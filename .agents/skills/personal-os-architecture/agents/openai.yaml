@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal OS Architecture"
+  short_description: "Keep product boundaries and feature ownership coherent."
+  default_prompt: "Use $personal-os-architecture to structure this Personal OS feature."

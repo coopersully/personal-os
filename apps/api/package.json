@@ -1,0 +1,25 @@
+{
+  "name": "@personal-os/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.11",
+    "@personal-os/connectors": "workspace:*",
+    "@personal-os/database": "workspace:*",
+    "@personal-os/domain": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "hono": "^4.8.5",
+    "pg": "^8.16.3",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.15.4"
+  }
+}

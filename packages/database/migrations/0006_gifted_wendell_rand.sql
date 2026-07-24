@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "accent_color" text DEFAULT '#c7d23c' NOT NULL;

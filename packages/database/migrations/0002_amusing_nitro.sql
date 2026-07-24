@@ -1,0 +1,2 @@
+DROP INDEX "calendar_events_block_destination_idx";--> statement-breakpoint
+CREATE UNIQUE INDEX "calendar_events_block_destination_idx" ON "calendar_events" USING btree ("block_source_event_id","calendar_id") WHERE "calendar_events"."deleted_at" is null;

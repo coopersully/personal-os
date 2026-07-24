@@ -1,0 +1,120 @@
+/**
+ * Shared contracts for feature modules. These types deliberately describe the
+ * seams between product domains without collapsing domain records into a
+ * generic mutable object.
+ */
+
+import type { AccessScope } from "./auth.js";
+
+export const featureIds = [
+  "automations",
+  "bookmarks",
+  "calendar",
+  "finances",
+  "goals",
+  "mail",
+  "pinterest",
+  "reminders",
+  "settings",
+  "tasks",
+] as const;
+
+export type FeatureId = (typeof featureIds)[number];
+
+export const agentMutationPolicies = [
+  "read_only",
+  "preview",
+  "approve_each",
+  "approved_rule",
+] as const;
+
+export type AgentMutationPolicy = (typeof agentMutationPolicies)[number];
+
+export const connectorCapabilities = [
+  "calendar_read",
+  "calendar_write",
+  "mail_read",
+  "mail_manage",
+  "mail_send",
+  "finance_read",
+  "finance_write",
+  "bookmarks_read",
+] as const;
+
+export type ConnectorCapability = (typeof connectorCapabilities)[number];
+
+/**
+ * A durable attribution record for a projection, recommendation, or proposed
+ * mutation. The source provider remains authoritative for connected material.
+ */
+export type MaterialSourceReference = {
+  accountId: string | null;
+  provider: "google" | "icloud" | "local" | "plaid" | "x";
+  remoteId: string | null;
+  revision: string | null;
+  sourceType: "calendar_event" | "finance_transaction" | "mail_thread" | "bookmark" | "local";
+};
+
+/**
+ * Feature modules use this shape when exposing a provider action to the API,
+ * MCP, or UI. The policy must be evaluated by the API before any mutation.
+ */
+export type AgentActionContract = {
+  feature: FeatureId;
+  mutationPolicy: AgentMutationPolicy;
+  requiredCapabilities: ConnectorCapability[];
+  source: MaterialSourceReference | null;
+};
+
+/**
+ * Shared HTTP authorization for domains that an agent can access. A scoped
+ * token is the bounded user-approved rule for these mutations; stricter
+ * actions retain their route-level human-session guard.
+ */
+export const featureAccessPolicies = {
+  automations: {
+    readScope: "automations:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "automations:write",
+  },
+  bookmarks: {
+    readScope: "bookmarks:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "bookmarks:read",
+  },
+  calendar: {
+    readScope: "calendar:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "calendar:write",
+  },
+  finances: {
+    readScope: "finances:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "finances:write",
+  },
+  goals: {
+    readScope: "goals:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "goals:write",
+  },
+  mail: {
+    readScope: "mail:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "mail:write",
+  },
+  reminders: {
+    readScope: "reminders:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "reminders:write",
+  },
+  tasks: {
+    readScope: "tasks:read",
+    mutationPolicy: "approved_rule",
+    writeScope: "tasks:write",
+  },
+} as const satisfies Record<
+  string,
+  { mutationPolicy: AgentMutationPolicy; readScope: AccessScope; writeScope: AccessScope }
+>;
+
+export type FeatureAccessPolicyId = keyof typeof featureAccessPolicies;

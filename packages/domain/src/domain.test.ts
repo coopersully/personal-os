@@ -1,0 +1,527 @@
+import {
+  actorTypeSchema,
+  addLocalDays,
+  addMonths,
+  agentMutationPolicies,
+  apiErrorSchema,
+  automationRoutineSchema,
+  automationRunSchema,
+  calendarEventSchema,
+  calendarProviderSchema,
+  calendarSchema,
+  connectICloudInputSchema,
+  connectorCapabilities,
+  createAccessTokenInputSchema,
+  createAutomationRoutineInputSchema,
+  createEventBlockInputSchema,
+  createEventInputSchema,
+  createGoalInputSchema,
+  createLocalCalendarInputSchema,
+  createMotiveInputSchema,
+  createReminderInputSchema,
+  createTaskInputSchema,
+  dailyBriefSchema,
+  eventListQuerySchema,
+  featureAccessPolicies,
+  featureIds,
+  formatDateOnly,
+  formatDateWithOrdinal,
+  formatMonth,
+  idSchema,
+  isoDateTimeSchema,
+  localDateAt,
+  localDateRange,
+  localDateTimeToUtc,
+  localDayRange,
+  localWeekRange,
+  loginInputSchema,
+  mailboxRoleSchema,
+  mailboxSchema,
+  mailListQuerySchema,
+  mailProviderSchema,
+  mailThreadSchema,
+  paginationSchema,
+  registerInputSchema,
+  reminderListQuerySchema,
+  reminderPrioritySchema,
+  reminderSchema,
+  taskListQuerySchema,
+  taskSchema,
+  taskStatusSchema,
+  timeZoneSchema,
+  updateAutomationRoutineInputSchema,
+  updateEventBlockInputSchema,
+  updateEventInputSchema,
+  updateFinanceTransactionInputSchema,
+  updateGoalInputSchema,
+  updateLocalCalendarInputSchema,
+  updateMotiveInputSchema,
+  updateReminderInputSchema,
+  updateTaskInputSchema,
+  updateUserInputSchema,
+  userSchema,
+  weatherLocationOptionSchema,
+  weatherLocationSearchQuerySchema,
+  weatherQuerySchema,
+  weatherSnapshotSchema,
+} from "./index.js";
+
+const id = "11111111-1111-4111-8111-111111111111";
+const accountId = "22222222-2222-4222-8222-222222222222";
+const start = "2026-07-13T13:00:00.000Z";
+const end = "2026-07-13T14:00:00.000Z";
+
+describe("domain schemas", () => {
+  it("exposes stable cross-feature connector and agent-action contracts", () => {
+    expect(featureIds).toEqual([
+      "automations",
+      "bookmarks",
+      "calendar",
+      "finances",
+      "goals",
+      "mail",
+      "pinterest",
+      "reminders",
+      "settings",
+      "tasks",
+    ]);
+    expect(agentMutationPolicies).toEqual([
+      "read_only",
+      "preview",
+      "approve_each",
+      "approved_rule",
+    ]);
+    expect(connectorCapabilities).toContain("calendar_write");
+    expect(connectorCapabilities).toContain("mail_manage");
+    expect(featureAccessPolicies.calendar).toEqual({
+      mutationPolicy: "approved_rule",
+      readScope: "calendar:read",
+      writeScope: "calendar:write",
+    });
+    expect(featureAccessPolicies.goals.writeScope).toBe("goals:write");
+  });
+
+  it("formats calendar dates without timezone drift", () => {
+    expect(formatDateWithOrdinal("2026-06-06")).toBe("June 6th");
+    expect(formatMonth("2026-06")).toBe("June 2026");
+    expect(addMonths("2026-01", -1)).toBe("2025-12");
+    expect(addMonths("2026-12", 1)).toBe("2027-01");
+    expect(formatDateOnly("2026-06-06", { day: "numeric", month: "short", year: "numeric" })).toBe(
+      "Jun 6, 2026",
+    );
+  });
+
+  it("parses common, auth, and reminder values", () => {
+    expect(idSchema.parse(id)).toBe(id);
+    expect(isoDateTimeSchema.parse(start)).toBe(start);
+    expect(timeZoneSchema.parse(" America/New_York ")).toBe("America/New_York");
+    expect(paginationSchema.parse({ limit: "10" })).toEqual({ limit: 10 });
+    expect(paginationSchema.parse({}).limit).toBe(50);
+    expect(actorTypeSchema.options).toEqual(["user", "agent", "connector", "system"]);
+    expect(
+      apiErrorSchema.parse({ error: { code: "x", message: "m", requestId: "r" } }),
+    ).toBeTruthy();
+
+    expect(
+      registerInputSchema.parse({
+        displayName: "Test",
+        email: "UPPER@EXAMPLE.COM",
+        password: "LocalTestOnly123!",
+      }).email,
+    ).toBe("upper@example.com");
+    expect(
+      registerInputSchema.parse({
+        displayName: "Test",
+        email: "a@example.com",
+        password: "LocalTestOnly123!",
+      }).planningTimezone,
+    ).toBe("UTC");
+    expect(loginInputSchema.parse({ email: "UPPER@EXAMPLE.COM", password: "x" }).email).toBe(
+      "upper@example.com",
+    );
+    expect(
+      userSchema.parse({
+        accentColor: "#c7d23c",
+        emailVerified: true,
+        id,
+        displayName: "Test",
+        email: "a@example.com",
+        theme: "system",
+        planningTimezone: "UTC",
+        workdayEndMinute: 17 * 60,
+        workdayStartMinute: 9 * 60,
+        createdAt: start,
+        updatedAt: start,
+      }).id,
+    ).toBe(id);
+    expect(updateUserInputSchema.parse({ accentColor: "#6c9cff" }).accentColor).toBe("#6c9cff");
+    expect(updateUserInputSchema.parse({ theme: "dark" }).theme).toBe("dark");
+    expect(
+      updateUserInputSchema.parse({
+        homeLocation: {
+          coordinates: { latitude: 40.6782, longitude: -73.9442 },
+          label: " Brooklyn, NY ",
+        },
+      }),
+    ).toEqual({
+      homeLocation: {
+        coordinates: { latitude: 40.6782, longitude: -73.9442 },
+        label: "Brooklyn, NY",
+      },
+    });
+    expect(
+      updateUserInputSchema.parse({
+        displayName: "  Updated Test  ",
+        email: "UPDATED@EXAMPLE.COM",
+        planningTimezone: "America/New_York",
+      }),
+    ).toMatchObject({
+      displayName: "Updated Test",
+      email: "updated@example.com",
+      planningTimezone: "America/New_York",
+    });
+    expect(() => updateUserInputSchema.parse({ accentColor: "blue" })).toThrow();
+    expect(() => updateUserInputSchema.parse({})).toThrow();
+    expect(weatherQuerySchema.parse({ latitude: "40.7", longitude: "-74" })).toEqual({
+      latitude: 40.7,
+      longitude: -74,
+    });
+    expect(() => weatherQuerySchema.parse({ latitude: 40.7 })).toThrow();
+    expect(weatherLocationSearchQuerySchema.parse({ query: "  New York  " })).toEqual({
+      query: "New York",
+    });
+    expect(() => weatherLocationSearchQuerySchema.parse({ query: "N" })).toThrow();
+    expect(
+      weatherLocationOptionSchema.parse({
+        coordinates: { latitude: 40.7128, longitude: -74.006 },
+        label: "New York, New York, United States",
+      }),
+    ).toEqual({
+      coordinates: { latitude: 40.7128, longitude: -74.006 },
+      label: "New York, New York, United States",
+    });
+    expect(
+      weatherSnapshotSchema.parse({
+        alerts: [{ kind: "rain", label: "Rain now" }],
+        condition: "Rain",
+        location: {
+          city: "New York",
+          coordinates: { latitude: 40.7, longitude: -74 },
+          country: "United States",
+          label: "New York, New York, United States",
+          mapUrl: "https://www.openstreetmap.org/?mlat=40.7&mlon=-74#map=12/40.7/-74",
+          region: "New York",
+          shortLabel: "NYC",
+          source: "device",
+        },
+        observedAt: start,
+        temperatureF: 72,
+        usAqi: 42,
+      }),
+    ).toMatchObject({ condition: "Rain", temperatureF: 72 });
+    expect(updateFinanceTransactionInputSchema.parse({ notes: "Receipt saved" })).toEqual({
+      notes: "Receipt saved",
+    });
+    expect(() => updateFinanceTransactionInputSchema.parse({ learnMerchant: false })).toThrow();
+    expect(
+      createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
+        .scopes,
+    ).toEqual(["audit:read"]);
+    expect(
+      createAutomationRoutineInputSchema.parse({ template: "morning_brief", timezone: "UTC" }),
+    ).toMatchObject({ schedule: "Weekdays at 8:00 AM" });
+    const brief = dailyBriefSchema.parse({
+      allDay: [],
+      anytime: [],
+      capacity: {
+        availableMinutes: 240,
+        busyMinutes: 0,
+        flexibleTaskMinutes: 0,
+        overcommitted: false,
+        scheduledTaskMinutes: 0,
+        workdayEndsAt: "2026-07-13T17:00:00.000Z",
+        workdayStartsAt: "2026-07-13T09:00:00.000Z",
+      },
+      generatedAt: start,
+      laterToday: [],
+      next: null,
+      now: [],
+      overdue: [],
+      timeZone: "UTC",
+      tasks: [],
+      completedTasks: [],
+      today: [],
+      tomorrow: [],
+    });
+    expect(
+      automationRoutineSchema.parse({
+        createdAt: start,
+        enabled: true,
+        id,
+        lastRunAt: null,
+        schedule: "Daily",
+        template: "morning_brief",
+        timezone: "UTC",
+        title: "Morning brief",
+        updatedAt: start,
+      }).title,
+    ).toBe("Morning brief");
+    expect(
+      automationRunSchema.parse({
+        brief,
+        completedAt: start,
+        id: accountId,
+        routineId: id,
+        startedAt: start,
+        status: "completed",
+        summary: "Done",
+      }).brief,
+    ).toEqual(brief);
+
+    expect(reminderPrioritySchema.parse("high")).toBe("high");
+    expect(createReminderInputSchema.parse({ title: " Test " })).toEqual({
+      title: "Test",
+      notes: null,
+      dueAt: null,
+      timezone: null,
+      priority: "medium",
+    });
+    expect(updateReminderInputSchema.safeParse({}).success).toBe(false);
+    expect(updateReminderInputSchema.parse({ notes: null })).toEqual({ notes: null });
+    expect(
+      reminderSchema.parse({
+        id,
+        title: "Test",
+        createdAt: start,
+        updatedAt: start,
+        completedAt: null,
+      }).priority,
+    ).toBe("medium");
+    expect(reminderListQuerySchema.parse({ completed: "true" }).completed).toBe(true);
+    expect(reminderListQuerySchema.parse({ completed: "false" }).completed).toBe(false);
+
+    expect(taskStatusSchema.parse("scheduled")).toBe("scheduled");
+    expect(
+      createTaskInputSchema.parse({
+        title: " Plan task ",
+        scheduledAt: "2026-07-14T13:00:00.000Z",
+        status: "scheduled",
+      }),
+    ).toMatchObject({
+      estimateMinutes: null,
+      status: "scheduled",
+      title: "Plan task",
+    });
+    expect(
+      createTaskInputSchema.safeParse({ title: "Missing schedule", status: "scheduled" }).success,
+    ).toBe(false);
+    expect(updateTaskInputSchema.safeParse({}).success).toBe(false);
+    expect(updateTaskInputSchema.parse({ estimateMinutes: null })).toEqual({
+      estimateMinutes: null,
+    });
+    expect(createTaskInputSchema.parse({ tags: ["work", "work"], title: "Tag task" }).tags).toEqual(
+      ["work"],
+    );
+    expect(
+      taskSchema.parse({
+        id,
+        title: "Task",
+        createdAt: start,
+        updatedAt: start,
+        completedAt: null,
+      }),
+    ).toMatchObject({ estimateMinutes: null, scheduledAt: null, status: "inbox" });
+    expect(taskListQuerySchema.parse({ completed: "false", status: "next" })).toMatchObject({
+      completed: false,
+      status: "next",
+    });
+  });
+
+  it("parses calendar and event values and rejects invalid chronology", () => {
+    expect(calendarProviderSchema.parse("local")).toBe("local");
+    expect(
+      createLocalCalendarInputSchema.parse({ name: "Personal", timezone: "UTC" }).color,
+    ).toBeNull();
+    expect(updateLocalCalendarInputSchema.safeParse({}).success).toBe(false);
+    expect(updateLocalCalendarInputSchema.parse({ name: "Work" })).toEqual({ name: "Work" });
+    expect(
+      calendarSchema.parse({
+        id,
+        accountId,
+        provider: "local",
+        name: "Personal",
+        color: null,
+        timezone: "UTC",
+        isPrimary: true,
+        isSelected: true,
+        isWritable: true,
+        lastSyncedAt: null,
+      }).name,
+    ).toBe("Personal");
+    const input = { calendarId: id, title: "Focus", startsAt: start, endsAt: end, timezone: "UTC" };
+    expect(createEventInputSchema.parse(input)).toMatchObject({
+      allDay: false,
+      notes: null,
+      location: null,
+    });
+    expect(createEventInputSchema.safeParse({ ...input, endsAt: start }).success).toBe(false);
+    expect(updateEventInputSchema.safeParse({}).success).toBe(false);
+    expect(updateEventInputSchema.safeParse({ startsAt: end, endsAt: start }).success).toBe(false);
+    expect(updateEventInputSchema.parse({ startsAt: start })).toEqual({ startsAt: start });
+    expect(createEventBlockInputSchema.parse({ calendarId: id })).toEqual({
+      calendarId: id,
+      mode: "busy",
+    });
+    expect(updateEventBlockInputSchema.parse({ mode: "details" })).toEqual({ mode: "details" });
+    expect(updateAutomationRoutineInputSchema.safeParse({}).success).toBe(false);
+    expect(
+      updateAutomationRoutineInputSchema.parse({ enabled: false, schedule: "Daily at 8:00 PM" }),
+    ).toEqual({ enabled: false, schedule: "Daily at 8:00 PM" });
+    expect(createGoalInputSchema.parse({ title: "Protect focus" })).toMatchObject({
+      progress: 0,
+      description: null,
+      targetDate: null,
+    });
+    expect(updateGoalInputSchema.safeParse({}).success).toBe(false);
+    expect(createMotiveInputSchema.parse({ title: "Act with care" })).toMatchObject({
+      detail: null,
+    });
+    expect(updateMotiveInputSchema.safeParse({}).success).toBe(false);
+    expect(
+      eventListQuerySchema.parse({ from: start, to: end, calendarIds: `${id},`, query: "focus" })
+        .calendarIds,
+    ).toEqual([id]);
+    expect(
+      calendarEventSchema.parse({
+        ...input,
+        id: accountId,
+        provider: "local",
+        remoteEventId: null,
+        status: "confirmed",
+        recurrence: [],
+        createdAt: start,
+        updatedAt: start,
+      }),
+    ).toMatchObject({ blockMode: null, blocks: [], blockSourceEventId: null, title: "Focus" });
+    expect(
+      calendarEventSchema.safeParse({
+        ...input,
+        endsAt: start,
+        id: accountId,
+        provider: "local",
+        remoteEventId: null,
+        status: "confirmed",
+        recurrence: [],
+        createdAt: start,
+        updatedAt: start,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("parses mail, mailbox, and iCloud connector values", () => {
+    expect(mailProviderSchema.parse("icloud")).toBe("icloud");
+    expect(mailboxRoleSchema.parse("inbox")).toBe("inbox");
+    expect(
+      mailboxSchema.parse({
+        accountId,
+        id,
+        name: "Inbox",
+        provider: "google",
+        role: "inbox",
+        totalCount: 10,
+        unreadCount: 2,
+      }).unreadCount,
+    ).toBe(2);
+    expect(
+      mailThreadSchema.parse({
+        accountId,
+        bodyText: "Hello",
+        from: { address: "sender@example.com", name: null },
+        id,
+        mailboxIds: [id],
+        messageCount: 1,
+        provider: "google",
+        receivedAt: start,
+        remoteThreadId: "remote",
+        snippet: "Hello",
+        starred: false,
+        subject: "Subject",
+        to: [],
+        unread: true,
+      }).subject,
+    ).toBe("Subject");
+    expect(
+      mailListQuerySchema.parse({
+        accountIds: `${accountId},`,
+        limit: "25",
+        mailboxId: id,
+        query: "sender",
+        unread: "true",
+      }),
+    ).toMatchObject({ accountIds: [accountId], limit: 25, unread: true });
+    expect(mailListQuerySchema.parse({ unread: "false" }).unread).toBe(false);
+    expect(
+      connectICloudInputSchema.parse({
+        appSpecificPassword: "xxxx-xxxx",
+        email: "APPLE@ICLOUD.COM",
+      }),
+    ).toEqual({
+      appSpecificPassword: "xxxx-xxxx",
+      calendar: true,
+      email: "apple@icloud.com",
+      mail: true,
+    });
+    expect(
+      connectICloudInputSchema.safeParse({
+        appSpecificPassword: "password",
+        calendar: false,
+        email: "apple@icloud.com",
+        mail: false,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("time-zone ranges", () => {
+  it("calculates local dates, day ranges, date shifts, and weekday weeks", () => {
+    const now = new Date("2026-07-13T16:00:00.000Z");
+    expect(localDateAt(now, "America/New_York")).toEqual({ day: 13, month: 7, year: 2026 });
+    expect(localDayRange(now, "America/New_York")).toEqual({
+      from: "2026-07-13T04:00:00.000Z",
+      to: "2026-07-14T04:00:00.000Z",
+    });
+    expect(
+      localDateTimeToUtc({ day: 13, month: 7, year: 2026 }, 9 * 60, "America/New_York"),
+    ).toEqual(new Date("2026-07-13T13:00:00.000Z"));
+    expect(localWeekRange(now, "America/New_York")).toEqual({
+      from: "2026-07-12T04:00:00.000Z",
+      to: "2026-07-19T04:00:00.000Z",
+    });
+    expect(
+      localDateRange(
+        { day: 1, month: 11, year: 2026 },
+        { day: 2, month: 11, year: 2026 },
+        "America/New_York",
+      ),
+    ).toEqual({
+      from: "2026-11-01T04:00:00.000Z",
+      to: "2026-11-02T05:00:00.000Z",
+    });
+    expect(addLocalDays({ day: 31, month: 12, year: 2026 }, 1)).toEqual({
+      day: 1,
+      month: 1,
+      year: 2027,
+    });
+  });
+
+  it("starts Sunday dates on Sunday and follows DST", () => {
+    expect(localWeekRange(new Date("2026-07-19T16:00:00Z"), "UTC")).toEqual({
+      from: "2026-07-19T00:00:00.000Z",
+      to: "2026-07-26T00:00:00.000Z",
+    });
+    expect(localDayRange(new Date("2026-03-08T16:00:00Z"), "America/New_York")).toEqual({
+      from: "2026-03-08T05:00:00.000Z",
+      to: "2026-03-09T04:00:00.000Z",
+    });
+  });
+});

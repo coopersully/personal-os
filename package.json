@@ -1,0 +1,49 @@
+{
+  "name": "personal-os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.1.2",
+  "pnpm": {
+    "overrides": {
+      "@hono/node-server": "^2.0.5",
+      "@modelcontextprotocol/sdk>@hono/node-server": "2.0.10"
+    }
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm --filter './apps/**' --filter './packages/**' --filter '!@personal-os/desktop' --if-present run build",
+    "check": "bash ./.codex/scripts/check.sh && pnpm lint && pnpm typecheck && pnpm test:coverage && pnpm build",
+    "dev": "pnpm --parallel --filter @personal-os/api --filter @personal-os/web run dev",
+    "env:logs": "bash ./.codex/scripts/environment.sh logs",
+    "env:restart": "bash ./.codex/scripts/environment.sh restart",
+    "env:start": "bash ./.codex/scripts/environment.sh start",
+    "env:status": "bash ./.codex/scripts/environment.sh status",
+    "env:stop": "bash ./.codex/scripts/environment.sh stop",
+    "format": "biome format --write .",
+    "lint": "biome check . && node scripts/check-frontend-theme-contract.mjs && node scripts/check-theme-token-contract.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "typecheck": "tsc --noEmit -p e2e/tsconfig.json && pnpm --filter './apps/**' --filter './packages/**' --if-present run typecheck",
+    "verify": "bash ./.codex/scripts/environment.sh verify"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.1.2",
+    "@playwright/test": "^1.54.1",
+    "@testing-library/jest-dom": "^6.6.4",
+    "@testing-library/react": "^16.3.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@testcontainers/postgresql": "^11.5.1",
+    "@types/node": "^24.0.14",
+    "@vitest/coverage-v8": "^3.2.4",
+    "jsdom": "^26.1.0",
+    "tsx": "^4.20.3",
+    "tsup": "^8.5.0",
+    "typescript": "^5.8.3",
+    "vite": "^7.0.5",
+    "vitest": "^3.2.4"
+  }
+}

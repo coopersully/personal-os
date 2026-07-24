@@ -1,0 +1,42 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Personal OS",
+  "version": "0.1.0",
+  "identifier": "app.personal-os.desktop",
+  "build": {
+    "beforeBuildCommand": "pnpm --dir ../.. --filter @personal-os/web build",
+    "beforeDevCommand": "pnpm --dir ../.. --filter @personal-os/web dev",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../../web/dist"
+  },
+  "app": {
+    "security": {
+      "csp": "default-src 'self' customprotocol: asset:; connect-src ipc: http://ipc.localhost http://127.0.0.1:* http://localhost:* https:; font-src 'self' data:; img-src 'self' asset: data: https://lh3.googleusercontent.com; script-src 'self'; style-src 'self' 'unsafe-inline'"
+    },
+    "windows": [
+      {
+        "alwaysOnTop": false,
+        "center": true,
+        "decorations": true,
+        "fullscreen": false,
+        "height": 760,
+        "label": "main",
+        "minHeight": 560,
+        "minWidth": 360,
+        "resizable": true,
+        "transparent": true,
+        "title": "Personal OS",
+        "visible": true,
+        "width": 460
+      }
+    ]
+  },
+  "bundle": {
+    "active": true,
+    "category": "Productivity",
+    "copyright": "Copyright © 2026 Personal OS contributors",
+    "longDescription": "A transparent coordination layer for reminders and calendars, shared by people and their authorized agents.",
+    "shortDescription": "Your day, made tangible.",
+    "targets": "all"
+  }
+}

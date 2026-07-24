@@ -1,0 +1,25 @@
+import { ExternalLink } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import rehypeSanitize from "rehype-sanitize";
+import remarkGfm from "remark-gfm";
+
+export default function RichEventNotes({ source }: { source: string }) {
+  return (
+    <div className="rich-event-notes">
+      <ReactMarkdown
+        components={{
+          a: ({ children, href }) => (
+            <a href={href} rel="noreferrer" target="_blank">
+              {children} <ExternalLink aria-hidden="true" size={11} />
+            </a>
+          ),
+        }}
+        rehypePlugins={[rehypeRaw, rehypeSanitize]}
+        remarkPlugins={[remarkGfm]}
+      >
+        {source}
+      </ReactMarkdown>
+    </div>
+  );
+}

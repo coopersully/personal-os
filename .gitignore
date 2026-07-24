@@ -1,0 +1,35 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+# Personal runtime context and exported user data must never be committed.
+context.md
+briefs/
+state/
+private/
+*.dump
+*.sql.gz
+.codex/run/
+coverage/
+dist/
+node_modules/
+playwright-report/
+test-results/
+*.log
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/web/dev-dist/
+apps/web/public/sw.js
+apps/web/public/workbox-*.js
+
+# Third-party agent skills without redistribution terms stay local-only.
+.agents/skills/hono/
+
+# Terraform state, provider plugins, and local variable files can contain
+# account metadata or secret configuration and must remain local.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+crash.log

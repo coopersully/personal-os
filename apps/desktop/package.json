@@ -1,0 +1,15 @@
+{
+  "name": "@personal-os/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tauri build --bundles app --ci",
+    "bundle:dmg": "tauri build --bundles dmg --ci",
+    "dev": "tauri dev",
+    "typecheck": "tauri info"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

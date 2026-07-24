@@ -1,0 +1,8214 @@
+import type {
+  AccessToken,
+  AuditEvent,
+  CalendarAccount,
+  Session,
+  XBookmarkAccount,
+} from "@personal-os/api-client";
+import type {
+  AccessScope,
+  AutomationRoutine,
+  Calendar,
+  CalendarEvent,
+  DailyBrief,
+  Goal,
+  HomeLocation,
+  Invitation,
+  LocalDate,
+  PinterestPin,
+  PinterestWallpaperSettings,
+  Reminder,
+  Task,
+  Theme,
+  User,
+  WeatherCoordinates,
+  WeatherLocationOption,
+  WeatherSnapshot,
+} from "@personal-os/domain";
+import {
+  addLocalDays,
+  localDateAt,
+  localDateRange,
+  localDateTimeToUtc,
+  localDateToIso,
+  parseLocalDate,
+  sameLocalDate,
+  startOfLocalWeek,
+} from "@personal-os/domain";
+import { Badge, Button, EmptyState, Input, Label, Spinner } from "@personal-os/ui";
+import {
+  BankIcon as SolidBank,
+  CalendarIcon as SolidCalendar,
+  CheckSquareIcon as SolidCheckSquare,
+  CloudIcon as SolidCloud,
+  CompassIcon as SolidCompass,
+  EnvelopeSimpleIcon as SolidEnvelope,
+  GearIcon as SolidGear,
+  HouseIcon as SolidHouse,
+  ImageIcon as SolidImage,
+  KeyIcon as SolidKey,
+  ListChecksIcon as SolidListChecks,
+  LockKeyIcon as SolidLock,
+  PaintBrushIcon as SolidPaintBrush,
+  PulseIcon as SolidPulse,
+  RobotIcon as SolidRobot,
+  TargetIcon as SolidTarget,
+  UserCircleIcon as SolidUser,
+  UsersIcon as SolidUsers,
+} from "@phosphor-icons/react";
+import { type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { isTauri } from "@tauri-apps/api/core";
+import {
+  Activity,
+  ArrowLeft,
+  Bot,
+  CalendarDays,
+  CalendarPlus,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  Clock3,
+  Cloud,
+  CloudRain,
+  Columns3,
+  Command,
+  Compass,
+  Copy,
+  CopyPlus,
+  Edit3,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FileText,
+  Grid3X3,
+  Image,
+  Inbox,
+  KeyRound,
+  Layers3,
+  ListChecks,
+  ListTodo,
+  LocateFixed,
+  LockKeyhole,
+  LogOut,
+  type LucideIcon,
+  Mail,
+  MapPin,
+  Menu,
+  Monitor,
+  Moon,
+  MoreHorizontal,
+  Paintbrush,
+  PanelTop,
+  Pin,
+  Plus,
+  RefreshCw,
+  Scissors,
+  Search,
+  Settings,
+  Sun,
+  Target,
+  Trash2,
+  UserRound,
+  WifiOff,
+  X,
+} from "lucide-react";
+import {
+  type CSSProperties,
+  type FormEvent,
+  lazy,
+  type DragEvent as ReactDragEvent,
+  type ReactNode,
+  type UIEvent as ReactUIEvent,
+  Suspense,
+  useDeferredValue,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  Link,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+  useSearchParams,
+} from "react-router-dom";
+import { toast } from "sonner";
+import { ChoiceCardGroup } from "@/components/choice-card-group";
+import {
+  Alert as ShadcnAlert,
+  AlertAction as ShadcnAlertAction,
+  AlertDescription as ShadcnAlertDescription,
+  AlertTitle as ShadcnAlertTitle,
+} from "@/components/ui/alert";
+import {
+  Avatar as ShadcnAvatar,
+  AvatarBadge as ShadcnAvatarBadge,
+  AvatarFallback as ShadcnAvatarFallback,
+  AvatarImage as ShadcnAvatarImage,
+} from "@/components/ui/avatar";
+import { Badge as ShadcnBadge } from "@/components/ui/badge";
+import { Button as ShadcnButton } from "@/components/ui/button";
+import { Calendar as ShadcnCalendar } from "@/components/ui/calendar";
+import {
+  Card as ShadcnCard,
+  CardAction as ShadcnCardAction,
+  CardContent as ShadcnCardContent,
+  CardDescription as ShadcnCardDescription,
+  CardFooter as ShadcnCardFooter,
+  CardHeader as ShadcnCardHeader,
+  CardTitle as ShadcnCardTitle,
+} from "@/components/ui/card";
+import { Checkbox as ShadcnCheckbox } from "@/components/ui/checkbox";
+import {
+  Collapsible as ShadcnCollapsible,
+  CollapsibleContent as ShadcnCollapsibleContent,
+  CollapsibleTrigger as ShadcnCollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Combobox,
+  ComboboxContent,
+  ComboboxEmpty,
+  ComboboxInput,
+  ComboboxItem,
+  ComboboxList,
+} from "@/components/ui/combobox";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import {
+  Dialog as ShadcnDialog,
+  DialogContent as ShadcnDialogContent,
+  DialogDescription as ShadcnDialogDescription,
+  DialogFooter as ShadcnDialogFooter,
+  DialogHeader as ShadcnDialogHeader,
+  DialogTitle as ShadcnDialogTitle,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  Field as ShadcnField,
+  FieldContent as ShadcnFieldContent,
+  FieldDescription as ShadcnFieldDescription,
+  FieldGroup as ShadcnFieldGroup,
+  FieldLabel as ShadcnFieldLabel,
+  FieldLegend as ShadcnFieldLegend,
+  FieldSet as ShadcnFieldSet,
+} from "@/components/ui/field";
+import { Input as ShadcnInput } from "@/components/ui/input";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
+import {
+  Item as ShadcnItem,
+  ItemActions as ShadcnItemActions,
+  ItemContent as ShadcnItemContent,
+  ItemDescription as ShadcnItemDescription,
+  ItemGroup as ShadcnItemGroup,
+  ItemMedia as ShadcnItemMedia,
+  ItemTitle as ShadcnItemTitle,
+} from "@/components/ui/item";
+import {
+  NativeSelectOption,
+  NativeSelect as ShadcnNativeSelect,
+} from "@/components/ui/native-select";
+import {
+  Popover as ShadcnPopover,
+  PopoverContent as ShadcnPopoverContent,
+  PopoverDescription as ShadcnPopoverDescription,
+  PopoverHeader as ShadcnPopoverHeader,
+  PopoverTitle as ShadcnPopoverTitle,
+  PopoverTrigger as ShadcnPopoverTrigger,
+} from "@/components/ui/popover";
+import { ScrollArea as ShadcnScrollArea } from "@/components/ui/scroll-area";
+import {
+  SidebarContent as ShadcnSidebarContent,
+  SidebarFooter as ShadcnSidebarFooter,
+  SidebarGroup as ShadcnSidebarGroup,
+  SidebarGroupContent as ShadcnSidebarGroupContent,
+  SidebarGroupLabel as ShadcnSidebarGroupLabel,
+  SidebarHeader as ShadcnSidebarHeader,
+  SidebarMenu as ShadcnSidebarMenu,
+  SidebarMenuAction as ShadcnSidebarMenuAction,
+  SidebarMenuBadge as ShadcnSidebarMenuBadge,
+  SidebarMenuButton as ShadcnSidebarMenuButton,
+  SidebarMenuItem as ShadcnSidebarMenuItem,
+  SidebarMenuSub as ShadcnSidebarMenuSub,
+  SidebarMenuSubButton as ShadcnSidebarMenuSubButton,
+  SidebarMenuSubItem as ShadcnSidebarMenuSubItem,
+  SidebarProvider as ShadcnSidebarProvider,
+} from "@/components/ui/sidebar";
+import { Slider as ShadcnSlider } from "@/components/ui/slider";
+import { Toaster } from "@/components/ui/sonner";
+import { Textarea as ShadcnTextarea } from "@/components/ui/textarea";
+import {
+  ToggleGroup as ShadcnToggleGroup,
+  ToggleGroupItem as ShadcnToggleGroupItem,
+} from "@/components/ui/toggle-group";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { api, errorMessage, isUnauthorized } from "./api.js";
+import { scrollTimelineToMinute } from "./calendar-timeline.js";
+import { InlineError, PageLoading } from "./components/async-state.js";
+import { calendarNavigationItem } from "./features/calendar/manifest.js";
+import {
+  type CalendarView,
+  calendarQueryKeys,
+  calendarViewFromSearch,
+} from "./features/calendar/page.js";
+import { financesNavigationItem } from "./features/finances/manifest.js";
+import {
+  FinanceSidebarNavigation,
+  financeSectionFromPath,
+} from "./features/finances/navigation.js";
+import { FinancesPage } from "./features/finances/page.js";
+import {
+  MailPage as MailFeaturePage,
+  MailSidebar as MailFeatureSidebar,
+} from "./features/mail/mail.js";
+import { mailNavigationItem } from "./features/mail/manifest.js";
+import { settingsNavigationItem } from "./features/settings/manifest.js";
+import { formatOrdinalDate } from "./lib/date-format.js";
+import { formatRelativeTime } from "./lib/time-format.js";
+import { timeToMinute } from "./time.js";
+
+type Editor =
+  | { kind: "calendar" }
+  | { draft?: EventDraft; event?: CalendarEvent; kind: "event"; mode?: "details" | "edit" }
+  | { kind: "reminder"; reminder?: Reminder }
+  | { kind: "task"; task?: Task }
+  | null;
+
+type CalendarEventMove = { day: LocalDate; event: CalendarEvent; minute: number };
+type CalendarDropPreview = { dayKey: string; duration: number; minute: number };
+type EventDraft = { endsAt: string; startsAt: string };
+type CalendarMap = Map<string, Calendar>;
+type ContextSidebarMode =
+  | "calendar"
+  | "finances"
+  | "mail"
+  | "reminders"
+  | "settings"
+  | "tasks"
+  | null;
+
+const calendarViews: Array<{ icon: LucideIcon; label: string; value: CalendarView }> = [
+  { icon: CalendarDays, label: "Day", value: "day" },
+  { icon: Columns3, label: "Week", value: "week" },
+  { icon: Grid3X3, label: "Month", value: "month" },
+];
+
+const RichEventNotes = lazy(() => import("./rich-event-notes.js"));
+
+const calendarHourHeight = 64;
+const calendarMinutesPerDay = 24 * 60;
+const calendarTimelineHeight = 24 * calendarHourHeight;
+const calendarHours = Array.from({ length: 24 }, (_, hour) => hour);
+const calendarDragType = "application/x-personal-os-calendar-event";
+
+type NavigationItemDefinition = {
+  badge?: number;
+  icon: LucideIcon;
+  items?: NavigationItemDefinition[];
+  label: string;
+  path: string;
+};
+
+type NavigationGroupDefinition = {
+  items: NavigationItemDefinition[];
+  label: string;
+};
+
+const planNavigationItems: NavigationItemDefinition[] = [
+  { icon: PanelTop, label: "Today", path: "/today" },
+  calendarNavigationItem,
+  {
+    icon: ListChecks,
+    items: [{ icon: ListTodo, label: "Reminders", path: "/reminders" }],
+    label: "Tasks",
+    path: "/tasks",
+  },
+];
+
+const lifeNavigationItems: NavigationItemDefinition[] = [
+  { icon: Target, label: "Goals", path: "/goals" },
+  { icon: Compass, label: "Motives", path: "/motives" },
+];
+
+const navigationGroups: NavigationGroupDefinition[] = [
+  { items: planNavigationItems, label: "Plan" },
+  { items: lifeNavigationItems, label: "Personal" },
+  { items: [mailNavigationItem, financesNavigationItem], label: "Workspace" },
+];
+
+const workspaceShortcuts: NavigationItemDefinition[] = [
+  { icon: PanelTop, label: "Today at a Glance", path: "/today" },
+  calendarNavigationItem,
+  { icon: ListChecks, label: "Tasks", path: "/tasks" },
+  mailNavigationItem,
+  financesNavigationItem,
+];
+
+const accountNavigationItems: NavigationItemDefinition[] = [
+  settingsNavigationItem,
+  { icon: Activity, label: "Activity", path: "/activity" },
+];
+
+const mobileNavigationItems: NavigationItemDefinition[] = [
+  ...planNavigationItems.flatMap((item) => [{ ...item, items: undefined }, ...(item.items ?? [])]),
+  mailNavigationItem,
+];
+
+const contextSidebarPaths = new Set(["/calendar", "/mail", "/reminders", "/tasks"]);
+
+export function App() {
+  const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
+  if (me.isPending) {
+    return (
+      <main className="center-screen">
+        <Spinner label="Opening Personal OS" />
+      </main>
+    );
+  }
+  if (me.isError && isUnauthorized(me.error)) return <AuthScreen />;
+  if (me.isError) return <FatalState error={me.error} />;
+  return (
+    <TooltipProvider>
+      <ShadcnSidebarProvider className="contents">
+        <AuthenticatedApp user={me.data} />
+      </ShadcnSidebarProvider>
+    </TooltipProvider>
+  );
+}
+
+type DeviceWeatherLocation = {
+  coordinates: WeatherCoordinates | null;
+  status: "pending" | "unavailable" | "ready";
+};
+
+function useDeviceWeatherLocation(enabled: boolean): DeviceWeatherLocation {
+  const [location, setLocation] = useState<DeviceWeatherLocation>({
+    coordinates: null,
+    status: "pending",
+  });
+  useEffect(() => {
+    if (!enabled) return;
+    setLocation({ coordinates: null, status: "pending" });
+    if (!("geolocation" in navigator)) {
+      setLocation({ coordinates: null, status: "unavailable" });
+      return;
+    }
+    let active = true;
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        if (!active) return;
+        setLocation({
+          coordinates: {
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+          },
+          status: "ready",
+        });
+      },
+      () => {
+        if (active) setLocation({ coordinates: null, status: "unavailable" });
+      },
+      { enableHighAccuracy: false, maximumAge: 5 * 60_000, timeout: 10_000 },
+    );
+    return () => {
+      active = false;
+    };
+  }, [enabled]);
+  return location;
+}
+
+function AuthScreen() {
+  useDocumentTheme("system");
+  const params = new URLSearchParams(window.location.search);
+  const verificationToken = params.get("verifyEmail");
+  const passwordResetToken = params.get("resetPassword");
+  if (verificationToken) return <EmailVerificationScreen token={verificationToken} />;
+  if (passwordResetToken) return <PasswordResetScreen token={passwordResetToken} />;
+
+  return <CredentialsScreen />;
+}
+
+function CredentialsScreen() {
+  const queryClient = useQueryClient();
+  const [mode, setMode] = useState<"login" | "recovery" | "register">("login");
+  const mutation = useMutation({
+    mutationFn: async (form: FormData) => {
+      const email = String(form.get("email"));
+      const password = String(form.get("password"));
+      if (mode === "login") return api.login({ email, password });
+      if (mode === "recovery") {
+        await api.requestPasswordReset({ email });
+        return null;
+      }
+      return api.register({
+        displayName: String(form.get("displayName")),
+        email,
+        inviteCode: String(form.get("inviteCode")).trim() || undefined,
+        password,
+        planningTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+    },
+    onSuccess: (user) => {
+      if (user) queryClient.setQueryData(["me"], user);
+    },
+  });
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    mutation.mutate(new FormData(event.currentTarget));
+  };
+  return (
+    <main className="auth-shell">
+      <section className="auth-story" aria-label="Product introduction">
+        <div className="wordmark wordmark--light">
+          <LogoMark /> Personal OS
+        </div>
+        <div>
+          <p className="eyebrow">A shared surface for you and your agents</p>
+          <h1>Your day, made tangible.</h1>
+          <p className="auth-story__copy">
+            One calm place for reminders and calendars. Directly editable by you. Safely available
+            to the agents you trust.
+          </p>
+        </div>
+        <div className="material-demo" aria-hidden="true">
+          <span className="material-demo__time">09:30</span>
+          <span className="material-demo__line" />
+          <div>
+            <b>Design review</b>
+            <small>Product calendar · 45 min</small>
+          </div>
+        </div>
+      </section>
+      <section className="auth-form-wrap">
+        <form className="auth-form" onSubmit={submit}>
+          <div className="auth-form__heading">
+            <LogoMark />
+            <h2>
+              {mode === "login"
+                ? "Welcome back"
+                : mode === "recovery"
+                  ? "Reset your password"
+                  : "Make this yours"}
+            </h2>
+            <p>
+              {mode === "login"
+                ? "Open your daily surface."
+                : mode === "recovery"
+                  ? "We’ll send a reset link if this address has an account."
+                  : "Start with a local calendar—connectors can come later."}
+            </p>
+          </div>
+          {mode === "register" && (
+            <>
+              <Field label="Name" name="displayName" autoComplete="name" required />
+              <Field label="Invite code" name="inviteCode" autoComplete="off" />
+            </>
+          )}
+          <Field label="Email" name="email" type="email" autoComplete="email" required />
+          {mode !== "recovery" ? (
+            <Field
+              label="Password"
+              name="password"
+              type="password"
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              minLength={12}
+              required
+            />
+          ) : null}
+          {mutation.isError && (
+            <p className="form-error" role="alert">
+              {errorMessage(mutation.error)}
+            </p>
+          )}
+          {mutation.isSuccess && mode === "recovery" ? (
+            <p className="form-success" role="status">
+              If an account exists for that email, a password-reset link is on its way.
+            </p>
+          ) : null}
+          <Button
+            className="button--wide"
+            disabled={mutation.isPending}
+            tone="accent"
+            type="submit"
+          >
+            {mutation.isPending ? (
+              <Spinner label="Signing in" />
+            ) : mode === "login" ? (
+              "Open Personal OS"
+            ) : mode === "recovery" ? (
+              "Send reset link"
+            ) : (
+              "Create account"
+            )}
+          </Button>
+          {mode === "login" ? (
+            <>
+              <button className="text-button" type="button" onClick={() => setMode("register")}>
+                New here? Create an account
+              </button>
+              <button className="text-button" type="button" onClick={() => setMode("recovery")}>
+                Forgot your password?
+              </button>
+            </>
+          ) : (
+            <button className="text-button" type="button" onClick={() => setMode("login")}>
+              {mode === "register" ? "Already have an account? Sign in" : "Back to sign in"}
+            </button>
+          )}
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function EmailVerificationScreen({ token }: { token: string }) {
+  const queryClient = useQueryClient();
+  const verification = useMutation({
+    mutationFn: () => api.confirmEmailVerification({ token }),
+    onSuccess: (user) => queryClient.setQueryData(["me"], user),
+  });
+  return (
+    <AuthActionShell title="Confirm your email">
+      <p>Confirm the email address for this Personal OS account.</p>
+      {verification.isError ? (
+        <p className="form-error">{errorMessage(verification.error)}</p>
+      ) : null}
+      {verification.isSuccess ? (
+        <p className="form-success" role="status">
+          Your email is confirmed. You can close this page or continue using Personal OS.
+        </p>
+      ) : (
+        <Button
+          disabled={verification.isPending}
+          onClick={() => verification.mutate()}
+          tone="accent"
+        >
+          {verification.isPending ? <Spinner label="Confirming email" /> : "Confirm email"}
+        </Button>
+      )}
+    </AuthActionShell>
+  );
+}
+
+function PasswordResetScreen({ token }: { token: string }) {
+  const [complete, setComplete] = useState(false);
+  const reset = useMutation({
+    mutationFn: (form: FormData) =>
+      api.resetPassword({ password: String(form.get("password")), token }),
+    onSuccess: () => setComplete(true),
+  });
+  return (
+    <AuthActionShell title="Choose a new password">
+      {complete ? (
+        <p className="form-success" role="status">
+          Your password has been reset. Return to the app to sign in.
+        </p>
+      ) : (
+        <form
+          className="auth-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            reset.mutate(new FormData(event.currentTarget));
+          }}
+        >
+          <Field
+            autoComplete="new-password"
+            label="New password"
+            minLength={12}
+            name="password"
+            required
+            type="password"
+          />
+          {reset.isError ? <p className="form-error">{errorMessage(reset.error)}</p> : null}
+          <Button disabled={reset.isPending} tone="accent" type="submit">
+            {reset.isPending ? <Spinner label="Resetting password" /> : "Reset password"}
+          </Button>
+        </form>
+      )}
+    </AuthActionShell>
+  );
+}
+
+function AuthActionShell({ children, title }: { children: ReactNode; title: string }) {
+  return (
+    <main className="auth-shell">
+      <section className="auth-form-wrap">
+        <div className="auth-form">
+          <div className="auth-form__heading">
+            <LogoMark />
+            <h2>{title}</h2>
+          </div>
+          {children}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function AuthenticatedApp({ user }: { user: User }) {
+  useDocumentTheme(user.theme);
+  const [editor, setEditor] = useState<Editor>(null);
+  const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [online, setOnline] = useState(navigator.onLine);
+  const [pinned, setPinned] = useState(false);
+  const location = useLocation();
+  const isTodayWorkspace = location.pathname === "/today";
+  const deviceWeatherLocation = useDeviceWeatherLocation(isTodayWorkspace);
+  const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
+  const reminders = useQuery({
+    queryFn: () => api.listReminders({ completed: false, limit: 100, query: "" }),
+    queryKey: ["reminders", "badge"],
+  });
+  const tasks = useQuery({
+    queryFn: () => api.listTasks({ completed: false, limit: 100 }),
+    queryKey: ["tasks", "badge"],
+  });
+  const mailboxes = useQuery({ queryFn: api.listMailboxes, queryKey: ["mailboxes", "badge"] });
+  const weather = useQuery({
+    enabled:
+      isTodayWorkspace &&
+      (deviceWeatherLocation.coordinates !== null ||
+        (deviceWeatherLocation.status !== "pending" && user.homeLocation !== null)),
+    queryFn: () => api.getWeather(deviceWeatherLocation.coordinates ?? undefined),
+    queryKey: ["weather", deviceWeatherLocation.coordinates, user.homeLocation],
+    refetchInterval: 10 * 60_000,
+    staleTime: 5 * 60_000,
+  });
+  const todayBrief = useQuery({
+    enabled: location.pathname === "/today",
+    queryFn: api.getDailyBrief,
+    queryKey: ["daily-brief", user.planningTimezone],
+    refetchInterval: 60_000,
+  });
+  const now = new Date();
+  const reminderBadge =
+    reminders.data?.items.filter(
+      (reminder) => reminder.dueAt !== null && new Date(reminder.dueAt).getTime() <= now.getTime(),
+    ).length ?? 0;
+  const taskBadge =
+    tasks.data?.items.filter(
+      (task) =>
+        task.dueAt !== null &&
+        new Date(task.dueAt).getTime() <= now.getTime() &&
+        task.status !== "cancelled",
+    ).length ?? 0;
+  const mailBadge = mailboxes.data?.reduce((total, mailbox) => total + mailbox.unreadCount, 0) ?? 0;
+  const withBadges = (item: NavigationItemDefinition): NavigationItemDefinition => {
+    const badge =
+      item.path === "/reminders"
+        ? reminderBadge
+        : item.path === "/tasks"
+          ? taskBadge
+          : item.path === "/mail"
+            ? mailBadge
+            : 0;
+    return {
+      ...item,
+      ...(badge > 0 ? { badge } : {}),
+      ...(item.items ? { items: item.items.map(withBadges) } : {}),
+    };
+  };
+  const closeMobileMenu = () => setMobileMenuOpen(false);
+  const openMobileMenu = () => setMobileMenuOpen(true);
+  const settingsMode = location.pathname === "/settings";
+  const financeMode =
+    location.pathname === "/finances" || location.pathname.startsWith("/finances/");
+  const sidebarMode: ContextSidebarMode = settingsMode
+    ? "settings"
+    : financeMode
+      ? "finances"
+      : location.pathname === "/calendar"
+        ? "calendar"
+        : location.pathname === "/reminders"
+          ? "reminders"
+          : location.pathname === "/tasks"
+            ? "tasks"
+            : location.pathname === "/mail"
+              ? "mail"
+              : null;
+  const activeSettingsSection = settingsSectionFromSearch(location.search);
+  const topNavigationTitle = workspaceTitleForLocation(location.pathname, location.search);
+  const activeFinanceSection = financeSectionFromPath(location.pathname);
+  const financeOverview = useQuery({
+    queryFn: api.getFinanceOverview,
+    queryKey: ["finance-overview"],
+  });
+
+  useEffect(() => {
+    const connect = () => setOnline(true);
+    const disconnect = () => setOnline(false);
+    window.addEventListener("online", connect);
+    window.addEventListener("offline", disconnect);
+    return () => {
+      window.removeEventListener("online", connect);
+      window.removeEventListener("offline", disconnect);
+    };
+  }, []);
+
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (!event.metaKey && !event.ctrlKey) return;
+      const key = event.key.toLowerCase();
+      if (key === "k") {
+        setEditor({ kind: "reminder" });
+      }
+      if (key === "k") event.preventDefault();
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+  }, []);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileMenuOpen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [mobileMenuOpen]);
+
+  const togglePin = async () => {
+    const next = !pinned;
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    await getCurrentWindow().setAlwaysOnTop(next);
+    setPinned(next);
+  };
+
+  return (
+    <>
+      <div className="app-shell">
+        <PinterestWallpaperScheduler />
+        <a className="skip-link" href="#main-content">
+          Skip to main content
+        </a>
+        {mobileMenuOpen ? (
+          <button
+            aria-label="Close Navigation"
+            className="sidebar-overlay"
+            onClick={closeMobileMenu}
+            type="button"
+          />
+        ) : null}
+        <aside
+          aria-label={
+            sidebarMode
+              ? `${sidebarMode.charAt(0).toUpperCase()}${sidebarMode.slice(1)} Sidebar`
+              : "Application Sidebar"
+          }
+          className={`sidebar${mobileMenuOpen ? " sidebar--mobile-open" : ""}${sidebarMode ? " sidebar--context" : ""}`}
+          data-state="expanded"
+          id="app-sidebar"
+        >
+          <ShadcnSidebarHeader className="sidebar__header">
+            {sidebarMode === "settings" ? (
+              <Link
+                aria-label={`Back to ${workspaceOwnerName(user)}'s Workspace`}
+                className="sidebar__back"
+                onClick={closeMobileMenu}
+                to="/today"
+              >
+                <ArrowLeft aria-hidden="true" size={18} />{" "}
+                <span>{workspaceOwnerName(user)}'s Workspace</span>
+              </Link>
+            ) : (
+              <WorkspaceSwitcher onNavigate={closeMobileMenu} pathname={location.pathname} />
+            )}
+            <button
+              aria-label="Close Navigation"
+              className="sidebar__mobile-close"
+              onClick={closeMobileMenu}
+              type="button"
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          </ShadcnSidebarHeader>
+          <ShadcnSidebarContent
+            className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}${sidebarMode === "calendar" ? " sidebar__content--calendar" : ""}`}
+            key={sidebarMode ?? "application-navigation"}
+          >
+            {sidebarMode === "settings" ? (
+              <SettingsSidebarNavigation
+                canManageInvitations={user.canManageInvitations === true}
+                onNavigate={closeMobileMenu}
+                section={activeSettingsSection}
+              />
+            ) : sidebarMode === "finances" ? (
+              <FinanceSidebarNavigation
+                onNavigate={closeMobileMenu}
+                reviewCount={financeOverview.data?.reviewCount ?? 0}
+                section={activeFinanceSection}
+              />
+            ) : sidebarMode === "calendar" ? (
+              <CalendarSidebar user={user} />
+            ) : sidebarMode === "reminders" ? (
+              <RemindersSidebar onNavigate={closeMobileMenu} />
+            ) : sidebarMode === "tasks" ? (
+              <TasksSidebar onNavigate={closeMobileMenu} />
+            ) : sidebarMode === "mail" ? (
+              <MailFeatureSidebar onNavigate={closeMobileMenu} />
+            ) : (
+              navigationGroups.map((group) => (
+                <ShadcnSidebarGroup key={group.label}>
+                  <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
+                  <ShadcnSidebarGroupContent>
+                    <nav aria-label={group.label}>
+                      <ShadcnSidebarMenu>
+                        {group.items.map((item) => (
+                          <SidebarNavigationItem
+                            key={item.path}
+                            onNavigate={closeMobileMenu}
+                            {...withBadges(item)}
+                          />
+                        ))}
+                      </ShadcnSidebarMenu>
+                    </nav>
+                  </ShadcnSidebarGroupContent>
+                </ShadcnSidebarGroup>
+              ))
+            )}
+          </ShadcnSidebarContent>
+          <ShadcnSidebarFooter className="sidebar__footer">
+            <AccountMenu onNavigate={closeMobileMenu} user={user} />
+          </ShadcnSidebarFooter>
+        </aside>
+        <div className="workspace">
+          {!online && (
+            <div className="offline-banner">
+              <WifiOff size={15} /> Offline — changes are paused until you reconnect.
+            </div>
+          )}
+          <TopNavigation
+            actions={
+              <>
+                {"__TAURI_INTERNALS__" in window && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <ShadcnButton
+                        aria-label="Keep window on top"
+                        aria-pressed={pinned}
+                        onClick={togglePin}
+                        size="icon"
+                        variant="ghost"
+                      >
+                        <Pin aria-hidden="true" fill={pinned ? "currentColor" : "none"} />
+                      </ShadcnButton>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom">Keep window on top</TooltipContent>
+                  </Tooltip>
+                )}
+                {sidebarMode === "tasks" ? (
+                  <TaskCreateButton setEditor={setEditor} />
+                ) : sidebarMode === "calendar" ? (
+                  <CalendarCreateButton setEditor={setEditor} />
+                ) : location.pathname === "/mail" ? (
+                  <MailSyncButton />
+                ) : location.pathname === "/finances" ? (
+                  <FinanceAddTransactionButton />
+                ) : sidebarMode === "settings" ? null : (
+                  <CreateMenu setEditor={setEditor} />
+                )}
+              </>
+            }
+            className={location.pathname === "/today" ? "top-navigation--today" : ""}
+            context={
+              sidebarMode === "calendar" ? (
+                <CalendarTopbar
+                  onToday={() => setCalendarTodaySnap((current) => current + 1)}
+                  user={user}
+                />
+              ) : location.pathname === "/today" ? (
+                <TodayWeatherTopbar user={user} weather={weather.data} />
+              ) : location.pathname === "/mail" ? (
+                <MailTopbarControls />
+              ) : null
+            }
+            leading={
+              <>
+                <button
+                  aria-controls="app-sidebar"
+                  aria-expanded={mobileMenuOpen}
+                  aria-label="Open Navigation"
+                  className="sidebar-trigger sidebar-trigger--mobile"
+                  onClick={openMobileMenu}
+                  type="button"
+                >
+                  <Menu aria-hidden="true" size={19} />
+                </button>
+                {location.pathname === "/today" ? (
+                  todayBrief.data ? (
+                    <TodayNavigationTitle
+                      generatedAt={todayBrief.data.generatedAt}
+                      timeZone={user.planningTimezone}
+                    />
+                  ) : null
+                ) : topNavigationTitle ? (
+                  <TopNavigationTitle title={topNavigationTitle} />
+                ) : null}
+              </>
+            }
+          />
+          <main
+            className={`content${sidebarMode === "calendar" ? " content--calendar" : ""}`}
+            id="main-content"
+          >
+            <Routes>
+              <Route
+                path="/today"
+                element={
+                  <TodayPage
+                    brief={todayBrief}
+                    deviceWeatherLocation={deviceWeatherLocation}
+                    user={user}
+                    setEditor={setEditor}
+                    weather={weather}
+                  />
+                }
+              />
+              <Route
+                path="/calendar"
+                element={
+                  <CalendarPage setEditor={setEditor} todaySnap={calendarTodaySnap} user={user} />
+                }
+              />
+              <Route
+                path="/reminders"
+                element={<RemindersPage setEditor={setEditor} user={user} />}
+              />
+              <Route path="/tasks" element={<TasksPage setEditor={setEditor} user={user} />} />
+              <Route path="/mail" element={<MailFeaturePage user={user} />} />
+              <Route
+                path="/automations"
+                element={<Navigate replace to="/settings?section=automations" />}
+              />
+              <Route path="/activity" element={<ActivityPage />} />
+              <Route path="/goals" element={<GoalsPage />} />
+              <Route path="/motives" element={<MotivesPage />} />
+              <Route path="/finances/*" element={<FinancesPage />} />
+              <Route
+                path="/settings"
+                element={<SettingsPage user={user} setEditor={setEditor} />}
+              />
+              <Route path="*" element={<Navigate replace to="/today" />} />
+            </Routes>
+          </main>
+        </div>
+        <nav className="mobile-nav" aria-label="Primary">
+          {mobileNavigationItems.map((item) => (
+            <NavigationItem key={item.path} onNavigate={closeMobileMenu} {...withBadges(item)} />
+          ))}
+          <button
+            aria-expanded={mobileMenuOpen}
+            aria-label="More"
+            className={mobileMenuOpen ? "nav-item nav-item--active" : "nav-item"}
+            onClick={openMobileMenu}
+            type="button"
+          >
+            <MoreHorizontal aria-hidden="true" size={19} />
+            <span>More</span>
+          </button>
+        </nav>
+        {editor?.kind === "reminder" && (
+          <ReminderDialog close={() => setEditor(null)} reminder={editor.reminder} user={user} />
+        )}
+        {editor?.kind === "task" && (
+          <TaskDialog close={() => setEditor(null)} task={editor.task} user={user} />
+        )}
+        {editor?.kind === "event" && editor.event && editor.mode !== "edit" && (
+          <EventInspector
+            calendars={calendars.data ?? []}
+            close={() => setEditor(null)}
+            edit={() =>
+              setEditor({ event: editor.event as CalendarEvent, kind: "event", mode: "edit" })
+            }
+            event={editor.event}
+            user={user}
+          />
+        )}
+        {editor?.kind === "event" && (!editor.event || editor.mode === "edit") && (
+          <EventDialog
+            calendars={calendars.data ?? []}
+            close={() => setEditor(null)}
+            event={editor.event}
+            user={user}
+            {...(editor.draft ? { draft: editor.draft } : {})}
+          />
+        )}
+        {editor?.kind === "calendar" && (
+          <CalendarDialog close={() => setEditor(null)} user={user} />
+        )}
+      </div>
+      {typeof window.matchMedia === "function" ? (
+        <Toaster position="bottom-right" theme={user.theme} />
+      ) : null}
+    </>
+  );
+}
+
+function NavigationItem({
+  badge,
+  icon: Icon,
+  label,
+  onNavigate,
+  path,
+}: NavigationItemDefinition & { onNavigate?: () => void }) {
+  return (
+    <NavLink
+      className={({ isActive }) => `nav-item${isActive ? " nav-item--active" : ""}`}
+      onClick={onNavigate}
+      title={label}
+      to={path}
+    >
+      {({ isActive }) => (
+        <>
+          <NavigationIcon active={isActive} fallback={Icon} label={label} size={19} />
+          <span>{label}</span>
+          {badge ? (
+            <b aria-hidden="true" className="nav-item__badge">
+              {badge}
+            </b>
+          ) : null}
+        </>
+      )}
+    </NavLink>
+  );
+}
+
+function SidebarNavigationItem({
+  badge,
+  icon: Icon,
+  isActive: explicitIsActive,
+  items,
+  label,
+  onNavigate,
+  path,
+}: NavigationItemDefinition & { isActive?: boolean; onNavigate: () => void }) {
+  const location = useLocation();
+  const isActive = explicitIsActive ?? location.pathname === path;
+  const opensContextSidebar = contextSidebarPaths.has(path);
+  return (
+    <ShadcnSidebarMenuItem>
+      <ShadcnSidebarMenuButton asChild className={badge ? "pr-14" : undefined} isActive={isActive}>
+        <NavLink onClick={onNavigate} to={path}>
+          <NavigationIcon active={isActive} fallback={Icon} label={label} />
+          <span>{label}</span>
+        </NavLink>
+      </ShadcnSidebarMenuButton>
+      {badge ? <ShadcnSidebarMenuBadge className="right-7">{badge}</ShadcnSidebarMenuBadge> : null}
+      {opensContextSidebar ? (
+        <ShadcnSidebarMenuAction asChild aria-hidden="true">
+          <span>
+            <ExternalLink aria-hidden="true" />
+          </span>
+        </ShadcnSidebarMenuAction>
+      ) : null}
+      {items?.length ? (
+        <ShadcnSidebarMenuSub>
+          {items.map((item) => (
+            <SidebarSubNavigationItem key={item.path} {...item} onNavigate={onNavigate} />
+          ))}
+        </ShadcnSidebarMenuSub>
+      ) : null}
+    </ShadcnSidebarMenuItem>
+  );
+}
+
+const solidNavigationIcons = {
+  "Agent access": SolidKey,
+  Appearance: SolidPaintBrush,
+  Automations: SolidRobot,
+  Calendar: SolidCalendar,
+  Calendars: SolidCalendar,
+  Connections: SolidCloud,
+  Finances: SolidBank,
+  Goals: SolidTarget,
+  Invitations: SolidUsers,
+  Mail: SolidEnvelope,
+  Motives: SolidCompass,
+  Profile: SolidUser,
+  Reminders: SolidCheckSquare,
+  Sessions: SolidLock,
+  Settings: SolidGear,
+  Tasks: SolidListChecks,
+  Today: SolidHouse,
+  Wallpaper: SolidImage,
+  Activity: SolidPulse,
+} as const;
+
+function NavigationIcon({
+  active,
+  fallback: OutlineIcon,
+  label,
+  size,
+}: {
+  active: boolean;
+  fallback: LucideIcon;
+  label: string;
+  size?: number;
+}) {
+  const SolidIcon = solidNavigationIcons[label as keyof typeof solidNavigationIcons];
+  if (active && SolidIcon) {
+    return size === undefined ? (
+      <SolidIcon aria-hidden="true" weight="fill" />
+    ) : (
+      <SolidIcon aria-hidden="true" size={size} weight="fill" />
+    );
+  }
+  return size === undefined ? (
+    <OutlineIcon aria-hidden="true" />
+  ) : (
+    <OutlineIcon aria-hidden="true" size={size} />
+  );
+}
+
+function SidebarSubNavigationItem({
+  badge,
+  icon: Icon,
+  label,
+  onNavigate,
+  path,
+}: NavigationItemDefinition & { onNavigate: () => void }) {
+  return (
+    <ShadcnSidebarMenuSubItem>
+      <ShadcnSidebarMenuSubButton asChild>
+        <Link onClick={onNavigate} to={path}>
+          <Icon aria-hidden="true" />
+          <span className="truncate">{label}</span>
+          {badge ? (
+            <span aria-hidden="true" className="ml-auto text-xs tabular-nums">
+              {badge}
+            </span>
+          ) : null}
+          <ExternalLink aria-hidden="true" />
+        </Link>
+      </ShadcnSidebarMenuSubButton>
+    </ShadcnSidebarMenuSubItem>
+  );
+}
+
+function TopNavigation({
+  actions,
+  className,
+  context,
+  leading,
+}: {
+  actions?: ReactNode;
+  className?: string;
+  context?: ReactNode;
+  leading?: ReactNode;
+}) {
+  return (
+    <nav
+      aria-label="Top navigation"
+      className={`top-navigation${className ? ` ${className}` : ""}`}
+    >
+      <div className="top-navigation__leading">{leading}</div>
+      {context ? <div className="top-navigation__context">{context}</div> : null}
+      {actions ? <div className="top-navigation__actions">{actions}</div> : null}
+    </nav>
+  );
+}
+
+function WorkspaceSwitcher({ onNavigate, pathname }: { onNavigate: () => void; pathname: string }) {
+  const workspace = workspaceShortcuts.find((item) => item.path === pathname);
+  const section =
+    workspace?.label ??
+    navigationGroups
+      .flatMap((group) => group.items)
+      .flatMap((item) => [item, ...(item.items ?? [])])
+      .find((item) => item.path === pathname)?.label ??
+    "Home OS";
+  const WorkspaceIcon = workspace?.icon;
+
+  return (
+    <ShadcnSidebarMenu>
+      <ShadcnSidebarMenuItem>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <ShadcnSidebarMenuButton
+              aria-label="Switch workspace"
+              className="sidebar__workspace-trigger"
+            >
+              {WorkspaceIcon ? <WorkspaceIcon aria-hidden="true" /> : <LogoMark compact />}
+              <span>{section}</span>
+              <ChevronDown aria-hidden="true" className="ml-auto" data-icon="inline-end" />
+            </ShadcnSidebarMenuButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-[--radix-popper-anchor-width]">
+            <DropdownMenuGroup>
+              <WorkspaceMenuItem
+                item={workspaceShortcuts[0] as NavigationItemDefinition}
+                onNavigate={onNavigate}
+                pathname={pathname}
+              />
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              {workspaceShortcuts.slice(1).map((item) => (
+                <WorkspaceMenuItem
+                  item={item}
+                  key={item.path}
+                  onNavigate={onNavigate}
+                  pathname={pathname}
+                />
+              ))}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </ShadcnSidebarMenuItem>
+    </ShadcnSidebarMenu>
+  );
+}
+
+function WorkspaceMenuItem({
+  item,
+  onNavigate,
+  pathname,
+}: {
+  item: NavigationItemDefinition;
+  onNavigate: () => void;
+  pathname: string;
+}) {
+  const { icon: Icon, label, path } = item;
+  const isActive = pathname === path;
+  return (
+    <DropdownMenuItem asChild data-active={isActive}>
+      <Link aria-current={isActive ? "page" : undefined} onClick={onNavigate} to={path}>
+        <Icon aria-hidden="true" />
+        <span>{label}</span>
+        {isActive ? <Check aria-hidden="true" className="ml-auto" /> : null}
+      </Link>
+    </DropdownMenuItem>
+  );
+}
+
+function AccountMenu({ onNavigate, user }: { onNavigate: () => void; user: User }) {
+  const queryClient = useQueryClient();
+  const accountName = user.displayName.trim() || user.email;
+  const logout = useMutation({
+    mutationFn: api.logout,
+    onSuccess: () => {
+      queryClient.clear();
+      window.location.assign("/");
+    },
+  });
+
+  return (
+    <ShadcnSidebarMenu>
+      <ShadcnSidebarMenuItem>
+        <div className="sidebar__account-trigger flex min-h-9 items-center gap-2 px-2">
+          <ShadcnAvatar className="sidebar__account-avatar" size="sm">
+            <ShadcnAvatarFallback>{initials(accountName)}</ShadcnAvatarFallback>
+          </ShadcnAvatar>
+          <span className="sidebar__account-name min-w-0 flex-1 truncate text-sm font-medium">
+            {accountName}
+          </span>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <ShadcnButton
+                aria-label="Account menu"
+                className="size-8 shrink-0"
+                size="icon"
+                variant="ghost"
+              >
+                <Settings aria-hidden="true" />
+              </ShadcnButton>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56" side="top">
+              <DropdownMenuLabel>
+                <span className="block truncate">{accountName}</span>
+                <span className="block truncate font-normal">{user.email}</span>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                {accountNavigationItems.map(({ icon: Icon, label, path }) => (
+                  <DropdownMenuItem asChild key={path}>
+                    <NavLink onClick={onNavigate} to={path}>
+                      <Icon aria-hidden="true" />
+                      <span>{label}</span>
+                    </NavLink>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={logout.isPending}
+                onSelect={(event) => {
+                  event.preventDefault();
+                  logout.mutate();
+                }}
+                variant="destructive"
+              >
+                <LogOut aria-hidden="true" />
+                <span>{logout.isPending ? "Signing out…" : "Log out"}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      </ShadcnSidebarMenuItem>
+    </ShadcnSidebarMenu>
+  );
+}
+
+function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <ShadcnButton>
+          <Plus aria-hidden="true" data-icon="inline-start" /> Add
+        </ShadcnButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuGroup>
+          <DropdownMenuItem onSelect={() => setEditor({ kind: "task" })}>
+            <ListChecks aria-hidden="true" /> Task
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setEditor({ kind: "reminder" })}>
+            <ListTodo aria-hidden="true" /> Reminder
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => setEditor({ kind: "event" })}>
+            <CalendarDays aria-hidden="true" /> Event
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function CalendarCreateButton({ setEditor }: { setEditor: (editor: Editor) => void }) {
+  return (
+    <ShadcnButton onClick={() => setEditor({ kind: "event" })}>
+      <CalendarPlus aria-hidden="true" data-icon="inline-start" /> New event
+    </ShadcnButton>
+  );
+}
+
+function TaskCreateButton({ setEditor }: { setEditor: (editor: Editor) => void }) {
+  return (
+    <ShadcnButton onClick={() => setEditor({ kind: "task" })}>
+      <Plus aria-hidden="true" data-icon="inline-start" /> New task
+    </ShadcnButton>
+  );
+}
+
+function FinanceAddTransactionButton() {
+  return (
+    <ShadcnButton asChild>
+      <a href="#finance-add-transaction">
+        <Plus aria-hidden="true" data-icon="inline-start" /> Add transaction
+      </a>
+    </ShadcnButton>
+  );
+}
+
+function TodayPage({
+  brief,
+  deviceWeatherLocation,
+  setEditor,
+  user,
+  weather,
+}: {
+  brief: Pick<UseQueryResult<DailyBrief>, "data" | "error" | "isError" | "isPending">;
+  deviceWeatherLocation: DeviceWeatherLocation;
+  setEditor: (editor: Editor) => void;
+  user: User;
+  weather: {
+    data: WeatherSnapshot | undefined;
+    isError: boolean;
+    isPending: boolean;
+  };
+}) {
+  const completedReminders = useQuery({
+    queryFn: () => api.listReminders({ completed: true, limit: 100 }),
+    queryKey: ["reminders", "completed"],
+  });
+  if (brief.isError) return <InlineError error={brief.error} />;
+  if (completedReminders.isError) return <InlineError error={completedReminders.error} />;
+  if (brief.isPending || completedReminders.isPending || !brief.data) {
+    return <PageLoading />;
+  }
+  const agenda = brief.data;
+  const currentTime = new Date(agenda.generatedAt);
+  const today = localDateAt(currentTime, user.planningTimezone);
+  const overdueReminders = agenda.overdue.filter((reminder) => reminder.completedAt === null);
+  const todayReminders = agenda.today.filter((reminder) => reminder.completedAt === null);
+  const anytimeReminders = agenda.anytime.filter((reminder) => reminder.completedAt === null);
+  const doneToday = completedReminders.data.items.filter(
+    (reminder) =>
+      reminder.completedAt !== null &&
+      sameLocalDate(localDateAt(new Date(reminder.completedAt), user.planningTimezone), today),
+  );
+  const openTasks = agenda.tasks.filter((task) => task.status !== "cancelled");
+  const overdueTasks = openTasks.filter(
+    (task) => task.dueAt !== null && new Date(task.dueAt).getTime() < currentTime.getTime(),
+  );
+  const todayTasks = openTasks.filter(
+    (task) =>
+      task.dueAt !== null &&
+      new Date(task.dueAt).getTime() >= currentTime.getTime() &&
+      sameLocalDate(localDateAt(new Date(task.dueAt), user.planningTimezone), today),
+  );
+  const nextTasks = openTasks.filter(
+    (task) =>
+      !overdueTasks.some((candidate) => candidate.id === task.id) &&
+      !todayTasks.some((candidate) => candidate.id === task.id) &&
+      (task.status === "next" || task.status === "scheduled"),
+  );
+  const recommendedTasks = new Map(
+    (agenda.recommendedTasks ?? []).map((recommendation) => [
+      recommendation.task.id,
+      recommendation,
+    ]),
+  );
+  nextTasks.sort(
+    (left, right) => Number(recommendedTasks.has(right.id)) - Number(recommendedTasks.has(left.id)),
+  );
+  const doneTasksToday = agenda.completedTasks.filter(
+    (task) =>
+      task.completedAt !== null &&
+      sameLocalDate(localDateAt(new Date(task.completedAt), user.planningTimezone), today),
+  );
+  const remainingCount =
+    overdueReminders.length + todayReminders.length + anytimeReminders.length + openTasks.length;
+  return (
+    <div className="today-layout" data-page="today">
+      <section className="day-column">
+        <TodayConditions
+          deviceWeatherLocation={deviceWeatherLocation}
+          savedLocation={user.homeLocation}
+          weather={weather}
+        />
+        <ShadcnCard aria-label="Current commitment" className="today-moment-block">
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>
+              <h2>{agenda.now.length > 0 ? "Happening now" : "Next commitment"}</h2>
+            </ShadcnCardTitle>
+            <ShadcnCardAction>
+              <ShadcnBadge variant="secondary">
+                {formatTime(currentTime.toISOString(), user.planningTimezone)}
+              </ShadcnBadge>
+            </ShadcnCardAction>
+          </ShadcnCardHeader>
+          <ShadcnCardContent className="today-moment-block__content">
+            {agenda.now.length > 0 ? (
+              <>
+                {agenda.now.map((event) => (
+                  <EventCard
+                    currentTime={currentTime}
+                    event={event}
+                    key={event.id}
+                    onEdit={() => setEditor({ event, kind: "event" })}
+                    timeZone={user.planningTimezone}
+                  />
+                ))}
+                {agenda.next ? (
+                  <div className="today-moment-block__then">
+                    <p className="eyebrow">Up next</p>
+                    <EventCard
+                      event={agenda.next}
+                      onEdit={() =>
+                        setEditor({ event: agenda.next as CalendarEvent, kind: "event" })
+                      }
+                      timeZone={user.planningTimezone}
+                    />
+                  </div>
+                ) : null}
+              </>
+            ) : agenda.next ? (
+              <EventCard
+                event={agenda.next}
+                onEdit={() => setEditor({ event: agenda.next as CalendarEvent, kind: "event" })}
+                timeZone={user.planningTimezone}
+              />
+            ) : (
+              <EmptyState icon={<CalendarDays />} title="The day is open">
+                Leave it spacious or add a block when it matters.
+              </EmptyState>
+            )}
+          </ShadcnCardContent>
+        </ShadcnCard>
+        <section aria-label="Day flow" className="today-sequence">
+          <div className="section-heading">
+            <div>
+              <h2>Later today</h2>
+            </div>
+          </div>
+          {agenda.allDay.length > 0 ? (
+            <div className="today-all-day">
+              <p className="eyebrow">All day</p>
+              {agenda.allDay.map((event) => (
+                <EventCard
+                  event={event}
+                  key={event.id}
+                  onEdit={() => setEditor({ event, kind: "event" })}
+                  timeZone={user.planningTimezone}
+                />
+              ))}
+            </div>
+          ) : null}
+          {agenda.laterToday.filter((event) => event.id !== agenda.next?.id).length > 0 ? (
+            agenda.laterToday
+              .filter((event) => event.id !== agenda.next?.id)
+              .map((event) => (
+                <EventCard
+                  event={event}
+                  key={event.id}
+                  onEdit={() => setEditor({ event, kind: "event" })}
+                  timeZone={user.planningTimezone}
+                />
+              ))
+          ) : (
+            <p className="today-sequence__empty">Nothing else is fixed on the calendar.</p>
+          )}
+        </section>
+      </section>
+      <aside aria-labelledby="today-queue-title" className="today-queue">
+        <div className="section-heading">
+          <div>
+            <h2 id="today-queue-title">Your commitments</h2>
+            <p className="today-queue__summary">
+              {agenda.capacity.overcommitted
+                ? `No free time before ${formatTime(agenda.capacity.workdayEndsAt, user.planningTimezone)}.`
+                : `${formatMinutes(agenda.capacity.availableMinutes)} free until ${formatTime(
+                    agenda.capacity.workdayEndsAt,
+                    user.planningTimezone,
+                  )}`}
+            </p>
+          </div>
+          <ShadcnBadge variant="secondary">{remainingCount}</ShadcnBadge>
+        </div>
+        {overdueReminders.length > 0 && (
+          <ReminderGroup
+            label="Overdue"
+            reminders={overdueReminders}
+            setEditor={setEditor}
+            timeZone={user.planningTimezone}
+          />
+        )}
+        {todayReminders.length > 0 ? (
+          <ReminderGroup
+            label="Today"
+            reminders={todayReminders}
+            setEditor={setEditor}
+            timeZone={user.planningTimezone}
+          />
+        ) : (
+          overdueReminders.length === 0 &&
+          overdueTasks.length === 0 &&
+          todayTasks.length === 0 &&
+          nextTasks.length === 0 && (
+            <EmptyState icon={<CheckCircle2 />} title="Nothing pulling at you">
+              Add a reminder when something deserves your attention.
+            </EmptyState>
+          )
+        )}
+        {anytimeReminders.length > 0 ? (
+          <ReminderGroup
+            label="No due date"
+            reminders={anytimeReminders}
+            setEditor={setEditor}
+            timeZone={user.planningTimezone}
+          />
+        ) : null}
+        {overdueTasks.length > 0 ? (
+          <TaskGroup
+            label="Overdue tasks"
+            recommendations={recommendedTasks}
+            setEditor={setEditor}
+            tasks={overdueTasks}
+            timeZone={user.planningTimezone}
+          />
+        ) : null}
+        {todayTasks.length > 0 ? (
+          <TaskGroup
+            label="Due today"
+            recommendations={recommendedTasks}
+            setEditor={setEditor}
+            tasks={todayTasks}
+            timeZone={user.planningTimezone}
+          />
+        ) : null}
+        {nextTasks.length > 0 ? (
+          <TaskGroup
+            label="Next tasks"
+            recommendations={recommendedTasks}
+            setEditor={setEditor}
+            tasks={nextTasks}
+            timeZone={user.planningTimezone}
+          />
+        ) : null}
+        {doneToday.length > 0 || doneTasksToday.length > 0 ? (
+          <ShadcnCollapsible className="today-history">
+            <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">
+              <CheckCircle2 aria-hidden="true" />
+              <span>Done today</span>
+              <ShadcnBadge variant="secondary">
+                {doneToday.length + doneTasksToday.length}
+              </ShadcnBadge>
+              <ChevronDown aria-hidden="true" />
+            </ShadcnCollapsibleTrigger>
+            <ShadcnCollapsibleContent className="today-history__content">
+              {doneToday.length > 0 ? (
+                <ReminderGroup
+                  label="Completed reminders"
+                  reminders={doneToday}
+                  setEditor={setEditor}
+                  timeZone={user.planningTimezone}
+                />
+              ) : null}
+              {doneTasksToday.length > 0 ? (
+                <TaskGroup
+                  label="Completed tasks"
+                  setEditor={setEditor}
+                  tasks={doneTasksToday}
+                  timeZone={user.planningTimezone}
+                />
+              ) : null}
+            </ShadcnCollapsibleContent>
+          </ShadcnCollapsible>
+        ) : null}
+      </aside>
+    </div>
+  );
+}
+
+function TodayConditions({
+  deviceWeatherLocation,
+  savedLocation,
+  weather,
+}: {
+  deviceWeatherLocation: DeviceWeatherLocation;
+  savedLocation: HomeLocation | null;
+  weather: {
+    data: WeatherSnapshot | undefined;
+    isError: boolean;
+    isPending: boolean;
+  };
+}) {
+  if (weather.data) return null;
+  const description = weather.isError
+    ? "Conditions are temporarily unavailable."
+    : deviceWeatherLocation.status === "pending"
+      ? "Finding local conditions…"
+      : savedLocation
+        ? `Checking ${savedLocation.label}…`
+        : "Allow device location or add a saved location in Profile.";
+  return (
+    <ShadcnItem className="today-conditions" size="sm">
+      <ShadcnItemMedia variant="icon">
+        <Cloud aria-hidden="true" />
+      </ShadcnItemMedia>
+      <ShadcnItemContent>
+        <ShadcnItemTitle>Current conditions</ShadcnItemTitle>
+        <ShadcnItemDescription>{description}</ShadcnItemDescription>
+      </ShadcnItemContent>
+      {deviceWeatherLocation.status === "pending" ||
+      (savedLocation !== null && weather.isPending) ? (
+        <ShadcnItemActions>
+          <ShadcnBadge variant="secondary">Updating</ShadcnBadge>
+        </ShadcnItemActions>
+      ) : null}
+    </ShadcnItem>
+  );
+}
+
+function TodayWeatherTopbar({
+  user,
+  weather,
+}: {
+  user: User;
+  weather: WeatherSnapshot | undefined;
+}) {
+  if (!weather) return null;
+  const WeatherIcon = weather.alerts.some((alert) => alert.kind === "rain")
+    ? CloudRain
+    : weather.condition.includes("Clear")
+      ? Sun
+      : Cloud;
+  const temperature = `${Math.round(weather.temperatureF)}°F`;
+  const alertDescription =
+    weather.alerts.length > 0 ? weather.alerts.map((alert) => alert.label).join(" · ") : null;
+  return (
+    <fieldset aria-label="Today conditions" className="top-navigation__weather">
+      <TodayWeatherPopover
+        content={
+          <WeatherConditionsPopoverContent
+            alertDescription={alertDescription}
+            planningTimezone={user.planningTimezone}
+            weather={weather}
+            WeatherIcon={WeatherIcon}
+          />
+        }
+        contentClassName="weather-popover"
+        description={`Updated ${formatTime(weather.observedAt, user.planningTimezone)}`}
+        showHeader={false}
+        tooltip={`${weather.condition}, ${temperature}`}
+        title={weather.condition}
+      >
+        <ShadcnButton
+          aria-label={`${weather.condition}, ${temperature}`}
+          className="top-navigation__weather-trigger"
+          variant="secondary"
+        >
+          <WeatherIcon aria-hidden="true" />
+          <span>{temperature}</span>
+        </ShadcnButton>
+      </TodayWeatherPopover>
+      <TodayWeatherPopover
+        content={<WeatherLocationPopoverContent weather={weather} />}
+        contentClassName="weather-location-popover"
+        description={weather.location.source === "device" ? "Using this device" : "Home location"}
+        tooltip={`Weather location: ${weather.location.shortLabel}`}
+        title={weather.location.label}
+      >
+        <ShadcnButton
+          aria-label={`Weather location: ${weather.location.shortLabel}`}
+          className="top-navigation__weather-location"
+          variant="ghost"
+        >
+          <MapPin aria-hidden="true" />
+          <span>{weather.location.shortLabel}</span>
+        </ShadcnButton>
+      </TodayWeatherPopover>
+    </fieldset>
+  );
+}
+
+function WeatherConditionsPopoverContent({
+  alertDescription,
+  planningTimezone,
+  weather,
+  WeatherIcon,
+}: {
+  alertDescription: string | null;
+  planningTimezone: string;
+  weather: WeatherSnapshot;
+  WeatherIcon: LucideIcon;
+}) {
+  const roundedTemperature = Math.round(weather.temperatureF);
+  return (
+    <>
+      <div
+        className={`weather-popover__sky weather-popover__sky--${weatherSkyPeriod(
+          weather.observedAt,
+          planningTimezone,
+        )}`}
+      >
+        <div className="weather-popover__sky-heading">
+          <span>
+            <WeatherIcon aria-hidden="true" />
+            {weather.condition}
+          </span>
+          <span>{formatTime(weather.observedAt, planningTimezone)}</span>
+        </div>
+        <strong className="weather-popover__temperature">{roundedTemperature}°</strong>
+        <dl className="weather-popover__stats">
+          <div>
+            <dt>Updated</dt>
+            <dd>{formatTime(weather.observedAt, planningTimezone)}</dd>
+          </div>
+          <div>
+            <dt>Air quality</dt>
+            <dd>{weather.usAqi === null ? "Unavailable" : `AQI ${weather.usAqi}`}</dd>
+          </div>
+        </dl>
+      </div>
+      <div className="weather-popover__details">
+        {alertDescription ? <p className="weather-popover__alert">{alertDescription}</p> : null}
+        <p>{weather.location.shortLabel}</p>
+      </div>
+    </>
+  );
+}
+
+function WeatherLocationPopoverContent({ weather }: { weather: WeatherSnapshot }) {
+  const { coordinates, label, mapUrl, source } = weather.location;
+  return (
+    <>
+      <div className="weather-location-popover__map">
+        <iframe loading="lazy" src={weatherMapEmbedUrl(coordinates)} title={`Map of ${label}`} />
+        <a
+          aria-label={`Open ${label} in OpenStreetMap`}
+          href={mapUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          <span>
+            <ExternalLink aria-hidden="true" />
+            Open map
+          </span>
+        </a>
+      </div>
+      <div className="weather-location-popover__details">
+        <strong>{label}</strong>
+        <span>{source === "device" ? "Using this device" : "Home location"}</span>
+        <span>{formatWeatherCoordinates(coordinates)}</span>
+      </div>
+    </>
+  );
+}
+
+function TodayNavigationTitle({
+  generatedAt,
+  timeZone,
+}: {
+  generatedAt: string;
+  timeZone: string;
+}) {
+  const currentTime = new Date(generatedAt);
+  return (
+    <h1 className="top-navigation__title">
+      <time dateTime={localDateToIso(localDateAt(currentTime, timeZone))}>
+        {formatOrdinalDate(currentTime, timeZone)}
+      </time>
+    </h1>
+  );
+}
+
+function TopNavigationTitle({ title }: { title: string }) {
+  return <h1 className="top-navigation__title">{title}</h1>;
+}
+
+function workspaceTitleForLocation(pathname: string, search: string): string | null {
+  const searchParams = new URLSearchParams(search);
+  if (pathname === "/calendar") return "Calendar";
+  if (pathname === "/reminders") {
+    return searchParams.get("view") === "completed" ? "Completed reminders" : "Reminders";
+  }
+  if (pathname === "/tasks") return "Tasks";
+  if (pathname === "/mail") return "Mail";
+  if (pathname === "/goals") return "Goals";
+  if (pathname === "/motives") return "Motives";
+  if (pathname === "/finances") return "Finances";
+  if (pathname === "/finances/accounts") return "Accounts";
+  if (pathname === "/finances/budgets") return "Budgets";
+  if (pathname === "/finances/cashflow") return "Cash flow";
+  if (pathname === "/finances/health") return "Ledger health";
+  if (pathname === "/finances/imports") return "Import history";
+  if (pathname === "/finances/profile") return "Financial profile";
+  if (pathname === "/finances/review") return "Review queue";
+  if (pathname === "/finances/subscriptions") return "Subscriptions";
+  if (pathname === "/finances/transactions") return "Transactions";
+  if (pathname === "/activity") return "Activity";
+  if (pathname === "/settings") return "Settings";
+  return null;
+}
+
+function TodayWeatherPopover({
+  children,
+  content,
+  contentClassName,
+  description,
+  showHeader = true,
+  title,
+  tooltip,
+}: {
+  children: ReactNode;
+  content?: ReactNode;
+  contentClassName?: string;
+  description: ReactNode;
+  showHeader?: boolean;
+  title: string;
+  tooltip: string;
+}) {
+  return (
+    <ShadcnPopover>
+      <Tooltip>
+        <ShadcnPopoverTrigger asChild>
+          <TooltipTrigger asChild>{children}</TooltipTrigger>
+        </ShadcnPopoverTrigger>
+        <TooltipContent side="bottom">{tooltip}</TooltipContent>
+      </Tooltip>
+      <ShadcnPopoverContent align="start" className={contentClassName} side="bottom">
+        {showHeader ? (
+          <ShadcnPopoverHeader>
+            <ShadcnPopoverTitle>{title}</ShadcnPopoverTitle>
+            <ShadcnPopoverDescription>{description}</ShadcnPopoverDescription>
+          </ShadcnPopoverHeader>
+        ) : null}
+        {content}
+      </ShadcnPopoverContent>
+    </ShadcnPopover>
+  );
+}
+
+function AutomationsPage({ user }: { user: User }) {
+  const queryClient = useQueryClient();
+  const routines = useQuery({ queryFn: api.listAutomations, queryKey: ["automations"] });
+  const runs = useQuery({ queryFn: () => api.listAutomationRuns(), queryKey: ["automation-runs"] });
+  const install = useMutation({
+    mutationFn: (template: "morning_brief" | "nightly_review") =>
+      api.createAutomation({
+        schedule: template === "morning_brief" ? "Weekdays at 8:00 AM" : "Daily at 8:00 PM",
+        template,
+        timezone: user.planningTimezone,
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["automations"] }),
+  });
+  const run = useMutation({
+    mutationFn: ({ dryRun, id }: { dryRun: boolean; id: string }) => api.runAutomation(id, dryRun),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["automation-runs"] });
+      queryClient.invalidateQueries({ queryKey: ["automations"] });
+      queryClient.invalidateQueries({ queryKey: ["daily-brief"] });
+    },
+  });
+  const update = useMutation({
+    mutationFn: ({
+      id,
+      input,
+    }: {
+      id: string;
+      input: Parameters<typeof api.updateAutomation>[1];
+    }) => api.updateAutomation(id, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["automations"] }),
+  });
+  if (routines.isPending || runs.isPending) return <PageLoading />;
+  if (routines.isError) return <InlineError error={routines.error} />;
+  if (runs.isError) return <InlineError error={runs.error} />;
+  const installed = new Set(routines.data.map((routine) => routine.template));
+  const content = (
+    <>
+      <section className="automation-catalog" aria-label="Routine catalog">
+        <AutomationTemplateCard
+          description="Prepare a concise, time-aware view of what is happening now, what is next, and what needs attention."
+          disabled={installed.has("morning_brief") || install.isPending}
+          install={() => install.mutate("morning_brief")}
+          title="Morning brief"
+        />
+        <AutomationTemplateCard
+          description="Capture the same material at the end of the day so an agent can help close loops and prepare tomorrow."
+          disabled={installed.has("nightly_review") || install.isPending}
+          install={() => install.mutate("nightly_review")}
+          title="Nightly review"
+        />
+      </section>
+      {install.isError ? <InlineError error={install.error} /> : null}
+      <section className="automation-routines" aria-label="Installed routines">
+        <div className="section-heading">
+          <div>
+            <p className="eyebrow">Installed</p>
+            <h2>Your routines</h2>
+          </div>
+        </div>
+        {routines.data.length === 0 ? (
+          <EmptyState icon={<Bot />} title="No routines yet">
+            Install a starter routine above. It never receives more authority than the token you
+            give an agent.
+          </EmptyState>
+        ) : (
+          routines.data.map((routine) => (
+            <AutomationRoutineCard
+              key={routine.id}
+              latestRun={runs.data.find((item) => item.routineId === routine.id)}
+              routine={routine}
+              run={(dryRun) => run.mutate({ dryRun, id: routine.id })}
+              runPending={run.isPending}
+              save={(input) => update.mutate({ id: routine.id, input })}
+              savePending={update.isPending}
+            />
+          ))
+        )}
+      </section>
+      {run.isError ? <InlineError error={run.error} /> : null}
+      {update.isError ? <InlineError error={update.error} /> : null}
+    </>
+  );
+  return (
+    <SettingsSection
+      action={<Badge>{routines.data.length} installed</Badge>}
+      description="Install and manage routines. Agents can use them only within the authority you grant."
+      title="Automations"
+    >
+      {content}
+    </SettingsSection>
+  );
+}
+
+function AutomationRoutineCard({
+  latestRun,
+  routine,
+  run,
+  runPending,
+  save,
+  savePending,
+}: {
+  latestRun: { startedAt: string; status: string } | undefined;
+  routine: AutomationRoutine;
+  run: (dryRun: boolean) => void;
+  runPending: boolean;
+  save: (input: { enabled: boolean; schedule: string; timezone: string }) => void;
+  savePending: boolean;
+}) {
+  const [enabled, setEnabled] = useState(routine.enabled);
+  const [schedule, setSchedule] = useState(routine.schedule);
+  const changed = enabled !== routine.enabled || schedule !== routine.schedule;
+  return (
+    <article className="automation-routine">
+      <div>
+        <h3>{routine.title}</h3>
+        <small>
+          {latestRun
+            ? `${latestRun.status === "dry_run" ? "Previewed" : "Ran"} ${formatRelative(latestRun.startedAt)}`
+            : "Not run yet"}
+        </small>
+      </div>
+      <div className="automation-routine__controls">
+        <label>
+          Schedule
+          <input
+            aria-label={`${routine.title} schedule`}
+            onChange={(event) => setSchedule(event.target.value)}
+            value={schedule}
+          />
+        </label>
+        <label className="switch-field">
+          <input
+            checked={enabled}
+            onChange={(event) => setEnabled(event.target.checked)}
+            type="checkbox"
+          />
+          Enabled
+        </label>
+        <span>{routine.timezone}</span>
+        <Button
+          disabled={!changed || savePending || schedule.trim().length === 0}
+          onClick={() => save({ enabled, schedule: schedule.trim(), timezone: routine.timezone })}
+          tone="ghost"
+        >
+          Save
+        </Button>
+      </div>
+      <div className="automation-routine__actions">
+        <Button disabled={runPending || !enabled} onClick={() => run(true)} tone="ghost">
+          Preview
+        </Button>
+        <Button disabled={runPending || !enabled} onClick={() => run(false)}>
+          Run now
+        </Button>
+      </div>
+    </article>
+  );
+}
+
+function AutomationTemplateCard({
+  description,
+  disabled,
+  install,
+  title,
+}: {
+  description: string;
+  disabled: boolean;
+  install: () => void;
+  title: string;
+}) {
+  return (
+    <article className="automation-template">
+      <Bot aria-hidden="true" size={20} />
+      <h2>{title}</h2>
+      <p>{description}</p>
+      <Button disabled={disabled} onClick={install} tone={disabled ? "ghost" : "accent"}>
+        {disabled ? "Installed" : "Install"}
+      </Button>
+    </article>
+  );
+}
+
+function CalendarPage({
+  setEditor,
+  todaySnap,
+  user,
+}: {
+  setEditor: (editor: Editor) => void;
+  todaySnap: number;
+  user: User;
+}) {
+  const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [currentTime, setCurrentTime] = useState(() => new Date());
+  const [draggedEventId, setDraggedEventId] = useState<string | null>(null);
+  const [dragPreview, setDragPreview] = useState<CalendarDropPreview | null>(null);
+  const requestedView = searchParams.get("view");
+  const defaultView: CalendarView =
+    typeof window.matchMedia === "function" && window.matchMedia("(max-width: 560px)").matches
+      ? "day"
+      : "week";
+  const view = calendarViewFromSearch(requestedView, defaultView);
+  const includeWeekends = searchParams.get("weekends") !== "0";
+  const requestedAnchor = searchParams.get("date");
+  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
+    ? parseLocalDate(requestedAnchor as string)
+    : localDateAt(currentTime, user.planningTimezone);
+  const updateCalendarState = (updates: Record<string, string>) =>
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      for (const [key, value] of Object.entries(updates)) {
+        next.set(key, value);
+      }
+      return next;
+    });
+  const days = useMemo(
+    () => calendarPeriodDays(view, anchor, includeWeekends),
+    [anchor, includeWeekends, view],
+  );
+  const range = useMemo(
+    () =>
+      localDateRange(
+        days[0] as LocalDate,
+        addLocalDays(days[days.length - 1] as LocalDate, 1),
+        user.planningTimezone,
+      ),
+    [days, user.planningTimezone],
+  );
+  const events = useQuery({
+    queryFn: () => api.listEvents(range),
+    queryKey: calendarQueryKeys.events(view, range.from, range.to),
+  });
+  const calendars = useQuery({ queryFn: api.listCalendars, queryKey: calendarQueryKeys.calendars });
+  const calendarsById = useMemo(
+    () => new Map((calendars.data ?? []).map((calendar) => [calendar.id, calendar])),
+    [calendars.data],
+  );
+  const moveEvent = useMutation({
+    mutationFn: async (input: CalendarEventMove) => {
+      const times = movedEventTimes(input.event, input.day, input.minute, user.planningTimezone);
+      return api.updateEvent(input.event.id, times);
+    },
+    onError: (_error, _input, context) => {
+      if (!context) return;
+      for (const [key, data] of context.snapshots) {
+        queryClient.setQueryData(key, data);
+      }
+    },
+    onMutate: async (input: CalendarEventMove) => {
+      await queryClient.cancelQueries({ queryKey: ["events"] });
+      const snapshots = queryClient.getQueriesData<CalendarEvent[]>({ queryKey: ["events"] });
+      const times = movedEventTimes(input.event, input.day, input.minute, user.planningTimezone);
+      queryClient.setQueriesData<CalendarEvent[]>({ queryKey: ["events"] }, (records) =>
+        records?.map((record) => (record.id === input.event.id ? { ...record, ...times } : record)),
+      );
+      return { snapshots };
+    },
+    onSettled: () => invalidateMaterial(queryClient),
+  });
+  const today = localDateAt(currentTime, user.planningTimezone);
+  const followToday = sameLocalDate(anchor, today) && searchParams.get("follow") !== "0";
+  const disableFollowToday = () => updateCalendarState({ follow: "0" });
+  const eventsByDay = useMemo(() => {
+    const records = events.data ?? [];
+    return new Map(
+      days.map((day) => {
+        const dayRange = localDateRange(day, addLocalDays(day, 1), user.planningTimezone);
+        const startsAt = new Date(dayRange.from).getTime();
+        const endsAt = new Date(dayRange.to).getTime();
+        return [
+          localDateKey(day),
+          records.filter(
+            (event) =>
+              new Date(event.startsAt).getTime() < endsAt &&
+              new Date(event.endsAt).getTime() > startsAt,
+          ),
+        ];
+      }),
+    );
+  }, [days, events.data, user.planningTimezone]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const showDay = (day: LocalDate) => {
+    updateCalendarState({ date: localDateToIso(day), view: "day" });
+  };
+  const dropEvent = (event: CalendarEvent, day: LocalDate, minute: number) => {
+    if (calendarsById.get(event.calendarId)?.isWritable) {
+      moveEvent.mutate({ day, event, minute });
+    }
+    setDraggedEventId(null);
+    setDragPreview(null);
+  };
+  const clearDrag = () => {
+    setDraggedEventId(null);
+    setDragPreview(null);
+  };
+
+  return (
+    <div className="calendar-page">
+      {moveEvent.isError ? <InlineError error={moveEvent.error} /> : null}
+      {events.isPending ? (
+        <PageLoading />
+      ) : events.isError ? (
+        <InlineError error={events.error} />
+      ) : view === "day" ? (
+        <DayCalendarView
+          currentTime={currentTime}
+          day={days[0] as LocalDate}
+          events={eventsByDay.get(localDateKey(days[0] as LocalDate)) as CalendarEvent[]}
+          calendarsById={calendarsById}
+          clearDrag={clearDrag}
+          dragPreview={dragPreview}
+          draggedEventId={draggedEventId}
+          moveEvent={dropEvent}
+          setEditor={setEditor}
+          setDraggedEventId={setDraggedEventId}
+          setDragPreview={setDragPreview}
+          followToday={followToday}
+          key={localDateKey(days[0] as LocalDate)}
+          onExitFollow={disableFollowToday}
+          timeZone={user.planningTimezone}
+          today={today}
+          todaySnap={todaySnap}
+        />
+      ) : view === "week" ? (
+        <WeekCalendarView
+          currentTime={currentTime}
+          days={days}
+          eventsByDay={eventsByDay}
+          calendarsById={calendarsById}
+          clearDrag={clearDrag}
+          dragPreview={dragPreview}
+          draggedEventId={draggedEventId}
+          moveEvent={dropEvent}
+          setEditor={setEditor}
+          setDraggedEventId={setDraggedEventId}
+          setDragPreview={setDragPreview}
+          showDay={showDay}
+          followToday={followToday}
+          key={localDateKey(days[0] as LocalDate)}
+          onExitFollow={disableFollowToday}
+          timeZone={user.planningTimezone}
+          today={today}
+          todaySnap={todaySnap}
+        />
+      ) : (
+        <MonthCalendarView
+          anchor={anchor}
+          days={days}
+          eventsByDay={eventsByDay}
+          calendarsById={calendarsById}
+          clearDrag={clearDrag}
+          draggedEventId={draggedEventId}
+          moveEvent={dropEvent}
+          setEditor={setEditor}
+          setDraggedEventId={setDraggedEventId}
+          showDay={showDay}
+          key={localDateKey(anchor)}
+          timeZone={user.planningTimezone}
+          today={today}
+          todaySnap={todaySnap}
+        />
+      )}
+    </div>
+  );
+}
+
+function CalendarTopbar({ onToday, user }: { onToday: () => void; user: User }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const compactMedia =
+    typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 560px)") : undefined;
+  const defaultView: CalendarView = compactMedia?.matches ? "day" : "week";
+  const requestedView = searchParams.get("view");
+  const view = calendarViewFromSearch(requestedView, defaultView);
+  const includeWeekends = searchParams.get("weekends") !== "0";
+  const requestedAnchor = searchParams.get("date");
+  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
+    ? parseLocalDate(requestedAnchor as string)
+    : localDateAt(new Date(), user.planningTimezone);
+  const updateCalendarState = (updates: Record<string, null | string>) =>
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      for (const [key, value] of Object.entries(updates)) {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      }
+      return next;
+    });
+  const isToday = sameLocalDate(anchor, localDateAt(new Date(), user.planningTimezone));
+  const followsToday = isToday && searchParams.get("follow") !== "0";
+
+  return (
+    <fieldset className="calendar-topbar">
+      <legend className="sr-only">Calendar controls</legend>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <ShadcnButton
+            aria-label="Today"
+            aria-pressed={followsToday}
+            className="calendar-topbar__today follow-target"
+            data-following={followsToday}
+            onClick={() => {
+              updateCalendarState({
+                date: localDateToIso(localDateAt(new Date(), user.planningTimezone)),
+                follow: "1",
+              });
+              onToday();
+            }}
+            size="icon"
+            variant="default"
+          >
+            <LocateFixed aria-hidden="true" />
+          </ShadcnButton>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          {followsToday
+            ? "Following today — current time stays centered"
+            : "Return to today and follow the current time"}
+        </TooltipContent>
+      </Tooltip>
+      <ShadcnToggleGroup
+        aria-label="Calendar view: choose day, week, or month"
+        className="calendar-topbar__view-switch"
+        data-view={view}
+        onValueChange={(value) => {
+          if (value === "day" || value === "week" || value === "month") {
+            updateCalendarState({ view: value === defaultView ? null : value });
+          }
+        }}
+        type="single"
+        value={view}
+        variant="default"
+        spacing={0}
+      >
+        {calendarViews.map((option) => {
+          const Icon = option.icon;
+          return (
+            <Tooltip key={option.value}>
+              <TooltipTrigger asChild>
+                <ShadcnToggleGroupItem
+                  aria-label={option.label}
+                  className="calendar-topbar__view-option"
+                  data-selected={view === option.value}
+                  value={option.value}
+                >
+                  <Icon aria-hidden="true" />
+                  <span className="calendar-topbar__view-label">{option.label}</span>
+                </ShadcnToggleGroupItem>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Show {option.label.toLowerCase()} view</TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </ShadcnToggleGroup>
+      {view === "week" ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <ShadcnButton
+              aria-label="Weekends"
+              aria-pressed={includeWeekends}
+              className="calendar-topbar__weekends"
+              onClick={() => updateCalendarState({ weekends: includeWeekends ? "0" : null })}
+              size="icon"
+              variant={includeWeekends ? "secondary" : "ghost"}
+            >
+              {includeWeekends ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
+            </ShadcnButton>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {includeWeekends ? "Hide weekends" : "Show weekends"}
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+    </fieldset>
+  );
+}
+
+function CalendarSidebar({ user }: { user: User }) {
+  const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
+  const accounts = useQuery({ queryFn: api.listConnectors, queryKey: ["connectors"] });
+
+  return (
+    <div className="calendar-sidebar">
+      <CalendarSidebarDatePicker user={user} />
+      <CalendarVisibilitySidebar accounts={accounts.data ?? []} calendars={calendars.data ?? []} />
+    </div>
+  );
+}
+
+function CalendarSidebarDatePicker({ user }: { user: User }) {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedAnchor = searchParams.get("date");
+  const anchor = /^\d{4}-\d{2}-\d{2}$/.test(requestedAnchor ?? "")
+    ? parseLocalDate(requestedAnchor as string)
+    : localDateAt(new Date(), user.planningTimezone);
+  const selectedDate = calendarDate(anchor);
+  const weekStart = startOfLocalWeek(anchor);
+  const weekEnd = addLocalDays(weekStart, 6);
+  const setAnchor = (nextAnchor: LocalDate) =>
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("date", localDateToIso(nextAnchor));
+      return next;
+    });
+  const setMonth = (month: number) => {
+    const daysInMonth = new Date(Date.UTC(anchor.year, month, 0)).getUTCDate();
+    setAnchor({ ...anchor, day: Math.min(anchor.day, daysInMonth), month });
+  };
+  const setYear = (year: number) => {
+    const daysInMonth = new Date(Date.UTC(year, anchor.month, 0)).getUTCDate();
+    setAnchor({ ...anchor, day: Math.min(anchor.day, daysInMonth), year });
+  };
+
+  return (
+    <section
+      aria-label="Calendar date picker"
+      className="context-sidebar__section context-sidebar__date-picker"
+    >
+      <ShadcnCalendar
+        className="[--cell-size:--spacing(5)]"
+        classNames={{
+          day: "group/day relative h-6 w-full rounded-(--cell-radius) p-0 text-center select-none",
+          day_button: "aspect-auto h-6 min-w-0 text-xs",
+          month: "flex w-full flex-col gap-2",
+          month_caption:
+            "relative z-10 flex h-(--cell-size) w-full items-center justify-center px-(--cell-size)",
+          week: "mt-0 flex w-full",
+          weekday:
+            "flex h-4 flex-1 items-center justify-center rounded-(--cell-radius) text-[0.6875rem] font-normal text-muted-foreground select-none",
+        }}
+        components={{
+          CaptionLabel: () => (
+            <CalendarSidebarCaption
+              month={anchor.month}
+              onMonthChange={setMonth}
+              onYearChange={setYear}
+              year={anchor.year}
+            />
+          ),
+        }}
+        mode="single"
+        modifiers={{ selectedWeek: { from: calendarDate(weekStart), to: calendarDate(weekEnd) } }}
+        modifiersClassNames={{
+          selectedWeek:
+            "rounded-none bg-secondary text-secondary-foreground first:rounded-s-(--cell-radius) last:rounded-e-(--cell-radius)",
+        }}
+        month={selectedDate}
+        onMonthChange={(month) => {
+          const nextMonth = localDateAt(month, user.planningTimezone);
+          const daysInMonth = new Date(Date.UTC(nextMonth.year, nextMonth.month, 0)).getUTCDate();
+          setAnchor({ ...nextMonth, day: Math.min(anchor.day, daysInMonth) });
+        }}
+        onSelect={(date) => {
+          if (date) setAnchor(localDateAt(date, user.planningTimezone));
+        }}
+        selected={selectedDate}
+        timeZone={user.planningTimezone}
+      />
+    </section>
+  );
+}
+
+function CalendarSidebarCaption({
+  month,
+  onMonthChange,
+  onYearChange,
+  year,
+}: {
+  month: number;
+  onMonthChange: (month: number) => void;
+  onYearChange: (year: number) => void;
+  year: number;
+}) {
+  const monthName = new Date(Date.UTC(year, month - 1, 1)).toLocaleString("en-US", {
+    month: "long",
+  });
+  return (
+    <div className="calendar-sidebar__caption">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <ShadcnButton aria-label="Choose the month" size="sm" variant="ghost">
+            {monthName}
+          </ShadcnButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center">
+          <DropdownMenuLabel>Select month</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            {Array.from({ length: 12 }, (_, index) => index + 1).map((value) => (
+              <DropdownMenuItem key={value} onSelect={() => onMonthChange(value)}>
+                {new Date(Date.UTC(year, value - 1, 1)).toLocaleString("en-US", {
+                  month: "long",
+                })}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <ShadcnButton aria-label="Choose the year" size="sm" variant="ghost">
+            {year}
+          </ShadcnButton>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="center">
+          <DropdownMenuLabel>Select year</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            {Array.from({ length: 11 }, (_, index) => year - 5 + index).map((value) => (
+              <DropdownMenuItem key={value} onSelect={() => onYearChange(value)}>
+                {value}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+function CalendarProviderEmblem({ provider }: { provider: string }) {
+  const normalizedProvider = provider.toLowerCase();
+  if (normalizedProvider === "google") {
+    return (
+      <svg aria-hidden="true" viewBox="0 0 24 24">
+        <path
+          fill="#4285f4"
+          d="M21.35 12.28c0-.78-.07-1.53-.2-2.25H12v4.26h5.23a4.47 4.47 0 0 1-1.94 2.93v2.77h3.15c1.84-1.69 2.91-4.18 2.91-7.71Z"
+        />
+        <path
+          fill="#34a853"
+          d="M12 22c2.63 0 4.84-.87 6.45-2.36l-3.15-2.77c-.87.58-1.99.93-3.3.93-2.54 0-4.69-1.72-5.46-4.03H3.29v2.84A10 10 0 0 0 12 22Z"
+        />
+        <path
+          fill="#fbbc05"
+          d="M6.54 13.77A6 6 0 0 1 6.23 12c0-.62.11-1.21.31-1.77V7.39H3.29A10 10 0 0 0 2 12c0 1.61.39 3.13 1.29 4.61l3.25-2.84Z"
+        />
+        <path
+          fill="#ea4335"
+          d="M12 6.2c1.43 0 2.71.49 3.72 1.45l2.79-2.79C16.83 3.29 14.63 2 12 2a10 10 0 0 0-8.71 5.39l3.25 2.84C7.31 7.92 9.46 6.2 12 6.2Z"
+        />
+      </svg>
+    );
+  }
+  if (normalizedProvider === "icloud" || normalizedProvider === "apple") {
+    return (
+      <svg aria-hidden="true" fill="currentColor" viewBox="0 0 24 24">
+        <path d="M16.68 12.53c.02-1.86 1.52-2.75 1.59-2.79-.87-1.27-2.22-1.45-2.7-1.47-1.15-.12-2.24.68-2.82.68-.58 0-1.48-.66-2.43-.64-1.25.02-2.4.73-3.04 1.86-1.3 2.25-.33 5.57.94 7.4.62.89 1.36 1.89 2.33 1.86.94-.04 1.3-.61 2.44-.61 1.14 0 1.47.61 2.45.59 1.01-.02 1.65-.92 2.27-1.81.71-1.04 1-2.05 1.02-2.1-.02-.01-2.04-.78-2.05-2.97ZM14.8 7.04c.52-.63.87-1.5.77-2.37-.75.03-1.66.5-2.2 1.13-.49.57-.91 1.46-.8 2.32.84.07 1.7-.43 2.23-1.08Z" />
+      </svg>
+    );
+  }
+  return <CalendarDays aria-hidden="true" />;
+}
+
+function ConnectedServiceMark({ provider }: { provider: string }) {
+  const normalizedProvider = provider.toLowerCase();
+  if (normalizedProvider === "local") return null;
+  const label =
+    normalizedProvider === "google"
+      ? "Google"
+      : normalizedProvider === "icloud"
+        ? "iCloud"
+        : normalizedProvider === "apple"
+          ? "Apple"
+          : provider.replace(
+              /(^|[-_\s])(\p{L})/gu,
+              (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`,
+            );
+  if (
+    normalizedProvider !== "google" &&
+    normalizedProvider !== "icloud" &&
+    normalizedProvider !== "apple"
+  ) {
+    return <ShadcnBadge variant="secondary">{label}</ShadcnBadge>;
+  }
+  return (
+    <span
+      aria-label={`${label} calendar`}
+      className={`connected-service-mark connected-service-mark--${normalizedProvider}`}
+      role="img"
+      title={label}
+    >
+      <CalendarProviderEmblem provider={normalizedProvider} />
+    </span>
+  );
+}
+
+function ConnectedAccountIdentity({
+  avatarUrl,
+  label,
+  provider,
+  size = "sm",
+}: {
+  avatarUrl: string | null | undefined;
+  label: string;
+  provider: string;
+  size?: "default" | "sm";
+}) {
+  return (
+    <span aria-hidden="true" className="connected-account-identity">
+      <ShadcnAvatar size={size}>
+        {avatarUrl ? <ShadcnAvatarImage alt="" src={avatarUrl} /> : null}
+        <ShadcnAvatarFallback>{initials(label)}</ShadcnAvatarFallback>
+        <ShadcnAvatarBadge className="provider-emblem">
+          <CalendarProviderEmblem provider={provider} />
+        </ShadcnAvatarBadge>
+      </ShadcnAvatar>
+    </span>
+  );
+}
+
+type CalendarAccountGroup = {
+  account: CalendarAccount | undefined;
+  accountId: string;
+  calendars: Calendar[];
+  label: string;
+  provider: string;
+};
+
+function groupCalendarsByAccount(
+  accounts: CalendarAccount[],
+  calendars: Calendar[],
+): CalendarAccountGroup[] {
+  const accountsById = new Map(accounts.map((account) => [account.id, account]));
+  return [...Map.groupBy(calendars, (calendar) => calendar.accountId)].map(
+    ([accountId, accountCalendars]) => {
+      const account = accountsById.get(accountId);
+      const isLocal = accountCalendars[0]?.provider === "local";
+      return {
+        account,
+        accountId,
+        calendars: accountCalendars,
+        provider: isLocal
+          ? "local"
+          : (account?.provider ?? (accountCalendars[0] as Calendar).provider),
+        label:
+          account?.label ?? account?.email ?? (isLocal ? "My calendars" : "Connected calendars"),
+      };
+    },
+  );
+}
+
+function CalendarVisibilitySidebar({
+  accounts,
+  calendars,
+}: {
+  accounts: CalendarAccount[];
+  calendars: Calendar[];
+}) {
+  const [toggleError, setToggleError] = useState<unknown>(null);
+  const calendarGroups = groupCalendarsByAccount(accounts, calendars);
+  return (
+    <section className="context-sidebar__calendar-visibility" aria-label="Calendars">
+      {calendars.length === 0 ? (
+        <div className="context-sidebar__calendar-scroll-content">
+          <ShadcnSidebarGroupLabel>Calendars 0/0</ShadcnSidebarGroupLabel>
+          <p className="context-sidebar__empty">No calendars are available.</p>
+        </div>
+      ) : (
+        <ShadcnScrollArea className="context-sidebar__calendar-scroll">
+          <div className="context-sidebar__calendar-scroll-content">
+            <ShadcnSidebarGroupLabel>
+              Calendars {calendars.filter((calendar) => calendar.isSelected).length}/
+              {calendars.length}
+            </ShadcnSidebarGroupLabel>
+            <ShadcnSidebarMenu className="context-sidebar__calendar-groups">
+              {calendarGroups.map((group) => (
+                <ShadcnCollapsible
+                  asChild
+                  className="group/calendar-account"
+                  defaultOpen
+                  key={group.accountId}
+                >
+                  <ShadcnSidebarMenuItem className="context-sidebar__calendar-account">
+                    <ShadcnCollapsibleTrigger asChild>
+                      <ShadcnSidebarMenuButton
+                        aria-label={`Toggle ${group.label} calendars`}
+                        className="context-sidebar__calendar-account-trigger px-0 hover:!bg-transparent hover:!text-sidebar-foreground active:!bg-transparent active:!text-sidebar-foreground data-[state=open]:!bg-transparent data-[state=open]:!text-sidebar-foreground data-[state=open]:hover:!bg-transparent data-[state=open]:hover:!text-sidebar-foreground"
+                      >
+                        <ConnectedAccountIdentity
+                          avatarUrl={group.account?.avatarUrl}
+                          label={group.label}
+                          provider={group.provider}
+                        />
+                        <span className="context-sidebar__calendar-account-copy truncate">
+                          <span className="context-sidebar__calendar-account-name truncate">
+                            {group.label}
+                          </span>
+                          {group.account?.email && group.account.email !== group.label ? (
+                            <span className="context-sidebar__calendar-account-email truncate">
+                              {group.account.email}
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="context-sidebar__calendar-count ml-auto shrink-0 text-xs tabular-nums">
+                          {group.calendars.filter((calendar) => calendar.isSelected).length}/
+                          {group.calendars.length}
+                        </span>
+                        <ChevronDown
+                          aria-hidden="true"
+                          className="transition-transform group-data-[state=closed]/calendar-account:-rotate-90"
+                          data-icon="inline-end"
+                        />
+                      </ShadcnSidebarMenuButton>
+                    </ShadcnCollapsibleTrigger>
+                    <ShadcnCollapsibleContent>
+                      <ShadcnSidebarMenuSub className="context-sidebar__calendar-list">
+                        {group.calendars.map((calendar) => (
+                          <ShadcnSidebarMenuSubItem key={calendar.id}>
+                            <CalendarVisibilityToggle
+                              calendar={calendar}
+                              setError={setToggleError}
+                            />
+                          </ShadcnSidebarMenuSubItem>
+                        ))}
+                      </ShadcnSidebarMenuSub>
+                    </ShadcnCollapsibleContent>
+                  </ShadcnSidebarMenuItem>
+                </ShadcnCollapsible>
+              ))}
+            </ShadcnSidebarMenu>
+            {toggleError ? (
+              <p className="context-sidebar__error" role="alert">
+                {errorMessage(toggleError)}
+              </p>
+            ) : null}
+          </div>
+        </ShadcnScrollArea>
+      )}
+    </section>
+  );
+}
+
+function CalendarVisibilityToggle({
+  calendar,
+  setError,
+}: {
+  calendar: Calendar;
+  setError: (error: unknown) => void;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation<Calendar, Error, boolean, { previousSelected: boolean }>({
+    mutationFn: (selected) => api.setCalendarSelected(calendar.id, selected),
+    onError: (error, _selected, context) => {
+      queryClient.setQueryData<Calendar[]>(["calendars"], (records) =>
+        records?.map((record) =>
+          record.id === calendar.id && context
+            ? { ...record, isSelected: context.previousSelected }
+            : record,
+        ),
+      );
+      setError(error);
+    },
+    onMutate: async (selected) => {
+      setError(null);
+      await queryClient.cancelQueries({ queryKey: ["calendars"] });
+      queryClient.setQueryData<Calendar[]>(["calendars"], (records) =>
+        records?.map((record) =>
+          record.id === calendar.id ? { ...record, isSelected: selected } : record,
+        ),
+      );
+      return { previousSelected: calendar.isSelected };
+    },
+    onSettled: () => invalidateMaterial(queryClient),
+  });
+  return (
+    <ShadcnField className="context-sidebar__calendar" orientation="horizontal">
+      <ShadcnCheckbox
+        checked={calendar.isSelected}
+        className="data-checked:border-(--calendar-color) data-checked:bg-(--calendar-color)"
+        disabled={mutation.isPending}
+        id={`calendar-${calendar.id}`}
+        onCheckedChange={(checked) => mutation.mutate(checked === true)}
+        style={
+          {
+            "--calendar-color": calendar.color ?? "var(--sidebar-primary)",
+          } as CSSProperties
+        }
+      />
+      <ShadcnFieldLabel htmlFor={`calendar-${calendar.id}`}>
+        <span>{calendar.name}</span>
+        {!calendar.isWritable ? (
+          <ExternalLink
+            aria-label="Subscribed calendar"
+            className="context-sidebar__calendar-external"
+            role="img"
+          />
+        ) : null}
+      </ShadcnFieldLabel>
+    </ShadcnField>
+  );
+}
+
+function DayCalendarView({
+  calendarsById,
+  clearDrag,
+  currentTime,
+  day,
+  dragPreview,
+  draggedEventId,
+  events,
+  followToday,
+  moveEvent,
+  onExitFollow,
+  setEditor,
+  setDraggedEventId,
+  setDragPreview,
+  timeZone,
+  today,
+  todaySnap,
+}: {
+  calendarsById: CalendarMap;
+  clearDrag: () => void;
+  currentTime: Date;
+  day: LocalDate;
+  dragPreview: CalendarDropPreview | null;
+  draggedEventId: string | null;
+  events: CalendarEvent[];
+  followToday: boolean;
+  moveEvent: (event: CalendarEvent, day: LocalDate, minute: number) => void;
+  onExitFollow: () => void;
+  setEditor: (editor: Editor) => void;
+  setDraggedEventId: (id: string | null) => void;
+  setDragPreview: (preview: CalendarDropPreview | null) => void;
+  timeZone: string;
+  today: LocalDate;
+  todaySnap: number;
+}) {
+  const isToday = sameLocalDate(day, today);
+  const allDayEvents = events.filter((event) => event.allDay);
+  const timelineEvents = useMemo(
+    () => positionTimelineEvents(events, day, timeZone),
+    [day, events, timeZone],
+  );
+  const scrollContainer = useRef<HTMLDivElement>(null);
+  const [contextMinute, setContextMinute] = useState(0);
+  useEffect(() => {
+    if (!isToday) scrollTimelineToMinute(scrollContainer.current, 8 * 60);
+  }, [isToday]);
+  useEffect(() => {
+    if (!isToday || !followToday) return;
+    scrollTimelineToMinute(scrollContainer.current, localDateTimeAt(currentTime, timeZone).minute);
+  }, [currentTime, followToday, isToday, timeZone]);
+  useEffect(() => {
+    if (!isToday || !followToday || todaySnap === 0) return;
+    scrollTimelineToMinute(scrollContainer.current, localDateTimeAt(currentTime, timeZone).minute);
+  }, [currentTime, followToday, isToday, timeZone, todaySnap]);
+  const handleScroll = (event: ReactUIEvent<HTMLDivElement>) => {
+    if (!followToday) return;
+    const target = Math.max(
+      0,
+      minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) -
+        event.currentTarget.clientHeight / 2,
+    );
+    if (Math.abs(event.currentTarget.scrollTop - target) > 96) onExitFollow();
+  };
+  return (
+    <section className={`calendar-day-view${isToday ? " is-today" : ""}`}>
+      <AllDayEvents events={allDayEvents} setEditor={setEditor} />
+      <div className="calendar-timeline-scroll" onScroll={handleScroll} ref={scrollContainer}>
+        <div className="calendar-time-grid calendar-time-grid--day">
+          <TimeAxis />
+          <ContextMenu>
+            <ContextMenuTrigger asChild>
+              <section
+                aria-label="24-hour schedule with 15-minute marks"
+                className={`calendar-timeline${draggedEventId ? " is-drag-target" : ""}`}
+                onContextMenu={(contextEvent) =>
+                  setContextMinute(
+                    timelineMinuteAtPointer(contextEvent, contextEvent.currentTarget),
+                  )
+                }
+                onDragLeave={(dragEvent) => clearTimelineDropPreview(dragEvent, setDragPreview)}
+                onDragOver={(dragEvent) =>
+                  previewTimelineDrop(dragEvent, day, events, draggedEventId, setDragPreview)
+                }
+                onDrop={(dragEvent) =>
+                  dropTimelineEvent(dragEvent, day, events, moveEvent, setDraggedEventId)
+                }
+                style={{ height: calendarTimelineHeight }}
+              >
+                {dragPreview?.dayKey === localDateKey(day) ? (
+                  <CalendarDropPreview preview={dragPreview} />
+                ) : null}
+                {isToday ? <TimelineNow currentTime={currentTime} timeZone={timeZone} /> : null}
+                {timelineEvents.length === 0 ? (
+                  <span className="calendar-timeline-empty">This day is open</span>
+                ) : null}
+                {timelineEvents.map((layout) => (
+                  <TimelineEvent
+                    calendar={calendarsById.get(layout.event.calendarId)}
+                    key={layout.event.id}
+                    layout={layout}
+                    onEdit={() => setEditor({ event: layout.event, kind: "event" })}
+                    onDragEnd={clearDrag}
+                    setDraggedEventId={setDraggedEventId}
+                    timeZone={timeZone}
+                  />
+                ))}
+              </section>
+            </ContextMenuTrigger>
+            <CalendarBlankContextMenu
+              day={day}
+              minute={contextMinute}
+              setEditor={setEditor}
+              timeZone={timeZone}
+            />
+          </ContextMenu>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function WeekCalendarView({
+  calendarsById,
+  clearDrag,
+  currentTime,
+  days,
+  dragPreview,
+  draggedEventId,
+  eventsByDay,
+  followToday,
+  moveEvent,
+  onExitFollow,
+  setEditor,
+  setDraggedEventId,
+  setDragPreview,
+  showDay,
+  timeZone,
+  today,
+  todaySnap,
+}: {
+  calendarsById: CalendarMap;
+  clearDrag: () => void;
+  currentTime: Date;
+  days: LocalDate[];
+  dragPreview: CalendarDropPreview | null;
+  draggedEventId: string | null;
+  eventsByDay: Map<string, CalendarEvent[]>;
+  followToday: boolean;
+  moveEvent: (event: CalendarEvent, day: LocalDate, minute: number) => void;
+  onExitFollow: () => void;
+  setEditor: (editor: Editor) => void;
+  setDraggedEventId: (id: string | null) => void;
+  setDragPreview: (preview: CalendarDropPreview | null) => void;
+  showDay: (day: LocalDate) => void;
+  timeZone: string;
+  today: LocalDate;
+  todaySnap: number;
+}) {
+  const layoutsByDay = useMemo(
+    () =>
+      new Map(
+        days.map((day) => [
+          localDateKey(day),
+          positionTimelineEvents(
+            eventsByDay.get(localDateKey(day)) as CalendarEvent[],
+            day,
+            timeZone,
+          ),
+        ]),
+      ),
+    [days, eventsByDay, timeZone],
+  );
+  const scrollContainer = useRef<HTMLDivElement>(null);
+  const includesToday = days.some((day) => sameLocalDate(day, today));
+  useEffect(() => {
+    if (!includesToday) scrollTimelineToMinute(scrollContainer.current, 8 * 60);
+  }, [includesToday]);
+  useEffect(() => {
+    if (!includesToday || !followToday) return;
+    scrollTimelineToMinute(scrollContainer.current, localDateTimeAt(currentTime, timeZone).minute);
+  }, [currentTime, followToday, includesToday, timeZone]);
+  useEffect(() => {
+    if (!includesToday || !followToday || todaySnap === 0) return;
+    const container = scrollContainer.current;
+    scrollTimelineToMinute(container, localDateTimeAt(new Date(), timeZone).minute);
+    const todayButton = container?.querySelector<HTMLElement>('button[aria-current="date"]');
+    if (!container || !todayButton) return;
+    const containerBounds = container.getBoundingClientRect();
+    const todayBounds = todayButton.getBoundingClientRect();
+    container.scrollLeft = Math.max(
+      0,
+      container.scrollLeft +
+        todayBounds.left -
+        containerBounds.left -
+        (container.clientWidth - todayBounds.width) / 2,
+    );
+  }, [followToday, includesToday, timeZone, todaySnap]);
+  const handleScroll = (event: ReactUIEvent<HTMLDivElement>) => {
+    if (!followToday) return;
+    const container = event.currentTarget;
+    const verticalTarget = Math.max(
+      0,
+      minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) -
+        container.clientHeight / 2,
+    );
+    const todayButton = container.querySelector<HTMLElement>(
+      'button[aria-current="date"]',
+    ) as HTMLElement;
+    const containerBounds = container.getBoundingClientRect();
+    const todayBounds = todayButton.getBoundingClientRect();
+    const horizontalDistance = Math.abs(
+      todayBounds.left + todayBounds.width / 2 - (containerBounds.left + container.clientWidth / 2),
+    );
+    if (Math.max(Math.abs(container.scrollTop - verticalTarget), horizontalDistance) > 96) {
+      onExitFollow();
+    }
+  };
+  return (
+    <div className="week-calendar" onScroll={handleScroll} ref={scrollContainer}>
+      <div
+        className="week-calendar-grid"
+        style={{
+          gridTemplateColumns: `56px repeat(${days.length}, minmax(140px, 1fr))`,
+          minWidth: 56 + days.length * 140,
+        }}
+      >
+        <div className="week-time-corner">All day</div>
+        {days.map((day) => {
+          const dayEvents = eventsByDay.get(localDateKey(day)) as CalendarEvent[];
+          const allDayEvents = dayEvents.filter((event) => event.allDay);
+          const isToday = sameLocalDate(day, today);
+          return (
+            <header
+              className={`week-day-header${isToday ? " is-today" : ""}`}
+              key={`header-${localDateKey(day)}`}
+            >
+              <div>
+                <span>{formatLocalWeekday(day)}</span>
+                <button
+                  aria-current={isToday ? "date" : undefined}
+                  aria-label={`View ${formatLocalDate(day, {
+                    day: "numeric",
+                    month: "long",
+                    weekday: "long",
+                    year: "numeric",
+                  })}`}
+                  onClick={() => showDay(day)}
+                  type="button"
+                >
+                  {day.day}
+                </button>
+              </div>
+              <AllDayEvents compact events={allDayEvents} setEditor={setEditor} />
+            </header>
+          );
+        })}
+        <TimeAxis />
+        {days.map((day) => {
+          const layouts = layoutsByDay.get(localDateKey(day)) as TimelineEventLayout[];
+          const isToday = sameLocalDate(day, today);
+          return (
+            <section
+              aria-label={`${formatLocalWeekday(day)} timeline`}
+              className={`calendar-timeline week-day-timeline${isToday ? " is-today" : ""}${draggedEventId ? " is-drag-target" : ""}`}
+              key={`timeline-${localDateKey(day)}`}
+              onDragLeave={(dragEvent) => clearTimelineDropPreview(dragEvent, setDragPreview)}
+              onDragOver={(dragEvent) =>
+                previewTimelineDrop(
+                  dragEvent,
+                  day,
+                  Array.from(eventsByDay.values()).flat(),
+                  draggedEventId,
+                  setDragPreview,
+                )
+              }
+              onDrop={(dragEvent) =>
+                dropTimelineEvent(
+                  dragEvent,
+                  day,
+                  Array.from(eventsByDay.values()).flat(),
+                  moveEvent,
+                  setDraggedEventId,
+                )
+              }
+              style={{ height: calendarTimelineHeight }}
+            >
+              {dragPreview?.dayKey === localDateKey(day) ? (
+                <CalendarDropPreview preview={dragPreview} />
+              ) : null}
+              {isToday ? <TimelineNow currentTime={currentTime} timeZone={timeZone} /> : null}
+              {layouts.length === 0 ? <span className="calendar-timeline-empty">Open</span> : null}
+              {layouts.map((layout) => (
+                <TimelineEvent
+                  calendar={calendarsById.get(layout.event.calendarId)}
+                  compact
+                  key={layout.event.id}
+                  layout={layout}
+                  onEdit={() => setEditor({ event: layout.event, kind: "event" })}
+                  onDragEnd={clearDrag}
+                  setDraggedEventId={setDraggedEventId}
+                  timeZone={timeZone}
+                />
+              ))}
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+type TimelineEventLayout = {
+  column: number;
+  columns: number;
+  endMinute: number;
+  event: CalendarEvent;
+  startMinute: number;
+};
+
+function TimeAxis() {
+  return (
+    <ol
+      aria-hidden="true"
+      className="calendar-time-axis"
+      style={{ height: calendarTimelineHeight }}
+    >
+      {calendarHours.map((hour) => (
+        <li key={hour} style={{ top: minuteToTimelinePixels(hour * 60) }}>
+          {formatHour(hour)}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function TimelineNow({ currentTime, timeZone }: { currentTime: Date; timeZone: string }) {
+  return (
+    <div
+      aria-label={`Current time ${formatTime(currentTime.toISOString(), timeZone)}`}
+      className="calendar-now-line"
+      role="timer"
+      style={{ top: minuteToTimelinePixels(localDateTimeAt(currentTime, timeZone).minute) }}
+    >
+      <span>
+        <strong>Now</strong>
+        {formatTime(currentTime.toISOString(), timeZone)}
+      </span>
+      <i />
+    </div>
+  );
+}
+
+function CalendarDropPreview({ preview }: { preview: CalendarDropPreview }) {
+  return (
+    <div
+      aria-live="polite"
+      className="calendar-drop-preview"
+      role="status"
+      style={{
+        height: Math.max(minuteToTimelinePixels(preview.duration), 18),
+        top: minuteToTimelinePixels(preview.minute),
+      }}
+    >
+      Drop at {formatHour(Math.floor(preview.minute / 60))}
+    </div>
+  );
+}
+
+function TimelineEvent({
+  calendar,
+  compact = false,
+  layout,
+  onEdit,
+  onDragEnd,
+  setDraggedEventId,
+  timeZone,
+}: {
+  calendar: Calendar | undefined;
+  compact?: boolean;
+  layout: TimelineEventLayout;
+  onEdit: () => void;
+  onDragEnd: () => void;
+  setDraggedEventId: (id: string | null) => void;
+  timeZone: string;
+}) {
+  const { column, columns, endMinute, event, startMinute } = layout;
+  const writable = calendar?.isWritable ?? false;
+  return (
+    <CalendarEventContextMenu calendar={calendar} event={event} timeZone={timeZone}>
+      <button
+        aria-label={`${formatTime(event.startsAt, timeZone)} ${event.title}`}
+        className={`calendar-timeline-event${compact ? " calendar-timeline-event--compact" : ""}${writable ? " is-draggable" : ""}`}
+        draggable={writable}
+        onDragEnd={onDragEnd}
+        onDragStart={(dragEvent) => startCalendarDrag(dragEvent, event, setDraggedEventId)}
+        onClick={onEdit}
+        style={{
+          borderLeftColor: calendar?.color ?? "#777ce3",
+          height: Math.max(minuteToTimelinePixels(endMinute - startMinute), 18),
+          left: `calc(${(column / columns) * 100}% + 3px)`,
+          top: minuteToTimelinePixels(startMinute),
+          width: `calc(${100 / columns}% - 6px)`,
+        }}
+        title={writable ? "Drag to reschedule · Open for precise editing" : "Read-only calendar"}
+        type="button"
+      >
+        <strong>
+          {event.title}
+          {event.blocks.length > 0 ? (
+            <LockKeyhole aria-label="Blocks another calendar" className="linked-block-icon" />
+          ) : null}
+        </strong>
+        <span>{formatTimelineTimeRange(event, timeZone)}</span>
+        {event.location ? <small>{event.location}</small> : null}
+      </button>
+    </CalendarEventContextMenu>
+  );
+}
+
+function CalendarBlankContextMenu({
+  day,
+  minute,
+  setEditor,
+  timeZone,
+}: {
+  day: LocalDate;
+  minute: number;
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+}) {
+  const queryClient = useQueryClient();
+  const canPaste = typeof navigator.clipboard?.readText === "function";
+  const startsAt = localDateTimeToUtc(day, minute, timeZone).toISOString();
+  const endsAt = localDateTimeToUtc(
+    day,
+    Math.min(minute + 60, calendarMinutesPerDay - 1),
+    timeZone,
+  ).toISOString();
+  const paste = useMutation({
+    mutationFn: async () => {
+      const event = parseClipboardCalendarEvent(await navigator.clipboard.readText());
+      if (!event) throw new Error("Copy an event from Personal OS before pasting it here.");
+      const times = movedEventTimes(event, day, minute, timeZone);
+      return api.createEvent({
+        allDay: event.allDay,
+        calendarId: event.calendarId,
+        endsAt: times.endsAt,
+        location: event.location,
+        notes: event.notes,
+        startsAt: times.startsAt,
+        timezone: timeZone,
+        title: event.title,
+      });
+    },
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  return (
+    <ContextMenuContent>
+      <ContextMenuLabel>{formatHour(Math.floor(minute / 60))}</ContextMenuLabel>
+      <ContextMenuSeparator />
+      <ContextMenuItem onSelect={() => setEditor({ draft: { endsAt, startsAt }, kind: "event" })}>
+        <CalendarPlus aria-hidden="true" /> New event here
+      </ContextMenuItem>
+      <ContextMenuItem disabled={!canPaste || paste.isPending} onSelect={() => paste.mutate()}>
+        <Plus aria-hidden="true" /> Paste event
+      </ContextMenuItem>
+    </ContextMenuContent>
+  );
+}
+
+function parseClipboardCalendarEvent(value: string): CalendarEvent | undefined {
+  try {
+    const event = JSON.parse(value) as Partial<CalendarEvent>;
+    return typeof event.calendarId === "string" &&
+      typeof event.endsAt === "string" &&
+      typeof event.startsAt === "string" &&
+      typeof event.title === "string" &&
+      typeof event.allDay === "boolean"
+      ? (event as CalendarEvent)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function CalendarEventContextMenu({
+  calendar,
+  children,
+  event,
+  timeZone,
+}: {
+  calendar: Calendar | undefined;
+  children: ReactNode;
+  event: CalendarEvent;
+  timeZone: string;
+}) {
+  const queryClient = useQueryClient();
+  const canCopy = typeof navigator.clipboard?.writeText === "function";
+  const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
+  const writable = calendar?.isWritable ?? false;
+  const destinations = (calendars.data ?? []).filter(
+    (candidate) => candidate.id !== event.calendarId && candidate.isWritable,
+  );
+  const remove = useMutation({
+    mutationFn: () => api.deleteEvent(event.id),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const duplicate = useMutation({
+    mutationFn: () =>
+      api.createEvent({
+        allDay: event.allDay,
+        calendarId: event.calendarId,
+        endsAt: event.endsAt,
+        location: event.location,
+        notes: event.notes,
+        startsAt: event.startsAt,
+        timezone: timeZone,
+        title: `${event.title} copy`,
+      }),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const block = useMutation({
+    mutationFn: (calendarId: string) =>
+      api.createEventBlock(event.id, { calendarId, mode: "busy" }),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const copy = async () => navigator.clipboard?.writeText(JSON.stringify(event));
+  const cut = async () => {
+    await copy();
+    remove.mutate();
+  };
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuLabel>{event.title}</ContextMenuLabel>
+        <ContextMenuSeparator />
+        <ContextMenuItem disabled={!canCopy} onSelect={copy}>
+          <Copy aria-hidden="true" /> Copy event
+        </ContextMenuItem>
+        <ContextMenuItem disabled={!canCopy || !writable || remove.isPending} onSelect={cut}>
+          <Scissors aria-hidden="true" /> Cut event
+        </ContextMenuItem>
+        <ContextMenuItem
+          disabled={!writable || duplicate.isPending}
+          onSelect={() => duplicate.mutate()}
+        >
+          <CopyPlus aria-hidden="true" /> Duplicate event
+        </ContextMenuItem>
+        <ContextMenuSub>
+          <ContextMenuSubTrigger disabled={destinations.length === 0 || block.isPending}>
+            <LockKeyhole aria-hidden="true" /> Block on calendar
+          </ContextMenuSubTrigger>
+          <ContextMenuSubContent>
+            {destinations.map((destination) => (
+              <ContextMenuItem key={destination.id} onSelect={() => block.mutate(destination.id)}>
+                {destination.name}
+              </ContextMenuItem>
+            ))}
+          </ContextMenuSubContent>
+        </ContextMenuSub>
+        <ContextMenuSeparator />
+        <ContextMenuItem
+          disabled={!writable || remove.isPending}
+          onSelect={() => remove.mutate()}
+          variant="destructive"
+        >
+          <Trash2 aria-hidden="true" /> Delete event
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+function AllDayEvents({
+  compact = false,
+  events,
+  setEditor,
+}: {
+  compact?: boolean;
+  events: CalendarEvent[];
+  setEditor: (editor: Editor) => void;
+}) {
+  if (events.length === 0) return null;
+  return (
+    <div className={`calendar-all-day${compact ? " calendar-all-day--compact" : ""}`}>
+      {compact ? null : <span>All day</span>}
+      <div>
+        {events.map((event) => (
+          <button
+            aria-label={`All day ${event.title}`}
+            key={event.id}
+            onClick={() => setEditor({ event, kind: "event" })}
+            type="button"
+          >
+            {event.title}
+            {event.blocks.length > 0 ? (
+              <LockKeyhole aria-label="Blocks another calendar" className="linked-block-icon" />
+            ) : null}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MonthCalendarView({
+  anchor,
+  calendarsById,
+  clearDrag,
+  days,
+  draggedEventId,
+  eventsByDay,
+  moveEvent,
+  setEditor,
+  setDraggedEventId,
+  showDay,
+  timeZone,
+  today,
+  todaySnap,
+}: {
+  anchor: LocalDate;
+  calendarsById: CalendarMap;
+  clearDrag: () => void;
+  days: LocalDate[];
+  draggedEventId: string | null;
+  eventsByDay: Map<string, CalendarEvent[]>;
+  moveEvent: (event: CalendarEvent, day: LocalDate, minute: number) => void;
+  setEditor: (editor: Editor) => void;
+  setDraggedEventId: (id: string | null) => void;
+  showDay: (day: LocalDate) => void;
+  timeZone: string;
+  today: LocalDate;
+  todaySnap: number;
+}) {
+  const scrollContainer = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (todaySnap === 0) return;
+    const container = scrollContainer.current;
+    const todayButton = container?.querySelector<HTMLElement>('button[aria-current="date"]');
+    if (!container || !todayButton) return;
+    const containerBounds = container.getBoundingClientRect();
+    const todayBounds = todayButton.getBoundingClientRect();
+    container.scrollLeft = Math.max(
+      0,
+      container.scrollLeft +
+        todayBounds.left -
+        containerBounds.left -
+        (container.clientWidth - todayBounds.width) / 2,
+    );
+    container.scrollTop = Math.max(
+      0,
+      container.scrollTop +
+        todayBounds.top -
+        containerBounds.top -
+        (container.clientHeight - todayBounds.height) / 2,
+    );
+  }, [todaySnap]);
+  return (
+    <div className="month-calendar" ref={scrollContainer}>
+      <div className="month-weekdays" aria-hidden="true">
+        {calendarWeekdayLabels.map((label) => (
+          <span key={label}>{label}</span>
+        ))}
+      </div>
+      <div className="month-grid">
+        {days.map((day) => {
+          const dayEvents = eventsByDay.get(localDateKey(day)) as CalendarEvent[];
+          const isToday = sameLocalDate(day, today);
+          const outsideMonth = day.month !== anchor.month;
+          return (
+            <section
+              aria-label={`${formatLocalDate(day, { day: "numeric", month: "long" })} calendar day`}
+              className={`month-day${isToday ? " is-today" : ""}${outsideMonth ? " is-outside" : ""}${draggedEventId ? " is-drag-target" : ""}`}
+              key={localDateKey(day)}
+              onDragOver={(dragEvent) => allowCalendarDrop(dragEvent, draggedEventId)}
+              onDrop={(dragEvent) => {
+                dragEvent.preventDefault();
+                const dragged = findDraggedEvent(dragEvent, eventsByDay, draggedEventId);
+                if (dragged) {
+                  moveEvent(
+                    dragged,
+                    day,
+                    Math.floor(localDateTimeAt(dragged.startsAt, timeZone).minute),
+                  );
+                }
+                setDraggedEventId(null);
+              }}
+            >
+              <header>
+                <button
+                  aria-current={isToday ? "date" : undefined}
+                  aria-label={`View ${formatLocalDate(day, {
+                    day: "numeric",
+                    month: "long",
+                    weekday: "long",
+                    year: "numeric",
+                  })}`}
+                  onClick={() => showDay(day)}
+                  type="button"
+                >
+                  {day.day}
+                </button>
+              </header>
+              <div className="month-day__events">
+                {dayEvents.slice(0, 3).map((event) => (
+                  <button
+                    aria-label={`${event.allDay ? "All day" : formatTime(event.startsAt, timeZone)} ${event.title}`}
+                    className={`month-event${calendarsById.get(event.calendarId)?.isWritable ? " is-draggable" : ""}`}
+                    draggable={calendarsById.get(event.calendarId)?.isWritable ?? false}
+                    key={event.id}
+                    onDragEnd={clearDrag}
+                    onDragStart={(dragEvent) =>
+                      startCalendarDrag(dragEvent, event, setDraggedEventId)
+                    }
+                    onClick={() => setEditor({ event, kind: "event" })}
+                    type="button"
+                  >
+                    <i
+                      style={{
+                        background: calendarsById.get(event.calendarId)?.color ?? "#777ce3",
+                      }}
+                    />
+                    <span className="month-event__time">
+                      {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
+                    </span>
+                    <span>{event.title}</span>
+                    {event.blocks.length > 0 ? (
+                      <LockKeyhole
+                        aria-label="Blocks another calendar"
+                        className="linked-block-icon"
+                      />
+                    ) : null}
+                  </button>
+                ))}
+                {dayEvents.length > 3 ? (
+                  <span className="month-day__more">+{dayEvents.length - 3} more</span>
+                ) : null}
+              </div>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RemindersSidebar({ onNavigate }: { onNavigate: () => void }) {
+  const [searchParams] = useSearchParams();
+  const showCompleted = searchParams.get("view") === "completed";
+  return (
+    <ShadcnSidebarGroup>
+      <ShadcnSidebarGroupLabel>View</ShadcnSidebarGroupLabel>
+      <ShadcnSidebarGroupContent>
+        <nav aria-label="Reminder views">
+          <ShadcnSidebarMenu>
+            <ShadcnSidebarMenuItem>
+              <ShadcnSidebarMenuButton asChild isActive={!showCompleted}>
+                <Link
+                  aria-current={!showCompleted ? "page" : undefined}
+                  onClick={onNavigate}
+                  to="/reminders"
+                >
+                  <ListTodo aria-hidden="true" />
+                  <span>Open</span>
+                </Link>
+              </ShadcnSidebarMenuButton>
+            </ShadcnSidebarMenuItem>
+            <ShadcnSidebarMenuItem>
+              <ShadcnSidebarMenuButton asChild isActive={showCompleted}>
+                <Link
+                  aria-current={showCompleted ? "page" : undefined}
+                  onClick={onNavigate}
+                  to="/reminders?view=completed"
+                >
+                  <CheckCircle2 aria-hidden="true" />
+                  <span>Completed</span>
+                </Link>
+              </ShadcnSidebarMenuButton>
+            </ShadcnSidebarMenuItem>
+          </ShadcnSidebarMenu>
+        </nav>
+      </ShadcnSidebarGroupContent>
+    </ShadcnSidebarGroup>
+  );
+}
+
+function RemindersPage({ setEditor, user }: { setEditor: (editor: Editor) => void; user: User }) {
+  const [searchParams] = useSearchParams();
+  const showCompleted = searchParams.get("view") === "completed";
+  const reminders = useQuery({
+    queryFn: () => api.listReminders({ completed: showCompleted }),
+    queryKey: ["reminders", showCompleted],
+  });
+  const timeZone = user.planningTimezone;
+  return (
+    <div className="narrow-page">
+      {reminders.isPending ? (
+        <PageLoading />
+      ) : reminders.isError ? (
+        <InlineError error={reminders.error} />
+      ) : reminders.data.items.length === 0 ? (
+        <EmptyState
+          icon={<ListTodo />}
+          title={showCompleted ? "No completed reminders" : "A clear slate"}
+        >
+          {showCompleted
+            ? "Completed items will collect here."
+            : "Create the first reminder worth keeping."}
+        </EmptyState>
+      ) : (
+        <div className="reminder-list reminder-list--large">
+          {reminders.data.items.map((reminder) => (
+            <ReminderRow
+              key={reminder.id}
+              onEdit={() => setEditor({ kind: "reminder", reminder })}
+              reminder={reminder}
+              timeZone={timeZone}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type TaskView = "completed" | "inbox" | "next" | "scheduled";
+
+function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
+  const [searchParams] = useSearchParams();
+  const view = (searchParams.get("view") ?? "inbox") as TaskView;
+  const views: Array<{ icon: LucideIcon; label: string; value: TaskView }> = [
+    { icon: Inbox, label: "Inbox", value: "inbox" },
+    { icon: ListChecks, label: "Next", value: "next" },
+    { icon: Clock3, label: "Scheduled", value: "scheduled" },
+    { icon: CheckCircle2, label: "Completed", value: "completed" },
+  ];
+  return (
+    <ShadcnSidebarGroup>
+      <ShadcnSidebarGroupLabel>View</ShadcnSidebarGroupLabel>
+      <ShadcnSidebarGroupContent>
+        <nav aria-label="Task views">
+          <ShadcnSidebarMenu>
+            {views.map(({ icon: Icon, label, value }) => {
+              const selected = view === value;
+              return (
+                <ShadcnSidebarMenuItem key={value}>
+                  <ShadcnSidebarMenuButton asChild isActive={selected}>
+                    <Link
+                      aria-current={selected ? "page" : undefined}
+                      onClick={onNavigate}
+                      to={value === "inbox" ? "/tasks" : `/tasks?view=${value}`}
+                    >
+                      <Icon aria-hidden="true" />
+                      <span>{label}</span>
+                    </Link>
+                  </ShadcnSidebarMenuButton>
+                </ShadcnSidebarMenuItem>
+              );
+            })}
+          </ShadcnSidebarMenu>
+        </nav>
+      </ShadcnSidebarGroupContent>
+    </ShadcnSidebarGroup>
+  );
+}
+
+function TasksPage({ setEditor, user }: { setEditor: (editor: Editor) => void; user: User }) {
+  const [searchParams] = useSearchParams();
+  const requestedView = searchParams.get("view");
+  const view: TaskView =
+    requestedView === "next" || requestedView === "scheduled" || requestedView === "completed"
+      ? requestedView
+      : "inbox";
+  const tasks = useQuery({
+    queryFn: () =>
+      api.listTasks(
+        view === "completed" ? { completed: true } : { completed: false, status: view },
+      ),
+    queryKey: ["tasks", view],
+  });
+  const copy: Record<TaskView, { description: string; empty: string; title: string }> = {
+    completed: {
+      description: "A quiet record of work you finished.",
+      empty: "Completed tasks will collect here.",
+      title: "Completed tasks",
+    },
+    inbox: {
+      description: "Capture first. Decide what belongs next later.",
+      empty: "Capture the first task worth keeping.",
+      title: "Task inbox",
+    },
+    next: {
+      description: "A deliberately short queue for your attention.",
+      empty: "Move a task here when it is ready for attention.",
+      title: "Next tasks",
+    },
+    scheduled: {
+      description: "Tasks with a protected place in time.",
+      empty: "Schedule a task when it needs a specific time block.",
+      title: "Scheduled tasks",
+    },
+  };
+  const detail = copy[view];
+  return (
+    <div className="narrow-page">
+      <ShadcnCard>
+        <ShadcnCardHeader>
+          <ShadcnCardTitle>{detail.title}</ShadcnCardTitle>
+          <ShadcnCardDescription>{detail.description}</ShadcnCardDescription>
+        </ShadcnCardHeader>
+        <ShadcnCardContent>
+          {tasks.isPending ? (
+            <PageLoading />
+          ) : tasks.isError ? (
+            <InlineError error={tasks.error} />
+          ) : tasks.data.items.length === 0 ? (
+            <EmptyState icon={<ListChecks />} title="Nothing here yet">
+              {detail.empty}
+            </EmptyState>
+          ) : (
+            <ShadcnItemGroup>
+              {tasks.data.items.map((task) => (
+                <TaskRow
+                  key={task.id}
+                  onEdit={() => setEditor({ kind: "task", task })}
+                  task={task}
+                  timeZone={user.planningTimezone}
+                />
+              ))}
+            </ShadcnItemGroup>
+          )}
+        </ShadcnCardContent>
+      </ShadcnCard>
+    </div>
+  );
+}
+
+function TaskRow({
+  onEdit,
+  recommendation,
+  task,
+  timeZone,
+}: {
+  onEdit: () => void;
+  recommendation?: DailyBrief["recommendedTasks"][number];
+  task: Task;
+  timeZone: string;
+}) {
+  const queryClient = useQueryClient();
+  const complete = useMutation({
+    mutationFn: (completed: boolean) => api.completeTask(task.id, completed),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteTask(task.id),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const completeTask = task.completedAt !== null;
+  return (
+    <ShadcnItem variant="outline">
+      <ShadcnItemMedia>
+        <ShadcnCheckbox
+          aria-label={`${completeTask ? "Reopen" : "Complete"} ${task.title}`}
+          checked={completeTask}
+          disabled={complete.isPending}
+          onCheckedChange={(checked) => complete.mutate(checked === true)}
+        />
+      </ShadcnItemMedia>
+      <ShadcnItemContent>
+        <ShadcnItemTitle
+          className={completeTask ? "line-through text-muted-foreground" : undefined}
+        >
+          {task.title}
+        </ShadcnItemTitle>
+        <ShadcnItemDescription>{taskDescription(task, timeZone)}</ShadcnItemDescription>
+        {recommendation ? (
+          <ShadcnItemDescription>{recommendationCopy(recommendation)}</ShadcnItemDescription>
+        ) : null}
+        {task.tags.length > 0 ? (
+          <ul aria-label="Task tags" className="flex flex-wrap gap-1">
+            {task.tags.map((tag) => (
+              <ShadcnBadge asChild key={tag} variant="outline">
+                <li>{tag}</li>
+              </ShadcnBadge>
+            ))}
+          </ul>
+        ) : null}
+      </ShadcnItemContent>
+      <ShadcnItemActions>
+        <ShadcnBadge variant="secondary">{task.status}</ShadcnBadge>
+        <ShadcnButton
+          aria-label={`Edit ${task.title}`}
+          onClick={onEdit}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Edit3 />
+        </ShadcnButton>
+        <ShadcnButton
+          aria-label={`Remove ${task.title}`}
+          disabled={remove.isPending}
+          onClick={() => remove.mutate()}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Trash2 />
+        </ShadcnButton>
+      </ShadcnItemActions>
+      {complete.isError || remove.isError ? (
+        <ShadcnItemDescription className="basis-full text-destructive" role="alert">
+          {errorMessage(complete.error ?? remove.error)}
+        </ShadcnItemDescription>
+      ) : null}
+    </ShadcnItem>
+  );
+}
+
+function GoalsPage() {
+  const queryClient = useQueryClient();
+  const goals = useQuery({ queryFn: api.listGoals, queryKey: ["goals"] });
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [targetDate, setTargetDate] = useState("");
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["goals"] });
+  const create = useMutation({
+    mutationFn: () =>
+      api.createGoal({
+        description: description.trim() || null,
+        progress: 0,
+        targetDate: targetDate || null,
+        title: title.trim(),
+      }),
+    onSuccess: () => {
+      setTitle("");
+      setDescription("");
+      setTargetDate("");
+      return refresh();
+    },
+  });
+  const update = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Parameters<typeof api.updateGoal>[1] }) =>
+      api.updateGoal(id, input),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteGoal(id),
+    onSuccess: refresh,
+  });
+  if (goals.isPending) return <PageLoading />;
+  if (goals.isError) return <InlineError error={goals.error} />;
+  return (
+    <div className="wide-page flex flex-col gap-6 pb-8">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <ShadcnCard>
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>Active outcomes</ShadcnCardTitle>
+            <ShadcnCardDescription>
+              Keep the list short enough to make tradeoffs clear.
+            </ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <ShadcnCardContent>
+            {goals.data.length === 0 ? (
+              <EmptyState icon={<Target />} title="Set a direction">
+                Create one outcome you want your daily decisions to support.
+              </EmptyState>
+            ) : (
+              <ShadcnItemGroup>
+                {goals.data.map((goal) => (
+                  <GoalItem
+                    goal={goal}
+                    key={goal.id}
+                    onDelete={() => remove.mutate(goal.id)}
+                    onUpdate={(input) => update.mutate({ id: goal.id, input })}
+                    pending={update.isPending || remove.isPending}
+                  />
+                ))}
+              </ShadcnItemGroup>
+            )}
+          </ShadcnCardContent>
+        </ShadcnCard>
+        <ShadcnCard>
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>New goal</ShadcnCardTitle>
+            <ShadcnCardDescription>
+              Describe the outcome, not a long task list.
+            </ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <ShadcnCardContent>
+            <ShadcnFieldGroup>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="goal-title">Outcome</ShadcnFieldLabel>
+                <ShadcnInput
+                  id="goal-title"
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Ship a calmer weekly rhythm"
+                  value={title}
+                />
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="goal-description">
+                  What does success look like?
+                </ShadcnFieldLabel>
+                <ShadcnTextarea
+                  id="goal-description"
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Optional context for you and authorized agents"
+                  value={description}
+                />
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="goal-target-date">Target date</ShadcnFieldLabel>
+                <ShadcnInput
+                  id="goal-target-date"
+                  onChange={(event) => setTargetDate(event.target.value)}
+                  type="date"
+                  value={targetDate}
+                />
+              </ShadcnField>
+              <ShadcnButton
+                disabled={create.isPending || !title.trim()}
+                onClick={() => create.mutate()}
+              >
+                <Target data-icon="inline-start" />
+                Create goal
+              </ShadcnButton>
+            </ShadcnFieldGroup>
+            {create.isError ? <InlineError error={create.error} /> : null}
+          </ShadcnCardContent>
+        </ShadcnCard>
+      </section>
+    </div>
+  );
+}
+
+function GoalItem({
+  goal,
+  onDelete,
+  onUpdate,
+  pending,
+}: {
+  goal: Goal;
+  onDelete: () => void;
+  onUpdate: (input: Parameters<typeof api.updateGoal>[1]) => void;
+  pending: boolean;
+}) {
+  return (
+    <ShadcnItem variant="outline">
+      <ShadcnItemContent>
+        <ShadcnItemTitle>{goal.title}</ShadcnItemTitle>
+        <ShadcnItemDescription>
+          {goal.description ?? "No supporting context yet."}
+          {goal.targetDate ? ` · Target ${goal.targetDate}` : ""}
+        </ShadcnItemDescription>
+        <div className="flex items-center gap-2">
+          <ShadcnBadge variant={goal.status === "completed" ? "secondary" : "outline"}>
+            {goal.status}
+          </ShadcnBadge>
+          <ShadcnButton
+            disabled={pending}
+            onClick={() =>
+              onUpdate({
+                progress: Math.min(100, goal.progress + 10),
+                ...(goal.progress >= 90 ? { status: "completed" } : {}),
+              })
+            }
+            size="sm"
+            variant="outline"
+          >
+            {goal.progress}%
+          </ShadcnButton>
+        </div>
+      </ShadcnItemContent>
+      <ShadcnItemActions>
+        <ShadcnButton
+          disabled={pending}
+          onClick={() => onUpdate({ status: goal.status === "paused" ? "active" : "paused" })}
+          size="sm"
+          variant="outline"
+        >
+          {goal.status === "paused" ? "Resume" : "Pause"}
+        </ShadcnButton>
+        <ShadcnButton
+          aria-label={`Remove ${goal.title}`}
+          disabled={pending}
+          onClick={onDelete}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <Trash2 />
+        </ShadcnButton>
+      </ShadcnItemActions>
+    </ShadcnItem>
+  );
+}
+
+function MotivesPage() {
+  const queryClient = useQueryClient();
+  const motives = useQuery({ queryFn: api.listMotives, queryKey: ["motives"] });
+  const [title, setTitle] = useState("");
+  const [detail, setDetail] = useState("");
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["motives"] });
+  const create = useMutation({
+    mutationFn: () => api.createMotive({ detail: detail.trim() || null, title: title.trim() }),
+    onSuccess: () => {
+      setTitle("");
+      setDetail("");
+      return refresh();
+    },
+  });
+  const update = useMutation({
+    mutationFn: ({ id, input }: { id: string; input: Parameters<typeof api.updateMotive>[1] }) =>
+      api.updateMotive(id, input),
+    onSuccess: refresh,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteMotive(id),
+    onSuccess: refresh,
+  });
+  if (motives.isPending) return <PageLoading />;
+  if (motives.isError) return <InlineError error={motives.error} />;
+  return (
+    <div className="wide-page flex flex-col gap-6 pb-8">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <ShadcnCard>
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>Decision context</ShadcnCardTitle>
+            <ShadcnCardDescription>
+              Keep only the principles you want surfaced during planning.
+            </ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <ShadcnCardContent>
+            {motives.data.length === 0 ? (
+              <EmptyState icon={<Compass />} title="Name what matters">
+                Add a value or reason that should inform your priorities.
+              </EmptyState>
+            ) : (
+              <ShadcnItemGroup>
+                {motives.data.map((motive) => (
+                  <ShadcnItem key={motive.id} variant="outline">
+                    <ShadcnItemContent>
+                      <ShadcnItemTitle>{motive.title}</ShadcnItemTitle>
+                      <ShadcnItemDescription>
+                        {motive.detail ?? "No additional context."}
+                      </ShadcnItemDescription>
+                    </ShadcnItemContent>
+                    <ShadcnItemActions>
+                      <ShadcnBadge variant={motive.isActive ? "secondary" : "outline"}>
+                        {motive.isActive ? "active" : "paused"}
+                      </ShadcnBadge>
+                      <ShadcnButton
+                        disabled={update.isPending}
+                        onClick={() =>
+                          update.mutate({ id: motive.id, input: { isActive: !motive.isActive } })
+                        }
+                        size="sm"
+                        variant="outline"
+                      >
+                        {motive.isActive ? "Pause" : "Resume"}
+                      </ShadcnButton>
+                      <ShadcnButton
+                        aria-label={`Remove ${motive.title}`}
+                        disabled={remove.isPending}
+                        onClick={() => remove.mutate(motive.id)}
+                        size="icon-sm"
+                        variant="ghost"
+                      >
+                        <Trash2 />
+                      </ShadcnButton>
+                    </ShadcnItemActions>
+                  </ShadcnItem>
+                ))}
+              </ShadcnItemGroup>
+            )}
+          </ShadcnCardContent>
+        </ShadcnCard>
+        <ShadcnCard>
+          <ShadcnCardHeader>
+            <ShadcnCardTitle>New motive</ShadcnCardTitle>
+            <ShadcnCardDescription>
+              Use a value, identity, or reason—not a task.
+            </ShadcnCardDescription>
+          </ShadcnCardHeader>
+          <ShadcnCardContent>
+            <ShadcnFieldGroup>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="motive-title">Motive</ShadcnFieldLabel>
+                <ShadcnInput
+                  id="motive-title"
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Protect focused time"
+                  value={title}
+                />
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="motive-detail">Context</ShadcnFieldLabel>
+                <ShadcnTextarea
+                  id="motive-detail"
+                  onChange={(event) => setDetail(event.target.value)}
+                  placeholder="Optional explanation for future decisions"
+                  value={detail}
+                />
+              </ShadcnField>
+              <ShadcnButton
+                disabled={create.isPending || !title.trim()}
+                onClick={() => create.mutate()}
+              >
+                <Compass data-icon="inline-start" />
+                Create motive
+              </ShadcnButton>
+            </ShadcnFieldGroup>
+            {create.isError ? <InlineError error={create.error} /> : null}
+          </ShadcnCardContent>
+        </ShadcnCard>
+      </section>
+    </div>
+  );
+}
+
+function MailTopbarControls() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const search = searchParams.get("q")?.trim() ?? "";
+  const unreadOnly = searchParams.get("unread") === "1";
+  const [searchDraft, setSearchDraft] = useState(search);
+
+  useEffect(() => setSearchDraft(search), [search]);
+
+  const updateMailState = (updates: Record<string, null | string>) => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      for (const [key, value] of Object.entries(updates)) {
+        if (value) next.set(key, value);
+        else next.delete(key);
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div className="mail-topbar-controls">
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          updateMailState({ q: searchDraft.trim() || null, thread: null, view: null });
+        }}
+      >
+        <InputGroup className="mail-topbar__search">
+          <InputGroupAddon>
+            <Search aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
+            aria-label="Search mail"
+            onChange={(event) => setSearchDraft(event.currentTarget.value)}
+            placeholder="Search mail"
+            type="search"
+            value={searchDraft}
+          />
+        </InputGroup>
+      </form>
+      <ShadcnButton
+        aria-pressed={unreadOnly}
+        onClick={() =>
+          updateMailState({ thread: null, unread: unreadOnly ? null : "1", view: null })
+        }
+        size="sm"
+        variant={unreadOnly ? "secondary" : "ghost"}
+      >
+        Unread
+      </ShadcnButton>
+    </div>
+  );
+}
+
+function MailSyncButton() {
+  const queryClient = useQueryClient();
+  const accounts = useQuery({ queryFn: api.listConnectors, queryKey: ["connectors"] });
+  const enabledAccounts = useMemo(
+    () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
+    [accounts.data],
+  );
+  const sync = useMutation({
+    mutationFn: () => Promise.all(enabledAccounts.map((account) => api.syncConnector(account.id))),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["connectors"] }),
+        queryClient.invalidateQueries({ queryKey: ["mailboxes"] }),
+        queryClient.invalidateQueries({ queryKey: ["mail-threads"] }),
+      ]),
+  });
+
+  return (
+    <>
+      {sync.isError ? (
+        <span className="text-destructive text-sm" role="alert">
+          {errorMessage(sync.error)}
+        </span>
+      ) : null}
+      <ShadcnButton
+        aria-label="Sync all mail accounts"
+        disabled={accounts.isPending || enabledAccounts.length === 0 || sync.isPending}
+        onClick={() => sync.mutate()}
+        variant="outline"
+      >
+        <RefreshCw aria-hidden="true" className={sync.isPending ? "spin" : ""} />
+        {sync.isPending ? "Syncing…" : "Sync"}
+      </ShadcnButton>
+    </>
+  );
+}
+
+function ActivityPage() {
+  const activity = useQuery({ queryFn: () => api.listActivity(100), queryKey: ["activity"] });
+  return (
+    <div className="narrow-page">
+      {activity.isPending ? (
+        <PageLoading />
+      ) : activity.isError ? (
+        <InlineError error={activity.error} />
+      ) : (
+        <div className="activity-list">
+          {[
+            ...Map.groupBy(
+              activity.data,
+              (entry) => `${entry.requestId}:${entry.actorType}:${entry.action}`,
+            ).entries(),
+          ].map(([key, entries]) =>
+            entries.length === 1 ? (
+              <ActivityRow entry={entries[0] as AuditEvent} key={key} />
+            ) : (
+              <ActivityBatch entries={entries} key={key} />
+            ),
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ActivityBatch({ entries }: { entries: AuditEvent[] }) {
+  const first = entries[0] as AuditEvent;
+  const actor = actorLabel(first.actorType);
+  return (
+    <details className="activity-batch">
+      <summary>
+        <div className={`activity-row__actor actor--${first.actorType}`}>
+          <ActivityActorIcon actorType={first.actorType} />
+        </div>
+        <div className="activity-batch__summary">
+          <strong>{humanizeAction(first.action)}</strong>
+          <span>
+            {actor} · {entries.length} changes · {formatRelative(first.createdAt)}
+          </span>
+        </div>
+        <ChevronDown aria-hidden="true" size={17} />
+      </summary>
+      <div className="activity-batch__entries">
+        {entries.map((entry) => (
+          <ActivityRow entry={entry} key={entry.id} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function actorLabel(actorType: string): string {
+  if (actorType === "agent") return "Agent";
+  if (actorType === "connector") return "Connector";
+  if (actorType === "system") return "System";
+  return "You";
+}
+
+function ActivityActorIcon({ actorType }: { actorType: string }) {
+  if (actorType === "agent") return <Command size={17} />;
+  if (actorType === "connector") return <Cloud size={17} />;
+  return <UserRound size={17} />;
+}
+
+function ActivityRow({ entry }: { entry: AuditEvent }) {
+  const actor = actorLabel(entry.actorType);
+  return (
+    <article className="activity-row">
+      <div className={`activity-row__actor actor--${entry.actorType}`}>
+        <ActivityActorIcon actorType={entry.actorType} />
+      </div>
+      <div>
+        <strong>{humanizeAction(entry.action)}</strong>
+        <span>
+          {actor} · {formatRelative(entry.createdAt)}
+        </span>
+      </div>
+    </article>
+  );
+}
+
+type SettingsSectionId =
+  | "agents"
+  | "automations"
+  | "appearance"
+  | "calendars"
+  | "connections"
+  | "invitations"
+  | "profile"
+  | "sessions"
+  | "wallpaper";
+
+const settingsNavigation: Array<{
+  items: Array<{ icon: LucideIcon; id: SettingsSectionId; label: string }>;
+  label: string;
+}> = [
+  {
+    label: "Personal",
+    items: [
+      { icon: UserRound, id: "profile", label: "Profile" },
+      { icon: Paintbrush, id: "appearance", label: "Appearance" },
+      { icon: Image, id: "wallpaper", label: "Wallpaper" },
+    ],
+  },
+  {
+    label: "Security",
+    items: [
+      { icon: LockKeyhole, id: "sessions", label: "Sessions" },
+      { icon: UserRound, id: "invitations", label: "Invitations" },
+    ],
+  },
+  {
+    label: "Workspace",
+    items: [
+      { icon: Cloud, id: "connections", label: "Connections" },
+      { icon: CalendarDays, id: "calendars", label: "Calendars" },
+    ],
+  },
+  {
+    label: "Automation",
+    items: [
+      { icon: Bot, id: "automations", label: "Automations" },
+      { icon: KeyRound, id: "agents", label: "Agent access" },
+    ],
+  },
+];
+
+const settingsSectionIds = new Set<SettingsSectionId>(
+  settingsNavigation.flatMap((group) => group.items.map((item) => item.id)),
+);
+
+function settingsSectionFromSearch(search: string): SettingsSectionId {
+  const requestedSection = new URLSearchParams(search).get("section");
+  return requestedSection === "account"
+    ? "profile"
+    : settingsSectionIds.has(requestedSection as SettingsSectionId)
+      ? (requestedSection as SettingsSectionId)
+      : "profile";
+}
+
+function SettingsSidebarNavigation({
+  canManageInvitations,
+  onNavigate,
+  section,
+}: {
+  canManageInvitations: boolean;
+  onNavigate: () => void;
+  section: SettingsSectionId;
+}) {
+  return (
+    <>
+      {settingsNavigation
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => item.id !== "invitations" || canManageInvitations),
+        }))
+        .filter((group) => group.items.length > 0)
+        .map((group) => (
+          <ShadcnSidebarGroup key={group.label}>
+            <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
+            <ShadcnSidebarGroupContent>
+              <nav aria-label={group.label}>
+                <ShadcnSidebarMenu>
+                  {group.items.map(({ icon, id, label }) => (
+                    <SidebarNavigationItem
+                      icon={icon}
+                      isActive={section === id}
+                      key={id}
+                      label={label}
+                      onNavigate={onNavigate}
+                      path={`/settings?section=${id}`}
+                    />
+                  ))}
+                </ShadcnSidebarMenu>
+              </nav>
+            </ShadcnSidebarGroupContent>
+          </ShadcnSidebarGroup>
+        ))}
+    </>
+  );
+}
+
+function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void; user: User }) {
+  const location = useLocation();
+  const section = settingsSectionFromSearch(location.search);
+  if (section === "invitations" && user.canManageInvitations !== true) {
+    return <Navigate replace to="/settings?section=profile" />;
+  }
+  return (
+    <div className="settings-page">
+      <section aria-live="polite" className="settings-panel" key={section}>
+        {section === "calendars" ? <CalendarsSettings setEditor={setEditor} /> : null}
+        {section === "connections" ? <ConnectorsSettings /> : null}
+        {section === "agents" ? <TokensSettings /> : null}
+        {section === "automations" ? <AutomationsPage user={user} /> : null}
+        {section === "appearance" ? <ThemeSettings user={user} /> : null}
+        {section === "profile" ? <ProfileSettings user={user} /> : null}
+        {section === "invitations" ? <InvitationsSettings /> : null}
+        {section === "sessions" ? <SessionsSettings /> : null}
+        {section === "wallpaper" ? <PinterestWallpaperSettingsPanel /> : null}
+      </section>
+    </div>
+  );
+}
+
+function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void }) {
+  const queryClient = useQueryClient();
+  const query = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
+  const accounts = useQuery({ queryFn: api.listConnectors, queryKey: ["connectors"] });
+  const selected = useMutation({
+    mutationFn: ({ id, value }: { id: string; value: boolean }) =>
+      api.setCalendarSelected(id, value),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const remove = useMutation({
+    mutationFn: api.deleteCalendar,
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const calendarGroups = groupCalendarsByAccount(accounts.data ?? [], query.data ?? []);
+  return (
+    <SettingsSection
+      action={
+        <ShadcnButton onClick={() => setEditor({ kind: "calendar" })}>
+          <Plus data-icon="inline-start" size={15} /> Local calendar
+        </ShadcnButton>
+      }
+      description="Choose what appears in your unified view."
+      title="Calendars"
+    >
+      {calendarGroups.length ? (
+        <ShadcnItemGroup className="calendar-settings__groups">
+          {calendarGroups.map((group) => (
+            <section className="calendar-settings__group" key={group.accountId}>
+              <ShadcnItem className="calendar-settings__account" size="sm">
+                <ShadcnItemMedia variant="default">
+                  <ConnectedAccountIdentity
+                    avatarUrl={group.account?.avatarUrl}
+                    label={group.label}
+                    provider={group.provider}
+                    size="default"
+                  />
+                </ShadcnItemMedia>
+                <ShadcnItemContent>
+                  <ShadcnItemTitle>{group.label}</ShadcnItemTitle>
+                  <ShadcnItemDescription>
+                    {group.account?.email && group.account.email !== group.label
+                      ? group.account.email
+                      : `${group.calendars.length} calendar${group.calendars.length === 1 ? "" : "s"}`}
+                  </ShadcnItemDescription>
+                </ShadcnItemContent>
+                <ShadcnItemActions>
+                  <span className="calendar-settings__count">
+                    {group.calendars.filter((calendar) => calendar.isSelected).length}/
+                    {group.calendars.length}
+                  </span>
+                </ShadcnItemActions>
+              </ShadcnItem>
+              <ShadcnItemGroup className="calendar-settings__calendars">
+                {group.calendars.map((calendar) => (
+                  <ShadcnItem className="calendar-settings__calendar" key={calendar.id} size="sm">
+                    <ShadcnItemMedia variant="default">
+                      <ShadcnCheckbox
+                        aria-label={
+                          calendar.isSelected ? `Hide ${calendar.name}` : `Show ${calendar.name}`
+                        }
+                        checked={calendar.isSelected}
+                        className="calendar-settings__checkbox data-checked:border-(--calendar-color) data-checked:bg-(--calendar-color)"
+                        disabled={selected.isPending}
+                        onCheckedChange={(checked) =>
+                          selected.mutate({ id: calendar.id, value: checked === true })
+                        }
+                        style={
+                          {
+                            "--calendar-color": calendar.color ?? "var(--primary)",
+                          } as CSSProperties
+                        }
+                      />
+                    </ShadcnItemMedia>
+                    <ShadcnItemContent>
+                      <ShadcnItemTitle>
+                        {calendar.name}
+                        {!calendar.isWritable ? (
+                          <ExternalLink
+                            aria-label="Subscribed calendar"
+                            className="calendar-settings__calendar-external"
+                            role="img"
+                          />
+                        ) : null}
+                      </ShadcnItemTitle>
+                      <ShadcnItemDescription>
+                        {calendar.provider === "local"
+                          ? "Personal OS calendar"
+                          : calendar.provider === "icloud"
+                            ? "iCloud Calendar"
+                            : "Google Calendar"}{" "}
+                        · {calendar.isWritable ? "Writable" : "Subscribed"}
+                      </ShadcnItemDescription>
+                    </ShadcnItemContent>
+                    {calendar.provider === "local" ? (
+                      <ShadcnItemActions>
+                        <ShadcnButton
+                          aria-label={`Delete ${calendar.name}`}
+                          disabled={remove.isPending}
+                          onClick={() => remove.mutate(calendar.id)}
+                          size="icon"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <Trash2 />
+                        </ShadcnButton>
+                      </ShadcnItemActions>
+                    ) : null}
+                  </ShadcnItem>
+                ))}
+              </ShadcnItemGroup>
+            </section>
+          ))}
+        </ShadcnItemGroup>
+      ) : (
+        <p className="settings-empty">No calendars are available.</p>
+      )}
+    </SettingsSection>
+  );
+}
+
+function ConnectorsSettings() {
+  const queryClient = useQueryClient();
+  const query = useQuery({ queryFn: api.listConnectors, queryKey: ["connectors"] });
+  const xAccount = useQuery({
+    queryFn: api.getXBookmarkAccount,
+    queryKey: ["x-bookmarks", "account"],
+  });
+  const xFolders = useQuery({
+    enabled: Boolean(xAccount.data),
+    queryFn: api.listXBookmarkFolders,
+    queryKey: ["x-bookmarks", "folders"],
+  });
+  const [showICloud, setShowICloud] = useState(false);
+  const googleConnect = useMutation({
+    mutationFn: async ({ accountId }: { accountId?: string }) => {
+      const url = await api.getGoogleAuthorizationUrl(accountId);
+      if (isTauri()) {
+        const { openUrl } = await import("@tauri-apps/plugin-opener");
+        await openUrl(url);
+        return;
+      }
+      window.location.assign(url);
+    },
+  });
+  const xConnect = useMutation({
+    mutationFn: async () => {
+      const url = await api.getXBookmarkAuthorizationUrl();
+      if (isTauri()) {
+        const { openUrl } = await import("@tauri-apps/plugin-opener");
+        await openUrl(url);
+        return;
+      }
+      window.location.assign(url);
+    },
+  });
+  const refreshXBookmarks = () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["x-bookmarks", "account"] }),
+      queryClient.invalidateQueries({ queryKey: ["x-bookmarks", "folders"] }),
+    ]);
+  const selectXFolder = useMutation({
+    mutationFn: api.selectXBookmarkFolder,
+    onSuccess: refreshXBookmarks,
+  });
+  const syncXBookmarks = useMutation({
+    mutationFn: api.syncXBookmarks,
+    onSuccess: refreshXBookmarks,
+  });
+  const disconnectXBookmarks = useMutation({
+    mutationFn: api.deleteXBookmarkAccount,
+    onSuccess: refreshXBookmarks,
+  });
+  const icloudConnect = useMutation({
+    mutationFn: (form: FormData) =>
+      api.connectICloud({
+        appSpecificPassword: String(form.get("appSpecificPassword")),
+        calendar: form.get("calendar") === "on",
+        email: String(form.get("email")),
+        mail: form.get("mail") === "on",
+      }),
+    onSuccess: () => {
+      setShowICloud(false);
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["connectors"] }),
+        queryClient.invalidateQueries({ queryKey: ["mailboxes"] }),
+        queryClient.invalidateQueries({ queryKey: ["mail-threads"] }),
+        invalidateMaterial(queryClient),
+      ]);
+    },
+  });
+  const sync = useMutation({
+    mutationFn: api.syncConnector,
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["connectors"] }),
+        invalidateMaterial(queryClient),
+      ]),
+  });
+  const disconnect = useMutation({
+    mutationFn: api.deleteConnector,
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["connectors"] }),
+        invalidateMaterial(queryClient),
+      ]),
+  });
+  return (
+    <SettingsSection
+      action={
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <ShadcnButton>
+              <Plus aria-hidden="true" data-icon="inline-start" /> Connect
+            </ShadcnButton>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuLabel>Connect an account</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuItem
+                disabled={googleConnect.isPending}
+                onSelect={() => googleConnect.mutate({})}
+              >
+                <CalendarProviderEmblem provider="google" />
+                Google
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => setShowICloud(true)}>
+                <CalendarProviderEmblem provider="icloud" />
+                iCloud
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled={xConnect.isPending} onSelect={() => xConnect.mutate()}>
+                <ExternalLink aria-hidden="true" />X bookmarks
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      }
+      description="One account can expose Calendar, Mail, or both. Providers remain authoritative."
+      title="Connections"
+    >
+      {googleConnect.error && <SettingsError error={googleConnect.error} />}
+      {xConnect.error && <SettingsError error={xConnect.error} />}
+      {selectXFolder.error && <SettingsError error={selectXFolder.error} />}
+      {syncXBookmarks.error && <SettingsError error={syncXBookmarks.error} />}
+      {disconnectXBookmarks.error && <SettingsError error={disconnectXBookmarks.error} />}
+      {icloudConnect.error && <SettingsError error={icloudConnect.error} />}
+      {sync.error && <SettingsError error={sync.error} />}
+      {disconnect.error && <SettingsError error={disconnect.error} />}
+      {showICloud ? (
+        <form
+          className="icloud-connect-panel"
+          onSubmit={(event) => {
+            event.preventDefault();
+            icloudConnect.mutate(new FormData(event.currentTarget));
+          }}
+        >
+          <ShadcnAlert>
+            <Cloud />
+            <ShadcnAlertTitle>Add iCloud</ShadcnAlertTitle>
+            <ShadcnAlertDescription>
+              Use an app-specific password—not your Apple Account password. It is encrypted and can
+              be revoked from Apple at any time.
+            </ShadcnAlertDescription>
+          </ShadcnAlert>
+          <ShadcnFieldGroup className="icloud-connect-panel__fields">
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="icloud-email">Apple Account email</ShadcnFieldLabel>
+              <ShadcnInput
+                autoComplete="email"
+                id="icloud-email"
+                name="email"
+                placeholder="name@icloud.com"
+                required
+                type="email"
+              />
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="icloud-app-password">
+                App-specific password
+              </ShadcnFieldLabel>
+              <ShadcnInput
+                autoComplete="off"
+                id="icloud-app-password"
+                name="appSpecificPassword"
+                placeholder="xxxx-xxxx-xxxx-xxxx"
+                required
+                type="password"
+              />
+            </ShadcnField>
+          </ShadcnFieldGroup>
+          <ShadcnFieldSet>
+            <ShadcnFieldLegend variant="label">Services to connect</ShadcnFieldLegend>
+            <ShadcnFieldGroup className="icloud-service-options">
+              <ShadcnField orientation="horizontal">
+                <ShadcnCheckbox defaultChecked id="icloud-mail" name="mail" />
+                <ShadcnFieldContent>
+                  <ShadcnFieldLabel htmlFor="icloud-mail">Mail</ShadcnFieldLabel>
+                  <ShadcnFieldDescription>
+                    Read mailboxes and message content through IMAP.
+                  </ShadcnFieldDescription>
+                </ShadcnFieldContent>
+              </ShadcnField>
+              <ShadcnField orientation="horizontal">
+                <ShadcnCheckbox defaultChecked id="icloud-calendar" name="calendar" />
+                <ShadcnFieldContent>
+                  <ShadcnFieldLabel htmlFor="icloud-calendar">Calendar</ShadcnFieldLabel>
+                  <ShadcnFieldDescription>
+                    Read and edit calendars through CalDAV.
+                  </ShadcnFieldDescription>
+                </ShadcnFieldContent>
+              </ShadcnField>
+            </ShadcnFieldGroup>
+          </ShadcnFieldSet>
+          <div className="icloud-connect-panel__footer">
+            <a href="https://account.apple.com/account/manage" rel="noreferrer" target="_blank">
+              Create an app-specific password <ExternalLink size={13} />
+            </a>
+            <div>
+              <ShadcnButton onClick={() => setShowICloud(false)} type="button" variant="ghost">
+                Cancel
+              </ShadcnButton>
+              <ShadcnButton disabled={icloudConnect.isPending} type="submit">
+                {icloudConnect.isPending ? "Connecting iCloud" : "Add iCloud"}
+              </ShadcnButton>
+            </div>
+          </div>
+        </form>
+      ) : null}
+      {xAccount.data ? (
+        <XBookmarksConnectorRow
+          account={xAccount.data}
+          disconnect={() => disconnectXBookmarks.mutate()}
+          folders={xFolders.data ?? []}
+          selectFolder={(folderId) => selectXFolder.mutate(folderId)}
+          sync={() => syncXBookmarks.mutate()}
+          syncing={selectXFolder.isPending || syncXBookmarks.isPending}
+        />
+      ) : null}
+      {query.data?.length ? (
+        <ShadcnItemGroup>
+          {query.data.map((account) => (
+            <ConnectorRow
+              account={account}
+              disconnect={() => disconnect.mutate(account.id)}
+              {...(account.provider === "google" && !account.mailEnabled
+                ? { enableMail: () => googleConnect.mutate({ accountId: account.id }) }
+                : {})}
+              key={account.id}
+              sync={() => sync.mutate(account.id)}
+              syncing={sync.isPending && sync.variables === account.id}
+            />
+          ))}
+        </ShadcnItemGroup>
+      ) : (
+        <p className="settings-empty">
+          No external calendars connected. Your local calendar already works.
+        </p>
+      )}
+    </SettingsSection>
+  );
+}
+
+function XBookmarksConnectorRow({
+  account,
+  disconnect,
+  folders,
+  selectFolder,
+  sync,
+  syncing,
+}: {
+  account: XBookmarkAccount;
+  disconnect: () => void;
+  folders: Array<{ id: string; name: string; remoteFolderId: string }>;
+  selectFolder: (folderId: string) => void;
+  sync: () => void;
+  syncing: boolean;
+}) {
+  return (
+    <ShadcnItem variant="outline">
+      <ShadcnItemMedia className="provider-icon" variant="icon">
+        𝕏
+      </ShadcnItemMedia>
+      <ShadcnItemContent>
+        <ShadcnItemTitle>{account.displayName ?? `@${account.username}`}</ShadcnItemTitle>
+        <ShadcnItemDescription>
+          {account.syncError
+            ? account.syncError
+            : account.lastSyncedAt
+              ? `Synced ${formatRelative(account.lastSyncedAt)}`
+              : "Select the bookmark folder to sync"}
+        </ShadcnItemDescription>
+        <div className="capability-badges">
+          <ShadcnBadge variant="secondary">Read-only bookmarks</ShadcnBadge>
+          <select
+            aria-label="X bookmark folder"
+            disabled={syncing || !folders.length}
+            onChange={(event) => selectFolder(event.target.value)}
+            value={account.selectedFolderId ?? ""}
+          >
+            <option disabled value="">
+              Choose a folder
+            </option>
+            {folders.map((folder) => (
+              <option key={folder.id} value={folder.remoteFolderId}>
+                {folder.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </ShadcnItemContent>
+      <ShadcnItemActions>
+        <ShadcnBadge variant={account.syncStatus === "error" ? "destructive" : "secondary"}>
+          {account.syncStatus}
+        </ShadcnBadge>
+        <ShadcnButton
+          aria-label={`Sync X bookmarks for ${account.username}`}
+          disabled={syncing || !account.selectedFolderId}
+          onClick={sync}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <RefreshCw className={syncing ? "spin" : ""} />
+        </ShadcnButton>
+        <ShadcnButton
+          aria-label={`Disconnect X bookmarks for ${account.username}`}
+          onClick={disconnect}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <Trash2 />
+        </ShadcnButton>
+      </ShadcnItemActions>
+    </ShadcnItem>
+  );
+}
+
+async function applyPinterestWallpaper(settings: PinterestWallpaperSettings): Promise<string[]> {
+  const pins = await api.listPinterestPins(12);
+  if (pins.length < 4) {
+    throw new Error("This board needs at least four image Pins to make a collage.");
+  }
+  if (!isTauri()) {
+    throw new Error("Pinterest wallpaper is available in the Personal OS desktop app.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  try {
+    await invoke<string>("apply_pinterest_wallpaper", {
+      backgroundColor: settings.backgroundColor,
+      backgroundMode: settings.backgroundMode,
+      boardLabel: pinterestBoardLabel(settings.boardUrl),
+      cornerRadius: settings.cornerRadius,
+      imageUrls: pins.map((pin) => pin.imageUrl),
+      frameSpacing: settings.frameSpacing,
+      layout: settings.layout,
+      mosaicFit: settings.mosaicFit,
+      paddingBottom: settings.paddingBottom,
+      paddingEnd: settings.paddingEnd,
+      paddingStart: settings.paddingStart,
+      paddingTop: settings.paddingTop,
+      rotationDegrees: settings.rotationDegrees,
+      tileSize: settings.tileSize,
+    });
+  } catch (error) {
+    throw new Error(typeof error === "string" ? error : "Could not apply the Pinterest wallpaper.");
+  }
+  await api.recordPinterestWallpaperApplied();
+  return pins.map((pin) => pin.imageUrl);
+}
+
+function pinterestBoardLabel(boardUrl: string | null): string {
+  if (!boardUrl) return "Pinterest";
+  const slug = new URL(boardUrl).pathname.split("/").filter(Boolean).at(-1);
+  if (!slug) return "Pinterest";
+  return slug
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((word) => `${word.slice(0, 1).toUpperCase()}${word.slice(1)}`)
+    .join(" ");
+}
+
+async function unavailablePinterestWallpaperSettings() {
+  return {
+    backgroundColor: "#ffffff",
+    backgroundMode: "white" as const,
+    boardUrl: null,
+    cornerRadius: 0,
+    enabled: false,
+    frameSpacing: 16,
+    lastAppliedAt: null,
+    mosaicFit: "preserve" as const,
+    paddingBottom: 16,
+    paddingEnd: 16,
+    paddingLinked: true,
+    paddingStart: 16,
+    paddingTop: 16,
+    layout: "grid" as const,
+    rotationDegrees: 0,
+    tileSize: 64,
+  };
+}
+
+type DesktopPreviewEnvironment = {
+  hasNotch: boolean;
+  platform: "linux" | "macos" | "windows" | "unknown";
+  safeArea: { bottom: number; end: number; start: number; top: number };
+  screen: { height: number; width: number };
+};
+
+async function getDesktopPreviewEnvironment(): Promise<DesktopPreviewEnvironment> {
+  if (!isTauri()) {
+    return {
+      hasNotch: false,
+      platform: "unknown",
+      safeArea: { bottom: 0, end: 0, start: 0, top: 0 },
+      screen: { height: 0, width: 0 },
+    };
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<DesktopPreviewEnvironment>("desktop_preview_environment");
+}
+
+function PinterestWallpaperScheduler() {
+  const settings = useQuery({
+    enabled: isTauri(),
+    queryFn: api.getPinterestWallpaperSettings ?? unavailablePinterestWallpaperSettings,
+    queryKey: ["pinterest-wallpaper"],
+    retry: false,
+  });
+  const applying = useRef(false);
+  useEffect(() => {
+    const value = settings.data;
+    if (!isTauri() || !value?.boardUrl || !value.enabled) return;
+    const refresh = async () => {
+      if (applying.current) return;
+      applying.current = true;
+      try {
+        await applyPinterestWallpaper(value);
+      } catch {
+        // The settings panel keeps actionable errors visible; scheduled refreshes stay quiet.
+      } finally {
+        applying.current = false;
+      }
+    };
+    const alreadyAppliedToday = value.lastAppliedAt
+      ? new Date(value.lastAppliedAt).toDateString() === new Date().toDateString()
+      : false;
+    if (!alreadyAppliedToday) void refresh();
+    let timer: number;
+    const scheduleNextRefresh = () => {
+      const next = new Date();
+      next.setHours(8, 0, 0, 0);
+      if (next <= new Date()) next.setDate(next.getDate() + 1);
+      timer = window.setTimeout(() => {
+        void refresh().finally(scheduleNextRefresh);
+      }, next.getTime() - Date.now());
+    };
+    scheduleNextRefresh();
+    return () => window.clearTimeout(timer);
+  }, [settings.data]);
+  return null;
+}
+
+function PinterestWallpaperSettingsPanel() {
+  return isTauri() ? (
+    <PinterestWallpaperDesktopSettingsPanel />
+  ) : (
+    <PinterestWallpaperWebPlaceholder />
+  );
+}
+
+function PinterestWallpaperWebPlaceholder() {
+  return (
+    <SettingsSection
+      description="Pinterest wallpapers are created and applied from Personal OS for macOS."
+      title="Pinterest wallpaper"
+    >
+      <ShadcnAlert role="status" variant="info">
+        <Image />
+        <ShadcnAlertTitle>Available in Personal OS for macOS</ShadcnAlertTitle>
+        <ShadcnAlertDescription>
+          Open the desktop app to choose a public Pinterest board and refine the wallpaper.
+        </ShadcnAlertDescription>
+      </ShadcnAlert>
+    </SettingsSection>
+  );
+}
+
+function PinterestWallpaperDesktopSettingsPanel() {
+  const queryClient = useQueryClient();
+  const settings = useQuery({
+    queryFn: api.getPinterestWallpaperSettings ?? unavailablePinterestWallpaperSettings,
+    queryKey: ["pinterest-wallpaper"],
+    retry: false,
+  });
+  const [boardUrl, setBoardUrl] = useState("");
+  const [appliedImages, setAppliedImages] = useState<string[]>([]);
+  const [backgroundColor, setBackgroundColor] = useState("#ffffff");
+  const [cornerRadius, setCornerRadius] = useState(0);
+  const [frameSpacing, setFrameSpacing] = useState(16);
+  const [paddingBottom, setPaddingBottom] = useState(16);
+  const [paddingEnd, setPaddingEnd] = useState(16);
+  const [paddingLinked, setPaddingLinked] = useState(true);
+  const [paddingStart, setPaddingStart] = useState(16);
+  const [paddingTop, setPaddingTop] = useState(16);
+  const [rotationDegrees, setRotationDegrees] = useState(0);
+  const [showDesktopOverlay, setShowDesktopOverlay] = useState(true);
+  const [tileSize, setTileSize] = useState(64);
+  useEffect(() => {
+    setBoardUrl(settings.data?.boardUrl ?? "");
+    setBackgroundColor(settings.data?.backgroundColor ?? "#ffffff");
+    setCornerRadius(settings.data?.cornerRadius ?? 0);
+    setFrameSpacing(settings.data?.frameSpacing ?? 16);
+    setPaddingBottom(settings.data?.paddingBottom ?? 16);
+    setPaddingEnd(settings.data?.paddingEnd ?? 16);
+    setPaddingLinked(settings.data?.paddingLinked ?? true);
+    setPaddingStart(settings.data?.paddingStart ?? 16);
+    setPaddingTop(settings.data?.paddingTop ?? 16);
+    setRotationDegrees(settings.data?.rotationDegrees ?? 0);
+    setTileSize(settings.data?.tileSize ?? 64);
+  }, [settings.data]);
+  const invalidate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["pinterest-wallpaper"] }),
+      queryClient.invalidateQueries({ queryKey: ["pinterest-wallpaper-preview"] }),
+    ]);
+  };
+  const update = useMutation({
+    mutationFn: api.updatePinterestWallpaperSettings,
+    onMutate: (input) => {
+      const previous = queryClient.getQueryData<PinterestWallpaperSettings>([
+        "pinterest-wallpaper",
+      ]);
+      if (previous) {
+        const changed = Object.fromEntries(
+          Object.entries(input).filter(([, inputValue]) => inputValue !== undefined),
+        ) as Partial<PinterestWallpaperSettings>;
+        queryClient.setQueryData<PinterestWallpaperSettings>(["pinterest-wallpaper"], {
+          ...previous,
+          ...changed,
+        });
+      }
+      return { previous };
+    },
+    onError: (_error, _input, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(["pinterest-wallpaper"], context.previous);
+      }
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["pinterest-wallpaper"] });
+    },
+  });
+  const updatePadding = (edge: "bottom" | "end" | "start" | "top", next: number) => {
+    const values = paddingLinked
+      ? { paddingBottom: next, paddingEnd: next, paddingStart: next, paddingTop: next }
+      : {
+          paddingBottom: edge === "bottom" ? next : paddingBottom,
+          paddingEnd: edge === "end" ? next : paddingEnd,
+          paddingStart: edge === "start" ? next : paddingStart,
+          paddingTop: edge === "top" ? next : paddingTop,
+        };
+    setPaddingBottom(values.paddingBottom);
+    setPaddingEnd(values.paddingEnd);
+    setPaddingStart(values.paddingStart);
+    setPaddingTop(values.paddingTop);
+    update.mutate(values);
+  };
+  const apply = useMutation({
+    mutationFn: () => {
+      if (!settings.data) throw new Error("Wallpaper settings are still loading.");
+      return applyPinterestWallpaper(settings.data);
+    },
+    onSuccess: async (images) => {
+      setAppliedImages(images);
+      await invalidate();
+      toast.success("Wallpaper refreshed.");
+    },
+    onError: (error) => toast.error(errorMessage(error)),
+  });
+  const value = settings.data;
+  const dailyBackdropTimestamp = value?.lastAppliedAt
+    ? new Date(value.lastAppliedAt).getTime()
+    : Date.now();
+  const preview = useQuery({
+    enabled: Boolean(value?.boardUrl),
+    queryFn: () => api.listPinterestPins(12),
+    queryKey: ["pinterest-wallpaper-preview", value?.boardUrl],
+    retry: false,
+  });
+  const desktopEnvironment = useQuery({
+    enabled: true,
+    queryFn: getDesktopPreviewEnvironment,
+    queryKey: ["desktop-preview-environment"],
+    retry: false,
+  });
+  return (
+    <SettingsSection
+      action={
+        <ShadcnButton
+          disabled={!value?.boardUrl || apply.isPending || update.isPending}
+          onClick={() => apply.mutate()}
+        >
+          <RefreshCw data-icon="inline-start" size={15} />
+          {apply.isPending ? "Refreshing" : "Refresh now"}
+        </ShadcnButton>
+      }
+      description="Paste a public board URL and Personal OS will compose a fresh tiled collage from its Pins each day."
+      title="Pinterest wallpaper"
+    >
+      {settings.error ? <SettingsError error={settings.error} /> : null}
+      {update.error ? <SettingsError error={update.error} /> : null}
+      {preview.error ? <SettingsError error={preview.error} /> : null}
+      <ShadcnFieldGroup className="pinterest-wallpaper__controls">
+        <ShadcnField>
+          <ShadcnFieldLabel htmlFor="pinterest-board-url">Public board URL</ShadcnFieldLabel>
+          <ShadcnInput
+            autoComplete="url"
+            id="pinterest-board-url"
+            onBlur={() => update.mutate({ boardUrl: boardUrl.trim() || null })}
+            onChange={(event) => setBoardUrl(event.target.value)}
+            placeholder="https://www.pinterest.com/name/board-name/"
+            type="url"
+            value={boardUrl}
+          />
+          <ShadcnFieldDescription>
+            The board must be public. If Pinterest only exposes a few Pins, Personal OS repeats them
+            to complete the collage.
+          </ShadcnFieldDescription>
+        </ShadcnField>
+        <ShadcnField orientation="horizontal">
+          <ShadcnCheckbox
+            checked={value?.enabled ?? false}
+            disabled={!value?.boardUrl || update.isPending}
+            id="pinterest-daily"
+            onCheckedChange={(checked) => update.mutate({ enabled: checked === true })}
+          />
+          <ShadcnFieldContent>
+            <ShadcnFieldLabel htmlFor="pinterest-daily">Refresh every day</ShadcnFieldLabel>
+            <ShadcnFieldDescription>
+              A new collage is applied at 8:00 AM while Personal OS is running, and catches up when
+              you next open it.
+            </ShadcnFieldDescription>
+          </ShadcnFieldContent>
+        </ShadcnField>
+        <ShadcnField>
+          <ShadcnFieldLabel>Layout</ShadcnFieldLabel>
+          <ShadcnToggleGroup
+            aria-label="Wallpaper layout"
+            onValueChange={(next) => {
+              if (next === "grid" || next === "stack") update.mutate({ layout: next });
+            }}
+            size="sm"
+            type="single"
+            value={value?.layout ?? "grid"}
+            variant="outline"
+          >
+            <ShadcnToggleGroupItem aria-label="Tiled grid" value="grid">
+              <Grid3X3 data-icon="inline-start" size={15} /> Grid
+            </ShadcnToggleGroupItem>
+            <ShadcnToggleGroupItem aria-label="Overlapping stack" value="stack">
+              <Layers3 data-icon="inline-start" size={15} /> Stack
+            </ShadcnToggleGroupItem>
+          </ShadcnToggleGroup>
+          <ShadcnFieldDescription>
+            Grid keeps every image tidy. Stack layers them like pinned photos.
+          </ShadcnFieldDescription>
+        </ShadcnField>
+      </ShadcnFieldGroup>
+      <ShadcnFieldSet className="pinterest-wallpaper__fieldset">
+        <ShadcnFieldLegend>Appearance</ShadcnFieldLegend>
+        <ShadcnFieldDescription>
+          Tune how the board’s images are cropped, spaced, and presented.
+        </ShadcnFieldDescription>
+        <ShadcnFieldGroup className="pinterest-wallpaper__controls">
+          <ShadcnField>
+            <ShadcnFieldLabel>Mosaic fit</ShadcnFieldLabel>
+            <ShadcnToggleGroup
+              aria-label="Mosaic fit"
+              onValueChange={(next) => {
+                if (next === "preserve" || next === "fill") update.mutate({ mosaicFit: next });
+              }}
+              size="sm"
+              type="single"
+              value={value?.mosaicFit ?? "preserve"}
+              variant="outline"
+            >
+              <ShadcnToggleGroupItem aria-label="Preserve image shapes" value="preserve">
+                Preserve images
+              </ShadcnToggleGroupItem>
+              <ShadcnToggleGroupItem aria-label="Fill the rectangular frame" value="fill">
+                Fill frame
+              </ShadcnToggleGroupItem>
+            </ShadcnToggleGroup>
+            <ShadcnFieldDescription>
+              Preserve keeps every image uncropped and centers the clean mosaic. Fill makes an exact
+              rectangle with equal edges by allowing a small, centered crop.
+            </ShadcnFieldDescription>
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel>Backdrop</ShadcnFieldLabel>
+            <ShadcnToggleGroup
+              aria-label="Wallpaper backdrop"
+              onValueChange={(next) => {
+                if (
+                  next === "white" ||
+                  next === "custom" ||
+                  next === "matched" ||
+                  next === "random"
+                ) {
+                  update.mutate({ backgroundMode: next });
+                }
+              }}
+              size="sm"
+              type="single"
+              value={value?.backgroundMode ?? "white"}
+              variant="outline"
+            >
+              <ShadcnToggleGroupItem aria-label="White backdrop" value="white">
+                White
+              </ShadcnToggleGroupItem>
+              <ShadcnToggleGroupItem aria-label="Custom backdrop" value="custom">
+                Custom
+              </ShadcnToggleGroupItem>
+              <ShadcnToggleGroupItem aria-label="Color-matched backdrop" value="matched">
+                Matched
+              </ShadcnToggleGroupItem>
+              <ShadcnToggleGroupItem aria-label="Daily random backdrop" value="random">
+                Daily
+              </ShadcnToggleGroupItem>
+            </ShadcnToggleGroup>
+            {value?.backgroundMode === "custom" ? (
+              <ShadcnInput
+                aria-label="Custom backdrop color"
+                className="pinterest-wallpaper__color-input"
+                onChange={(event) => setBackgroundColor(event.target.value)}
+                onBlur={() => update.mutate({ backgroundColor })}
+                type="color"
+                value={backgroundColor}
+              />
+            ) : null}
+            <ShadcnFieldDescription>
+              Match samples the board’s colors; Daily picks a fresh complementary color each
+              refresh.
+            </ShadcnFieldDescription>
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="pinterest-tile-size">
+              Image size · {tileSize}%
+            </ShadcnFieldLabel>
+            <ShadcnSlider
+              id="pinterest-tile-size"
+              max={96}
+              min={32}
+              onValueChange={(next) => setTileSize(next[0] ?? 64)}
+              onValueCommit={(next) => update.mutate({ tileSize: next[0] ?? 64 })}
+              step={4}
+              value={[tileSize]}
+            />
+            <ShadcnFieldDescription>
+              Small shows more Pins; large lets each one breathe.
+            </ShadcnFieldDescription>
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="pinterest-rotation">
+              Rotation · {rotationDegrees}°
+            </ShadcnFieldLabel>
+            <ShadcnSlider
+              id="pinterest-rotation"
+              max={16}
+              min={0}
+              onValueChange={(next) => setRotationDegrees(next[0] ?? 0)}
+              onValueCommit={(next) => update.mutate({ rotationDegrees: next[0] ?? 0 })}
+              step={1}
+              value={[rotationDegrees]}
+            />
+            <ShadcnFieldDescription>
+              Add a little tilt, especially nice with the stacked layout.
+            </ShadcnFieldDescription>
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="pinterest-frame-spacing">
+              Image gap · {frameSpacing}px
+            </ShadcnFieldLabel>
+            <ShadcnSlider
+              id="pinterest-frame-spacing"
+              max={72}
+              min={0}
+              onValueChange={(next) => setFrameSpacing(next[0] ?? 16)}
+              onValueCommit={(next) => update.mutate({ frameSpacing: next[0] ?? 16 })}
+              step={2}
+              value={[frameSpacing]}
+            />
+            <ShadcnFieldDescription>
+              The space between images. The backdrop color shows through here.
+            </ShadcnFieldDescription>
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="pinterest-corner-radius">
+              Image corners · {cornerRadius}px
+            </ShadcnFieldLabel>
+            <ShadcnSlider
+              id="pinterest-corner-radius"
+              max={80}
+              min={0}
+              onValueChange={(next) => setCornerRadius(next[0] ?? 0)}
+              onValueCommit={(next) => update.mutate({ cornerRadius: next[0] ?? 0 })}
+              step={2}
+              value={[cornerRadius]}
+            />
+            <ShadcnFieldDescription>
+              Round each image while keeping its full shape intact.
+            </ShadcnFieldDescription>
+          </ShadcnField>
+        </ShadcnFieldGroup>
+      </ShadcnFieldSet>
+      <ShadcnFieldSet className="pinterest-wallpaper__fieldset">
+        <ShadcnFieldLegend>Framing</ShadcnFieldLegend>
+        <ShadcnFieldDescription>
+          Control the canvas around the collage and its desktop preview guides.
+        </ShadcnFieldDescription>
+        <ShadcnFieldGroup className="pinterest-wallpaper__controls">
+          <ShadcnField orientation="horizontal">
+            <ShadcnCheckbox
+              checked={paddingLinked}
+              id="pinterest-padding-linked"
+              onCheckedChange={(checked) => {
+                const linked = checked === true;
+                setPaddingLinked(linked);
+                if (linked) {
+                  setPaddingBottom(paddingTop);
+                  setPaddingEnd(paddingTop);
+                  setPaddingStart(paddingTop);
+                  update.mutate({
+                    paddingBottom: paddingTop,
+                    paddingEnd: paddingTop,
+                    paddingLinked: true,
+                    paddingStart: paddingTop,
+                  });
+                } else {
+                  update.mutate({ paddingLinked: false });
+                }
+              }}
+            />
+            <ShadcnFieldContent>
+              <ShadcnFieldLabel htmlFor="pinterest-padding-linked">
+                Link edge padding
+              </ShadcnFieldLabel>
+              <ShadcnFieldDescription>
+                Move every edge together, or unlock them to push the collage toward one side.
+              </ShadcnFieldDescription>
+            </ShadcnFieldContent>
+          </ShadcnField>
+          {paddingLinked ? (
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="pinterest-padding-top">
+                Edge padding · {paddingTop}px
+              </ShadcnFieldLabel>
+              <ShadcnSlider
+                id="pinterest-padding-top"
+                max={240}
+                min={0}
+                onValueChange={(next) => {
+                  const nextPadding = next[0] ?? 16;
+                  setPaddingTop(nextPadding);
+                  setPaddingBottom(nextPadding);
+                  setPaddingStart(nextPadding);
+                  setPaddingEnd(nextPadding);
+                }}
+                onValueCommit={(next) => updatePadding("top", next[0] ?? 16)}
+                step={4}
+                value={[paddingTop]}
+              />
+              <ShadcnFieldDescription>
+                All edges move together. Turn off linked padding to adjust each edge separately.
+              </ShadcnFieldDescription>
+            </ShadcnField>
+          ) : (
+            <div className="pinterest-wallpaper__padding-grid">
+              {(
+                [
+                  ["top", "Top", paddingTop],
+                  ["bottom", "Bottom", paddingBottom],
+                  ["start", "Start", paddingStart],
+                  ["end", "End", paddingEnd],
+                ] as const
+              ).map(([edge, label, padding]) => (
+                <ShadcnField key={edge}>
+                  <ShadcnFieldLabel htmlFor={`pinterest-padding-${edge}`}>
+                    {label} · {padding}px
+                  </ShadcnFieldLabel>
+                  <ShadcnSlider
+                    id={`pinterest-padding-${edge}`}
+                    max={240}
+                    min={0}
+                    onValueChange={(next) => {
+                      const value = next[0] ?? 16;
+                      if (edge === "top") setPaddingTop(value);
+                      if (edge === "bottom") setPaddingBottom(value);
+                      if (edge === "start") setPaddingStart(value);
+                      if (edge === "end") setPaddingEnd(value);
+                      if (paddingLinked) {
+                        setPaddingTop(value);
+                        setPaddingBottom(value);
+                        setPaddingStart(value);
+                        setPaddingEnd(value);
+                      }
+                    }}
+                    onValueCommit={(next) => updatePadding(edge, next[0] ?? 16)}
+                    step={4}
+                    value={[padding]}
+                  />
+                </ShadcnField>
+              ))}
+            </div>
+          )}
+          {desktopEnvironment.data ? (
+            <ShadcnField orientation="horizontal">
+              <ShadcnCheckbox
+                checked={showDesktopOverlay}
+                id="pinterest-desktop-overlay"
+                onCheckedChange={(checked) => setShowDesktopOverlay(checked === true)}
+              />
+              <ShadcnFieldContent>
+                <ShadcnFieldLabel htmlFor="pinterest-desktop-overlay">
+                  Show desktop safe areas
+                </ShadcnFieldLabel>
+                <ShadcnFieldDescription>
+                  {desktopEnvironment.data
+                    ? `${desktopEnvironment.data.platform === "macos" ? "Mac" : desktopEnvironment.data.platform} menu and dock areas appear over the preview.`
+                    : "The desktop app measures your system’s menu and taskbar area for this preview."}
+                </ShadcnFieldDescription>
+              </ShadcnFieldContent>
+            </ShadcnField>
+          ) : null}
+        </ShadcnFieldGroup>
+      </ShadcnFieldSet>
+      {value?.boardUrl ? (
+        <PinterestWallpaperPreview
+          backgroundColor={backgroundColor}
+          backgroundMode={value.backgroundMode}
+          cornerRadius={cornerRadius}
+          layout={value.layout}
+          mosaicFit={value.mosaicFit}
+          pins={
+            preview.data ??
+            appliedImages.map((imageUrl, index) => ({ id: String(index), imageUrl, title: null }))
+          }
+          frameSpacing={frameSpacing}
+          paddingBottom={paddingBottom}
+          paddingEnd={paddingEnd}
+          paddingStart={paddingStart}
+          paddingTop={paddingTop}
+          rotationDegrees={rotationDegrees}
+          {...(showDesktopOverlay && desktopEnvironment.data
+            ? { desktopEnvironment: desktopEnvironment.data }
+            : {})}
+          dailyBackdropTimestamp={dailyBackdropTimestamp}
+          previewError={preview.error ? errorMessage(preview.error) : null}
+          tileSize={tileSize}
+        />
+      ) : null}
+    </SettingsSection>
+  );
+}
+
+function PinterestWallpaperPreview({
+  backgroundColor,
+  backgroundMode,
+  cornerRadius,
+  dailyBackdropTimestamp,
+  frameSpacing,
+  layout,
+  mosaicFit,
+  paddingBottom,
+  paddingEnd,
+  paddingStart,
+  paddingTop,
+  pins,
+  previewError,
+  rotationDegrees,
+  desktopEnvironment,
+  tileSize,
+}: {
+  backgroundColor: string;
+  backgroundMode: PinterestWallpaperSettings["backgroundMode"];
+  cornerRadius: number;
+  dailyBackdropTimestamp: number;
+  frameSpacing: number;
+  layout: PinterestWallpaperSettings["layout"];
+  mosaicFit: PinterestWallpaperSettings["mosaicFit"];
+  paddingBottom: number;
+  paddingEnd: number;
+  paddingStart: number;
+  paddingTop: number;
+  pins: PinterestPin[];
+  previewError: string | null;
+  rotationDegrees: number;
+  desktopEnvironment?: DesktopPreviewEnvironment;
+  tileSize: number;
+}) {
+  const [imageRatios, setImageRatios] = useState<Record<string, number>>({});
+  const imagePins = pins.slice(0, layout === "stack" ? 6 : 12);
+  const columns = Math.max(2, Math.min(5, Math.round(7 - tileSize / 18)));
+  const gridColumns = imagePins.length
+    ? Array.from({ length: columns }, (_, column) =>
+        imagePins.filter((_pin, index) => index % columns === column),
+      )
+    : [];
+  const stackPositions = [
+    [3, 10],
+    [39, 6],
+    [17, 34],
+    [51, 40],
+    [0, 53],
+    [33, 61],
+  ];
+  const cardSize = Math.round(32 + tileSize * 0.48);
+  return (
+    <section aria-label="Wallpaper preview" className="pinterest-wallpaper-preview">
+      <div className="pinterest-wallpaper-preview__heading">
+        <span>Live preview</span>
+        <small>
+          {imagePins.length ? `${imagePins.length} Pins shown` : "Previewing your layout"}
+        </small>
+      </div>
+      <div
+        className={`pinterest-wallpaper-preview__canvas pinterest-wallpaper-preview__canvas--${layout} pinterest-wallpaper-preview__canvas--${mosaicFit}`}
+        style={
+          {
+            "--wallpaper-background": previewBackground(
+              backgroundMode,
+              backgroundColor,
+              dailyBackdropTimestamp,
+            ),
+            "--wallpaper-gap": `${frameSpacing}px`,
+            "--wallpaper-padding-bottom": `${paddingBottom}px`,
+            "--wallpaper-padding-end": `${paddingEnd}px`,
+            "--wallpaper-padding-start": `${paddingStart}px`,
+            "--wallpaper-padding-top": `${paddingTop}px`,
+            "--wallpaper-radius": `${cornerRadius}px`,
+          } as React.CSSProperties
+        }
+      >
+        {previewError ? (
+          <PinterestWallpaperPlaceholder error={previewError} layout={layout} />
+        ) : !imagePins.length ? (
+          <PinterestWallpaperPlaceholder layout={layout} />
+        ) : layout === "grid" ? (
+          gridColumns.map((columnPins, columnIndex) => {
+            const columnRatio = columnPins.reduce(
+              (total, pin) => total + (imageRatios[pin.id] ?? 1),
+              0,
+            );
+            return (
+              <div
+                className="pinterest-wallpaper-preview__column"
+                key={columnPins.map((pin) => pin.id).join(":")}
+                style={{ flexGrow: 1 / Math.max(columnRatio, 0.1) }}
+              >
+                {columnPins.map((pin, index) => {
+                  const direction = (index + columnIndex) % 2 === 0 ? -1 : 1;
+                  return (
+                    <img
+                      alt=""
+                      className="pinterest-wallpaper-preview__tile"
+                      key={pin.id}
+                      onLoad={(event) => {
+                        const image = event.currentTarget;
+                        if (!image.naturalWidth || !image.naturalHeight) return;
+                        const ratio = image.naturalHeight / image.naturalWidth;
+                        setImageRatios((current) =>
+                          current[pin.id] === ratio ? current : { ...current, [pin.id]: ratio },
+                        );
+                      }}
+                      src={pin.imageUrl}
+                      style={
+                        {
+                          "--wallpaper-rotation": `${direction * rotationDegrees * 0.15}deg`,
+                        } as React.CSSProperties
+                      }
+                    />
+                  );
+                })}
+              </div>
+            );
+          })
+        ) : (
+          imagePins.map((pin, index) => {
+            const [left, top] = stackPositions[index % stackPositions.length] ?? [0, 0];
+            const direction = index % 2 === 0 ? -1 : 1;
+            const rotation =
+              layout === "stack" ? direction * rotationDegrees : direction * rotationDegrees * 0.15;
+            return (
+              <img
+                alt=""
+                className="pinterest-wallpaper-preview__tile"
+                key={pin.id}
+                src={pin.imageUrl}
+                style={
+                  {
+                    "--wallpaper-left": `${left}%`,
+                    "--wallpaper-rotation": `${rotation}deg`,
+                    "--wallpaper-size": `${cardSize}%`,
+                    "--wallpaper-top": `${top}%`,
+                  } as React.CSSProperties
+                }
+              />
+            );
+          })
+        )}
+        {desktopEnvironment ? <DesktopSafeAreaOverlay environment={desktopEnvironment} /> : null}
+      </div>
+    </section>
+  );
+}
+
+function DesktopSafeAreaOverlay({ environment }: { environment: DesktopPreviewEnvironment }) {
+  const { bottom, end, start, top } = environment.safeArea;
+  const style = {
+    "--desktop-safe-bottom": `${(bottom / Math.max(1, environment.screen.height)) * 100}%`,
+    "--desktop-safe-end": `${(end / Math.max(1, environment.screen.width)) * 100}%`,
+    "--desktop-safe-start": `${(start / Math.max(1, environment.screen.width)) * 100}%`,
+    "--desktop-safe-top": `${(top / Math.max(1, environment.screen.height)) * 100}%`,
+  } as React.CSSProperties;
+  return (
+    <div
+      aria-label={`${environment.platform} desktop safe-area overlay`}
+      className={`pinterest-wallpaper-preview__safe-area pinterest-wallpaper-preview__safe-area--${environment.platform}${environment.hasNotch ? " pinterest-wallpaper-preview__safe-area--notch" : ""}`}
+      role="img"
+      style={style}
+    >
+      <span className="pinterest-wallpaper-preview__safe-area-top" />
+      <span className="pinterest-wallpaper-preview__safe-area-bottom" />
+      <span className="pinterest-wallpaper-preview__safe-area-start" />
+      <span className="pinterest-wallpaper-preview__safe-area-end" />
+    </div>
+  );
+}
+
+function PinterestWallpaperPlaceholder({
+  error,
+  layout,
+}: {
+  error?: string;
+  layout: PinterestWallpaperSettings["layout"];
+}) {
+  const tiles = ["sun", "leaf", "mountain", "stars", "wave", "cloud", "flower", "moon"];
+  return (
+    <div
+      aria-label={
+        error
+          ? "Pinterest image preview could not load"
+          : "Illustrated wallpaper placeholder while Pinterest images load"
+      }
+      className={`pinterest-wallpaper-placeholder pinterest-wallpaper-placeholder--${layout}`}
+      role="img"
+    >
+      {tiles.map((tile) => (
+        <div className="pinterest-wallpaper-placeholder__tile" key={tile}>
+          <Image aria-hidden="true" size={20} strokeWidth={1.5} />
+          <span>Image</span>
+        </div>
+      ))}
+      <p aria-live="polite">
+        {error ? "Pinterest images could not load." : "Loading Pinterest images…"}
+      </p>
+    </div>
+  );
+}
+
+function previewBackground(
+  mode: PinterestWallpaperSettings["backgroundMode"],
+  customColor: string,
+  timestamp: number,
+): string {
+  if (mode === "custom") return customColor;
+  if (mode === "matched") return "#e4ddd8";
+  if (mode === "random") return pinterestDailyBackdrop(timestamp);
+  return "#ffffff";
+}
+
+function pinterestDailyBackdrop(timestamp: number): string {
+  const palette = ["#DCE8F2", "#E9DFD0", "#DCE9DC", "#EEE0EA", "#F0E5D3", "#E1E2F1"];
+  return palette[Math.floor(timestamp / 86_400_000) % palette.length] ?? "#ffffff";
+}
+
+function ConnectorRow({
+  account,
+  disconnect,
+  enableMail,
+  sync,
+  syncing,
+}: {
+  account: CalendarAccount;
+  disconnect: () => void;
+  enableMail?: () => void;
+  sync: () => void;
+  syncing: boolean;
+}) {
+  return (
+    <ShadcnItem className="connector-row" size="sm">
+      <ShadcnItemMedia variant="default">
+        <ConnectedAccountIdentity
+          avatarUrl={account.avatarUrl}
+          label={account.label}
+          provider={account.provider}
+          size="default"
+        />
+      </ShadcnItemMedia>
+      <ShadcnItemContent>
+        <ShadcnItemTitle>{account.label}</ShadcnItemTitle>
+        <ShadcnItemDescription>
+          {account.email ?? "Connected account"} ·{" "}
+          {account.syncError
+            ? account.syncError
+            : account.lastSyncedAt
+              ? `Synced ${formatRelative(account.lastSyncedAt)}`
+              : "Ready to sync"}
+        </ShadcnItemDescription>
+        <div className="capability-badges">
+          <ConnectorCapabilityBadge enabled={account.calendarEnabled} label="Calendar" />
+          <ConnectorCapabilityBadge
+            enabled={account.mailEnabled}
+            label="Mail"
+            {...(enableMail
+              ? { onEnable: enableMail, onEnableLabel: `Enable Mail for ${account.label}` }
+              : {})}
+          />
+        </div>
+      </ShadcnItemContent>
+      <ShadcnItemActions>
+        <ConnectorSyncBadge status={account.syncStatus} />
+        <ShadcnButton
+          aria-label={`Sync ${account.label}`}
+          disabled={syncing}
+          onClick={sync}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <RefreshCw className={syncing ? "spin" : ""} />
+        </ShadcnButton>
+        <ShadcnButton
+          aria-label={`Disconnect ${account.label}`}
+          onClick={disconnect}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <Trash2 />
+        </ShadcnButton>
+      </ShadcnItemActions>
+    </ShadcnItem>
+  );
+}
+
+function ConnectorCapabilityBadge({
+  enabled,
+  label,
+  onEnable,
+  onEnableLabel,
+}: {
+  enabled: boolean;
+  label: string;
+  onEnable?: () => void;
+  onEnableLabel?: string;
+}) {
+  const badge = (
+    <>
+      {enabled ? (
+        <Check aria-hidden="true" data-icon="inline-start" />
+      ) : (
+        <X aria-hidden="true" data-icon="inline-start" />
+      )}
+      {label}
+    </>
+  );
+  if (!enabled && onEnable && onEnableLabel) {
+    return (
+      <ShadcnBadge
+        asChild
+        className="capability-badge capability-badge--disabled"
+        variant="secondary"
+      >
+        <button aria-label={onEnableLabel} onClick={onEnable} type="button">
+          {badge}
+        </button>
+      </ShadcnBadge>
+    );
+  }
+  return (
+    <ShadcnBadge
+      className={`capability-badge${enabled ? " capability-badge--enabled" : " capability-badge--disabled"}`}
+      variant="secondary"
+    >
+      {badge}
+    </ShadcnBadge>
+  );
+}
+
+function ConnectorSyncBadge({ status }: { status: string }) {
+  if (status === "error") {
+    return <ShadcnBadge variant="destructive">Needs attention</ShadcnBadge>;
+  }
+  if (status === "syncing") {
+    return <ShadcnBadge variant="secondary">Syncing</ShadcnBadge>;
+  }
+  return <ShadcnBadge variant="secondary">Ready</ShadcnBadge>;
+}
+
+const calendarAndRemindersScopes: AccessScope[] = [
+  "calendar:read",
+  "calendar:write",
+  "reminders:read",
+  "reminders:write",
+  "tasks:read",
+  "tasks:write",
+  "automations:read",
+];
+
+const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
+  {
+    name: "Calendar & reminders",
+    description: "Plan, create, and complete your day.",
+    scopes: calendarAndRemindersScopes,
+  },
+  {
+    name: "Morning brief",
+    description: "Read your agenda, mail, and routine results.",
+    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
+  },
+  {
+    name: "Full personal OS",
+    description: "Create, manage, and audit all supported material.",
+    scopes: [
+      "calendar:read",
+      "calendar:write",
+      "reminders:read",
+      "reminders:write",
+      "tasks:read",
+      "tasks:write",
+      "mail:read",
+      "mail:write",
+      "goals:read",
+      "goals:write",
+      "automations:read",
+      "automations:write",
+      "audit:read",
+      "bookmarks:read",
+    ],
+  },
+];
+
+const scopeLabels: Record<AccessScope, string> = {
+  "audit:read": "Read activity",
+  "bookmarks:read": "Read X bookmarks",
+  "finances:read": "Read finances",
+  "finances:write": "Manage finances",
+  "automations:read": "Read automations",
+  "automations:write": "Run automations",
+  "calendar:read": "Read calendar",
+  "calendar:write": "Manage calendar",
+  "mail:read": "Read mail",
+  "mail:write": "Manage mail",
+  "goals:read": "Read goals & motives",
+  "goals:write": "Manage goals & motives",
+  "reminders:read": "Read reminders",
+  "reminders:write": "Manage reminders",
+  "tasks:read": "Read tasks",
+  "tasks:write": "Manage tasks",
+};
+
+function TokensSettings() {
+  const queryClient = useQueryClient();
+  const query = useQuery({ queryFn: api.listAccessTokens, queryKey: ["tokens"] });
+  const oauthClients = useQuery({ queryFn: api.listOAuthClients, queryKey: ["oauth-clients"] });
+  const [secret, setSecret] = useState<string | null>(null);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [tokenName, setTokenName] = useState("My agent");
+  const [scopes, setScopes] = useState<AccessScope[]>(calendarAndRemindersScopes);
+  const create = useMutation({
+    mutationFn: () =>
+      api.createAccessToken({
+        name: tokenName.trim(),
+        scopes,
+      }),
+    onSuccess: (token) => {
+      setSecret(token.token);
+      return queryClient.invalidateQueries({ queryKey: ["tokens"] });
+    },
+  });
+  const remove = useMutation({
+    mutationFn: api.deleteAccessToken,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tokens"] }),
+  });
+  const revokeOAuthClient = useMutation({
+    mutationFn: api.revokeOAuthClient,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["oauth-clients"] }),
+  });
+  const selectedPreset =
+    tokenPresets.find(
+      (preset) =>
+        preset.scopes.length === scopes.length &&
+        preset.scopes.every((scope) => scopes.includes(scope)),
+    )?.name ?? "";
+  const activeTokens = (query.data ?? []).filter((token) => token.revokedAt === null);
+  const revokedTokens = (query.data ?? []).filter((token) => token.revokedAt !== null);
+  return (
+    <SettingsSection
+      description="Scoped, revocable access for MCP clients. Tokens are stored as hashes."
+      title="Agent access"
+    >
+      <div className="token-composer">
+        <ShadcnFieldGroup>
+          <ShadcnField orientation="responsive">
+            <ShadcnFieldContent>
+              <ShadcnFieldLabel htmlFor="token-name">Token name</ShadcnFieldLabel>
+              <ShadcnFieldDescription>
+                Start with a preset, then refine the individual permissions before creating an agent
+                token.
+              </ShadcnFieldDescription>
+            </ShadcnFieldContent>
+            <ShadcnInput
+              id="token-name"
+              onChange={(event) => setTokenName(event.target.value)}
+              value={tokenName}
+            />
+          </ShadcnField>
+          <ShadcnFieldSet>
+            <ShadcnFieldLegend variant="label">Permission preset</ShadcnFieldLegend>
+            <ShadcnToggleGroup
+              aria-label="Permission preset"
+              onValueChange={(presetName) => {
+                const preset = tokenPresets.find((item) => item.name === presetName);
+                if (preset) setScopes(preset.scopes);
+              }}
+              type="single"
+              value={selectedPreset}
+              variant="outline"
+            >
+              {tokenPresets.map((preset) => (
+                <ShadcnToggleGroupItem key={preset.name} value={preset.name}>
+                  {preset.name}
+                </ShadcnToggleGroupItem>
+              ))}
+            </ShadcnToggleGroup>
+          </ShadcnFieldSet>
+          <ShadcnCollapsible
+            className="settings-disclosure"
+            onOpenChange={setPermissionsOpen}
+            open={permissionsOpen}
+          >
+            <ShadcnCollapsibleTrigger asChild>
+              <ShadcnButton
+                className="settings-disclosure__trigger"
+                type="button"
+                variant="outline"
+              >
+                Fine-tune permissions · {scopes.length} selected
+                <ChevronDown aria-hidden="true" data-icon="inline-end" />
+              </ShadcnButton>
+            </ShadcnCollapsibleTrigger>
+            <ShadcnCollapsibleContent className="settings-disclosure__content">
+              <ShadcnFieldSet>
+                <ShadcnFieldLegend className="sr-only" variant="label">
+                  Fine-tune permissions
+                </ShadcnFieldLegend>
+                <ShadcnFieldGroup className="token-permissions">
+                  {(Object.keys(scopeLabels) as AccessScope[]).map((scope) => (
+                    <ShadcnField key={scope} orientation="horizontal">
+                      <ShadcnCheckbox
+                        checked={scopes.includes(scope)}
+                        id={`scope-${scope}`}
+                        onCheckedChange={(checked) =>
+                          setScopes((current) =>
+                            checked
+                              ? [...new Set([...current, scope])]
+                              : current.filter((selectedScope) => selectedScope !== scope),
+                          )
+                        }
+                      />
+                      <ShadcnFieldLabel htmlFor={`scope-${scope}`}>
+                        {scopeLabels[scope]}
+                      </ShadcnFieldLabel>
+                    </ShadcnField>
+                  ))}
+                </ShadcnFieldGroup>
+              </ShadcnFieldSet>
+            </ShadcnCollapsibleContent>
+          </ShadcnCollapsible>
+          <ShadcnButton
+            className="token-composer__submit"
+            disabled={create.isPending || scopes.length === 0 || tokenName.trim().length === 0}
+            onClick={() => create.mutate()}
+            type="button"
+          >
+            <Plus data-icon="inline-start" size={15} /> Create agent token
+          </ShadcnButton>
+        </ShadcnFieldGroup>
+      </div>
+      {secret && (
+        <ShadcnAlert>
+          <Command />
+          <ShadcnAlertTitle>Copy this token now</ShadcnAlertTitle>
+          <ShadcnAlertDescription>
+            It will not be shown again. <code>{secret}</code>
+          </ShadcnAlertDescription>
+          <ShadcnAlertAction>
+            <ShadcnButton
+              aria-label="Dismiss token"
+              onClick={() => setSecret(null)}
+              size="icon"
+              type="button"
+              variant="ghost"
+            >
+              <X />
+            </ShadcnButton>
+          </ShadcnAlertAction>
+        </ShadcnAlert>
+      )}
+      {activeTokens.length ? (
+        <ShadcnItemGroup>
+          {activeTokens.map((token) => (
+            <TokenRow key={token.id} remove={() => remove.mutate(token.id)} token={token} />
+          ))}
+        </ShadcnItemGroup>
+      ) : null}
+      {revokedTokens.length ? (
+        <ShadcnCollapsible className="settings-disclosure">
+          <ShadcnCollapsibleTrigger asChild>
+            <ShadcnButton className="settings-disclosure__trigger" type="button" variant="outline">
+              Revoked tokens · {revokedTokens.length}
+              <ChevronDown aria-hidden="true" data-icon="inline-end" />
+            </ShadcnButton>
+          </ShadcnCollapsibleTrigger>
+          <ShadcnCollapsibleContent className="settings-disclosure__content">
+            <ShadcnItemGroup>
+              {revokedTokens.map((token) => (
+                <TokenRow key={token.id} remove={() => remove.mutate(token.id)} token={token} />
+              ))}
+            </ShadcnItemGroup>
+          </ShadcnCollapsibleContent>
+        </ShadcnCollapsible>
+      ) : null}
+      {oauthClients.data?.length ? (
+        <>
+          <h3 className="settings-subtitle">Authorized MCP clients</h3>
+          <ShadcnItemGroup>
+            {oauthClients.data.map((client) => (
+              <ShadcnItem key={client.id} variant="outline">
+                <ShadcnItemMedia className="provider-icon" variant="icon">
+                  <Command size={16} />
+                </ShadcnItemMedia>
+                <ShadcnItemContent>
+                  <ShadcnItemTitle>{client.name}</ShadcnItemTitle>
+                  <ShadcnItemDescription>
+                    {client.lastUsedAt ? `Used ${formatRelative(client.lastUsedAt)}` : "Never used"}{" "}
+                    · {client.scopes.length} scopes
+                  </ShadcnItemDescription>
+                </ShadcnItemContent>
+                <ShadcnItemActions>
+                  <ShadcnButton
+                    aria-label={`Revoke ${client.name}`}
+                    disabled={revokeOAuthClient.isPending}
+                    onClick={() => revokeOAuthClient.mutate(client.id)}
+                    size="icon"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <Trash2 />
+                  </ShadcnButton>
+                </ShadcnItemActions>
+              </ShadcnItem>
+            ))}
+          </ShadcnItemGroup>
+        </>
+      ) : null}
+    </SettingsSection>
+  );
+}
+
+function TokenRow({ remove, token }: { remove: () => void; token: AccessToken }) {
+  return (
+    <ShadcnItem variant="outline">
+      <ShadcnItemMedia className="provider-icon" variant="icon">
+        <Command size={16} />
+      </ShadcnItemMedia>
+      <ShadcnItemContent>
+        <ShadcnItemTitle>{token.name}</ShadcnItemTitle>
+        <ShadcnItemDescription>
+          {token.lastUsedAt ? `Used ${formatRelative(token.lastUsedAt)}` : "Never used"} ·{" "}
+          {token.scopes.length} scopes
+        </ShadcnItemDescription>
+      </ShadcnItemContent>
+      <ShadcnItemActions>
+        {token.revokedAt ? (
+          <ShadcnBadge variant="secondary">Revoked</ShadcnBadge>
+        ) : (
+          <ShadcnButton
+            aria-label={`Revoke ${token.name}`}
+            onClick={remove}
+            size="icon"
+            type="button"
+            variant="ghost"
+          >
+            <Trash2 />
+          </ShadcnButton>
+        )}
+      </ShadcnItemActions>
+    </ShadcnItem>
+  );
+}
+
+function ProfileSettings({ user }: { user: User }) {
+  const queryClient = useQueryClient();
+  const [homeLocation, setHomeLocation] = useState<HomeLocation | null>(user.homeLocation);
+  const [homeLocationValid, setHomeLocationValid] = useState(true);
+  const [planningTimezone, setPlanningTimezone] = useState(user.planningTimezone);
+  const update = useMutation({
+    mutationFn: (input: {
+      displayName: string;
+      email: string;
+      planningTimezone: string;
+      homeLocation: HomeLocation | null;
+      workdayEndMinute: number;
+      workdayStartMinute: number;
+    }) => api.updateUser(input),
+    onSuccess: (nextUser) => {
+      queryClient.setQueryData(["me"], nextUser);
+      toast.success("Profile saved.");
+    },
+  });
+  const resendVerification = useMutation({
+    mutationFn: api.resendEmailVerification,
+    onSuccess: () => toast.success("Confirmation email sent."),
+  });
+  const timeZones = Array.from(
+    new Set([
+      planningTimezone,
+      user.planningTimezone,
+      "America/New_York",
+      "America/Chicago",
+      "America/Denver",
+      "America/Los_Angeles",
+      "Europe/London",
+      "UTC",
+    ]),
+  );
+  const [firstName, lastName] = splitProfileName(user.displayName);
+  return (
+    <SettingsSection
+      description="Your identity and local time are used to personalize the workspace and schedule material correctly."
+      title="Profile"
+    >
+      <form
+        className="profile-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const form = new FormData(event.currentTarget);
+          update.mutate({
+            displayName: [form.get("firstName"), form.get("lastName")]
+              .map((value) => String(value).trim())
+              .filter(Boolean)
+              .join(" "),
+            email: String(form.get("email")),
+            planningTimezone,
+            homeLocation,
+            workdayEndMinute: timeToMinute(String(form.get("workdayEnd"))),
+            workdayStartMinute: timeToMinute(String(form.get("workdayStart"))),
+          });
+        }}
+      >
+        {!user.emailVerified ? (
+          <ShadcnAlert role="status" variant="warning">
+            <Mail />
+            <ShadcnAlertTitle>Email confirmation needed</ShadcnAlertTitle>
+            <ShadcnAlertDescription>
+              Confirm this address to keep account recovery available and unlock connected accounts.
+            </ShadcnAlertDescription>
+            <ShadcnAlertAction>
+              <ShadcnButton
+                disabled={resendVerification.isPending}
+                onClick={() => resendVerification.mutate()}
+                type="button"
+                variant="outline"
+              >
+                {resendVerification.isPending ? "Sending…" : "Resend confirmation"}
+              </ShadcnButton>
+            </ShadcnAlertAction>
+          </ShadcnAlert>
+        ) : null}
+        <ShadcnFieldGroup className="form-grid">
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="profile-first-name">First name</ShadcnFieldLabel>
+            <ShadcnInput
+              autoComplete="given-name"
+              defaultValue={firstName}
+              id="profile-first-name"
+              name="firstName"
+              required
+            />
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="profile-last-name">Last name</ShadcnFieldLabel>
+            <ShadcnInput
+              autoComplete="family-name"
+              defaultValue={lastName}
+              id="profile-last-name"
+              name="lastName"
+            />
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="profile-email">Email</ShadcnFieldLabel>
+            <ShadcnInput
+              autoComplete="email"
+              defaultValue={user.email}
+              id="profile-email"
+              name="email"
+              required
+              type="email"
+            />
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="profile-workday-start">Planning day starts</ShadcnFieldLabel>
+            <ShadcnInput
+              defaultValue={minuteToTime(user.workdayStartMinute)}
+              id="profile-workday-start"
+              name="workdayStart"
+              required
+              type="time"
+            />
+          </ShadcnField>
+          <ShadcnField>
+            <ShadcnFieldLabel htmlFor="profile-workday-end">Planning day ends</ShadcnFieldLabel>
+            <ShadcnInput
+              defaultValue={minuteToTime(user.workdayEndMinute)}
+              id="profile-workday-end"
+              name="workdayEnd"
+              required
+              type="time"
+            />
+          </ShadcnField>
+          <HomeLocationField
+            key={user.updatedAt}
+            savedLocation={user.homeLocation}
+            onChange={(location) => {
+              setHomeLocation(location);
+              if (location?.timezone) setPlanningTimezone(location.timezone);
+            }}
+            onValidityChange={setHomeLocationValid}
+          />
+          <ShadcnField className="profile-form__full-row">
+            <ShadcnFieldLabel htmlFor="profile-timezone">Planning time zone</ShadcnFieldLabel>
+            <ShadcnNativeSelect
+              id="profile-timezone"
+              name="planningTimezone"
+              onChange={(event) => setPlanningTimezone(event.target.value)}
+              value={planningTimezone}
+            >
+              {timeZones.map((timeZone) => (
+                <NativeSelectOption key={timeZone} value={timeZone}>
+                  {timeZone.replace("_", " ")}
+                </NativeSelectOption>
+              ))}
+            </ShadcnNativeSelect>
+            <ShadcnFieldDescription>
+              Home Location supplies this default. Choose a different zone when your planning day
+              should stay anchored elsewhere.
+            </ShadcnFieldDescription>
+          </ShadcnField>
+        </ShadcnFieldGroup>
+        {update.isError ? <SettingsError error={update.error} /> : null}
+        {resendVerification.isError ? <SettingsError error={resendVerification.error} /> : null}
+        <ShadcnButton disabled={update.isPending || !homeLocationValid} type="submit">
+          {update.isPending ? "Saving profile…" : "Save profile"}
+        </ShadcnButton>
+      </form>
+    </SettingsSection>
+  );
+}
+
+function splitProfileName(displayName: string): [firstName: string, lastName: string] {
+  const [firstName = "", ...lastName] = displayName.trim().split(/\s+/);
+  return [firstName, lastName.join(" ")];
+}
+
+function HomeLocationField({
+  onChange,
+  onValidityChange,
+  savedLocation,
+}: {
+  onChange: (location: WeatherLocationOption | null) => void;
+  onValidityChange: (valid: boolean) => void;
+  savedLocation: HomeLocation | null;
+}) {
+  const [selectedLocation, setSelectedLocation] = useState<WeatherLocationOption | null>(
+    savedLocation?.coordinates
+      ? { ...savedLocation, coordinates: savedLocation.coordinates }
+      : null,
+  );
+  const [searchValue, setSearchValue] = useState(savedLocation?.label ?? "");
+  const [open, setOpen] = useState(false);
+  const deferredSearch = useDeferredValue(selectedLocation === null ? searchValue.trim() : "");
+  const locations = useQuery({
+    enabled: deferredSearch.length >= 2,
+    queryFn: () => api.searchWeatherLocations(deferredSearch),
+    queryKey: ["weather-location-search", deferredSearch],
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+  const items = useMemo(() => {
+    const results = locations.data ?? [];
+    if (
+      selectedLocation === null ||
+      results.some((item) => item.label === selectedLocation.label)
+    ) {
+      return results;
+    }
+    return [selectedLocation, ...results];
+  }, [locations.data, selectedLocation]);
+  const query = searchValue.trim();
+  const fieldInvalid =
+    query.length > 0 && selectedLocation === null && savedLocation?.label !== query;
+  return (
+    <ShadcnField data-invalid={fieldInvalid || undefined}>
+      <ShadcnFieldLabel htmlFor="profile-home-location">Home Location</ShadcnFieldLabel>
+      <Combobox
+        autoHighlight
+        filter={null}
+        inputValue={searchValue}
+        itemToStringLabel={(location: WeatherLocationOption) => location.label}
+        items={items}
+        onInputValueChange={(nextValue, { reason }) => {
+          if (reason === "item-press") return;
+          setSearchValue(nextValue);
+          setOpen(nextValue.trim().length > 0);
+          if (nextValue.trim().length === 0) {
+            setSelectedLocation(null);
+            onChange(null);
+            onValidityChange(true);
+            return;
+          }
+          if (savedLocation?.label === nextValue.trim()) {
+            if (savedLocation.coordinates) {
+              const restoredLocation = {
+                ...savedLocation,
+                coordinates: savedLocation.coordinates,
+              };
+              setSelectedLocation(restoredLocation);
+              onChange(restoredLocation);
+            }
+            onValidityChange(true);
+            return;
+          }
+          setSelectedLocation(null);
+          onChange(null);
+          onValidityChange(false);
+        }}
+        onOpenChange={setOpen}
+        onValueChange={(nextValue, { reason }) => {
+          setSelectedLocation(nextValue);
+          if (reason === "item-press") {
+            setSearchValue(nextValue?.label ?? "");
+            setOpen(false);
+          }
+          if (nextValue === null && (reason === "clear-press" || reason === "input-clear")) {
+            setSearchValue("");
+            setOpen(false);
+          }
+          onChange(nextValue);
+          onValidityChange(
+            nextValue !== null || reason === "clear-press" || reason === "input-clear",
+          );
+        }}
+        open={open}
+        value={selectedLocation}
+      >
+        <ComboboxInput
+          aria-describedby="profile-home-location-description"
+          aria-invalid={fieldInvalid || undefined}
+          autoComplete="off"
+          id="profile-home-location"
+          placeholder="Search by city, ZIP, or region"
+          showClear
+        />
+        <ComboboxContent aria-busy={locations.isFetching || undefined}>
+          {query.length < 2 ? (
+            <p className="px-2 py-2 text-sm text-muted-foreground">Type at least two characters.</p>
+          ) : null}
+          {locations.isFetching ? (
+            <p className="px-2 py-2 text-sm text-muted-foreground">Searching places…</p>
+          ) : null}
+          {locations.isError ? (
+            <p className="px-2 py-2 text-sm text-destructive" role="alert">
+              {errorMessage(locations.error)}
+            </p>
+          ) : null}
+          <ComboboxEmpty>
+            {query.length >= 2 && !locations.isFetching && !locations.isError
+              ? "No matching places."
+              : null}
+          </ComboboxEmpty>
+          <ComboboxList>
+            {(location: WeatherLocationOption) => (
+              <ComboboxItem key={location.label} value={location}>
+                {location.label}
+              </ComboboxItem>
+            )}
+          </ComboboxList>
+        </ComboboxContent>
+      </Combobox>
+      <ShadcnFieldDescription id="profile-home-location-description">
+        Used when this device cannot share its location.
+      </ShadcnFieldDescription>
+    </ShadcnField>
+  );
+}
+
+function InvitationsSettings() {
+  const queryClient = useQueryClient();
+  const invitations = useQuery({ queryFn: api.listInvitations, queryKey: ["invitations"] });
+  const [latestCode, setLatestCode] = useState<string | null>(null);
+  const create = useMutation({
+    mutationFn: (form: FormData) =>
+      api.createInvitation({
+        ...(String(form.get("email")).trim() ? { email: String(form.get("email")).trim() } : {}),
+        expiresInDays: Number(form.get("expiresInDays")),
+      }),
+    onSuccess: (invitation) => {
+      setLatestCode(invitation.code);
+      void queryClient.invalidateQueries({ queryKey: ["invitations"] });
+    },
+  });
+  const copyLatestCode = async () => {
+    if (!latestCode || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(latestCode);
+  };
+  return (
+    <SettingsSection
+      description="Issue single-use invitation codes for the private beta. The code is shown only once, so copy it before you leave this page."
+      title="Invitations"
+    >
+      {invitations.isError ? (
+        <SettingsError error={invitations.error} />
+      ) : (
+        <>
+          <form
+            className="profile-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              create.mutate(new FormData(event.currentTarget));
+            }}
+          >
+            <ShadcnFieldGroup className="form-grid">
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="invite-email">
+                  Friend’s email (optional)
+                </ShadcnFieldLabel>
+                <ShadcnInput id="invite-email" name="email" type="email" />
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
+                <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">
+                  <NativeSelectOption value="7">7 days</NativeSelectOption>
+                  <NativeSelectOption value="14">14 days</NativeSelectOption>
+                  <NativeSelectOption value="30">30 days</NativeSelectOption>
+                </ShadcnNativeSelect>
+              </ShadcnField>
+            </ShadcnFieldGroup>
+            {create.isError ? <SettingsError error={create.error} /> : null}
+            <ShadcnButton disabled={create.isPending} type="submit">
+              {create.isPending ? "Creating invitation…" : "Create invitation"}
+            </ShadcnButton>
+          </form>
+          {latestCode ? (
+            <ShadcnAlert>
+              <CheckCircle2 />
+              <ShadcnAlertTitle>Invitation ready</ShadcnAlertTitle>
+              <ShadcnAlertDescription>
+                Share this code privately: <code>{latestCode}</code>
+              </ShadcnAlertDescription>
+              <ShadcnAlertAction>
+                <ShadcnButton onClick={() => void copyLatestCode()} type="button" variant="outline">
+                  Copy code
+                </ShadcnButton>
+              </ShadcnAlertAction>
+            </ShadcnAlert>
+          ) : null}
+          {invitations.isLoading ? <Spinner label="Loading invitations" /> : null}
+          {invitations.data?.length ? (
+            <div className="settings-list">
+              {invitations.data.map((invitation) => (
+                <InvitationRow invitation={invitation} key={invitation.id} />
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
+    </SettingsSection>
+  );
+}
+
+function InvitationRow({ invitation }: { invitation: Invitation }) {
+  const expired = new Date(invitation.expiresAt).getTime() <= Date.now();
+  return (
+    <ShadcnItem>
+      <ShadcnItemContent>
+        <ShadcnItemTitle>{invitation.email ?? "Unassigned invitation"}</ShadcnItemTitle>
+        <ShadcnItemDescription>
+          {invitation.redeemedAt
+            ? `Redeemed ${formatRelative(invitation.redeemedAt)}`
+            : expired
+              ? "Expired"
+              : `Expires ${formatRelative(invitation.expiresAt)}`}
+        </ShadcnItemDescription>
+      </ShadcnItemContent>
+    </ShadcnItem>
+  );
+}
+
+function SessionsSettings() {
+  const queryClient = useQueryClient();
+  const sessions = useQuery({ queryFn: api.listSessions, queryKey: ["sessions"] });
+  const revoke = useMutation({
+    mutationFn: api.revokeSession,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["sessions"] }),
+  });
+  return (
+    <SettingsSection
+      description="Devices with an active sign-in to your Personal OS account. Revoke access you no longer recognize."
+      title="Sessions"
+    >
+      <ShadcnItemGroup>
+        {sessions.data?.map((session) => (
+          <SessionRow key={session.id} revoke={() => revoke.mutate(session.id)} session={session} />
+        ))}
+      </ShadcnItemGroup>
+    </SettingsSection>
+  );
+}
+
+const appearanceThemes: Array<{
+  icon: LucideIcon;
+  label: string;
+  value: Theme;
+}> = [
+  {
+    icon: Monitor,
+    label: "System",
+    value: "system",
+  },
+  {
+    icon: Sun,
+    label: "Light",
+    value: "light",
+  },
+  {
+    icon: Moon,
+    label: "Dark",
+    value: "dark",
+  },
+];
+
+function ThemeSettings({ user }: { user: User }) {
+  const queryClient = useQueryClient();
+  const updateTheme = useMutation({
+    mutationFn: (input: { theme: Theme }) => api.updateUser(input),
+    onSuccess: (nextUser) => queryClient.setQueryData(["me"], nextUser),
+  });
+  return (
+    <SettingsSection title="Appearance">
+      <ShadcnFieldSet className="settings-choice-group">
+        <ShadcnFieldLegend variant="label">Color mode</ShadcnFieldLegend>
+        <ChoiceCardGroup
+          aria-label="Color mode"
+          className="appearance-picker"
+          disabled={updateTheme.isPending}
+          onValueChange={(theme) => updateTheme.mutate({ theme: theme as Theme })}
+          options={appearanceThemes.map(({ icon: Icon, label, value }) => ({
+            icon: <Icon size={18} />,
+            label,
+            preview: <AppearancePreview mode={value} />,
+            value,
+          }))}
+          value={user.theme}
+        />
+      </ShadcnFieldSet>
+      {updateTheme.isError ? <SettingsError error={updateTheme.error} /> : null}
+    </SettingsSection>
+  );
+}
+
+function AppearancePreview({ mode }: { mode: Theme }) {
+  const panes = mode === "system" ? ["light", "dark"] : [mode];
+  return (
+    <span aria-hidden="true" className="appearance-preview" data-mode={mode}>
+      {panes.map((tone) => (
+        <span className={`appearance-preview__pane appearance-preview__pane--${tone}`} key={tone}>
+          <span className="appearance-preview__rail" />
+          <span className="appearance-preview__content">
+            <span />
+            <span />
+          </span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function useDocumentTheme(theme: Theme) {
+  useEffect(() => {
+    const root = document.documentElement;
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const apply = () => {
+      const resolved = theme === "system" ? (media?.matches ? "dark" : "light") : theme;
+      root.classList.toggle("dark", resolved === "dark");
+      root.style.colorScheme = resolved;
+    };
+    apply();
+    if (
+      theme !== "system" ||
+      !media ||
+      typeof media.addEventListener !== "function" ||
+      typeof media.removeEventListener !== "function"
+    ) {
+      return;
+    }
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, [theme]);
+}
+
+function SessionRow({ revoke, session }: { revoke: () => void; session: Session }) {
+  return (
+    <ShadcnItem variant="outline">
+      <ShadcnItemMedia className="provider-icon" variant="icon">
+        <UserRound size={16} />
+      </ShadcnItemMedia>
+      <ShadcnItemContent>
+        <ShadcnItemTitle>
+          {session.userAgent?.split(" ").slice(0, 3).join(" ") ?? "Unknown device"}
+        </ShadcnItemTitle>
+        <ShadcnItemDescription>
+          {session.ipAddress ?? "Local"} · Active {formatRelative(session.lastSeenAt)}
+        </ShadcnItemDescription>
+      </ShadcnItemContent>
+      <ShadcnItemActions>
+        <ShadcnButton
+          aria-label="Revoke session"
+          onClick={revoke}
+          size="icon"
+          type="button"
+          variant="ghost"
+        >
+          <Trash2 />
+        </ShadcnButton>
+      </ShadcnItemActions>
+    </ShadcnItem>
+  );
+}
+
+function SettingsSection({
+  action,
+  children,
+  description,
+  title,
+}: {
+  action?: ReactNode;
+  children: ReactNode;
+  description?: string;
+  title: string;
+}) {
+  return (
+    <ShadcnCard className="settings-section">
+      <ShadcnCardHeader>
+        <ShadcnCardTitle>
+          <h2>{title}</h2>
+        </ShadcnCardTitle>
+        {description ? <ShadcnCardDescription>{description}</ShadcnCardDescription> : null}
+        {action ? <ShadcnCardAction>{action}</ShadcnCardAction> : null}
+      </ShadcnCardHeader>
+      <ShadcnCardContent className="settings-section__body">{children}</ShadcnCardContent>
+    </ShadcnCard>
+  );
+}
+
+function SettingsError({ error }: { error: unknown }) {
+  return (
+    <ShadcnAlert variant="destructive">
+      <X />
+      <ShadcnAlertTitle>Something needs attention</ShadcnAlertTitle>
+      <ShadcnAlertDescription>{errorMessage(error)}</ShadcnAlertDescription>
+    </ShadcnAlert>
+  );
+}
+
+function ReminderGroup({
+  label,
+  reminders,
+  setEditor,
+  timeZone,
+}: {
+  label: string;
+  reminders: Reminder[];
+  setEditor: (editor: Editor) => void;
+  timeZone: string;
+}) {
+  return (
+    <section className="reminder-group">
+      <h3>
+        {label}
+        <span>{reminders.length}</span>
+      </h3>
+      <div className="reminder-list">
+        {reminders.map((reminder) => (
+          <ReminderRow
+            key={reminder.id}
+            onEdit={() => setEditor({ kind: "reminder", reminder })}
+            reminder={reminder}
+            timeZone={timeZone}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function TaskGroup({
+  label,
+  recommendations,
+  setEditor,
+  tasks,
+  timeZone,
+}: {
+  label: string;
+  recommendations?: Map<string, DailyBrief["recommendedTasks"][number]>;
+  setEditor: (editor: Editor) => void;
+  tasks: Task[];
+  timeZone: string;
+}) {
+  return (
+    <section className="reminder-group">
+      <h3>
+        {label}
+        <span>{tasks.length}</span>
+      </h3>
+      <ShadcnItemGroup>
+        {tasks.map((task) => {
+          const recommendation = recommendations?.get(task.id);
+          return (
+            <TaskRow
+              key={task.id}
+              onEdit={() => setEditor({ kind: "task", task })}
+              {...(recommendation ? { recommendation } : {})}
+              task={task}
+              timeZone={timeZone}
+            />
+          );
+        })}
+      </ShadcnItemGroup>
+    </section>
+  );
+}
+
+function ReminderRow({
+  onEdit,
+  reminder,
+  timeZone,
+}: {
+  onEdit: () => void;
+  reminder: Reminder;
+  timeZone: string;
+}) {
+  const queryClient = useQueryClient();
+  const complete = useMutation({
+    mutationFn: () => api.completeReminder(reminder.id, !reminder.completedAt),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.deleteReminder(reminder.id),
+    onSuccess: () => invalidateMaterial(queryClient),
+  });
+  return (
+    <article className={`reminder-row${reminder.completedAt ? " reminder-row--done" : ""}`}>
+      <button
+        aria-label={
+          reminder.completedAt ? `Reopen ${reminder.title}` : `Complete ${reminder.title}`
+        }
+        className="check-button"
+        disabled={complete.isPending}
+        onClick={() => complete.mutate()}
+        type="button"
+      >
+        {reminder.completedAt ? <Check size={15} /> : <Circle size={18} />}
+      </button>
+      <button className="reminder-row__material" onClick={onEdit} type="button">
+        <strong>{reminder.title}</strong>
+        <span>
+          {reminder.dueAt ? (
+            <>
+              <Clock3 size={13} /> {formatDue(reminder.dueAt, timeZone)}
+            </>
+          ) : (
+            "No deadline"
+          )}
+        </span>
+      </button>
+      <Badge className={`priority priority--${reminder.priority}`}>{reminder.priority}</Badge>
+      <Button
+        aria-label={`Delete ${reminder.title}`}
+        disabled={remove.isPending}
+        onClick={() => remove.mutate()}
+        tone="ghost"
+      >
+        <Trash2 size={15} />
+      </Button>
+    </article>
+  );
+}
+
+function EventCard({
+  currentTime,
+  event,
+  onEdit,
+  timeZone,
+}: {
+  currentTime?: Date;
+  event: CalendarEvent;
+  onEdit: () => void;
+  timeZone: string;
+}) {
+  const eventLabel = `${event.allDay ? "All day" : formatTime(event.startsAt, timeZone)} ${event.title}`;
+  const isInProgress =
+    currentTime !== undefined &&
+    !event.allDay &&
+    new Date(event.startsAt).getTime() <= currentTime.getTime() &&
+    currentTime.getTime() < new Date(event.endsAt).getTime();
+  const conferenceProvider = event.conferenceUrl
+    ? conferenceProviderLabel(event.conferenceUrl)
+    : null;
+  return (
+    <ShadcnCard className="gap-0 py-0" size="sm">
+      <ShadcnCardContent className="grid grid-cols-[auto_3px_minmax(0,1fr)_auto] items-stretch gap-3 py-3">
+        <span className="self-center font-mono text-xs text-muted-foreground">
+          {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
+        </span>
+        <span aria-hidden="true" className="rounded-full bg-primary" />
+        <ShadcnButton
+          aria-label={`${eventLabel}. Open details`}
+          className="h-auto min-w-0 justify-start px-0 text-left hover:bg-transparent"
+          onClick={onEdit}
+          type="button"
+          variant="ghost"
+        >
+          <span className="flex min-w-0 flex-col items-start gap-0.5">
+            <strong className="flex w-full items-center gap-1 truncate">
+              {event.title}
+              {event.blocks.length > 0 ? (
+                <LockKeyhole aria-label="Blocks another calendar" className="shrink-0" />
+              ) : null}
+            </strong>
+            <span className="flex max-w-full items-center gap-1 truncate text-xs text-muted-foreground">
+              {event.location ? (
+                <>
+                  <MapPin aria-hidden="true" />
+                  {event.location}
+                </>
+              ) : (
+                `${formatTime(event.startsAt, timeZone)}–${formatTime(event.endsAt, timeZone)}`
+              )}
+            </span>
+          </span>
+        </ShadcnButton>
+        <ConnectedServiceMark provider={event.provider} />
+      </ShadcnCardContent>
+      {isInProgress ? (
+        <ShadcnCardFooter className="flex-wrap justify-between gap-2 px-3 py-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <ShadcnBadge variant="outline">
+              <Clock3 aria-hidden="true" data-icon="inline-start" /> In progress
+            </ShadcnBadge>
+            <span className="font-mono text-xs text-muted-foreground">
+              {meetingTimingSummary(event, currentTime)}
+            </span>
+          </div>
+          {event.conferenceUrl ? (
+            <ShadcnButton asChild size="sm">
+              <a href={event.conferenceUrl} rel="noreferrer" target="_blank">
+                Join {conferenceProvider}
+                <ExternalLink aria-hidden="true" data-icon="inline-end" />
+              </a>
+            </ShadcnButton>
+          ) : null}
+        </ShadcnCardFooter>
+      ) : null}
+    </ShadcnCard>
+  );
+}
+
+function ReminderDialog({
+  close,
+  reminder,
+  user,
+}: {
+  close: () => void;
+  reminder: Reminder | undefined;
+  user: User;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (input: {
+      dueAt: string | null;
+      notes: string | null;
+      priority: "low" | "medium" | "high";
+      timezone: string | null;
+      title: string;
+    }) => (reminder ? api.updateReminder(reminder.id, input) : api.createReminder(input)),
+    onSuccess: async () => {
+      await invalidateMaterial(queryClient);
+      close();
+    },
+  });
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const due = String(form.get("dueAt"));
+    mutation.mutate({
+      dueAt: due ? dateTimeLocalToIso(due, user.planningTimezone) : null,
+      notes: nullable(form.get("notes")),
+      priority: String(form.get("priority")) as "low" | "medium" | "high",
+      timezone: due ? user.planningTimezone : null,
+      title: String(form.get("title")),
+    });
+  };
+  return (
+    <Modal
+      close={close}
+      eyebrow="Reminder"
+      title={reminder ? "Refine reminder" : "Hold onto something"}
+    >
+      <form className="editor-form" onSubmit={submit}>
+        <Field
+          autoFocus
+          defaultValue={reminder?.title}
+          label="What needs attention?"
+          name="title"
+          required
+        />
+        <div className="form-grid">
+          <Field
+            defaultValue={toDateTimeLocal(reminder?.dueAt, user.planningTimezone)}
+            label="Deadline"
+            name="dueAt"
+            type="datetime-local"
+          />
+          <label className="field">
+            <span>Priority</span>
+            <select defaultValue={reminder?.priority ?? "medium"} name="priority">
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+        </div>
+        <label className="field">
+          <span>Notes</span>
+          <textarea defaultValue={reminder?.notes ?? ""} name="notes" rows={4} />
+        </label>
+        <FormActions
+          close={close}
+          error={mutation.error}
+          pending={mutation.isPending}
+          submitLabel={reminder ? "Save changes" : "Create reminder"}
+        />
+      </form>
+    </Modal>
+  );
+}
+
+function TaskDialog({
+  close,
+  task,
+  user,
+}: {
+  close: () => void;
+  task: Task | undefined;
+  user: User;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (input: {
+      dueAt: string | null;
+      estimateMinutes: number | null;
+      notes: string | null;
+      priority: "low" | "medium" | "high";
+      scheduledAt: string | null;
+      status: "cancelled" | "completed" | "inbox" | "next" | "scheduled";
+      tags: string[];
+      timezone: string | null;
+      title: string;
+    }) => (task ? api.updateTask(task.id, input) : api.createTask(input)),
+    onSuccess: async () => {
+      await invalidateMaterial(queryClient);
+      close();
+    },
+  });
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const dueAt = String(form.get("dueAt"));
+    const scheduledAt = String(form.get("scheduledAt"));
+    const estimate = String(form.get("estimateMinutes"));
+    mutation.mutate({
+      dueAt: dueAt ? dateTimeLocalToIso(dueAt, user.planningTimezone) : null,
+      estimateMinutes: estimate ? Number(estimate) : null,
+      notes: nullable(form.get("notes")),
+      priority: String(form.get("priority")) as "low" | "medium" | "high",
+      scheduledAt: scheduledAt ? dateTimeLocalToIso(scheduledAt, user.planningTimezone) : null,
+      status: String(form.get("status")) as
+        | "cancelled"
+        | "completed"
+        | "inbox"
+        | "next"
+        | "scheduled",
+      timezone: dueAt || scheduledAt ? user.planningTimezone : null,
+      tags: String(form.get("tags"))
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter(Boolean),
+      title: String(form.get("title")),
+    });
+  };
+  return (
+    <ShadcnDialog open onOpenChange={(open) => !open && close()}>
+      <ShadcnDialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+        <ShadcnDialogHeader>
+          <ShadcnDialogTitle>{task ? "Refine task" : "Capture a task"}</ShadcnDialogTitle>
+          <ShadcnDialogDescription>
+            Keep the commitment separate from its deadline and any time you reserve for it.
+          </ShadcnDialogDescription>
+        </ShadcnDialogHeader>
+        <form onSubmit={submit}>
+          <ShadcnFieldGroup>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="task-title">Task</ShadcnFieldLabel>
+              <ShadcnInput
+                autoFocus
+                defaultValue={task?.title}
+                id="task-title"
+                name="title"
+                required
+              />
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="task-notes">Notes</ShadcnFieldLabel>
+              <ShadcnTextarea
+                defaultValue={task?.notes ?? ""}
+                id="task-notes"
+                name="notes"
+                rows={4}
+              />
+            </ShadcnField>
+            <ShadcnFieldGroup className="grid gap-5 sm:grid-cols-2">
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="task-status">Status</ShadcnFieldLabel>
+                <ShadcnNativeSelect
+                  defaultValue={task?.status ?? "inbox"}
+                  id="task-status"
+                  name="status"
+                >
+                  <NativeSelectOption value="inbox">Inbox</NativeSelectOption>
+                  <NativeSelectOption value="next">Next</NativeSelectOption>
+                  <NativeSelectOption value="scheduled">Scheduled</NativeSelectOption>
+                  <NativeSelectOption value="completed">Completed</NativeSelectOption>
+                  <NativeSelectOption value="cancelled">Cancelled</NativeSelectOption>
+                </ShadcnNativeSelect>
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="task-priority">Priority</ShadcnFieldLabel>
+                <ShadcnNativeSelect
+                  defaultValue={task?.priority ?? "medium"}
+                  id="task-priority"
+                  name="priority"
+                >
+                  <NativeSelectOption value="low">Low</NativeSelectOption>
+                  <NativeSelectOption value="medium">Medium</NativeSelectOption>
+                  <NativeSelectOption value="high">High</NativeSelectOption>
+                </ShadcnNativeSelect>
+              </ShadcnField>
+            </ShadcnFieldGroup>
+            <ShadcnFieldGroup className="grid gap-5 sm:grid-cols-2">
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="task-due-at">Deadline</ShadcnFieldLabel>
+                <ShadcnInput
+                  defaultValue={toDateTimeLocal(task?.dueAt, user.planningTimezone)}
+                  id="task-due-at"
+                  name="dueAt"
+                  type="datetime-local"
+                />
+              </ShadcnField>
+              <ShadcnField>
+                <ShadcnFieldLabel htmlFor="task-scheduled-at">Reserved time</ShadcnFieldLabel>
+                <ShadcnInput
+                  defaultValue={toDateTimeLocal(task?.scheduledAt, user.planningTimezone)}
+                  id="task-scheduled-at"
+                  name="scheduledAt"
+                  type="datetime-local"
+                />
+              </ShadcnField>
+            </ShadcnFieldGroup>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="task-estimate">Estimate in minutes</ShadcnFieldLabel>
+              <ShadcnInput
+                defaultValue={task?.estimateMinutes ?? ""}
+                id="task-estimate"
+                max={24 * 60}
+                min={5}
+                name="estimateMinutes"
+                step={5}
+                type="number"
+              />
+            </ShadcnField>
+            <ShadcnField>
+              <ShadcnFieldLabel htmlFor="task-tags">Tags</ShadcnFieldLabel>
+              <ShadcnInput
+                defaultValue={task?.tags.join(", ") ?? ""}
+                id="task-tags"
+                name="tags"
+                placeholder="Planning, home"
+              />
+              <ShadcnFieldDescription>Separate tags with commas.</ShadcnFieldDescription>
+            </ShadcnField>
+          </ShadcnFieldGroup>
+          {mutation.isError ? <InlineError error={mutation.error} /> : null}
+          <ShadcnDialogFooter className="mt-5">
+            <ShadcnButton onClick={close} type="button" variant="outline">
+              Cancel
+            </ShadcnButton>
+            <ShadcnButton disabled={mutation.isPending} type="submit">
+              {mutation.isPending ? "Saving…" : task ? "Save changes" : "Create task"}
+            </ShadcnButton>
+          </ShadcnDialogFooter>
+        </form>
+      </ShadcnDialogContent>
+    </ShadcnDialog>
+  );
+}
+
+function EventInspector({
+  calendars,
+  close,
+  edit,
+  event,
+  user,
+}: {
+  calendars: Calendar[];
+  close: () => void;
+  edit: () => void;
+  event: CalendarEvent;
+  user: User;
+}) {
+  const queryClient = useQueryClient();
+  const sheetRef = useRef<HTMLElement>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [blocks, setBlocks] = useState(event.blocks);
+  const calendar = calendars.find((record) => record.id === event.calendarId);
+  const blockDestinations = calendars.filter(
+    (record) => record.id !== event.calendarId && record.isWritable,
+  );
+  const remove = useMutation({
+    mutationFn: () => api.deleteEvent(event.id),
+    onSuccess: async () => {
+      await invalidateMaterial(queryClient);
+      close();
+    },
+  });
+  const changeBlock = useMutation({
+    mutationFn: async (
+      input:
+        | {
+            calendarId: string;
+            mode: "busy" | "details";
+            operation: "create";
+          }
+        | {
+            blockId: string;
+            calendarId: string;
+            mode: "busy" | "details";
+            operation: "delete" | "update";
+          },
+    ) => {
+      if (input.operation === "create") {
+        return api.createEventBlock(event.id, {
+          calendarId: input.calendarId,
+          mode: input.mode,
+        });
+      }
+      return input.operation === "delete"
+        ? api.deleteEventBlock(event.id, input.blockId)
+        : api.updateEventBlock(event.id, input.blockId, { mode: input.mode });
+    },
+    onSuccess: async (updated) => {
+      setBlocks(updated.blocks);
+      await invalidateMaterial(queryClient);
+    },
+  });
+  useEffect(() => {
+    const handleEscape = (keyboardEvent: KeyboardEvent) => {
+      if (keyboardEvent.key === "Escape") close();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [close]);
+  useDialogFocus(sheetRef);
+  return (
+    <div className="event-sheet-backdrop">
+      <button
+        aria-label="Close event details"
+        className="event-sheet-dismiss"
+        onClick={close}
+        type="button"
+      />
+      <aside
+        aria-labelledby="event-sheet-title"
+        aria-modal="true"
+        className="event-sheet"
+        ref={sheetRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <header className="event-sheet__header">
+          <div className="event-sheet__calendar">
+            <i aria-hidden="true" style={{ background: calendar?.color ?? "#777ce3" }} />
+            <span>{calendar?.name ?? "Calendar"}</span>
+            <Badge>{event.provider}</Badge>
+          </div>
+          <Button aria-label="Close event details" onClick={close} tone="ghost">
+            <X aria-hidden="true" size={19} />
+          </Button>
+        </header>
+        <div className="event-sheet__body">
+          <div className="event-sheet__title">
+            <p className="eyebrow">{event.allDay ? "All-day event" : "Scheduled event"}</p>
+            <h2 id="event-sheet-title">{event.title}</h2>
+          </div>
+          <dl className="event-sheet__facts">
+            <div>
+              <dt>
+                <Clock3 aria-hidden="true" size={17} /> Time
+              </dt>
+              <dd>{formatEventRange(event, user.planningTimezone)}</dd>
+            </div>
+            <div>
+              <dt>
+                <CalendarDays aria-hidden="true" size={17} /> Time Zone
+              </dt>
+              <dd>
+                {user.planningTimezone} ·{" "}
+                {formatTimeZoneName(new Date(event.startsAt), user.planningTimezone)}
+              </dd>
+            </div>
+            {event.location ? (
+              <div>
+                <dt>
+                  <MapPin aria-hidden="true" size={17} /> Location
+                </dt>
+                <dd>
+                  <a
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}`}
+                    rel="noreferrer"
+                    target="_blank"
+                  >
+                    {event.location} <ExternalLink aria-hidden="true" size={12} />
+                  </a>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+          {blockDestinations.length > 0 ? (
+            <section className="event-sheet__blocking" aria-labelledby="event-blocking-title">
+              <header>
+                <div>
+                  <h3 id="event-blocking-title">
+                    <LockKeyhole aria-hidden="true" size={16} /> Blocked time
+                  </h3>
+                  <p>Keep one event here while reserving the same time elsewhere.</p>
+                </div>
+                {blocks.length > 0 ? <Badge>{blocks.length} linked</Badge> : null}
+              </header>
+              <div className="event-block-list">
+                {blockDestinations.map((destination) => {
+                  const block = blocks.find((record) => record.calendarId === destination.id);
+                  return (
+                    <div className="event-block-row" key={destination.id}>
+                      <label>
+                        <input
+                          checked={Boolean(block)}
+                          disabled={changeBlock.isPending}
+                          onChange={(changeEvent) => {
+                            if (changeEvent.currentTarget.checked) {
+                              changeBlock.mutate({
+                                calendarId: destination.id,
+                                mode: "busy",
+                                operation: "create",
+                              });
+                            } else {
+                              const linkedBlock = block as NonNullable<typeof block>;
+                              changeBlock.mutate({
+                                blockId: linkedBlock.eventId,
+                                calendarId: destination.id,
+                                mode: linkedBlock.mode,
+                                operation: "delete",
+                              });
+                            }
+                          }}
+                          type="checkbox"
+                        />
+                        <i
+                          aria-hidden="true"
+                          style={{ background: destination.color ?? "#777ce3" }}
+                        />
+                        <span>
+                          <strong>{destination.name}</strong>
+                          <small>{destination.provider}</small>
+                        </span>
+                      </label>
+                      <select
+                        aria-label={`Privacy on ${destination.name}`}
+                        disabled={!block || changeBlock.isPending}
+                        onChange={(changeEvent) =>
+                          block &&
+                          changeBlock.mutate({
+                            blockId: block.eventId,
+                            calendarId: destination.id,
+                            mode: changeEvent.currentTarget.value as "busy" | "details",
+                            operation: "update",
+                          })
+                        }
+                        value={block?.mode ?? "busy"}
+                      >
+                        <option value="busy">Busy only</option>
+                        <option value="details">Include details</option>
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+              {changeBlock.isError ? (
+                <p className="form-error" role="alert">
+                  {errorMessage(changeBlock.error)}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+          <section className="event-sheet__notes" aria-labelledby="event-notes-title">
+            <h3 id="event-notes-title">
+              <FileText aria-hidden="true" size={16} /> Notes
+            </h3>
+            {event.notes ? (
+              <Suspense fallback={<p className="event-sheet__empty">Formatting notes…</p>}>
+                <RichEventNotes source={event.notes} />
+              </Suspense>
+            ) : (
+              <p className="event-sheet__empty">No notes attached to this event.</p>
+            )}
+          </section>
+          <div className="event-sheet__sync-note">
+            <Cloud aria-hidden="true" size={16} />
+            <span>
+              {event.provider === "google"
+                ? "Edits write through to Google Calendar before they appear here."
+                : "This event is stored in Personal OS and available to authorized agents."}
+            </span>
+          </div>
+          {remove.isError ? (
+            <p className="form-error" role="alert">
+              {errorMessage(remove.error)}
+            </p>
+          ) : null}
+        </div>
+        <footer className="event-sheet__actions">
+          {confirmDelete ? (
+            <div className="event-sheet__confirm">
+              <span>Delete this event everywhere?</span>
+              <Button onClick={() => setConfirmDelete(false)}>Keep Event</Button>
+              <Button disabled={remove.isPending} onClick={() => remove.mutate()} tone="danger">
+                {remove.isPending ? <Spinner label="Deleting" /> : "Delete Event"}
+              </Button>
+            </div>
+          ) : (
+            <>
+              <Button
+                disabled={!calendar?.isWritable}
+                onClick={() => setConfirmDelete(true)}
+                tone="danger"
+              >
+                <Trash2 aria-hidden="true" size={15} /> Delete
+              </Button>
+              <Button disabled={!calendar?.isWritable} onClick={edit} tone="accent">
+                <Edit3 aria-hidden="true" size={15} /> Edit Event
+              </Button>
+            </>
+          )}
+        </footer>
+      </aside>
+    </div>
+  );
+}
+
+function EventDialog({
+  calendars,
+  close,
+  draft,
+  event,
+  user,
+}: {
+  calendars: Calendar[];
+  close: () => void;
+  draft?: EventDraft;
+  event: CalendarEvent | undefined;
+  user: User;
+}) {
+  const queryClient = useQueryClient();
+  const writable = calendars.filter((calendar) => calendar.isWritable);
+  const mutation = useMutation({
+    mutationFn: (input: {
+      allDay: boolean;
+      calendarId: string;
+      endsAt: string;
+      location: string | null;
+      notes: string | null;
+      startsAt: string;
+      timezone: string;
+      title: string;
+    }) => (event ? api.updateEvent(event.id, input) : api.createEvent(input)),
+    onSuccess: async () => {
+      await invalidateMaterial(queryClient);
+      close();
+    },
+  });
+  const submit = (formEvent: FormEvent<HTMLFormElement>) => {
+    formEvent.preventDefault();
+    const form = new FormData(formEvent.currentTarget);
+    mutation.mutate({
+      allDay: form.get("allDay") === "on",
+      calendarId: String(form.get("calendarId")),
+      endsAt: dateTimeLocalToIso(String(form.get("endsAt")), user.planningTimezone),
+      location: nullable(form.get("location")),
+      notes: nullable(form.get("notes")),
+      startsAt: dateTimeLocalToIso(String(form.get("startsAt")), user.planningTimezone),
+      timezone: user.planningTimezone,
+      title: String(form.get("title")),
+    });
+  };
+  return (
+    <Modal
+      close={close}
+      eyebrow="Calendar"
+      title={event ? "Refine event" : "Shape a block of time"}
+    >
+      <form className="editor-form" onSubmit={submit}>
+        <Field autoFocus defaultValue={event?.title} label="Event" name="title" required />
+        <label className="field">
+          <span>Calendar</span>
+          <select
+            defaultValue={event?.calendarId ?? writable[0]?.id}
+            disabled={Boolean(event)}
+            name="calendarId"
+            required
+          >
+            {writable.map((calendar) => (
+              <option key={calendar.id} value={calendar.id}>
+                {calendar.name} · {calendar.provider}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="form-grid">
+          <Field
+            defaultValue={toDateTimeLocal(
+              draft?.startsAt ?? event?.startsAt,
+              user.planningTimezone,
+              1,
+            )}
+            label="Starts"
+            name="startsAt"
+            type="datetime-local"
+            required
+          />
+          <Field
+            defaultValue={toDateTimeLocal(draft?.endsAt ?? event?.endsAt, user.planningTimezone, 2)}
+            label="Ends"
+            name="endsAt"
+            type="datetime-local"
+            required
+          />
+        </div>
+        <div className="form-grid">
+          <Field defaultValue={event?.location ?? ""} label="Location" name="location" />
+          <label className="check-field">
+            <input defaultChecked={event?.allDay} name="allDay" type="checkbox" /> All day
+          </label>
+        </div>
+        <label className="field">
+          <span>Notes</span>
+          <textarea
+            aria-describedby="event-notes-help"
+            defaultValue={event?.notes ?? ""}
+            name="notes"
+            rows={5}
+          />
+          <small className="field-help" id="event-notes-help">
+            Markdown and safe HTML render in event details and stay intact when synced.
+          </small>
+        </label>
+        <FormActions
+          close={close}
+          error={mutation.error}
+          pending={mutation.isPending}
+          submitLabel={event ? "Save changes" : "Create event"}
+        />
+      </form>
+    </Modal>
+  );
+}
+
+function CalendarDialog({ close, user }: { close: () => void; user: User }) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: (form: FormData) =>
+      api.createCalendar({
+        color: String(form.get("color")),
+        name: String(form.get("name")),
+        timezone: user.planningTimezone,
+      }),
+    onSuccess: async () => {
+      await invalidateMaterial(queryClient);
+      close();
+    },
+  });
+  return (
+    <Modal close={close} eyebrow="Local calendar" title="Create a new material">
+      <form
+        className="editor-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          mutation.mutate(new FormData(event.currentTarget));
+        }}
+      >
+        <Field autoFocus label="Calendar name" name="name" required />
+        <Field defaultValue="#7c8cff" label="Color" name="color" type="color" required />
+        <FormActions
+          close={close}
+          error={mutation.error}
+          pending={mutation.isPending}
+          submitLabel="Create calendar"
+        />
+      </form>
+    </Modal>
+  );
+}
+
+function Modal({
+  children,
+  close,
+  eyebrow,
+  title,
+}: {
+  children: ReactNode;
+  close: () => void;
+  eyebrow: string;
+  title: string;
+}) {
+  const modalRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, [close]);
+  useDialogFocus(modalRef);
+  return (
+    <div className="modal-backdrop">
+      <button aria-label="Close dialog" className="modal-dismiss" onClick={close} type="button" />
+      <section
+        aria-labelledby="modal-title"
+        aria-modal="true"
+        className="modal"
+        ref={modalRef}
+        role="dialog"
+        tabIndex={-1}
+      >
+        <header>
+          <div>
+            <p className="eyebrow">{eyebrow}</p>
+            <h2 id="modal-title">{title}</h2>
+          </div>
+          <Button aria-label="Close" onClick={close} tone="ghost">
+            <X size={19} />
+          </Button>
+        </header>
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function useDialogFocus(container: { current: HTMLElement | null }) {
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement;
+    const dialog = container.current as HTMLElement;
+    dialog.focus();
+    return () => previouslyFocused.focus();
+  }, [container]);
+}
+
+function FormActions({
+  close,
+  error,
+  pending,
+  submitLabel,
+}: {
+  close: () => void;
+  error: unknown;
+  pending: boolean;
+  submitLabel: string;
+}) {
+  return (
+    <>
+      {error && (
+        <p className="form-error" role="alert">
+          {errorMessage(error)}
+        </p>
+      )}
+      <div className="form-actions">
+        <Button onClick={close}>Cancel</Button>
+        <Button disabled={pending} tone="accent" type="submit">
+          {pending ? <Spinner label="Saving" /> : submitLabel}
+        </Button>
+      </div>
+    </>
+  );
+}
+
+function Field({
+  label,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  const generatedId = useId();
+  const fieldId = props.id ?? generatedId;
+  return (
+    <Label className="field" htmlFor={fieldId}>
+      <span>{label}</span>
+      <Input {...props} id={fieldId} />
+    </Label>
+  );
+}
+
+function FatalState({ error }: { error: unknown }) {
+  if (error instanceof TypeError) {
+    return (
+      <main className="center-screen">
+        <div className="inline-error" role="alert">
+          <strong>Personal OS service is offline.</strong>
+          <span>Run the Start environment action, then try again.</span>
+        </div>
+        <Button onClick={() => window.location.reload()}>Try again</Button>
+      </main>
+    );
+  }
+  return (
+    <main className="center-screen">
+      <InlineError error={error} />
+      <Button onClick={() => window.location.reload()}>Try again</Button>
+    </main>
+  );
+}
+function LogoMark({ compact = false }: { compact?: boolean }) {
+  return (
+    <span className={`logo-mark${compact ? " logo-mark--compact" : ""}`}>
+      <Clock3 size={compact ? 12 : 17} />
+    </span>
+  );
+}
+
+async function invalidateMaterial(queryClient: ReturnType<typeof useQueryClient>) {
+  await Promise.all(
+    ["daily-brief", "agenda", "events", "reminders", "calendars", "activity"].map((key) =>
+      queryClient.invalidateQueries({ queryKey: [key] }),
+    ),
+  );
+}
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function workspaceOwnerName(user: User): string {
+  const firstName = user.displayName.trim().split(/\s+/)[0];
+  return firstName || user.email.split("@")[0] || "Your";
+}
+function nullable(value: FormDataEntryValue | null): string | null {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+function toDateTimeLocal(
+  value: string | null | undefined,
+  timeZone: string,
+  hoursFromNow?: number,
+) {
+  if (!value && hoursFromNow === undefined) return "";
+  const date = value
+    ? new Date(value)
+    : new Date(Date.now() + (hoursFromNow as number) * 3_600_000);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      day: "2-digit",
+      hour: "2-digit",
+      hour12: false,
+      minute: "2-digit",
+      month: "2-digit",
+      timeZone,
+      year: "numeric",
+    })
+      .formatToParts(date)
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${String(Number(parts.hour) % 24).padStart(2, "0")}:${parts.minute}`;
+}
+function dateTimeLocalToIso(value: string, timeZone: string): string {
+  const [dateValue, timeValue] = value.split("T");
+  const date = parseLocalDate(dateValue as string);
+  const [hour, minute] = (timeValue as string).split(":").map(Number);
+  return localDateTimeToUtc(
+    date,
+    (hour as number) * 60 + (minute as number),
+    timeZone,
+  ).toISOString();
+}
+function formatTime(value: string, timeZone: string) {
+  return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit", timeZone }).format(
+    new Date(value),
+  );
+}
+
+export function formatTimelineTimeRange(event: CalendarEvent, timeZone: string) {
+  const start = formatTime(event.startsAt, timeZone);
+  const end = formatTime(event.endsAt, timeZone);
+  if (start !== end || new Date(event.endsAt).getTime() <= new Date(event.startsAt).getTime()) {
+    return `${start}–${end}`;
+  }
+  return `${start} ${formatTimeZoneName(new Date(event.startsAt), timeZone)}–${end} ${formatTimeZoneName(new Date(event.endsAt), timeZone)}`;
+}
+function formatWeatherCoordinates(coordinates: WeatherCoordinates) {
+  return `${coordinates.latitude.toFixed(4)}, ${coordinates.longitude.toFixed(4)}`;
+}
+
+function weatherMapEmbedUrl(coordinates: WeatherCoordinates) {
+  const latitudeSpan = 0.035;
+  const longitudeSpan = 0.05;
+  const parameters = new URLSearchParams({
+    bbox: [
+      coordinates.longitude - longitudeSpan,
+      coordinates.latitude - latitudeSpan,
+      coordinates.longitude + longitudeSpan,
+      coordinates.latitude + latitudeSpan,
+    ].join(","),
+    layer: "mapnik",
+    marker: `${coordinates.latitude},${coordinates.longitude}`,
+  });
+  return `https://www.openstreetmap.org/export/embed.html?${parameters.toString()}`;
+}
+
+function weatherSkyPeriod(observedAt: string, timeZone: string) {
+  const hour = Number(
+    new Intl.DateTimeFormat("en", { hour: "numeric", hourCycle: "h23", timeZone }).format(
+      new Date(observedAt),
+    ),
+  );
+  if (hour >= 5 && hour < 10) return "morning";
+  if (hour >= 10 && hour < 17) return "day";
+  if (hour >= 17 && hour < 21) return "evening";
+  return "night";
+}
+function formatEventRange(event: CalendarEvent, timeZone: string): string {
+  const start = new Date(event.startsAt);
+  const end = new Date(event.endsAt);
+  const startDay = localDateAt(start, timeZone);
+  const endDisplay = event.allDay ? new Date(end.getTime() - 1) : end;
+  const endDay = localDateAt(endDisplay, timeZone);
+  const dateFormatter = new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "long",
+    timeZone,
+    weekday: "long",
+    year: "numeric",
+  });
+  if (event.allDay) {
+    return sameLocalDate(startDay, endDay)
+      ? `${dateFormatter.format(start)} · All day`
+      : `${dateFormatter.format(start)} – ${dateFormatter.format(endDisplay)} · All day`;
+  }
+  if (sameLocalDate(startDay, endDay)) {
+    return `${dateFormatter.format(start)} · ${formatTime(event.startsAt, timeZone)}–${formatTime(event.endsAt, timeZone)}`;
+  }
+  return `${formatDue(event.startsAt, timeZone)} – ${formatDue(event.endsAt, timeZone)}`;
+}
+function taskDescription(task: Task, timeZone: string): string {
+  const details = [
+    task.scheduledAt ? `Reserved ${formatDue(task.scheduledAt, timeZone)}` : null,
+    task.dueAt ? `Due ${formatDue(task.dueAt, timeZone)}` : null,
+    task.estimateMinutes ? `${task.estimateMinutes} min` : null,
+  ].filter((detail): detail is string => detail !== null);
+  return details.length > 0 ? details.join(" · ") : task.notes || "No date or estimate yet";
+}
+function recommendationCopy(recommendation: DailyBrief["recommendedTasks"][number]) {
+  const urgency = {
+    due_today: "Due today",
+    inbox: "Captured for later",
+    next: "Ready next",
+    overdue: "Overdue",
+  }[recommendation.urgency];
+  const capacity = {
+    does_not_fit: "does not fit in the remaining planning window",
+    fits_remaining_time: "fits in the remaining planning window",
+    needs_estimate: "needs an estimate before it can be planned",
+  }[recommendation.capacity];
+  return `${urgency} · ${capacity}`;
+}
+function formatDue(value: string, timeZone: string) {
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    month: "short",
+    timeZone,
+  }).format(new Date(value));
+}
+const formatRelative = formatRelativeTime;
+function formatMinutes(value: number) {
+  if (value === 0) return "No time";
+  const hours = Math.floor(value / 60);
+  const minutes = value % 60;
+  if (hours === 0) return `${minutes} min`;
+  return minutes === 0 ? `${hours} hr` : `${hours} hr ${minutes} min`;
+}
+function meetingTimingSummary(event: CalendarEvent, currentTime: Date) {
+  const elapsed = Math.max(
+    0,
+    Math.floor((currentTime.getTime() - new Date(event.startsAt).getTime()) / 60_000),
+  );
+  const remaining = Math.max(
+    0,
+    Math.ceil((new Date(event.endsAt).getTime() - currentTime.getTime()) / 60_000),
+  );
+  return `Started ${formatMinutes(elapsed)} ago · ${formatMinutes(remaining)} left`;
+}
+function conferenceProviderLabel(url: string): string {
+  const hostname = new URL(url).hostname;
+  if (hostname === "meet.google.com") return "Google Meet";
+  if (hostname === "teams.live.com" || hostname.endsWith(".teams.microsoft.com")) {
+    return "Microsoft Teams";
+  }
+  if (hostname === "zoom.us" || hostname.endsWith(".zoom.us")) return "Zoom";
+  if (hostname === "webex.com" || hostname.endsWith(".webex.com")) return "Webex";
+  return "meeting";
+}
+function minuteToTime(value: number) {
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+function humanizeAction(action: string) {
+  return action
+    .split(".")
+    .map((part) => part.replaceAll("_", " "))
+    .join(" · ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+const calendarWeekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function calendarPeriodDays(
+  view: CalendarView,
+  anchor: LocalDate,
+  includeWeekends: boolean,
+): LocalDate[] {
+  if (view === "day") return [anchor];
+  const weekStart = startOfLocalWeek(anchor);
+  if (view === "week") {
+    return Array.from({ length: includeWeekends ? 7 : 5 }, (_, index) =>
+      addLocalDays(weekStart, includeWeekends ? index : index + 1),
+    );
+  }
+  const monthStart = { day: 1, month: anchor.month, year: anchor.year };
+  const gridStart = startOfLocalWeek(monthStart);
+  return Array.from({ length: 42 }, (_, index) => addLocalDays(gridStart, index));
+}
+
+function formatLocalDate(date: LocalDate, options: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat("en", { ...options, timeZone: "UTC" }).format(
+    new Date(Date.UTC(date.year, date.month - 1, date.day, 12)),
+  );
+}
+
+function formatLocalWeekday(date: LocalDate): string {
+  return formatLocalDate(date, { weekday: "long" });
+}
+
+function calendarDate(date: LocalDate): Date {
+  return new Date(Date.UTC(date.year, date.month - 1, date.day, 12));
+}
+
+function localDateKey(date: LocalDate): string {
+  return localDateToIso(date);
+}
+
+function startCalendarDrag(
+  dragEvent: ReactDragEvent<HTMLButtonElement>,
+  event: CalendarEvent,
+  setDraggedEventId: (id: string | null) => void,
+) {
+  dragEvent.dataTransfer.effectAllowed = "move";
+  dragEvent.dataTransfer.setData(calendarDragType, event.id);
+  setDraggedEventId(event.id);
+}
+
+function allowCalendarDrop(dragEvent: ReactDragEvent<HTMLElement>, draggedEventId: string | null) {
+  if (!draggedEventId) return;
+  dragEvent.preventDefault();
+  dragEvent.dataTransfer.dropEffect = "move";
+}
+
+function timelineMinuteAtPointer(pointerEvent: { clientY: number }, timeline: HTMLElement) {
+  const bounds = timeline.getBoundingClientRect();
+  const clientY = Number.isFinite(pointerEvent.clientY) ? pointerEvent.clientY : 0;
+  const top = Number.isFinite(bounds.top) ? bounds.top : 0;
+  const relativeY = Math.min(calendarTimelineHeight, Math.max(0, clientY - top));
+  const unsnappedMinute = (relativeY / calendarTimelineHeight) * calendarMinutesPerDay;
+  return Math.min(23 * 60 + 45, Math.max(0, Math.round(unsnappedMinute / 15) * 15));
+}
+
+function previewTimelineDrop(
+  dragEvent: ReactDragEvent<HTMLElement>,
+  day: LocalDate,
+  events: CalendarEvent[],
+  draggedEventId: string | null,
+  setPreview: (preview: CalendarDropPreview | null) => void,
+) {
+  if (!draggedEventId) return;
+  allowCalendarDrop(dragEvent, draggedEventId);
+  const dragged = events.find(
+    (event) => event.id === (dragEvent.dataTransfer.getData(calendarDragType) || draggedEventId),
+  );
+  if (!dragged || dragged.allDay) return;
+  setPreview({
+    dayKey: localDateKey(day),
+    duration: Math.max(
+      15,
+      Math.round(
+        (new Date(dragged.endsAt).getTime() - new Date(dragged.startsAt).getTime()) / 60_000,
+      ),
+    ),
+    minute: timelineMinuteAtPointer(dragEvent, dragEvent.currentTarget),
+  });
+}
+
+function clearTimelineDropPreview(
+  dragEvent: ReactDragEvent<HTMLElement>,
+  setPreview: (preview: CalendarDropPreview | null) => void,
+) {
+  if (dragEvent.currentTarget.contains(dragEvent.relatedTarget as Node | null)) return;
+  setPreview(null);
+}
+
+function dropTimelineEvent(
+  dragEvent: ReactDragEvent<HTMLElement>,
+  day: LocalDate,
+  events: CalendarEvent[],
+  moveEvent: (event: CalendarEvent, day: LocalDate, minute: number) => void,
+  setDraggedEventId: (id: string | null) => void,
+) {
+  dragEvent.preventDefault();
+  const id = dragEvent.dataTransfer.getData(calendarDragType);
+  const event = events.find((record) => record.id === id);
+  if (event) {
+    const minute = timelineMinuteAtPointer(dragEvent, dragEvent.currentTarget);
+    moveEvent(event, day, minute);
+  }
+  setDraggedEventId(null);
+}
+
+function findDraggedEvent(
+  dragEvent: ReactDragEvent<HTMLElement>,
+  eventsByDay: Map<string, CalendarEvent[]>,
+  fallbackId: string | null,
+): CalendarEvent | undefined {
+  const id = dragEvent.dataTransfer.getData(calendarDragType) || fallbackId;
+  return Array.from(eventsByDay.values())
+    .flat()
+    .find((event) => event.id === id);
+}
+
+function movedEventTimes(
+  event: CalendarEvent,
+  day: LocalDate,
+  minute: number,
+  timeZone: string,
+): Pick<CalendarEvent, "endsAt" | "startsAt"> {
+  if (event.allDay) {
+    const originalStart = localDateAt(new Date(event.startsAt), timeZone);
+    const originalEnd = localDateAt(new Date(event.endsAt), timeZone);
+    const dayCount = Math.max(1, differenceInLocalDays(originalStart, originalEnd));
+    const range = localDateRange(day, addLocalDays(day, dayCount), timeZone);
+    return { endsAt: range.to, startsAt: range.from };
+  }
+  const startsAt = localDateTimeToUtc(day, minute, timeZone).toISOString();
+  const duration = Math.max(
+    15 * 60_000,
+    new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime(),
+  );
+  return { endsAt: new Date(new Date(startsAt).getTime() + duration).toISOString(), startsAt };
+}
+
+function differenceInLocalDays(from: LocalDate, to: LocalDate): number {
+  return Math.round(
+    (Date.UTC(to.year, to.month - 1, to.day) - Date.UTC(from.year, from.month - 1, from.day)) /
+      86_400_000,
+  );
+}
+
+function localDateTimeAt(value: Date | string, timeZone: string) {
+  const values = Object.fromEntries(
+    new Intl.DateTimeFormat("en", {
+      day: "numeric",
+      hour: "numeric",
+      hourCycle: "h23",
+      minute: "numeric",
+      month: "numeric",
+      second: "numeric",
+      timeZone,
+      year: "numeric",
+    })
+      .formatToParts(new Date(value))
+      .map((part) => [part.type, part.value]),
+  );
+  return {
+    date: {
+      day: Number(values.day),
+      month: Number(values.month),
+      year: Number(values.year),
+    } satisfies LocalDate,
+    minute: Number(values.hour) * 60 + Number(values.minute) + Number(values.second) / 60,
+  };
+}
+
+function minuteToTimelinePixels(minute: number): number {
+  return (minute / 60) * calendarHourHeight;
+}
+
+export function positionTimelineEvents(
+  events: CalendarEvent[],
+  day: LocalDate,
+  timeZone: string,
+): TimelineEventLayout[] {
+  const intervals = events
+    .filter((event) => !event.allDay)
+    .map((event) => {
+      const start = localDateTimeAt(event.startsAt, timeZone);
+      const end = localDateTimeAt(event.endsAt, timeZone);
+      const startMinute = sameLocalDate(start.date, day) ? start.minute : 0;
+      const endMinute = sameLocalDate(end.date, day) ? end.minute : calendarMinutesPerDay;
+      const elapsedMinutes = Math.max(
+        15,
+        (new Date(event.endsAt).getTime() - new Date(event.startsAt).getTime()) / 60_000,
+      );
+      return {
+        endMinute: Math.min(
+          calendarMinutesPerDay,
+          Math.max(endMinute, startMinute + elapsedMinutes),
+        ),
+        event,
+        startMinute: Math.max(0, startMinute),
+      };
+    })
+    .sort(
+      (left, right) =>
+        left.startMinute - right.startMinute ||
+        left.endMinute - right.endMinute ||
+        left.event.id.localeCompare(right.event.id),
+    );
+  const layouts: TimelineEventLayout[] = [];
+  let cluster: typeof intervals = [];
+  let clusterEnd = -Infinity;
+  const layoutCluster = () => {
+    const columnEnds: number[] = [];
+    for (const interval of cluster) {
+      const column = columnEnds.findIndex((endMinute) => endMinute <= interval.startMinute);
+      const resolvedColumn = column === -1 ? columnEnds.length : column;
+      columnEnds[resolvedColumn] = interval.endMinute;
+      layouts.push({ ...interval, column: resolvedColumn, columns: 0 });
+    }
+    const columns = columnEnds.length;
+    for (let index = layouts.length - cluster.length; index < layouts.length; index += 1) {
+      const layout = layouts[index];
+      if (layout) layouts[index] = { ...layout, columns };
+    }
+  };
+  for (const interval of intervals) {
+    if (cluster.length > 0 && interval.startMinute >= clusterEnd) {
+      layoutCluster();
+      cluster = [];
+      clusterEnd = -Infinity;
+    }
+    cluster.push(interval);
+    clusterEnd = Math.max(clusterEnd, interval.endMinute);
+  }
+  if (cluster.length > 0) layoutCluster();
+  return layouts;
+}
+
+function formatHour(hour: number): string {
+  if (hour === 0) return "12 AM";
+  if (hour === 12) return "12 PM";
+  return hour < 12 ? `${hour} AM` : `${hour - 12} PM`;
+}
+
+function formatTimeZoneName(date: Date, timeZone: string): string {
+  const parts = new Intl.DateTimeFormat("en", { timeZone, timeZoneName: "short" }).formatToParts(
+    date,
+  );
+  return (parts[parts.length - 1] as Intl.DateTimeFormatPart).value;
+}

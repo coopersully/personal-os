@@ -1,0 +1,265 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1783958806119,
+      "tag": "0000_optimal_red_hulk",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1784070768890,
+      "tag": "0001_new_medusa",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784071519772,
+      "tag": "0002_amusing_nitro",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784127407765,
+      "tag": "0003_tranquil_weapon_omega",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784218603891,
+      "tag": "0004_yielding_mentallo",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784221625954,
+      "tag": "0005_neat_sharon_carter",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784227601983,
+      "tag": "0006_gifted_wendell_rand",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784410534720,
+      "tag": "0007_clumsy_triathlon",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784413015664,
+      "tag": "0008_naive_junta",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784413582940,
+      "tag": "0009_green_maximus",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784480400000,
+      "tag": "0010_finance_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784484000000,
+      "tag": "0011_plaid_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784552400000,
+      "tag": "0012_goals_and_motives",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784556000000,
+      "tag": "0013_finance_category_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1784559600000,
+      "tag": "0014_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1784916000000,
+      "tag": "0015_calendar_conference_links",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1785002400000,
+      "tag": "0016_finance_intelligence",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785006000000,
+      "tag": "0017_remove_journal_and_notes",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785019200000,
+      "tag": "0018_account_lifecycle",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1785022800000,
+      "tag": "0019_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1786831200000,
+      "tag": "0020_mcp_oauth",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1786834800000,
+      "tag": "0021_theme_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1786838400000,
+      "tag": "0022_account_profile_avatar",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1786842000000,
+      "tag": "0023_weather_location",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786845600000,
+      "tag": "0024_workspace_preferences_reconcile",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786849200000,
+      "tag": "0025_weather_location_selection",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1785025600000,
+      "tag": "0026_mail_workflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1785029200000,
+      "tag": "0027_mail_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786860000000,
+      "tag": "0028_pinterest_wallpaper",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1786863600000,
+      "tag": "0029_pinterest_wallpaper_layout",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786867200000,
+      "tag": "0030_pinterest_wallpaper_spacing",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1786870800000,
+      "tag": "0031_pinterest_wallpaper_style",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1786874400000,
+      "tag": "0032_pinterest_wallpaper_mosaic_fit",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1786878000000,
+      "tag": "0033_finance_intelligence_legacy_bridge",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786881600000,
+      "tag": "0034_calendar_event_fidelity",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786885200000,
+      "tag": "0035_x_bookmarks",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786888800000,
+      "tag": "0036_home_location_and_planning_timezone",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "name": "@personal-os/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "personal-os-mcp": "./dist/stdio.js"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev:http": "tsx watch src/http.ts",
+    "dev:stdio": "tsx src/stdio.ts",
+    "start": "node dist/http.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.10",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@personal-os/api-client": "workspace:*",
+    "@personal-os/domain": "workspace:*",
+    "express": "^5.1.0",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.3"
+  }
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal OS Database"
+  short_description: "Safely evolve PostgreSQL schemas and migrations."
+  default_prompt: "Use $personal-os-database to add this persistent model safely."

@@ -1,0 +1,25 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Keep transitive runtime dependencies on patched releases until their parents
+# publish dependency ranges that include the fixes.
+overrides:
+  "@modelcontextprotocol/sdk@1.29.0>@hono/node-server": "2.0.11"
+  "ajv@8.20.0>fast-uri": "3.1.4"
+
+allowBuilds:
+  '@biomejs/biome': true
+  '@playwright/browser-chromium': true
+  cpu-features: true
+  esbuild: true
+  protobufjs: true
+  ssh2: true
+
+onlyBuiltDependencies:
+  - '@biomejs/biome'
+  - '@playwright/browser-chromium'
+  - cpu-features
+  - esbuild
+  - protobufjs
+  - ssh2

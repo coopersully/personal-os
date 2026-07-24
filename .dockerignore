@@ -1,0 +1,9 @@
+.git
+.env
+**/coverage
+**/dist
+**/node_modules
+**/playwright-report
+**/target
+**/test-results
+.DS_Store

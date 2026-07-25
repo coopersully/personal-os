@@ -174,8 +174,10 @@ const secondMailThread = {
 const mocks = vi.hoisted(() => ({
   completeReminder: vi.fn(),
   completeTask: vi.fn(),
+  confirmEmailVerification: vi.fn(),
   connectICloud: vi.fn(),
   createAccessToken: vi.fn(),
+  createInvitation: vi.fn(),
   createCalendar: vi.fn(),
   createMailDraft: vi.fn(),
   createEvent: vi.fn(),
@@ -221,6 +223,8 @@ const mocks = vi.hoisted(() => ({
   listMailboxes: vi.fn(),
   listMailMessages: vi.fn(),
   listMailThreads: vi.fn(),
+  listInvitations: vi.fn(),
+  listOAuthClients: vi.fn(),
   sendMail: vi.fn(),
   snoozeMailThread: vi.fn(),
   listGoals: vi.fn(),
@@ -260,11 +264,16 @@ const mocks = vi.hoisted(() => ({
     ready: false,
   },
   register: vi.fn(),
+  recordPinterestWallpaperApplied: vi.fn(),
+  requestPasswordReset: vi.fn(),
+  resendEmailVerification: vi.fn(),
+  resetPassword: vi.fn(),
   resolveFinanceReview: vi.fn(),
   restoreEvent: vi.fn(),
   restoreReminder: vi.fn(),
   runAutomation: vi.fn(),
   revokeSession: vi.fn(),
+  revokeOAuthClient: vi.fn(),
   setCalendarSelected: vi.fn(),
   setAlwaysOnTop: vi.fn(),
   syncConnector: vi.fn(),
@@ -593,6 +602,8 @@ function defaults() {
       revokedAt: now,
     },
   ]);
+  mocks.listInvitations.mockResolvedValue([]);
+  mocks.listOAuthClients.mockResolvedValue([]);
   mocks.listSessions.mockResolvedValue([
     {
       id,
@@ -651,6 +662,7 @@ function defaults() {
   mocks.deleteCalendar.mockResolvedValue(undefined);
   mocks.setCalendarSelected.mockResolvedValue(calendar);
   mocks.getGoogleAuthorizationUrl.mockResolvedValue("/settings?google=started");
+  mocks.getXBookmarkAuthorizationUrl.mockResolvedValue("https://x.com/i/oauth2/authorize");
   mocks.getPinterestWallpaperSettings.mockResolvedValue({
     backgroundColor: "#ffffff",
     backgroundMode: "white",
@@ -702,6 +714,9 @@ function defaults() {
   mocks.openUrl.mockResolvedValue(undefined);
   mocks.setAlwaysOnTop.mockResolvedValue(undefined);
   mocks.syncConnector.mockResolvedValue(1);
+  mocks.selectXBookmarkFolder.mockResolvedValue(1);
+  mocks.syncXBookmarks.mockResolvedValue(2);
+  mocks.deleteXBookmarkAccount.mockResolvedValue(undefined);
   mocks.deleteConnector.mockResolvedValue(undefined);
   mocks.connectICloud.mockResolvedValue({ accountId: secondId, email: "test@icloud.com" });
   mocks.createAccessToken.mockResolvedValue({
@@ -715,6 +730,22 @@ function defaults() {
     revokedAt: null,
   });
   mocks.deleteAccessToken.mockResolvedValue(undefined);
+  mocks.createInvitation.mockResolvedValue({
+    code: "invite-code",
+    createdAt: now,
+    createdBy: id,
+    email: "friend@example.com",
+    expiresAt: "2026-07-27T12:00:00.000Z",
+    id,
+    redeemedAt: null,
+    redeemedBy: null,
+  });
+  mocks.confirmEmailVerification.mockResolvedValue(user);
+  mocks.requestPasswordReset.mockResolvedValue(undefined);
+  mocks.resendEmailVerification.mockResolvedValue(undefined);
+  mocks.resetPassword.mockResolvedValue(undefined);
+  mocks.recordPinterestWallpaperApplied.mockResolvedValue(undefined);
+  mocks.revokeOAuthClient.mockResolvedValue(undefined);
   mocks.revokeSession.mockResolvedValue(undefined);
   mocks.updateUser.mockResolvedValue(user);
   mocks.runAutomation.mockResolvedValue({
@@ -1068,6 +1099,46 @@ describe("ilo web app", () => {
         inviteCode: "invite_test_code_12345",
       }),
     );
+  });
+
+  it("recovers accounts and completes one-time authentication links", async () => {
+    const browser = userEvent.setup();
+    mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
+    const recovery = setup();
+    await browser.click(await screen.findByRole("button", { name: "Forgot your password?" }));
+    await browser.type(screen.getByLabelText("Email"), "test@example.com");
+    await browser.click(screen.getByRole("button", { name: "Send reset link" }));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "password-reset link is on its way",
+    );
+    expect(mocks.requestPasswordReset).toHaveBeenCalledWith({ email: "test@example.com" });
+    await browser.click(screen.getByRole("button", { name: "Back to sign in" }));
+    recovery.unmount();
+
+    window.history.replaceState({}, "", "/?verifyEmail=verification-token");
+    mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
+    const verification = setup();
+    await browser.click(await screen.findByRole("button", { name: "Confirm email" }));
+    await waitFor(() =>
+      expect(mocks.confirmEmailVerification).toHaveBeenCalledWith({
+        token: "verification-token",
+      }),
+    );
+    expect(await screen.findByRole("heading", { name: "Your commitments" })).toBeInTheDocument();
+    verification.unmount();
+
+    window.history.replaceState({}, "", "/?resetPassword=reset-token");
+    mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
+    const passwordReset = setup();
+    await browser.type(await screen.findByLabelText("New password"), "LocalTestOnly123!");
+    await browser.click(screen.getByRole("button", { name: "Reset password" }));
+    expect(await screen.findByRole("status")).toHaveTextContent("Your password has been reset");
+    expect(mocks.resetPassword).toHaveBeenCalledWith({
+      password: "LocalTestOnly123!",
+      token: "reset-token",
+    });
+    passwordReset.unmount();
+    window.history.replaceState({}, "", "/");
   });
 
   it("renders fatal and inline failures", async () => {
@@ -3825,6 +3896,93 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Motives unavailable");
   });
 
+  it("manages private invitations from the admin-only settings surface", async () => {
+    mocks.getMe.mockResolvedValue({ ...user, canManageInvitations: true });
+    mocks.listInvitations.mockResolvedValue([
+      {
+        createdAt: now,
+        createdBy: id,
+        email: "active@example.com",
+        expiresAt: "2026-07-27T12:00:00.000Z",
+        id,
+        redeemedAt: null,
+        redeemedBy: null,
+      },
+      {
+        createdAt: now,
+        createdBy: id,
+        email: null,
+        expiresAt: "2026-07-01T12:00:00.000Z",
+        id: secondId,
+        redeemedAt: null,
+        redeemedBy: null,
+      },
+      {
+        createdAt: now,
+        createdBy: id,
+        email: "used@example.com",
+        expiresAt: "2026-07-27T12:00:00.000Z",
+        id: thirdId,
+        redeemedAt: "2026-07-12T12:00:00.000Z",
+        redeemedBy: secondId,
+      },
+    ]);
+    const browser = userEvent.setup();
+    setup("/settings?section=invitations");
+
+    expect(await screen.findByRole("heading", { name: "Invitations" })).toBeInTheDocument();
+    expect(await screen.findByText("Expired")).toBeInTheDocument();
+    expect(screen.getByText(/Redeemed/)).toBeInTheDocument();
+    expect(screen.getByText("Expires in 14 days")).toBeInTheDocument();
+    await browser.type(screen.getByLabelText("Friend’s email (optional)"), "friend@example.com");
+    await browser.selectOptions(screen.getByLabelText("Expires after"), "30");
+    await browser.click(screen.getByRole("button", { name: "Create invitation" }));
+    expect(await screen.findByText("Invitation ready")).toBeInTheDocument();
+    expect(mocks.createInvitation).toHaveBeenCalledWith({
+      email: "friend@example.com",
+      expiresInDays: 30,
+    });
+    const writeText = vi.spyOn(navigator.clipboard, "writeText");
+    await browser.click(screen.getByRole("button", { name: "Copy code" }));
+    expect(writeText).toHaveBeenCalledWith("invite-code");
+  });
+
+  it("connects and manages the selected X bookmark folder", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    mocks.getXBookmarkAccount.mockResolvedValue({
+      displayName: null,
+      id,
+      lastSyncedAt: null,
+      selectedFolderId: "folder-1",
+      selectedFolderName: "Planning",
+      syncError: null,
+      syncStatus: "idle",
+      username: "cooper",
+    });
+    mocks.listXBookmarkFolders.mockResolvedValue([
+      { id, name: "Planning", remoteFolderId: "folder-1" },
+      { id: secondId, name: "Reading", remoteFolderId: "folder-2" },
+    ]);
+    const browser = userEvent.setup();
+    setup("/settings?section=connections");
+
+    const folder = await screen.findByLabelText("X bookmark folder");
+    await browser.selectOptions(folder, "folder-2");
+    await waitFor(() =>
+      expect(mocks.selectXBookmarkFolder).toHaveBeenCalledWith("folder-2", expect.anything()),
+    );
+    await browser.click(screen.getByRole("button", { name: "Sync X bookmarks for cooper" }));
+    await waitFor(() => expect(mocks.syncXBookmarks).toHaveBeenCalled());
+    await browser.click(screen.getByRole("button", { name: "Disconnect X bookmarks for cooper" }));
+    await waitFor(() => expect(mocks.deleteXBookmarkAccount).toHaveBeenCalled());
+
+    await browser.click(screen.getByRole("button", { name: "Connect" }));
+    await browser.click(screen.getByRole("menuitem", { name: "X bookmarks" }));
+    await waitFor(() =>
+      expect(mocks.openUrl).toHaveBeenCalledWith("https://x.com/i/oauth2/authorize"),
+    );
+  });
+
   it("keeps Pinterest wallpaper desktop-only and exposes its desktop controls intentionally", async () => {
     const webView = setup("/settings?section=wallpaper");
     expect(await screen.findByText("Available in ilo for macOS")).toBeInTheDocument();
@@ -3865,5 +4023,106 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Refresh now" })).toBeDisabled();
     finishSave?.();
     pendingSave.unmount();
+  });
+
+  it("previews, tunes, and applies a Pinterest desktop wallpaper", async () => {
+    mocks.isTauri.mockReturnValue(true);
+    let settings = {
+      backgroundColor: "#ffffff",
+      backgroundMode: "white" as const,
+      boardUrl: "https://www.pinterest.com/example/mindset/",
+      cornerRadius: 0,
+      enabled: false,
+      frameSpacing: 16,
+      lastAppliedAt: null,
+      layout: "grid" as const,
+      mosaicFit: "preserve" as const,
+      paddingBottom: 16,
+      paddingEnd: 16,
+      paddingLinked: true,
+      paddingStart: 16,
+      paddingTop: 16,
+      rotationDegrees: 0,
+      tileSize: 64,
+    };
+    const pins = Array.from({ length: 5 }, (_, index) => ({
+      id: `pin-${index}`,
+      imageUrl: `https://i.pinimg.com/736x/example-${index}.jpg`,
+      title: null,
+    }));
+    mocks.getPinterestWallpaperSettings.mockImplementation(async () => settings);
+    mocks.updatePinterestWallpaperSettings.mockImplementation(async (input) => {
+      settings = { ...settings, ...input };
+      return settings;
+    });
+    mocks.listPinterestPins.mockResolvedValue(pins);
+    const browser = userEvent.setup();
+    const view = setup("/settings?section=wallpaper");
+
+    const boardUrl = await screen.findByLabelText("Public board URL");
+    fireEvent.change(boardUrl, {
+      target: { value: "https://www.pinterest.com/example/new-board/" },
+    });
+    fireEvent.blur(boardUrl);
+    await waitFor(() =>
+      expect(mocks.updatePinterestWallpaperSettings).toHaveBeenCalledWith(
+        expect.objectContaining({ boardUrl: expect.any(String) }),
+        expect.anything(),
+      ),
+    );
+
+    await browser.click(screen.getByRole("radio", { name: "Overlapping stack" }));
+    await browser.click(screen.getByRole("radio", { name: "Tiled grid" }));
+    await browser.click(screen.getByRole("radio", { name: "Fill the rectangular frame" }));
+    await browser.click(screen.getByRole("radio", { name: "Color-matched backdrop" }));
+    await browser.click(screen.getByRole("radio", { name: "Daily random backdrop" }));
+    await browser.click(screen.getByRole("radio", { name: "Custom backdrop" }));
+    const color = await screen.findByLabelText("Custom backdrop color");
+    fireEvent.change(color, { target: { value: "#123456" } });
+    fireEvent.blur(color);
+
+    for (const slider of screen.getAllByRole("slider")) {
+      slider.focus();
+      await browser.keyboard("{ArrowRight}");
+    }
+
+    await browser.click(screen.getByRole("checkbox", { name: "Link edge padding" }));
+    for (const slider of screen.getAllByRole("slider").slice(-4)) {
+      slider.focus();
+      await browser.keyboard("{ArrowRight}");
+    }
+    await browser.click(screen.getByRole("checkbox", { name: "Link edge padding" }));
+    await browser.click(screen.getByRole("checkbox", { name: "Show desktop safe areas" }));
+
+    const previewImage = view.container.querySelector<HTMLImageElement>(
+      ".pinterest-wallpaper-preview__tile",
+    );
+    expect(previewImage).not.toBeNull();
+    if (previewImage) {
+      fireEvent.load(previewImage);
+      Object.defineProperties(previewImage, {
+        naturalHeight: { configurable: true, value: 200 },
+        naturalWidth: { configurable: true, value: 100 },
+      });
+      fireEvent.load(previewImage);
+      fireEvent.load(previewImage);
+    }
+
+    await browser.click(screen.getByRole("checkbox", { name: "Refresh every day" }));
+    await waitFor(() =>
+      expect(mocks.updatePinterestWallpaperSettings).toHaveBeenCalledWith(
+        { enabled: true },
+        expect.anything(),
+      ),
+    );
+    await browser.click(screen.getByRole("button", { name: "Refresh now" }));
+    await waitFor(() => expect(mocks.recordPinterestWallpaperApplied).toHaveBeenCalled());
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "apply_pinterest_wallpaper",
+      expect.objectContaining({
+        boardLabel: "Mindset",
+        imageUrls: pins.map((pin) => pin.imageUrl),
+      }),
+    );
   });
 });

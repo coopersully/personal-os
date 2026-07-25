@@ -26,4 +26,27 @@ describe("fixed-window rate limiter", () => {
     expect(limiter.check("second-source")).toEqual({ allowed: true });
     expect(limiter.check("first-source")).toEqual({ allowed: true });
   });
+
+  it("evicts expired sources before active ones", () => {
+    let time = 0;
+    const limiter = createFixedWindowRateLimiter({
+      maxEntries: 2,
+      maxRequests: 2,
+      now: () => time,
+      windowMs: 10,
+    });
+    expect(limiter.check("expired")).toEqual({ allowed: true });
+    time = 5;
+    expect(limiter.check("active")).toEqual({ allowed: true });
+    time = 11;
+    expect(limiter.check("new")).toEqual({ allowed: true });
+    expect(limiter.check("active")).toEqual({ allowed: true });
+  });
+
+  it("uses the system clock and default capacity when omitted", () => {
+    vi.spyOn(Date, "now").mockReturnValue(100);
+    const limiter = createFixedWindowRateLimiter({ maxRequests: 1, windowMs: 1_000 });
+    expect(limiter.check("default")).toEqual({ allowed: true });
+    vi.restoreAllMocks();
+  });
 });

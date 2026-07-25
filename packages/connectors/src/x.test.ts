@@ -56,7 +56,7 @@ describe("X Bookmarks connector", () => {
 
   it("refreshes expired credentials and reads paginated folders and posts", async () => {
     const fetch = queued(
-      response({ access_token: "fresh", expires_in: 7200, refresh_token: "fresh-refresh" }),
+      response({ access_token: "fresh", expires_in: 7200 }),
       response({ data: [{ id: "folder-1", name: "Calendar" }], meta: { next_token: "next" } }),
       response({ data: [{ id: "folder-2", name: "Later" }] }),
       response({
@@ -80,6 +80,7 @@ describe("X Bookmarks connector", () => {
       { id: "folder-1", name: "Calendar" },
       { id: "folder-2", name: "Later" },
     ]);
+    expect(folders.credentials.refreshToken).toBe("refresh");
     expect(String(fetch.mock.calls[2]?.[0])).toContain("users/user%201/bookmarks/folders");
     expect(String(fetch.mock.calls[2]?.[0])).toContain("pagination_token=next");
     const bookmarks = await x.listFolderBookmarks(folders.credentials, "user 1", "folder 1");

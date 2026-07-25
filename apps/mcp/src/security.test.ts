@@ -2,6 +2,7 @@ import {
   createFixedWindowRateLimiter,
   isAllowedOrigin,
   loadMcpSecurityConfig,
+  requestIp,
   tokenFingerprint,
 } from "./security.js";
 
@@ -42,5 +43,55 @@ describe("MCP HTTP security", () => {
     expect(limiter.check("first")).toEqual({ allowed: true });
     expect(limiter.check("second")).toEqual({ allowed: true });
     expect(limiter.check("first")).toEqual({ allowed: true });
+  });
+
+  it("uses a forwarded client address only when proxy trust is enabled", () => {
+    const request = {
+      header: vi.fn().mockReturnValue("203.0.113.4, 10.0.0.2"),
+    };
+
+    expect(requestIp(request, false)).toBe("direct");
+    expect(requestIp(request, true)).toBe("203.0.113.4");
+    request.header.mockReturnValue(undefined);
+    expect(requestIp(request, true)).toBe("direct");
+  });
+
+  it("loads explicit proxy and limiter settings", () => {
+    expect(
+      loadMcpSecurityConfig({
+        MCP_ALLOWED_ORIGINS: " https://one.example, ,https://two.example ",
+        MCP_RATE_LIMIT_MAX_REQUESTS: "3",
+        MCP_RATE_LIMIT_WINDOW_SECONDS: "4",
+        MCP_TRUST_PROXY: "true",
+      }),
+    ).toEqual({
+      allowedOrigins: new Set(["https://one.example", "https://two.example"]),
+      rateLimitMaxRequests: 3,
+      rateLimitWindowMs: 4_000,
+      trustProxy: true,
+    });
+  });
+
+  it("evicts expired buckets before the oldest active bucket", () => {
+    let current = 0;
+    const limiter = createFixedWindowRateLimiter({
+      maxEntries: 2,
+      maxRequests: 2,
+      now: () => current,
+      windowMs: 10,
+    });
+    expect(limiter.check("expired")).toEqual({ allowed: true });
+    current = 5;
+    expect(limiter.check("active")).toEqual({ allowed: true });
+    current = 11;
+    expect(limiter.check("new")).toEqual({ allowed: true });
+    expect(limiter.check("active")).toEqual({ allowed: true });
+  });
+
+  it("uses default limiter options when omitted", () => {
+    vi.spyOn(Date, "now").mockReturnValue(100);
+    const limiter = createFixedWindowRateLimiter({ maxRequests: 1, windowMs: 1_000 });
+    expect(limiter.check("default")).toEqual({ allowed: true });
+    vi.restoreAllMocks();
   });
 });

@@ -238,6 +238,13 @@ function apiFetch() {
         { sessionToken: "sess_new", user },
         url.pathname.endsWith("register") ? 201 : 200,
       );
+    if (url.pathname === "/v1/auth/email-verification/confirm") return json({ user });
+    if (
+      url.pathname === "/v1/auth/recovery" ||
+      url.pathname === "/v1/auth/password-reset" ||
+      url.pathname === "/v1/auth/email-verification"
+    )
+      return new Response(null, { status: 204 });
     if (url.pathname === "/v1/me" && method === "PATCH")
       return json({ user: { ...user, ...JSON.parse(String(init?.body)) } });
     if (url.pathname === "/v1/me") return json({ user });
@@ -274,6 +281,48 @@ function apiFetch() {
             expiresAt: null,
             lastUsedAt: null,
             revokedAt: null,
+          },
+        ],
+      });
+    if (url.pathname === "/v1/oauth/clients")
+      return json({
+        clients: [
+          {
+            id,
+            lastUsedAt: now,
+            name: "Codex",
+            redirectUris: ["http://127.0.0.1/callback"],
+            scopes: ["audit:read"],
+          },
+        ],
+      });
+    if (url.pathname === "/v1/invitations" && method === "POST")
+      return json(
+        {
+          invitation: {
+            code: "invite-code",
+            createdAt: now,
+            createdBy: id,
+            email: "friend@example.com",
+            expiresAt: now,
+            id,
+            redeemedAt: null,
+            redeemedBy: null,
+          },
+        },
+        201,
+      );
+    if (url.pathname === "/v1/invitations")
+      return json({
+        invitations: [
+          {
+            createdAt: now,
+            createdBy: id,
+            email: "friend@example.com",
+            expiresAt: now,
+            id,
+            redeemedAt: null,
+            redeemedBy: null,
           },
         ],
       });
@@ -375,6 +424,59 @@ function apiFetch() {
       return json({ result: { changed: 2 } });
     if (url.pathname === "/v1/x-bookmarks/account" && method === "DELETE")
       return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/pinterest/applied") return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/pinterest/pins")
+      return json({
+        pins: [
+          {
+            id,
+            imageUrl: "https://i.pinimg.com/example.jpg",
+            title: "Example",
+          },
+        ],
+      });
+    if (url.pathname === "/v1/pinterest" && method === "PATCH")
+      return json({
+        settings: {
+          backgroundColor: "#ffffff",
+          backgroundMode: "white",
+          boardUrl: "https://www.pinterest.com/example/board/",
+          cornerRadius: 0,
+          enabled: true,
+          frameSpacing: 16,
+          lastAppliedAt: null,
+          layout: "grid",
+          mosaicFit: "preserve",
+          paddingBottom: 16,
+          paddingEnd: 16,
+          paddingLinked: true,
+          paddingStart: 16,
+          paddingTop: 16,
+          rotationDegrees: 0,
+          tileSize: 64,
+        },
+      });
+    if (url.pathname === "/v1/pinterest")
+      return json({
+        settings: {
+          backgroundColor: "#ffffff",
+          backgroundMode: "white",
+          boardUrl: "https://www.pinterest.com/example/board/",
+          cornerRadius: 0,
+          enabled: true,
+          frameSpacing: 16,
+          lastAppliedAt: null,
+          layout: "grid",
+          mosaicFit: "preserve",
+          paddingBottom: 16,
+          paddingEnd: 16,
+          paddingLinked: true,
+          paddingStart: 16,
+          paddingTop: 16,
+          rotationDegrees: 0,
+          tileSize: 64,
+        },
+      });
     if (url.pathname === "/v1/connectors/icloud")
       return json({ account: { accountId, email: "test@icloud.com" } }, 201);
     if (url.pathname === "/v1/connectors")
@@ -565,7 +667,12 @@ function apiFetch() {
 describe("ilo API client", () => {
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
-    const api = createApiClient({ baseUrl: "https://api.example.com/", fetch, token: "pos_token" });
+    const api = createApiClient({
+      baseUrl: "https://api.example.com/",
+      fetch,
+      headers: { "x-ilo-client": "web" },
+      token: "pos_token",
+    });
     await expect(api.getMe()).resolves.toEqual(user);
     await expect(api.listGoals()).resolves.toEqual([goal]);
     await expect(
@@ -879,8 +986,26 @@ describe("ilo API client", () => {
       api.createAccessToken({ name: "Agent", scopes: ["audit:read"] }),
     ).resolves.toMatchObject({ token: "pos_secret" });
     await api.deleteAccessToken(id);
+    await expect(api.listOAuthClients()).resolves.toHaveLength(1);
+    await api.revokeOAuthClient(id);
+    await expect(
+      api.createInvitation({ email: "friend@example.com", expiresInDays: 14 }),
+    ).resolves.toMatchObject({ code: "invite-code" });
+    await expect(api.listInvitations()).resolves.toHaveLength(1);
     await expect(api.listSessions()).resolves.toHaveLength(1);
     await api.revokeSession(id);
+    await expect(api.confirmEmailVerification({ token: "verification-token" })).resolves.toEqual(
+      user,
+    );
+    await api.requestPasswordReset({ email: "test@example.com" });
+    await api.resetPassword({ password: "LocalTestOnly123!", token: "reset-token" });
+    await api.resendEmailVerification();
+    await expect(api.getPinterestWallpaperSettings()).resolves.toMatchObject({ enabled: true });
+    await expect(api.listPinterestPins()).resolves.toHaveLength(1);
+    await expect(
+      api.updatePinterestWallpaperSettings({ backgroundMode: "matched" }),
+    ).resolves.toMatchObject({ enabled: true });
+    await api.recordPinterestWallpaperApplied();
 
     const eventCall = fetch.mock.calls.find(([url]) => String(url).includes("/v1/events?"));
     expect(String(eventCall?.[0])).toContain(`calendarIds=${encodeURIComponent(id)}`);
@@ -892,6 +1017,7 @@ describe("ilo API client", () => {
     expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get("authorization")).toBe(
       "Bearer pos_token",
     );
+    expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get("x-ilo-client")).toBe("web");
   });
 
   it("adopts, persists, uses, and clears a desktop session token", async () => {

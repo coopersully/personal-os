@@ -48,10 +48,15 @@ test("a person and an agent share one reminder and calendar surface", async ({
 
   await returnToApp();
   await primaryNavigation.getByRole("link", { name: "Today" }).click();
+  const planningDate = await page.locator("h1 time").getAttribute("datetime");
+  if (!planningDate) throw new Error("Today heading did not expose its planning date.");
   await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByRole("menuitem", { name: "Event" }).click();
   await page.getByLabel("Event", { exact: true }).fill(eventTitle);
+  await page.getByLabel("Starts").fill(`${planningDate}T12:00`);
+  await page.getByLabel("Ends").fill(`${planningDate}T13:00`);
   await page.getByLabel("Location").fill("Desktop overlay");
+  await page.getByRole("checkbox", { name: "All day" }).check();
   await page.getByRole("button", { name: "Create event" }).click();
   await expect(page.getByText(eventTitle)).toBeVisible();
 

@@ -2,6 +2,9 @@
 domain_name       = "example.com"
 cloudflare_zone_id = "023e105f4ecef8ad9ca31a8372d0c353"
 github_repository = "your-handle/personal-os"
+# If GitHub's OIDC subject customization uses immutable IDs, set the exact
+# subject shown in CloudTrail, for example:
+# github_oidc_subject = "repo:your-handle@12345678/personal-os@87654321:environment:production"
 owner_emails      = "owner@example.com"
 email_from        = "ilo <noreply@example.com>"
 

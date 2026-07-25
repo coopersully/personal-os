@@ -115,7 +115,10 @@ environment variables:
 `.github/workflows/deploy.yml` runs only after CI succeeds on `main` (or from a
 manual dispatch on `main`). Its job must use the protected GitHub environment
 named by `github_environment`; the OIDC trust policy accepts only that
-environment. The workflow publishes immutable
+environment. Repositories that customize GitHub's OIDC subject to include
+immutable owner and repository IDs must set `github_oidc_subject` to the exact
+`repo:<owner>@<owner-id>/<repository>@<repository-id>:environment:<name>`
+subject recorded by CloudTrail. The workflow publishes immutable
 `sha-<commit>` images, registers task-definition revisions, deploys the
 migration-capable API serially, waits for API health before deploying MCP,
 publishes the web build, invalidates CloudFront, and verifies all three public

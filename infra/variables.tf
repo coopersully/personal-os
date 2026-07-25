@@ -47,6 +47,20 @@ variable "github_environment" {
   default     = "production"
 }
 
+variable "github_oidc_subject" {
+  description = "Exact GitHub Actions OIDC subject allowed to assume the deployment role. Set this when the repository uses a customized subject claim with immutable owner and repository IDs."
+  type        = string
+  default     = null
+
+  validation {
+    condition = (
+      var.github_oidc_subject == null ||
+      can(regex("^repo:[^:]+:environment:[^:]+$", var.github_oidc_subject))
+    )
+    error_message = "github_oidc_subject must be a GitHub environment subject in repo:<identity>:environment:<name> form."
+  }
+}
+
 variable "owner_emails" {
   description = "Comma-separated initial ilo owners allowed to create invitations."
   type        = string

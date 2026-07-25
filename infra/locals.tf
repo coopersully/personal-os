@@ -3,6 +3,10 @@ locals {
   app_domain = "app.${var.domain_name}"
   api_domain = "api.${var.domain_name}"
   mcp_domain = "mcp.${var.domain_name}"
+  github_oidc_subject = coalesce(
+    var.github_oidc_subject,
+    "repo:${var.github_repository}:environment:${var.github_environment}",
+  )
 
   common_tags = {
     Application = var.project_name

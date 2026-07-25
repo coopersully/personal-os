@@ -54,7 +54,7 @@ app.post("/mcp", async (request, response) => {
       `Bearer resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`,
     );
     response.status(401).json({
-      error: "A Personal OS bearer token is required.",
+      error: "An ilo bearer token is required.",
       jsonrpc: "2.0",
       id: null,
     });
@@ -111,7 +111,7 @@ app.post("/mcp", async (request, response) => {
 });
 
 const listener = app.listen(port, host, () => {
-  process.stderr.write(`Personal OS MCP listening at http://${host}:${port}/mcp\n`);
+  process.stderr.write(`ilo MCP listening at http://${host}:${port}/mcp\n`);
 });
 
 process.on("SIGINT", () => listener.close(() => process.exit(0)));

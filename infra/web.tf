@@ -15,12 +15,55 @@ resource "aws_s3_bucket_versioning" "web" {
   versioning_configuration { status = "Enabled" }
 }
 
+resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
 resource "aws_cloudfront_origin_access_control" "web" {
   name                              = "${local.name}-web"
-  description                       = "CloudFront-only S3 access for Personal OS web assets"
+  description                       = "CloudFront-only S3 access for ilo web assets"
   origin_access_control_origin_type = "s3"
   signing_behavior                  = "always"
   signing_protocol                  = "sigv4"
+}
+
+resource "aws_cloudfront_response_headers_policy" "security" {
+  name = "${local.name}-security"
+
+  security_headers_config {
+    content_type_options {
+      override = true
+    }
+
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+
+    strict_transport_security {
+      access_control_max_age_sec = 63072000
+      include_subdomains         = true
+      override                   = true
+      preload                    = true
+    }
+
+    xss_protection {
+      mode_block = true
+      override   = true
+      protection = true
+    }
+  }
 }
 
 resource "aws_cloudfront_distribution" "web" {
@@ -46,10 +89,11 @@ resource "aws_cloudfront_distribution" "web" {
       cookies { forward = "none" }
     }
 
-    viewer_protocol_policy = "redirect-to-https"
-    min_ttl                = 0
-    default_ttl            = 3600
-    max_ttl                = 31536000
+    viewer_protocol_policy     = "redirect-to-https"
+    min_ttl                    = 0
+    default_ttl                = 3600
+    max_ttl                    = 31536000
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security.id
   }
 
   custom_error_response {

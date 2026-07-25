@@ -1,6 +1,6 @@
-# Contributing to Personal OS
+# Contributing to ilo
 
-Thanks for helping improve Personal OS. Please use a focused branch and pull
+Thanks for helping improve ilo. Please use a focused branch and pull
 request for each change, explain the user impact, and include focused tests.
 
 ## Before opening a pull request

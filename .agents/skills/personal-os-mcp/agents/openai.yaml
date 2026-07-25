@@ -1,4 +1,4 @@
 interface:
-  display_name: "Personal OS MCP"
+  display_name: "ilo MCP"
   short_description: "Build secure API-backed MCP tools."
   default_prompt: "Use $personal-os-mcp to add this MCP capability."

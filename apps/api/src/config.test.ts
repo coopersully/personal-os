@@ -52,7 +52,7 @@ describe("API configuration", () => {
         ...required,
         ALLOWED_ORIGINS:
           " https://mobile.example.com,https://app.example.com,https://desktop.example.com ",
-        EMAIL_FROM: "Personal OS <noreply@example.com>",
+        EMAIL_FROM: "ilo <noreply@example.com>",
         GOOGLE_CLIENT_ID: "client",
         GOOGLE_CLIENT_SECRET: "secret",
         LOG_LEVEL: "warn",
@@ -97,6 +97,17 @@ describe("API configuration", () => {
   it("rejects incomplete or invalid deployment configuration", () => {
     expect(() => loadConfig({ ...required, PORT: "0" })).toThrow();
     expect(() => loadConfig({ ...required, NODE_ENV: "production" })).toThrow();
+    expect(() =>
+      loadConfig({
+        ...required,
+        EMAIL_FROM: "ilo <noreply@example.com>",
+        MCP_INTERNAL_SECRET: "mcp-internal-secret-that-is-long-enough",
+        NODE_ENV: "production",
+        OWNER_EMAILS: "owner@example.com",
+        REGISTRATION_MODE: "open",
+        RESEND_API_KEY: "resend-key",
+      }),
+    ).toThrow("Production registration must remain invite-only.");
     expect(() => loadConfig({})).toThrow();
   });
 });

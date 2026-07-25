@@ -1,4 +1,4 @@
-# Personal OS — Master Product & Experience Design
+# ilo — Master Product & Experience Design
 
 - Status: Proposed master design
 - Date: 2026-07-18
@@ -6,7 +6,7 @@
 
 ## 1. Decision and intentional scope expansion
 
-Personal OS will be a private, cross-device operating layer for an individual's commitments, communications, reflection, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
+ilo will be a private, cross-device operating layer for an individual's commitments, communications, reflection, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
 
 This design intentionally expands scope beyond the current MVP. The expansion is necessary to make safe automation usable: a permission prompt alone is not a workflow. Every automated mutation therefore needs a comprehensible UI path, a preview or rule policy, audit evidence, undo/recovery where possible, and a way to stop future runs.
 
@@ -14,7 +14,7 @@ There are no deferred product domains in this document. Delivery is phased for d
 
 ## 2. Product promise
 
-> At any moment, Personal OS shows what matters next, what is actively happening, what is realistically still possible today, and what an authorized agent did or proposes to do.
+> At any moment, ilo shows what matters next, what is actively happening, what is realistically still possible today, and what an authorized agent did or proposes to do.
 
 It must make the useful action easy for a person who wants a calm, low-information interface while retaining fast paths, search, keyboard access, automation, and inspection for a power user.
 
@@ -106,7 +106,7 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 ### 6.1 Onboarding, identity, and connections
 
 1. Create account or sign in; persist session across refresh and device restart.
-2. Set preferred name, primary timezone, locale, notification preference, brand color, and optional personal OS name (for example, “Home OS”).
+2. Set preferred name, primary timezone, locale, notification preference, brand color, and optional ilo name (for example, “Home OS”).
 3. Choose a starting path: connect Google, connect iCloud, create local-only workspace, connect Plaid, or import later.
 4. Google connection asks separately for Calendar read/write, Gmail read, Gmail modify/send, Gmail settings/filters, and optional contacts. Multiple accounts are supported, named, and independently revocable. The product discloses the verification/security-assessment implications before enabling restricted Gmail scopes or server-side storage.
 5. iCloud connection prefers Apple Account authorization when the platform supports it and otherwise accepts an app-specific password through an encrypted credential flow. Mail and CalDAV calendar are independently enabled, discovered, health-checked, and designed for revocation when an Apple password reset invalidates app passwords.
@@ -211,7 +211,7 @@ Mail policy tiers:
 
 **Presets:** Read my day; Calendar manager; Reminder/task manager; Mail triage (preview); Mail manager; Goals coach; Finance categorizer (preview); Morning routine; Midday reset; Nightly cleanup; Weekly review; Monthly finance close.
 
-**Routine lifecycle:** choose template → choose optional host/skill/model runner → select scope and sources → set trigger/schedule/timezone → set approval policy → test dry run on bounded data → inspect result → enable → inspect/pause/edit/version/revoke later. Personal OS owns the routine definition, trigger, policy, run state, approval, and recovery lifecycle; a host such as Codex or Claude receives only a bounded invocation and cannot become the policy authority.
+**Routine lifecycle:** choose template → choose optional host/skill/model runner → select scope and sources → set trigger/schedule/timezone → set approval policy → test dry run on bounded data → inspect result → enable → inspect/pause/edit/version/revoke later. ilo owns the routine definition, trigger, policy, run state, approval, and recovery lifecycle; a host such as Codex or Claude receives only a bounded invocation and cannot become the policy authority.
 
 Triggers include cron/calendar time, new mail, calendar changes, new finance transactions, a reminder deadline, manual run, and platform notification action. Runs are queued, idempotent, bounded by concurrency/time/tool-call limits, resumable only where safe, and never overlap unless declared safe.
 
@@ -220,7 +220,7 @@ The Activity view filters by material, actor, routine, source, result, date, and
 ### 6.9 Desktop overlay, widgets, notifications, and mobile
 
 - Tauri desktop shell for macOS/Windows supports compact, pinned, always-on-top, click-through-disabled interactive modes, global shortcut, docked sprite/pet, and full-app deep links.
-- The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact Personal OS panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
+- The sprite has idle, open, unread/pending, error, and reduced-motion states; click opens a compact ilo panel and click/shortcut closes it. It communicates urgency through a count/quiet animation, never through inaccessible motion alone.
 - Widgets on desktop and mobile show selectable blocks: Now/Next, due tasks, unread triage count, finance reviews, habit prompts, and compact calendar. Widgets show private-safe summaries unless the user opts into detail. Apple widgets use a native WidgetKit extension, shared container, and timeline/push update model; Windows widgets use a Windows widget provider/PWA-specific Adaptive Card adapter. Widgets are glanceable deep-link surfaces, not a second full application, a source of high-sensitivity content, or a real-time alert guarantee; notifications carry time-critical delivery.
 - Notifications use a per-domain policy, quiet hours, time zone, device selection, escalation/reminder behavior, and source privacy. Calendar/reminder notifications respect platform permissions and are de-duplicated across devices.
 - PWA and native shell preserve core actions offline, visibly queue local changes, reconcile provider material on return, and show conflict/resolution UI.

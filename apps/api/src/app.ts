@@ -323,10 +323,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       ? authorization.slice(8)
       : getCookie(context, dependencies.config.sessionCookieName);
     if (!token)
-      throw new AppError(
-        "unauthorized",
-        "Sign in to Personal OS before authorizing an MCP client.",
-      );
+      throw new AppError("unauthorized", "Sign in to ilo before authorizing an MCP client.");
     const principal = await auth.authenticateSession(token);
     if (!(await auth.getUser(principal.userId)).emailVerified)
       throw new AppError("forbidden", "Verify your email before authorizing an MCP client.");
@@ -355,11 +352,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     )
       throw new AppError(
         "invalid_request",
-        "This authorization server only issues tokens for the Personal OS MCP resource.",
+        "This authorization server only issues tokens for the ilo MCP resource.",
       );
     await oauthSession(context);
     return context.html(
-      `<main><h1>Authorize Personal OS MCP</h1><p>This authorizes the requesting MCP client to use your Personal OS account. Connected services remain inside Personal OS.</p><form method="post"><input type="hidden" name="client_id" value="${escapeHtml(query.client_id)}"><input type="hidden" name="code_challenge" value="${escapeHtml(query.code_challenge)}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="redirect_uri" value="${escapeHtml(query.redirect_uri)}"><input type="hidden" name="resource" value="${escapeHtml(query.resource)}"><input type="hidden" name="scope" value="${escapeHtml(query.scope ?? "")}"><input type="hidden" name="state" value="${escapeHtml(query.state ?? "")}"><button type="submit">Authorize</button></form></main>`,
+      `<main><h1>Authorize ilo MCP</h1><p>This authorizes the requesting MCP client to use your ilo account. Connected services remain inside ilo.</p><form method="post"><input type="hidden" name="client_id" value="${escapeHtml(query.client_id)}"><input type="hidden" name="code_challenge" value="${escapeHtml(query.code_challenge)}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="redirect_uri" value="${escapeHtml(query.redirect_uri)}"><input type="hidden" name="resource" value="${escapeHtml(query.resource)}"><input type="hidden" name="scope" value="${escapeHtml(query.scope ?? "")}"><input type="hidden" name="state" value="${escapeHtml(query.state ?? "")}"><button type="submit">Authorize</button></form></main>`,
     );
   });
   app.post("/oauth/authorize", async (context) => {
@@ -370,7 +367,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     )
       throw new AppError(
         "invalid_request",
-        "This authorization server only issues tokens for the Personal OS MCP resource.",
+        "This authorization server only issues tokens for the ilo MCP resource.",
       );
     const principal = await oauthSession(context);
     const code = await oauth.authorize({
@@ -742,9 +739,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     const token = await auth.createEmailVerificationToken(userId);
     const url = `${dependencies.config.appBaseUrl}/?verifyEmail=${encodeURIComponent(token)}`;
     await email.send({
-      html: `<p>Confirm your email address for Personal OS:</p><p><a href="${url}">Confirm email</a></p>`,
-      subject: "Confirm your Personal OS email",
-      text: `Confirm your Personal OS email: ${url}`,
+      html: `<p>Confirm your email address for ilo:</p><p><a href="${url}">Confirm email</a></p>`,
+      subject: "Confirm your ilo email",
+      text: `Confirm your ilo email: ${url}`,
       to: emailAddress,
     });
   }
@@ -752,9 +749,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   async function sendPasswordReset(emailAddress: string, token: string): Promise<void> {
     const url = `${dependencies.config.appBaseUrl}/?resetPassword=${encodeURIComponent(token)}`;
     await email.send({
-      html: `<p>Reset your Personal OS password:</p><p><a href="${url}">Reset password</a></p>`,
-      subject: "Reset your Personal OS password",
-      text: `Reset your Personal OS password: ${url}`,
+      html: `<p>Reset your ilo password:</p><p><a href="${url}">Reset password</a></p>`,
+      subject: "Reset your ilo password",
+      text: `Reset your ilo password: ${url}`,
       to: emailAddress,
     });
   }

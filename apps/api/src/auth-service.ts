@@ -89,7 +89,7 @@ type AuthServiceOptions = {
 export function createAuthService(options: AuthServiceOptions) {
   const { db, now, sessionTtlDays } = options;
   const ownerEmails = new Set(options.ownerEmails ?? []);
-  const registrationMode = options.registrationMode ?? "open";
+  const registrationMode = options.registrationMode ?? "invite";
   const serializeUserWithCapabilities = (user: typeof users.$inferSelect): User => ({
     ...serializeUser(user),
     canManageInvitations: ownerEmails.has(user.email),

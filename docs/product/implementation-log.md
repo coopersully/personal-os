@@ -1,4 +1,4 @@
-# Personal OS — Implementation Log
+# ilo — Implementation Log
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 

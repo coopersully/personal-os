@@ -22,8 +22,9 @@ test("a person and an agent share one reminder and calendar surface", async ({
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
-  await page.getByRole("button", { name: "New here? Create an account" }).click();
+  await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
   await page.getByLabel("Name").fill("E2E Person");
+  await page.getByLabel("Invite code").fill("invite_local_e2e_12345");
   await page.getByLabel("Email").fill(email);
   await page.getByLabel("Password").fill("LocalTestOnly123!");
   await page.getByRole("button", { name: "Create account" }).click();

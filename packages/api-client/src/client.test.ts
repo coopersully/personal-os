@@ -562,7 +562,7 @@ function apiFetch() {
   });
 }
 
-describe("Personal OS API client", () => {
+describe("ilo API client", () => {
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
     const api = createApiClient({ baseUrl: "https://api.example.com/", fetch, token: "pos_token" });

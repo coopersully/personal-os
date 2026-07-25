@@ -9,7 +9,7 @@ pub fn run() {
             desktop_preview_environment
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run Personal OS");
+        .expect("failed to run ilo");
 }
 
 #[tauri::command]

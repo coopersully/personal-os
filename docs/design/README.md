@@ -1,6 +1,6 @@
-# Personal OS design system
+# ilo design system
 
-Personal OS is a calm, opinionated workspace for a person and their agents. The
+ilo is a calm, opinionated workspace for a person and their agents. The
 system exists to make the product feel intentional at every scale, while making
 its UI predictable to build and review.
 

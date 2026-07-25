@@ -675,10 +675,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
   }
   function getPlaid() {
     if (!plaid?.clientId || !plaid.secret) {
-      throw new AppError(
-        "invalid_request",
-        "Plaid is not configured for this Personal OS instance.",
-      );
+      throw new AppError("invalid_request", "Plaid is not configured for this ilo instance.");
     }
     return plaid;
   }
@@ -1505,7 +1502,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
     },
     async createPlaidLinkToken(userId: string) {
       const response = await plaidRequest<{ link_token: string }>("/link/token/create", {
-        client_name: "Personal OS",
+        client_name: "ilo",
         country_codes: ["US"],
         language: "en",
         link_customization_name: "default",

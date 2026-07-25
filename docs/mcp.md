@@ -1,6 +1,6 @@
 # MCP integration
 
-The MCP server is an adapter over the authenticated Personal OS API. It contains no reminder, calendar, provider, or audit rules of its own.
+The MCP server is an adapter over the authenticated ilo API. It contains no reminder, calendar, provider, or audit rules of its own.
 
 ## Transports
 

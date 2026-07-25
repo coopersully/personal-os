@@ -1,8 +1,8 @@
-# Personal OS experience standards
+# ilo experience standards
 
 ## Purpose
 
-Personal OS should feel like one shared work surface for a person and their
+ilo should feel like one shared work surface for a person and their
 agents. Pages may expose different material, but they should not invent a new
 information hierarchy or a new location for common actions each time.
 

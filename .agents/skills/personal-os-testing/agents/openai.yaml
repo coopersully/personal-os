@@ -1,4 +1,4 @@
 interface:
-  display_name: "Personal OS Testing"
+  display_name: "ilo Testing"
   short_description: "Verify changes across unit, integration, and E2E layers."
-  default_prompt: "Use $personal-os-testing to validate this Personal OS change."
+  default_prompt: "Use $personal-os-testing to validate this ilo change."

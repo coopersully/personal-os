@@ -21,7 +21,7 @@ resource "cloudflare_dns_record" "certificate_validation" {
   ttl     = 60
   content = trimsuffix(each.value.record, ".")
   proxied = false
-  comment = "Personal OS ACM certificate validation"
+  comment = "ilo ACM certificate validation"
 }
 
 resource "aws_acm_certificate_validation" "public" {
@@ -36,7 +36,7 @@ resource "cloudflare_dns_record" "app" {
   ttl     = 60
   content = aws_cloudfront_distribution.web.domain_name
   proxied = false
-  comment = "Personal OS web application"
+  comment = "ilo web application"
 }
 
 resource "cloudflare_dns_record" "api" {
@@ -46,7 +46,7 @@ resource "cloudflare_dns_record" "api" {
   ttl     = 60
   content = aws_lb.public.dns_name
   proxied = false
-  comment = "Personal OS API"
+  comment = "ilo API"
 }
 
 resource "cloudflare_dns_record" "mcp" {
@@ -56,7 +56,7 @@ resource "cloudflare_dns_record" "mcp" {
   ttl     = 60
   content = aws_lb.public.dns_name
   proxied = false
-  comment = "Personal OS public MCP endpoint"
+  comment = "ilo public MCP endpoint"
 }
 
 resource "cloudflare_dns_record" "resend_dkim" {
@@ -97,5 +97,5 @@ resource "cloudflare_dns_record" "dmarc" {
   ttl     = 60
   content = "v=DMARC1; p=none;"
   proxied = false
-  comment = "Personal OS DMARC policy"
+  comment = "ilo DMARC policy"
 }

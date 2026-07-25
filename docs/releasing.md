@@ -1,4 +1,4 @@
-# Releasing Personal OS
+# Releasing ilo
 
 Releases are immutable, semantically versioned Git tags. Use prereleases while
 the hosted service remains invite-only: `v0.1.0-beta.1`, then `v0.1.0` when the

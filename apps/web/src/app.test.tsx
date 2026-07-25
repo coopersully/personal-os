@@ -882,7 +882,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Personal OS web app", () => {
+describe("ilo web app", () => {
   it("lays out transitive overlaps in stable columns and preserves repeated DST hours", () => {
     const timelineEvent = { ...event, conferenceUrl: null };
     const overlappingEvents = [
@@ -1049,25 +1049,31 @@ describe("Personal OS web app", () => {
     expect(await screen.findByRole("heading", { name: "Welcome back" })).toBeInTheDocument();
     await browser.type(screen.getByLabelText("Email"), "test@example.com");
     await browser.type(screen.getByLabelText("Password"), "wrong-password");
-    await browser.click(screen.getByRole("button", { name: "Open Personal OS" }));
+    await browser.click(screen.getByRole("button", { name: "Open ilo" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Wrong password");
-    await browser.click(screen.getByRole("button", { name: "New here? Create an account" }));
+    await browser.click(screen.getByRole("button", { name: "Have an invite? Create an account" }));
     await browser.click(screen.getByRole("button", { name: "Already have an account? Sign in" }));
-    await browser.click(screen.getByRole("button", { name: "New here? Create an account" }));
+    await browser.click(screen.getByRole("button", { name: "Have an invite? Create an account" }));
     await browser.type(screen.getByLabelText("Name"), "Test User");
+    expect(screen.getByLabelText("Invite code")).toBeRequired();
+    await browser.type(screen.getByLabelText("Invite code"), "invite_test_code_12345");
     await browser.clear(screen.getByLabelText("Password"));
     await browser.type(screen.getByLabelText("Password"), "LocalTestOnly123!");
     await browser.click(screen.getByRole("button", { name: "Create account" }));
     expect(await screen.findByRole("heading", { name: "Your commitments" })).toBeInTheDocument();
     expect(mocks.register).toHaveBeenCalledWith(
-      expect.objectContaining({ displayName: "Test User", email: "test@example.com" }),
+      expect.objectContaining({
+        displayName: "Test User",
+        email: "test@example.com",
+        inviteCode: "invite_test_code_12345",
+      }),
     );
   });
 
   it("renders fatal and inline failures", async () => {
     mocks.getMe.mockRejectedValueOnce(new TypeError("Load failed"));
     const offline = setup();
-    expect(await screen.findByText("Personal OS service is offline.")).toBeInTheDocument();
+    expect(await screen.findByText("ilo service is offline.")).toBeInTheDocument();
     expect(screen.getByText(/Start environment action/)).toBeInTheDocument();
     await userEvent.setup().click(screen.getByRole("button", { name: "Try again" }));
     offline.unmount();
@@ -2415,7 +2421,7 @@ describe("Personal OS web app", () => {
       "https://example.com/brief",
     );
     expect(view.container.querySelector("script")).not.toBeInTheDocument();
-    expect(screen.getByText(/stored in Personal OS/)).toBeInTheDocument();
+    expect(screen.getByText(/stored in ilo/)).toBeInTheDocument();
 
     await browser.click(screen.getByRole("button", { name: "Delete" }));
     expect(screen.getByText("Delete this event everywhere?")).toBeInTheDocument();
@@ -3523,7 +3529,7 @@ describe("Personal OS web app", () => {
     const browser = userEvent.setup();
     await browser.type(await screen.findByLabelText("Email"), "test@example.com");
     await browser.type(screen.getByLabelText("Password"), "LocalTestOnly123!");
-    await browser.click(screen.getByRole("button", { name: "Open Personal OS" }));
+    await browser.click(screen.getByRole("button", { name: "Open ilo" }));
     expect(await screen.findByText("Signing in")).toBeInTheDocument();
     rejectLogin(new Error("Later failure"));
     expect(await screen.findByRole("alert")).toHaveTextContent("Later failure");
@@ -3821,7 +3827,7 @@ describe("Personal OS web app", () => {
 
   it("keeps Pinterest wallpaper desktop-only and exposes its desktop controls intentionally", async () => {
     const webView = setup("/settings?section=wallpaper");
-    expect(await screen.findByText("Available in Personal OS for macOS")).toBeInTheDocument();
+    expect(await screen.findByText("Available in ilo for macOS")).toBeInTheDocument();
     expect(screen.queryByLabelText("Public board URL")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Refresh now" })).not.toBeInTheDocument();
     expect(mocks.getPinterestWallpaperSettings).not.toHaveBeenCalled();

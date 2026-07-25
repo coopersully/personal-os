@@ -3,7 +3,7 @@ import type { PersonalOsApiClient } from "@personal-os/api-client";
 import { z } from "zod";
 import { result } from "../tool-result.js";
 
-const id = z.string().uuid().describe("Personal OS object identifier");
+const id = z.string().uuid().describe("ilo object identifier");
 
 /** Finance-owned MCP surface. Domain policy remains enforced by the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {

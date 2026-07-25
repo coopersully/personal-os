@@ -28,7 +28,10 @@ RUN pnpm --filter @personal-os/api build \
  && pnpm --filter @personal-os/api deploy --prod --legacy /output/api \
  && pnpm --filter @personal-os/mcp deploy --prod --legacy /output/mcp
 
-FROM node:22.18.0-bookworm-slim AS api
+FROM node:22.18.0-alpine3.22 AS runtime
+RUN apk upgrade --no-cache
+
+FROM runtime AS api
 ENV NODE_ENV=production
 ENV MIGRATIONS_DIR=/app/migrations
 WORKDIR /app
@@ -42,7 +45,7 @@ USER node
 EXPOSE 8787
 CMD ["node", "dist/main.js"]
 
-FROM node:22.18.0-bookworm-slim AS mcp
+FROM runtime AS mcp
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 WORKDIR /app

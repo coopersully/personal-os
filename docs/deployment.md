@@ -5,7 +5,7 @@
 | Variable | Purpose |
 | --- | --- |
 | `DATABASE_URL` | PostgreSQL connection URL |
-| `EMAIL_FROM` | Verified transactional sender, for example `Personal OS <noreply@example.com>` |
+| `EMAIL_FROM` | Verified transactional sender, for example `ilo <noreply@example.com>` |
 | `APP_BASE_URL` | Canonical browser application URL and OAuth return destination |
 | `API_BASE_URL` | Canonical API URL advertised by OpenAPI |
 | `ALLOWED_ORIGINS` | Comma-separated browser and Tauri origins |
@@ -24,7 +24,7 @@
 | `MCP_PUBLIC_URL` | Canonical public MCP origin, for example `https://mcp.example.com` |
 | `MCP_RESOURCE_URL` | Canonical MCP resource URI, normally `https://mcp.example.com/mcp` |
 | `MCP_INTERNAL_SECRET` | Random 32+ character secret shared only by the API and MCP containers |
-| `REGISTRATION_MODE` | Set `invite` for a private beta; `open` only when public registration is intentional |
+| `REGISTRATION_MODE` | Must be `invite` in production; the API refuses to boot in open mode |
 | `OWNER_EMAILS` | Comma-separated email addresses allowed to issue invitations |
 | `X_CLIENT_ID` | X OAuth 2.0 client ID |
 | `X_CLIENT_SECRET` | X OAuth confidential-client secret (if configured) |
@@ -34,18 +34,22 @@ Generate the encryption key outside the repository and store it in the deploymen
 
 Hosted deployments should set both `EMAIL_FROM` and `RESEND_API_KEY`. Without them, development safely suppresses transactional email, but users cannot complete email verification or recover a password.
 
-Production defaults to invite-only sign-up and refuses to start without at least one `OWNER_EMAILS` address. An owner signs in, opens Settings → Invitations, creates a one-time code (optionally bound to a friend's email), and shares the code privately. Codes are hashed at rest, expire after 14 days by default, and cannot be reused.
+Production requires invite-only sign-up and refuses to start in open mode or
+without at least one `OWNER_EMAILS` address. An owner signs in, opens Settings →
+Invitations, creates a one-time code (optionally bound to a friend's email), and
+shares the code privately. Codes are hashed at rest, expire after 14 days by
+default, and cannot be reused.
 
 The application has an in-process authentication rate-limit backstop. Configure an equivalent shared rate limit at the public edge before running more than one API replica. Never expose PostgreSQL or container-only ports; place the API behind the same authenticated HTTPS edge used by the web app.
 
 ## Images
 
 The root Dockerfile has `api`, `mcp`, and `web` targets. The API image runs migrations before accepting traffic, runs as an unprivileged user, and exposes liveness/readiness endpoints. The web target uses unprivileged Nginx with immutable asset caching and SPA fallback.
-The MCP image binds to all container interfaces, requires a Personal OS bearer token for every protocol request, and exposes only an unauthenticated liveness endpoint. The endpoint is meant to be public: terminate TLS at the edge, rate-limit it there, and keep bearer tokens out of query strings and logs. Browser-originated MCP requests can be restricted with `MCP_ALLOWED_ORIGINS`; native and agent clients do not send an Origin header and remain supported.
+The MCP image binds to all container interfaces, requires an ilo bearer token for every protocol request, and exposes only an unauthenticated liveness endpoint. The endpoint is meant to be public: terminate TLS at the edge, rate-limit it there, and keep bearer tokens out of query strings and logs. Browser-originated MCP requests can be restricted with `MCP_ALLOWED_ORIGINS`; native and agent clients do not send an Origin header and remain supported.
 
 ## MCP OAuth
 
-The public MCP endpoint publishes protected-resource metadata and directs clients to Personal OS's OAuth authorization server. A person signs in to Personal OS once and consents to the MCP client; Google, iCloud, and other connected services remain internal to that Personal OS account. OAuth clients use dynamic registration, exact redirect-URI matching, S256 PKCE, five-minute one-time authorization codes, one-hour MCP audience-bound access tokens, and rotating refresh tokens. Do not reuse `MCP_INTERNAL_SECRET` outside the API and MCP containers, and use distinct values per environment.
+The public MCP endpoint publishes protected-resource metadata and directs clients to ilo's OAuth authorization server. A person signs in to ilo once and consents to the MCP client; Google, iCloud, and other connected services remain internal to that ilo account. OAuth clients use dynamic registration, exact redirect-URI matching, S256 PKCE, five-minute one-time authorization codes, one-hour MCP audience-bound access tokens, and rotating refresh tokens. Do not reuse `MCP_INTERNAL_SECRET` outside the API and MCP containers, and use distinct values per environment.
 
 Build with the public API address compiled into the PWA:
 
@@ -76,7 +80,7 @@ Register the exact public `GOOGLE_REDIRECT_URI` in Google Cloud. Request Calenda
 
 ## X Bookmarks configuration
 
-Create an X OAuth 2.0 app, register the exact public `X_REDIRECT_URI`, and set its client ID (plus client secret for a confidential client). The connector requests only `bookmark.read`, `tweet.read`, `users.read`, and `offline.access`. After connecting in **Settings → Connections**, select one bookmark folder. Personal OS stores the OAuth refresh token encrypted, projects only that folder's posts, and exposes the projection to agents through the `bookmarks:read` scope and the `list_x_bookmarks` MCP tool. It never writes to X.
+Create an X OAuth 2.0 app, register the exact public `X_REDIRECT_URI`, and set its client ID (plus client secret for a confidential client). The connector requests only `bookmark.read`, `tweet.read`, `users.read`, and `offline.access`. After connecting in **Settings → Connections**, select one bookmark folder. ilo stores the OAuth refresh token encrypted, projects only that folder's posts, and exposes the projection to agents through the `bookmarks:read` scope and the `list_x_bookmarks` MCP tool. It never writes to X.
 
 ## Backups and rollback
 

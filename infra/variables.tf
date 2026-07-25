@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "AWS region for all Personal OS production resources."
+  description = "AWS region for all ilo production resources."
   type        = string
   default     = "us-east-1"
 }
@@ -48,13 +48,13 @@ variable "github_environment" {
 }
 
 variable "owner_emails" {
-  description = "Comma-separated initial Personal OS owners allowed to create invitations."
+  description = "Comma-separated initial ilo owners allowed to create invitations."
   type        = string
   sensitive   = true
 }
 
 variable "email_from" {
-  description = "Verified transactional sender, for example Personal OS <noreply@example.com>."
+  description = "Verified transactional sender, for example ilo <noreply@example.com>."
   type        = string
 }
 
@@ -62,17 +62,6 @@ variable "google_client_id" {
   description = "Production Google OAuth client ID. The secret remains in Parameter Store."
   type        = string
   default     = ""
-}
-
-variable "registration_mode" {
-  description = "Keep invite during the hosted beta; open is an intentional future choice."
-  type        = string
-  default     = "invite"
-
-  validation {
-    condition     = contains(["invite", "open"], var.registration_mode)
-    error_message = "registration_mode must be invite or open."
-  }
 }
 
 variable "plaid_enabled" {

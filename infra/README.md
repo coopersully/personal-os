@@ -1,15 +1,19 @@
-# Personal OS AWS infrastructure
+# ilo AWS infrastructure
 
 This directory defines an AWS deployment baseline in `us-east-1`:
 
 - private RDS PostgreSQL with encrypted storage, automated backups, and an RDS-managed master password;
 - two immutable ECR repositories and ECS Fargate services for the API and public MCP endpoint;
-- a public ALB with ACM TLS, host routing, WAF rate limiting, and CloudWatch logs;
-- a private S3 web bucket delivered through CloudFront; and
+- private ECS application subnets with outbound-only provider access through a NAT gateway;
+- a public ALB with ACM TLS, strict host routing, managed WAF protections, and CloudWatch logs;
+- a private, encrypted S3 web bucket delivered through CloudFront with browser security headers;
 - authoritative DNS records in an existing Cloudflare zone; and
 - a GitHub Actions OIDC deployment role restricted to the repository and branch configured in Terraform.
 
-The tasks run in public subnets with public egress to avoid the fixed cost of a NAT gateway during the beta. They are *not* publicly reachable: their security group accepts inbound traffic only from the ALB. PostgreSQL remains in private subnets and accepts traffic only from application tasks. Move tasks to private subnets with NAT or VPC endpoints before a higher-scale launch.
+The tasks run without public IP addresses and accept inbound traffic only from
+the ALB. Their security group permits only DNS, PostgreSQL inside the VPC, and
+outbound TLS for provider APIs and transactional email. PostgreSQL remains in
+dedicated private subnets and accepts traffic only from application tasks.
 
 ## One-time bootstrap
 
@@ -121,6 +125,9 @@ The task execution role—not the application task roles—can read the named ru
 
 ## Cost and availability posture
 
-This is a deliberate invite-only-beta baseline: one API task, one MCP task, a single-AZ `db.t4g.micro` database, CloudFront/S3 web delivery, and a public ALB. WAF is enabled by default. Multi-AZ RDS, private-task NAT, custom KMS keys, multi-replica services, and an on-call alarm suite should be added before claiming high availability.
+This is a secured invite-only-beta baseline: one private API task, one private
+MCP task, a single-AZ `db.t4g.micro` database, CloudFront/S3 web delivery, and a
+public ALB protected by managed WAF rules. Multi-AZ RDS, multi-replica services,
+and an on-call alarm suite should be added before claiming high availability.
 
 Run `terraform fmt -recursive` and `terraform validate` before every infrastructure pull request. Terraform plans and applies are production changes and should be reviewed separately from application deployment commits.

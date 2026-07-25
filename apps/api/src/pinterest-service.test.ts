@@ -34,7 +34,7 @@ describe("Pinterest wallpaper service", () => {
     const pins = await service.pins("user-1", 12);
 
     expect(fetch).toHaveBeenCalledWith("https://www.pinterest.com/example/mindset/", {
-      headers: { "user-agent": "Personal OS wallpaper/1.0" },
+      headers: { "user-agent": "ilo wallpaper/1.0" },
     });
     expect(pins).toHaveLength(12);
     expect(new Set(pins.map((pin) => pin.id)).size).toBe(12);

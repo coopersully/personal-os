@@ -1,8 +1,8 @@
-import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
+import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import { createApiClient } from "@personal-os/api-client";
-import type { Request, Response } from "express";
+import express, { type Request, type Response } from "express";
 import {
   createFixedWindowRateLimiter,
   isAllowedOrigin,
@@ -26,10 +26,12 @@ const rateLimiter = createFixedWindowRateLimiter({
   maxRequests: security.rateLimitMaxRequests,
   windowMs: security.rateLimitWindowMs,
 });
-const app = createMcpExpressApp();
+const app = express();
 app.disable("x-powered-by");
+app.use(express.json());
 
 app.get("/health/live", (_request, response) => response.json({ status: "ok" }));
+app.use(hostHeaderValidation([new URL(publicUrl).hostname]));
 app.get("/.well-known/oauth-protected-resource", (_request, response) =>
   response.json({ authorization_servers: [authorizationServer], resource: `${publicUrl}/mcp` }),
 );

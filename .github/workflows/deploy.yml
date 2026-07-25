@@ -1,0 +1,213 @@
+name: Deploy hosted application
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy production
+    if: >-
+      (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      API_ECR_REPOSITORY: ${{ vars.API_ECR_REPOSITORY }}
+      API_SERVICE: ${{ vars.API_SERVICE }}
+      API_URL: ${{ vars.API_URL }}
+      APP_URL: ${{ vars.APP_URL }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
+      MCP_ECR_REPOSITORY: ${{ vars.MCP_ECR_REPOSITORY }}
+      MCP_SERVICE: ${{ vars.MCP_SERVICE }}
+      MCP_URL: ${{ vars.MCP_URL }}
+      WEB_BUCKET: ${{ vars.WEB_BUCKET }}
+      WEB_DISTRIBUTION_ID: ${{ vars.WEB_DISTRIBUTION_ID }}
+    steps:
+      - name: Require production deployment configuration
+        run: |
+          for variable in \
+            API_ECR_REPOSITORY API_SERVICE API_URL APP_URL AWS_REGION \
+            AWS_ROLE_ARN ECS_CLUSTER MCP_ECR_REPOSITORY MCP_SERVICE MCP_URL \
+            WEB_BUCKET WEB_DISTRIBUTION_ID
+          do
+            test -n "${!variable}" || {
+              echo "::error::Missing GitHub production variable: ${variable}"
+              exit 1
+            }
+          done
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.2
+
+      - uses: actions/setup-node@v4
+        with:
+          cache: pnpm
+          node-version: 22
+
+      - name: Select immutable release tag
+        id: release
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: echo "tag=sha-${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+
+      - uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API and MCP images
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            --target api \
+            --tag "${API_ECR_REPOSITORY}:${RELEASE_TAG}" \
+            .
+          docker build \
+            --platform linux/amd64 \
+            --target mcp \
+            --tag "${MCP_ECR_REPOSITORY}:${RELEASE_TAG}" \
+            .
+          docker push "${API_ECR_REPOSITORY}:${RELEASE_TAG}"
+          docker push "${MCP_ECR_REPOSITORY}:${RELEASE_TAG}"
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build web application
+        env:
+          VITE_API_BASE_URL: ${{ env.API_URL }}
+        run: pnpm --filter @personal-os/web build
+
+      - name: Register immutable task definitions
+        id: tasks
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          register_task() {
+            local family="$1"
+            local container="$2"
+            local image="$3"
+            local output_name="$4"
+            local task_file
+            local registered_arn
+            task_file="$(mktemp)"
+
+            aws ecs describe-task-definition \
+              --task-definition "$family" \
+              --output json |
+              jq \
+                --arg container "$container" \
+                --arg image "$image" \
+                '.taskDefinition
+                | .containerDefinitions |= map(
+                    if .name == $container then .image = $image else . end
+                  )
+                | del(
+                    .compatibilities,
+                    .registeredAt,
+                    .registeredBy,
+                    .requiresAttributes,
+                    .revision,
+                    .status,
+                    .taskDefinitionArn
+                  )' > "$task_file"
+
+            registered_arn="$(
+              aws ecs register-task-definition \
+                --cli-input-json "file://${task_file}" \
+                --query taskDefinition.taskDefinitionArn \
+                --output text
+            )"
+            echo "${output_name}=${registered_arn}" >> "$GITHUB_OUTPUT"
+          }
+
+          register_task \
+            "$API_SERVICE" \
+            api \
+            "${API_ECR_REPOSITORY}:${RELEASE_TAG}" \
+            api_task_definition
+          register_task \
+            "$MCP_SERVICE" \
+            mcp \
+            "${MCP_ECR_REPOSITORY}:${RELEASE_TAG}" \
+            mcp_task_definition
+
+      - name: Deploy migration-capable API serially
+        env:
+          API_TASK_DEFINITION: ${{ steps.tasks.outputs.api_task_definition }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$API_SERVICE" \
+            --task-definition "$API_TASK_DEFINITION" \
+            --desired-count 1 \
+            >/dev/null
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$API_SERVICE"
+
+      - name: Deploy MCP after the API is healthy
+        env:
+          MCP_TASK_DEFINITION: ${{ steps.tasks.outputs.mcp_task_definition }}
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$MCP_SERVICE" \
+            --task-definition "$MCP_TASK_DEFINITION" \
+            --desired-count 1 \
+            >/dev/null
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$MCP_SERVICE"
+
+      - name: Publish web assets
+        run: |
+          aws s3 sync \
+            apps/web/dist/assets \
+            "s3://${WEB_BUCKET}/assets" \
+            --cache-control "public,max-age=31536000,immutable" \
+            --delete
+          aws s3 sync \
+            apps/web/dist \
+            "s3://${WEB_BUCKET}" \
+            --cache-control "no-cache" \
+            --delete \
+            --exclude "assets/*"
+          aws cloudfront create-invalidation \
+            --distribution-id "$WEB_DISTRIBUTION_ID" \
+            --paths "/*" \
+            >/dev/null
+
+      - name: Verify public health
+        run: |
+          curl --fail --retry 12 --retry-all-errors --retry-delay 5 \
+            "${API_URL}/health/ready"
+          curl --fail --retry 12 --retry-all-errors --retry-delay 5 \
+            "${MCP_URL%/mcp}/health/live"
+          curl --fail --retry 12 --retry-all-errors --retry-delay 5 \
+            "$APP_URL"

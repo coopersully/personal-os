@@ -27,11 +27,12 @@ resource "aws_lb" "public" {
 }
 
 resource "aws_lb_target_group" "api" {
-  name        = "${local.name}-api"
-  port        = 8787
-  protocol    = "HTTP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.main.id
+  name                 = "${local.name}-api"
+  port                 = 8787
+  protocol             = "HTTP"
+  target_type          = "ip"
+  vpc_id               = aws_vpc.main.id
+  deregistration_delay = 30
 
   health_check {
     enabled             = true
@@ -45,11 +46,12 @@ resource "aws_lb_target_group" "api" {
 }
 
 resource "aws_lb_target_group" "mcp" {
-  name        = "${local.name}-mcp"
-  port        = 8788
-  protocol    = "HTTP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.main.id
+  name                 = "${local.name}-mcp"
+  port                 = 8788
+  protocol             = "HTTP"
+  target_type          = "ip"
+  vpc_id               = aws_vpc.main.id
+  deregistration_delay = 30
 
   health_check {
     enabled             = true
@@ -131,6 +133,11 @@ resource "aws_ecs_task_definition" "api" {
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.api_task.arn
 
+  runtime_platform {
+    cpu_architecture        = "X86_64"
+    operating_system_family = "LINUX"
+  }
+
   container_definitions = jsonencode([{
     name         = "api"
     image        = "${aws_ecr_repository.api.repository_url}:bootstrap"
@@ -147,9 +154,11 @@ resource "aws_ecs_task_definition" "api" {
       { name = "GOOGLE_REDIRECT_URI", value = "https://${local.api_domain}/v1/connectors/google/callback" },
       { name = "MCP_RESOURCE_URL", value = "https://${local.mcp_domain}/mcp" },
       { name = "OWNER_EMAILS", value = var.owner_emails },
+      { name = "PLAID_ENV", value = var.plaid_environment },
       { name = "REGISTRATION_MODE", value = var.registration_mode },
       { name = "TRUST_PROXY", value = "true" },
       { name = "LOG_LEVEL", value = "info" },
+      { name = "X_REDIRECT_URI", value = "https://${local.api_domain}/v1/x-bookmarks/callback" },
     ]
     secrets = concat(
       [
@@ -159,7 +168,14 @@ resource "aws_ecs_task_definition" "api" {
         { name = "MCP_INTERNAL_SECRET", valueFrom = local.runtime_parameter_arns.MCP_INTERNAL_SECRET },
         { name = "RESEND_API_KEY", valueFrom = local.runtime_parameter_arns.RESEND_API_KEY },
       ],
-      var.plaid_enabled ? [{ name = "PLAID_SECRET", valueFrom = local.runtime_parameter_arns.PLAID_SECRET }] : [],
+      var.plaid_enabled ? [
+        { name = "PLAID_CLIENT_ID", valueFrom = local.runtime_parameter_arns.PLAID_CLIENT_ID },
+        { name = "PLAID_SECRET", valueFrom = local.runtime_parameter_arns.PLAID_SECRET },
+      ] : [],
+      var.x_enabled ? [
+        { name = "X_CLIENT_ID", valueFrom = local.runtime_parameter_arns.X_CLIENT_ID },
+        { name = "X_CLIENT_SECRET", valueFrom = local.runtime_parameter_arns.X_CLIENT_SECRET },
+      ] : [],
     )
     logConfiguration = {
       logDriver = "awslogs"
@@ -188,6 +204,11 @@ resource "aws_ecs_task_definition" "mcp" {
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.mcp_task.arn
 
+  runtime_platform {
+    cpu_architecture        = "X86_64"
+    operating_system_family = "LINUX"
+  }
+
   container_definitions = jsonencode([{
     name         = "mcp"
     image        = "${aws_ecr_repository.mcp.repository_url}:bootstrap"
@@ -202,6 +223,7 @@ resource "aws_ecs_task_definition" "mcp" {
       { name = "MCP_RATE_LIMIT_WINDOW_SECONDS", value = "60" },
       { name = "MCP_TRUST_PROXY", value = "true" },
       { name = "MCP_PUBLIC_URL", value = "https://${local.mcp_domain}" },
+      { name = "OAUTH_AUTHORIZATION_SERVER_URL", value = "https://${local.api_domain}" },
     ]
     secrets = [
       { name = "MCP_INTERNAL_SECRET", valueFrom = local.runtime_parameter_arns.MCP_INTERNAL_SECRET },
@@ -235,6 +257,11 @@ resource "aws_ecs_service" "api" {
   deployment_maximum_percent         = 100
   health_check_grace_period_seconds  = 90
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
     assign_public_ip = true
     security_groups  = [aws_security_group.application.id]
@@ -262,6 +289,11 @@ resource "aws_ecs_service" "mcp" {
   deployment_minimum_healthy_percent = 0
   deployment_maximum_percent         = 100
   health_check_grace_period_seconds  = 60
+
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
 
   network_configuration {
     assign_public_ip = true

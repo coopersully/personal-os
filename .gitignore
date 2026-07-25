@@ -28,6 +28,7 @@ apps/web/public/workbox-*.js
 # Terraform state, provider plugins, and local variable files can contain
 # account metadata or secret configuration and must remain local.
 .terraform/
+backend.hcl
 *.tfstate
 *.tfstate.*
 *.tfvars

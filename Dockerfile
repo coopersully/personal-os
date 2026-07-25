@@ -32,6 +32,10 @@ FROM node:22.18.0-bookworm-slim AS api
 ENV NODE_ENV=production
 ENV MIGRATIONS_DIR=/app/migrations
 WORKDIR /app
+ADD --chown=node:node --chmod=0444 \
+  --checksum=sha256:e5bb2084ccf45087bda1c9bffdea0eb15ee67f0b91646106e466714f9de3c7e3 \
+  https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+  /app/aws-rds-global-bundle.pem
 COPY --from=build --chown=node:node /output/api ./
 COPY --from=build --chown=node:node /workspace/packages/database/migrations ./migrations
 USER node

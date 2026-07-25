@@ -18,7 +18,8 @@ locals {
       "RESEND_API_KEY",
       "DATABASE_URL",
     ]),
-    var.plaid_enabled ? toset(["PLAID_SECRET"]) : toset([]),
+    var.plaid_enabled ? toset(["PLAID_CLIENT_ID", "PLAID_SECRET"]) : toset([]),
+    var.x_enabled ? toset(["X_CLIENT_ID", "X_CLIENT_SECRET"]) : toset([]),
   )
 
   runtime_parameter_arns = {

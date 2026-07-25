@@ -110,6 +110,7 @@ import {
   Target,
   Trash2,
   UserRound,
+  Volleyball,
   WifiOff,
   X,
 } from "lucide-react";
@@ -7756,7 +7757,7 @@ function FatalState({ error }: { error: unknown }) {
 function LogoMark({ compact = false }: { compact?: boolean }) {
   return (
     <span className={`logo-mark${compact ? " logo-mark--compact" : ""}`}>
-      <Clock3 size={compact ? 12 : 17} />
+      <Volleyball aria-hidden="true" />
     </span>
   );
 }

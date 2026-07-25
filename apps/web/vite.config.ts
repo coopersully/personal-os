@@ -34,12 +34,21 @@ export default defineConfig(({ mode }) => {
         // Avoid a development service worker: it can retain stale source modules between local
         // refreshes. The production build still registers the worker from main.tsx.
         devOptions: { enabled: false },
-        includeAssets: ["icon.svg"],
+        includeAssets: ["apple-touch-icon.png", "favicon-32.png", "icon.svg"],
         manifest: {
           background_color: "#12110f",
           description: "A shared daily surface for people and their agents.",
           display: "standalone",
-          icons: [{ sizes: "any", src: "/icon.svg", type: "image/svg+xml" }],
+          icons: [
+            { sizes: "any", src: "/icon.svg", type: "image/svg+xml" },
+            { sizes: "192x192", src: "/icon-192.png", type: "image/png" },
+            {
+              purpose: "any maskable",
+              sizes: "512x512",
+              src: "/icon-512.png",
+              type: "image/png",
+            },
+          ],
           name: "ilo",
           orientation: "any",
           short_name: "ilo",

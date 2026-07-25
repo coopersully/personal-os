@@ -16,7 +16,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     info: {
       description:
         "The shared reminders, calendar, and read-only mail data plane for people and agents.",
-      title: "Personal OS API",
+      title: "ilo API",
       version: "0.1.0",
     },
     openapi: "3.1.0",

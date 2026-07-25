@@ -1,5 +1,5 @@
 variable "aws_region" {
-  description = "AWS region for all Personal OS production resources."
+  description = "AWS region for all ilo production resources."
   type        = string
   default     = "us-east-1"
 }
@@ -26,8 +26,8 @@ variable "domain_name" {
   type        = string
 }
 
-variable "route53_zone_id" {
-  description = "Existing public Route 53 hosted-zone ID for domain_name."
+variable "cloudflare_zone_id" {
+  description = "Authoritative Cloudflare zone ID for domain_name."
   type        = string
 }
 
@@ -41,20 +41,20 @@ variable "github_repository" {
   }
 }
 
-variable "main_branch" {
-  description = "Only this branch may assume the production deployment role."
+variable "github_environment" {
+  description = "Protected GitHub environment allowed to assume the production deployment role."
   type        = string
-  default     = "main"
+  default     = "production"
 }
 
 variable "owner_emails" {
-  description = "Comma-separated initial Personal OS owners allowed to create invitations."
+  description = "Comma-separated initial ilo owners allowed to create invitations."
   type        = string
   sensitive   = true
 }
 
 variable "email_from" {
-  description = "Verified transactional sender, for example Personal OS <noreply@example.com>."
+  description = "Verified transactional sender, for example ilo <noreply@example.com>."
   type        = string
 }
 
@@ -64,19 +64,25 @@ variable "google_client_id" {
   default     = ""
 }
 
-variable "registration_mode" {
-  description = "Keep invite during the hosted beta; open is an intentional future choice."
+variable "plaid_enabled" {
+  description = "Inject the Plaid runtime secret only when the production Plaid integration is enabled."
+  type        = bool
+  default     = false
+}
+
+variable "plaid_environment" {
+  description = "Plaid API environment used when plaid_enabled is true."
   type        = string
-  default     = "invite"
+  default     = "sandbox"
 
   validation {
-    condition     = contains(["invite", "open"], var.registration_mode)
-    error_message = "registration_mode must be invite or open."
+    condition     = contains(["sandbox", "development", "production"], var.plaid_environment)
+    error_message = "plaid_environment must be sandbox, development, or production."
   }
 }
 
-variable "plaid_enabled" {
-  description = "Inject the Plaid runtime secret only when the production Plaid integration is enabled."
+variable "x_enabled" {
+  description = "Inject the X OAuth client credentials when the production X bookmarks integration is enabled."
   type        = bool
   default     = false
 }

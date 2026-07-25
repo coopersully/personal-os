@@ -1,9 +1,9 @@
 ---
 name: personal-os-frontend
-description: Build accessible, domain-owned Personal OS React PWA features. Use when changing `apps/web`, adding a feature page or view state, composing shadcn primitives, changing API queries, or refactoring the application shell.
+description: Build accessible, domain-owned ilo React PWA features. Use when changing `apps/web`, adding a feature page or view state, composing shadcn primitives, changing API queries, or refactoring the application shell.
 ---
 
-# Personal OS frontend
+# ilo frontend
 
 Follow `apps/web/src/features/README.md`, `docs/design/system.md`, the relevant
 page specification in `docs/design/pages`, and

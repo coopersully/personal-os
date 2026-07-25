@@ -2,7 +2,7 @@
 
 ## Repository Purpose
 
-This repository is the Personal OS monorepo and also stores personal agent skills and routine definitions. Keep changes small, explicit, and easy to review.
+This repository is the ilo monorepo and also stores personal agent skills and routine definitions. Keep changes small, explicit, and easy to review.
 
 ## Codex Local Environment
 

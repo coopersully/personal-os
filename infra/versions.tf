@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 5.22"
+    }
   }
 }
 
@@ -20,6 +24,8 @@ provider "aws" {
     tags = local.common_tags
   }
 }
+
+provider "cloudflare" {}
 
 data "aws_caller_identity" "current" {}
 

@@ -6,4 +6,10 @@
 **/playwright-report
 **/target
 **/test-results
+**/.terraform
+**/*.tfstate
+**/*.tfstate.*
+infra/backend.hcl
+infra/bootstrap/terraform.tfvars
+infra/terraform.tfvars
 .DS_Store

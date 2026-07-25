@@ -131,7 +131,7 @@ export function createPinterestService({
     }
     const boardUrl = publicPinterestBoardUrl(connection.boardUrl);
     const response = await requestFetch(boardUrl, {
-      headers: { "user-agent": "Personal OS wallpaper/1.0" },
+      headers: { "user-agent": "ilo wallpaper/1.0" },
     });
     if (!response.ok) {
       throw new AppError(

@@ -1,8 +1,8 @@
-# Personal OS design system
+# ilo design system
 
 ## Purpose
 
-Personal OS helps one person see, decide, and act across their commitments
+ilo helps one person see, decide, and act across their commitments
 without hiding where information came from or asking them to surrender control
 to an agent. The interface should feel like a well-made personal instrument:
 quiet by default, direct when needed, and detailed only at the point of use.

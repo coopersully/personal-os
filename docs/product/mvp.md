@@ -1,8 +1,8 @@
-# Personal OS MVP
+# ilo MVP
 
 ## Product statement
 
-Personal OS is a transparent coordination layer shared by people and agents. It
+ilo is a transparent coordination layer shared by people and agents. It
 combines reminders, calendars, and read-only mail in one directly manipulable interface, while
 also exposing the same operations through the Model Context Protocol (MCP).
 
@@ -85,10 +85,10 @@ provider internals.
 
 ## Source-of-truth rules
 
-- Personal OS is authoritative for users, reminders, sessions, access tokens,
+- ilo is authoritative for users, reminders, sessions, access tokens,
   local calendars, local events, preferences, and audit records.
 - A connected provider is authoritative for its calendars, events, and mail.
-- Personal OS stores a normalized projection of provider data and retains the
+- ilo stores a normalized projection of provider data and retains the
   remote identifiers, revision, and raw payload required for reconciliation.
 - An account-saved weather location retains the selected place label and
   coordinates from a searchable place picker so it can be retrieved without a

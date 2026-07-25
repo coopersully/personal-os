@@ -258,4 +258,104 @@ describe("weather service", () => {
       }).current({ coordinates: { latitude: 40, longitude: -73 }, savedLocation: null }),
     ).rejects.toMatchObject({ code: "service_unavailable" });
   });
+
+  it("preserves sparse saved locations and labels unknown provider conditions", async () => {
+    await expect(
+      createWeatherService({
+        fetch: weatherFetch([
+          json({ current: { temperature_2m: 70, weather_code: 999 } }),
+          json({ current: {} }),
+        ]),
+        now: () => now,
+      }).current({
+        savedLocation: {
+          coordinates: { latitude: 1.23456, longitude: -2.34567 },
+          label: " , , ",
+        },
+      }),
+    ).resolves.toMatchObject({
+      condition: "Current conditions",
+      location: {
+        city: null,
+        country: null,
+        label: "1.2346, -2.3457",
+        region: null,
+        shortLabel: "1.2346, -2.3457",
+      },
+    });
+
+    const legacyFetch = weatherFetch([
+      json({
+        results: [{ latitude: 1, longitude: 2, name: "Somewhere" }],
+      }),
+      json({ current: { temperature_2m: 70, weather_code: 1 } }),
+      json({ current: {} }),
+    ]);
+    await createWeatherService({ fetch: legacyFetch, now: () => now }).current({
+      savedLocation: { label: ", Somewhere" },
+    });
+    expect(String(legacyFetch.mock.calls[0]?.[0])).toContain("name=%2C+Somewhere");
+  });
+
+  it("uses reverse-geocoder place fallbacks and tolerates a missing address", async () => {
+    let clock = 10_000;
+    vi.spyOn(Date, "now").mockImplementation(() => {
+      clock += 1_001;
+      return clock;
+    });
+    const fetch = weatherFetch([
+      json({ address: { country: "One", state_district: "District", town: "Town" } }),
+      json({ current: { temperature_2m: 70, weather_code: 1 } }),
+      json({ current: {} }),
+      json({ address: { county: "County", village: "Village" } }),
+      json({ current: { temperature_2m: 70, weather_code: 1 } }),
+      json({ current: {} }),
+      json({ address: { municipality: "Municipality" } }),
+      json({ current: { temperature_2m: 70, weather_code: 1 } }),
+      json({ current: {} }),
+      json({}),
+      json({ current: { temperature_2m: 70, weather_code: 1 } }),
+      json({ current: {} }),
+    ]);
+    const weather = createWeatherService({ fetch, now: () => now });
+
+    await expect(
+      weather.current({ coordinates: { latitude: 1, longitude: 1 }, savedLocation: null }),
+    ).resolves.toMatchObject({
+      location: { city: "Town", country: "One", region: "District" },
+    });
+    await expect(
+      weather.current({ coordinates: { latitude: 2, longitude: 2 }, savedLocation: null }),
+    ).resolves.toMatchObject({ location: { city: "Village", country: null, region: "County" } });
+    await expect(
+      weather.current({ coordinates: { latitude: 3, longitude: 3 }, savedLocation: null }),
+    ).resolves.toMatchObject({ location: { city: "Municipality", country: null, region: null } });
+    await expect(
+      weather.current({ coordinates: { latitude: 4, longitude: 4 }, savedLocation: null }),
+    ).resolves.toMatchObject({
+      location: { city: null, country: null, label: "4.0000, 4.0000", region: null },
+    });
+    vi.restoreAllMocks();
+  });
+
+  it("explains location-search transport and provider failures", async () => {
+    await expect(
+      createWeatherService({
+        fetch: vi.fn().mockRejectedValue(new Error("offline")),
+        now: () => now,
+      }).searchLocations("New York"),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      createWeatherService({
+        fetch: weatherFetch([json({}, 503)]),
+        now: () => now,
+      }).searchLocations("New York"),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      createWeatherService({
+        fetch: weatherFetch([json({})]),
+        now: () => now,
+      }).searchLocations("New York"),
+    ).resolves.toEqual([]);
+  });
 });

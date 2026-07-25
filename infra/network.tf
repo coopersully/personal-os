@@ -37,6 +37,47 @@ resource "aws_route_table_association" "public" {
   route_table_id = aws_route_table.public.id
 }
 
+resource "aws_eip" "nat" {
+  domain = "vpc"
+
+  depends_on = [aws_internet_gateway.main]
+}
+
+resource "aws_nat_gateway" "application" {
+  allocation_id = aws_eip.nat.id
+  subnet_id     = aws_subnet.public[0].id
+
+  depends_on = [aws_internet_gateway.main]
+
+  tags = { Name = "${local.name}-application" }
+}
+
+resource "aws_subnet" "application" {
+  count = 2
+
+  vpc_id            = aws_vpc.main.id
+  availability_zone = data.aws_availability_zones.available.names[count.index]
+  cidr_block        = cidrsubnet(aws_vpc.main.cidr_block, 4, count.index + 4)
+
+  tags = { Name = "${local.name}-application-${count.index + 1}" }
+}
+
+resource "aws_route_table" "application" {
+  vpc_id = aws_vpc.main.id
+
+  route {
+    cidr_block     = "0.0.0.0/0"
+    nat_gateway_id = aws_nat_gateway.application.id
+  }
+}
+
+resource "aws_route_table_association" "application" {
+  count = length(aws_subnet.application)
+
+  subnet_id      = aws_subnet.application[count.index].id
+  route_table_id = aws_route_table.application.id
+}
+
 resource "aws_subnet" "database" {
   count = 2
 
@@ -53,9 +94,13 @@ resource "aws_db_subnet_group" "main" {
 }
 
 resource "aws_security_group" "load_balancer" {
-  name        = "${local.name}-alb"
-  description = "Public HTTPS ingress for Personal OS API and MCP"
+  name_prefix = "${local.name}-alb-"
+  description = "Public HTTPS ingress for ilo API and MCP"
   vpc_id      = aws_vpc.main.id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   ingress {
     description = "Redirect HTTP to HTTPS"
@@ -74,10 +119,19 @@ resource "aws_security_group" "load_balancer" {
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
+    description = "API traffic to application tasks"
+    from_port   = 8787
+    to_port     = 8787
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
+
+  egress {
+    description = "MCP traffic to application tasks"
+    from_port   = 8788
+    to_port     = 8788
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 }
 
@@ -103,18 +157,46 @@ resource "aws_security_group" "application" {
   }
 
   egress {
-    description = "Provider APIs, transactional email, package-independent runtime traffic"
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    description = "Provider APIs and transactional email over TLS"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "PostgreSQL in private database subnets"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
+
+  egress {
+    description = "VPC DNS over UDP"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "udp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
+
+  egress {
+    description = "VPC DNS over TCP"
+    from_port   = 53
+    to_port     = 53
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 }
 
 resource "aws_security_group" "database" {
-  name        = "${local.name}-database"
-  description = "PostgreSQL accepts connections only from Personal OS API tasks"
+  name_prefix = "${local.name}-database-"
+  description = "PostgreSQL accepts connections only from ilo API tasks"
   vpc_id      = aws_vpc.main.id
+
+  lifecycle {
+    create_before_destroy = true
+  }
 
   ingress {
     from_port       = 5432

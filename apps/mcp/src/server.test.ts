@@ -344,7 +344,7 @@ function mockApi() {
   };
 }
 
-describe("Personal OS MCP server", () => {
+describe("ilo MCP server", () => {
   it("exposes and executes the complete agent surface and today resource", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({

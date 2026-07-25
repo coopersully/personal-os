@@ -62,6 +62,13 @@ const configSchema = z
         path: ["MCP_INTERNAL_SECRET"],
       });
     }
+    if (value.REGISTRATION_MODE !== "invite") {
+      context.addIssue({
+        code: "custom",
+        message: "Production registration must remain invite-only.",
+        path: ["REGISTRATION_MODE"],
+      });
+    }
   });
 
 export type AppConfig = {

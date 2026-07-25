@@ -1,4 +1,4 @@
-# Personal OS — Assumptions and Load-Bearing Choices Audit
+# ilo — Assumptions and Load-Bearing Choices Audit
 
 - Date: 2026-07-18
 - Method: **exactly five** independent passes. Each pass starts from a different failure mode, cites current primary documentation or research, and can overturn an earlier conclusion.
@@ -9,10 +9,10 @@
 
 | Critical choice | Assumption tested | Verdict | Load-bearing decision |
 | --- | --- | --- | --- |
-| Unified personal OS | One generic “material” table can make mail, events, tasks, journals, and transactions unified. | Reject. | Keep native, domain-specific records as their source of truth; create a typed link/annotation graph and a shared activity/search projection above them. |
+| Unified ilo | One generic “material” table can make mail, events, tasks, journals, and transactions unified. | Reject. | Keep native, domain-specific records as their source of truth; create a typed link/annotation graph and a shared activity/search projection above them. |
 | Provider synchronization | Local copies can be treated as a convenient cache. | Refine. | Local provider projections are disposable and revisioned; user-authored links, policies, approvals, local material, and audit evidence are not. |
 | Agent authorization | MCP scopes, descriptions, and UI confirmations make an agent safe enough. | Reject. | The API policy engine enforces scope, source selection, action tier, origin/egress checks, rate limits, idempotency, and approval state. Tool annotations are never authority. |
-| Automation host | A Codex or Claude subscription can own schedules and durable routine state. | Reject. | Personal OS owns trigger evaluation, queue, state machine, cancellation, retries, and emergency stop. A model host is a bounded, revocable runner adapter. |
+| Automation host | A Codex or Claude subscription can own schedules and durable routine state. | Reject. | ilo owns trigger evaluation, queue, state machine, cancellation, retries, and emergency stop. A model host is a bounded, revocable runner adapter. |
 | Gmail automation | Mail read, archive, triage, rules, and sending are a single ordinary connector integration. | Refine. | Incremental, separately disclosed scopes and provider-compliance gates are required. Read, manage, send, settings/filters, and permanent deletion are distinct capabilities. |
 | Finance data | Transactions are a stable ledger once shown. | Reject. | Transactions are a cursor-driven change stream: added, modified, removed, pending, posted, and reconciliation-linked. Pending data is explicitly provisional. |
 | “Free” product posture | Subscription agent hosts and Plaid remove meaningful operating cost. | Reject. | The core works manually/local-first; paid connectors and model hosts are optional, visible dependencies with graceful degraded modes. |
@@ -22,7 +22,7 @@
 
 ## Pass 1 of 5 — Data ownership and synchronization
 
-**Challenge.** Does “one Personal OS” mean one data model, and can a reset safely replace everything stored locally?
+**Challenge.** Does “one ilo” mean one data model, and can a reset safely replace everything stored locally?
 
 **Evidence.** Google Calendar’s incremental sync requires a persisted token, returns deleted entries during change sync, and can return `410 Gone`, requiring the client to wipe its synchronized event store and re-sync. It also requires preserving the same query shape across incremental pages. [Google Calendar synchronization](https://developers.google.com/workspace/calendar/api/guides/sync) Gmail and Plaid likewise expose incremental histories/change streams rather than immutable snapshots; Plaid’s `/transactions/sync` returns `added`, `modified`, and `removed` updates from a cursor. [Plaid Transactions](https://plaid.com/docs/transactions/)
 
@@ -52,7 +52,7 @@
 
 **What fails in practice.** External model hosts can be paused, change permissions, lose credentials, duplicate a retry, or return an ambiguous result. A daily planner that auto-fills every open minute makes a brittle schedule and can turn normal incompletion into a shame signal. “Run every morning” without a durable run identity, input snapshot, timeout, and cancellation model produces duplicate or invisible actions.
 
-**Decision.** Personal OS owns a durable routine definition, trigger evaluator, queue, worker lease, idempotency key, structured run state, limits, approval queue, retry policy, cancellation, dead letter, and audit log. Runner adapters receive only a bounded job plus a scoped short-lived credential and return a structured proposal/result. Today uses Now, Next, Remaining, and Done; capacity is a conservative suggestion based on explicit work hours, hard events, buffers, and user estimates. It offers defer/split/reduce/schedule choices and never silently moves hard events or presents health/productivity judgments.
+**Decision.** ilo owns a durable routine definition, trigger evaluator, queue, worker lease, idempotency key, structured run state, limits, approval queue, retry policy, cancellation, dead letter, and audit log. Runner adapters receive only a bounded job plus a scoped short-lived credential and return a structured proposal/result. Today uses Now, Next, Remaining, and Done; capacity is a conservative suggestion based on explicit work hours, hard events, buffers, and user estimates. It offers defer/split/reduce/schedule choices and never silently moves hard events or presents health/productivity judgments.
 
 **Plan changes required.** Make dry-run, replay, cancellation, duplicate-delivery, runner-unavailable, and approval-expiry acceptance tests prerequisite to enabling any recurring routine. Add a low-stimulation Today usability study before making capacity recommendations a default.
 
@@ -64,7 +64,7 @@
 
 **What fails in practice.** The roadmap would be unsafe if it treats “archive,” “trash,” “delete,” “unsubscribe,” “send,” and “create a mail filter” as the same level of permission. Likewise, a finance categorization engine that learns from pending purchases can create duplicate rules, distort a budget, and present false certainty.
 
-**Decision.** Connector capability is data, not hard-coded UI. Gmail uses incremental consent and distinct product operation classes; because Google's `gmail.modify` grant itself permits compose/send, Personal OS must separately deny sending unless its own `mail:send` policy and approval requirements are satisfied. Ordinary cleanup may move to Trash, while permanent deletion is a separate explicit capability and policy. A provider-compliance/security review is a gate before public Gmail mutation. Finance uses `/transactions/sync` cursor application as the canonical reconciliation path, preserves pending→posted linkage where supplied, and never learns durable rules or makes settled-budget/safe-to-spend statements from pending data. Manual, CSV, and OFX sources remain parity paths, not import afterthoughts.
+**Decision.** Connector capability is data, not hard-coded UI. Gmail uses incremental consent and distinct product operation classes; because Google's `gmail.modify` grant itself permits compose/send, ilo must separately deny sending unless its own `mail:send` policy and approval requirements are satisfied. Ordinary cleanup may move to Trash, while permanent deletion is a separate explicit capability and policy. A provider-compliance/security review is a gate before public Gmail mutation. Finance uses `/transactions/sync` cursor application as the canonical reconciliation path, preserves pending→posted linkage where supplied, and never learns durable rules or makes settled-budget/safe-to-spend statements from pending data. Manual, CSV, and OFX sources remain parity paths, not import afterthoughts.
 
 **Plan changes required.** Split connector epics into a sandbox/private-user release path and a public-production/compliance path. Add a formal capability matrix, provider webhooks/signature validation, re-authentication state, and transaction-change fixtures before promising broad automation.
 

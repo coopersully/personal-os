@@ -1,4 +1,4 @@
-# Personal OS — Complete Implementation Plan
+# ilo — Complete Implementation Plan
 
 - Status: Proposed execution plan
 - Date: 2026-07-18
@@ -170,7 +170,7 @@ flowchart TD
 - Add manual, cron/timezone, new mail, event/calendar, finance transaction, deadline, journal completion, and notification-action triggers.
 - Build dry run, run preview, exact candidate set, approval inbox, approval expiry, batch homogeneity rules, emergency stop, pause/resume/edit/version/clone/revoke, and activity/run detail UI.
 - Expand MCP tools/resources to match all domain actions while making scope/policy/capability failures structured and comprehensible. Ensure MCP never owns business rules.
-- Build deterministic schedules for sync/notification/cleanup independent of the agent host; agents receive a bounded invocation payload and return structured plans/results. The Personal OS owns trigger evaluation, queueing, idempotency, approvals, run state, retries, recovery, and emergency stop. Codex and Claude adapters are optional, independently revocable runners—not the scheduler or policy authority.
+- Build deterministic schedules for sync/notification/cleanup independent of the agent host; agents receive a bounded invocation payload and return structured plans/results. The ilo owns trigger evaluation, queueing, idempotency, approvals, run state, retries, recovery, and emergency stop. Codex and Claude adapters are optional, independently revocable runners—not the scheduler or policy authority.
 
 **Done when**
 

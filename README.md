@@ -1,11 +1,11 @@
-# Personal OS
+# ilo
 
-> **Status:** invite-only hosted beta. Personal OS is self-hostable under the
+> **Status:** invite-only hosted beta. ilo is self-hostable under the
 > [GNU Affero General Public License v3.0](LICENSE); commercial licensing and
 > trademark terms are available in [COMMERCIAL.md](COMMERCIAL.md) and
 > [TRADEMARKS.md](TRADEMARKS.md).
 
-Personal OS is a transparent coordination layer shared by people and agents. It combines reminders, calendars, and read-only mail in one directly editable surface and exposes the same material through HTTP and MCP.
+ilo is a transparent coordination layer shared by people and agents. It combines reminders, calendars, and read-only mail in one directly editable surface and exposes the same material through HTTP and MCP.
 
 The first slice is complete enough to run end to end:
 
@@ -75,7 +75,7 @@ Start the local services before opening an installed copy:
 
 ```bash
 docker compose up --detach
-open -a "Personal OS" # macOS
+open -a "ilo" # macOS
 ```
 
 The services keep running after the window closes. Stop them with `docker compose down`; local data

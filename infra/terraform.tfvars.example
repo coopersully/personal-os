@@ -1,17 +1,15 @@
 # Copy to terraform.tfvars and keep the copy untracked.
-domain_name     = "example.com"
-route53_zone_id = "Z0123456789ABCDEF"
+domain_name       = "example.com"
+cloudflare_zone_id = "023e105f4ecef8ad9ca31a8372d0c353"
 github_repository = "your-handle/personal-os"
 owner_emails      = "owner@example.com"
-email_from        = "Personal OS <noreply@example.com>"
-
-# Keep the beta invite-only until a deliberate broader launch.
-registration_mode = "invite"
+email_from        = "ilo <noreply@example.com>"
 
 # This must be the client ID for the public production OAuth client, not the
 # client secret. Leave blank only while Google connections are disabled.
 google_client_id = ""
 
-# Leave disabled until a production Plaid account and PLAID_SECRET parameter
-# are configured.
-plaid_enabled = false
+# Enable only when the matching client ID and secret parameters are configured.
+plaid_enabled     = false
+plaid_environment = "sandbox"
+x_enabled         = false

@@ -21,7 +21,7 @@ export function registerXBookmarkTools(server: McpServer, api: PersonalOsApiClie
     {
       annotations: { idempotentHint: true, openWorldHint: false, readOnlyHint: true },
       description:
-        "Refresh the selected X bookmark folder into Personal OS. This reads X only and never changes X.",
+        "Refresh the selected X bookmark folder into ilo. This reads X only and never changes X.",
       inputSchema: {},
       title: "Sync X bookmarks",
     },

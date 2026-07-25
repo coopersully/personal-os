@@ -14,7 +14,7 @@ type ServerOptions = {
   timeZone: string;
 };
 
-const id = z.string().uuid().describe("Personal OS object identifier");
+const id = z.string().uuid().describe("ilo object identifier");
 const isoDateTime = z
   .string()
   .datetime({ offset: true })
@@ -47,7 +47,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
     "create_reminder",
     {
       annotations: { openWorldHint: false },
-      description: "Create a reminder in the user's Personal OS.",
+      description: "Create a reminder in the user's ilo.",
       inputSchema: {
         dueAt: isoDateTime.nullable().default(null),
         notes: z.string().max(10_000).nullable().default(null),
@@ -128,7 +128,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
     "create_task",
     {
       annotations: { openWorldHint: false },
-      description: "Create a task in the user's Personal OS planning queue.",
+      description: "Create a task in the user's ilo planning queue.",
       inputSchema: {
         dueAt: isoDateTime.nullable().default(null),
         estimateMinutes: z
@@ -309,7 +309,7 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
     "list_automations",
     {
       annotations: { openWorldHint: false, readOnlyHint: true },
-      description: "List enabled Personal OS routines that an authorized agent can run.",
+      description: "List enabled ilo routines that an authorized agent can run.",
       inputSchema: {},
       title: "List automations",
     },

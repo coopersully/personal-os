@@ -7,7 +7,7 @@ const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8787";
 const token = process.env.PERSONAL_OS_TOKEN;
 
 if (!token) {
-  process.stderr.write("PERSONAL_OS_TOKEN is required. Create one in Personal OS settings.\n");
+  process.stderr.write("PERSONAL_OS_TOKEN is required. Create one in ilo settings.\n");
   process.exit(1);
 }
 

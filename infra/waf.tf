@@ -30,6 +30,50 @@ resource "aws_wafv2_web_acl" "public" {
     }
   }
 
+  rule {
+    name     = "aws-managed-known-bad-inputs"
+    priority = 2
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesKnownBadInputsRuleSet"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-known-bad-inputs"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  rule {
+    name     = "aws-managed-ip-reputation"
+    priority = 3
+
+    override_action {
+      none {}
+    }
+
+    statement {
+      managed_rule_group_statement {
+        name        = "AWSManagedRulesAmazonIpReputationList"
+        vendor_name = "AWS"
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${local.name}-ip-reputation"
+      sampled_requests_enabled   = true
+    }
+  }
+
   visibility_config {
     cloudwatch_metrics_enabled = true
     metric_name                = "${local.name}-web-acl"

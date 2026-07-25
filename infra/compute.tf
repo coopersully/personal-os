@@ -18,20 +18,23 @@ resource "aws_cloudwatch_log_group" "mcp" {
 }
 
 resource "aws_lb" "public" {
-  name               = "${local.name}-public"
-  internal           = false
-  load_balancer_type = "application"
-  security_groups    = [aws_security_group.load_balancer.id]
-  subnets            = aws_subnet.public[*].id
-  idle_timeout       = 60
+  name                       = "${local.name}-public"
+  internal                   = false
+  load_balancer_type         = "application"
+  security_groups            = [aws_security_group.load_balancer.id]
+  subnets                    = aws_subnet.public[*].id
+  idle_timeout               = 60
+  drop_invalid_header_fields = true
+  enable_deletion_protection = true
 }
 
 resource "aws_lb_target_group" "api" {
-  name        = "${local.name}-api"
-  port        = 8787
-  protocol    = "HTTP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.main.id
+  name                 = "${local.name}-api"
+  port                 = 8787
+  protocol             = "HTTP"
+  target_type          = "ip"
+  vpc_id               = aws_vpc.main.id
+  deregistration_delay = 30
 
   health_check {
     enabled             = true
@@ -45,11 +48,12 @@ resource "aws_lb_target_group" "api" {
 }
 
 resource "aws_lb_target_group" "mcp" {
-  name        = "${local.name}-mcp"
-  port        = 8788
-  protocol    = "HTTP"
-  target_type = "ip"
-  vpc_id      = aws_vpc.main.id
+  name                 = "${local.name}-mcp"
+  port                 = 8788
+  protocol             = "HTTP"
+  target_type          = "ip"
+  vpc_id               = aws_vpc.main.id
+  deregistration_delay = 30
 
   health_check {
     enabled             = true
@@ -128,14 +132,24 @@ resource "aws_ecs_task_definition" "api" {
   network_mode             = "awsvpc"
   cpu                      = "512"
   memory                   = "1024"
+  enable_fault_injection   = false
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.api_task.arn
+  tags                     = {}
+
+  runtime_platform {
+    cpu_architecture        = "X86_64"
+    operating_system_family = "LINUX"
+  }
 
   container_definitions = jsonencode([{
-    name         = "api"
-    image        = "${aws_ecr_repository.api.repository_url}:bootstrap"
-    essential    = true
-    portMappings = [{ containerPort = 8787, hostPort = 8787, protocol = "tcp" }]
+    name           = "api"
+    image          = "${aws_ecr_repository.api.repository_url}:bootstrap"
+    essential      = true
+    portMappings   = [{ containerPort = 8787, hostPort = 8787, protocol = "tcp" }]
+    mountPoints    = []
+    systemControls = []
+    volumesFrom    = []
     environment = [
       { name = "NODE_ENV", value = "production" },
       { name = "PORT", value = "8787" },
@@ -147,9 +161,11 @@ resource "aws_ecs_task_definition" "api" {
       { name = "GOOGLE_REDIRECT_URI", value = "https://${local.api_domain}/v1/connectors/google/callback" },
       { name = "MCP_RESOURCE_URL", value = "https://${local.mcp_domain}/mcp" },
       { name = "OWNER_EMAILS", value = var.owner_emails },
-      { name = "REGISTRATION_MODE", value = var.registration_mode },
+      { name = "PLAID_ENV", value = var.plaid_environment },
+      { name = "REGISTRATION_MODE", value = "invite" },
       { name = "TRUST_PROXY", value = "true" },
       { name = "LOG_LEVEL", value = "info" },
+      { name = "X_REDIRECT_URI", value = "https://${local.api_domain}/v1/x-bookmarks/callback" },
     ]
     secrets = concat(
       [
@@ -159,7 +175,14 @@ resource "aws_ecs_task_definition" "api" {
         { name = "MCP_INTERNAL_SECRET", valueFrom = local.runtime_parameter_arns.MCP_INTERNAL_SECRET },
         { name = "RESEND_API_KEY", valueFrom = local.runtime_parameter_arns.RESEND_API_KEY },
       ],
-      var.plaid_enabled ? [{ name = "PLAID_SECRET", valueFrom = local.runtime_parameter_arns.PLAID_SECRET }] : [],
+      var.plaid_enabled ? [
+        { name = "PLAID_CLIENT_ID", valueFrom = local.runtime_parameter_arns.PLAID_CLIENT_ID },
+        { name = "PLAID_SECRET", valueFrom = local.runtime_parameter_arns.PLAID_SECRET },
+      ] : [],
+      var.x_enabled ? [
+        { name = "X_CLIENT_ID", valueFrom = local.runtime_parameter_arns.X_CLIENT_ID },
+        { name = "X_CLIENT_SECRET", valueFrom = local.runtime_parameter_arns.X_CLIENT_SECRET },
+      ] : [],
     )
     logConfiguration = {
       logDriver = "awslogs"
@@ -176,6 +199,11 @@ resource "aws_ecs_task_definition" "api" {
       retries     = 3
       startPeriod = 30
     }
+    linuxParameters = {
+      capabilities       = { add = [], drop = ["ALL"] }
+      initProcessEnabled = true
+    }
+    readonlyRootFilesystem = true
   }])
 }
 
@@ -185,14 +213,24 @@ resource "aws_ecs_task_definition" "mcp" {
   network_mode             = "awsvpc"
   cpu                      = "256"
   memory                   = "512"
+  enable_fault_injection   = false
   execution_role_arn       = aws_iam_role.task_execution.arn
   task_role_arn            = aws_iam_role.mcp_task.arn
+  tags                     = {}
+
+  runtime_platform {
+    cpu_architecture        = "X86_64"
+    operating_system_family = "LINUX"
+  }
 
   container_definitions = jsonencode([{
-    name         = "mcp"
-    image        = "${aws_ecr_repository.mcp.repository_url}:bootstrap"
-    essential    = true
-    portMappings = [{ containerPort = 8788, hostPort = 8788, protocol = "tcp" }]
+    name           = "mcp"
+    image          = "${aws_ecr_repository.mcp.repository_url}:bootstrap"
+    essential      = true
+    portMappings   = [{ containerPort = 8788, hostPort = 8788, protocol = "tcp" }]
+    mountPoints    = []
+    systemControls = []
+    volumesFrom    = []
     environment = [
       { name = "HOST", value = "0.0.0.0" },
       { name = "PORT", value = "8788" },
@@ -202,6 +240,7 @@ resource "aws_ecs_task_definition" "mcp" {
       { name = "MCP_RATE_LIMIT_WINDOW_SECONDS", value = "60" },
       { name = "MCP_TRUST_PROXY", value = "true" },
       { name = "MCP_PUBLIC_URL", value = "https://${local.mcp_domain}" },
+      { name = "OAUTH_AUTHORIZATION_SERVER_URL", value = "https://${local.api_domain}" },
     ]
     secrets = [
       { name = "MCP_INTERNAL_SECRET", valueFrom = local.runtime_parameter_arns.MCP_INTERNAL_SECRET },
@@ -221,6 +260,11 @@ resource "aws_ecs_task_definition" "mcp" {
       retries     = 3
       startPeriod = 30
     }
+    linuxParameters = {
+      capabilities       = { add = [], drop = ["ALL"] }
+      initProcessEnabled = true
+    }
+    readonlyRootFilesystem = true
   }])
 }
 
@@ -232,13 +276,18 @@ resource "aws_ecs_service" "api" {
   launch_type     = "FARGATE"
 
   deployment_minimum_healthy_percent = 0
-  deployment_maximum_percent         = 100
+  deployment_maximum_percent         = 200
   health_check_grace_period_seconds  = 90
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
-    assign_public_ip = true
+    assign_public_ip = false
     security_groups  = [aws_security_group.application.id]
-    subnets          = aws_subnet.public[*].id
+    subnets          = aws_subnet.application[*].id
   }
 
   load_balancer {
@@ -250,6 +299,8 @@ resource "aws_ecs_service" "api" {
   lifecycle {
     ignore_changes = [desired_count, task_definition]
   }
+
+  depends_on = [aws_route_table_association.application]
 }
 
 resource "aws_ecs_service" "mcp" {
@@ -260,13 +311,18 @@ resource "aws_ecs_service" "mcp" {
   launch_type     = "FARGATE"
 
   deployment_minimum_healthy_percent = 0
-  deployment_maximum_percent         = 100
+  deployment_maximum_percent         = 200
   health_check_grace_period_seconds  = 60
 
+  deployment_circuit_breaker {
+    enable   = true
+    rollback = true
+  }
+
   network_configuration {
-    assign_public_ip = true
+    assign_public_ip = false
     security_groups  = [aws_security_group.application.id]
-    subnets          = aws_subnet.public[*].id
+    subnets          = aws_subnet.application[*].id
   }
 
   load_balancer {
@@ -278,4 +334,6 @@ resource "aws_ecs_service" "mcp" {
   lifecycle {
     ignore_changes = [desired_count, task_definition]
   }
+
+  depends_on = [aws_route_table_association.application]
 }

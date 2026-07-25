@@ -1,4 +1,4 @@
 interface:
-  display_name: "Personal OS Frontend"
+  display_name: "ilo Frontend"
   short_description: "Build accessible, domain-owned React features."
   default_prompt: "Use $personal-os-frontend to implement this web feature."

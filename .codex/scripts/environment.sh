@@ -334,7 +334,7 @@ command_setup() {
   log "Installing the locked workspace dependencies..."
   pnpm install --frozen-lockfile
   bash "$ROOT/.codex/scripts/check.sh"
-  log "Setup complete. Run Start to launch Personal OS."
+  log "Setup complete. Run Start to launch ilo."
 }
 
 command_start() {
@@ -343,7 +343,7 @@ command_start() {
   require_docker
 
   if runtime_is_healthy; then
-    log "Personal OS is already running."
+    log "ilo is already running."
     command_status
     return
   fi
@@ -396,7 +396,7 @@ command_start() {
     die "Web startup failed."
   }
 
-  log "Personal OS is ready."
+  log "ilo is ready."
   printf '  App:       %s\n' "$WEB_URL"
   printf '  API:       %s/health/ready\n' "$API_URL"
   printf '  MCP:       %s/mcp\n' "$MCP_URL"
@@ -411,14 +411,14 @@ command_stop() {
   stop_source_services
 
   if docker_is_ready; then
-    log "Stopping Personal OS containers..."
+    log "Stopping ilo containers..."
     docker compose stop web mcp api postgres >/dev/null 2>&1 || true
   fi
 
   for port in "$WEB_PORT" "$MCP_PORT" "$API_PORT"; do
     clear_repo_port "$port"
   done
-  log "Personal OS is stopped. PostgreSQL data is preserved."
+  log "ilo is stopped. PostgreSQL data is preserved."
 }
 
 service_status() {
@@ -439,7 +439,7 @@ service_status() {
 
 command_status() {
   local healthy=0 postgres_status="down"
-  printf 'Personal OS local runtime\n'
+  printf 'ilo local runtime\n'
   service_status web "$WEB_URL" || healthy=1
   service_status api "$API_URL/health/ready" || healthy=1
   service_status mcp "$MCP_URL/health/live" || healthy=1

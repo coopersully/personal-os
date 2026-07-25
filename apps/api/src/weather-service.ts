@@ -247,7 +247,7 @@ export function createWeatherService({ fetch = globalThis.fetch, now }: WeatherS
         fetch(url, {
           headers: {
             "Accept-Language": "en",
-            "User-Agent": "Personal OS/1.0 (https://github.com/coopersully/personal-os)",
+            "User-Agent": "ilo/1.0 (https://github.com/coopersully/personal-os)",
           },
           signal: controller.signal,
         }),

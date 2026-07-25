@@ -110,6 +110,7 @@ import {
   Target,
   Trash2,
   UserRound,
+  Volleyball,
   WifiOff,
   X,
 } from "lucide-react";
@@ -382,7 +383,7 @@ export function App() {
   if (me.isPending) {
     return (
       <main className="center-screen">
-        <Spinner label="Opening Personal OS" />
+        <Spinner label="Opening ilo" />
       </main>
     );
   }
@@ -481,7 +482,7 @@ function CredentialsScreen() {
     <main className="auth-shell">
       <section className="auth-story" aria-label="Product introduction">
         <div className="wordmark wordmark--light">
-          <LogoMark /> Personal OS
+          <LogoMark /> ilo
         </div>
         <div>
           <p className="eyebrow">A shared surface for you and your agents</p>
@@ -516,13 +517,13 @@ function CredentialsScreen() {
                 ? "Open your daily surface."
                 : mode === "recovery"
                   ? "We’ll send a reset link if this address has an account."
-                  : "Start with a local calendar—connectors can come later."}
+                  : "Enter your invitation to create an account."}
             </p>
           </div>
           {mode === "register" && (
             <>
               <Field label="Name" name="displayName" autoComplete="name" required />
-              <Field label="Invite code" name="inviteCode" autoComplete="off" />
+              <Field label="Invite code" name="inviteCode" autoComplete="off" required />
             </>
           )}
           <Field label="Email" name="email" type="email" autoComplete="email" required />
@@ -555,7 +556,7 @@ function CredentialsScreen() {
             {mutation.isPending ? (
               <Spinner label="Signing in" />
             ) : mode === "login" ? (
-              "Open Personal OS"
+              "Open ilo"
             ) : mode === "recovery" ? (
               "Send reset link"
             ) : (
@@ -565,7 +566,7 @@ function CredentialsScreen() {
           {mode === "login" ? (
             <>
               <button className="text-button" type="button" onClick={() => setMode("register")}>
-                New here? Create an account
+                Have an invite? Create an account
               </button>
               <button className="text-button" type="button" onClick={() => setMode("recovery")}>
                 Forgot your password?
@@ -590,13 +591,13 @@ function EmailVerificationScreen({ token }: { token: string }) {
   });
   return (
     <AuthActionShell title="Confirm your email">
-      <p>Confirm the email address for this Personal OS account.</p>
+      <p>Confirm the email address for this ilo account.</p>
       {verification.isError ? (
         <p className="form-error">{errorMessage(verification.error)}</p>
       ) : null}
       {verification.isSuccess ? (
         <p className="form-success" role="status">
-          Your email is confirmed. You can close this page or continue using Personal OS.
+          Your email is confirmed. You can close this page or continue using ilo.
         </p>
       ) : (
         <Button
@@ -3296,7 +3297,7 @@ function CalendarBlankContextMenu({
   const paste = useMutation({
     mutationFn: async () => {
       const event = parseClipboardCalendarEvent(await navigator.clipboard.readText());
-      if (!event) throw new Error("Copy an event from Personal OS before pasting it here.");
+      if (!event) throw new Error("Copy an event from ilo before pasting it here.");
       const times = movedEventTimes(event, day, minute, timeZone);
       return api.createEvent({
         allDay: event.allDay,
@@ -4559,7 +4560,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                       </ShadcnItemTitle>
                       <ShadcnItemDescription>
                         {calendar.provider === "local"
-                          ? "Personal OS calendar"
+                          ? "ilo calendar"
                           : calendar.provider === "icloud"
                             ? "iCloud Calendar"
                             : "Google Calendar"}{" "}
@@ -4917,7 +4918,7 @@ async function applyPinterestWallpaper(settings: PinterestWallpaperSettings): Pr
     throw new Error("This board needs at least four image Pins to make a collage.");
   }
   if (!isTauri()) {
-    throw new Error("Pinterest wallpaper is available in the Personal OS desktop app.");
+    throw new Error("Pinterest wallpaper is available in the ilo desktop app.");
   }
   const { invoke } = await import("@tauri-apps/api/core");
   try {
@@ -5048,12 +5049,12 @@ function PinterestWallpaperSettingsPanel() {
 function PinterestWallpaperWebPlaceholder() {
   return (
     <SettingsSection
-      description="Pinterest wallpapers are created and applied from Personal OS for macOS."
+      description="Pinterest wallpapers are created and applied from ilo for macOS."
       title="Pinterest wallpaper"
     >
       <ShadcnAlert role="status" variant="info">
         <Image />
-        <ShadcnAlertTitle>Available in Personal OS for macOS</ShadcnAlertTitle>
+        <ShadcnAlertTitle>Available in ilo for macOS</ShadcnAlertTitle>
         <ShadcnAlertDescription>
           Open the desktop app to choose a public Pinterest board and refine the wallpaper.
         </ShadcnAlertDescription>
@@ -5181,7 +5182,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
           {apply.isPending ? "Refreshing" : "Refresh now"}
         </ShadcnButton>
       }
-      description="Paste a public board URL and Personal OS will compose a fresh tiled collage from its Pins each day."
+      description="Paste a public board URL and ilo will compose a fresh tiled collage from its Pins each day."
       title="Pinterest wallpaper"
     >
       {settings.error ? <SettingsError error={settings.error} /> : null}
@@ -5200,8 +5201,8 @@ function PinterestWallpaperDesktopSettingsPanel() {
             value={boardUrl}
           />
           <ShadcnFieldDescription>
-            The board must be public. If Pinterest only exposes a few Pins, Personal OS repeats them
-            to complete the collage.
+            The board must be public. If Pinterest only exposes a few Pins, ilo repeats them to
+            complete the collage.
           </ShadcnFieldDescription>
         </ShadcnField>
         <ShadcnField orientation="horizontal">
@@ -5214,8 +5215,8 @@ function PinterestWallpaperDesktopSettingsPanel() {
           <ShadcnFieldContent>
             <ShadcnFieldLabel htmlFor="pinterest-daily">Refresh every day</ShadcnFieldLabel>
             <ShadcnFieldDescription>
-              A new collage is applied at 8:00 AM while Personal OS is running, and catches up when
-              you next open it.
+              A new collage is applied at 8:00 AM while ilo is running, and catches up when you next
+              open it.
             </ShadcnFieldDescription>
           </ShadcnFieldContent>
         </ShadcnField>
@@ -5907,7 +5908,7 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
     scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
   },
   {
-    name: "Full personal OS",
+    name: "Full ilo",
     description: "Create, manage, and audit all supported material.",
     scopes: [
       "calendar:read",
@@ -6604,7 +6605,7 @@ function SessionsSettings() {
   });
   return (
     <SettingsSection
-      description="Devices with an active sign-in to your Personal OS account. Revoke access you no longer recognize."
+      description="Devices with an active sign-in to your ilo account. Revoke access you no longer recognize."
       title="Sessions"
     >
       <ShadcnItemGroup>
@@ -7446,7 +7447,7 @@ function EventInspector({
             <span>
               {event.provider === "google"
                 ? "Edits write through to Google Calendar before they appear here."
-                : "This event is stored in Personal OS and available to authorized agents."}
+                : "This event is stored in ilo and available to authorized agents."}
             </span>
           </div>
           {remove.isError ? (
@@ -7739,7 +7740,7 @@ function FatalState({ error }: { error: unknown }) {
     return (
       <main className="center-screen">
         <div className="inline-error" role="alert">
-          <strong>Personal OS service is offline.</strong>
+          <strong>ilo service is offline.</strong>
           <span>Run the Start environment action, then try again.</span>
         </div>
         <Button onClick={() => window.location.reload()}>Try again</Button>
@@ -7756,7 +7757,7 @@ function FatalState({ error }: { error: unknown }) {
 function LogoMark({ compact = false }: { compact?: boolean }) {
   return (
     <span className={`logo-mark${compact ? " logo-mark--compact" : ""}`}>
-      <Clock3 size={compact ? 12 : 17} />
+      <Volleyball aria-hidden="true" />
     </span>
   );
 }

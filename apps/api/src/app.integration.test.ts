@@ -29,7 +29,7 @@ type RequestOptions = {
   rawBody?: string;
 };
 
-describe.sequential("Personal OS API", () => {
+describe.sequential("ilo API", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
   let app: PersonalOsApp;
@@ -2304,7 +2304,7 @@ describe.sequential("Personal OS API", () => {
     ).toBe(200);
   });
 
-  it("issues and rotates Personal OS MCP OAuth tokens with PKCE", async () => {
+  it("issues and rotates ilo MCP OAuth tokens with PKCE", async () => {
     const userRegistration = await request("/v1/auth/register", {
       auth: "none",
       body: {

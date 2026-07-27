@@ -6,6 +6,10 @@ github_repository = "your-handle/personal-os"
 # subject shown in CloudTrail, for example:
 # github_oidc_subject = "repo:your-handle@12345678/personal-os@87654321:environment:production"
 owner_emails      = "owner@example.com"
+alert_email       = "owner@example.com"
+monthly_budget_usd = 100
+# Reuse the account's default service anomaly monitor at a lower threshold.
+# cost_anomaly_monitor_arn = "arn:aws:ce::123456789012:anomalymonitor/example"
 email_from        = "ilo <noreply@example.com>"
 
 # This must be the client ID for the public production OAuth client, not the

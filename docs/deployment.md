@@ -84,4 +84,10 @@ Create an X OAuth 2.0 app, register the exact public `X_REDIRECT_URI`, and set i
 
 ## Backups and rollback
 
-Back up PostgreSQL before schema releases. Application records use soft deletion where recovery matters, but database backups remain necessary for account or infrastructure loss. Roll back the application image independently when the deployed schema remains backward compatible; restore a database only as an explicit incident action.
+RDS retains seven days of automated backups and AWS Backup creates a weekly
+recovery point retained for 35 days. Application records use soft deletion
+where recovery matters, but database backups remain necessary for account or
+infrastructure loss. Roll back the application image independently when the
+deployed schema remains backward compatible; restore a database only as an
+explicit incident action. A failed backup job is routed to the production SNS
+operations topic.

@@ -10,14 +10,44 @@ on:
 permissions:
   contents: read
   id-token: write
+  issues: write
+  statuses: write
 
 concurrency:
   group: production-deployment
   cancel-in-progress: false
 
 jobs:
+  announce:
+    name: Mark production deployment pending
+    runs-on: ubuntu-latest
+    outputs:
+      release_sha: ${{ steps.release.outputs.sha }}
+    steps:
+      - name: Select release commit
+        id: release
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: echo "sha=${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish pending commit status
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${RELEASE_SHA}" \
+            -f state=pending \
+            -f context=production/ilo \
+            -f description="Production deployment is queued" \
+            -f target_url="$RUN_URL"
+
   deploy:
     name: Deploy production
+    needs: announce
     if: >-
       (github.event_name == 'workflow_run' &&
         github.event.workflow_run.conclusion == 'success') ||
@@ -25,7 +55,9 @@ jobs:
         github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    environment: production
+    environment:
+      name: production
+      url: ${{ vars.APP_URL }}
     env:
       API_ECR_REPOSITORY: ${{ vars.API_ECR_REPOSITORY }}
       API_SERVICE: ${{ vars.API_SERVICE }}
@@ -55,7 +87,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ needs.announce.outputs.release_sha }}
 
       - uses: pnpm/action-setup@v4
         with:
@@ -69,7 +101,7 @@ jobs:
       - name: Select immutable release tag
         id: release
         env:
-          HEAD_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+          HEAD_SHA: ${{ needs.announce.outputs.release_sha }}
         run: echo "tag=sha-${HEAD_SHA}" >> "$GITHUB_OUTPUT"
 
       - uses: aws-actions/configure-aws-credentials@v5
@@ -95,6 +127,37 @@ jobs:
             .
           docker push "${API_ECR_REPOSITORY}:${RELEASE_TAG}"
           docker push "${MCP_ECR_REPOSITORY}:${RELEASE_TAG}"
+
+      - name: Reject vulnerable container images
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          check_image() {
+            local repository_url="$1"
+            local repository_name="${repository_url##*/}"
+            local findings
+            local critical
+            local high
+
+            aws ecr wait image-scan-complete \
+              --repository-name "$repository_name" \
+              --image-id imageTag="$RELEASE_TAG"
+            findings="$(
+              aws ecr describe-image-scan-findings \
+                --repository-name "$repository_name" \
+                --image-id imageTag="$RELEASE_TAG" \
+                --query imageScanFindings.findingSeverityCounts \
+                --output json
+            )"
+            critical="$(jq -r '.CRITICAL // 0' <<<"$findings")"
+            high="$(jq -r '.HIGH // 0' <<<"$findings")"
+            echo "${repository_name}: ${critical} critical, ${high} high"
+            test "$critical" -eq 0
+            test "$high" -eq 0
+          }
+
+          check_image "$API_ECR_REPOSITORY"
+          check_image "$MCP_ECR_REPOSITORY"
 
       - run: pnpm install --frozen-lockfile
 
@@ -198,10 +261,16 @@ jobs:
             --cache-control "no-cache" \
             --delete \
             --exclude "assets/*"
-          aws cloudfront create-invalidation \
+          invalidation_id="$(
+            aws cloudfront create-invalidation \
+              --distribution-id "$WEB_DISTRIBUTION_ID" \
+              --paths "/*" \
+              --query Invalidation.Id \
+              --output text
+          )"
+          aws cloudfront wait invalidation-completed \
             --distribution-id "$WEB_DISTRIBUTION_ID" \
-            --paths "/*" \
-            >/dev/null
+            --id "$invalidation_id"
 
       - name: Verify public health
         run: |
@@ -211,3 +280,94 @@ jobs:
             "${MCP_URL%/mcp}/health/live"
           curl --fail --retry 12 --retry-all-errors --retry-delay 5 \
             "$APP_URL"
+
+  report:
+    name: Report production deployment
+    needs: [announce, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Determine deployment outcome
+        id: outcome
+        env:
+          CI_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_run" && "$CI_CONCLUSION" != "success" ]]; then
+            echo "state=error" >> "$GITHUB_OUTPUT"
+            echo "description=CI failed; production was not deployed" >> "$GITHUB_OUTPUT"
+          elif [[ "$DEPLOY_RESULT" == "success" ]]; then
+            echo "state=success" >> "$GITHUB_OUTPUT"
+            echo "description=Production deployment succeeded" >> "$GITHUB_OUTPUT"
+          else
+            echo "state=failure" >> "$GITHUB_OUTPUT"
+            echo "description=Production deployment failed" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Publish final commit status
+        env:
+          DESCRIPTION: ${{ steps.outcome.outputs.description }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.announce.outputs.release_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATE: ${{ steps.outcome.outputs.state }}
+        run: |
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/statuses/${RELEASE_SHA}" \
+            -f state="$STATE" \
+            -f context=production/ilo \
+            -f description="$DESCRIPTION" \
+            -f target_url="$RUN_URL"
+          {
+            echo "## ilo production"
+            echo
+            echo "- Commit: \`${RELEASE_SHA}\`"
+            echo "- Result: **${STATE}**"
+            echo "- Detail: ${DESCRIPTION}"
+            echo "- Run: ${RUN_URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or resolve the production incident
+        continue-on-error: true
+        env:
+          DESCRIPTION: ${{ steps.outcome.outputs.description }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SHA: ${{ needs.announce.outputs.release_sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          STATE: ${{ steps.outcome.outputs.state }}
+        run: |
+          issue_number="$(
+            gh issue list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --search '"Production deployment is failing" in:title' \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+          if [[ "$STATE" == "success" ]]; then
+            if [[ -n "$issue_number" ]]; then
+              gh issue comment "$issue_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --body "Recovered with \`${RELEASE_SHA}\`. ${RUN_URL}"
+              gh issue close "$issue_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --reason completed
+            fi
+          elif [[ -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "${DESCRIPTION} for \`${RELEASE_SHA}\`. ${RUN_URL}"
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Production deployment is failing" \
+              --body "${DESCRIPTION} for \`${RELEASE_SHA}\`.
+
+          Workflow: ${RUN_URL}"
+          fi
+
+      - name: Preserve the failed workflow conclusion
+        if: steps.outcome.outputs.state != 'success'
+        run: exit 1

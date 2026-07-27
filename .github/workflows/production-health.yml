@@ -1,0 +1,93 @@
+name: Production health
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: production-health
+  cancel-in-progress: true
+
+jobs:
+  public-health:
+    name: Verify public production
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check ilo public surfaces
+        run: |
+          check() {
+            local name="$1"
+            local url="$2"
+            echo "Checking ${name}: ${url}"
+            curl \
+              --fail \
+              --location \
+              --max-time 20 \
+              --retry 3 \
+              --retry-all-errors \
+              --retry-delay 5 \
+              "$url" \
+              >/dev/null
+          }
+
+          check app https://app.ilo.coopersully.me
+          check api https://api.ilo.coopersully.me/health/ready
+          check mcp https://mcp.ilo.coopersully.me/health/live
+
+      - name: Record health summary
+        if: always()
+        env:
+          RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "## ilo production health"
+            echo
+            echo "- Result: **${RESULT}**"
+            echo "- App: https://app.ilo.coopersully.me"
+            echo "- API: https://api.ilo.coopersully.me/health/ready"
+            echo "- MCP: https://mcp.ilo.coopersully.me/health/live"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or resolve the health incident
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          issue_number="$(
+            gh issue list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --search '"Production health check is failing" in:title' \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+          if [[ "$RESULT" == "success" ]]; then
+            if [[ -n "$issue_number" ]]; then
+              gh issue comment "$issue_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --body "Production recovered. ${RUN_URL}"
+              gh issue close "$issue_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --reason completed
+            fi
+          elif [[ -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "The hourly production check is still failing. ${RUN_URL}"
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Production health check is failing" \
+              --body "At least one public ilo surface failed its hourly check.
+
+          Workflow: ${RUN_URL}"
+          fi

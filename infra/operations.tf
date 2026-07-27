@@ -348,15 +348,15 @@ resource "aws_cloudwatch_metric_alarm" "target_latency" {
 
 resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   alarm_name          = "${local.name}-alb-5xx"
-  alarm_description   = "The public load balancer returned at least five 5xx responses in five minutes."
+  alarm_description   = "The public load balancer returned at least five 5xx responses in two of three five-minute windows."
   namespace           = "AWS/ApplicationELB"
   metric_name         = "HTTPCode_ELB_5XX_Count"
   statistic           = "Sum"
   comparison_operator = "GreaterThanOrEqualToThreshold"
   threshold           = 5
   period              = 300
-  evaluation_periods  = 1
-  datapoints_to_alarm = 1
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
   treat_missing_data  = "notBreaching"
 
   dimensions = {

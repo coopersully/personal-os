@@ -136,18 +136,39 @@ jobs:
             local repository_url="$1"
             local repository_name="${repository_url##*/}"
             local findings
+            local scan_status
             local critical
             local high
 
-            aws ecr wait image-scan-complete \
-              --repository-name "$repository_name" \
-              --image-id imageTag="$RELEASE_TAG"
-            findings="$(
-              aws ecr describe-image-scan-findings \
-                --repository-name "$repository_name" \
-                --image-id imageTag="$RELEASE_TAG" \
-                --output json
-            )"
+            # A scan-on-push result is not always registered by the time the
+            # push command returns. The AWS waiter treats that short
+            # ScanNotFound window as terminal, so poll until ECR exposes a
+            # completed result instead.
+            for attempt in {1..30}; do
+              if findings="$(
+                aws ecr describe-image-scan-findings \
+                  --repository-name "$repository_name" \
+                  --image-id imageTag="$RELEASE_TAG" \
+                  --output json 2>/dev/null
+              )"; then
+                scan_status="$(
+                  jq -r '.imageScanStatus.status // "UNKNOWN"' <<<"$findings"
+                )"
+                if [ "$scan_status" = "COMPLETE" ]; then
+                  break
+                fi
+                if [ "$scan_status" = "FAILED" ]; then
+                  echo "${repository_name}: image scan failed" >&2
+                  return 1
+                fi
+              fi
+
+              if [ "$attempt" -eq 30 ]; then
+                echo "${repository_name}: image scan did not complete" >&2
+                return 1
+              fi
+              sleep 10
+            done
             critical="$(
               jq -r '.imageScanFindings.findingSeverityCounts.CRITICAL // 0' \
                 <<<"$findings"

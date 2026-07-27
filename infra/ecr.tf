@@ -21,12 +21,22 @@ resource "aws_ecr_lifecycle_policy" "api" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Retain the 30 most recent immutable API images"
+      description  = "Retain the 15 most recent immutable API images"
       selection = {
         tagStatus     = "tagged"
         tagPrefixList = ["sha-"]
         countType     = "imageCountMoreThan"
-        countNumber   = 30
+        countNumber   = 15
+      }
+      action = { type = "expire" }
+      }, {
+      rulePriority = 2
+      description  = "Expire untagged API images after one day"
+      selection = {
+        tagStatus   = "untagged"
+        countType   = "sinceImagePushed"
+        countUnit   = "days"
+        countNumber = 1
       }
       action = { type = "expire" }
     }]
@@ -38,12 +48,22 @@ resource "aws_ecr_lifecycle_policy" "mcp" {
   policy = jsonencode({
     rules = [{
       rulePriority = 1
-      description  = "Retain the 30 most recent immutable MCP images"
+      description  = "Retain the 15 most recent immutable MCP images"
       selection = {
         tagStatus     = "tagged"
         tagPrefixList = ["sha-"]
         countType     = "imageCountMoreThan"
-        countNumber   = 30
+        countNumber   = 15
+      }
+      action = { type = "expire" }
+      }, {
+      rulePriority = 2
+      description  = "Expire untagged MCP images after one day"
+      selection = {
+        tagStatus   = "untagged"
+        countType   = "sinceImagePushed"
+        countUnit   = "days"
+        countNumber = 1
       }
       action = { type = "expire" }
     }]

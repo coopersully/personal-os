@@ -25,6 +25,27 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "web" {
   }
 }
 
+resource "aws_s3_bucket_lifecycle_configuration" "web" {
+  bucket = aws_s3_bucket.web.id
+
+  rule {
+    id     = "version-retention"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.web]
+}
+
 resource "aws_cloudfront_origin_access_control" "web" {
   name                              = "${local.name}-web"
   description                       = "CloudFront-only S3 access for ilo web assets"

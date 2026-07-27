@@ -67,6 +67,45 @@ variable "owner_emails" {
   sensitive   = true
 }
 
+variable "alert_email" {
+  description = "Email address for production health, security, backup, and cost alerts."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alert_email == "" || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.alert_email))
+    error_message = "alert_email must be blank or a valid email address."
+  }
+}
+
+variable "monthly_budget_usd" {
+  description = "Account-wide monthly AWS cost budget in USD."
+  type        = number
+  default     = 100
+
+  validation {
+    condition     = var.monthly_budget_usd >= 10
+    error_message = "monthly_budget_usd must be at least 10."
+  }
+}
+
+variable "cost_anomaly_monitor_arn" {
+  description = "Existing account Cost Anomaly Detection monitor ARN to notify at ilo's lower threshold."
+  type        = string
+  default     = null
+}
+
+variable "cost_anomaly_threshold_usd" {
+  description = "Absolute unexpected-spend impact that triggers an immediate operations-topic alert."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.cost_anomaly_threshold_usd >= 1
+    error_message = "cost_anomaly_threshold_usd must be at least 1."
+  }
+}
+
 variable "email_from" {
   description = "Verified transactional sender, for example ilo <noreply@example.com>."
   type        = string
@@ -117,6 +156,23 @@ variable "mcp_desired_count" {
   description = "Initial MCP task count. Keep at 0 until the first GitHub deployment has pushed an image."
   type        = number
   default     = 0
+}
+
+variable "service_min_capacity" {
+  description = "Minimum running task count maintained by ECS service auto scaling."
+  type        = number
+  default     = 1
+}
+
+variable "service_max_capacity" {
+  description = "Maximum running task count allowed during load spikes."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.service_max_capacity >= var.service_min_capacity
+    error_message = "service_max_capacity must be greater than or equal to service_min_capacity."
+  }
 }
 
 variable "database_instance_class" {

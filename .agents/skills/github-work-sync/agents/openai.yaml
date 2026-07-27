@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Work Sync"
+  short_description: "Sync branches and PRs to GitHub Issues."
+  default_prompt: "Use $github-work-sync to create or update GitHub issue coverage for the current work."

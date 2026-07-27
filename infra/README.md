@@ -140,6 +140,9 @@ events. The configured email endpoint must confirm the one-time Amazon SNS
 subscription before runtime alerts can arrive. Budget and Cost Anomaly
 Detection alerts use the same operations topic; budget notifications are also
 sent directly so the budget does not depend only on SNS confirmation.
+AWS Config records continuously to the audit bucket but is intentionally not
+attached directly to this topic because its per-resource change stream is far
+too noisy for an operator alert channel.
 
 CloudWatch alarms cover public HTTPS health, ECS CPU/memory, unhealthy targets,
 5xx responses, latency, RDS CPU/storage/memory/connections, NAT failures, and

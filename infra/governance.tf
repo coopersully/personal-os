@@ -265,7 +265,6 @@ resource "aws_config_delivery_channel" "main" {
   name           = local.name
   s3_bucket_name = aws_s3_bucket.audit.id
   s3_key_prefix  = "config"
-  sns_topic_arn  = aws_sns_topic.operations.arn
 
   snapshot_delivery_properties {
     delivery_frequency = "TwentyFour_Hours"
@@ -273,7 +272,6 @@ resource "aws_config_delivery_channel" "main" {
 
   depends_on = [
     aws_iam_role_policy.config_delivery,
-    aws_sns_topic_policy.operations,
   ]
 }
 

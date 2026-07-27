@@ -68,29 +68,24 @@ export function FinanceSidebarNavigation({
   reviewCount: number;
   section: FinanceSection;
 }) {
-  return (
-    <>
-      <p className="sidebar__mode-label">Finances</p>
-      {navigation.map((group) => (
-        <nav aria-label={group.label} className="sidebar-group" key={group.label}>
-          <p className="sidebar-group__label">{group.label}</p>
-          <div className="nav-list">
-            {group.items.map(({ icon: Icon, id, label }) => (
-              <Link
-                aria-current={section === id ? "page" : undefined}
-                className={`nav-item${section === id ? " nav-item--active" : ""}`}
-                key={id}
-                onClick={onNavigate}
-                to={id === "overview" ? "/finances" : `/finances/${id}`}
-              >
-                <Icon aria-hidden="true" size={19} />
-                <span>{label}</span>
-                {id === "review" && reviewCount > 0 ? <b>{reviewCount}</b> : null}
-              </Link>
-            ))}
-          </div>
-        </nav>
-      ))}
-    </>
-  );
+  return navigation.map((group) => (
+    <nav aria-label={group.label} className="sidebar-group" key={group.label}>
+      <p className="sidebar-group__label">{group.label}</p>
+      <div className="nav-list">
+        {group.items.map(({ icon: Icon, id, label }) => (
+          <Link
+            aria-current={section === id ? "page" : undefined}
+            className={`nav-item${section === id ? " nav-item--active" : ""}`}
+            key={id}
+            onClick={onNavigate}
+            to={id === "overview" ? "/finances" : `/finances/${id}`}
+          >
+            <Icon aria-hidden="true" size={19} />
+            <span>{label}</span>
+            {id === "review" && reviewCount > 0 ? <b>{reviewCount}</b> : null}
+          </Link>
+        ))}
+      </div>
+    </nav>
+  ));
 }

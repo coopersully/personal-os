@@ -88,6 +88,7 @@ import {
 } from "@/components/ui/table";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
@@ -2883,27 +2884,5 @@ function transactionAmountTone(direction: FinanceTransaction["direction"]) {
 }
 
 function FinancePageSkeleton() {
-  return (
-    <section
-      aria-busy="true"
-      aria-label="Loading finances"
-      className="wide-page flex w-full max-w-6xl flex-col gap-6 pb-8"
-    >
-      <div className="space-y-3">
-        <div className="h-3 w-36 animate-pulse rounded bg-muted" />
-        <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-full max-w-xl animate-pulse rounded bg-muted" />
-      </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        {["spend", "accounts", "review"].map((name) => (
-          <div className="h-24 animate-pulse rounded-xl border bg-muted/40" key={name} />
-        ))}
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {["primary", "secondary"].map((name) => (
-          <div className="h-40 animate-pulse rounded-xl border bg-muted/40" key={name} />
-        ))}
-      </div>
-    </section>
-  );
+  return <WorkspaceSkeleton kind="finances" />;
 }

@@ -20,9 +20,19 @@ performance work.
   invent page-only representations of provider material.
 - Compose `src/components/ui` primitives. Do not create replacement primitives
   or bypass shared theme tokens.
+- Compose dense contextual navigation with the shared Sidebar, Collapsible,
+  and sub-menu primitives. Keep account disclosures and child destinations as
+  separate bounded rows; truncate identity text and align counts independently
+  so live provider data cannot collapse into a text block.
+- Do not repeat a workspace name between the switcher and its contextual
+  navigation, and do not mark internal routes with external-link glyphs.
 - Let the app shell own routing, global navigation, Today, the generic Add menu,
   and modal composition. Keep new domain behavior out of `app.tsx` unless it is
   necessary composition wiring.
+- Keep page-wide orientation, search, filters, freshness actions, and the
+  primary create action in the app frame. When the frame exposes them, begin
+  the feature body with primary material instead of repeating a title, eyebrow,
+  search field, or action bar.
 
 ## Apply the design system deterministically
 
@@ -37,6 +47,9 @@ performance work.
   than it can be explained.
 - Keep semantic foreground tokens intact on interactive controls. Never add a
   global color override that can defeat a component's `text-*` contrast class.
+- Keep navigation icon geometry stable across states: use the regular and
+  filled weights of the same icon, with fill reserved for the active
+  destination.
 - Combine only attributes that answer the same user question into one compact
   trigger and detail surface. Keep a neighbouring control when it represents a
   distinct action—for example, weather icon + temperature combine, while the

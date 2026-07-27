@@ -54,6 +54,11 @@ Every product page has these layers, in order:
 | Detail | What do I need to inspect or change? | Open an inspector, sheet, popover, or a labelled disclosure from the affected item. |
 | History | What happened before? | Collapse by default unless it changes the immediate decision. |
 
+The app frame owns page-wide orientation, search, filters, freshness actions,
+and the primary create action. When those controls are present in the frame,
+the page body begins with its primary material and never repeats a title,
+eyebrow, search field, or action bar.
+
 ### Blocks
 
 A block is a named product pattern with a stable purpose, not merely a rounded
@@ -142,6 +147,57 @@ colors, raw color utilities, or a second spacing scale.
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
+
+### Motion, loading, and perceived performance
+
+Use the shared motion tokens in `apps/web/src/styles.css` instead of choosing
+durations page by page.
+
+- A micro transition, such as a menu highlight moving between adjacent choices,
+  uses `--motion-duration-fast` (140 ms). A page-level spatial transition uses
+  `--motion-duration-spatial` (220 ms). Both use
+  `--motion-ease-spatial`.
+- Animate only compositor-friendly `transform` and `opacity` for page movement.
+  Never delay navigation, focus, or data display until an animation completes.
+- Direction carries spatial continuity. Moving to a later item in an ordered
+  switcher brings the destination up from below; moving to an earlier item
+  brings it down from above. The menu indicator and destination use the same
+  order and direction.
+- Hover and keyboard focus are equivalent intent signals. A preview available
+  on hover must also appear as a person arrows through the menu.
+- A destination's own skeleton preserves its major geometry without inventing
+  records, values, or status. An intent preview mounts the production route so
+  an unresolved request naturally shows that exact pending state. Compose the
+  shared shadcn `Skeleton`; do not hand-roll pulse animation or build a
+  preview-only substitute.
+- Opening a bounded workspace switcher may warm each destination's default-route
+  queries in parallel. A hovered or focused destination renders the same route
+  component used after selection, made inert and assistive-technology-hidden
+  until navigation. Never maintain a second simplified reconstruction of the
+  page. Reuse cached data immediately, then allow the destination's normal
+  query to refresh stale material in the background. A speculative failure
+  stays silent until the person navigates and the destination can present its
+  normal error state.
+- Flat shell chrome uses surface color, spacing, and hierarchy rather than
+  divider borders between the sidebar, top navigation, and body. A workspace
+  selector may use the semantic secondary surface to remain discoverable
+  without reintroducing a hard seam.
+- Contextual navigation rails compose the shared Sidebar group, menu,
+  collapsible, and sub-menu primitives. Account identities are bounded
+  disclosure rows; their child destinations are separate, indented rows with
+  stable height, truncation, and independently aligned counts. Provider,
+  account, destination, and count text must never collapse into one unbroken
+  line when data is dense.
+- A contextual sidebar does not repeat the workspace name already shown by its
+  switcher or its first navigation group. Internal destinations never carry an
+  external-link glyph; reserve that affordance for actions that actually open
+  a new browsing context.
+- When a shared moving selection surface already makes keyboard focus
+  unmistakable, remove duplicate per-item rings without removing that visible
+  focus state. Focus must remain at least as clear as hover and current-page
+  selection.
+- `prefers-reduced-motion` removes spatial travel and animated pulsing without
+  removing the preview, selection, loading, or navigation state.
 
 ### Interface copy
 

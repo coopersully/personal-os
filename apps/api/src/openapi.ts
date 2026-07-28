@@ -15,7 +15,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     },
     info: {
       description:
-        "The shared reminders, calendar, and read-only mail data plane for people and agents.",
+        "The shared reminders, calendar, mail, finance, and assistant data plane for people and agents.",
       title: "ilo API",
       version: "0.1.0",
     },
@@ -213,6 +213,31 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/mail/threads/{id}": {
         get: { security, responses: { 200: { description: "Mail conversation" } } },
+        patch: { security, responses: { 200: { description: "Mail conversation updated" } } },
+      },
+      "/v1/mail/rules": {
+        get: { security, responses: { 200: { description: "Mail rules" } } },
+        post: { security, responses: { 201: { description: "Mail rule created" } } },
+      },
+      "/v1/mail/rules/preview": {
+        post: { security, responses: { 200: { description: "Mail rule preview" } } },
+      },
+      "/v1/mail/rules/{id}": {
+        patch: { security, responses: { 200: { description: "Mail rule updated" } } },
+      },
+      "/v1/assistant/setup-status": {
+        get: { security, responses: { 200: { description: "Agent setup status" } } },
+      },
+      "/v1/assistant/profiles/{domain}": {
+        get: { security, responses: { 200: { description: "Domain preference profile" } } },
+        put: { security, responses: { 200: { description: "Domain preference profile saved" } } },
+      },
+      "/v1/assistant/attention": {
+        get: { security, responses: { 200: { description: "Domain attention items" } } },
+        post: { security, responses: { 201: { description: "Attention item created" } } },
+      },
+      "/v1/assistant/attention/{domain}/{id}": {
+        patch: { security, responses: { 200: { description: "Attention item updated" } } },
       },
       "/v1/audit": { get: { security, responses: { 200: { description: "Activity history" } } } },
     },

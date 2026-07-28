@@ -2,6 +2,21 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-07-28 — Agent-guided setup and shared assistant contracts
+
+- Added versioned domain profiles for durable preferences, source meanings, user-defined categories,
+  and operating instructions across mail, calendar, reminders, tasks, finances, and goals.
+- Added one cross-domain attention-item structure for important information, upcoming commitments,
+  follow-ups, and post-run summaries, with source attribution and audit history.
+- Established a common rule envelope while leaving conditions, actions, and execution inside each
+  domain. Mail is the first executable rule slice, with exact previews, delayed actions, scoped
+  accounts, optimistic updates, and explicit activation policy.
+- Migrated existing Mail rules through an expand/dual-read transition so older instances and
+  existing rows remain safe during rollout; legacy columns can be contracted in a later release.
+- Added matching API-client and MCP verbs plus the installable `ilo-setup` skill. Its short adaptive
+  interview saves drafts first, previews exact candidates, and requires explicit acceptance before
+  automatic behavior becomes active.
+
 ## 2026-07-27 — Immediate, resumable account setup
 
 - New accounts enter a persistent guided setup immediately after registration,

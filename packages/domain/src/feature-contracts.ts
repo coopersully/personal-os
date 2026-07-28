@@ -61,13 +61,23 @@ export type StartGoogleAuthorizationInput = z.infer<typeof startGoogleAuthorizat
  * A durable attribution record for a projection, recommendation, or proposed
  * mutation. The source provider remains authoritative for connected material.
  */
-export type MaterialSourceReference = {
-  accountId: string | null;
-  provider: "google" | "icloud" | "local" | "plaid" | "x";
-  remoteId: string | null;
-  revision: string | null;
-  sourceType: "calendar_event" | "finance_transaction" | "mail_thread" | "bookmark" | "local";
-};
+export const materialSourceReferenceSchema = z.object({
+  accountId: z.uuid().nullable(),
+  provider: z.enum(["google", "icloud", "local", "plaid", "x"]),
+  remoteId: z.string().nullable(),
+  revision: z.string().nullable(),
+  sourceType: z.enum([
+    "calendar_event",
+    "finance_transaction",
+    "mail_thread",
+    "reminder",
+    "task",
+    "goal",
+    "bookmark",
+    "local",
+  ]),
+});
+export type MaterialSourceReference = z.infer<typeof materialSourceReferenceSchema>;
 
 /**
  * Feature modules use this shape when exposing a provider action to the API,

@@ -3,8 +3,8 @@
 ## Product statement
 
 ilo is a transparent coordination layer shared by people and agents. It
-combines reminders, calendars, and read-only mail in one directly manipulable interface, while
-also exposing the same operations through the Model Context Protocol (MCP).
+combines reminders, calendars, and mail in one directly manipulable interface, while also exposing
+the same operations through the Model Context Protocol (MCP).
 
 The product is an overlay on existing operating systems, not a replacement for
 them. The first release is an installable responsive web application, a compact
@@ -55,11 +55,14 @@ provider internals.
 - Local calendar CRUD.
 - Google Calendar OAuth, calendar discovery, event synchronization, and
   write-through event CRUD.
-- Incremental Google OAuth for Gmail read-only access, mailbox discovery, and
-  conversation synchronization.
+- Incremental Google OAuth for Gmail read access plus an explicit modify/send upgrade, mailbox
+  discovery, conversation synchronization, provider-backed thread actions, and sending.
 - iCloud IMAP Mail and CalDAV Calendar through one encrypted app-specific password,
   with each capability independently enabled.
-- Unified read-only mailbox, search, conversation list, and plain-text reader.
+- Unified mailbox, search, conversation list, plain-text reader, drafts/sending, and
+  provider-supported thread actions.
+- Versioned domain preference profiles, cross-domain attention items, exact Mail-rule previews, and
+  an installable guided-setup skill for scoped MCP hosts.
 - Unified agenda and calendar views.
 - Current conditions in Today, preferring transient device location after the
   browser grants permission and falling back to an account-saved place selected
@@ -77,7 +80,8 @@ provider internals.
 ### Explicitly deferred
 
 - Microsoft Graph and additional mail/calendar providers.
-- Sending, replying, forwarding, moving, deleting, starring, or changing read state in mail.
+- Permanent mail deletion, provider filter/label creation, spam classification, and unsubscribe
+  automation.
 - Native Apple and Windows widget extensions. The Tauri overlay and PWA are the
   initial cross-platform surfaces.
 - Shared/team calendars, invitations, scheduling polls, and meeting negotiation.
@@ -111,8 +115,9 @@ The MVP is complete only when all of the following are demonstrated:
 4. A configured Google account can authorize, discover calendars, synchronize
    changes, and perform event CRUD without bypassing the domain service.
 5. An MCP client can list and mutate reminders and events using a scoped token.
-6. A connected Google or iCloud mailbox can synchronize and be searched/read from
-   both the UI and a `mail:read` MCP token without exposing credentials.
+6. A connected Google or iCloud mailbox can synchronize and be searched/read from both the UI and
+   a `mail:read` MCP token without exposing credentials; supported mutations require
+   `mail:write`, and automatic Google Mail rules require an enabled `approved_rule`.
 7. The agenda shows local and connected events together without losing source
    identity.
 8. The activity view identifies human, agent, connector, and system changes.

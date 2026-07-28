@@ -1,8 +1,11 @@
-import { resolve } from "node:path";
+import { cp, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   calendarAccounts,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfiles,
   mailboxes,
   mailDrafts,
   mailMessages,
@@ -13,6 +16,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import { createMailService } from "./mail-service.js";
 
 describe.sequential("mail service", () => {
@@ -23,7 +27,10 @@ describe.sequential("mail service", () => {
   let enabledAccountId: string;
   let disabledAccountId: string;
   let inboxId: string;
+  let profileId: string;
   let threadId: string;
+  let legacyRuleId: string;
+  let temporaryMigrationsFolder: string | null = null;
   const gateway = { send: vi.fn(async () => undefined), update: vi.fn(async () => undefined) };
 
   beforeAll(async () => {
@@ -33,7 +40,19 @@ describe.sequential("mail service", () => {
       .withPassword("personal_os")
       .start();
     database = createDatabaseClient(container.getConnectionUri());
-    await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
+    const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
+    temporaryMigrationsFolder = await mkdtemp(join(tmpdir(), "ilo-mail-migrations-"));
+    await cp(migrationsFolder, temporaryMigrationsFolder, { recursive: true });
+    await unlink(join(temporaryMigrationsFolder, "0037_agent_setup_foundation.sql"));
+    const journalPath = join(temporaryMigrationsFolder, "meta/_journal.json");
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+    journal.entries = journal.entries.filter(
+      (entry) => entry.tag !== "0037_agent_setup_foundation",
+    );
+    await writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+    await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
       .insert(users)
       .values({
@@ -45,6 +64,16 @@ describe.sequential("mail service", () => {
       .returning();
     if (!user) throw new Error("Fixture user was not created.");
     userId = user.id;
+    const legacyRule = await database.pool.query<{ id: string }>(
+      `INSERT INTO mail_rules (user_id, name, query, action, enabled)
+       VALUES ($1, 'Legacy archive', 'legacy newsletter', 'archive', true)
+       RETURNING id`,
+      [userId],
+    );
+    const migratedRuleId = legacyRule.rows[0]?.id;
+    if (!migratedRuleId) throw new Error("Legacy rule fixture was not created.");
+    legacyRuleId = migratedRuleId;
+    await migrateDatabase(database.db, migrationsFolder);
     const [enabled, disabled] = await database.db
       .insert(calendarAccounts)
       .values([
@@ -86,6 +115,22 @@ describe.sequential("mail service", () => {
       .returning();
     if (!inbox) throw new Error("Fixture mailbox was not created.");
     inboxId = inbox.id;
+    const [profile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep mail useful.",
+        preferences: {},
+        sourceContexts: [],
+        status: "draft",
+        summary: "Mail setup.",
+        userId,
+      })
+      .returning();
+    if (!profile) throw new Error("Fixture profile was not created.");
+    profileId = profile.id;
     await database.db.insert(mailboxes).values({
       accountId: disabled.id,
       name: "Hidden inbox",
@@ -140,6 +185,50 @@ describe.sequential("mail service", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+    if (temporaryMigrationsFolder)
+      await rm(temporaryMigrationsFolder, { force: true, recursive: true });
+  });
+
+  it("preserves and normalizes legacy rules through the setup migration", async () => {
+    const [stored] = await database.db
+      .select()
+      .from(mailRules)
+      .where(eq(mailRules.id, legacyRuleId));
+    expect(stored).toMatchObject({
+      actions: [{ afterDays: 0, mailboxId: null, type: "archive" }],
+      condition: { field: "any", operator: "contains", value: "legacy newsletter" },
+      enabled: true,
+      legacyAction: "archive",
+      legacyQuery: "legacy newsletter",
+      policy: "approved_rule",
+    });
+    await expect(service.listRules(userId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          condition: { field: "any", operator: "contains", value: "legacy newsletter" },
+          id: legacyRuleId,
+          policy: "approved_rule",
+        }),
+      ]),
+    );
+    const oldWriterRule = await database.pool.query<{ id: string }>(
+      `INSERT INTO mail_rules (user_id, name, query, action, enabled)
+       VALUES ($1, 'Overlap rule', 'legacy overlap', 'mark_read', true)
+       RETURNING id`,
+      [userId],
+    );
+    const oldWriterRuleId = oldWriterRule.rows[0]?.id;
+    if (!oldWriterRuleId) throw new Error("Rolling-deploy rule fixture was not created.");
+    await expect(service.listRules(userId)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+          condition: { field: "any", operator: "contains", value: "legacy overlap" },
+          id: oldWriterRuleId,
+          policy: "approved_rule",
+        }),
+      ]),
+    );
   });
 
   it("lists enabled mailboxes and serializes mailbox membership", async () => {
@@ -259,19 +348,61 @@ describe.sequential("mail service", () => {
     await expect(service.listThreads(userId, { limit: 100 })).resolves.toEqual([
       expect.objectContaining({ subject: "Another note" }),
     ]);
-    const rule = await service.createRule(userId, {
-      action: "archive",
-      enabled: true,
-      name: "Archive newsletters",
-      query: "newsletter",
+    const rule = await service.createRule(
+      {
+        actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
+        condition: { field: "subject", operator: "contains", value: "Project" },
+        confidenceThreshold: null,
+        description: "Archive old project updates.",
+        enabled: false,
+        name: "Archive newsletters",
+        policy: "preview",
+        profileId: null,
+        sourceIds: [enabledAccountId],
+      },
+      {
+        principal: {
+          actorId: userId,
+          actorType: "user",
+          scopes: new Set(["mail:read", "mail:write"]),
+          userId,
+        },
+        requestId: "request-rule",
+      },
+    );
+    await expect(
+      service.previewRule(userId, {
+        actions: rule.actions,
+        condition: rule.condition,
+        confidenceThreshold: null,
+        description: rule.description,
+        sourceIds: rule.sourceIds,
+      }),
+    ).resolves.toMatchObject({
+      candidates: [expect.objectContaining({ id: threadId })],
+      matchedCount: 1,
     });
-    if (!rule) throw new Error("Rule was not created.");
-    await expect(service.listRules(userId)).resolves.toEqual([
-      expect.objectContaining({ id: rule.id }),
-    ]);
-    await expect(database.db.select().from(mailRules)).resolves.toEqual([
-      expect.objectContaining({ id: rule.id }),
-    ]);
+    await expect(
+      service.updateRule(
+        rule.id,
+        { enabled: true, expectedVersion: rule.version, policy: "approved_rule" },
+        {
+          principal: {
+            actorId: userId,
+            actorType: "user",
+            scopes: new Set(["mail:read", "mail:write"]),
+            userId,
+          },
+          requestId: "request-rule-update",
+        },
+      ),
+    ).resolves.toMatchObject({ enabled: true, policy: "approved_rule", version: 2 });
+    await expect(service.listRules(userId)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ enabled: true, id: rule.id, version: 2 })]),
+    );
+    await expect(database.db.select().from(mailRules)).resolves.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: rule.id })]),
+    );
   });
 
   it("rejects missing messages, drafts, and mailbox memberships", async () => {
@@ -334,5 +465,103 @@ describe.sequential("mail service", () => {
         "request-5",
       ),
     ).resolves.toMatchObject({ unread: false });
+  });
+
+  it("validates rule references and preserves explicit partial updates", async () => {
+    const context = {
+      principal: {
+        actorId: userId,
+        actorType: "user" as const,
+        scopes: new Set(["mail:read" as const, "mail:write" as const]),
+        userId,
+      },
+      requestId: "rule-validation",
+    };
+    const baseRule = {
+      actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" as const }],
+      condition: {
+        field: "sender" as const,
+        operator: "ends_with" as const,
+        value: "@example.com",
+      },
+      confidenceThreshold: 0.9,
+      description: "Read known senders.",
+      enabled: false,
+      name: "Known senders",
+      policy: "preview" as const,
+      profileId,
+      sourceIds: [enabledAccountId],
+    };
+    await expect(
+      service.createRule({ ...baseRule, profileId: disabledAccountId }, context),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.createRule({ ...baseRule, sourceIds: [disabledAccountId] }, context),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createRule(
+        {
+          ...baseRule,
+          actions: [{ afterDays: 0, mailboxId: disabledAccountId, type: "add_label" }],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createRule(
+        {
+          ...baseRule,
+          actions: [{ afterDays: 0, mailboxId: inboxId, type: "add_label" }],
+          sourceIds: [],
+        },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    const rule = await service.createRule(
+      {
+        ...baseRule,
+        actions: [{ afterDays: 0, mailboxId: inboxId, type: "add_label" }],
+      },
+      context,
+    );
+    expect(rule).toMatchObject({
+      confidenceThreshold: 0.9,
+      profileId,
+      sourceIds: [enabledAccountId],
+    });
+    await expect(
+      service.previewRule(userId, {
+        actions: baseRule.actions,
+        condition: baseRule.condition,
+        confidenceThreshold: 0.9,
+        description: baseRule.description,
+        sourceIds: [],
+      }),
+    ).resolves.toMatchObject({ matchedCount: 2, scannedCount: 2 });
+    await expect(
+      service.updateRule(disabledAccountId, { enabled: true, expectedVersion: 1 }, context),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.updateRule(rule.id, { enabled: true, expectedVersion: 99 }, context),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.updateRule(
+        rule.id,
+        {
+          actions: baseRule.actions,
+          confidenceThreshold: null,
+          expectedVersion: rule.version,
+          profileId: null,
+          sourceIds: [],
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      confidenceThreshold: null,
+      profileId: null,
+      sourceIds: [],
+      version: 2,
+    });
   });
 });

@@ -3,6 +3,7 @@ import type { PersonalOsApiClient } from "@personal-os/api-client";
 import { localDayRange } from "@personal-os/domain";
 import { z } from "zod";
 import { emptyResult, result } from "./tool-result.js";
+import { registerAssistantTools } from "./tools/assistant.js";
 import { registerCalendarEventTools, registerCalendarListTools } from "./tools/calendar.js";
 import { registerFinanceTools } from "./tools/finances.js";
 import { registerMailTools } from "./tools/mail.js";
@@ -24,6 +25,7 @@ const timeZone = z.string().min(1).describe("IANA time zone, for example America
 export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
   const server = new McpServer({ name: "personal-os", version: "0.1.0" });
 
+  registerAssistantTools(server, options.api);
   registerFinanceTools(server, options.api);
   registerXBookmarkTools(server, options.api);
 

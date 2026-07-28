@@ -29,6 +29,7 @@ import { getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
+import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
@@ -44,6 +45,7 @@ import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
 import { createReminderService } from "./reminder-service.js";
+import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
@@ -176,6 +178,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const audit = createAuditService(dependencies.db);
+  const assistant = createAssistantService({ db: dependencies.db, now });
   const mail = createMailService({ db: dependencies.db, gateway: connectors.mailGateway, now });
   const weather = createWeatherService({
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
@@ -219,7 +222,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     "*",
     cors({
       allowHeaders: ["Content-Type", "Authorization", "X-Request-Id"],
-      allowMethods: ["DELETE", "GET", "OPTIONS", "PATCH", "POST"],
+      allowMethods: ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"],
       credentials: true,
       origin: dependencies.config.allowedOrigins,
     }),
@@ -474,6 +477,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/weather/*", authenticate, requireHuman);
   app.use("/v1/automations", authenticate);
   app.use("/v1/automations/*", authenticate);
+  app.use("/v1/assistant/*", authenticate);
   const requireVerifiedEmail: MiddlewareHandler<AppEnv> = async (context, next) => {
     if (!(await auth.getUser(context.get("principal").userId)).emailVerified)
       throw new AppError("forbidden", "Verify your email before connecting an account.");
@@ -744,7 +748,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ),
   );
 
-  registerMailRoutes({ app, mail });
+  registerMailRoutes({ app, mail, mutationContext });
+
+  registerAssistantRoutes({ app, assistant, mutationContext });
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 

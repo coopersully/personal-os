@@ -10,6 +10,7 @@ import type {
   FinanceTransaction,
   Goal,
   Mailbox,
+  MailRule,
   MailThread,
   Motive,
   Reminder,
@@ -126,6 +127,52 @@ const mailThread: MailThread = {
   subject: "Test mail",
   to: [],
   unread: true,
+};
+const mailRule: MailRule = {
+  actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
+  condition: { field: "any", operator: "contains", value: "news" },
+  confidenceThreshold: null,
+  createdAt: now,
+  description: "Archive routine newsletters after one day.",
+  domain: "mail",
+  enabled: false,
+  id,
+  name: "Archive",
+  policy: "preview",
+  profileId: null,
+  sourceIds: [accountId],
+  updatedAt: now,
+  version: 1,
+};
+const domainProfile = {
+  categories: [],
+  createdAt: now,
+  domain: "mail" as const,
+  id,
+  instructions: ["Keep only high-signal mail visible."],
+  objective: "Keep a clean inbox.",
+  preferences: { inboxStyle: "signal_only" },
+  sourceContexts: [],
+  status: "draft" as const,
+  summary: "A high-signal inbox.",
+  updatedAt: now,
+  version: 1,
+};
+const attentionItem = {
+  createdAt: now,
+  domain: "mail" as const,
+  expiresAt: null,
+  id,
+  importance: "normal" as const,
+  kind: "important" as const,
+  occursAt: null,
+  relatedEntityId: null,
+  relatedEntityType: null,
+  source: null,
+  status: "open" as const,
+  summary: "Important mail.",
+  title: "Important",
+  updatedAt: now,
 };
 const automation: AutomationRoutine = {
   id,
@@ -639,15 +686,39 @@ function apiFetch() {
         },
       });
     if (url.pathname.endsWith("/sync")) return json({ result: { changed: 3 } });
+    if (url.pathname === "/v1/assistant/setup-status")
+      return json({
+        setup: {
+          domains: [
+            {
+              canRead: true,
+              canWrite: true,
+              domain: "mail",
+              profileStatus: "draft",
+              profileVersion: 1,
+            },
+          ],
+        },
+      });
+    if (url.pathname === "/v1/assistant/profiles/mail") return json({ profile: domainProfile });
+    if (url.pathname === `/v1/assistant/attention/mail/${id}`)
+      return json({ item: { ...attentionItem, status: "resolved" } });
+    if (url.pathname === "/v1/assistant/attention" && method === "POST")
+      return json({ item: attentionItem }, 201);
+    if (url.pathname === "/v1/assistant/attention") return json({ items: [attentionItem] });
     if (url.pathname === "/v1/mail/drafts" && method === "POST")
       return json({ draft: { id } }, 201);
     if (url.pathname === "/v1/mail/drafts")
       return json({ drafts: [{ body: "Draft", id, subject: "Subject" }] });
-    if (url.pathname === "/v1/mail/rules" && method === "POST") return json({ rule: { id } }, 201);
-    if (url.pathname === "/v1/mail/rules")
+    if (url.pathname === "/v1/mail/rules/preview")
       return json({
-        rules: [{ action: "archive", enabled: true, id, name: "Archive", query: "news" }],
+        preview: { candidates: [], matchedCount: 0, scannedCount: 1 },
       });
+    if (url.pathname === `/v1/mail/rules/${id}` && method === "PATCH")
+      return json({ rule: { ...mailRule, enabled: true, version: 2 } });
+    if (url.pathname === "/v1/mail/rules" && method === "POST")
+      return json({ rule: mailRule }, 201);
+    if (url.pathname === "/v1/mail/rules") return json({ rules: [mailRule] });
     if (url.pathname === "/v1/mail/send" || url.pathname.endsWith("/snooze"))
       return new Response(null, { status: 204 });
     if (url.pathname === `/v1/mail/threads/${id}/messages`)
@@ -955,6 +1026,42 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ accountId, email: "test@icloud.com" });
     await expect(api.listMailboxes()).resolves.toEqual([mailbox]);
+    await expect(api.getAssistantSetupStatus()).resolves.toMatchObject({
+      domains: [expect.objectContaining({ domain: "mail" })],
+    });
+    await expect(api.getDomainProfile("mail")).resolves.toEqual(domainProfile);
+    await expect(
+      api.upsertDomainProfile({
+        categories: [],
+        domain: "mail",
+        instructions: domainProfile.instructions,
+        objective: domainProfile.objective,
+        preferences: domainProfile.preferences,
+        sourceContexts: [],
+        status: "draft",
+        summary: domainProfile.summary,
+      }),
+    ).resolves.toEqual(domainProfile);
+    await expect(
+      api.listAttentionItems({ domain: "mail", limit: 50, status: "open" }),
+    ).resolves.toEqual([attentionItem]);
+    await expect(
+      api.createAttentionItem({
+        domain: "mail",
+        expiresAt: null,
+        importance: "normal",
+        kind: "important",
+        occursAt: null,
+        relatedEntityId: null,
+        relatedEntityType: null,
+        source: null,
+        summary: attentionItem.summary,
+        title: attentionItem.title,
+      }),
+    ).resolves.toEqual(attentionItem);
+    await expect(
+      api.updateAttentionItem("mail", id, { status: "resolved" }),
+    ).resolves.toMatchObject({ status: "resolved" });
     await expect(
       api.listMailThreads({
         accountIds: [accountId],
@@ -989,11 +1096,31 @@ describe("ilo API client", () => {
       { body: "Draft", id, subject: "Subject" },
     ]);
     await expect(
-      api.createMailRule({ action: "archive", enabled: true, name: "Archive", query: "news" }),
-    ).resolves.toEqual({ id });
-    await expect(api.listMailRules()).resolves.toEqual([
-      { action: "archive", enabled: true, id, name: "Archive", query: "news" },
-    ]);
+      api.createMailRule({
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        confidenceThreshold: null,
+        description: mailRule.description,
+        enabled: false,
+        name: mailRule.name,
+        policy: "preview",
+        profileId: null,
+        sourceIds: [accountId],
+      }),
+    ).resolves.toEqual(mailRule);
+    await expect(api.listMailRules()).resolves.toEqual([mailRule]);
+    await expect(
+      api.previewMailRule({
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        confidenceThreshold: null,
+        description: mailRule.description,
+        sourceIds: [accountId],
+      }),
+    ).resolves.toMatchObject({ matchedCount: 0 });
+    await expect(
+      api.updateMailRule(id, { enabled: true, expectedVersion: 1 }),
+    ).resolves.toMatchObject({ enabled: true, version: 2 });
     await expect(api.updateMailThread(id, { unread: false })).resolves.toEqual(mailThread);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
     await api.sendMail({

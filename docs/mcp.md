@@ -1,6 +1,7 @@
 # MCP integration
 
-The MCP server is an adapter over the authenticated ilo API. It contains no reminder, calendar, provider, or audit rules of its own.
+The MCP server is an adapter over the authenticated ilo API. It contains no reminder, calendar,
+mail, finance, provider, or audit rules of its own.
 
 ## Transports
 
@@ -11,7 +12,24 @@ The HTTP server is stateless: it creates an isolated MCP server and transport fo
 
 ## Tools
 
-The server exposes read/create/update/complete/delete reminder tools; read/create/update/delete event tools; calendar discovery; read-only mailbox, mail search, and conversation tools; actor-aware activity history; and Finance tools. Destructive and read-only annotations are included for compatible MCP hosts.
+The server exposes read/create/update/complete/delete reminder tools; read/create/update/delete event
+tools; calendar discovery; mailbox, mail search, conversation, and mail rule tools; actor-aware
+activity history; and Finance tools. Destructive and read-only annotations are included for
+compatible MCP hosts.
+
+The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
+
+- `get_agent_setup_status` discovers accessible domains and existing profile state.
+- `get_domain_profile` and `save_domain_profile` read and maintain durable domain preferences,
+  source meanings, categories, and instructions.
+- `list_attention_items`, `create_attention_item`, and `update_attention_item` use the same shape
+  for important items, upcoming commitments, follow-ups, and post-run summaries across domains.
+
+Rules share a versioned envelope—name, description, profile, sources, confidence threshold, policy,
+enabled state, and version—while each feature owns its condition and action language. Mail is the
+first executable implementation: agents can list, preview, create, and update mail rules. New rules
+are disabled and preview-only by default, and connector sync executes only enabled
+`approved_rule` rules.
 
 Finance tools are an adapter over the same Finance API used by the web app. They
 include ledger health, transactions, categories, budgets, merchants, review
@@ -32,7 +50,7 @@ Create a token in the product settings. Grant only the scopes the host needs:
 
 - `reminders:read`, `reminders:write`
 - `calendar:read`, `calendar:write`
-- `mail:read`
+- `mail:read`, `mail:write`
 - `audit:read`
 - `finances:read`, `finances:write`
 

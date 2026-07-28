@@ -4,15 +4,24 @@ import type {
   AccountSetupStep,
   AccountSetupWorkspace,
   ActorType,
+  AgentMutationPolicy,
+  AssistantDomain,
+  AttentionItemImportance,
+  AttentionItemKind,
+  AttentionItemStatus,
   AutomationRunStatus,
   AutomationTemplate,
   CalendarProvider,
   FinanceProvider,
   GoogleConnectionService,
   HomeLocation,
+  LegacyMailRuleAction,
   MailAddress,
   MailboxRole,
   MailProvider,
+  MailRuleAction,
+  MailRuleCondition,
+  MaterialSourceReference,
   Theme,
   TransactionDirection,
 } from "@personal-os/domain";
@@ -266,6 +275,77 @@ export const automationRuns = pgTable(
   (table) => [
     index("automation_runs_routine_time_idx").on(table.routineId, table.startedAt),
     index("automation_runs_user_time_idx").on(table.userId, table.startedAt),
+  ],
+);
+
+export const domainProfiles = pgTable(
+  "domain_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    objective: text("objective").notNull(),
+    summary: text("summary").notNull(),
+    instructions: jsonb("instructions").$type<string[]>().notNull().default([]),
+    sourceContexts: jsonb("source_contexts")
+      .$type<
+        Array<{
+          notes: string | null;
+          purpose: string;
+          sourceId: string;
+          sourceLabel: string;
+        }>
+      >()
+      .notNull()
+      .default([]),
+    categories: jsonb("categories")
+      .$type<Array<{ description: string; examples: string[]; key: string; label: string }>>()
+      .notNull()
+      .default([]),
+    preferences: jsonb("preferences")
+      .$type<Record<string, boolean | number | string | string[]>>()
+      .notNull()
+      .default({}),
+    status: text("status").$type<"active" | "draft">().notNull().default("draft"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("domain_profiles_user_domain_idx").on(table.userId, table.domain),
+    index("domain_profiles_user_status_idx").on(table.userId, table.status),
+  ],
+);
+
+export const attentionItems = pgTable(
+  "attention_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    kind: text("kind").$type<AttentionItemKind>().notNull(),
+    importance: text("importance").$type<AttentionItemImportance>().notNull(),
+    status: text("status").$type<AttentionItemStatus>().notNull().default("open"),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    occursAt: timestamp("occurs_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    source: jsonb("source").$type<MaterialSourceReference>(),
+    relatedEntityType: text("related_entity_type"),
+    relatedEntityId: uuid("related_entity_id"),
+    ...timestamps,
+  },
+  (table) => [
+    index("attention_items_user_domain_status_idx").on(
+      table.userId,
+      table.domain,
+      table.status,
+      table.createdAt,
+    ),
+    index("attention_items_user_occurs_idx").on(table.userId, table.occursAt),
   ],
 );
 
@@ -589,13 +669,24 @@ export const mailRules = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").references(() => domainProfiles.id, { onDelete: "set null" }),
     name: text("name").notNull(),
-    query: text("query").notNull(),
-    action: text("action").$type<"archive" | "mark_read" | "star">().notNull(),
-    enabled: boolean("enabled").notNull().default(true),
+    legacyQuery: text("query").notNull().default("__ilo_rule_v2__"),
+    legacyAction: text("action").$type<LegacyMailRuleAction>().notNull().default("archive"),
+    description: text("description").notNull().default(""),
+    condition: jsonb("condition").$type<MailRuleCondition>(),
+    actions: jsonb("actions").$type<MailRuleAction[]>(),
+    sourceAccountIds: jsonb("source_account_ids").$type<string[]>().notNull().default([]),
+    confidenceThreshold: integer("confidence_threshold_basis_points"),
+    policy: text("policy").$type<AgentMutationPolicy>().notNull().default("preview"),
+    enabled: boolean("enabled").notNull().default(false),
+    version: integer("version").notNull().default(1),
     ...timestamps,
   },
-  (table) => [index("mail_rules_user_idx").on(table.userId)],
+  (table) => [
+    index("mail_rules_user_idx").on(table.userId),
+    index("mail_rules_user_enabled_idx").on(table.userId, table.enabled),
+  ],
 );
 
 export const calendars = pgTable(

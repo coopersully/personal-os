@@ -13,6 +13,7 @@ import {
   connectICloudInputSchema,
   connectorCapabilities,
   createAccessTokenInputSchema,
+  createAttentionItemInputSchema,
   createAutomationRoutineInputSchema,
   createEventBlockInputSchema,
   createEventInputSchema,
@@ -41,7 +42,10 @@ import {
   mailboxSchema,
   mailListQuerySchema,
   mailProviderSchema,
+  mailRuleActionIsDue,
+  mailRuleActionSchema,
   mailThreadSchema,
+  matchesMailRule,
   paginationSchema,
   passwordRequirementState,
   passwordSchema,
@@ -49,6 +53,7 @@ import {
   reminderListQuerySchema,
   reminderPrioritySchema,
   reminderSchema,
+  resolveStoredMailRule,
   startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
   taskSchema,
@@ -65,6 +70,7 @@ import {
   updateReminderInputSchema,
   updateTaskInputSchema,
   updateUserInputSchema,
+  upsertDomainProfileInputSchema,
   userSchema,
   weatherLocationOptionSchema,
   weatherLocationSearchQuerySchema,
@@ -105,6 +111,116 @@ describe("domain schemas", () => {
       writeScope: "calendar:write",
     });
     expect(featureAccessPolicies.goals.writeScope).toBe("goals:write");
+  });
+
+  it("uses shared profile and attention envelopes with domain-owned mail rules", () => {
+    expect(
+      upsertDomainProfileInputSchema.parse({
+        categories: [],
+        domain: "mail",
+        instructions: ["Keep delivery problems visible."],
+        objective: "Keep a clean inbox.",
+        preferences: { inboxStyle: "signal_only", retentionDays: 1 },
+        sourceContexts: [],
+        status: "draft",
+        summary: "Only high-signal mail stays visible.",
+      }),
+    ).toMatchObject({ domain: "mail", status: "draft" });
+    expect(
+      createAttentionItemInputSchema.parse({
+        domain: "calendar",
+        expiresAt: null,
+        importance: "high",
+        kind: "upcoming",
+        occursAt: start,
+        relatedEntityId: null,
+        relatedEntityType: null,
+        source: null,
+        summary: "A commitment is approaching.",
+        title: "Upcoming commitment",
+      }),
+    ).toMatchObject({ domain: "calendar", kind: "upcoming" });
+    expect(
+      matchesMailRule(
+        { field: "sender", operator: "ends_with", value: "@example.com" },
+        {
+          from: { address: "orders@example.com", name: "Orders" },
+          snippet: "Your order shipped",
+          subject: "Shipment",
+        },
+      ),
+    ).toBe(true);
+    expect(
+      mailRuleActionIsDue(
+        { afterDays: 1, mailboxId: null, type: "trash" },
+        "2026-07-26T12:00:00.000Z",
+        new Date("2026-07-28T12:00:00.000Z"),
+      ),
+    ).toBe(true);
+    expect(
+      mailRuleActionIsDue(
+        { afterDays: 3, mailboxId: null, type: "trash" },
+        new Date("2026-07-26T12:00:00.000Z"),
+        new Date("2026-07-28T12:00:00.000Z"),
+      ),
+    ).toBe(false);
+    expect(
+      matchesMailRule(
+        { field: "subject", operator: "equals", value: "shipment" },
+        {
+          from: { address: "orders@example.com", name: null },
+          snippet: "Your order shipped",
+          subject: "Shipment",
+        },
+      ),
+    ).toBe(true);
+    expect(
+      matchesMailRule(
+        { field: "snippet", operator: "contains", value: "missing" },
+        {
+          from: { address: "orders@example.com", name: null },
+          snippet: "Your order shipped",
+          subject: "Shipment",
+        },
+      ),
+    ).toBe(false);
+    expect(
+      matchesMailRule(
+        { field: "any", operator: "contains", value: "orders@example.com" },
+        {
+          from: { address: "orders@example.com", name: null },
+          snippet: "Your order shipped",
+          subject: "Shipment",
+        },
+      ),
+    ).toBe(true);
+    expect(
+      mailRuleActionSchema.safeParse({
+        mailboxId: accountId,
+        type: "add_label",
+      }).success,
+    ).toBe(true);
+    expect(mailRuleActionSchema.safeParse({ type: "add_label" }).success).toBe(false);
+    expect(
+      mailRuleActionSchema.safeParse({
+        mailboxId: accountId,
+        type: "archive",
+      }).success,
+    ).toBe(false);
+    expect(
+      resolveStoredMailRule({
+        action: "mark_read",
+        actions: null,
+        condition: null,
+        enabled: true,
+        policy: "preview",
+        query: "legacy sender",
+      }),
+    ).toEqual({
+      actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+      condition: { field: "any", operator: "contains", value: "legacy sender" },
+      policy: "approved_rule",
+    });
   });
 
   it("formats calendar dates without timezone drift", () => {

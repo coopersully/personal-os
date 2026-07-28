@@ -101,6 +101,52 @@ const mailThread: MailThread = {
   to: [],
   unread: true,
 };
+const domainProfile = {
+  categories: [],
+  createdAt: now,
+  domain: "mail" as const,
+  id,
+  instructions: ["Keep only high-signal mail visible."],
+  objective: "Keep a clean inbox.",
+  preferences: { inboxStyle: "signal_only" },
+  sourceContexts: [],
+  status: "draft" as const,
+  summary: "A low-noise inbox.",
+  updatedAt: now,
+  version: 1,
+};
+const attentionItem = {
+  createdAt: now,
+  domain: "mail" as const,
+  expiresAt: null,
+  id,
+  importance: "high" as const,
+  kind: "important" as const,
+  occursAt: null,
+  relatedEntityId: null,
+  relatedEntityType: null,
+  source: null,
+  status: "open" as const,
+  summary: "A reply is due.",
+  title: "Reply needed",
+  updatedAt: now,
+};
+const mailRule = {
+  actions: [{ afterDays: 1, mailboxId: null, type: "archive" as const }],
+  condition: { field: "any" as const, operator: "contains" as const, value: "newsletter" },
+  confidenceThreshold: null,
+  createdAt: now,
+  description: "Archive newsletters after one day.",
+  domain: "mail" as const,
+  enabled: false,
+  id,
+  name: "Archive newsletters",
+  policy: "preview" as const,
+  profileId: id,
+  sourceIds: [accountId],
+  updatedAt: now,
+  version: 1,
+};
 const automation: AutomationRoutine = {
   id,
   template: "morning_brief",
@@ -148,6 +194,22 @@ const automationRun: AutomationRun = {
 
 function mockApi() {
   return {
+    getAssistantSetupStatus: vi.fn(async () => ({
+      domains: [
+        {
+          canRead: true,
+          canWrite: true,
+          domain: "mail" as const,
+          profileStatus: "draft" as const,
+          profileVersion: 1,
+        },
+      ],
+    })),
+    getDomainProfile: vi.fn(async () => domainProfile),
+    upsertDomainProfile: vi.fn(async () => domainProfile),
+    listAttentionItems: vi.fn(async () => [attentionItem]),
+    createAttentionItem: vi.fn(async () => attentionItem),
+    updateAttentionItem: vi.fn(async () => attentionItem),
     completeReminder: vi.fn(async () => reminder),
     completeTask: vi.fn(async () => task),
     createReminder: vi.fn(async () => reminder),
@@ -312,6 +374,14 @@ function mockApi() {
     listMailThreads: vi.fn(async () => [mailThread]),
     getMailThread: vi.fn(async () => mailThread),
     listMailMessages: vi.fn(async () => []),
+    listMailRules: vi.fn(async () => [mailRule]),
+    previewMailRule: vi.fn(async () => ({
+      candidates: [],
+      matchedCount: 0,
+      scannedCount: 1,
+    })),
+    createMailRule: vi.fn(async () => mailRule),
+    updateMailRule: vi.fn(async () => ({ ...mailRule, enabled: true, version: 2 })),
     updateMailThread: vi.fn(async () => mailThread),
     snoozeMailThread: vi.fn(async () => undefined),
     sendMail: vi.fn(async () => undefined),
@@ -358,6 +428,12 @@ describe("ilo MCP server", () => {
 
     const tools = await client.listTools();
     expect(tools.tools.map((tool) => tool.name)).toEqual([
+      "get_agent_setup_status",
+      "get_domain_profile",
+      "save_domain_profile",
+      "list_attention_items",
+      "create_attention_item",
+      "update_attention_item",
       "get_finance_wealth_summary",
       "get_finance_cashflow",
       "review_finance_recurring_payment",
@@ -396,6 +472,10 @@ describe("ilo MCP server", () => {
       "bulk_update_mail",
       "snooze_mail",
       "send_mail",
+      "list_mail_rules",
+      "preview_mail_rule",
+      "create_mail_rule",
+      "update_mail_rule",
       "list_events",
       "create_event",
       "update_event",
@@ -417,6 +497,39 @@ describe("ilo MCP server", () => {
       destructiveHint: true,
     });
 
+    await client.callTool({ name: "get_agent_setup_status", arguments: {} });
+    await client.callTool({ name: "get_domain_profile", arguments: { domain: "mail" } });
+    await client.callTool({
+      name: "save_domain_profile",
+      arguments: {
+        categories: [],
+        domain: "mail",
+        instructions: ["Keep only high-signal mail visible."],
+        objective: "Keep a clean inbox.",
+        preferences: { inboxStyle: "signal_only" },
+        sourceContexts: [],
+        status: "draft",
+        summary: "A low-noise inbox.",
+      },
+    });
+    await client.callTool({
+      name: "list_attention_items",
+      arguments: { domain: "mail" },
+    });
+    await client.callTool({
+      name: "create_attention_item",
+      arguments: {
+        domain: "mail",
+        importance: "high",
+        kind: "important",
+        summary: "A reply is due.",
+        title: "Reply needed",
+      },
+    });
+    await client.callTool({
+      name: "update_attention_item",
+      arguments: { domain: "mail", id, status: "resolved" },
+    });
     await client.callTool({ name: "list_goals", arguments: {} });
     await client.callTool({
       name: "create_goal",
@@ -569,6 +682,31 @@ describe("ilo MCP server", () => {
         to: [{ address: "recipient@example.com", name: null }],
       },
     });
+    await client.callTool({ name: "list_mail_rules", arguments: {} });
+    await client.callTool({
+      name: "preview_mail_rule",
+      arguments: {
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        description: mailRule.description,
+        sourceIds: mailRule.sourceIds,
+      },
+    });
+    await client.callTool({
+      name: "create_mail_rule",
+      arguments: {
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        description: mailRule.description,
+        name: mailRule.name,
+        profileId: id,
+        sourceIds: mailRule.sourceIds,
+      },
+    });
+    await client.callTool({
+      name: "update_mail_rule",
+      arguments: { enabled: true, expectedVersion: 1, id },
+    });
     await client.callTool({
       name: "list_events",
       arguments: { from: now, to: event.endsAt, calendarIds: [id], query: "Focus" },
@@ -648,6 +786,16 @@ describe("ilo MCP server", () => {
       cc: [],
       subject: "Re: Test mail",
       to: [{ address: "recipient@example.com", name: null }],
+    });
+    expect(api.upsertDomainProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ domain: "mail", status: "draft" }),
+    );
+    expect(api.previewMailRule).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceIds: [accountId] }),
+    );
+    expect(api.updateMailRule).toHaveBeenCalledWith(id, {
+      enabled: true,
+      expectedVersion: 1,
     });
 
     const resources = await client.listResources();

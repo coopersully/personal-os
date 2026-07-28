@@ -1,3 +1,4 @@
+import type { AccessScope } from "@personal-os/domain";
 import { Hono } from "hono";
 import type { createMailService } from "../mail-service.js";
 import type { AppEnv } from "../types.js";
@@ -25,6 +26,7 @@ const thread = {
 describe("Mail routes", () => {
   it("routes the complete read and write surface through the Mail service", async () => {
     const app = new Hono<AppEnv>();
+    let scopes = new Set<AccessScope>(["mail:read", "mail:write"]);
     const mail = {
       createDraft: vi.fn(async () => ({ id })),
       createRule: vi.fn(async () => ({ id })),
@@ -32,25 +34,32 @@ describe("Mail routes", () => {
       listDrafts: vi.fn(async () => [{ body: "Body", id, subject: "Subject" }]),
       listMailboxes: vi.fn(async () => []),
       listMessages: vi.fn(async () => []),
-      listRules: vi.fn(async () => [
-        { action: "archive", enabled: true, id, name: "Archive", query: "news" },
-      ]),
+      listRules: vi.fn(async () => []),
       listThreads: vi.fn(async () => [thread]),
+      previewRule: vi.fn(async () => ({ candidates: [], matchedCount: 0, scannedCount: 1 })),
       send: vi.fn(async () => undefined),
       snoozeThread: vi.fn(async () => undefined),
+      updateRule: vi.fn(async () => ({ id })),
       updateThread: vi.fn(async () => thread),
     };
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
         actorType: "user",
-        scopes: new Set(["mail:read", "mail:write"]),
+        scopes,
         userId: id,
       });
       context.set("requestId", "request-1");
       await next();
     });
-    registerMailRoutes({ app, mail: mail as unknown as ReturnType<typeof createMailService> });
+    registerMailRoutes({
+      app,
+      mail: mail as unknown as ReturnType<typeof createMailService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
     const request = (path: string, init?: RequestInit) =>
       app.request(path, { headers: { "content-type": "application/json" }, ...init });
 
@@ -78,15 +87,34 @@ describe("Mail routes", () => {
       (
         await request("/v1/mail/rules", {
           body: JSON.stringify({
-            action: "archive",
-            enabled: true,
+            actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
+            condition: { field: "any", operator: "contains", value: "news" },
+            enabled: false,
             name: "Archive",
-            query: "news",
           }),
           method: "POST",
         })
       ).status,
     ).toBe(201);
+    expect(
+      (
+        await request("/v1/mail/rules/preview", {
+          body: JSON.stringify({
+            actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
+            condition: { field: "any", operator: "contains", value: "news" },
+          }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request(`/v1/mail/rules/${id}`, {
+          body: JSON.stringify({ enabled: true, expectedVersion: 1 }),
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(200);
     expect(
       (
         await request("/v1/mail/send", {
@@ -117,5 +145,17 @@ describe("Mail routes", () => {
         })
       ).status,
     ).toBe(204);
+    scopes = new Set<AccessScope>(["mail:read"]);
+    expect(
+      (
+        await request("/v1/mail/rules/preview", {
+          body: JSON.stringify({
+            actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
+            condition: { field: "any", operator: "contains", value: "news" },
+          }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(200);
   });
 });

@@ -1,9 +1,32 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
+import { idSchema, mailRuleActionSchema, mailRuleConditionSchema } from "@personal-os/domain";
 import { z } from "zod";
 import { result } from "../tool-result.js";
 
-const id = z.string().uuid().describe("ilo object identifier");
+const id = idSchema.describe("ilo object identifier");
+const mailRuleCondition = mailRuleConditionSchema;
+const mailRuleAction = mailRuleActionSchema;
+const mailRuleFields = {
+  actions: z.array(mailRuleAction).min(1).max(10),
+  condition: mailRuleCondition,
+  confidenceThreshold: z.number().min(0).max(1).nullable(),
+  description: z.string().max(2_000),
+  enabled: z.boolean(),
+  name: z.string().min(1).max(120),
+  policy: z.enum(["preview", "approve_each", "approved_rule"]),
+  profileId: id.nullable(),
+  sourceIds: z.array(id).max(50),
+} as const;
+const createMailRuleFields = {
+  ...mailRuleFields,
+  confidenceThreshold: mailRuleFields.confidenceThreshold.default(null),
+  description: mailRuleFields.description.default(""),
+  enabled: mailRuleFields.enabled.default(false),
+  policy: mailRuleFields.policy.default("preview"),
+  profileId: mailRuleFields.profileId.default(null),
+  sourceIds: mailRuleFields.sourceIds.default([]),
+} as const;
 
 /** Mail-owned MCP surface; the API remains the authorization boundary. */
 export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
@@ -111,5 +134,67 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
       await api.sendMail(input);
       return result({ sent: true });
     },
+  );
+  server.registerTool(
+    "list_mail_rules",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "List the user's versioned mail rules, including exact conditions, actions, source accounts, delays, policy, and enabled state.",
+      inputSchema: {},
+      title: "List mail rules",
+    },
+    async () => result(await api.listMailRules()),
+  );
+  server.registerTool(
+    "preview_mail_rule",
+    {
+      annotations: { openWorldHint: false, readOnlyHint: true },
+      description:
+        "Preview a proposed mail rule against up to 200 recent conversations. Returns exact matches and whether delayed actions are due without changing mail.",
+      inputSchema: {
+        actions: mailRuleFields.actions,
+        condition: mailRuleFields.condition,
+        confidenceThreshold: mailRuleFields.confidenceThreshold.default(null),
+        description: mailRuleFields.description.default(""),
+        sourceIds: mailRuleFields.sourceIds.default([]),
+      },
+      title: "Preview mail rule",
+    },
+    async (input) => result(await api.previewMailRule(input)),
+  );
+  server.registerTool(
+    "create_mail_rule",
+    {
+      annotations: { openWorldHint: false },
+      description:
+        "Save a versioned mail rule after previewing its exact candidates. New rules default to disabled and preview policy.",
+      inputSchema: createMailRuleFields,
+      title: "Create mail rule",
+    },
+    async (input) => result(await api.createMailRule(input)),
+  );
+  server.registerTool(
+    "update_mail_rule",
+    {
+      annotations: { idempotentHint: true, openWorldHint: false },
+      description:
+        "Revise, enable, disable, or change the policy of a mail rule using optimistic version matching.",
+      inputSchema: {
+        actions: mailRuleFields.actions.optional(),
+        condition: mailRuleFields.condition.optional(),
+        confidenceThreshold: mailRuleFields.confidenceThreshold.optional(),
+        description: mailRuleFields.description.optional(),
+        enabled: mailRuleFields.enabled.optional(),
+        expectedVersion: z.number().int().positive(),
+        id,
+        name: mailRuleFields.name.optional(),
+        policy: mailRuleFields.policy.optional(),
+        profileId: mailRuleFields.profileId.optional(),
+        sourceIds: mailRuleFields.sourceIds.optional(),
+      },
+      title: "Update mail rule",
+    },
+    async ({ id: ruleId, ...input }) => result(await api.updateMailRule(ruleId, input)),
   );
 }

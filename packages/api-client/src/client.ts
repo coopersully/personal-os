@@ -26,6 +26,7 @@ import type {
   WeatherLocationOption,
   WeatherSnapshot,
 } from "@personal-os/domain";
+import { createAssistantApiClient } from "./features/assistant.js";
 import { createCalendarApiClient } from "./features/calendar.js";
 import { createFinanceApi } from "./features/finances.js";
 import { createGoalsApiClient } from "./features/goals.js";
@@ -180,6 +181,7 @@ export function createApiClient(options: ClientOptions) {
   }
 
   return {
+    ...createAssistantApiClient(request, toQuery),
     ...createFinanceApi(request),
     ...createCalendarApiClient(request),
     ...createGoalsApiClient(request),

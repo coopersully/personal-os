@@ -1380,11 +1380,6 @@ p {
 }
 @media (max-width: 640px) {
   .top-navigation--today .top-navigation__context { display: none; }
-  .today-navigation__journal {
-    font-size: 0;
-    padding-inline: 0.5rem;
-  }
-  .today-navigation__journal [data-icon="inline-start"] { margin: 0; }
   .top-navigation__title { font-size: 1.0625rem; }
 }
 .calendar-topbar {

@@ -1,5 +1,6 @@
 import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
 import { z } from "zod";
+import { providerFetch } from "./http.js";
 import type {
   CredentialResult,
   GoogleAuthorizationService,
@@ -165,7 +166,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     parameters: URLSearchParams,
   ): Promise<z.infer<typeof tokenResponseSchema>> {
     requireConfiguration();
-    const response = await request("https://oauth2.googleapis.com/token", {
+    const response = await providerFetch(request, "https://oauth2.googleapis.com/token", {
       body: parameters,
       headers: { "content-type": "application/x-www-form-urlencoded" },
       method: "POST",
@@ -207,7 +208,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     }
     return {
       credentials: currentCredentials,
-      response: await request(input, { ...init, headers }),
+      response: await providerFetch(request, input, { ...init, headers }),
     };
   }
 

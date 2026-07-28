@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ConnectorError } from "./google.js";
+import { providerFetch } from "./http.js";
 import type { XBookmark, XBookmarkFolder, XConnector, XCredentials } from "./types.js";
 
 const tokenSchema = z.object({
@@ -76,7 +77,7 @@ export function createXConnector(options: XConnectorOptions): XConnector {
         `Basic ${Buffer.from(`${options.clientId}:${options.clientSecret}`).toString("base64")}`,
       );
     }
-    const response = await request("https://api.x.com/2/oauth2/token", {
+    const response = await providerFetch(request, "https://api.x.com/2/oauth2/token", {
       body: parameters,
       headers,
       method: "POST",
@@ -106,7 +107,7 @@ export function createXConnector(options: XConnectorOptions): XConnector {
 
   async function authenticatedRequest(credentials: XCredentials, url: URL) {
     const current = await validCredentials(credentials);
-    const response = await request(url, {
+    const response = await providerFetch(request, url, {
       headers: { authorization: `Bearer ${current.accessToken}` },
     });
     return { credentials: current, value: await parseResponse(response) };

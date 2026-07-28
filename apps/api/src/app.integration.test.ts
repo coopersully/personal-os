@@ -1929,6 +1929,10 @@ describe.sequential("ilo API", () => {
       }),
     );
     expect(icloudConnection.account.email).toBe("test@icloud.com");
+    await vi.waitFor(async () => {
+      const connectorPayload = await payload(await request("/v1/connectors"));
+      expect(connectorPayload.accounts).toEqual([expect.objectContaining({ syncStatus: "idle" })]);
+    });
     const mailboxPayload = await payload(await request("/v1/mailboxes", { auth: "agent" }));
     expect(mailboxPayload.mailboxes).toEqual([
       expect.objectContaining({ name: "Inbox", unreadCount: 1 }),

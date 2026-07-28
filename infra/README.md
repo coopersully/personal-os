@@ -15,9 +15,10 @@ This directory defines an AWS deployment baseline in `us-east-1`:
 - a GitHub Actions OIDC deployment role restricted to the repository and branch configured in Terraform.
 
 The tasks run without public IP addresses and accept inbound traffic only from
-the ALB. Their security group permits only DNS, PostgreSQL inside the VPC, and
-outbound TLS for provider APIs and transactional email. PostgreSQL remains in
-dedicated private subnets and accepts traffic only from application tasks.
+the ALB. Their security group permits only DNS, PostgreSQL inside the VPC,
+HTTPS provider traffic on TCP 443, iCloud Mail IMAP over TLS on TCP 993, and
+iCloud Mail SMTP submission on TCP 587. PostgreSQL remains in dedicated private
+subnets and accepts traffic only from application tasks.
 
 ## One-time bootstrap
 
@@ -176,4 +177,10 @@ auto-scaling are suitable for unattended beta operation. Multi-AZ RDS and
 multi-replica minimums remain deliberate paid upgrades before claiming high
 availability.
 
-Run `terraform fmt -recursive` and `terraform validate` before every infrastructure pull request. Terraform plans and applies are production changes and should be reviewed separately from application deployment commits.
+Run `terraform fmt -recursive` and `terraform validate` before every infrastructure pull request.
+For a changed external dependency, also reconcile the
+[external boundary record](../docs/engineering/external-boundary-reliability.md) against the plan
+and post-deploy smoke evidence. Terraform proves declared runtime policy; it does not prove that a
+credential is authorized or that the dependency accepted the operation. Terraform plans and
+applies are production changes and should be reviewed separately from application deployment
+commits.

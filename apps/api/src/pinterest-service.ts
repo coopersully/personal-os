@@ -1,3 +1,4 @@
+import { providerFetch } from "@personal-os/connectors";
 import { type Database, pinterestConnections } from "@personal-os/database";
 import type {
   PinterestPin,
@@ -130,7 +131,7 @@ export function createPinterestService({
       );
     }
     const boardUrl = publicPinterestBoardUrl(connection.boardUrl);
-    const response = await requestFetch(boardUrl, {
+    const response = await providerFetch(requestFetch, boardUrl, {
       headers: { "user-agent": "ilo wallpaper/1.0" },
     });
     if (!response.ok) {

@@ -42,6 +42,33 @@ default, and cannot be reused.
 
 The application has an in-process authentication rate-limit backstop. Configure an equivalent shared rate limit at the public edge before running more than one API replica. Never expose PostgreSQL or container-only ports; place the API behind the same authenticated HTTPS edge used by the web app.
 
+## External dependency readiness
+
+Runtime configuration is necessary but not sufficient evidence that an external capability works.
+Boot validation can prove that a value exists and has the expected shape; it cannot prove that the
+credential is current, has the required scope or role, names the intended resource, has a
+registered callback, or is reachable from the deployed task.
+
+Before enabling a new or changed external capability in production, use the boundary record in
+[`engineering/external-boundary-reliability.md`](engineering/external-boundary-reliability.md) and
+verify:
+
+1. the intended environment receives the correct secret and non-secret configuration without
+   exposing either value;
+2. provider consent, scopes, roles, callback/webhook registration, and resource policies authorize
+   the exact operation;
+3. DNS, TLS, proxy, protocol, ingress, egress, and port rules permit the path from the deployed
+   runtime;
+4. caller deadlines, downstream timeouts, retries, pagination, payloads, concurrency, and rate
+   limits have a bounded end-to-end budget;
+5. partial success, process loss, duplicate delivery, stale work, rollback, and manual repair leave
+   durable, observable state; and
+6. a least-privileged, non-destructive production smoke proves the capability after deployment,
+   with a request or operation identifier that can be correlated in redacted logs.
+
+Record “configured,” “authorized,” “reachable,” and “verified” separately in deployment evidence.
+Never claim all integrations are healthy from secret inventory or process health alone.
+
 ## Images
 
 The root Dockerfile has `api`, `mcp`, and `web` targets. The API image runs migrations before accepting traffic, runs as an unprivileged user, and exposes liveness/readiness endpoints. The web target uses unprivileged Nginx with immutable asset caching and SPA fallback.
@@ -74,7 +101,25 @@ rollout rather than a long deploy-time backfill.
 
 Forward `X-Request-Id` from the edge when present. Do not log authorization headers, cookies, OAuth codes, encrypted credentials, or raw provider payloads.
 
-## Google configuration
+## Connector configuration
+
+Production's public load balancer has a 60-second idle timeout. Individual provider network calls
+are bounded to 15 seconds, and connection routes return before source discovery, pagination,
+projection, or initial synchronization. Do not increase the load-balancer timeout to accommodate a
+provider bootstrap; preserve the asynchronous boundary described in
+[`engineering/connector-reliability.md`](engineering/connector-reliability.md).
+
+The application security group must allow the transports used by enabled connectors:
+
+| Provider transport | Destination port |
+| --- | ---: |
+| HTTPS APIs, OAuth, CalDAV, and Resend | TCP 443 |
+| iCloud Mail IMAP over TLS | TCP 993 |
+| iCloud Mail SMTP submission | TCP 587 |
+
+`pnpm lint` checks this timeout and network contract against the Terraform and connector defaults.
+
+### Google
 
 Register the exact public `GOOGLE_REDIRECT_URI` in Google Cloud. Request Calendar read/write and user email scopes. OAuth state is random, user-bound, one-time-use, and expires after ten minutes. Use separate OAuth clients and encryption keys for development and production.
 
@@ -84,7 +129,16 @@ provider failures remain visible on the connector account and can be retried man
 callback itself below the public edge timeout instead of extending the timeout to cover provider
 bootstrap work.
 
-## X Bookmarks configuration
+### Apple iCloud
+
+iCloud uses the person's Apple Account email and an app-specific password. Calendar traffic uses
+CalDAV over HTTPS; Mail reads use IMAP over TLS on port 993 and sends use SMTP submission on port
+587. The connect response confirms that the encrypted account was saved, then Calendar discovery
+and Mail sync run asynchronously. Invalid credentials or unavailable Apple services leave the
+account visible with an error so the person can retry or reconnect without holding the original
+request open.
+
+### X Bookmarks
 
 Create an X OAuth 2.0 app, register the exact public `X_REDIRECT_URI`, and set its client ID (plus client secret for a confidential client). The connector requests only `bookmark.read`, `tweet.read`, `users.read`, and `offline.access`. After connecting in **Settings → Connections**, select one bookmark folder. ilo stores the OAuth refresh token encrypted, projects only that folder's posts, and exposes the projection to agents through the `bookmarks:read` scope and the `list_x_bookmarks` MCP tool. It never writes to X.
 

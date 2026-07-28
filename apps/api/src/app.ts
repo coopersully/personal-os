@@ -307,6 +307,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       );
     }
     const result = await connectors.completeGoogleAuthorization(query.state, query.code);
+    void connectors.syncAccount(result.userId, result.accountId).catch(() => {
+      // The account and credentials are already saved, while syncAccount records
+      // the provider error for the settings UI and a later manual retry.
+    });
     const separator = result.returnPath.includes("?") ? "&" : "?";
     return context.redirect(
       `${dependencies.config.appBaseUrl}${result.returnPath}${separator}google=connected`,

@@ -207,6 +207,9 @@ describe.sequential("connector service", () => {
       String(new URL(initialUrl).searchParams.get("state")),
       "bootstrap-code",
     );
+    const [initialAccount] = await service.listAccounts(userId);
+    if (!initialAccount) throw new Error("Initial Google account was not created.");
+    await service.syncAccount(userId, initialAccount.id);
     vi.clearAllMocks();
   }, 120_000);
 
@@ -271,6 +274,9 @@ describe.sequential("connector service", () => {
       String(new URL(url).searchParams.get("state")),
       "mail-code",
     );
+    expect(google.listCalendars).not.toHaveBeenCalled();
+    expect(google.syncMail).not.toHaveBeenCalled();
+    await service.syncAccount(userId, account.id);
     expect(
       (await service.listAccounts(userId)).find((item) => item.id === account.id),
     ).toMatchObject({
@@ -308,7 +314,11 @@ describe.sequential("connector service", () => {
       accountId: account.id,
       email: "person@example.com",
       returnPath: "/settings?section=connections",
+      userId,
     });
+    await expect(service.syncAccount(userId, account.id)).rejects.toThrow(
+      "Mailbox bootstrap unavailable",
+    );
     expect(
       (await service.listAccounts(userId)).find((item) => item.id === account.id),
     ).toMatchObject({
@@ -616,6 +626,7 @@ describe.sequential("connector service", () => {
     const secondUrl = await service.startGoogleAuthorization(userId);
     const secondState = new URL(secondUrl).searchParams.get("state");
     const reconnected = await service.completeGoogleAuthorization(String(secondState), "code-2");
+    await service.syncAccount(userId, reconnected.accountId);
     expect(reconnected.accountId).toBe(connected.accountId);
     expect((await service.listAccounts(userId))[0]).toMatchObject({
       email: "renamed@example.com",

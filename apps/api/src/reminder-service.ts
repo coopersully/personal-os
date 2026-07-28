@@ -2,10 +2,12 @@ import { auditEvents, type Database, reminders } from "@personal-os/database";
 import type {
   CreateReminderInput,
   Reminder,
+  ReminderDeferralPreview,
+  ReminderDeferralPreviewInput,
   ReminderListQuery,
   UpdateReminderInput,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, ilike, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -24,6 +26,17 @@ type ReminderServiceOptions = {
 };
 
 export function createReminderService({ db, now }: ReminderServiceOptions) {
+  function auditState(
+    row: typeof reminders.$inferSelect,
+    context: MutationContext,
+  ): Record<string, unknown> {
+    return {
+      ...auditSnapshot(row),
+      policy: context.principal.actorType === "user" ? "approve_each" : "approved_rule",
+      source: serializeReminder(row).source,
+    };
+  }
+
   async function findActive(userId: string, id: string) {
     const [record] = await db
       .select()
@@ -64,8 +77,8 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         await transaction.insert(auditEvents).values(
           auditValues({
             action: completed ? "reminder.completed" : "reminder.reopened",
-            after: auditSnapshot(updated),
-            before: auditSnapshot(before),
+            after: auditState(updated, context),
+            before: auditState(before, context),
             entityId: updated.id,
             entityType: "reminder",
             ...context,
@@ -98,7 +111,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "reminder.created",
-            after: auditSnapshot(created),
+            after: auditState(created, context),
             before: null,
             entityId: created.id,
             entityType: "reminder",
@@ -126,8 +139,8 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "reminder.deleted",
-            after: auditSnapshot(after),
-            before: auditSnapshot(before),
+            after: auditState(after, context),
+            before: auditState(before, context),
             entityId: after.id,
             entityType: "reminder",
             ...context,
@@ -195,6 +208,53 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       };
     },
 
+    async previewOverdueDeferral(
+      userId: string,
+      input: ReminderDeferralPreviewInput,
+    ): Promise<ReminderDeferralPreview> {
+      const conditions = [
+        eq(reminders.userId, userId),
+        eq(reminders.kind, "reminder"),
+        isNull(reminders.completedAt),
+        isNull(reminders.deletedAt),
+        lt(reminders.dueAt, new Date(input.overdueBefore)),
+      ];
+      if (input.priority) conditions.push(eq(reminders.priority, input.priority));
+      const records = await db
+        .select()
+        .from(reminders)
+        .where(and(...conditions))
+        .orderBy(asc(reminders.dueAt), asc(reminders.id))
+        .limit(input.limit + 1);
+      if (records.length > input.limit) {
+        throw new AppError(
+          "invalid_request",
+          "The overdue reminder preview exceeds its safety limit. Narrow the cutoff or priority.",
+          { limit: input.limit, matchedCountAtLeast: records.length },
+        );
+      }
+      return {
+        candidates: records.map((record) => {
+          const reminder = serializeReminder(record);
+          if (!reminder.dueAt) {
+            throw new AppError("invalid_request", "An overdue reminder must have a due time.");
+          }
+          return {
+            dueAt: reminder.dueAt,
+            id: reminder.id,
+            priority: reminder.priority,
+            proposedDueAt: input.proposedDueAt,
+            proposedTimezone: input.timezone,
+            source: reminder.source,
+            title: reminder.title,
+            updatedAt: reminder.updatedAt,
+          };
+        }),
+        matchedCount: records.length,
+        policy: "preview",
+      };
+    },
+
     async restore(id: string, context: MutationContext): Promise<Reminder> {
       const [before] = await db
         .select()
@@ -225,8 +285,8 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "reminder.restored",
-            after: auditSnapshot(restored),
-            before: auditSnapshot(before),
+            after: auditState(restored, context),
+            before: auditState(before, context),
             entityId: restored.id,
             entityType: "reminder",
             ...context,
@@ -243,6 +303,11 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       context: MutationContext,
     ): Promise<Reminder> {
       const before = await findActive(context.principal.userId, id);
+      if (input.expectedUpdatedAt && input.expectedUpdatedAt !== before.updatedAt.toISOString()) {
+        throw new AppError("conflict", "The reminder changed since it was loaded.", {
+          currentUpdatedAt: before.updatedAt.toISOString(),
+        });
+      }
       const after = await db.transaction(async (transaction) => {
         const updated = requireDatabaseRecord(
           (
@@ -266,8 +331,8 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "reminder.updated",
-            after: auditSnapshot(updated),
-            before: auditSnapshot(before),
+            after: auditState(updated, context),
+            before: auditState(before, context),
             entityId: updated.id,
             entityType: "reminder",
             ...context,

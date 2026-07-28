@@ -53,6 +53,9 @@ Access management
   sources, learn account and label meanings, save a draft profile, preview
   exact recent candidates, and create disabled preview rules. A rule becomes an
   enabled `approved_rule` only after explicit acceptance.
+- Reminders adds a typed interview and exact preview-only overdue-deferral
+  proposal while retaining direct bounded CRUD; it does not add executable
+  Reminder rules or notification delivery.
 - Other domains honestly state that they currently support profiles and
   attention items but not domain-owned executable rules.
 

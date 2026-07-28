@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
+import { reminderProfilePreferencesSchema } from "./reminder.js";
 
 export const assistantDomains = [
   "mail",
@@ -71,7 +72,19 @@ export const upsertDomainProfileInputSchema = domainProfileSchema
     status: true,
     summary: true,
   })
-  .extend({ expectedVersion: z.int().positive().optional() });
+  .extend({ expectedVersion: z.int().positive().optional() })
+  .superRefine((input, context) => {
+    if (input.domain !== "reminders") return;
+    const parsed = reminderProfilePreferencesSchema.safeParse(input.preferences);
+    if (parsed.success) return;
+    for (const issue of parsed.error.issues) {
+      context.addIssue({
+        code: "custom",
+        message: issue.message,
+        path: ["preferences", ...issue.path],
+      });
+    }
+  });
 export type UpsertDomainProfileInput = z.infer<typeof upsertDomainProfileInputSchema>;
 
 export const attentionItemKindSchema = z.enum([

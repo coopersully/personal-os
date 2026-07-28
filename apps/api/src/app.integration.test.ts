@@ -1058,6 +1058,14 @@ describe.sequential("ilo API", () => {
     expect((await request("/v1/reminders", { auth: "agent" })).status).toBe(200);
     expect(
       (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
         await request("/v1/reminders", {
           auth: "agent",
           body: { title: "Forbidden write" },
@@ -1252,6 +1260,83 @@ describe.sequential("ilo API", () => {
         }),
       )
     ).reminder;
+    expect(first.source).toEqual({
+      accountId: null,
+      provider: "local",
+      remoteId: first.id,
+      revision: first.updatedAt,
+      sourceType: "reminder",
+    });
+    const overdueOne = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: {
+            dueAt: "2026-07-11T10:00:00.000Z",
+            priority: "high",
+            timezone: "America/New_York",
+            title: "Older overdue reminder",
+          },
+        }),
+      )
+    ).reminder;
+    const overdueTwo = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: {
+            dueAt: "2026-07-12T10:00:00.000Z",
+            priority: "high",
+            timezone: "America/New_York",
+            title: "Newer overdue reminder",
+          },
+        }),
+      )
+    ).reminder;
+    const deferralPreview = await payload(
+      await request(
+        "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T13%3A00%3A00.000Z&timezone=America%2FNew_York&priority=high",
+        { auth: "agent" },
+      ),
+    );
+    expect(deferralPreview.preview).toEqual({
+      candidates: [
+        expect.objectContaining({
+          dueAt: "2026-07-11T10:00:00.000Z",
+          id: overdueOne.id,
+          proposedDueAt: "2026-07-14T13:00:00.000Z",
+          proposedTimezone: "America/New_York",
+          source: overdueOne.source,
+          updatedAt: overdueOne.updatedAt,
+        }),
+        expect.objectContaining({
+          dueAt: "2026-07-12T10:00:00.000Z",
+          id: overdueTwo.id,
+          source: overdueTwo.source,
+        }),
+      ],
+      matchedCount: 2,
+      policy: "preview",
+    });
+    const oversizedPreview = await request(
+      "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T13%3A00%3A00.000Z&priority=high&limit=1",
+      { auth: "agent" },
+    );
+    expect(oversizedPreview.status).toBe(400);
+    expect((await payload(oversizedPreview)).error).toMatchObject({
+      code: "invalid_request",
+      details: { limit: 1, matchedCountAtLeast: 2 },
+    });
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-13T11%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    await request(`/v1/reminders/${overdueOne.id}`, { auth: "agent", method: "DELETE" });
+    await request(`/v1/reminders/${overdueTwo.id}`, { auth: "agent", method: "DELETE" });
     await expect(
       request(`/v1/automations/${routine.id}/runs`, { auth: "agent", body: { dryRun: true } }),
     ).resolves.toMatchObject({ status: 201 });
@@ -1311,6 +1396,19 @@ describe.sequential("ilo API", () => {
       notes: null,
       dueAt: null,
       priority: "low",
+    });
+    const conflictingUpdate = await request(`/v1/reminders/${first.id}`, {
+      auth: "agent",
+      method: "PATCH",
+      body: {
+        expectedUpdatedAt: first.updatedAt,
+        title: "Stale agent update",
+      },
+    });
+    expect(conflictingUpdate.status).toBe(409);
+    expect((await payload(conflictingUpdate)).error).toMatchObject({
+      code: "conflict",
+      details: { currentUpdatedAt: updated.reminder.updatedAt },
     });
     expect(
       (
@@ -1982,11 +2080,20 @@ describe.sequential("ilo API", () => {
 
     const audit = (await payload(await request("/v1/audit", { auth: "agent" }))).events;
     expect(
-      audit.some(
+      audit.find(
         (entry: { action: string; actorType: string }) =>
           entry.action === "reminder.created" && entry.actorType === "agent",
       ),
-    ).toBe(true);
+    ).toMatchObject({
+      after: {
+        policy: "approved_rule",
+        source: {
+          accountId: null,
+          provider: "local",
+          sourceType: "reminder",
+        },
+      },
+    });
     expect(audit.some((entry: { action: string }) => entry.action === "task.created")).toBe(true);
     expect(logs).toHaveBeenCalled();
     expect(

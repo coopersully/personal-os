@@ -12,10 +12,12 @@ The HTTP server is stateless: it creates an isolated MCP server and transport fo
 
 ## Tools
 
-The server exposes read/create/update/complete/delete reminder tools; read/create/update/delete event
-tools; calendar discovery; mailbox, mail search, conversation, and mail rule tools; actor-aware
-activity history; and Finance tools. Destructive and read-only annotations are included for
-compatible MCP hosts.
+The server exposes focused Reminder list/get/create/update/complete/trash/restore tools and an exact,
+read-only overdue-deferral preview; read/create/update/delete event tools; calendar discovery;
+mailbox, mail search, conversation, and mail rule tools; actor-aware activity history; and Finance
+tools. Every Reminder tool declares read-only, destructive, idempotent, and open-world hints for
+compatible MCP hosts. These annotations are presentation hints only; API scopes, mutation policy,
+structured errors, audit history, and recoverable deletion are authoritative.
 
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
 
@@ -24,6 +26,14 @@ The shared assistant tools give Claude, Codex, and other MCP hosts one consisten
   source meanings, categories, and instructions.
 - `list_attention_items`, `create_attention_item`, and `update_attention_item` use the same shape
   for important items, upcoming commitments, follow-ups, and post-run summaries across domains.
+
+Reminders use a typed profile vocabulary for capture defaults, priority meanings, deadline versus
+notification intent, time zones, overdue review, thresholds, and automatic-action preferences.
+`dueAt` drives due/overdue views and is not proof of notification delivery. Direct single-Reminder
+mutations remain audited API actions. Bulk overdue deferral begins with
+`preview_overdue_reminder_deferral`, which returns the complete bounded candidate set, `preview`
+policy, source references, and revisions without mutating. Guarded individual updates use
+`expectedUpdatedAt` so concurrent changes surface as conflicts.
 
 Rules share a versioned envelope—name, description, profile, sources, confidence threshold, policy,
 enabled state, and version—while each feature owns its condition and action language. Mail is the

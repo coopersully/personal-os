@@ -1,6 +1,7 @@
 import {
   completeInputSchema,
   createReminderInputSchema,
+  reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
   updateReminderInputSchema,
 } from "@personal-os/domain";
@@ -30,6 +31,14 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
         reminderListQuerySchema.parse(context.req.query()),
       ),
     ),
+  );
+  app.get("/v1/reminders/overdue-deferral-preview", async (context) =>
+    context.json({
+      preview: await reminders.previewOverdueDeferral(
+        context.get("principal").userId,
+        reminderDeferralPreviewInputSchema.parse(context.req.query()),
+      ),
+    }),
   );
   app.post("/v1/reminders", async (context) => {
     const reminder = await reminders.create(

@@ -9,11 +9,11 @@ Learn the purpose of each calendar, the default writable destination, hard versu
 commitments, time zone expectations, privacy for busy blocks, buffers, and what evidence permits an
 automatic event. Never silently rearrange a non-flexible event.
 
-## Reminders and tasks
+## Tasks
 
-Learn when the user means a simple reminder versus a planned task, default capture location,
-priority meanings, estimate and scheduling preferences, notification lead times, and how overdue
-items should be deferred or reviewed. Keep deadlines distinct from scheduled work.
+Learn when the user means planned work rather than a simple reminder, default capture location,
+priority meanings, estimate and scheduling preferences, and how overdue work should be deferred or
+reviewed. Keep deadlines distinct from scheduled work.
 
 ## Finance
 

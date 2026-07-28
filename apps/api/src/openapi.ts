@@ -106,6 +106,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: { security, responses: { 200: { description: "Reminder page" } } },
         post: { security, responses: { 201: { description: "Reminder created" } } },
       },
+      "/v1/reminders/overdue-deferral-preview": {
+        get: {
+          security,
+          responses: { 200: { description: "Exact read-only overdue deferral preview" } },
+        },
+      },
       "/v1/reminders/{id}": {
         delete: { security, responses: { 204: { description: "Reminder deleted" } } },
         get: { security, responses: { 200: { description: "Reminder" } } },

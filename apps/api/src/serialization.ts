@@ -57,6 +57,13 @@ export function serializeReminder(row: ReminderRow): Reminder {
     id: row.id,
     notes: row.notes,
     priority: row.priority,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: row.updatedAt.toISOString(),
+      sourceType: "reminder",
+    },
     timezone: row.timezone,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),

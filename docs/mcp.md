@@ -46,7 +46,11 @@ anything. An accepted apply must echo the proposal transaction's exact
 `updatedAt` as `expectedTransactionUpdatedAt`; stale decisions fail without
 overwriting newer data. Each decision is atomic, while a batch can truthfully
 report `applied`, `review_required`, and structured `failed` results for
-different transactions. Merchant merges and recurring-payment, alert, and
+different transactions. The API runs at most four decisions concurrently.
+Proposal pages return an opaque `nextCursor`, and hosts can continue without
+making read calls mutate the ledger. Direct transaction categorization is not
+an agent tool or agent-permitted raw API shortcut. Merchant merges and
+recurring-payment, alert, and
 ordinary review decisions are bounded mutations. Provider administration,
 account/import/profile/budget changes, permanent merchant rules, and ambiguous
 transfer confirmation remain human-only.

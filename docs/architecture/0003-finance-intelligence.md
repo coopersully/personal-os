@@ -63,8 +63,12 @@ Apply requires that exact revision and performs the transaction update,
 classification evidence, review resolution, optional human-approved merchant
 rule, and audit insert in one database transaction. A batch can succeed for
 some decisions and fail for others, but a single decision never reports failure
-after committing only part of itself. Transfer confirmation uses the same
-transactional path.
+after committing only part of itself. Agent apply also recomputes the current
+server proposal and rejects substituted categories or confidence. Work is
+bounded to four concurrent decisions so a large batch does not exhaust the
+database pool. A below-threshold decision records its review case, evidence,
+and redacted deferred audit event in the same transaction. Transfer
+confirmation uses the same transactional path.
 
 Provider transfer labels and matching amounts alone are insufficient to exclude
 a record from spending. A transfer is excluded only after a supported account
@@ -118,7 +122,9 @@ ledger health, transactions, budgets, merchants, review queue, wealth, and cash
 flow. Agents should inspect guided context, ledger health, and relevant
 transactions before offering financial guidance. Categorization uses a
 proposal/apply pair; applying is still constrained by the service's adaptive
-confidence policy and a transaction revision. Merchant merges, names, review
+confidence policy and a transaction revision. Proposal pages use the ledger's
+opaque cursor and read paths never materialize merchant/category enrichment.
+Direct category edits are human-only. Merchant merges, names, review
 decisions, recurring status, and alerts have explicit bounded mutation tools.
 Agents must not turn an ambiguous result into a category, transfer,
 subscription, or permanent rule on their own.
@@ -127,6 +133,8 @@ MCP annotations describe expected host UX only. The API's scopes, human-session
 guards, adaptive policy, revision checks, transactions, and audit trail remain
 the security and integrity boundary. Batch apply responses preserve structured
 per-decision errors so hosts can disclose partial effects between decisions.
+An account referenced by the durable Finance profile cannot be deleted until
+the human removes that source context.
 
 ## Migration policy
 

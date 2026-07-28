@@ -691,7 +691,8 @@ function apiFetch() {
     if (url.pathname === `/v1/finances/merchants/${id}` && method === "PATCH")
       return json({ merchant: { ...financeMerchant, isUserConfirmed: true } });
     if (url.pathname === "/v1/finances/review") return json({ reviews: [] });
-    if (url.pathname === "/v1/finances/categorizations/propose") return json({ proposals: [] });
+    if (url.pathname === "/v1/finances/categorizations/propose")
+      return json({ nextCursor: "next-review-page", proposals: [] });
     if (url.pathname === "/v1/finances/categorizations/apply")
       return json({
         results: [
@@ -1032,7 +1033,10 @@ describe("ilo API client", () => {
     await expect(api.listFinanceTransactions({ review: "needs_review" })).resolves.toMatchObject({
       nextCursor: null,
     });
-    await expect(api.proposeFinanceCategorizations()).resolves.toEqual([]);
+    await expect(api.proposeFinanceCategorizations()).resolves.toEqual({
+      items: [],
+      nextCursor: "next-review-page",
+    });
     await expect(
       api.applyFinanceCategorizations({
         decisions: [

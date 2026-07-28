@@ -13,7 +13,7 @@ describe("finance routes", () => {
       createBudget: vi.fn(),
       deleteAccount: vi.fn(),
       getGuidedSetupContext: vi.fn(async () => ({ ready: true })),
-      proposeCategorizations: vi.fn(async () => []),
+      proposeCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
       syncPlaidAccount: vi.fn(),
     };
     app.use("*", async (context, next) => {

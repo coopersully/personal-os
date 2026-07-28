@@ -12,6 +12,7 @@ import type {
   FinanceBudgetStatus,
   FinanceCategorizationApplyResult,
   FinanceCategorizationProposal,
+  FinanceCategorizationProposalPage,
   FinanceCategory,
   FinanceCsvImportInput,
   FinanceExport,
@@ -244,15 +245,16 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async proposeFinanceCategorizations(
       query: Partial<FinanceTransactionQuery> = {},
-    ): Promise<FinanceCategorizationProposal[]> {
+    ): Promise<FinanceCategorizationProposalPage> {
       const search = new URLSearchParams();
       for (const [key, value] of Object.entries(query)) {
         if (value !== undefined) search.set(key, String(value));
       }
-      const response = await request<{ proposals: FinanceCategorizationProposal[] }>(
-        `/v1/finances/categorizations/propose${search.size ? `?${search}` : ""}`,
-      );
-      return response.proposals;
+      const response = await request<{
+        nextCursor: string | null;
+        proposals: FinanceCategorizationProposal[];
+      }>(`/v1/finances/categorizations/propose${search.size ? `?${search}` : ""}`);
+      return { items: response.proposals, nextCursor: response.nextCursor };
     },
     async getPlaidLinkToken(): Promise<string> {
       const response = await request<{ linkToken: string }>("/v1/finances/plaid/link-token", {

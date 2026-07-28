@@ -363,7 +363,7 @@ function mockApi() {
     })),
     getFinanceReviewQueue: vi.fn(async () => []),
     listFinanceTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),
-    proposeFinanceCategorizations: vi.fn(async () => []),
+    proposeFinanceCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
     applyFinanceCategorizations: vi.fn(async () => []),
     resolveFinanceReview: vi.fn(async () => ({ deferred: true })),
     updateFinanceMerchant: vi.fn(async () => ({
@@ -627,7 +627,10 @@ describe("ilo MCP server", () => {
       },
     });
     await client.callTool({ name: "get_finance_review_queue", arguments: {} });
-    await client.callTool({ name: "propose_finance_categorizations", arguments: {} });
+    await client.callTool({
+      name: "propose_finance_categorizations",
+      arguments: { cursor: "next-review-page" },
+    });
     await client.callTool({
       name: "apply_finance_categorizations",
       arguments: {

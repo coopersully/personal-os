@@ -61,7 +61,8 @@ categorization threshold or silently reconfigure alert generation.
 1. Read `get_finance_ledger_health`, `get_finance_review_queue`, and
    `get_finance_categories`.
 2. Call `propose_finance_categorizations`. `meetsPolicyThreshold` means eligible under current API
-   policy; it does not mean the proposal ran automatically.
+   policy; it does not mean the proposal ran automatically. Follow `nextCursor` when more review
+   work is needed beyond the current page.
 3. Show the transaction, category, confidence, threshold, and rationale. Apply only decisions the
    user accepts.
 4. Call `apply_finance_categorizations` with `learnMerchant` set to `never` or `suggest`, passing

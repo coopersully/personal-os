@@ -1060,6 +1060,8 @@ describe.sequential("ilo API", () => {
             "calendar:read",
             "calendar:write",
             "mail:read",
+            "finances:read",
+            "finances:write",
             "goals:read",
             "goals:write",
             "audit:read",
@@ -1074,6 +1076,31 @@ describe.sequential("ilo API", () => {
     expect(agentToken).toMatch(/^pos_/);
     expect((await payload(await request("/v1/access-tokens"))).tokens).toHaveLength(1);
     expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(403);
+    const agentBypassCandidate = (
+      await payload(
+        await request("/v1/finances/transactions", {
+          body: {
+            accountId: paypalAccount.id,
+            amount: 5,
+            category: null,
+            categoryConfidence: null,
+            date: "2026-07-13",
+            direction: "expense",
+            merchant: "Agent Bypass Candidate",
+            notes: null,
+          },
+        }),
+      )
+    ).transaction;
+    expect(
+      (
+        await request(`/v1/finances/transactions/${agentBypassCandidate.id}`, {
+          auth: "agent",
+          body: { category: "Shopping", learnMerchant: false },
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(403);
     expect(
       (
         await request("/v1/me", {

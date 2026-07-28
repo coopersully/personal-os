@@ -11,7 +11,9 @@ This log records delivered vertical slices against the master plan. It does not 
   source meanings, review cadence, thresholds, and safety constraints.
 - Made categorization preview read-scoped and revision-guarded. Each accepted decision now commits
   its ledger change, evidence, review resolution, optional human merchant rule, and audit record
-  atomically; batches retain structured per-decision partial-result reporting.
+  atomically; below-threshold reviews are audited, proposal pages are cursor-paginated, and
+  four-worker batches retain structured per-decision partial-result reporting without exhausting
+  the database pool.
 - Kept account/provider/import/profile/budget administration, permanent merchant rules, and
   ambiguous transfers behind interactive human review. Agent attribution remains intact for
   categorization, recurring-state, and merchant-display changes.

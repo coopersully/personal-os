@@ -1,14 +1,16 @@
 import { resolve } from "node:path";
 import {
+  auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfiles,
   financeAlerts,
   financeTransactions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import type { Principal } from "./types.js";
 
@@ -233,6 +235,13 @@ describe.sequential("finance service", () => {
         agentContext,
       ),
     ).rejects.toThrow("Permanent merchant rules require review");
+    await expect(
+      service.updateTransaction(
+        review.id,
+        { category: "Shopping", learnMerchant: false },
+        agentContext,
+      ),
+    ).rejects.toThrow("Direct category edits");
     const stale = await service.createTransaction(
       {
         accountId: account.id,
@@ -282,6 +291,113 @@ describe.sequential("finance service", () => {
       .from(financeTransactions)
       .where(eq(financeTransactions.id, stale.id));
     expect(staleAfter).toMatchObject({ category: null, notes: "Changed after preview" });
+    const [readOnlyCandidate] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 900,
+        category: null,
+        direction: "expense",
+        merchant: "Read Only Proposal",
+        needsReview: true,
+        transactionDate: "2026-07-19",
+        userId,
+      })
+      .returning();
+    if (!readOnlyCandidate) throw new Error("Read-only proposal fixture was not created.");
+    await service.proposeCategorizations(userId, { limit: 50, review: "needs_review" });
+    const [readOnlyCandidateAfter] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, readOnlyCandidate.id));
+    expect(readOnlyCandidateAfter).toMatchObject({
+      categoryId: null,
+      merchantId: null,
+      updatedAt: readOnlyCandidate.updatedAt,
+    });
+    await database.db
+      .delete(financeTransactions)
+      .where(eq(financeTransactions.id, readOnlyCandidate.id));
+    await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 1,
+        category: "Shopping",
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Single Evidence",
+        notes: null,
+      },
+      context,
+    );
+    const lowConfidenceCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 2,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Single Evidence",
+        notes: null,
+      },
+      context,
+    );
+    await expect(
+      service.proposeCategorizations(userId, { limit: 50, review: "needs_review" }),
+    ).resolves.toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          confidence: 0.95,
+          threshold: 0.9725,
+          transaction: expect.objectContaining({ id: lowConfidenceCandidate.id }),
+        }),
+      ]),
+    });
+    await expect(
+      service.applyCategorizations(
+        {
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 0.95,
+              expectedTransactionUpdatedAt: lowConfidenceCandidate.updatedAt,
+              learnMerchant: "suggest",
+              rationale: "One confirmation remains below the adaptive threshold.",
+              transactionId: lowConfidenceCandidate.id,
+            },
+          ],
+        },
+        agentContext,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({ applied: false, status: "review_required", threshold: 0.9725 }),
+    ]);
+    const lowConfidenceAudits = await database.db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "finance.categorization_deferred"),
+          eq(auditEvents.entityId, lowConfidenceCandidate.id),
+        ),
+      );
+    expect(lowConfidenceAudits).toHaveLength(1);
+    const lowConfidenceReview = (await service.listReviewQueue(userId)).find(
+      (item) => item.transaction.id === lowConfidenceCandidate.id,
+    );
+    if (!lowConfidenceReview) throw new Error("Low-confidence review was not created.");
+    await service.resolveReview(
+      lowConfidenceReview.id,
+      {
+        action: "recategorize",
+        categoryId: shopping.id,
+        learnMerchant: "never",
+        rationale: "The user accepted the individual category.",
+      },
+      context,
+    );
     for (const amount of [3, 4]) {
       await service.createTransaction(
         {
@@ -312,8 +428,8 @@ describe.sequential("finance service", () => {
     );
     await expect(
       service.proposeCategorizations(userId, { limit: 50, review: "needs_review" }),
-    ).resolves.toEqual(
-      expect.arrayContaining([
+    ).resolves.toMatchObject({
+      items: expect.arrayContaining([
         expect.objectContaining({
           meetsPolicyThreshold: true,
           policy: "preview",
@@ -322,7 +438,7 @@ describe.sequential("finance service", () => {
           transaction: expect.objectContaining({ id: evidenceCandidate.id }),
         }),
       ]),
-    );
+    });
     await expect(
       service.applyCategorizations(
         {
@@ -396,6 +512,13 @@ describe.sequential("finance service", () => {
       (item) => item.transaction.id === transferCandidate.id,
     );
     if (!transferReview) throw new Error("Transfer candidate was not queued for review.");
+    const categorizationWorkflow = (
+      await service.getGuidedSetupContext(userId)
+    ).suggestedWorkflows.find((workflow) => workflow.key === "categorization_review");
+    expect(categorizationWorkflow).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringContaining("ambiguous transfers"),
+    });
     await expect(
       service.resolveReview(
         transferReview.id,
@@ -407,6 +530,30 @@ describe.sequential("finance service", () => {
         agentContext,
       ),
     ).rejects.toThrow("ambiguous transfer requires an interactive user session");
+    await expect(
+      service.resolveReview(
+        transferReview.id,
+        { action: "defer", learnMerchant: "never", rationale: "Review this in Finance." },
+        context,
+      ),
+    ).resolves.toEqual({ deferred: true });
+    await expect(
+      service.resolveReview(
+        transferReview.id,
+        { action: "defer", learnMerchant: "never", rationale: "Retry after a lost response." },
+        context,
+      ),
+    ).resolves.toEqual({ deferred: true });
+    const deferAudits = await database.db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "finance.review_deferred"),
+          eq(auditEvents.entityId, transferReview.id),
+        ),
+      );
+    expect(deferAudits).toHaveLength(1);
     await expect(
       service.resolveReview(
         transferReview.id,
@@ -564,13 +711,37 @@ describe.sequential("finance service", () => {
     ).rejects.toThrow("transaction was not found");
     await service.createBudget({ category: "Groceries", limit: 400, month: "2026-07" }, context);
     const overview = await service.listOverview(userId);
-    expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 76.75 });
+    expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 79.75 });
     expect(overview.budgets).toHaveLength(1);
     await expect(service.listOverview(userId, "2026-06")).resolves.toMatchObject({
       budgets: [],
       spendingThisMonth: 0,
       transactions: [],
     });
+    await database.db.insert(domainProfiles).values({
+      categories: [],
+      domain: "finances",
+      instructions: [],
+      objective: "Keep account meanings durable.",
+      preferences: {},
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Daily spending",
+          sourceId: account.id,
+          sourceLabel: account.name,
+        },
+      ],
+      status: "active",
+      summary: "The wallet is in scope.",
+      userId,
+    });
+    await expect(service.deleteAccount(account.id, context)).rejects.toThrow(
+      "Remove this account from the Finance agent profile",
+    );
+    await database.db
+      .delete(domainProfiles)
+      .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "finances")));
     await service.deleteAccount(account.id, context);
     expect((await service.listOverview(userId)).accounts).not.toContainEqual(
       expect.objectContaining({ id: account.id }),

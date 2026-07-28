@@ -182,23 +182,21 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       ),
     }),
   );
-  app.post("/v1/finances/categorizations/propose", async (context) =>
-    context.json({
-      proposals: await finances.proposeCategorizations(
-        context.get("principal").userId,
-        financeTransactionQuerySchema.parse(context.req.query()),
-      ),
-    }),
-  );
+  app.post("/v1/finances/categorizations/propose", async (context) => {
+    const page = await finances.proposeCategorizations(
+      context.get("principal").userId,
+      financeTransactionQuerySchema.parse(context.req.query()),
+    );
+    return context.json({ nextCursor: page.nextCursor, proposals: page.items });
+  });
   // GET keeps proposal generation available to read-scoped agents; it never mutates the ledger.
-  app.get("/v1/finances/categorizations/propose", async (context) =>
-    context.json({
-      proposals: await finances.proposeCategorizations(
-        context.get("principal").userId,
-        financeTransactionQuerySchema.parse(context.req.query()),
-      ),
-    }),
-  );
+  app.get("/v1/finances/categorizations/propose", async (context) => {
+    const page = await finances.proposeCategorizations(
+      context.get("principal").userId,
+      financeTransactionQuerySchema.parse(context.req.query()),
+    );
+    return context.json({ nextCursor: page.nextCursor, proposals: page.items });
+  });
   app.post("/v1/finances/categorizations/apply", async (context) =>
     context.json({
       results: await finances.applyCategorizations(

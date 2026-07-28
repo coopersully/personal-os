@@ -396,6 +396,14 @@ export const financeCategorizationProposalSchema = z.object({
 });
 export type FinanceCategorizationProposal = z.infer<typeof financeCategorizationProposalSchema>;
 
+export const financeCategorizationProposalPageSchema = z.object({
+  items: z.array(financeCategorizationProposalSchema),
+  nextCursor: z.string().min(1).max(600).nullable(),
+});
+export type FinanceCategorizationProposalPage = z.infer<
+  typeof financeCategorizationProposalPageSchema
+>;
+
 export const financeCategorizationApplyResultSchema = z.object({
   applied: z.boolean(),
   error: z

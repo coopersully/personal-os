@@ -230,6 +230,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         "Prepare conservative category proposals for transactions needing review. This read-scoped preview does not change a transaction or create a merchant rule; meetsPolicyThreshold is eligibility, not automatic execution.",
       inputSchema: {
         accountId: id.optional(),
+        cursor: z.string().min(1).max(600).optional(),
         from: z.iso.date().optional(),
         limit: z.number().int().min(1).max(100).default(50),
         to: z.iso.date().optional(),

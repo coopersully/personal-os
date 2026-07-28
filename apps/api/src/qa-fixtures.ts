@@ -6,6 +6,7 @@ import {
   calendarEvents,
   calendars,
   type Database,
+  domainProfiles,
   financeAccounts,
   financeAlerts,
   financeBudgets,
@@ -164,6 +165,7 @@ type FixtureData = {
   calendarAccounts: Array<typeof calendarAccounts.$inferInsert>;
   calendarEvents: Array<typeof calendarEvents.$inferInsert>;
   calendars: Array<typeof calendars.$inferInsert>;
+  domainProfiles: Array<typeof domainProfiles.$inferInsert>;
   financeAccounts: Array<typeof financeAccounts.$inferInsert>;
   financeAlerts: Array<typeof financeAlerts.$inferInsert>;
   financeBudgets: Array<typeof financeBudgets.$inferInsert>;
@@ -198,6 +200,7 @@ function emptyFixtureData(): FixtureData {
     calendarAccounts: [],
     calendarEvents: [],
     calendars: [],
+    domainProfiles: [],
     financeAccounts: [],
     financeAlerts: [],
     financeBudgets: [],
@@ -869,13 +872,64 @@ function addLoadedWorkspace(
     updatedAt: now,
     userId: account.id,
   });
-  data.mailRules.push({
-    action: "mark_read",
+  const mailProfileId = fixtureId(account, 333);
+  data.domainProfiles.push({
+    categories: [
+      {
+        description: "Messages that need a decision, response, or near-term action.",
+        examples: ["Travel approval", "Board packet"],
+        key: "needs_attention",
+        label: "Needs attention",
+      },
+      {
+        description: "Expected routine notices that can leave the unread queue.",
+        examples: ["Monthly statement"],
+        key: "routine_notice",
+        label: "Routine notice",
+      },
+    ],
     createdAt: ago(24 * 10),
+    domain: "mail",
+    id: mailProfileId,
+    instructions: [
+      "Keep messages that need a response or decision visible.",
+      "Mark expected statement notices as read while preserving the message.",
+      "Treat payment failures, security warnings, and delivery problems as exceptions.",
+    ],
+    objective: "Keep the inbox focused on decisions and time-sensitive exceptions.",
+    preferences: {
+      inboxStyle: "signal_only",
+      routineOrderRetentionDays: 1,
+    },
+    sourceContexts: [
+      {
+        notes: "Personal and household communication.",
+        purpose: "Primary inbox",
+        sourceId: connectedAccountId,
+        sourceLabel: "Fixture Google",
+      },
+    ],
+    status: "active",
+    summary:
+      "Keep actionable messages visible, quietly clear expected routine notices, and preserve exceptions.",
+    updatedAt: now,
+    userId: account.id,
+  });
+  data.mailRules.push({
+    actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+    condition: {
+      field: "sender",
+      operator: "equals",
+      value: "statements@examplebank.test",
+    },
+    createdAt: ago(24 * 10),
+    description: "Keep routine bank statements out of the unread queue.",
     enabled: true,
     id: fixtureId(account, 332),
     name: "Statements",
-    query: "from:statements@examplebank.test",
+    policy: "approved_rule",
+    profileId: mailProfileId,
+    sourceAccountIds: [connectedAccountId],
     updatedAt: now,
     userId: account.id,
   });
@@ -1427,6 +1481,8 @@ export async function loadQaFixtures(
     if (data.mailMessages.length) await transaction.insert(mailMessages).values(data.mailMessages);
     if (data.mailDrafts.length) await transaction.insert(mailDrafts).values(data.mailDrafts);
     if (data.mailSnoozes.length) await transaction.insert(mailSnoozes).values(data.mailSnoozes);
+    if (data.domainProfiles.length)
+      await transaction.insert(domainProfiles).values(data.domainProfiles);
     if (data.mailRules.length) await transaction.insert(mailRules).values(data.mailRules);
     if (data.financeAccounts.length)
       await transaction.insert(financeAccounts).values(data.financeAccounts);

@@ -13,6 +13,7 @@ import {
   calendarEvents,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfiles,
   financeTransactions,
   mailThreads,
   migrateDatabase,
@@ -330,31 +331,37 @@ describe.sequential("ilo API", () => {
     expect(degraded).toBeDefined();
     expect(await verifyPassword(DEMO_QA_PASSWORD, demo?.passwordHash ?? "")).toBe(true);
 
-    const [events, messages, transactions, emptyTasks, degradedAccounts] = await Promise.all([
-      database.db
-        .select()
-        .from(calendarEvents)
-        .where(eq(calendarEvents.userId, demo?.id ?? "")),
-      database.db
-        .select()
-        .from(mailThreads)
-        .where(eq(mailThreads.userId, demo?.id ?? "")),
-      database.db
-        .select()
-        .from(financeTransactions)
-        .where(eq(financeTransactions.userId, demo?.id ?? "")),
-      database.db
-        .select()
-        .from(reminders)
-        .where(eq(reminders.userId, empty?.id ?? "")),
-      database.db
-        .select()
-        .from(calendarAccounts)
-        .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
-    ]);
+    const [events, messages, transactions, profiles, emptyTasks, degradedAccounts] =
+      await Promise.all([
+        database.db
+          .select()
+          .from(calendarEvents)
+          .where(eq(calendarEvents.userId, demo?.id ?? "")),
+        database.db
+          .select()
+          .from(mailThreads)
+          .where(eq(mailThreads.userId, demo?.id ?? "")),
+        database.db
+          .select()
+          .from(financeTransactions)
+          .where(eq(financeTransactions.userId, demo?.id ?? "")),
+        database.db
+          .select()
+          .from(domainProfiles)
+          .where(eq(domainProfiles.userId, demo?.id ?? "")),
+        database.db
+          .select()
+          .from(reminders)
+          .where(eq(reminders.userId, empty?.id ?? "")),
+        database.db
+          .select()
+          .from(calendarAccounts)
+          .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
+      ]);
     expect(events).toHaveLength(7);
     expect(messages).toHaveLength(5);
     expect(transactions).toHaveLength(9);
+    expect(profiles).toContainEqual(expect.objectContaining({ domain: "mail", status: "active" }));
     expect(emptyTasks).toEqual([]);
     expect(degradedAccounts).toContainEqual(
       expect.objectContaining({ provider: "google", syncStatus: "error" }),
@@ -2528,6 +2535,10 @@ describe.sequential("ilo API", () => {
       headers: { authorization: `Session ${oauthSessionToken}` },
     });
     expect(consent.status).toBe(200);
+    const consentPage = await consent.text();
+    expect(consentPage).toContain("Connect Protocol test client");
+    expect(consentPage).toContain("Read tasks");
+    expect(consentPage).toContain("Connected provider credentials remain inside Ilo");
     const approved = await app.request("/oauth/authorize", {
       body: new URLSearchParams(Object.fromEntries(authorize.searchParams)).toString(),
       headers: {
@@ -2552,6 +2563,30 @@ describe.sequential("ilo API", () => {
     });
     expect(exchange.status).toBe(200);
     const tokens = (await exchange.json()) as { access_token: string; refresh_token: string };
+    expect(
+      (
+        await (
+          await app.request("/v1/access-tokens", {
+            headers: { authorization: `Session ${oauthSessionToken}` },
+          })
+        ).json()
+      ).tokens,
+    ).toEqual([]);
+    expect(
+      (
+        await (
+          await app.request("/v1/oauth/clients", {
+            headers: { authorization: `Session ${oauthSessionToken}` },
+          })
+        ).json()
+      ).clients,
+    ).toEqual([
+      expect.objectContaining({
+        id: client.client_id,
+        name: "Protocol test client",
+        scopes: ["tasks:read"],
+      }),
+    ]);
     expect(
       (await app.request("/v1/me", { headers: { authorization: `Bearer ${tokens.access_token}` } }))
         .status,

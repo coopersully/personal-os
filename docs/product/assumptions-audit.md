@@ -9,7 +9,7 @@
 
 | Critical choice | Assumption tested | Verdict | Load-bearing decision |
 | --- | --- | --- | --- |
-| Unified ilo | One generic “material” table can make mail, events, tasks, journals, and transactions unified. | Reject. | Keep native, domain-specific records as their source of truth; create a typed link/annotation graph and a shared activity/search projection above them. |
+| Unified ilo | One generic “material” table can make mail, events, tasks, goals, and transactions unified. | Reject. | Keep native, domain-specific records as their source of truth; create a typed link/annotation graph and a shared activity/search projection above them. |
 | Provider synchronization | Local copies can be treated as a convenient cache. | Refine. | Local provider projections are disposable and revisioned; user-authored links, policies, approvals, local material, and audit evidence are not. |
 | Agent authorization | MCP scopes, descriptions, and UI confirmations make an agent safe enough. | Reject. | The API policy engine enforces scope, source selection, action tier, origin/egress checks, rate limits, idempotency, and approval state. Tool annotations are never authority. |
 | Automation host | A Codex or Claude subscription can own schedules and durable routine state. | Reject. | ilo owns trigger evaluation, queue, state machine, cancellation, retries, and emergency stop. A model host is a bounded, revocable runner adapter. |
@@ -26,9 +26,9 @@
 
 **Evidence.** Google Calendar’s incremental sync requires a persisted token, returns deleted entries during change sync, and can return `410 Gone`, requiring the client to wipe its synchronized event store and re-sync. It also requires preserving the same query shape across incremental pages. [Google Calendar synchronization](https://developers.google.com/workspace/calendar/api/guides/sync) Gmail and Plaid likewise expose incremental histories/change streams rather than immutable snapshots; Plaid’s `/transactions/sync` returns `added`, `modified`, and `removed` updates from a cursor. [Plaid Transactions](https://plaid.com/docs/transactions/)
 
-**What fails in practice.** A generic “material” row cannot safely represent a Calendar recurrence exception, an email thread, a local task, a journal privacy tier, and a pending bank transaction without either losing provider semantics or slowly re-inventing every domain as nullable columns. A database-wide reset would also erase the very relationships—the task created from an email, an approval decision, a busy mirror rule—that make the overlay valuable.
+**What fails in practice.** A generic “material” row cannot safely represent a Calendar recurrence exception, an email thread, a local task, a goal, and a pending bank transaction without either losing provider semantics or slowly re-inventing every domain as nullable columns. A database-wide reset would also erase the very relationships—the task created from an email, an approval decision, a busy mirror rule—that make the overlay valuable.
 
-**Decision.** Unification happens through a typed graph, not premature universal storage. Every native record has a stable internal ID, provider/source ID where relevant, source revision, projection status, and links to other records. A provider full sync may replace that provider’s normalized projection and cursor only. It may never clear user-authored links, tags, notes, projects, rules, approvals, journal data, or audit evidence.
+**Decision.** Unification happens through a typed graph, not premature universal storage. Every native record has a stable internal ID, provider/source ID where relevant, source revision, projection status, and links to other records. A provider full sync may replace that provider's normalized projection and cursor only. It may never clear user-authored links, tags, projects, rules, approvals, domain profiles, attention items, or audit evidence.
 
 **Plan changes required.** Add an explicit `material_links`/source-reference contract and connector-reconciliation contract before message-to-task, busy-mirroring, or agent-generated material ships. Test a forced provider reset preserving local overlay data.
 

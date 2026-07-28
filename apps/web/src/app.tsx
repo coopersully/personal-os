@@ -1,12 +1,10 @@
 import type {
-  AccessToken,
   AuditEvent,
   CalendarAccount,
   Session,
   XBookmarkAccount,
 } from "@personal-os/api-client";
 import type {
-  AccessScope,
   AutomationRoutine,
   Calendar,
   CalendarEvent,
@@ -313,6 +311,7 @@ import {
   MailSidebar as MailFeatureSidebar,
 } from "./features/mail/mail.js";
 import { mailNavigationItem } from "./features/mail/manifest.js";
+import { AgentAccessSettings } from "./features/settings/agent-access.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
 import { SetupPage } from "./features/setup/page.js";
 import { formatOrdinalDate } from "./lib/date-format.js";
@@ -4994,7 +4993,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       <section aria-live="polite" className="settings-panel" key={section}>
         {section === "calendars" ? <CalendarsSettings setEditor={setEditor} /> : null}
         {section === "connections" ? <ConnectorsSettings /> : null}
-        {section === "agents" ? <TokensSettings /> : null}
+        {section === "agents" ? <AgentAccessSettings /> : null}
         {section === "automations" ? <AutomationsPage user={user} /> : null}
         {section === "appearance" ? <ThemeSettings user={user} /> : null}
         {section === "profile" ? <ProfileSettings user={user} /> : null}
@@ -6418,309 +6417,6 @@ function ConnectorSyncBadge({ status }: { status: string }) {
     return <ShadcnBadge variant="secondary">Syncing</ShadcnBadge>;
   }
   return <ShadcnBadge variant="secondary">Ready</ShadcnBadge>;
-}
-
-const calendarAndRemindersScopes: AccessScope[] = [
-  "calendar:read",
-  "calendar:write",
-  "reminders:read",
-  "reminders:write",
-  "tasks:read",
-  "tasks:write",
-  "automations:read",
-];
-
-const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
-  {
-    name: "Calendar & reminders",
-    description: "Plan, create, and complete your day.",
-    scopes: calendarAndRemindersScopes,
-  },
-  {
-    name: "Morning brief",
-    description: "Read your agenda, mail, and routine results.",
-    scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
-  },
-  {
-    name: "Full ilo",
-    description: "Create, manage, and audit all supported material.",
-    scopes: [
-      "calendar:read",
-      "calendar:write",
-      "reminders:read",
-      "reminders:write",
-      "tasks:read",
-      "tasks:write",
-      "mail:read",
-      "mail:write",
-      "goals:read",
-      "goals:write",
-      "automations:read",
-      "automations:write",
-      "audit:read",
-      "bookmarks:read",
-    ],
-  },
-];
-
-const scopeLabels: Record<AccessScope, string> = {
-  "audit:read": "Read activity",
-  "bookmarks:read": "Read X bookmarks",
-  "finances:read": "Read finances",
-  "finances:write": "Manage finances",
-  "automations:read": "Read automations",
-  "automations:write": "Run automations",
-  "calendar:read": "Read calendar",
-  "calendar:write": "Manage calendar",
-  "mail:read": "Read mail",
-  "mail:write": "Manage mail",
-  "goals:read": "Read goals & motives",
-  "goals:write": "Manage goals & motives",
-  "reminders:read": "Read reminders",
-  "reminders:write": "Manage reminders",
-  "tasks:read": "Read tasks",
-  "tasks:write": "Manage tasks",
-};
-
-function TokensSettings() {
-  const queryClient = useQueryClient();
-  const query = useQuery({ queryFn: api.listAccessTokens, queryKey: ["tokens"] });
-  const oauthClients = useQuery({ queryFn: api.listOAuthClients, queryKey: ["oauth-clients"] });
-  const [secret, setSecret] = useState<string | null>(null);
-  const [permissionsOpen, setPermissionsOpen] = useState(false);
-  const [tokenName, setTokenName] = useState("My agent");
-  const [scopes, setScopes] = useState<AccessScope[]>(calendarAndRemindersScopes);
-  const create = useMutation({
-    mutationFn: () =>
-      api.createAccessToken({
-        name: tokenName.trim(),
-        scopes,
-      }),
-    onSuccess: (token) => {
-      setSecret(token.token);
-      return queryClient.invalidateQueries({ queryKey: ["tokens"] });
-    },
-  });
-  const remove = useMutation({
-    mutationFn: api.deleteAccessToken,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["tokens"] }),
-  });
-  const revokeOAuthClient = useMutation({
-    mutationFn: api.revokeOAuthClient,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["oauth-clients"] }),
-  });
-  const selectedPreset =
-    tokenPresets.find(
-      (preset) =>
-        preset.scopes.length === scopes.length &&
-        preset.scopes.every((scope) => scopes.includes(scope)),
-    )?.name ?? "";
-  const activeTokens = (query.data ?? []).filter((token) => token.revokedAt === null);
-  const revokedTokens = (query.data ?? []).filter((token) => token.revokedAt !== null);
-  return (
-    <SettingsSection
-      description="Scoped, revocable access for MCP clients. Tokens are stored as hashes."
-      title="Agent access"
-    >
-      <div className="token-composer">
-        <ShadcnFieldGroup>
-          <ShadcnField orientation="responsive">
-            <ShadcnFieldContent>
-              <ShadcnFieldLabel htmlFor="token-name">Token name</ShadcnFieldLabel>
-              <ShadcnFieldDescription>
-                Start with a preset, then refine the individual permissions before creating an agent
-                token.
-              </ShadcnFieldDescription>
-            </ShadcnFieldContent>
-            <ShadcnInput
-              id="token-name"
-              onChange={(event) => setTokenName(event.target.value)}
-              value={tokenName}
-            />
-          </ShadcnField>
-          <ShadcnFieldSet>
-            <ShadcnFieldLegend variant="label">Permission preset</ShadcnFieldLegend>
-            <ShadcnToggleGroup
-              aria-label="Permission preset"
-              onValueChange={(presetName) => {
-                const preset = tokenPresets.find((item) => item.name === presetName);
-                if (preset) setScopes(preset.scopes);
-              }}
-              type="single"
-              value={selectedPreset}
-              variant="outline"
-            >
-              {tokenPresets.map((preset) => (
-                <ShadcnToggleGroupItem key={preset.name} value={preset.name}>
-                  {preset.name}
-                </ShadcnToggleGroupItem>
-              ))}
-            </ShadcnToggleGroup>
-          </ShadcnFieldSet>
-          <ShadcnCollapsible
-            className="settings-disclosure"
-            onOpenChange={setPermissionsOpen}
-            open={permissionsOpen}
-          >
-            <ShadcnCollapsibleTrigger asChild>
-              <ShadcnButton
-                className="settings-disclosure__trigger"
-                type="button"
-                variant="outline"
-              >
-                Fine-tune permissions · {scopes.length} selected
-                <ChevronDown aria-hidden="true" data-icon="inline-end" />
-              </ShadcnButton>
-            </ShadcnCollapsibleTrigger>
-            <ShadcnCollapsibleContent className="settings-disclosure__content">
-              <ShadcnFieldSet>
-                <ShadcnFieldLegend className="sr-only" variant="label">
-                  Fine-tune permissions
-                </ShadcnFieldLegend>
-                <ShadcnFieldGroup className="token-permissions">
-                  {(Object.keys(scopeLabels) as AccessScope[]).map((scope) => (
-                    <ShadcnField key={scope} orientation="horizontal">
-                      <ShadcnCheckbox
-                        checked={scopes.includes(scope)}
-                        id={`scope-${scope}`}
-                        onCheckedChange={(checked) =>
-                          setScopes((current) =>
-                            checked
-                              ? [...new Set([...current, scope])]
-                              : current.filter((selectedScope) => selectedScope !== scope),
-                          )
-                        }
-                      />
-                      <ShadcnFieldLabel htmlFor={`scope-${scope}`}>
-                        {scopeLabels[scope]}
-                      </ShadcnFieldLabel>
-                    </ShadcnField>
-                  ))}
-                </ShadcnFieldGroup>
-              </ShadcnFieldSet>
-            </ShadcnCollapsibleContent>
-          </ShadcnCollapsible>
-          <ShadcnButton
-            className="token-composer__submit"
-            disabled={create.isPending || scopes.length === 0 || tokenName.trim().length === 0}
-            onClick={() => create.mutate()}
-            type="button"
-          >
-            <Plus data-icon="inline-start" size={15} /> Create agent token
-          </ShadcnButton>
-        </ShadcnFieldGroup>
-      </div>
-      {secret && (
-        <ShadcnAlert>
-          <Command />
-          <ShadcnAlertTitle>Copy this token now</ShadcnAlertTitle>
-          <ShadcnAlertDescription>
-            It will not be shown again. <code>{secret}</code>
-          </ShadcnAlertDescription>
-          <ShadcnAlertAction>
-            <ShadcnButton
-              aria-label="Dismiss token"
-              onClick={() => setSecret(null)}
-              size="icon"
-              type="button"
-              variant="ghost"
-            >
-              <X />
-            </ShadcnButton>
-          </ShadcnAlertAction>
-        </ShadcnAlert>
-      )}
-      {activeTokens.length ? (
-        <ShadcnItemGroup>
-          {activeTokens.map((token) => (
-            <TokenRow key={token.id} remove={() => remove.mutate(token.id)} token={token} />
-          ))}
-        </ShadcnItemGroup>
-      ) : null}
-      {revokedTokens.length ? (
-        <ShadcnCollapsible className="settings-disclosure">
-          <ShadcnCollapsibleTrigger asChild>
-            <ShadcnButton className="settings-disclosure__trigger" type="button" variant="outline">
-              Revoked tokens · {revokedTokens.length}
-              <ChevronDown aria-hidden="true" data-icon="inline-end" />
-            </ShadcnButton>
-          </ShadcnCollapsibleTrigger>
-          <ShadcnCollapsibleContent className="settings-disclosure__content">
-            <ShadcnItemGroup>
-              {revokedTokens.map((token) => (
-                <TokenRow key={token.id} remove={() => remove.mutate(token.id)} token={token} />
-              ))}
-            </ShadcnItemGroup>
-          </ShadcnCollapsibleContent>
-        </ShadcnCollapsible>
-      ) : null}
-      {oauthClients.data?.length ? (
-        <>
-          <h3 className="settings-subtitle">Authorized MCP clients</h3>
-          <ShadcnItemGroup>
-            {oauthClients.data.map((client) => (
-              <ShadcnItem key={client.id} variant="outline">
-                <ShadcnItemMedia className="provider-icon" variant="icon">
-                  <Command size={16} />
-                </ShadcnItemMedia>
-                <ShadcnItemContent>
-                  <ShadcnItemTitle>{client.name}</ShadcnItemTitle>
-                  <ShadcnItemDescription>
-                    {client.lastUsedAt ? `Used ${formatRelative(client.lastUsedAt)}` : "Never used"}{" "}
-                    · {client.scopes.length} scopes
-                  </ShadcnItemDescription>
-                </ShadcnItemContent>
-                <ShadcnItemActions>
-                  <ShadcnButton
-                    aria-label={`Revoke ${client.name}`}
-                    disabled={revokeOAuthClient.isPending}
-                    onClick={() => revokeOAuthClient.mutate(client.id)}
-                    size="icon"
-                    type="button"
-                    variant="ghost"
-                  >
-                    <Trash2 />
-                  </ShadcnButton>
-                </ShadcnItemActions>
-              </ShadcnItem>
-            ))}
-          </ShadcnItemGroup>
-        </>
-      ) : null}
-    </SettingsSection>
-  );
-}
-
-function TokenRow({ remove, token }: { remove: () => void; token: AccessToken }) {
-  return (
-    <ShadcnItem variant="outline">
-      <ShadcnItemMedia className="provider-icon" variant="icon">
-        <Command size={16} />
-      </ShadcnItemMedia>
-      <ShadcnItemContent>
-        <ShadcnItemTitle>{token.name}</ShadcnItemTitle>
-        <ShadcnItemDescription>
-          {token.lastUsedAt ? `Used ${formatRelative(token.lastUsedAt)}` : "Never used"} ·{" "}
-          {token.scopes.length} scopes
-        </ShadcnItemDescription>
-      </ShadcnItemContent>
-      <ShadcnItemActions>
-        {token.revokedAt ? (
-          <ShadcnBadge variant="secondary">Revoked</ShadcnBadge>
-        ) : (
-          <ShadcnButton
-            aria-label={`Revoke ${token.name}`}
-            onClick={remove}
-            size="icon"
-            type="button"
-            variant="ghost"
-          >
-            <Trash2 />
-          </ShadcnButton>
-        )}
-      </ShadcnItemActions>
-    </ShadcnItem>
-  );
 }
 
 function ProfileSettings({ user }: { user: User }) {

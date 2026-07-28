@@ -1,25 +1,36 @@
 import {
+  createMailRuleInputSchema,
   mailDraftInputSchema,
   mailListQuerySchema,
-  mailRuleInputSchema,
   mailSnoozeInputSchema,
+  previewMailRuleInputSchema,
   sendMailInputSchema,
+  updateMailRuleInputSchema,
   updateMailThreadInputSchema,
 } from "@personal-os/domain";
-import type { Hono } from "hono";
+import type { Context, Hono } from "hono";
 import type { createMailService } from "../mail-service.js";
-import type { AppEnv } from "../types.js";
+import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
+
+type MutationContext = { principal: Principal; requestId: string };
 
 type MailRouteOptions = {
   app: Hono<AppEnv>;
   mail: ReturnType<typeof createMailService>;
+  mutationContext: (context: Context<AppEnv>) => MutationContext;
 };
 
 /** Register the Mail-owned HTTP surface. */
-export function registerMailRoutes({ app, mail }: MailRouteOptions) {
+export function registerMailRoutes({ app, mail, mutationContext }: MailRouteOptions) {
   app.use("/v1/mailboxes", requireScope("mail:read"));
-  app.use("/v1/mail/*", requireFeatureAccess("mail"));
+  const mailReadAccess = requireScope("mail:read");
+  const mailFeatureAccess = requireFeatureAccess("mail");
+  app.use("/v1/mail/*", (context, next) =>
+    context.req.method === "POST" && context.req.path === "/v1/mail/rules/preview"
+      ? mailReadAccess(context, next)
+      : mailFeatureAccess(context, next),
+  );
   app.get("/v1/mailboxes", async (context) =>
     context.json({ mailboxes: await mail.listMailboxes(context.get("principal").userId) }),
   );
@@ -33,12 +44,29 @@ export function registerMailRoutes({ app, mail }: MailRouteOptions) {
     context.json(
       {
         rule: await mail.createRule(
-          context.get("principal").userId,
-          await parseBody(context, mailRuleInputSchema),
+          await parseBody(context, createMailRuleInputSchema),
+          mutationContext(context),
         ),
       },
       201,
     ),
+  );
+  app.post("/v1/mail/rules/preview", async (context) =>
+    context.json({
+      preview: await mail.previewRule(
+        context.get("principal").userId,
+        await parseBody(context, previewMailRuleInputSchema),
+      ),
+    }),
+  );
+  app.patch("/v1/mail/rules/:id", async (context) =>
+    context.json({
+      rule: await mail.updateRule(
+        context.req.param("id"),
+        await parseBody(context, updateMailRuleInputSchema),
+        mutationContext(context),
+      ),
+    }),
   );
   app.post("/v1/mail/drafts", async (context) =>
     context.json(

@@ -28,6 +28,7 @@ import type {
   StartGoogleAuthorizationInput,
   UpdateEventInput,
 } from "@personal-os/domain";
+import { mailRuleActionIsDue, matchesMailRule, resolveStoredMailRule } from "@personal-os/domain";
 import { and, asc, eq, gt, isNull, lt, ne, notInArray, or } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
@@ -604,37 +605,86 @@ export function createConnectorService({
       .where(and(eq(mailRules.userId, account.userId), eq(mailRules.enabled, true)));
     if (account.provider === "google" && google.updateMailThread && rules.length > 0) {
       let currentCredentials = initialGoogleCredentials ?? credentials<GoogleCredentials>(account);
+      const accountMailboxes = await db
+        .select({ id: mailboxes.id, remoteMailboxId: mailboxes.remoteMailboxId })
+        .from(mailboxes)
+        .where(
+          and(
+            eq(mailboxes.accountId, account.id),
+            eq(mailboxes.userId, account.userId),
+            isNull(mailboxes.deletedAt),
+          ),
+        );
+      const remoteMailboxById = new Map(
+        accountMailboxes.map((mailbox) => [mailbox.id, mailbox.remoteMailboxId]),
+      );
       for (const thread of value.threads) {
         let projectedMailboxIds = thread.mailboxIds;
         let projectedStarred = thread.starred;
         let projectedUnread = thread.unread;
-        const searchable =
-          `${thread.subject}\n${thread.snippet}\n${thread.from.name ?? ""}\n${thread.from.address}`.toLowerCase();
         for (const rule of rules) {
-          if (!searchable.includes(rule.query.toLowerCase())) continue;
+          const resolvedRule = resolveStoredMailRule({
+            action: rule.legacyAction,
+            actions: rule.actions,
+            condition: rule.condition,
+            enabled: rule.enabled,
+            policy: rule.policy,
+            query: rule.legacyQuery,
+          });
+          if (resolvedRule.policy !== "approved_rule") continue;
+          if (rule.sourceAccountIds.length > 0 && !rule.sourceAccountIds.includes(account.id))
+            continue;
+          if (
+            !matchesMailRule(resolvedRule.condition, {
+              from: thread.from,
+              snippet: thread.snippet,
+              subject: thread.subject,
+            })
+          )
+            continue;
           const addMailboxIds: string[] = [];
           const removeMailboxIds: string[] = [];
-          if (rule.action === "archive" && projectedMailboxIds.includes("INBOX"))
-            removeMailboxIds.push("INBOX");
-          if (rule.action === "mark_read" && projectedUnread) removeMailboxIds.push("UNREAD");
-          if (rule.action === "star" && !projectedStarred) addMailboxIds.push("STARRED");
-          if (addMailboxIds.length === 0 && removeMailboxIds.length === 0) continue;
+          for (const action of resolvedRule.actions) {
+            if (!mailRuleActionIsDue(action, thread.receivedAt, now())) continue;
+            if (action.type === "archive" && projectedMailboxIds.includes("INBOX"))
+              removeMailboxIds.push("INBOX");
+            if (action.type === "mark_read" && projectedUnread) removeMailboxIds.push("UNREAD");
+            if (action.type === "star" && !projectedStarred) addMailboxIds.push("STARRED");
+            if (action.type === "trash") {
+              if (!projectedMailboxIds.includes("TRASH")) addMailboxIds.push("TRASH");
+              if (projectedMailboxIds.includes("INBOX")) removeMailboxIds.push("INBOX");
+            }
+            if (action.type === "add_label" && action.mailboxId) {
+              const remoteMailboxId = remoteMailboxById.get(action.mailboxId);
+              if (remoteMailboxId && !projectedMailboxIds.includes(remoteMailboxId))
+                addMailboxIds.push(remoteMailboxId);
+            }
+          }
+          const uniqueAddMailboxIds = [...new Set(addMailboxIds)];
+          const uniqueRemoveMailboxIds = [...new Set(removeMailboxIds)];
+          if (uniqueAddMailboxIds.length === 0 && uniqueRemoveMailboxIds.length === 0) continue;
           currentCredentials = await google.updateMailThread(
             currentCredentials,
             thread.remoteThreadId,
             {
-              addMailboxIds,
-              removeMailboxIds,
+              addMailboxIds: uniqueAddMailboxIds,
+              removeMailboxIds: uniqueRemoveMailboxIds,
             },
           );
-          await db
+          const nextMailboxIds = [
+            ...projectedMailboxIds.filter(
+              (mailboxId) => !uniqueRemoveMailboxIds.includes(mailboxId),
+            ),
+            ...uniqueAddMailboxIds.filter(
+              (mailboxId) => mailboxId !== "STARRED" && !projectedMailboxIds.includes(mailboxId),
+            ),
+          ];
+          const [updatedThread] = await db
             .update(mailThreads)
             .set({
-              remoteMailboxIds: removeMailboxIds.length
-                ? projectedMailboxIds.filter((mailboxId) => !removeMailboxIds.includes(mailboxId))
-                : projectedMailboxIds,
-              starred: addMailboxIds.includes("STARRED") || projectedStarred,
-              unread: removeMailboxIds.includes("UNREAD") ? false : projectedUnread,
+              remoteMailboxIds: nextMailboxIds,
+              starred: uniqueAddMailboxIds.includes("STARRED") || projectedStarred,
+              unread: uniqueRemoveMailboxIds.includes("UNREAD") ? false : projectedUnread,
               updatedAt: now(),
             })
             .where(
@@ -642,13 +692,28 @@ export function createConnectorService({
                 eq(mailThreads.accountId, account.id),
                 eq(mailThreads.remoteThreadId, thread.remoteThreadId),
               ),
+            )
+            .returning({ id: mailThreads.id });
+          if (updatedThread) {
+            await db.insert(auditEvents).values(
+              auditValues({
+                action: "mail.rule.applied",
+                after: {
+                  addMailboxIds: uniqueAddMailboxIds,
+                  removeMailboxIds: uniqueRemoveMailboxIds,
+                  ruleId: rule.id,
+                },
+                before: null,
+                entityId: updatedThread.id,
+                entityType: "mail_thread",
+                principal,
+                requestId,
+              }),
             );
-          if (removeMailboxIds.length)
-            projectedMailboxIds = projectedMailboxIds.filter(
-              (mailboxId) => !removeMailboxIds.includes(mailboxId),
-            );
-          if (removeMailboxIds.includes("UNREAD")) projectedUnread = false;
-          if (addMailboxIds.includes("STARRED")) projectedStarred = true;
+          }
+          projectedMailboxIds = nextMailboxIds;
+          if (uniqueRemoveMailboxIds.includes("UNREAD")) projectedUnread = false;
+          if (uniqueAddMailboxIds.includes("STARRED")) projectedStarred = true;
         }
       }
       updatedGoogleCredentials = currentCredentials;

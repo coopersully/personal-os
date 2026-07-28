@@ -130,11 +130,8 @@ export function SetupPage({ user }: { user: User }) {
   });
   const save = useMutation({
     mutationFn: api.updateAccountSetup,
-    onSuccess: (nextUser, input) => {
+    onSuccess: (nextUser) => {
       queryClient.setQueryData(["me"], nextUser);
-      if (input.action === "dismiss" || input.action === "complete") {
-        setDestination("/today");
-      }
     },
   });
 
@@ -160,8 +157,10 @@ export function SetupPage({ user }: { user: User }) {
   const resendVerification = useMutation({ mutationFn: api.resendEmailVerification });
   const steps = setupSteps(selectedWorkspaces, user.emailVerified);
   const stepIndex = Math.max(0, steps.indexOf(currentStep));
-  const exitSetup = () => save.mutate({ action: "dismiss" });
-  const completeSetup = () => save.mutate({ action: "complete" });
+  const exitSetup = () =>
+    save.mutate({ action: "dismiss" }, { onSuccess: () => setDestination("/today") });
+  const completeSetup = (redirectDestination = "/today") =>
+    save.mutate({ action: "complete" }, { onSuccess: () => setDestination(redirectDestination) });
 
   useEffect(() => {
     if (window.scrollY !== 0) window.scrollTo({ behavior: "auto", left: 0, top: 0 });
@@ -271,7 +270,8 @@ export function SetupPage({ user }: { user: User }) {
         ) : null}
         {currentStep === "ready" ? (
           <ReadyStep
-            complete={completeSetup}
+            complete={() => completeSetup()}
+            connectAgent={() => completeSetup("/settings?section=agents")}
             connectedAccounts={connectors.data?.length ?? 0}
             financeAccounts={finances.data?.accounts.length ?? 0}
             pending={save.isPending}
@@ -743,6 +743,7 @@ function FinancesStep({
 
 function ReadyStep({
   complete,
+  connectAgent,
   connectedAccounts,
   financeAccounts,
   pending,
@@ -750,6 +751,7 @@ function ReadyStep({
   selectedWorkspaces,
 }: {
   complete: () => void;
+  connectAgent: () => void;
   connectedAccounts: number;
   financeAccounts: number;
   pending: boolean;
@@ -789,7 +791,9 @@ function ReadyStep({
         <Item>
           <ItemContent>
             <ItemTitle>Agent access</ItemTitle>
-            <ItemDescription>Off until you explicitly create an access token.</ItemDescription>
+            <ItemDescription>
+              Ready when you connect Ilo from an MCP-compatible agent host.
+            </ItemDescription>
           </ItemContent>
         </Item>
       </ItemGroup>
@@ -798,10 +802,15 @@ function ReadyStep({
           <ArrowLeft data-icon="inline-start" />
           Review setup
         </Button>
-        <Button disabled={pending} onClick={complete} size="lg">
-          Open Today
-          <ArrowRight data-icon="inline-end" />
-        </Button>
+        <div className="setup-footer__actions">
+          <Button disabled={pending} onClick={complete} variant="outline">
+            Open Today
+          </Button>
+          <Button disabled={pending} onClick={connectAgent} size="lg">
+            Connect an agent
+            <ArrowRight data-icon="inline-end" />
+          </Button>
+        </div>
       </div>
     </div>
   );

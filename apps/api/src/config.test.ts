@@ -12,6 +12,7 @@ const required = {
 describe("API configuration", () => {
   it("applies development defaults", () => {
     expect(loadConfig(required)).toEqual({
+      agentSkillSourceUrl: "https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup",
       allowedOrigins: ["https://app.example.com"],
       authRateLimitMaxRequests: 20,
       authRateLimitWindowSeconds: 300,

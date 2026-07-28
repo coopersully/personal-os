@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { configuredRuleBaseSchema } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
+import type { AgentMutationPolicy } from "./feature-contracts.js";
 
 export const mailProviderSchema = z.enum(["google", "icloud"]);
 export type MailProvider = z.infer<typeof mailProviderSchema>;
@@ -115,13 +117,145 @@ export type SendMailInput = z.infer<typeof sendMailInputSchema>;
 export const mailSnoozeInputSchema = z.object({ until: isoDateTimeSchema });
 export type MailSnoozeInput = z.infer<typeof mailSnoozeInputSchema>;
 
-export const mailRuleInputSchema = z.object({
-  action: z.enum(["archive", "mark_read", "star"]),
-  enabled: z.boolean().default(true),
-  name: z.string().trim().min(1).max(120),
-  query: z.string().trim().min(1).max(500),
+export const mailRuleConditionSchema = z.object({
+  field: z.enum(["any", "sender", "subject", "snippet"]).default("any"),
+  operator: z.enum(["contains", "equals", "ends_with"]).default("contains"),
+  value: z.string().trim().min(1).max(500),
 });
-export type MailRuleInput = z.infer<typeof mailRuleInputSchema>;
+export type MailRuleCondition = z.infer<typeof mailRuleConditionSchema>;
+
+export const mailRuleActionSchema = z
+  .object({
+    afterDays: z.int().min(0).max(365).default(0),
+    mailboxId: idSchema.nullable().default(null),
+    type: z.enum(["add_label", "archive", "mark_read", "star", "trash"]),
+  })
+  .superRefine((action, context) => {
+    if (action.type === "add_label" && action.mailboxId === null) {
+      context.addIssue({
+        code: "custom",
+        message: "A label action requires a destination mailbox.",
+        path: ["mailboxId"],
+      });
+    }
+    if (action.type !== "add_label" && action.mailboxId !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "Only a label action accepts a destination mailbox.",
+        path: ["mailboxId"],
+      });
+    }
+  });
+export type MailRuleAction = z.infer<typeof mailRuleActionSchema>;
+
+export const legacyMailRuleActionSchema = z.enum(["archive", "mark_read", "star"]);
+export type LegacyMailRuleAction = z.infer<typeof legacyMailRuleActionSchema>;
+
+export function resolveStoredMailRule(input: {
+  action: LegacyMailRuleAction;
+  actions: MailRuleAction[] | null;
+  condition: MailRuleCondition | null;
+  enabled: boolean;
+  policy: AgentMutationPolicy;
+  query: string;
+}): {
+  actions: MailRuleAction[];
+  condition: MailRuleCondition;
+  policy: AgentMutationPolicy;
+} {
+  const isLegacy = input.actions === null || input.condition === null;
+  return {
+    actions: input.actions ?? [
+      {
+        afterDays: 0,
+        mailboxId: null,
+        type: input.action,
+      },
+    ],
+    condition: input.condition ?? {
+      field: "any",
+      operator: "contains",
+      value: input.query,
+    },
+    policy: isLegacy && input.enabled ? "approved_rule" : input.policy,
+  };
+}
+
+export const mailRuleSchema = configuredRuleBaseSchema.extend({
+  actions: z.array(mailRuleActionSchema).min(1).max(10),
+  condition: mailRuleConditionSchema,
+  domain: z.literal("mail"),
+});
+export type MailRule = z.infer<typeof mailRuleSchema>;
+
+const mailRuleInputSchema = mailRuleSchema.pick({
+  actions: true,
+  condition: true,
+  confidenceThreshold: true,
+  description: true,
+  enabled: true,
+  name: true,
+  policy: true,
+  profileId: true,
+  sourceIds: true,
+});
+
+export const createMailRuleInputSchema = mailRuleInputSchema.extend({
+  confidenceThreshold: z.number().min(0).max(1).nullable().default(null),
+  description: z.string().max(2_000).default(""),
+  enabled: z.literal(false).default(false),
+  policy: z.literal("preview").default("preview"),
+  profileId: idSchema.nullable().default(null),
+  sourceIds: z.array(idSchema).max(50).default([]),
+});
+export type CreateMailRuleInput = z.infer<typeof createMailRuleInputSchema>;
+
+export const updateMailRuleInputSchema = mailRuleInputSchema
+  .partial()
+  .extend({ expectedVersion: z.int().positive() })
+  .refine(
+    (input) => Object.keys(input).some((key) => key !== "expectedVersion"),
+    "Provide at least one mail rule change.",
+  );
+export type UpdateMailRuleInput = z.infer<typeof updateMailRuleInputSchema>;
+
+export const previewMailRuleInputSchema = createMailRuleInputSchema.omit({
+  enabled: true,
+  name: true,
+  policy: true,
+  profileId: true,
+});
+export type PreviewMailRuleInput = z.infer<typeof previewMailRuleInputSchema>;
+
+type MailRuleMatchMaterial = Pick<MailThread, "from" | "snippet" | "subject">;
+
+export function matchesMailRule(
+  condition: MailRuleCondition,
+  material: MailRuleMatchMaterial,
+): boolean {
+  const candidates =
+    condition.field === "any"
+      ? [material.subject, material.snippet, material.from.address, material.from.name ?? ""]
+      : condition.field === "sender"
+        ? [material.from.address, material.from.name ?? ""]
+        : [material[condition.field]];
+  const expected = condition.value.toLocaleLowerCase();
+  return candidates.some((candidate) => {
+    const value = candidate.toLocaleLowerCase();
+    if (condition.operator === "equals") return value === expected;
+    if (condition.operator === "ends_with") return value.endsWith(expected);
+    return value.includes(expected);
+  });
+}
+
+export function mailRuleActionIsDue(
+  action: MailRuleAction,
+  receivedAt: string | Date,
+  current: Date,
+): boolean {
+  const received = typeof receivedAt === "string" ? new Date(receivedAt) : receivedAt;
+  return current.getTime() - received.getTime() >= action.afterDays * 86_400_000;
+}
 
 export const connectICloudInputSchema = z
   .object({

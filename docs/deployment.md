@@ -24,6 +24,7 @@
 | `MCP_PUBLIC_URL` | Canonical public MCP origin, for example `https://mcp.example.com` |
 | `MCP_RESOURCE_URL` | Canonical MCP resource URI, normally `https://mcp.example.com/mcp` |
 | `MCP_INTERNAL_SECRET` | Random 32+ character secret shared only by the API and MCP containers |
+| `AGENT_SKILL_SOURCE_URL` | Public install source for the versioned Ilo guided-setup skill; defaults to the official repository skill directory |
 | `REGISTRATION_MODE` | Must be `invite` in production; the API refuses to boot in open mode |
 | `OWNER_EMAILS` | Comma-separated email addresses allowed to issue invitations |
 | `X_CLIENT_ID` | X OAuth 2.0 client ID |
@@ -76,7 +77,13 @@ The MCP image binds to all container interfaces, requires an ilo bearer token fo
 
 ## MCP OAuth
 
-The public MCP endpoint publishes protected-resource metadata and directs clients to ilo's OAuth authorization server. A person signs in to ilo once and consents to the MCP client; Google, iCloud, and other connected services remain internal to that ilo account. OAuth clients use dynamic registration, exact redirect-URI matching, S256 PKCE, five-minute one-time authorization codes, one-hour MCP audience-bound access tokens, and rotating refresh tokens. Do not reuse `MCP_INTERNAL_SECRET` outside the API and MCP containers, and use distinct values per environment.
+The public MCP endpoint publishes protected-resource metadata and directs clients to ilo's OAuth authorization server. A person signs in to ilo once and consents to the MCP client; Google, iCloud, and other connected services remain internal to that ilo account. The consent screen names the registered client and translates every requested scope into a user-facing permission. OAuth clients use dynamic registration, exact redirect-URI matching, S256 PKCE, five-minute one-time authorization codes, one-hour MCP audience-bound access tokens, and rotating refresh tokens. Do not reuse `MCP_INTERNAL_SECRET` outside the API and MCP containers, and use distinct values per environment.
+
+The authenticated connection-guide API derives its MCP URL from
+`MCP_RESOURCE_URL` and its skill install link from
+`AGENT_SKILL_SOURCE_URL`. Keep both public addresses aligned with the deployed
+environment so Settings never teaches a host to use a staging or local
+endpoint.
 
 Build with the public API address compiled into the PWA:
 

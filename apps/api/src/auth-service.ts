@@ -446,7 +446,7 @@ export function createAuthService(options: AuthServiceOptions) {
       const records = await db
         .select()
         .from(accessTokens)
-        .where(eq(accessTokens.userId, userId))
+        .where(and(eq(accessTokens.userId, userId), isNull(accessTokens.clientId)))
         .orderBy(desc(accessTokens.createdAt));
       return records.map(serializeAccessToken);
     },

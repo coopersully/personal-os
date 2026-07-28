@@ -1,3 +1,4 @@
+export * from "./assistant.js";
 export * from "./auth.js";
 export * from "./automation.js";
 export * from "./calendar.js";

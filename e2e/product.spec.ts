@@ -169,8 +169,18 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
   if (mobile) await page.getByRole("button", { name: "More" }).click();
   await settingsSidebar.getByRole("link", { name: "Agent access" }).click();
-  await expect(page.getByRole("heading", { name: "Agent access" })).toBeVisible();
-  await page.getByRole("button", { name: "Agent token" }).click();
+  await expect(page.getByRole("heading", { name: "Connect an agent" })).toBeVisible();
+  await expect(page.getByRole("textbox", { name: "Ilo MCP URL" })).toHaveValue(/\/mcp$/);
+  await expect(page.getByRole("link", { name: "View skill source" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Mail", checked: true })).toBeVisible();
+  await page.getByRole("button", { name: "Set up a local token" }).click();
+  await expect(
+    page.getByRole("radio", {
+      name: "Mail setup: Learn your inbox preferences, preview rules, and run approved Mail rules.",
+      checked: true,
+    }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Create local token" }).click();
   await expect(page.getByText(/^pos_/)).toBeVisible();
 
   const layout = await page.evaluate(() => ({

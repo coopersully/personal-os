@@ -389,24 +389,27 @@ describe.sequential("connector service", () => {
     if (!account) throw new Error("Connected account fixture is missing.");
     await database.db.insert(mailRules).values([
       {
-        action: "mark_read",
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "any", operator: "contains", value: "google mail" },
         enabled: true,
         name: "Read project mail",
-        query: "google mail",
+        policy: "approved_rule",
         userId,
       },
       {
-        action: "archive",
+        actions: [{ afterDays: 0, mailboxId: null, type: "archive" }],
+        condition: { field: "any", operator: "contains", value: "google mail" },
         enabled: true,
         name: "Archive project mail",
-        query: "google mail",
+        policy: "approved_rule",
         userId,
       },
       {
-        action: "star",
+        actions: [{ afterDays: 0, mailboxId: null, type: "star" }],
+        condition: { field: "any", operator: "contains", value: "google mail" },
         enabled: true,
         name: "Star project mail",
-        query: "google mail",
+        policy: "approved_rule",
         userId,
       },
     ]);

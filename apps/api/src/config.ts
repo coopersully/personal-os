@@ -7,6 +7,9 @@ const configSchema = z
     AUTH_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).max(1_000).default(20),
     AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3_600).default(300),
     API_BASE_URL: z.url(),
+    AGENT_SKILL_SOURCE_URL: z
+      .url()
+      .default("https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup"),
     APP_ENCRYPTION_KEY: z.string().min(1),
     DATABASE_URL: z.string().min(1),
     EMAIL_FROM: z.string().default(""),
@@ -72,6 +75,7 @@ const configSchema = z
   });
 
 export type AppConfig = {
+  agentSkillSourceUrl?: string;
   allowedOrigins: string[];
   authRateLimitMaxRequests?: number;
   authRateLimitWindowSeconds?: number;
@@ -105,6 +109,7 @@ export type AppConfig = {
 export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
   const value = configSchema.parse(environment);
   return {
+    agentSkillSourceUrl: value.AGENT_SKILL_SOURCE_URL,
     allowedOrigins: value.ALLOWED_ORIGINS
       ? [
           ...new Set([

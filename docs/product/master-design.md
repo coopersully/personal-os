@@ -6,7 +6,7 @@
 
 ## 1. Decision and intentional scope expansion
 
-ilo will be a private, cross-device operating layer for an individual's commitments, communications, reflection, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
+ilo will be a private, cross-device operating layer for an individual's commitments, communications, priorities, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
 
 This design intentionally expands scope beyond the current MVP. The expansion is necessary to make safe automation usable: a permission prompt alone is not a workflow. Every automated mutation therefore needs a comprehensible UI path, a preview or rule policy, audit evidence, undo/recovery where possible, and a way to stop future runs.
 
@@ -98,6 +98,9 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Reminder/task | Title, notes, status, project/area, priority, due date, scheduled time, estimate, recurrence, subtasks, tags, energy/context, defer history, source material, goal/motive links. |
 | Goal/motive/habit | Outcome, timeframe, progress metric, parent/child relationship, rationale, rewards, constraints, coaching preference, habit schedule/flexibility and completion data. |
 | Finance | Institution/account, balance, transaction, merchant, category/tag, split, recurring stream, rule, budget, cash-flow forecast, goal, review state and confidence. |
+| Domain profile | Domain, objective, source meanings, categories, durable instructions/preferences, status, and optimistic version. |
+| Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
+| Rule | Common version/policy/source/profile envelope plus a domain-owned condition and action contract. |
 | Automation | Template, versioned instructions/skill, trigger, schedule/event trigger, inputs, scopes, policy, model host, state, run and approval queue. |
 | Activity/audit | Actor, request/run, operation, entity, redacted before/after, remote request/revision, reversible action, result and failure data. |
 
@@ -206,6 +209,10 @@ Mail policy tiers:
 - Finance data uses stronger consent, redaction, retention, export/delete, no-notification-content defaults, an explicit warning before sharing with an agent, and a visible last-refresh/provider-freshness indicator.
 
 ### 6.8 Agent access, routines, and activity
+
+**Guided setup:** after connecting sources, the Ready step and Settings → Agent access provide the deployment's remote MCP URL, the repository-backed `ilo-setup` skill install request, and a domain-specific starter prompt. The user may paste these into Claude, Codex, or another compatible MCP host. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. The agent discovers its scoped domains, reads any existing domain profile, inspects a bounded representative sample, asks a short adaptive interview, saves a draft profile, previews exact rule candidates, and activates behavior only after the user accepts the summary. Personal preferences live in ilo rather than in a host skill or conversation memory.
+
+Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
 
 **Token/scopes:** `mail:read`, `mail:manage`, `mail:send`, `calendar:read`, `calendar:write`, `calendar:rsvp`, `reminders:read`, `reminders:write`, `tasks:write`, `goals:read/write`, `finance:read`, `finance:categorize`, `automation:read/run`, and `audit:read`. Scopes are paired with account/source selections and policy tiers.
 

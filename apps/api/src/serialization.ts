@@ -99,6 +99,7 @@ export function serializeCalendar(row: CalendarRow): Calendar {
 export function serializeEvent(
   row: CalendarEventRow,
   blocks: CalendarEventBlock[] = [],
+  accountId: string | null = null,
 ): CalendarEvent {
   return {
     allDay: row.allDay,
@@ -119,7 +120,7 @@ export function serializeEvent(
     reminders: row.reminders,
     remoteEventId: row.remoteEventId,
     source: {
-      accountId: null,
+      accountId,
       provider: row.provider,
       remoteId: row.remoteEventId ?? (row.provider === "local" ? row.id : null),
       revision: row.remoteEtag,

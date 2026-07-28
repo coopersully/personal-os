@@ -14,16 +14,19 @@ type CalendarProposalProfile = {
 
 type CalendarProposalContext = {
   destination: Calendar;
+  evaluatedAt: Date;
   possibleDuplicateEventId: string | null;
   profile: CalendarProposalProfile | null;
 };
+
+const CALENDAR_PROJECTION_FRESHNESS_MS = 5 * 60_000;
 
 /** Evaluate a caller-supplied Calendar candidate without treating its evidence as authority. */
 export function buildCalendarCommitmentProposal(
   input: ParsedPreviewCalendarCommitmentInput,
   context: CalendarProposalContext,
 ): CalendarCommitmentProposal {
-  const { destination, possibleDuplicateEventId, profile } = context;
+  const { destination, evaluatedAt, possibleDuplicateEventId, profile } = context;
   const preferences = profile
     ? calendarProfilePreferencesSchema.safeParse(profile.preferences)
     : null;
@@ -35,7 +38,10 @@ export function buildCalendarCommitmentProposal(
     (source.provider === "local" || (source.accountId !== null && source.remoteId !== null));
   const providerProjectionReady =
     destination.provider === "local" ||
-    (destination.source?.syncStatus === "idle" && destination.lastSyncedAt !== null);
+    (destination.source?.syncStatus === "idle" &&
+      destination.lastSyncedAt !== null &&
+      evaluatedAt.getTime() - new Date(destination.lastSyncedAt).getTime() <=
+        CALENDAR_PROJECTION_FRESHNESS_MS);
 
   if (!destination.isWritable) reasons.push("The destination calendar is read-only.");
   if (destination.source?.syncStatus === "error")

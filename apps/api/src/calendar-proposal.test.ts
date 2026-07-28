@@ -55,6 +55,7 @@ describe("Calendar commitment proposal policy", () => {
   it("keeps a normal caller candidate preview-only with a stable payload fingerprint", () => {
     const proposal = buildCalendarCommitmentProposal(baseInput, {
       destination: localDestination,
+      evaluatedAt: new Date("2026-07-28T15:00:00.000Z"),
       possibleDuplicateEventId: null,
       profile: null,
     });
@@ -72,6 +73,7 @@ describe("Calendar commitment proposal policy", () => {
     expect(
       buildCalendarCommitmentProposal(baseInput, {
         destination: localDestination,
+        evaluatedAt: new Date("2026-07-28T15:00:00.000Z"),
         possibleDuplicateEventId: null,
         profile: null,
       }).fingerprint,
@@ -83,6 +85,7 @@ describe("Calendar commitment proposal policy", () => {
       { ...baseInput, requestedPolicy: "read_only" },
       {
         destination: localDestination,
+        evaluatedAt: new Date("2026-07-28T15:00:00.000Z"),
         possibleDuplicateEventId: null,
         profile: null,
       },
@@ -103,6 +106,7 @@ describe("Calendar commitment proposal policy", () => {
       },
       {
         destination: localDestination,
+        evaluatedAt: new Date("2026-07-28T15:00:00.000Z"),
         possibleDuplicateEventId: null,
         profile: null,
       },
@@ -118,6 +122,26 @@ describe("Calendar commitment proposal policy", () => {
         expect.stringContaining("interactive Calendar action"),
       ]),
     );
+  });
+
+  it("warns when an idle provider projection is older than the freshness window", () => {
+    const proposal = buildCalendarCommitmentProposal(baseInput, {
+      destination: {
+        ...localDestination,
+        lastSyncedAt: "2026-07-28T14:50:00.000Z",
+        provider: "google",
+        source: {
+          accountLabel: "Google",
+          remoteCalendarId: "remote-calendar",
+          syncError: null,
+          syncStatus: "idle",
+        },
+      },
+      evaluatedAt: new Date("2026-07-28T15:00:00.000Z"),
+      possibleDuplicateEventId: null,
+      profile: null,
+    });
+    expect(proposal.warnings).toContainEqual(expect.stringContaining("not fully fresh"));
   });
 
   it("explains every degraded or misleading rule-authorized condition", () => {
@@ -159,6 +183,7 @@ describe("Calendar commitment proposal policy", () => {
       },
       {
         destination: remoteDestination,
+        evaluatedAt: new Date("2026-07-28T15:00:00.000Z"),
         possibleDuplicateEventId: calendarId,
         profile: {
           preferences: {

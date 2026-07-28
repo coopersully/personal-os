@@ -22,6 +22,7 @@ describe.sequential("Calendar commitment proposals", () => {
   let database: DatabaseClient;
   let localCalendarId: string;
   let profileId: string;
+  let remoteAccountId: string;
   let remoteCalendarId: string;
   let service: ReturnType<typeof createCalendarService>;
   let userId: string;
@@ -91,6 +92,7 @@ describe.sequential("Calendar commitment proposals", () => {
       })
       .returning();
     if (!localAccount || !remoteAccount) throw new Error("Account fixtures were not created.");
+    remoteAccountId = remoteAccount.id;
     const [localCalendar] = await database.db
       .insert(calendars)
       .values({
@@ -233,6 +235,21 @@ describe.sequential("Calendar commitment proposals", () => {
             accountLabel: "Google",
             remoteCalendarId: "remote-calendar",
             syncStatus: "idle",
+          }),
+        }),
+      ]),
+    );
+    await expect(
+      service.listEvents(userId, {
+        from: "2026-08-01T00:00:00.000Z",
+        to: "2026-08-02T00:00:00.000Z",
+      }),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: expect.objectContaining({
+            accountId: remoteAccountId,
+            remoteId: "remote-duplicate",
           }),
         }),
       ]),

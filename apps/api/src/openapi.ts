@@ -136,6 +136,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: { security, responses: { 200: { description: "Calendars" } } },
         post: { security, responses: { 201: { description: "Local calendar created" } } },
       },
+      "/v1/calendars/commitments/preview": {
+        post: {
+          security,
+          responses: { 200: { description: "Calendar commitment proposal preview" } },
+        },
+      },
       "/v1/calendars/{id}": {
         delete: { security, responses: { 204: { description: "Local calendar deleted" } } },
         patch: { security, responses: { 200: { description: "Local calendar updated" } } },

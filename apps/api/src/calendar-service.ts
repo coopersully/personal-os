@@ -205,9 +205,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
   }
 
   async function serializeWithBlocks(record: CalendarEventRecord): Promise<CalendarEvent> {
-    if (record.blockSourceEventId) return serializeEvent(record);
+    const calendar = await findCalendar(record.userId, record.calendarId);
+    if (record.blockSourceEventId) return serializeEvent(record, [], calendar.accountId);
     const blocks = await findActiveBlocks(record.userId, record.id);
-    return serializeEvent(record, blocks.map(eventBlock));
+    return serializeEvent(record, blocks.map(eventBlock), calendar.accountId);
   }
 
   function requireSourceEvent(event: CalendarEventRecord): void {
@@ -279,6 +280,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
     }
     return buildCalendarCommitmentProposal(input, {
       destination: serializeCalendarSource(destination, account),
+      evaluatedAt: now(),
       possibleDuplicateEventId: duplicate?.id ?? null,
       profile: profile
         ? {
@@ -356,7 +358,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
           },
         );
       }
-      return serializeEvent(record);
+      return serializeEvent(record, [], calendar.accountId);
     },
 
     async previewCommitment(
@@ -697,6 +699,9 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       const calendarIds = deduplicateCalendars(calendarRecords)
         .filter((calendar) => calendar.isSelected)
         .map((calendar) => calendar.id);
+      const accountIdByCalendarId = new Map(
+        calendarRecords.map((calendar) => [calendar.id, calendar.accountId]),
+      );
       const conditions = [
         eq(calendarEvents.userId, userId),
         isNull(calendarEvents.deletedAt),
@@ -786,7 +791,11 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         blocksBySource.set(sourceId, [...(blocksBySource.get(sourceId) ?? []), eventBlock(block)]);
       }
       return deduplicated.map((record) =>
-        serializeEvent(record, blocksBySource.get(record.id) ?? []),
+        serializeEvent(
+          record,
+          blocksBySource.get(record.id) ?? [],
+          accountIdByCalendarId.get(record.calendarId) ?? null,
+        ),
       );
     },
 

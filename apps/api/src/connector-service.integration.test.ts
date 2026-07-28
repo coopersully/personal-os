@@ -24,7 +24,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createConnectorService, MailProviderRejectedError } from "./connector-service.js";
@@ -2400,6 +2400,55 @@ describe.sequential("connector service", () => {
         title: "No credentials",
       }),
     ).rejects.toMatchObject({ code: "not_found" });
+  });
+
+  it("discloses a provider create when refreshed credential persistence fails", async () => {
+    const [calendar] = await database.db
+      .select()
+      .from(calendars)
+      .where(eq(calendars.remoteCalendarId, "remote-primary"));
+    if (!calendar) throw new Error("Google calendar fixture is missing.");
+    await database.db.execute(sql`
+      CREATE FUNCTION reject_calendar_credential_update() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.encrypted_credentials IS DISTINCT FROM OLD.encrypted_credentials THEN
+          RAISE EXCEPTION 'credential persistence unavailable';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql
+    `);
+    await database.db.execute(sql`
+      CREATE TRIGGER reject_calendar_credential_update
+      BEFORE UPDATE ON calendar_accounts
+      FOR EACH ROW EXECUTE FUNCTION reject_calendar_credential_update()
+    `);
+    try {
+      await expect(
+        service.eventGateway.create(calendar, {
+          allDay: false,
+          calendarId: calendar.id,
+          endsAt: "2026-07-13T14:00:00.000Z",
+          location: null,
+          notes: null,
+          startsAt: "2026-07-13T13:00:00.000Z",
+          timezone: "UTC",
+          title: "Credential failure",
+        }),
+      ).rejects.toMatchObject({
+        code: "service_unavailable",
+        details: {
+          partialEffect: "provider_event_created",
+          provider: "google",
+          remoteEventId: "created-remote",
+        },
+      });
+    } finally {
+      await database.db.execute(
+        sql`DROP TRIGGER reject_calendar_credential_update ON calendar_accounts`,
+      );
+      await database.db.execute(sql`DROP FUNCTION reject_calendar_credential_update()`);
+    }
   });
 
   it("reconciles incremental and full sync changes with an audit trail", async () => {

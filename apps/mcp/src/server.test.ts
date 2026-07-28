@@ -542,7 +542,7 @@ describe("ilo MCP server", () => {
       tools.tools.find((tool) => tool.name === "apply_finance_categorizations")?.annotations,
     ).toMatchObject({
       destructiveHint: true,
-      idempotentHint: false,
+      idempotentHint: true,
       readOnlyHint: false,
     });
     expect(

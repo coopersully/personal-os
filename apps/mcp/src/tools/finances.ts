@@ -20,6 +20,12 @@ const consequentialMutationAnnotations = {
   openWorldHint: false,
   readOnlyHint: false,
 } as const;
+const retrySafeMutationAnnotations = {
+  destructiveHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+  readOnlyHint: false,
+} as const;
 
 /** Finance-owned MCP surface. Domain policy remains enforced by the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
@@ -244,7 +250,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "apply_finance_categorizations",
     {
-      annotations: consequentialMutationAnnotations,
+      annotations: retrySafeMutationAnnotations,
       description:
         "Apply accepted category proposals. The API enforces its adaptive threshold; lower-confidence items remain in review. Exact lost-response retries return replayed=true without duplicating evidence. Agents cannot create permanent merchant rules. Inspect every returned status because a batch reports any partial failures per transaction.",
       inputSchema: {

@@ -14,8 +14,9 @@ explains Finance readiness and routes there without duplicating its controls.
 - Profile state is explicit: not configured, draft, or active.
 - Source readiness counts only current Finance accounts owned by the user.
 - Suggested-workflow readiness comes from the Finance API, not UI inference.
-- The safety summary names human-only account connection, import, budget,
-  financial-profile, permanent merchant-rule, and ambiguous-transfer work.
+- The safety summary renders every typed `humanOnlyActions` value returned by
+  the Finance API through an exhaustive label map; the UI does not duplicate
+  or infer that policy.
 - Loading and failure remain local to the guidance card and do not hide the
   human-managed financial profile.
 

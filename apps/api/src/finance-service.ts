@@ -306,10 +306,17 @@ function budgetImpact(row: typeof financeTransactions.$inferSelect, includePendi
 export function financeCsvImportErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "The CSV could not be imported.";
 }
-function categorizationApplyError(error: unknown): FinanceCategorizationApplyResult["error"] {
+function categorizationApplyError(
+  error: unknown,
+  requestId: string,
+): FinanceCategorizationApplyResult["error"] {
   return error instanceof AppError
-    ? { code: error.code, message: error.message }
-    : { code: "internal_error", message: "The categorization could not be applied." };
+    ? { code: error.code, message: error.message, requestId }
+    : {
+        code: "internal_error",
+        message: "The categorization could not be applied.",
+        requestId,
+      };
 }
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -2504,7 +2511,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         } catch (error) {
           return {
             applied: false,
-            error: categorizationApplyError(error),
+            error: categorizationApplyError(error, context.requestId),
             replayed: false,
             status: "failed" as const,
             threshold: null,
@@ -2861,8 +2868,16 @@ export function createFinanceService({ db, now, plaid }: Options) {
       return result;
     },
     async deleteAccount(id: string, context: MutationContext) {
-      const before = await ownedAccount(context.principal.userId, id);
       await db.transaction(async (tx) => {
+        const [before] = await tx
+          .select()
+          .from(financeAccounts)
+          .where(
+            and(eq(financeAccounts.id, id), eq(financeAccounts.userId, context.principal.userId)),
+          )
+          .for("update")
+          .limit(1);
+        if (!before) throw new AppError("not_found", "The financial account was not found.");
         const [profile] = await tx
           .select({ sourceContexts: domainProfiles.sourceContexts })
           .from(domainProfiles)

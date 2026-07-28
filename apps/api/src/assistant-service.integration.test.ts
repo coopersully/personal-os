@@ -12,6 +12,7 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
+import { createFinanceService } from "./finance-service.js";
 
 describe.sequential("assistant setup service", () => {
   let container: StartedPostgreSqlContainer;
@@ -271,6 +272,52 @@ describe.sequential("assistant setup service", () => {
       domain: "finances",
       sourceContexts: [expect.objectContaining({ sourceId: account.id })],
     });
+    const [raceAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Race Bank",
+        name: "Closing account",
+        provider: "manual",
+        status: "manual",
+        userId: financeUser.id,
+      })
+      .returning();
+    if (!raceAccount) throw new Error("Finance race fixture account was not created.");
+    const finances = createFinanceService({
+      db: database.db,
+      now: () => new Date("2026-07-28T16:00:00.000Z"),
+    });
+    const raceResults = await Promise.allSettled([
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          sourceContexts: [{ ...sourceContext, sourceId: raceAccount.id }],
+        },
+        financeContext,
+      ),
+      finances.deleteAccount(raceAccount.id, {
+        principal: {
+          actorId: financeUser.id,
+          actorType: "user",
+          scopes: new Set(["finances:read", "finances:write"]),
+          userId: financeUser.id,
+        },
+        requestId: "concurrent-account-delete",
+      }),
+    ]);
+    expect(raceResults.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const [savedRaceProfile] = await database.db
+      .select({ sourceContexts: domainProfiles.sourceContexts })
+      .from(domainProfiles)
+      .where(eq(domainProfiles.userId, financeUser.id));
+    const [savedRaceAccount] = await database.db
+      .select({ id: financeAccounts.id })
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, raceAccount.id));
+    expect(
+      savedRaceProfile?.sourceContexts.some((source) => source.sourceId === raceAccount.id),
+    ).toBe(Boolean(savedRaceAccount));
   });
 
   it("uses one cross-domain attention shape and audits changes", async () => {

@@ -76,6 +76,9 @@ An exact retry of an unchanged below-threshold decision reuses the existing
 open review and deferred evidence. The result reports `replayed: true` and does
 not update timestamps or append classification/audit rows; a changed revision,
 category, confidence, source, or rationale is not treated as that replay.
+The MCP apply annotation therefore marks the effect as retry-safe. Structured
+per-item errors include the API request ID so unexpected infrastructure
+failures remain correlatable without exposing internal details.
 
 Provider transfer labels and matching amounts alone are insufficient to exclude
 a record from spending. A transfer is excluded only after a supported account
@@ -141,7 +144,9 @@ guards, adaptive policy, revision checks, transactions, and audit trail remain
 the security and integrity boundary. Batch apply responses preserve structured
 per-decision errors so hosts can disclose partial effects between decisions.
 An account referenced by the durable Finance profile cannot be deleted until
-the human removes that source context.
+the human removes that source context. Profile saves and account deletion lock
+the account before the profile so a concurrent save/delete cannot create a
+dangling JSON source reference.
 
 ## Migration policy
 

@@ -2518,6 +2518,9 @@ describe("ilo web app", () => {
         expect(await screen.findByText("Agent guidance")).toBeInTheDocument();
         expect(await screen.findByText("1 available now.", { exact: false })).toBeInTheDocument();
         expect(screen.getByText("Human-only boundaries")).toBeInTheDocument();
+        expect(
+          screen.getByText("connect or disconnect sources", { exact: false }),
+        ).toBeInTheDocument();
       }
       view.unmount();
     }

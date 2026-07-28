@@ -74,33 +74,21 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       input: UpsertDomainProfileInput,
       context: MutationContext,
     ): Promise<DomainProfile> {
+      const financeSourceIds =
+        input.domain === "finances"
+          ? [...new Set(input.sourceContexts.map((source) => source.sourceId))]
+          : [];
       if (input.domain === "finances" && input.sourceContexts.length > 0) {
-        const sourceIds = [...new Set(input.sourceContexts.map((source) => source.sourceId))];
-        if (sourceIds.length !== input.sourceContexts.length) {
+        if (financeSourceIds.length !== input.sourceContexts.length) {
           throw new AppError(
             "invalid_request",
             "Include each Finance account once in source contexts.",
           );
         }
-        if (sourceIds.some((sourceId) => !idSchema.safeParse(sourceId).success)) {
+        if (financeSourceIds.some((sourceId) => !idSchema.safeParse(sourceId).success)) {
           throw new AppError(
             "invalid_request",
             "Finance source contexts must use canonical Finance account IDs.",
-          );
-        }
-        const ownedSources = await db
-          .select({ id: financeAccounts.id })
-          .from(financeAccounts)
-          .where(
-            and(
-              eq(financeAccounts.userId, context.principal.userId),
-              inArray(financeAccounts.id, sourceIds),
-            ),
-          );
-        if (ownedSources.length !== sourceIds.length) {
-          throw new AppError(
-            "invalid_request",
-            "Finance source contexts must reference current accounts owned by this user.",
           );
         }
       }
@@ -133,6 +121,24 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       let saved: typeof domainProfiles.$inferSelect;
       try {
         saved = await db.transaction(async (transaction) => {
+          if (financeSourceIds.length > 0) {
+            const ownedSources = await transaction
+              .select({ id: financeAccounts.id })
+              .from(financeAccounts)
+              .where(
+                and(
+                  eq(financeAccounts.userId, context.principal.userId),
+                  inArray(financeAccounts.id, financeSourceIds),
+                ),
+              )
+              .for("update");
+            if (ownedSources.length !== financeSourceIds.length) {
+              throw new AppError(
+                "invalid_request",
+                "Finance source contexts must reference current accounts owned by this user.",
+              );
+            }
+          }
           const [profile] = existing
             ? await transaction
                 .update(domainProfiles)

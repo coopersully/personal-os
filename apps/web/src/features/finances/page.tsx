@@ -94,6 +94,17 @@ import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
 import { PlaidConnectButton } from "./plaid-connect.js";
 
+const financeHumanOnlyActionLabels = {
+  confirm_ambiguous_transfer: "confirm ambiguous transfers",
+  connect_or_disconnect_source: "connect or disconnect sources",
+  create_merchant_rule: "create permanent merchant rules",
+  import_transactions: "import transactions",
+  manage_accounts: "manage accounts",
+  manage_budgets: "manage budgets",
+  manage_financial_profile: "manage the financial profile",
+  refresh_provider_data: "refresh provider data",
+} satisfies Record<FinanceGuidedSetupContext["humanOnlyActions"][number], string>;
+
 export function FinancesPage() {
   const location = useLocation();
   const section = financeSectionFromPath(location.pathname);
@@ -1899,8 +1910,10 @@ function FinanceAgentGuidancePanel({
               <ShadcnItemContent>
                 <ShadcnItemTitle>Human-only boundaries</ShadcnItemTitle>
                 <ShadcnItemDescription>
-                  Account connections, imports, budgets, financial-profile changes, permanent
-                  merchant rules, and ambiguous transfers stay in Finance.
+                  {setup.humanOnlyActions
+                    .map((action) => financeHumanOnlyActionLabels[action])
+                    .join(", ")}{" "}
+                  stay in Finance.
                 </ShadcnItemDescription>
               </ShadcnItemContent>
               <ShadcnItemActions>

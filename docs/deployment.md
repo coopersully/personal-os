@@ -42,6 +42,33 @@ default, and cannot be reused.
 
 The application has an in-process authentication rate-limit backstop. Configure an equivalent shared rate limit at the public edge before running more than one API replica. Never expose PostgreSQL or container-only ports; place the API behind the same authenticated HTTPS edge used by the web app.
 
+## External dependency readiness
+
+Runtime configuration is necessary but not sufficient evidence that an external capability works.
+Boot validation can prove that a value exists and has the expected shape; it cannot prove that the
+credential is current, has the required scope or role, names the intended resource, has a
+registered callback, or is reachable from the deployed task.
+
+Before enabling a new or changed external capability in production, use the boundary record in
+[`engineering/external-boundary-reliability.md`](engineering/external-boundary-reliability.md) and
+verify:
+
+1. the intended environment receives the correct secret and non-secret configuration without
+   exposing either value;
+2. provider consent, scopes, roles, callback/webhook registration, and resource policies authorize
+   the exact operation;
+3. DNS, TLS, proxy, protocol, ingress, egress, and port rules permit the path from the deployed
+   runtime;
+4. caller deadlines, downstream timeouts, retries, pagination, payloads, concurrency, and rate
+   limits have a bounded end-to-end budget;
+5. partial success, process loss, duplicate delivery, stale work, rollback, and manual repair leave
+   durable, observable state; and
+6. a least-privileged, non-destructive production smoke proves the capability after deployment,
+   with a request or operation identifier that can be correlated in redacted logs.
+
+Record “configured,” “authorized,” “reachable,” and “verified” separately in deployment evidence.
+Never claim all integrations are healthy from secret inventory or process health alone.
+
 ## Images
 
 The root Dockerfile has `api`, `mcp`, and `web` targets. The API image runs migrations before accepting traffic, runs as an unprivileged user, and exposes liveness/readiness endpoints. The web target uses unprivileged Nginx with immutable asset caching and SPA fallback.

@@ -4,6 +4,11 @@ Provider integration code crosses three independent failure boundaries: the publ
 provider's network and API, and ilo's durable projection. A connector is complete only when those
 boundaries agree in application code, infrastructure, tests, and operations.
 
+This document specializes the repository-wide
+[`external-boundary-reliability.md`](external-boundary-reliability.md) standard. Complete that
+standard's boundary record first; the rules below add connector-specific lifecycle, transport, and
+test requirements.
+
 ## Interactive boundary
 
 Production's application load balancer closes an idle request after 60 seconds. Every provider HTTP
@@ -63,11 +68,13 @@ a provider failure and verify that the durable account remains with `syncStatus 
 callback that needs an unavoidable provider exchange, use a deferred bootstrap provider response
 to prove the browser redirect does not wait for discovery.
 
-Before approval, answer all of these from the diff:
+Before approval, answer all of these from the boundary record and diff:
 
 - Does the connect or callback path stop after durable identity and credential persistence?
 - Can every provider request or socket fail before the edge timeout?
 - Does production egress allow every protocol and port referenced by the connector?
 - Does asynchronous work report success or failure durably and have a retry path?
 - Do focused tests cover the response boundary and the degraded provider path?
+- Which non-destructive production-equivalent check proves the exact granted capability, rather
+  than only the presence of a credential?
 - Do deployment and architecture docs describe any changed durable behavior?

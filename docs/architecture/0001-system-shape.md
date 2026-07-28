@@ -41,6 +41,24 @@ against the same migrations.
 - Connector callbacks bind OAuth state to a user, expire quickly, and are
   one-time-use.
 
+## External system boundaries
+
+Every external dependency is treated as independently fallible across
+configuration, authority, transport, timing, capacity, delivery semantics, and
+availability. A configured runtime value does not establish that its credential
+is valid, its requested capability is authorized, or its network path is
+reachable.
+
+The owning service defines the caller deadline, downstream timeout, durable
+commit point, idempotency or reconciliation rule, degraded state, retry and
+repair behavior, and observable evidence. Work that can outlive an interactive
+request crosses a durable handoff before the response; eventual completion
+cannot depend only on an in-memory promise. Application code, deployment
+configuration, and infrastructure policy form one boundary contract.
+
+The required reasoning method and evidence levels live in
+[`docs/engineering/external-boundary-reliability.md`](../engineering/external-boundary-reliability.md).
+
 ## Connector lifecycle
 
 Connection is a durable handoff, not a full synchronization transaction. An

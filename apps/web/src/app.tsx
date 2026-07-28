@@ -37,26 +37,32 @@ import {
 } from "@personal-os/domain";
 import { Badge, Button, EmptyState, Input, Label, Spinner } from "@personal-os/ui";
 import {
-  BankIcon as SolidBank,
-  CalendarIcon as SolidCalendar,
-  CheckSquareIcon as SolidCheckSquare,
-  CloudIcon as SolidCloud,
-  CompassIcon as SolidCompass,
-  EnvelopeSimpleIcon as SolidEnvelope,
-  GearIcon as SolidGear,
-  HouseIcon as SolidHouse,
-  ImageIcon as SolidImage,
-  KeyIcon as SolidKey,
-  ListChecksIcon as SolidListChecks,
-  LockKeyIcon as SolidLock,
-  PaintBrushIcon as SolidPaintBrush,
-  PulseIcon as SolidPulse,
-  RobotIcon as SolidRobot,
-  TargetIcon as SolidTarget,
-  UserCircleIcon as SolidUser,
-  UsersIcon as SolidUsers,
+  BankIcon as NavigationBank,
+  CalendarIcon as NavigationCalendar,
+  CheckSquareIcon as NavigationCheckSquare,
+  CloudIcon as NavigationCloud,
+  CompassIcon as NavigationCompass,
+  EnvelopeSimpleIcon as NavigationEnvelope,
+  GearIcon as NavigationGear,
+  HouseIcon as NavigationHouse,
+  ImageIcon as NavigationImage,
+  KeyIcon as NavigationKey,
+  ListChecksIcon as NavigationListChecks,
+  LockKeyIcon as NavigationLock,
+  PaintBrushIcon as NavigationPaintBrush,
+  PulseIcon as NavigationPulse,
+  RobotIcon as NavigationRobot,
+  TargetIcon as NavigationTarget,
+  UserCircleIcon as NavigationUser,
+  UsersIcon as NavigationUsers,
 } from "@phosphor-icons/react";
-import { type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  type UseQueryResult,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import {
   Activity,
@@ -106,6 +112,7 @@ import {
   Scissors,
   Search,
   Settings,
+  Sparkles,
   Sun,
   Target,
   Trash2,
@@ -122,6 +129,8 @@ import {
   type ReactNode,
   type UIEvent as ReactUIEvent,
   Suspense,
+  startTransition,
+  useContext,
   useDeferredValue,
   useEffect,
   useId,
@@ -132,13 +141,23 @@ import {
 import {
   Link,
   Navigate,
+  type Navigator,
   NavLink,
   Route,
   Routes,
+  UNSAFE_NavigationContext,
   useLocation,
   useSearchParams,
 } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  EmailField,
+  InviteCodeField,
+  isValidEmailAddress,
+  isValidPassword,
+  PasswordFields,
+  TextField,
+} from "@/components/auth-fields";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import {
   Alert as ShadcnAlert,
@@ -247,7 +266,6 @@ import {
   SidebarGroupLabel as ShadcnSidebarGroupLabel,
   SidebarHeader as ShadcnSidebarHeader,
   SidebarMenu as ShadcnSidebarMenu,
-  SidebarMenuAction as ShadcnSidebarMenuAction,
   SidebarMenuBadge as ShadcnSidebarMenuBadge,
   SidebarMenuButton as ShadcnSidebarMenuButton,
   SidebarMenuItem as ShadcnSidebarMenuItem,
@@ -267,9 +285,20 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { api, errorMessage, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { InlineError, PageLoading } from "./components/async-state.js";
+import { WorkspaceSkeleton } from "./components/workspace-skeleton.js";
+import {
+  getWorkspaceCalendarEntry,
+  workspaceCalendarSummary,
+  workspaceCountSummary,
+  workspaceFinanceSummary,
+  workspaceIndicatorOffset,
+  workspaceIntentStaleTime,
+  workspaceTodaySummary,
+} from "./components/workspace-switching.js";
 import { calendarNavigationItem } from "./features/calendar/manifest.js";
 import {
   type CalendarView,
+  calendarPeriodDays,
   calendarQueryKeys,
   calendarViewFromSearch,
 } from "./features/calendar/page.js";
@@ -285,6 +314,7 @@ import {
 } from "./features/mail/mail.js";
 import { mailNavigationItem } from "./features/mail/manifest.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
+import { SetupPage } from "./features/setup/page.js";
 import { formatOrdinalDate } from "./lib/date-format.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { timeToMinute } from "./time.js";
@@ -336,6 +366,15 @@ type NavigationGroupDefinition = {
   label: string;
 };
 
+type WorkspaceDefinition = NavigationItemDefinition;
+
+type WorkspaceTransitionDirection = "down" | "none" | "up";
+
+type WorkspacePreview = {
+  direction: Exclude<WorkspaceTransitionDirection, "none">;
+  path: string;
+};
+
 const planNavigationItems: NavigationItemDefinition[] = [
   { icon: PanelTop, label: "Today", path: "/today" },
   calendarNavigationItem,
@@ -358,7 +397,7 @@ const navigationGroups: NavigationGroupDefinition[] = [
   { items: [mailNavigationItem, financesNavigationItem], label: "Workspace" },
 ];
 
-const workspaceShortcuts: NavigationItemDefinition[] = [
+const workspaceShortcuts: WorkspaceDefinition[] = [
   { icon: PanelTop, label: "Today at a Glance", path: "/today" },
   calendarNavigationItem,
   { icon: ListChecks, label: "Tasks", path: "/tasks" },
@@ -367,6 +406,7 @@ const workspaceShortcuts: NavigationItemDefinition[] = [
 ];
 
 const accountNavigationItems: NavigationItemDefinition[] = [
+  { icon: Sparkles, label: "Setup", path: "/setup" },
   settingsNavigationItem,
   { icon: Activity, label: "Activity", path: "/activity" },
 ];
@@ -376,7 +416,25 @@ const mobileNavigationItems: NavigationItemDefinition[] = [
   mailNavigationItem,
 ];
 
-const contextSidebarPaths = new Set(["/calendar", "/mail", "/reminders", "/tasks"]);
+function workspaceForPath(pathname: string): WorkspaceDefinition | undefined {
+  return workspaceShortcuts.find(
+    (workspace) =>
+      pathname === workspace.path ||
+      (workspace.path === "/finances" && pathname.startsWith("/finances/")),
+  );
+}
+
+function workspaceDirection(
+  fromPath: string | null | undefined,
+  toPath: string,
+): WorkspaceTransitionDirection {
+  const fromIndex = workspaceShortcuts.findIndex((workspace) => workspace.path === fromPath);
+  const toIndex = workspaceShortcuts.findIndex((workspace) => workspace.path === toPath);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return "none";
+  return toIndex > fromIndex ? "down" : "up";
+}
+
+const ignorePreviewNavigation = () => undefined;
 
 export function App() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
@@ -391,10 +449,24 @@ export function App() {
   if (me.isError) return <FatalState error={me.error} />;
   return (
     <TooltipProvider>
-      <ShadcnSidebarProvider className="contents">
-        <AuthenticatedApp user={me.data} />
-      </ShadcnSidebarProvider>
+      <AuthenticatedExperience user={me.data} />
     </TooltipProvider>
+  );
+}
+
+function AuthenticatedExperience({ user }: { user: User }) {
+  useDocumentTheme(user.theme);
+  const location = useLocation();
+  const verificationToken = new URLSearchParams(location.search).get("verifyEmail");
+  if (verificationToken) return <EmailVerificationScreen token={verificationToken} />;
+  if (location.pathname === "/setup") return <SetupPage user={user} />;
+  if (user.setup.status === "not_started" || user.setup.status === "in_progress") {
+    return <Navigate replace to="/setup" />;
+  }
+  return (
+    <ShadcnSidebarProvider className="contents">
+      <AuthenticatedApp user={user} />
+    </ShadcnSidebarProvider>
   );
 }
 
@@ -453,20 +525,31 @@ function AuthScreen() {
 function CredentialsScreen() {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"login" | "recovery" | "register">("login");
+  const [inviteBlurred, setInviteBlurred] = useState(false);
+  const [credentials, setCredentials] = useState({
+    confirmPassword: "",
+    displayName: "",
+    email: "",
+    inviteCode: "",
+    password: "",
+  });
+  const invitationValidation = useMutation({
+    mutationFn: (inviteCode: string) => api.validateInvitation({ inviteCode }),
+  });
   const mutation = useMutation({
-    mutationFn: async (form: FormData) => {
-      const email = String(form.get("email"));
-      const password = String(form.get("password"));
-      if (mode === "login") return api.login({ email, password });
+    mutationFn: async () => {
+      if (mode === "login") {
+        return api.login({ email: credentials.email, password: credentials.password });
+      }
       if (mode === "recovery") {
-        await api.requestPasswordReset({ email });
+        await api.requestPasswordReset({ email: credentials.email });
         return null;
       }
       return api.register({
-        displayName: String(form.get("displayName")),
-        email,
-        inviteCode: String(form.get("inviteCode")).trim() || undefined,
-        password,
+        displayName: credentials.displayName,
+        email: credentials.email,
+        inviteCode: credentials.inviteCode,
+        password: credentials.password,
         planningTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
     },
@@ -474,9 +557,60 @@ function CredentialsScreen() {
       if (user) queryClient.setQueryData(["me"], user);
     },
   });
+  const emailValid = isValidEmailAddress(credentials.email);
+  const passwordValid = isValidPassword(credentials.password);
+  const passwordsMatch =
+    credentials.confirmPassword.length > 0 && credentials.password === credentials.confirmPassword;
+  const invitationResultIsCurrent =
+    invitationValidation.variables === credentials.inviteCode &&
+    credentials.inviteCode.length === 8;
+  const invitationValid =
+    invitationResultIsCurrent &&
+    invitationValidation.isSuccess &&
+    invitationValidation.data === true;
+  const invitationError = !inviteBlurred
+    ? undefined
+    : credentials.inviteCode.length !== 8
+      ? "Enter all eight characters from your invitation."
+      : invitationResultIsCurrent && invitationValidation.isError
+        ? errorMessage(invitationValidation.error)
+        : invitationResultIsCurrent &&
+            invitationValidation.isSuccess &&
+            invitationValidation.data === false
+          ? "This invitation is invalid or expired."
+          : undefined;
+  const invitationStatus =
+    invitationResultIsCurrent && invitationValidation.isPending
+      ? "checking"
+      : invitationValid
+        ? "valid"
+        : "idle";
+  const canSubmit =
+    mode === "login"
+      ? emailValid && credentials.password.length > 0
+      : mode === "recovery"
+        ? emailValid
+        : emailValid &&
+          credentials.displayName.trim().length > 0 &&
+          invitationValid &&
+          passwordValid &&
+          passwordsMatch;
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    mutation.mutate(new FormData(event.currentTarget));
+    if (!canSubmit) return;
+    mutation.mutate();
+  };
+  const selectMode = (nextMode: "login" | "recovery" | "register") => {
+    mutation.reset();
+    invitationValidation.reset();
+    setInviteBlurred(false);
+    setCredentials((current) => ({
+      ...current,
+      confirmPassword: "",
+      inviteCode: "",
+      password: "",
+    }));
+    setMode(nextMode);
   };
   return (
     <main className="auth-shell">
@@ -522,19 +656,72 @@ function CredentialsScreen() {
           </div>
           {mode === "register" && (
             <>
-              <Field label="Name" name="displayName" autoComplete="name" required />
-              <Field label="Invite code" name="inviteCode" autoComplete="off" required />
+              <InviteCodeField
+                error={invitationError}
+                onBlur={() => {
+                  setInviteBlurred(true);
+                  if (credentials.inviteCode.length === 8) {
+                    invitationValidation.mutate(credentials.inviteCode);
+                  } else {
+                    invitationValidation.reset();
+                  }
+                }}
+                onChange={(inviteCode) => {
+                  invitationValidation.reset();
+                  setInviteBlurred(false);
+                  setCredentials((current) => ({ ...current, inviteCode }));
+                }}
+                status={invitationStatus}
+                value={credentials.inviteCode}
+              />
+              <TextField
+                autoComplete="name"
+                label="Name"
+                name="displayName"
+                onChange={(event) =>
+                  setCredentials((current) => ({ ...current, displayName: event.target.value }))
+                }
+                placeholder="Sam Rivera"
+                required
+                value={credentials.displayName}
+              />
             </>
           )}
-          <Field label="Email" name="email" type="email" autoComplete="email" required />
+          <EmailField
+            autoComplete="email"
+            name="email"
+            onChange={(event) =>
+              setCredentials((current) => ({ ...current, email: event.target.value }))
+            }
+            required
+            value={credentials.email}
+          />
           {mode !== "recovery" ? (
-            <Field
-              label="Password"
-              name="password"
-              type="password"
+            <PasswordFields
               autoComplete={mode === "login" ? "current-password" : "new-password"}
-              minLength={12}
-              required
+              confirmValue={mode === "register" ? credentials.confirmPassword : undefined}
+              error={
+                mode === "register" && credentials.confirmPassword.length > 0 && !passwordsMatch
+                  ? "Passwords must match."
+                  : undefined
+              }
+              labelAction={
+                mode === "login" ? (
+                  <button
+                    className="text-button auth-field-action"
+                    onClick={() => selectMode("recovery")}
+                    type="button"
+                  >
+                    Forgot your password?
+                  </button>
+                ) : undefined
+              }
+              onConfirmValueChange={(confirmPassword) =>
+                setCredentials((current) => ({ ...current, confirmPassword }))
+              }
+              onValueChange={(password) => setCredentials((current) => ({ ...current, password }))}
+              showRequirements={mode === "register"}
+              value={credentials.password}
             />
           ) : null}
           {mutation.isError && (
@@ -549,7 +736,7 @@ function CredentialsScreen() {
           ) : null}
           <Button
             className="button--wide"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !canSubmit}
             tone="accent"
             type="submit"
           >
@@ -564,16 +751,11 @@ function CredentialsScreen() {
             )}
           </Button>
           {mode === "login" ? (
-            <>
-              <button className="text-button" type="button" onClick={() => setMode("register")}>
-                Have an invite? Create an account
-              </button>
-              <button className="text-button" type="button" onClick={() => setMode("recovery")}>
-                Forgot your password?
-              </button>
-            </>
+            <button className="text-button" type="button" onClick={() => selectMode("register")}>
+              I have an invite code
+            </button>
           ) : (
-            <button className="text-button" type="button" onClick={() => setMode("login")}>
+            <button className="text-button" type="button" onClick={() => selectMode("login")}>
               {mode === "register" ? "Already have an account? Sign in" : "Back to sign in"}
             </button>
           )}
@@ -614,11 +796,13 @@ function EmailVerificationScreen({ token }: { token: string }) {
 
 function PasswordResetScreen({ token }: { token: string }) {
   const [complete, setComplete] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const reset = useMutation({
-    mutationFn: (form: FormData) =>
-      api.resetPassword({ password: String(form.get("password")), token }),
+    mutationFn: () => api.resetPassword({ password, token }),
     onSuccess: () => setComplete(true),
   });
+  const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   return (
     <AuthActionShell title="Choose a new password">
       {complete ? (
@@ -630,19 +814,27 @@ function PasswordResetScreen({ token }: { token: string }) {
           className="auth-form"
           onSubmit={(event) => {
             event.preventDefault();
-            reset.mutate(new FormData(event.currentTarget));
+            reset.mutate();
           }}
         >
-          <Field
+          <PasswordFields
             autoComplete="new-password"
+            confirmValue={confirmPassword}
+            error={
+              confirmPassword.length > 0 && !passwordsMatch ? "Passwords must match." : undefined
+            }
             label="New password"
-            minLength={12}
-            name="password"
-            required
-            type="password"
+            onConfirmValueChange={setConfirmPassword}
+            onValueChange={setPassword}
+            showRequirements
+            value={password}
           />
           {reset.isError ? <p className="form-error">{errorMessage(reset.error)}</p> : null}
-          <Button disabled={reset.isPending} tone="accent" type="submit">
+          <Button
+            disabled={reset.isPending || !isValidPassword(password) || !passwordsMatch}
+            tone="accent"
+            type="submit"
+          >
             {reset.isPending ? <Spinner label="Resetting password" /> : "Reset password"}
           </Button>
         </form>
@@ -668,13 +860,27 @@ function AuthActionShell({ children, title }: { children: ReactNode; title: stri
 }
 
 function AuthenticatedApp({ user }: { user: User }) {
-  useDocumentTheme(user.theme);
   const [editor, setEditor] = useState<Editor>(null);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
+  const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
+  const [workspacePreview, setWorkspacePreview] = useState<WorkspacePreview | null>(null);
   const location = useLocation();
+  const activeWorkspace = workspaceForPath(location.pathname);
+  const workspacePath = activeWorkspace?.path ?? null;
+  const [routeTransition, setRouteTransition] = useState<{
+    direction: WorkspaceTransitionDirection;
+    path: string | null;
+  }>({ direction: "none", path: workspacePath });
+  if (routeTransition.path !== workspacePath) {
+    setRouteTransition({
+      direction: workspaceDirection(routeTransition.path, workspacePath ?? ""),
+      path: workspacePath,
+    });
+  }
+  const routeDirection = routeTransition.direction;
   const isTodayWorkspace = location.pathname === "/today";
   const deviceWeatherLocation = useDeviceWeatherLocation(isTodayWorkspace);
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
@@ -689,16 +895,17 @@ function AuthenticatedApp({ user }: { user: User }) {
   const mailboxes = useQuery({ queryFn: api.listMailboxes, queryKey: ["mailboxes", "badge"] });
   const weather = useQuery({
     enabled:
-      isTodayWorkspace &&
+      (isTodayWorkspace || workspaceSwitcherOpen) &&
       (deviceWeatherLocation.coordinates !== null ||
-        (deviceWeatherLocation.status !== "pending" && user.homeLocation !== null)),
+        ((deviceWeatherLocation.status !== "pending" || workspaceSwitcherOpen) &&
+          user.homeLocation !== null)),
     queryFn: () => api.getWeather(deviceWeatherLocation.coordinates ?? undefined),
     queryKey: ["weather", deviceWeatherLocation.coordinates, user.homeLocation],
     refetchInterval: 10 * 60_000,
     staleTime: 5 * 60_000,
   });
   const todayBrief = useQuery({
-    enabled: location.pathname === "/today",
+    enabled: isTodayWorkspace || workspaceSwitcherOpen,
     queryFn: api.getDailyBrief,
     queryKey: ["daily-brief", user.planningTimezone],
     refetchInterval: 60_000,
@@ -750,11 +957,12 @@ function AuthenticatedApp({ user }: { user: User }) {
               ? "mail"
               : null;
   const activeSettingsSection = settingsSectionFromSearch(location.search);
-  const topNavigationTitle = workspaceTitleForLocation(location.pathname, location.search);
+  const pageTitle = workspaceTitleForLocation(location.pathname, location.search);
   const activeFinanceSection = financeSectionFromPath(location.pathname);
+  const currentFinanceMonth = new Date().toISOString().slice(0, 7);
   const financeOverview = useQuery({
     queryFn: api.getFinanceOverview,
-    queryKey: ["finance-overview"],
+    queryKey: ["finance-overview", currentFinanceMonth],
   });
 
   useEffect(() => {
@@ -839,7 +1047,15 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <span>{workspaceOwnerName(user)}'s Workspace</span>
               </Link>
             ) : (
-              <WorkspaceSwitcher onNavigate={closeMobileMenu} pathname={location.pathname} />
+              <WorkspaceSwitcher
+                onNavigate={closeMobileMenu}
+                onOpenChange={setWorkspaceSwitcherOpen}
+                onPreviewChange={setWorkspacePreview}
+                pathname={location.pathname}
+                search={location.search}
+                user={user}
+                weather={weather.data}
+              />
             )}
             <button
               aria-label="Close Navigation"
@@ -929,7 +1145,10 @@ function AuthenticatedApp({ user }: { user: User }) {
                 ) : sidebarMode === "calendar" ? (
                   <CalendarCreateButton setEditor={setEditor} />
                 ) : location.pathname === "/mail" ? (
-                  <MailSyncButton />
+                  <>
+                    <MailSyncButton />
+                    <MailComposeButton />
+                  </>
                 ) : location.pathname === "/finances" ? (
                   <FinanceAddTransactionButton />
                 ) : sidebarMode === "settings" ? null : (
@@ -969,8 +1188,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                       timeZone={user.planningTimezone}
                     />
                   ) : null
-                ) : topNavigationTitle ? (
-                  <TopNavigationTitle title={topNavigationTitle} />
                 ) : null}
               </>
             }
@@ -979,45 +1196,45 @@ function AuthenticatedApp({ user }: { user: User }) {
             className={`content${sidebarMode === "calendar" ? " content--calendar" : ""}`}
             id="main-content"
           >
-            <Routes>
-              <Route
-                path="/today"
-                element={
-                  <TodayPage
-                    brief={todayBrief}
-                    deviceWeatherLocation={deviceWeatherLocation}
-                    user={user}
-                    setEditor={setEditor}
-                    weather={weather}
-                  />
-                }
-              />
-              <Route
-                path="/calendar"
-                element={
-                  <CalendarPage setEditor={setEditor} todaySnap={calendarTodaySnap} user={user} />
-                }
-              />
-              <Route
-                path="/reminders"
-                element={<RemindersPage setEditor={setEditor} user={user} />}
-              />
-              <Route path="/tasks" element={<TasksPage setEditor={setEditor} user={user} />} />
-              <Route path="/mail" element={<MailFeaturePage user={user} />} />
-              <Route
-                path="/automations"
-                element={<Navigate replace to="/settings?section=automations" />}
-              />
-              <Route path="/activity" element={<ActivityPage />} />
-              <Route path="/goals" element={<GoalsPage />} />
-              <Route path="/motives" element={<MotivesPage />} />
-              <Route path="/finances/*" element={<FinancesPage />} />
-              <Route
-                path="/settings"
-                element={<SettingsPage user={user} setEditor={setEditor} />}
-              />
-              <Route path="*" element={<Navigate replace to="/today" />} />
-            </Routes>
+            <div className="workspace-stage">
+              <div
+                className="workspace-route"
+                data-direction={routeDirection}
+                key={activeWorkspace?.path ?? location.pathname}
+              >
+                {pageTitle ? <h1 className="sr-only">{pageTitle}</h1> : null}
+                <WorkspaceRoutes
+                  calendarTodaySnap={calendarTodaySnap}
+                  deviceWeatherLocation={deviceWeatherLocation}
+                  setEditor={setEditor}
+                  todayBrief={todayBrief}
+                  user={user}
+                  weather={weather}
+                />
+              </div>
+              {workspaceSwitcherOpen && workspacePreview ? (
+                <div
+                  aria-hidden="true"
+                  className="workspace-preview"
+                  data-direction={workspacePreview.direction}
+                  data-workspace={workspacePreview.path.slice(1)}
+                  inert
+                  key={workspacePreview.path}
+                >
+                  <WorkspacePreviewNavigationBoundary>
+                    <WorkspaceRoutes
+                      calendarTodaySnap={calendarTodaySnap}
+                      deviceWeatherLocation={deviceWeatherLocation}
+                      locationOverride={workspacePreview.path}
+                      setEditor={setEditor}
+                      todayBrief={todayBrief}
+                      user={user}
+                      weather={weather}
+                    />
+                  </WorkspacePreviewNavigationBoundary>
+                </div>
+              ) : null}
+            </div>
           </main>
         </div>
         <nav className="mobile-nav" aria-label="Primary">
@@ -1072,6 +1289,99 @@ function AuthenticatedApp({ user }: { user: User }) {
   );
 }
 
+function WorkspacePreviewNavigationBoundary({ children }: { children: ReactNode }) {
+  const navigationContext = useContext(UNSAFE_NavigationContext);
+  const inertNavigationContext = useMemo(() => {
+    const source = navigationContext?.navigator;
+    if (!navigationContext || !isNavigator(source)) return null;
+    const navigator: Navigator = {
+      createHref: source.createHref.bind(source),
+      ...(source.encodeLocation
+        ? {
+            encodeLocation: source.encodeLocation.bind(source),
+          }
+        : {}),
+      go: ignorePreviewNavigation,
+      push: ignorePreviewNavigation,
+      replace: ignorePreviewNavigation,
+    };
+    return { ...navigationContext, navigator };
+  }, [navigationContext]);
+  if (!inertNavigationContext) return null;
+  return (
+    <UNSAFE_NavigationContext.Provider value={inertNavigationContext}>
+      {children}
+    </UNSAFE_NavigationContext.Provider>
+  );
+}
+
+export function isNavigator(value: unknown): value is Navigator {
+  if (!value || typeof value !== "object") return false;
+  const navigator = value as Partial<Record<keyof Navigator, unknown>>;
+  return (
+    typeof navigator.createHref === "function" &&
+    typeof navigator.go === "function" &&
+    typeof navigator.push === "function" &&
+    typeof navigator.replace === "function"
+  );
+}
+
+function WorkspaceRoutes({
+  calendarTodaySnap,
+  deviceWeatherLocation,
+  locationOverride,
+  setEditor,
+  todayBrief,
+  user,
+  weather,
+}: {
+  calendarTodaySnap: number;
+  deviceWeatherLocation: DeviceWeatherLocation;
+  locationOverride?: string;
+  setEditor: (editor: Editor) => void;
+  todayBrief: Pick<UseQueryResult<DailyBrief>, "data" | "error" | "isError" | "isPending">;
+  user: User;
+  weather: {
+    data: WeatherSnapshot | undefined;
+    isError: boolean;
+    isPending: boolean;
+  };
+}) {
+  return (
+    <Routes {...(locationOverride ? { location: locationOverride } : {})}>
+      <Route
+        path="/today"
+        element={
+          <TodayPage
+            brief={todayBrief}
+            deviceWeatherLocation={deviceWeatherLocation}
+            setEditor={setEditor}
+            user={user}
+            weather={weather}
+          />
+        }
+      />
+      <Route
+        path="/calendar"
+        element={<CalendarPage setEditor={setEditor} todaySnap={calendarTodaySnap} user={user} />}
+      />
+      <Route path="/reminders" element={<RemindersPage setEditor={setEditor} user={user} />} />
+      <Route path="/tasks" element={<TasksPage setEditor={setEditor} user={user} />} />
+      <Route path="/mail" element={<MailFeaturePage user={user} />} />
+      <Route
+        path="/automations"
+        element={<Navigate replace to="/settings?section=automations" />}
+      />
+      <Route path="/activity" element={<ActivityPage />} />
+      <Route path="/goals" element={<GoalsPage />} />
+      <Route path="/motives" element={<MotivesPage />} />
+      <Route path="/finances/*" element={<FinancesPage />} />
+      <Route path="/settings" element={<SettingsPage setEditor={setEditor} user={user} />} />
+      <Route path="*" element={<Navigate replace to="/today" />} />
+    </Routes>
+  );
+}
+
 function NavigationItem({
   badge,
   icon: Icon,
@@ -1112,7 +1422,6 @@ function SidebarNavigationItem({
 }: NavigationItemDefinition & { isActive?: boolean; onNavigate: () => void }) {
   const location = useLocation();
   const isActive = explicitIsActive ?? location.pathname === path;
-  const opensContextSidebar = contextSidebarPaths.has(path);
   return (
     <ShadcnSidebarMenuItem>
       <ShadcnSidebarMenuButton asChild className={badge ? "pr-14" : undefined} isActive={isActive}>
@@ -1122,13 +1431,6 @@ function SidebarNavigationItem({
         </NavLink>
       </ShadcnSidebarMenuButton>
       {badge ? <ShadcnSidebarMenuBadge className="right-7">{badge}</ShadcnSidebarMenuBadge> : null}
-      {opensContextSidebar ? (
-        <ShadcnSidebarMenuAction asChild aria-hidden="true">
-          <span>
-            <ExternalLink aria-hidden="true" />
-          </span>
-        </ShadcnSidebarMenuAction>
-      ) : null}
       {items?.length ? (
         <ShadcnSidebarMenuSub>
           {items.map((item) => (
@@ -1140,26 +1442,26 @@ function SidebarNavigationItem({
   );
 }
 
-const solidNavigationIcons = {
-  "Agent access": SolidKey,
-  Appearance: SolidPaintBrush,
-  Automations: SolidRobot,
-  Calendar: SolidCalendar,
-  Calendars: SolidCalendar,
-  Connections: SolidCloud,
-  Finances: SolidBank,
-  Goals: SolidTarget,
-  Invitations: SolidUsers,
-  Mail: SolidEnvelope,
-  Motives: SolidCompass,
-  Profile: SolidUser,
-  Reminders: SolidCheckSquare,
-  Sessions: SolidLock,
-  Settings: SolidGear,
-  Tasks: SolidListChecks,
-  Today: SolidHouse,
-  Wallpaper: SolidImage,
-  Activity: SolidPulse,
+const navigationIcons = {
+  "Agent access": NavigationKey,
+  Appearance: NavigationPaintBrush,
+  Automations: NavigationRobot,
+  Calendar: NavigationCalendar,
+  Calendars: NavigationCalendar,
+  Connections: NavigationCloud,
+  Finances: NavigationBank,
+  Goals: NavigationTarget,
+  Invitations: NavigationUsers,
+  Mail: NavigationEnvelope,
+  Motives: NavigationCompass,
+  Profile: NavigationUser,
+  Reminders: NavigationCheckSquare,
+  Sessions: NavigationLock,
+  Settings: NavigationGear,
+  Tasks: NavigationListChecks,
+  Today: NavigationHouse,
+  Wallpaper: NavigationImage,
+  Activity: NavigationPulse,
 } as const;
 
 function NavigationIcon({
@@ -1173,12 +1475,21 @@ function NavigationIcon({
   label: string;
   size?: number;
 }) {
-  const SolidIcon = solidNavigationIcons[label as keyof typeof solidNavigationIcons];
-  if (active && SolidIcon) {
+  const WeightedIcon = navigationIcons[label as keyof typeof navigationIcons];
+  if (WeightedIcon) {
     return size === undefined ? (
-      <SolidIcon aria-hidden="true" weight="fill" />
+      <WeightedIcon
+        aria-hidden="true"
+        data-navigation-icon-weight={active ? "fill" : "regular"}
+        weight={active ? "fill" : "regular"}
+      />
     ) : (
-      <SolidIcon aria-hidden="true" size={size} weight="fill" />
+      <WeightedIcon
+        aria-hidden="true"
+        data-navigation-icon-weight={active ? "fill" : "regular"}
+        size={size}
+        weight={active ? "fill" : "regular"}
+      />
     );
   }
   return size === undefined ? (
@@ -1206,7 +1517,6 @@ function SidebarSubNavigationItem({
               {badge}
             </span>
           ) : null}
-          <ExternalLink aria-hidden="true" />
         </Link>
       </ShadcnSidebarMenuSubButton>
     </ShadcnSidebarMenuSubItem>
@@ -1236,8 +1546,92 @@ function TopNavigation({
   );
 }
 
-function WorkspaceSwitcher({ onNavigate, pathname }: { onNavigate: () => void; pathname: string }) {
-  const workspace = workspaceShortcuts.find((item) => item.path === pathname);
+function warmWorkspacePreview(queryClient: QueryClient, path: WorkspaceDefinition["path"]) {
+  if (path === "/mail") {
+    void Promise.all([
+      queryClient.prefetchQuery({
+        queryFn: api.listConnectors,
+        queryKey: ["connectors"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.listMailboxes,
+        queryKey: ["mailboxes"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+    ]);
+  }
+  if (path === "/finances") {
+    void Promise.all([
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceWealthSummary,
+        queryKey: ["finance-wealth"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceLedgerHealth,
+        queryKey: ["finance-ledger-health"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceProfile,
+        queryKey: ["finance-profile"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.listFinanceIncomeStreams,
+        queryKey: ["finance-income-streams"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.listFinanceRecurringObligations,
+        queryKey: ["finance-recurring"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.listFinanceAlerts,
+        queryKey: ["finance-alerts"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceForecast,
+        queryKey: ["finance-forecast"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: () => api.getFinanceBudgetPace("week"),
+        queryKey: ["finance-budget-pace", "week"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceCategories,
+        queryKey: ["finance-categories"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+    ]);
+  }
+}
+
+function WorkspaceSwitcher({
+  onNavigate,
+  onOpenChange,
+  onPreviewChange,
+  pathname,
+  search,
+  user,
+  weather: currentWeather,
+}: {
+  onNavigate: () => void;
+  onOpenChange: (open: boolean) => void;
+  onPreviewChange: (preview: WorkspacePreview | null) => void;
+  pathname: string;
+  search: string;
+  user: User;
+  weather: WeatherSnapshot | undefined;
+}) {
+  const queryClient = useQueryClient();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const workspace = workspaceForPath(pathname);
   const section =
     workspace?.label ??
     navigationGroups
@@ -1246,37 +1640,138 @@ function WorkspaceSwitcher({ onNavigate, pathname }: { onNavigate: () => void; p
       .find((item) => item.path === pathname)?.label ??
     "Home OS";
   const WorkspaceIcon = workspace?.icon;
+  const activeIndex = Math.max(
+    0,
+    workspaceShortcuts.findIndex((item) => item.path === workspace?.path),
+  );
+  const previewIndex = useRef(activeIndex);
+  const previewPath = useRef<string | null>(workspace?.path ?? null);
+  const [indicatorIndex, setIndicatorIndex] = useState(activeIndex);
+  const indicatorOffset = workspaceIndicatorOffset(indicatorIndex);
+  const calendarEntry = getWorkspaceCalendarEntry(user, search);
+  const calendarEvents = useQuery({
+    enabled: menuOpen,
+    queryFn: () => api.listEvents(calendarEntry.range),
+    queryKey: calendarQueryKeys.events(
+      calendarEntry.view,
+      calendarEntry.range.from,
+      calendarEntry.range.to,
+    ),
+    staleTime: workspaceIntentStaleTime,
+  });
+  const taskInbox = useQuery({
+    enabled: menuOpen,
+    queryFn: () => api.listTasks({ completed: false, status: "inbox" }),
+    queryKey: ["tasks", "inbox"],
+    staleTime: workspaceIntentStaleTime,
+  });
+  const mailThreads = useQuery({
+    enabled: menuOpen,
+    queryFn: () => api.listMailThreads({}),
+    queryKey: ["mail-threads", null, null, "", false],
+    staleTime: workspaceIntentStaleTime,
+  });
+  const financeMonth = new Date().toISOString().slice(0, 7);
+  const finances = useQuery({
+    enabled: menuOpen,
+    queryFn: api.getFinanceOverview,
+    queryKey: ["finance-overview", financeMonth],
+    staleTime: workspaceIntentStaleTime,
+  });
+  const workspaceSummaries: Record<string, string> = {
+    "/calendar": workspaceCalendarSummary(calendarEvents.data, user),
+    "/finances": workspaceFinanceSummary(finances.data),
+    "/mail": workspaceCountSummary(
+      mailThreads.data?.filter((thread) => thread.unread).length,
+      "unread",
+      "Inbox clear",
+    ),
+    "/tasks": workspaceCountSummary(
+      taskInbox.data?.items.length,
+      "in inbox",
+      "All done",
+      "in inbox",
+    ),
+    "/today": workspaceTodaySummary(currentWeather, user.homeLocation?.label),
+  };
+
+  useEffect(() => {
+    previewIndex.current = activeIndex;
+    previewPath.current = workspace?.path ?? null;
+    setIndicatorIndex(activeIndex);
+  }, [activeIndex, workspace?.path]);
+
+  const preview = (item: WorkspaceDefinition, index: number) => {
+    if (previewPath.current === item.path) return;
+    warmWorkspacePreview(queryClient, item.path);
+    const direction = index >= previewIndex.current ? "down" : "up";
+    previewIndex.current = index;
+    previewPath.current = item.path;
+    setIndicatorIndex(index);
+    startTransition(() => {
+      onPreviewChange({ direction, path: item.path });
+    });
+  };
 
   return (
     <ShadcnSidebarMenu>
       <ShadcnSidebarMenuItem>
-        <DropdownMenu>
+        <DropdownMenu
+          onOpenChange={(open) => {
+            setMenuOpen(open);
+            onOpenChange(open);
+            if (open) {
+              previewIndex.current = activeIndex;
+              previewPath.current = workspace?.path ?? null;
+              setIndicatorIndex(activeIndex);
+            } else {
+              onPreviewChange(null);
+            }
+          }}
+        >
           <DropdownMenuTrigger asChild>
-            <ShadcnSidebarMenuButton
+            <ShadcnButton
               aria-label="Switch workspace"
-              className="sidebar__workspace-trigger"
+              className="sidebar__workspace-trigger w-full justify-start"
+              variant="secondary"
             >
               {WorkspaceIcon ? <WorkspaceIcon aria-hidden="true" /> : <LogoMark compact />}
               <span>{section}</span>
               <ChevronDown aria-hidden="true" className="ml-auto" data-icon="inline-end" />
-            </ShadcnSidebarMenuButton>
+            </ShadcnButton>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[--radix-popper-anchor-width]">
+          <DropdownMenuContent
+            align="start"
+            aria-label="Switch workspace"
+            className="workspace-switcher__menu w-[--radix-popper-anchor-width]"
+            style={
+              {
+                "--workspace-indicator-y": `${indicatorOffset}px`,
+              } as CSSProperties
+            }
+          >
+            <span aria-hidden="true" className="workspace-switcher__indicator" />
             <DropdownMenuGroup>
               <WorkspaceMenuItem
-                item={workspaceShortcuts[0] as NavigationItemDefinition}
+                index={0}
+                item={workspaceShortcuts[0] as WorkspaceDefinition}
                 onNavigate={onNavigate}
+                onPreview={preview}
                 pathname={pathname}
+                summary={workspaceSummaries["/today"] as string}
               />
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               {workspaceShortcuts.slice(1).map((item) => (
                 <WorkspaceMenuItem
+                  index={workspaceShortcuts.indexOf(item)}
                   item={item}
                   key={item.path}
                   onNavigate={onNavigate}
+                  onPreview={preview}
                   pathname={pathname}
+                  summary={workspaceSummaries[item.path] as string}
                 />
               ))}
             </DropdownMenuGroup>
@@ -1288,21 +1783,39 @@ function WorkspaceSwitcher({ onNavigate, pathname }: { onNavigate: () => void; p
 }
 
 function WorkspaceMenuItem({
+  index,
   item,
   onNavigate,
+  onPreview,
   pathname,
+  summary,
 }: {
-  item: NavigationItemDefinition;
+  index: number;
+  item: WorkspaceDefinition;
   onNavigate: () => void;
+  onPreview: (item: WorkspaceDefinition, index: number) => void;
   pathname: string;
+  summary: string;
 }) {
   const { icon: Icon, label, path } = item;
-  const isActive = pathname === path;
+  const isActive = workspaceForPath(pathname)?.path === path;
+  const summaryId = `workspace-switcher-summary-${path.slice(1)}`;
   return (
-    <DropdownMenuItem asChild data-active={isActive}>
-      <Link aria-current={isActive ? "page" : undefined} onClick={onNavigate} to={path}>
+    <DropdownMenuItem asChild className="workspace-switcher__item" data-active={isActive}>
+      <Link
+        aria-current={isActive ? "page" : undefined}
+        aria-describedby={summaryId}
+        aria-label={label}
+        onClick={onNavigate}
+        onFocus={() => onPreview(item, index)}
+        onPointerMove={() => onPreview(item, index)}
+        to={path}
+      >
         <Icon aria-hidden="true" />
-        <span>{label}</span>
+        <span className="workspace-switcher__copy">
+          <span>{label}</span>
+          <small id={summaryId}>{summary}</small>
+        </span>
         {isActive ? <Check aria-hidden="true" className="ml-auto" /> : null}
       </Link>
     </DropdownMenuItem>
@@ -1452,7 +1965,7 @@ function TodayPage({
   if (brief.isError) return <InlineError error={brief.error} />;
   if (completedReminders.isError) return <InlineError error={completedReminders.error} />;
   if (brief.isPending || completedReminders.isPending || !brief.data) {
-    return <PageLoading />;
+    return <PageLoading workspace="today" />;
   }
   const agenda = brief.data;
   const currentTime = new Date(agenda.generatedAt);
@@ -1892,10 +2405,6 @@ function TodayNavigationTitle({
   );
 }
 
-function TopNavigationTitle({ title }: { title: string }) {
-  return <h1 className="top-navigation__title">{title}</h1>;
-}
-
 function workspaceTitleForLocation(pathname: string, search: string): string | null {
   const searchParams = new URLSearchParams(search);
   if (pathname === "/calendar") return "Calendar";
@@ -2264,7 +2773,7 @@ function CalendarPage({
     <div className="calendar-page">
       {moveEvent.isError ? <InlineError error={moveEvent.error} /> : null}
       {events.isPending ? (
-        <PageLoading />
+        <PageLoading workspace="calendar" />
       ) : events.isError ? (
         <InlineError error={events.error} />
       ) : view === "day" ? (
@@ -2687,8 +3196,8 @@ function groupCalendarsByAccount(
   calendars: Calendar[],
 ): CalendarAccountGroup[] {
   const accountsById = new Map(accounts.map((account) => [account.id, account]));
-  return [...Map.groupBy(calendars, (calendar) => calendar.accountId)].map(
-    ([accountId, accountCalendars]) => {
+  return [...Map.groupBy(calendars, (calendar) => calendar.accountId)]
+    .map(([accountId, accountCalendars]) => {
       const account = accountsById.get(accountId);
       const isLocal = accountCalendars[0]?.provider === "local";
       return {
@@ -2701,8 +3210,10 @@ function groupCalendarsByAccount(
         label:
           account?.label ?? account?.email ?? (isLocal ? "My calendars" : "Connected calendars"),
       };
-    },
-  );
+    })
+    .toSorted(
+      (left, right) => Number(right.provider === "local") - Number(left.provider === "local"),
+    );
 }
 
 function CalendarVisibilitySidebar({
@@ -3760,6 +4271,7 @@ function TasksPage({ setEditor, user }: { setEditor: (editor: Editor) => void; u
     },
   };
   const detail = copy[view];
+  if (tasks.isPending) return <WorkspaceSkeleton kind="tasks" />;
   return (
     <div className="narrow-page">
       <ShadcnCard>
@@ -3768,9 +4280,7 @@ function TasksPage({ setEditor, user }: { setEditor: (editor: Editor) => void; u
           <ShadcnCardDescription>{detail.description}</ShadcnCardDescription>
         </ShadcnCardHeader>
         <ShadcnCardContent>
-          {tasks.isPending ? (
-            <PageLoading />
-          ) : tasks.isError ? (
+          {tasks.isError ? (
             <InlineError error={tasks.error} />
           ) : tasks.data.items.length === 0 ? (
             <EmptyState icon={<ListChecks />} title="Nothing here yet">
@@ -4266,6 +4776,28 @@ function MailSyncButton() {
   );
 }
 
+function MailComposeButton() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const composing = searchParams.get("compose") === "1";
+
+  return (
+    <ShadcnButton
+      aria-pressed={composing}
+      onClick={() =>
+        setSearchParams((current) => {
+          const next = new URLSearchParams(current);
+          if (composing) next.delete("compose");
+          else next.set("compose", "1");
+          return next;
+        })
+      }
+    >
+      <Plus aria-hidden="true" data-icon="inline-start" />
+      Compose
+    </ShadcnButton>
+  );
+}
+
 function ActivityPage() {
   const activity = useQuery({ queryFn: () => api.listActivity(100), queryKey: ["activity"] });
   return (
@@ -4609,7 +5141,9 @@ function ConnectorsSettings() {
   const [showICloud, setShowICloud] = useState(false);
   const googleConnect = useMutation({
     mutationFn: async ({ accountId }: { accountId?: string }) => {
-      const url = await api.getGoogleAuthorizationUrl(accountId);
+      const url = await api.getGoogleAuthorizationUrl({
+        ...(accountId ? { accountId } : {}),
+      });
       if (isTauri()) {
         const { openUrl } = await import("@tauri-apps/plugin-opener");
         await openUrl(url);
@@ -6530,12 +7064,7 @@ function InvitationsSettings() {
             }}
           >
             <ShadcnFieldGroup className="form-grid">
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="invite-email">
-                  Friend’s email (optional)
-                </ShadcnFieldLabel>
-                <ShadcnInput id="invite-email" name="email" type="email" />
-              </ShadcnField>
+              <EmailField id="invite-email" label="Friend’s email (optional)" name="email" />
               <ShadcnField>
                 <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
                 <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">
@@ -7961,23 +8490,6 @@ function humanizeAction(action: string) {
 }
 
 const calendarWeekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-function calendarPeriodDays(
-  view: CalendarView,
-  anchor: LocalDate,
-  includeWeekends: boolean,
-): LocalDate[] {
-  if (view === "day") return [anchor];
-  const weekStart = startOfLocalWeek(anchor);
-  if (view === "week") {
-    return Array.from({ length: includeWeekends ? 7 : 5 }, (_, index) =>
-      addLocalDays(weekStart, includeWeekends ? index : index + 1),
-    );
-  }
-  const monthStart = { day: 1, month: anchor.month, year: anchor.year };
-  const gridStart = startOfLocalWeek(monthStart);
-  return Array.from({ length: 42 }, (_, index) => addLocalDays(gridStart, index));
-}
 
 function formatLocalDate(date: LocalDate, options: Intl.DateTimeFormatOptions): string {
   return new Intl.DateTimeFormat("en", { ...options, timeZone: "UTC" }).format(

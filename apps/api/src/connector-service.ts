@@ -25,6 +25,7 @@ import type {
   CalendarProvider,
   ConnectICloudInput,
   CreateEventInput,
+  StartGoogleAuthorizationInput,
   UpdateEventInput,
 } from "@personal-os/domain";
 import { and, asc, eq, gt, isNull, lt, ne, notInArray, or } from "drizzle-orm";
@@ -700,8 +701,11 @@ export function createConnectorService({
       let googleCredentials = await google.exchangeCode(code);
       const profileResult = await google.getProfile(googleCredentials);
       googleCredentials = profileResult.credentials;
-      if (oauthState.targetAccountId) {
-        const target = await getAccount(oauthState.userId, oauthState.targetAccountId);
+      const requestedServices = oauthState.requestedServices ?? ["calendar", "mail"];
+      const target = oauthState.targetAccountId
+        ? await getAccount(oauthState.userId, oauthState.targetAccountId)
+        : null;
+      if (target) {
         if (
           target.provider !== "google" ||
           (target.providerAccountId && target.providerAccountId !== profileResult.value.id)
@@ -709,15 +713,34 @@ export function createConnectorService({
           throw new AppError("invalid_request", "Authorize the same Google account you selected.");
         }
       }
-      const calendarResult = await google.listCalendars(googleCredentials);
-      googleCredentials = calendarResult.credentials;
-      const mailEnabled = hasGoogleMailScope(googleCredentials);
+      const [matchedAccount] = target
+        ? [target]
+        : await db
+            .select()
+            .from(calendarAccounts)
+            .where(
+              and(
+                eq(calendarAccounts.userId, oauthState.userId),
+                eq(calendarAccounts.provider, "google"),
+                eq(calendarAccounts.providerAccountId, profileResult.value.id),
+              ),
+            )
+            .limit(1);
+      const calendarResult = requestedServices.includes("calendar")
+        ? await google.listCalendars(googleCredentials)
+        : null;
+      if (calendarResult) googleCredentials = calendarResult.credentials;
+      const calendarEnabled =
+        matchedAccount?.calendarEnabled === true || requestedServices.includes("calendar");
+      const mailEnabled =
+        matchedAccount?.mailEnabled === true ||
+        (requestedServices.includes("mail") && hasGoogleMailScope(googleCredentials));
       const account = requireDatabaseRecord(
         (
           await db
             .insert(calendarAccounts)
             .values({
-              calendarEnabled: true,
+              calendarEnabled,
               avatarUrl: profileResult.value.pictureUrl,
               email: profileResult.value.email,
               encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
@@ -729,7 +752,7 @@ export function createConnectorService({
             })
             .onConflictDoUpdate({
               set: {
-                calendarEnabled: true,
+                calendarEnabled,
                 avatarUrl: profileResult.value.pictureUrl,
                 email: profileResult.value.email,
                 encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
@@ -749,14 +772,22 @@ export function createConnectorService({
         )[0],
         "The Google account could not be saved.",
       );
-      await saveCalendars(account, calendarResult.value, "google");
+      if (calendarResult) await saveCalendars(account, calendarResult.value, "google");
       try {
         await syncAccount(oauthState.userId, account.id);
       } catch {
         // The account and credentials are already saved, while syncAccount records
         // the provider error for the settings UI and a later manual retry.
       }
-      return { accountId: account.id, email: account.email };
+      return {
+        accountId: account.id,
+        email: account.email,
+        returnPath:
+          oauthState.returnPath === "/setup" ||
+          oauthState.returnPath === "/settings?section=connections"
+            ? oauthState.returnPath
+            : "/settings?section=connections",
+      };
     },
 
     async connectICloud(userId: string, input: ConnectICloudInput) {
@@ -858,15 +889,21 @@ export function createConnectorService({
       }));
     },
 
-    async startGoogleAuthorization(userId: string, accountId?: string): Promise<string> {
-      const target = accountId ? await getAccount(userId, accountId) : null;
+    async startGoogleAuthorization(
+      userId: string,
+      input: StartGoogleAuthorizationInput = {
+        returnTo: "/settings?section=connections",
+        services: ["calendar", "mail"],
+      },
+    ): Promise<string> {
+      const target = input.accountId ? await getAccount(userId, input.accountId) : null;
       if (target && target.provider !== "google") {
         throw new AppError("invalid_request", "Only Google accounts use Google authorization.");
       }
       const state = generateToken("oauth");
       let url: string;
       try {
-        url = google.authorizationUrl(state, target?.email ?? undefined);
+        url = google.authorizationUrl(state, target?.email ?? undefined, input.services);
       } catch (error) {
         if (error instanceof ConnectorError) {
           throw new AppError("service_unavailable", error.message);
@@ -876,6 +913,8 @@ export function createConnectorService({
       await db.insert(oauthStates).values({
         expiresAt: new Date(now().getTime() + GOOGLE_OAUTH_STATE_TTL_MS),
         provider: "google",
+        requestedServices: input.services,
+        returnPath: input.returnTo,
         targetAccountId: target?.id,
         tokenHash: hashToken(state),
         userId,

@@ -257,10 +257,15 @@ describe.sequential("connector service", () => {
         ],
       },
     });
-    const url = await service.startGoogleAuthorization(userId, account.id);
+    const url = await service.startGoogleAuthorization(userId, {
+      accountId: account.id,
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
     expect(google.authorizationUrl).toHaveBeenLastCalledWith(
       expect.stringMatching(/^oauth_/),
       account.email,
+      ["calendar", "mail"],
     );
     await service.completeGoogleAuthorization(
       String(new URL(url).searchParams.get("state")),
@@ -289,13 +294,21 @@ describe.sequential("connector service", () => {
       value: [],
     });
     vi.mocked(syncMail).mockRejectedValueOnce(new Error("Mailbox bootstrap unavailable"));
-    const degradedUrl = await service.startGoogleAuthorization(userId, account.id);
+    const degradedUrl = await service.startGoogleAuthorization(userId, {
+      accountId: account.id,
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
     await expect(
       service.completeGoogleAuthorization(
         String(new URL(degradedUrl).searchParams.get("state")),
         "degraded-mail-code",
       ),
-    ).resolves.toEqual({ accountId: account.id, email: "person@example.com" });
+    ).resolves.toEqual({
+      accountId: account.id,
+      email: "person@example.com",
+      returnPath: "/settings?section=connections",
+    });
     expect(
       (await service.listAccounts(userId)).find((item) => item.id === account.id),
     ).toMatchObject({
@@ -309,7 +322,11 @@ describe.sequential("connector service", () => {
       credentials,
       value: { email: "wrong@example.com", id: "wrong-account", name: null },
     });
-    const mismatchUrl = await service.startGoogleAuthorization(userId, account.id);
+    const mismatchUrl = await service.startGoogleAuthorization(userId, {
+      accountId: account.id,
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
     await expect(
       service.completeGoogleAuthorization(
         String(new URL(mismatchUrl).searchParams.get("state")),
@@ -523,7 +540,11 @@ describe.sequential("connector service", () => {
         .where(eq(mailThreads.accountId, connected.accountId)),
     ).toEqual([expect.objectContaining({ subject: "iCloud mail" })]);
     await expect(
-      service.startGoogleAuthorization(userId, connected.accountId),
+      service.startGoogleAuthorization(userId, {
+        accountId: connected.accountId,
+        returnTo: "/settings?section=connections",
+        services: ["calendar", "mail"],
+      }),
     ).rejects.toMatchObject({
       code: "invalid_request",
     });
@@ -552,6 +573,7 @@ describe.sequential("connector service", () => {
     expect(state).toMatch(/^oauth_/);
     const connected = await service.completeGoogleAuthorization(String(state), "code-1");
     expect(connected.email).toBe("person@example.com");
+    expect(connected.returnPath).toBe("/settings?section=connections");
     expect(google.exchangeCode).toHaveBeenCalledWith("code-1");
     await expect(
       service.completeGoogleAuthorization(String(state), "code-again"),

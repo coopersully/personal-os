@@ -22,6 +22,8 @@
     "env:start": "bash ./.codex/scripts/environment.sh start",
     "env:status": "bash ./.codex/scripts/environment.sh status",
     "env:stop": "bash ./.codex/scripts/environment.sh stop",
+    "fixtures:list": "tsx scripts/qa-fixtures.ts list",
+    "fixtures:load": "bash ./.codex/scripts/environment.sh fixtures",
     "format": "biome format --write .",
     "lint": "biome check . && node scripts/check-frontend-theme-contract.mjs && node scripts/check-theme-token-contract.mjs",
     "test": "vitest run",

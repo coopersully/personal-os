@@ -24,6 +24,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/health/live": { get: { responses: { 200: { description: "Process is alive" } } } },
       "/health/ready": { get: { responses: { 200: { description: "Dependencies are ready" } } } },
       "/v1/auth/register": { post: { responses: { 201: { description: "Account created" } } } },
+      "/v1/auth/invitations/validate": {
+        post: { responses: { 200: { description: "Invitation validity checked" } } },
+      },
       "/v1/auth/login": { post: { responses: { 200: { description: "Session created" } } } },
       "/v1/auth/recovery": {
         post: { responses: { 204: { description: "Password recovery requested" } } },
@@ -43,6 +46,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/me": {
         get: { security, responses: { 200: { description: "Current user" } } },
         patch: { security, responses: { 200: { description: "Current user updated" } } },
+      },
+      "/v1/setup": {
+        patch: { security, responses: { 200: { description: "Account setup progress saved" } } },
       },
       "/v1/invitations": {
         get: { security, responses: { 200: { description: "Workspace invitations" } } },

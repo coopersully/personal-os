@@ -28,7 +28,6 @@ import {
   Download,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { usePlaidLink } from "react-plaid-link";
 import { Link, useLocation } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
@@ -88,9 +87,11 @@ import {
 } from "@/components/ui/table";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
+import { PlaidConnectButton } from "./plaid-connect.js";
 
 export function FinancesPage() {
   const location = useLocation();
@@ -820,7 +821,7 @@ export function FinancesPage() {
                   >
                     Track account
                   </ShadcnButton>
-                  <PlaidConnect onConnected={refresh} />
+                  <PlaidConnectButton onConnected={refresh} />
                 </div>
               </ShadcnCardAction>
             </ShadcnCardHeader>
@@ -2765,44 +2766,6 @@ function FinanceTextField({
   );
 }
 
-function PlaidConnect({ onConnected }: { onConnected: () => Promise<unknown> }) {
-  const [token, setToken] = useState<string | null>(null);
-  const status = useQuery({ queryFn: api.getPlaidStatus, queryKey: ["plaid-status"] });
-  const exchange = useMutation({
-    mutationFn: (publicToken: string) => api.exchangePlaidToken({ institution: null, publicToken }),
-    onSuccess: onConnected,
-  });
-  const { open, ready } = usePlaidLink({
-    onSuccess: (publicToken) => exchange.mutate(publicToken),
-    token,
-  });
-  useEffect(() => {
-    if (token && ready) open();
-  }, [open, ready, token]);
-  if (status.isPending) {
-    return (
-      <ShadcnButton disabled size="sm" variant="outline">
-        Checking Plaid
-      </ShadcnButton>
-    );
-  }
-  if (status.isError || !status.data.available) {
-    return (
-      <ShadcnButton disabled size="sm" variant="outline">
-        Plaid needs keys
-      </ShadcnButton>
-    );
-  }
-  return (
-    <ShadcnButton
-      disabled={exchange.isPending}
-      onClick={() => api.getPlaidLinkToken().then(setToken)}
-      size="sm"
-    >
-      Connect bank
-    </ShadcnButton>
-  );
-}
 function downloadFinanceCsv(name: string, rows: Array<Record<string, unknown>>) {
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   const csvCell = (value: unknown) => {
@@ -2883,27 +2846,5 @@ function transactionAmountTone(direction: FinanceTransaction["direction"]) {
 }
 
 function FinancePageSkeleton() {
-  return (
-    <section
-      aria-busy="true"
-      aria-label="Loading finances"
-      className="wide-page flex w-full max-w-6xl flex-col gap-6 pb-8"
-    >
-      <div className="space-y-3">
-        <div className="h-3 w-36 animate-pulse rounded bg-muted" />
-        <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-full max-w-xl animate-pulse rounded bg-muted" />
-      </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        {["spend", "accounts", "review"].map((name) => (
-          <div className="h-24 animate-pulse rounded-xl border bg-muted/40" key={name} />
-        ))}
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {["primary", "secondary"].map((name) => (
-          <div className="h-40 animate-pulse rounded-xl border bg-muted/40" key={name} />
-        ))}
-      </div>
-    </section>
-  );
+  return <WorkspaceSkeleton kind="finances" />;
 }

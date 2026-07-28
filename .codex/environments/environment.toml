@@ -36,6 +36,11 @@ icon = "test"
 command = "bash ./.codex/scripts/environment.sh test"
 
 [[actions]]
+name = "Load QA Fixtures"
+icon = "run"
+command = "bash ./.codex/scripts/environment.sh fixtures"
+
+[[actions]]
 name = "E2E"
 icon = "test"
 command = "bash ./.codex/scripts/environment.sh e2e"

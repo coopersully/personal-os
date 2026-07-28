@@ -25,6 +25,14 @@ const user: User = {
   accentColor: "#c7d23c",
   emailVerified: true,
   id,
+  setup: {
+    completedAt: now,
+    currentStep: "ready",
+    dismissedAt: null,
+    selectedWorkspaces: ["calendar", "tasks", "mail", "finances"],
+    startedAt: now,
+    status: "complete",
+  },
   displayName: "Test",
   email: "test@example.com",
   theme: "system",
@@ -233,6 +241,7 @@ function apiFetch() {
     if (method === "DELETE" && url.pathname.includes("/blocks/")) return json({ event });
     if (method === "DELETE" || url.pathname === "/v1/auth/logout")
       return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/auth/invitations/validate") return json({ valid: true });
     if (url.pathname === "/v1/auth/login" || url.pathname === "/v1/auth/register")
       return json(
         { sessionToken: "sess_new", user },
@@ -245,6 +254,17 @@ function apiFetch() {
       url.pathname === "/v1/auth/email-verification"
     )
       return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/setup" && method === "PATCH")
+      return json({
+        user: {
+          ...user,
+          setup: {
+            ...user.setup,
+            ...JSON.parse(String(init?.body)),
+            status: "in_progress",
+          },
+        },
+      });
     if (url.pathname === "/v1/me" && method === "PATCH")
       return json({ user: { ...user, ...JSON.parse(String(init?.body)) } });
     if (url.pathname === "/v1/me") return json({ user });
@@ -912,9 +932,13 @@ describe("ilo API client", () => {
     await expect(api.runAutomation(id, true)).resolves.toEqual(automationRun);
     await expect(api.listConnectors()).resolves.toHaveLength(1);
     await expect(api.getGoogleAuthorizationUrl()).resolves.toContain("accounts.google.com");
-    await expect(api.getGoogleAuthorizationUrl(accountId)).resolves.toContain(
-      "accounts.google.com",
-    );
+    await expect(
+      api.getGoogleAuthorizationUrl({
+        accountId,
+        returnTo: "/setup",
+        services: ["mail"],
+      }),
+    ).resolves.toContain("accounts.google.com");
     await expect(api.getXBookmarkAuthorizationUrl()).resolves.toContain("x.com");
     await expect(api.getXBookmarkAccount()).resolves.toMatchObject({ username: "test" });
     await expect(api.listXBookmarkFolders()).resolves.toMatchObject([{ remoteFolderId: "folder" }]);
@@ -1043,6 +1067,7 @@ describe("ilo API client", () => {
     );
     await api.logout();
     expect(onSessionToken).toHaveBeenLastCalledWith(null);
+    await expect(api.validateInvitation({ inviteCode: "ABCD2345" })).resolves.toBe(true);
     await expect(
       api.register({
         displayName: "Test",
@@ -1069,6 +1094,15 @@ describe("ilo API client", () => {
     );
     await expect(api.updateUser({ theme: "dark" })).resolves.toMatchObject({
       theme: "dark",
+    });
+    await expect(
+      api.updateAccountSetup({
+        action: "progress",
+        currentStep: "google",
+        selectedWorkspaces: ["calendar", "mail"],
+      }),
+    ).resolves.toMatchObject({
+      setup: { currentStep: "google", status: "in_progress" },
     });
   });
 

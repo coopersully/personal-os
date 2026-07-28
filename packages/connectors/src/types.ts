@@ -173,8 +173,14 @@ export type SendRemoteMailInput = {
   to: MailAddress[];
 };
 
+export type GoogleAuthorizationService = "calendar" | "mail";
+
 export type GoogleConnector = {
-  authorizationUrl: (state: string, loginHint?: string) => string;
+  authorizationUrl: (
+    state: string,
+    loginHint?: string,
+    services?: GoogleAuthorizationService[],
+  ) => string;
   createEvent: (
     credentials: GoogleCredentials,
     remoteCalendarId: string,

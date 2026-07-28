@@ -9,17 +9,26 @@ import type {
 import {
   automationRoutines,
   automationRuns,
+  calendarAccounts,
+  calendarEvents,
   createDatabaseClient,
   type DatabaseClient,
+  financeTransactions,
+  mailThreads,
   migrateDatabase,
+  reminders,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
 import type { EmailMessage } from "./email-delivery.js";
+import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
+import { verifyPassword } from "./security.js";
+
+const invalidLowercasePassword = ["alllowercase", "123", "!"].join("");
 
 type RequestOptions = {
   auth?: "agent" | "none" | "session";
@@ -214,8 +223,17 @@ describe.sequential("ilo API", () => {
         headers: { "content-type": "application/json" },
         method: "POST",
       });
+    const validateInvitation = async (inviteCode: string) => {
+      const response = await betaApp.request("/v1/auth/invitations/validate", {
+        body: JSON.stringify({ inviteCode }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      return (await response.json()).valid as boolean;
+    };
 
     expect((await signUp("beta-friend@example.com")).status).toBe(403);
+    expect(await validateInvitation("BAD12345")).toBe(false);
     const ownerRegistration = await signUp("beta-owner@example.com");
     expect(ownerRegistration.status).toBe(201);
     const ownerSession = (await ownerRegistration.json()).sessionToken as string;
@@ -226,7 +244,10 @@ describe.sequential("ilo API", () => {
     });
     expect(invitationResponse.status).toBe(201);
     const invitation = (await invitationResponse.json()).invitation as { code: string };
+    expect(invitation.code).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+    expect(await validateInvitation(invitation.code)).toBe(true);
     expect((await signUp("beta-friend@example.com", invitation.code)).status).toBe(201);
+    expect(await validateInvitation(invitation.code)).toBe(false);
     expect((await signUp("another-friend@example.com", invitation.code)).status).toBe(403);
 
     const recoveryApp = createApp({
@@ -269,6 +290,85 @@ describe.sequential("ilo API", () => {
     expect(limitedRecovery.headers.get("retry-after")).toBe("300");
   });
 
+  it("loads repeatable QA personas without touching ordinary accounts", async () => {
+    const fixtureNow = new Date("2026-07-28T14:00:00.000Z");
+    await database.db.insert(users).values({
+      displayName: "Unrelated account",
+      email: "qa-unrelated@example.com",
+      passwordHash: "not-a-fixture",
+      planningTimezone: "UTC",
+    });
+    await expect(loadQaFixtures(database.db, { now: fixtureNow })).resolves.toMatchObject({
+      accountCount: qaFixtureAccounts.length,
+    });
+    const fixtureEmails = qaFixtureAccounts.map((account) => account.email);
+    const fixtureUsers = await database.db
+      .select()
+      .from(users)
+      .where(inArray(users.email, fixtureEmails));
+    expect(fixtureUsers).toHaveLength(qaFixtureAccounts.length);
+    const demo = fixtureUsers.find((record) => record.email === "demo+full@ilo.test");
+    const onboarding = fixtureUsers.find((record) => record.email === "qa+onboarding-new@ilo.test");
+    const resumed = fixtureUsers.find((record) => record.email === "qa+onboarding-google@ilo.test");
+    const apple = fixtureUsers.find((record) => record.email === "qa+onboarding-apple@ilo.test");
+    const finances = fixtureUsers.find(
+      (record) => record.email === "qa+onboarding-finances@ilo.test",
+    );
+    const ready = fixtureUsers.find((record) => record.email === "qa+onboarding-ready@ilo.test");
+    const empty = fixtureUsers.find((record) => record.email === "qa+empty@ilo.test");
+    const degraded = fixtureUsers.find((record) => record.email === "qa+recovery@ilo.test");
+    expect(demo).toBeDefined();
+    expect(onboarding).toMatchObject({ emailVerifiedAt: null, setupStatus: "not_started" });
+    expect(resumed).toMatchObject({ setupCurrentStep: "google", setupStatus: "in_progress" });
+    expect(apple).toMatchObject({ setupCurrentStep: "icloud", setupStatus: "in_progress" });
+    expect(finances).toMatchObject({
+      setupCurrentStep: "finances",
+      setupStatus: "in_progress",
+    });
+    expect(ready).toMatchObject({ setupCurrentStep: "ready", setupStatus: "in_progress" });
+    expect(empty).toMatchObject({ setupStatus: "complete" });
+    expect(degraded).toBeDefined();
+    expect(await verifyPassword(DEMO_QA_PASSWORD, demo?.passwordHash ?? "")).toBe(true);
+
+    const [events, messages, transactions, emptyTasks, degradedAccounts] = await Promise.all([
+      database.db
+        .select()
+        .from(calendarEvents)
+        .where(eq(calendarEvents.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(mailThreads)
+        .where(eq(mailThreads.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(reminders)
+        .where(eq(reminders.userId, empty?.id ?? "")),
+      database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
+    ]);
+    expect(events).toHaveLength(7);
+    expect(messages).toHaveLength(5);
+    expect(transactions).toHaveLength(9);
+    expect(emptyTasks).toEqual([]);
+    expect(degradedAccounts).toContainEqual(
+      expect.objectContaining({ provider: "google", syncStatus: "error" }),
+    );
+
+    await loadQaFixtures(database.db, { now: new Date("2026-07-29T14:00:00.000Z") });
+    expect(
+      await database.db.select().from(users).where(inArray(users.email, fixtureEmails)),
+    ).toHaveLength(qaFixtureAccounts.length);
+    expect(
+      await database.db.select().from(users).where(eq(users.email, "qa-unrelated@example.com")),
+    ).toHaveLength(1);
+  });
+
   it("serves health, registration, sessions, tokens, reminders, calendars, events, and audit", async () => {
     await app.dispatchDueAutomations();
     expect(await payload(await request("/health/live", { auth: "none" }))).toEqual({
@@ -302,6 +402,50 @@ describe.sequential("ilo API", () => {
     expect(registrationBody.user).toMatchObject({
       email: "test@example.com",
       displayName: "Test User",
+      setup: {
+        completedAt: null,
+        currentStep: "welcome",
+        dismissedAt: null,
+        selectedWorkspaces: ["calendar", "tasks", "mail", "finances"],
+        startedAt: null,
+        status: "not_started",
+      },
+    });
+    expect((await request("/v1/setup", { auth: "none", method: "PATCH" })).status).toBe(401);
+    expect(
+      (
+        await payload(
+          await request("/v1/setup", {
+            body: {
+              action: "progress",
+              currentStep: "google",
+              selectedWorkspaces: ["calendar", "mail"],
+            },
+            method: "PATCH",
+          }),
+        )
+      ).user.setup,
+    ).toEqual({
+      completedAt: null,
+      currentStep: "google",
+      dismissedAt: null,
+      selectedWorkspaces: ["calendar", "mail"],
+      startedAt: "2026-07-13T12:00:00.000Z",
+      status: "in_progress",
+    });
+    expect(
+      (
+        await payload(
+          await request("/v1/setup", {
+            body: { action: "dismiss" },
+            method: "PATCH",
+          }),
+        )
+      ).user.setup,
+    ).toMatchObject({
+      currentStep: "google",
+      dismissedAt: "2026-07-13T12:00:00.000Z",
+      status: "dismissed",
     });
     expect((await request("/v1/weather")).status).toBe(400);
     weatherFetch.mockResolvedValueOnce(
@@ -2175,10 +2319,13 @@ describe.sequential("ilo API", () => {
       .update(users)
       .set({ emailVerifiedAt: new Date("2026-07-13T12:00:00.000Z") })
       .where(eq(users.email, "production@example.com"));
-    const googleStart = await productionApp.request("/v1/connectors/google/start", {
-      headers: { authorization: `Session ${productionSession}` },
-      method: "POST",
-    });
+    const googleStart = await productionApp.request(
+      "/v1/connectors/google/start?returnTo=%2Fsetup&services=calendar",
+      {
+        headers: { authorization: `Session ${productionSession}` },
+        method: "POST",
+      },
+    );
     const googleUrl = (await googleStart.json()).url;
     expect(googleUrl).toContain("accounts.example.com");
     const callback = await productionApp.request(
@@ -2188,7 +2335,7 @@ describe.sequential("ilo API", () => {
     );
     expect(callback.status).toBe(302);
     expect(callback.headers.get("location")).toBe(
-      "https://app.production.example.com/settings/connectors?google=connected",
+      "https://app.production.example.com/setup?google=connected",
     );
     const connectedAccounts = await productionApp.request("/v1/connectors", {
       headers: { authorization: `Session ${productionSession}` },
@@ -2231,6 +2378,19 @@ describe.sequential("ilo API", () => {
   }, 120_000);
 
   it("verifies email addresses and resets passwords through one-time email links", async () => {
+    expect(
+      (
+        await request("/v1/auth/register", {
+          auth: "none",
+          body: {
+            displayName: "Weak Password",
+            email: "weak-password@example.com",
+            password: invalidLowercasePassword,
+            planningTimezone: "UTC",
+          },
+        })
+      ).status,
+    ).toBe(400);
     const registration = await request("/v1/auth/register", {
       auth: "none",
       body: {
@@ -2282,7 +2442,15 @@ describe.sequential("ilo API", () => {
       (
         await request("/v1/auth/password-reset", {
           auth: "none",
-          body: { password: "A different password!", token: resetToken },
+          body: { password: invalidLowercasePassword, token: resetToken },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request("/v1/auth/password-reset", {
+          auth: "none",
+          body: { password: "DifferentPassword123!", token: resetToken },
         })
       ).status,
     ).toBe(204);
@@ -2298,7 +2466,7 @@ describe.sequential("ilo API", () => {
       (
         await request("/v1/auth/login", {
           auth: "none",
-          body: { email: "recovery@example.com", password: "A different password!" },
+          body: { email: "recovery@example.com", password: "DifferentPassword123!" },
         })
       ).status,
     ).toBe(200);

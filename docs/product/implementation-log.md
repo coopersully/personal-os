@@ -2,6 +2,19 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-07-27 — Immediate, resumable account setup
+
+- New accounts enter a persistent guided setup immediately after registration,
+  while established accounts remain uninterrupted.
+- Added workspace-driven progressive disclosure for Google, Apple, and Finance
+  connections, with a durable Exit setup action available throughout.
+- Reused the production iCloud and Plaid connection paths and limited Google
+  OAuth scopes to the Calendar and Mail services selected by the person.
+- Preserved setup progress and the safe return destination through provider
+  OAuth, then rendered the real connected account data on return.
+- Documented setup as progressive configuration rather than a product-tour
+  carousel in the design system and page contract.
+
 ## 2026-07-20 — Finance wealth and budget grounding
 
 - Added a typed wealth summary to the API, client, and MCP: net worth splits cash, investments, debt, and other assets; annual income excludes transfers.

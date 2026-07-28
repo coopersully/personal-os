@@ -15,10 +15,13 @@ import type {
   RegisterInput,
   RequestPasswordResetInput,
   ResetPasswordInput,
+  StartGoogleAuthorizationInput,
+  UpdateAccountSetupInput,
   UpdateAutomationRoutineInput,
   UpdatePinterestWallpaperSettingsInput,
   UpdateUserInput,
   User,
+  ValidateInvitationInput,
   WeatherCoordinates,
   WeatherLocationOption,
   WeatherSnapshot,
@@ -251,11 +254,19 @@ export function createApiClient(options: ClientOptions) {
       await request<void>("/v1/x-bookmarks/account", { method: "DELETE" });
     },
 
-    async getGoogleAuthorizationUrl(accountId?: string): Promise<string> {
-      const query = accountId ? `?accountId=${encodeURIComponent(accountId)}` : "";
-      const response = await request<{ url: string }>(`/v1/connectors/google/start${query}`, {
-        method: "POST",
-      });
+    async getGoogleAuthorizationUrl(
+      input: Partial<StartGoogleAuthorizationInput> = {},
+    ): Promise<string> {
+      const query = new URLSearchParams();
+      if (input.accountId) query.set("accountId", input.accountId);
+      if (input.returnTo) query.set("returnTo", input.returnTo);
+      if (input.services) query.set("services", input.services.join(","));
+      const response = await request<{ url: string }>(
+        `/v1/connectors/google/start${query.size ? `?${query}` : ""}`,
+        {
+          method: "POST",
+        },
+      );
       return response.url;
     },
 
@@ -397,6 +408,14 @@ export function createApiClient(options: ClientOptions) {
       return response.user;
     },
 
+    async validateInvitation(input: ValidateInvitationInput): Promise<boolean> {
+      const response = await request<{ valid: boolean }>("/v1/auth/invitations/validate", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return response.valid;
+    },
+
     async requestPasswordReset(input: RequestPasswordResetInput): Promise<void> {
       await request<void>("/v1/auth/recovery", {
         body: JSON.stringify(input),
@@ -462,6 +481,14 @@ export function createApiClient(options: ClientOptions) {
 
     async updateUser(input: UpdateUserInput): Promise<User> {
       const response = await request<{ user: User }>("/v1/me", {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
+      return response.user;
+    },
+
+    async updateAccountSetup(input: UpdateAccountSetupInput): Promise<User> {
+      const response = await request<{ user: User }>("/v1/setup", {
         body: JSON.stringify(input),
         method: "PATCH",
       });

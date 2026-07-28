@@ -5,7 +5,7 @@ const desktopSessionKey = "personal-os.desktop-session";
 
 export function apiBaseUrl(configuredBaseUrl: string | undefined, isDesktop: boolean) {
   if (configuredBaseUrl) return configuredBaseUrl;
-  return isDesktop ? "http://localhost:8787" : window.location.origin;
+  return isDesktop ? "http://localhost:8788" : window.location.origin;
 }
 
 const baseUrl = apiBaseUrl(import.meta.env.VITE_API_BASE_URL, desktop);

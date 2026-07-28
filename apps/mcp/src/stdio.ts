@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createApiClient } from "@personal-os/api-client";
 import { createPersonalOsMcpServer } from "./server.js";
 
-const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8787";
+const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8788";
 const token = process.env.PERSONAL_OS_TOKEN;
 
 if (!token) {

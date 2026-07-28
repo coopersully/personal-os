@@ -1,6 +1,8 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { loadQaFixtures } from "../apps/api/src/qa-fixtures.js";
+import { createDatabaseClient } from "../packages/database/src/index.js";
 
 const root = resolve(import.meta.dirname, "..");
 const apiUrl = "http://127.0.0.1:8797";
@@ -73,6 +75,12 @@ try {
     REGISTRATION_MODE: "open",
   });
   await waitFor(`${apiUrl}/health/ready`);
+  const fixtureDatabase = createDatabaseClient(postgres.getConnectionUri());
+  try {
+    await loadQaFixtures(fixtureDatabase.db);
+  } finally {
+    await fixtureDatabase.close();
+  }
   web = start(
     "pnpm",
     [

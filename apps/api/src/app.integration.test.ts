@@ -559,22 +559,19 @@ describe.sequential("ilo API", () => {
         expect.objectContaining({ displayName: "Trader Joe's Market", isUserConfirmed: true }),
       ]),
     );
-    expect(
-      (
-        await request("/v1/finances/transactions", {
-          body: {
-            accountId: financeAccount.id,
-            amount: 6,
-            category: null,
-            categoryConfidence: null,
-            date: "2026-07-13",
-            direction: "expense",
-            merchant: "TRADER JOES EXPRESS",
-            notes: null,
-          },
-        })
-      ).status,
-    ).toBe(201);
+    const variantResponse = await request("/v1/finances/transactions", {
+      body: {
+        accountId: financeAccount.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "TRADER JOES EXPRESS",
+        notes: null,
+      },
+    });
+    expect(variantResponse.status).toBe(201);
     const merchantsBeforeMerge = (await payload(await request("/v1/finances/merchants"))).merchants;
     const sourceMerchant = merchantsBeforeMerge.find(
       (item: { id: string }) => item.id !== merchant.id,
@@ -583,7 +580,11 @@ describe.sequential("ilo API", () => {
     expect(
       (
         await request("/v1/finances/merchants/merge", {
-          body: { sourceMerchantId: sourceMerchant.id, targetMerchantId: merchant.id },
+          body: {
+            rationale: "Confirmed duplicate aliases.",
+            sourceMerchantId: sourceMerchant.id,
+            targetMerchantId: merchant.id,
+          },
           method: "POST",
         })
       ).status,
@@ -596,9 +597,26 @@ describe.sequential("ilo API", () => {
     expect((await payload(await request("/v1/finances/transactions?limit=10"))).items).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: financeTransaction.id })]),
     );
-    expect((await request("/v1/finances/categorizations/propose", { method: "POST" })).status).toBe(
-      200,
+    const reviewCandidateResponse = await request("/v1/finances/transactions", {
+      body: {
+        accountId: financeAccount.id,
+        amount: 4,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "Mystery Agent Review",
+        notes: null,
+      },
+    });
+    expect(reviewCandidateResponse.status).toBe(201);
+    const reviewCandidate = (await payload(reviewCandidateResponse)).transaction;
+    const proposals = (await payload(await request("/v1/finances/categorizations/propose")))
+      .proposals;
+    const proposal = proposals.find(
+      (item: { transaction: { id: string } }) => item.transaction.id === reviewCandidate.id,
     );
+    if (!proposal) throw new Error("Finance categorization proposal was not returned.");
     const applied = await payload(
       await request("/v1/finances/categorizations/apply", {
         body: {
@@ -606,16 +624,38 @@ describe.sequential("ilo API", () => {
             {
               categoryId: shopping.id,
               confidence: 0.9,
+              expectedTransactionUpdatedAt: proposal.transaction.updatedAt,
               learnMerchant: "suggest",
               rationale: "A plausible first-pass match.",
-              transactionId: financeTransaction.id,
+              transactionId: reviewCandidate.id,
             },
           ],
         },
         method: "POST",
       }),
     );
-    expect(applied.results[0]).toMatchObject({ applied: false, threshold: 0.985 });
+    expect(applied.results[0]).toMatchObject({
+      applied: true,
+      status: "applied",
+      threshold: expect.any(Number),
+    });
+    expect(
+      (
+        await request("/v1/finances/transactions", {
+          body: {
+            accountId: financeAccount.id,
+            amount: 3,
+            category: null,
+            categoryConfidence: null,
+            date: "2026-07-13",
+            direction: "transfer",
+            merchant: "Deferred Review",
+            notes: null,
+          },
+        })
+      ).status,
+    ).toBe(201);
+    await app.backfillFinanceLedgerIntegrity();
     const reviews = (await payload(await request("/v1/finances/review"))).reviews;
     expect(reviews).toHaveLength(1);
     expect(

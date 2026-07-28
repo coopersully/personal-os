@@ -61,8 +61,9 @@ provider internals.
   with each capability independently enabled.
 - Unified mailbox, search, conversation list, plain-text reader, drafts/sending, and
   provider-supported thread actions.
-- Versioned domain preference profiles, cross-domain attention items, exact Mail-rule previews, and
-  an installable guided-setup skill for scoped MCP hosts.
+- Versioned domain preference profiles, cross-domain attention items, exact Mail-rule previews,
+  Finance readiness and proposal-first review workflows, and an installable guided-setup skill for
+  scoped MCP hosts.
 - A deployment-aware Agent access handoff with remote MCP OAuth, readable
   consent, skill-install and starter prompts, readiness state, revocation, and
   advanced personal-token fallback.

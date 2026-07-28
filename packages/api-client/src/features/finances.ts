@@ -10,10 +10,13 @@ import type {
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
+  FinanceCategorizationApplyResult,
+  FinanceCategorizationProposal,
   FinanceCategory,
   FinanceCsvImportInput,
   FinanceExport,
   FinanceForecast,
+  FinanceGuidedSetupContext,
   FinanceIncomeStream,
   FinanceLedgerHealth,
   FinanceMerchant,
@@ -41,13 +44,14 @@ export function createFinanceApi(request: FinanceRequest) {
   return {
     async applyFinanceCategorizations(
       input: ApplyFinanceCategorizationsInput,
-    ): Promise<Array<{ applied: boolean; threshold: number; transaction: FinanceTransaction }>> {
-      const response = await request<{
-        results: Array<{ applied: boolean; threshold: number; transaction: FinanceTransaction }>;
-      }>("/v1/finances/categorizations/apply", {
-        body: JSON.stringify(input),
-        method: "POST",
-      });
+    ): Promise<FinanceCategorizationApplyResult[]> {
+      const response = await request<{ results: FinanceCategorizationApplyResult[] }>(
+        "/v1/finances/categorizations/apply",
+        {
+          body: JSON.stringify(input),
+          method: "POST",
+        },
+      );
       return response.results;
     },
     async createFinanceAccount(input: CreateFinanceAccountInput): Promise<FinanceAccount> {
@@ -92,6 +96,12 @@ export function createFinanceApi(request: FinanceRequest) {
     async getFinanceOverview(): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>("/v1/finances");
       return response.overview;
+    },
+    async getFinanceGuidedSetup(): Promise<FinanceGuidedSetupContext> {
+      const response = await request<{ setup: FinanceGuidedSetupContext }>(
+        "/v1/finances/guided-setup",
+      );
+      return response.setup;
     },
     async getFinanceOverviewForMonth(month: string): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>(
@@ -232,23 +242,16 @@ export function createFinanceApi(request: FinanceRequest) {
       );
       return response.merchant;
     },
-    async proposeFinanceCategorizations(query: Partial<FinanceTransactionQuery> = {}) {
+    async proposeFinanceCategorizations(
+      query: Partial<FinanceTransactionQuery> = {},
+    ): Promise<FinanceCategorizationProposal[]> {
       const search = new URLSearchParams();
       for (const [key, value] of Object.entries(query)) {
         if (value !== undefined) search.set(key, String(value));
       }
-      const response = await request<{
-        proposals: Array<{
-          appliesAutomatically: boolean;
-          confidence: number;
-          rationale: string;
-          suggestedCategory: FinanceCategory | null;
-          threshold: number;
-          transaction: FinanceTransaction;
-        }>;
-      }>(`/v1/finances/categorizations/propose${search.size ? `?${search}` : ""}`, {
-        method: "POST",
-      });
+      const response = await request<{ proposals: FinanceCategorizationProposal[] }>(
+        `/v1/finances/categorizations/propose${search.size ? `?${search}` : ""}`,
+      );
       return response.proposals;
     },
     async getPlaidLinkToken(): Promise<string> {

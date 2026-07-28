@@ -24,6 +24,15 @@ function financePrincipal(userId: string): Principal {
   };
 }
 
+function financeAgentPrincipal(userId: string): Principal {
+  return {
+    actorId: crypto.randomUUID(),
+    actorType: "agent",
+    scopes: new Set(["finances:read", "finances:write"]),
+    userId,
+  };
+}
+
 function plaidFetch(): typeof globalThis.fetch {
   let syncCall = 0;
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -203,6 +212,76 @@ describe.sequential("finance service", () => {
       (item) => item.slug === "shopping",
     );
     if (!shopping) throw new Error("Shopping category was not seeded.");
+    const agentContext = {
+      principal: financeAgentPrincipal(userId),
+      requestId: "agent-finance",
+    };
+    await expect(
+      service.applyCategorizations(
+        {
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 1,
+              expectedTransactionUpdatedAt: review.updatedAt,
+              learnMerchant: "always",
+              rationale: "The agent should not create a permanent rule.",
+              transactionId: review.id,
+            },
+          ],
+        },
+        agentContext,
+      ),
+    ).rejects.toThrow("Permanent merchant rules require review");
+    const stale = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 7,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Revision Race",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({
+        notes: "Changed after preview",
+        updatedAt: new Date("2026-07-19T12:01:00.000Z"),
+      })
+      .where(eq(financeTransactions.id, stale.id));
+    await expect(
+      service.applyCategorizations(
+        {
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 1,
+              expectedTransactionUpdatedAt: stale.updatedAt,
+              learnMerchant: "never",
+              rationale: "This decision was prepared from a stale preview.",
+              transactionId: stale.id,
+            },
+          ],
+        },
+        context,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        error: expect.objectContaining({ code: "conflict" }),
+        status: "failed",
+        transaction: null,
+      }),
+    ]);
+    const [staleAfter] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, stale.id));
+    expect(staleAfter).toMatchObject({ category: null, notes: "Changed after preview" });
     for (const amount of [3, 4]) {
       await service.createTransaction(
         {
@@ -236,7 +315,8 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          appliesAutomatically: true,
+          meetsPolicyThreshold: true,
+          policy: "preview",
           confidence: 0.965,
           threshold: 0.96,
           transaction: expect.objectContaining({ id: evidenceCandidate.id }),
@@ -250,16 +330,19 @@ describe.sequential("finance service", () => {
             {
               categoryId: shopping.id,
               confidence: 0.9,
+              expectedTransactionUpdatedAt: review.updatedAt,
               learnMerchant: "suggest",
               rationale: "A plausible first-pass merchant match.",
               transactionId: review.id,
             },
           ],
         },
-        context,
+        agentContext,
       ),
     ).resolves.toEqual([expect.objectContaining({ applied: false, threshold: 0.985 })]);
-    const [reviewCase] = await service.listReviewQueue(userId);
+    const reviewCase = (await service.listReviewQueue(userId)).find(
+      (item) => item.transaction.id === review.id,
+    );
     if (!reviewCase) throw new Error("Low-confidence categorization was not queued for review.");
     await expect(
       service.resolveReview(
@@ -273,6 +356,58 @@ describe.sequential("finance service", () => {
         context,
       ),
     ).resolves.toEqual(expect.objectContaining({ applied: true }));
+    const transferCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 25,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "transfer",
+        merchant: "Account movement",
+        notes: null,
+      },
+      context,
+    );
+    await service.reconcileTransfers(userId);
+    const transferReview = (await service.listReviewQueue(userId)).find(
+      (item) => item.transaction.id === transferCandidate.id,
+    );
+    if (!transferReview) throw new Error("Transfer candidate was not queued for review.");
+    await expect(
+      service.resolveReview(
+        transferReview.id,
+        {
+          action: "not_purchase",
+          learnMerchant: "never",
+          rationale: "An agent may not confirm this transfer.",
+        },
+        agentContext,
+      ),
+    ).rejects.toThrow("ambiguous transfer requires an interactive user session");
+    await expect(
+      service.resolveReview(
+        transferReview.id,
+        {
+          action: "not_purchase",
+          learnMerchant: "never",
+          rationale: "The user confirmed this is movement between owned accounts.",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      applied: true,
+      transaction: expect.objectContaining({
+        category: "Transfers",
+        direction: "transfer",
+        needsReview: false,
+      }),
+    });
+    expect(
+      (await service.listReviewQueue(userId)).some(
+        (item) => item.transaction.id === transferCandidate.id,
+      ),
+    ).toBe(false);
     await service.updateTransaction(
       review.id,
       { category: "Shopping", learnMerchant: true },
@@ -407,7 +542,7 @@ describe.sequential("finance service", () => {
     ).rejects.toThrow("transaction was not found");
     await service.createBudget({ category: "Groceries", limit: 400, month: "2026-07" }, context);
     const overview = await service.listOverview(userId);
-    expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 69.75 });
+    expect(overview).toMatchObject({ reviewCount: 4, spendingThisMonth: 76.75 });
     expect(overview.budgets).toHaveLength(1);
     await expect(service.listOverview(userId, "2026-06")).resolves.toMatchObject({
       budgets: [],

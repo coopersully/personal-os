@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema } from "./common.js";
+import { agentMutationPolicies } from "./feature-contracts.js";
 
 export const financeProviderSchema = z.enum(["plaid", "paypal", "venmo", "zelle", "manual"]);
 export type FinanceProvider = z.infer<typeof financeProviderSchema>;
@@ -10,6 +11,30 @@ export type FinanceAccountKind = z.infer<typeof financeAccountKindSchema>;
 
 const moneySchema = z.number().finite().nonnegative().max(100_000_000);
 const categorySchema = z.string().trim().min(1).max(80);
+
+/**
+ * Stable preference keys used by the Finance guided interview. Unknown
+ * primitive keys remain valid so the shared profile envelope can evolve
+ * without forcing Finance-specific storage.
+ */
+export const financeGuidedPreferencesSchema = z
+  .object({
+    billReviewLeadDays: z.number().int().min(0).max(90).optional(),
+    budgetStyle: z
+      .enum(["category", "envelope", "flexible", "unspecified", "zero_based"])
+      .optional(),
+    largeExpenseAlertAmount: moneySchema.positive().optional(),
+    lowBalanceAlertAmount: moneySchema.optional(),
+    /** Percentage points, not a fraction: 20 means alert at a 20% amount change. */
+    recurringAmountChangePercent: z.number().finite().min(0).max(100).optional(),
+    reviewCadence: z.enum(["daily", "monthly", "on_change", "weekly"]).optional(),
+    reviewConfidenceBelow: z.number().finite().min(0.5).max(1).optional(),
+    reviewPendingTransactions: z.boolean().optional(),
+    termForReviewQueue: z.string().trim().min(1).max(80).optional(),
+    termForSpending: z.string().trim().min(1).max(80).optional(),
+  })
+  .catchall(z.union([z.boolean(), z.number(), z.string(), z.array(z.string().max(500)).max(100)]));
+export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSchema>;
 
 export const financeAccountSchema = z.object({
   balance: z.number().finite().nullable(),
@@ -220,6 +245,7 @@ export type UpdateFinanceMerchantInput = z.infer<typeof updateFinanceMerchantInp
 
 export const mergeFinanceMerchantsInputSchema = z
   .object({
+    rationale: z.string().trim().min(1).max(1_000),
     sourceMerchantId: idSchema,
     targetMerchantId: idSchema,
   })
@@ -259,6 +285,62 @@ export const financeLedgerHealthSchema = z.object({
 });
 export type FinanceLedgerHealth = z.infer<typeof financeLedgerHealthSchema>;
 
+export const financeGuidedSetupWorkflowKeySchema = z.enum([
+  "capture_preferences",
+  "categorization_review",
+  "recurring_review",
+  "alert_review",
+  "monthly_review",
+]);
+export type FinanceGuidedSetupWorkflowKey = z.infer<typeof financeGuidedSetupWorkflowKeySchema>;
+
+export const financeGuidedSetupContextSchema = z.object({
+  accountSources: z.array(financeAccountSchema),
+  alertSummary: z.object({
+    open: z.number().int().nonnegative(),
+    warnings: z.number().int().nonnegative(),
+  }),
+  asOf: isoDateTimeSchema,
+  budgetSummary: z.object({
+    count: z.number().int().nonnegative(),
+    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+    planned: moneySchema,
+  }),
+  cashflowSummary: z.object({
+    financialProfileConfigured: z.boolean(),
+    incomeStreams: z.number().int().nonnegative(),
+    recurringNeedsReview: z.number().int().nonnegative(),
+    recurringObligations: z.number().int().nonnegative(),
+  }),
+  humanOnlyActions: z.array(
+    z.enum([
+      "connect_or_disconnect_source",
+      "import_transactions",
+      "manage_accounts",
+      "manage_budgets",
+      "manage_financial_profile",
+      "refresh_provider_data",
+      "confirm_ambiguous_transfer",
+      "create_merchant_rule",
+    ]),
+  ),
+  ledgerHealth: financeLedgerHealthSchema,
+  reviewSummary: z.object({
+    count: z.number().int().nonnegative(),
+    reasons: z.record(financeReviewCaseSchema.shape.reason, z.number().int().nonnegative()),
+  }),
+  suggestedWorkflows: z.array(
+    z.object({
+      available: z.boolean(),
+      key: financeGuidedSetupWorkflowKeySchema,
+      policy: z.enum(agentMutationPolicies),
+      summary: z.string().min(1).max(500),
+      unavailableReason: z.string().min(1).max(500).nullable(),
+    }),
+  ),
+});
+export type FinanceGuidedSetupContext = z.infer<typeof financeGuidedSetupContextSchema>;
+
 export const financeTransactionQuerySchema = z.object({
   accountId: idSchema.optional(),
   categoryId: idSchema.optional(),
@@ -276,16 +358,59 @@ export type FinanceTransactionQuery = z.infer<typeof financeTransactionQuerySche
 const financeCategorizationDecisionSchema = z.object({
   categoryId: idSchema,
   confidence: z.number().min(0).max(1),
+  expectedTransactionUpdatedAt: isoDateTimeSchema,
   learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
   rationale: z.string().trim().min(1).max(1_000),
   transactionId: idSchema,
 });
 
-export const applyFinanceCategorizationsInputSchema = z.object({
-  decisions: z.array(financeCategorizationDecisionSchema).min(1).max(100),
-});
+export const applyFinanceCategorizationsInputSchema = z
+  .object({
+    decisions: z.array(financeCategorizationDecisionSchema).min(1).max(100),
+  })
+  .superRefine((value, context) => {
+    const ids = new Set<string>();
+    value.decisions.forEach((decision, index) => {
+      if (ids.has(decision.transactionId)) {
+        context.addIssue({
+          code: "custom",
+          message: "Include each transaction only once per categorization batch.",
+          path: ["decisions", index, "transactionId"],
+        });
+      }
+      ids.add(decision.transactionId);
+    });
+  });
 export type ApplyFinanceCategorizationsInput = z.infer<
   typeof applyFinanceCategorizationsInputSchema
+>;
+
+export const financeCategorizationProposalSchema = z.object({
+  confidence: z.number().min(0).max(1),
+  meetsPolicyThreshold: z.boolean(),
+  policy: z.literal("preview"),
+  rationale: z.string().min(1).max(1_000),
+  suggestedCategory: financeCategorySchema.nullable(),
+  threshold: z.number().min(0).max(1),
+  transaction: financeTransactionSchema,
+});
+export type FinanceCategorizationProposal = z.infer<typeof financeCategorizationProposalSchema>;
+
+export const financeCategorizationApplyResultSchema = z.object({
+  applied: z.boolean(),
+  error: z
+    .object({
+      code: z.string().min(1),
+      message: z.string().min(1),
+    })
+    .nullable(),
+  status: z.enum(["applied", "failed", "review_required"]),
+  threshold: z.number().min(0).max(1).nullable(),
+  transaction: financeTransactionSchema.nullable(),
+  transactionId: idSchema,
+});
+export type FinanceCategorizationApplyResult = z.infer<
+  typeof financeCategorizationApplyResultSchema
 >;
 
 export const financeReviewDecisionInputSchema = z.object({

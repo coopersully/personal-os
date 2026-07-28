@@ -220,6 +220,7 @@ const mocks = vi.hoisted(() => ({
   getDailyBrief: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
+  getDomainProfile: vi.fn(),
   getWeather: vi.fn(),
   searchWeatherLocations: vi.fn(),
   getGoogleAuthorizationUrl: vi.fn(),
@@ -253,6 +254,7 @@ const mocks = vi.hoisted(() => ({
   getFinanceOverviewForMonth: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceLedgerHealth: vi.fn(),
+  getFinanceGuidedSetup: vi.fn(),
   getFinanceProfile: vi.fn(),
   listFinanceIncomeStreams: vi.fn(),
   listFinanceRecurringObligations: vi.fn(),
@@ -483,6 +485,60 @@ function defaults() {
     staleAccounts: 0,
     unresolvedReviews: 0,
   });
+  mocks.getFinanceGuidedSetup.mockResolvedValue({
+    accountSources: [],
+    alertSummary: { open: 0, warnings: 0 },
+    asOf: now,
+    budgetSummary: { count: 0, month: "2026-07", planned: 0 },
+    cashflowSummary: {
+      financialProfileConfigured: false,
+      incomeStreams: 0,
+      recurringNeedsReview: 0,
+      recurringObligations: 0,
+    },
+    humanOnlyActions: [
+      "connect_or_disconnect_source",
+      "import_transactions",
+      "manage_accounts",
+      "manage_budgets",
+      "manage_financial_profile",
+      "refresh_provider_data",
+      "confirm_ambiguous_transfer",
+      "create_merchant_rule",
+    ],
+    ledgerHealth: {
+      asOf: now,
+      balanceOnlyAccounts: 0,
+      candidateTransfers: 0,
+      missingProvenance: 0,
+      pendingTransactions: 0,
+      possibleDuplicates: 0,
+      staleAccounts: 0,
+      unresolvedReviews: 0,
+    },
+    reviewSummary: {
+      count: 0,
+      reasons: {
+        ambiguous_merchant: 0,
+        low_confidence: 0,
+        one_time: 0,
+        possible_duplicate: 0,
+        possible_transfer: 0,
+        refund_or_reversal: 0,
+        unknown_merchant: 0,
+      },
+    },
+    suggestedWorkflows: [
+      {
+        available: true,
+        key: "capture_preferences",
+        policy: "approve_each",
+        summary: "Capture durable preferences.",
+        unavailableReason: null,
+      },
+    ],
+  });
+  mocks.getDomainProfile.mockResolvedValue(null);
   mocks.getFinanceProfile.mockResolvedValue(null);
   mocks.listFinanceIncomeStreams.mockResolvedValue([]);
   mocks.listFinanceRecurringObligations.mockResolvedValue([]);
@@ -2458,6 +2514,11 @@ describe("ilo web app", () => {
     ] as const) {
       const view = setup(path);
       expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
+      if (path === "/finances/profile") {
+        expect(await screen.findByText("Agent guidance")).toBeInTheDocument();
+        expect(await screen.findByText("1 available now.", { exact: false })).toBeInTheDocument();
+        expect(screen.getByText("Human-only boundaries")).toBeInTheDocument();
+      }
       view.unmount();
     }
   });

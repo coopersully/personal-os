@@ -5,6 +5,7 @@ import {
   attentionItemQuerySchema,
   createAttentionItemInputSchema,
   featureAccessPolicies,
+  financeGuidedPreferencesSchema,
   updateAttentionItemInputSchema,
   upsertDomainProfileInputSchema,
 } from "@personal-os/domain";
@@ -47,6 +48,7 @@ export function registerAssistantRoutes({
     if (input.domain !== domain) {
       throw new AppError("invalid_request", "The profile domain must match the request path.");
     }
+    if (domain === "finances") financeGuidedPreferencesSchema.parse(input.preferences);
     return context.json({
       profile: await assistant.upsertProfile(input, mutationContext(context)),
     });

@@ -1,4 +1,10 @@
-import { attentionItems, auditEvents, type Database, domainProfiles } from "@personal-os/database";
+import {
+  attentionItems,
+  auditEvents,
+  type Database,
+  domainProfiles,
+  financeAccounts,
+} from "@personal-os/database";
 import {
   type AssistantDomain,
   type AssistantSetupStatus,
@@ -11,7 +17,7 @@ import {
   type UpdateAttentionItemInput,
   type UpsertDomainProfileInput,
 } from "@personal-os/domain";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
@@ -67,6 +73,30 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       input: UpsertDomainProfileInput,
       context: MutationContext,
     ): Promise<DomainProfile> {
+      if (input.domain === "finances" && input.sourceContexts.length > 0) {
+        const sourceIds = [...new Set(input.sourceContexts.map((source) => source.sourceId))];
+        if (sourceIds.length !== input.sourceContexts.length) {
+          throw new AppError(
+            "invalid_request",
+            "Include each Finance account once in source contexts.",
+          );
+        }
+        const ownedSources = await db
+          .select({ id: financeAccounts.id })
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, context.principal.userId),
+              inArray(financeAccounts.id, sourceIds),
+            ),
+          );
+        if (ownedSources.length !== sourceIds.length) {
+          throw new AppError(
+            "invalid_request",
+            "Finance source contexts must reference current accounts owned by this user.",
+          );
+        }
+      }
       const existing = await findProfile(context.principal.userId, input.domain);
       if (existing && input.expectedVersion === undefined) {
         throw new AppError(

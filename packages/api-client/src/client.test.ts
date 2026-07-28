@@ -561,6 +561,45 @@ function apiFetch() {
         ],
       });
     if (url.pathname === "/v1/finances/plaid/status") return json({ available: true });
+    if (url.pathname === "/v1/finances/guided-setup")
+      return json({
+        setup: {
+          accountSources: [financeAccount],
+          alertSummary: { open: 0, warnings: 0 },
+          asOf: now,
+          budgetSummary: { count: 1, month: "2026-07", planned: 250 },
+          cashflowSummary: {
+            financialProfileConfigured: true,
+            incomeStreams: 0,
+            recurringNeedsReview: 0,
+            recurringObligations: 0,
+          },
+          humanOnlyActions: ["manage_financial_profile", "create_merchant_rule"],
+          ledgerHealth: {
+            asOf: now,
+            balanceOnlyAccounts: 0,
+            candidateTransfers: 0,
+            missingProvenance: 0,
+            pendingTransactions: 0,
+            possibleDuplicates: 0,
+            staleAccounts: 0,
+            unresolvedReviews: 0,
+          },
+          reviewSummary: {
+            count: 0,
+            reasons: {
+              ambiguous_merchant: 0,
+              low_confidence: 0,
+              one_time: 0,
+              possible_duplicate: 0,
+              possible_transfer: 0,
+              refund_or_reversal: 0,
+              unknown_merchant: 0,
+            },
+          },
+          suggestedWorkflows: [],
+        },
+      });
     if (url.pathname === "/v1/finances/profile")
       return json({
         profile: {
@@ -655,7 +694,16 @@ function apiFetch() {
     if (url.pathname === "/v1/finances/categorizations/propose") return json({ proposals: [] });
     if (url.pathname === "/v1/finances/categorizations/apply")
       return json({
-        results: [{ applied: true, threshold: 0.985, transaction: financeTransaction }],
+        results: [
+          {
+            applied: true,
+            error: null,
+            status: "applied",
+            threshold: 0.985,
+            transaction: financeTransaction,
+            transactionId: financeTransaction.id,
+          },
+        ],
       });
     if (url.pathname === `/v1/finances/review/${id}`)
       return json({ result: { applied: true, threshold: 0.985, transaction: financeTransaction } });
@@ -924,6 +972,10 @@ describe("ilo API client", () => {
     });
     await expect(api.getFinanceBudgetPace("week")).resolves.toMatchObject({ period: "week" });
     await expect(api.getFinanceWealthSummary()).resolves.toMatchObject({ netWorth: 1000 });
+    await expect(api.getFinanceGuidedSetup()).resolves.toMatchObject({
+      accountSources: [financeAccount],
+      humanOnlyActions: expect.arrayContaining(["create_merchant_rule"]),
+    });
     await expect(api.getFinanceProfile()).resolves.toMatchObject({ employer: "Acme" });
     await expect(
       api.updateFinanceProfile({
@@ -970,7 +1022,11 @@ describe("ilo API client", () => {
       api.updateFinanceMerchant(id, { displayName: "Corner Store" }),
     ).resolves.toMatchObject({ isUserConfirmed: true });
     await expect(
-      api.mergeFinanceMerchants({ sourceMerchantId: accountId, targetMerchantId: id }),
+      api.mergeFinanceMerchants({
+        rationale: "Confirmed duplicate aliases.",
+        sourceMerchantId: accountId,
+        targetMerchantId: id,
+      }),
     ).resolves.toEqual(financeMerchant);
     await expect(api.getFinanceReviewQueue()).resolves.toEqual([]);
     await expect(api.listFinanceTransactions({ review: "needs_review" })).resolves.toMatchObject({
@@ -983,6 +1039,7 @@ describe("ilo API client", () => {
           {
             categoryId: id,
             confidence: 0.99,
+            expectedTransactionUpdatedAt: now,
             learnMerchant: "suggest",
             rationale: "Known merchant history.",
             transactionId: accountId,

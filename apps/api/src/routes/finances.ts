@@ -50,6 +50,11 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
   app.get("/v1/finances/wealth", async (context) =>
     context.json({ wealth: await finances.getWealthSummary(context.get("principal").userId) }),
   );
+  app.get("/v1/finances/guided-setup", async (context) =>
+    context.json({
+      setup: await finances.getGuidedSetupContext(context.get("principal").userId),
+    }),
+  );
   app.get("/v1/finances/profile", async (context) =>
     context.json({ profile: await finances.getProfile(context.get("principal").userId) }),
   );
@@ -185,6 +190,15 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       ),
     }),
   );
+  // GET keeps proposal generation available to read-scoped agents; it never mutates the ledger.
+  app.get("/v1/finances/categorizations/propose", async (context) =>
+    context.json({
+      proposals: await finances.proposeCategorizations(
+        context.get("principal").userId,
+        financeTransactionQuerySchema.parse(context.req.query()),
+      ),
+    }),
+  );
   app.post("/v1/finances/categorizations/apply", async (context) =>
     context.json({
       results: await finances.applyCategorizations(
@@ -202,7 +216,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       ),
     }),
   );
-  app.post("/v1/finances/accounts", async (context) =>
+  app.post("/v1/finances/accounts", requireHuman, async (context) =>
     context.json(
       {
         account: await finances.createAccount(
@@ -213,7 +227,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       201,
     ),
   );
-  app.delete("/v1/finances/accounts/:id", async (context) => {
+  app.delete("/v1/finances/accounts/:id", requireHuman, async (context) => {
     await finances.deleteAccount(context.req.param("id"), mutationContext(context));
     return context.body(null, 204);
   });
@@ -237,7 +251,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       ),
     }),
   );
-  app.post("/v1/finances/budgets", async (context) =>
+  app.post("/v1/finances/budgets", requireHuman, async (context) =>
     context.json(
       {
         budget: await finances.createBudget(
@@ -267,7 +281,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       201,
     ),
   );
-  app.post("/v1/finances/accounts/:id/sync", async (context) =>
+  app.post("/v1/finances/accounts/:id/sync", requireHuman, async (context) =>
     context.json({
       result: await finances.syncPlaidAccount(context.req.param("id"), mutationContext(context)),
     }),

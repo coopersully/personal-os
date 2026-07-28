@@ -53,6 +53,9 @@ Access management
   sources, learn account and label meanings, save a draft profile, preview
   exact recent candidates, and create disabled preview rules. A rule becomes an
   enabled `approved_rule` only after explicit acceptance.
+- Finance adds a domain-owned readiness and reviewed-workflow surface in
+  Finances → Profile. Richer shared handoff presentation remains outside this
+  Settings-owned page.
 - Other domains honestly state that they currently support profiles and
   attention items but not domain-owned executable rules.
 

@@ -15,13 +15,6 @@ Learn when the user means a simple reminder versus a planned task, default captu
 priority meanings, estimate and scheduling preferences, notification lead times, and how overdue
 items should be deferred or reviewed. Keep deadlines distinct from scheduled work.
 
-## Finance
-
-Learn which accounts are included, category meanings, merchant and transfer conventions, recurring
-payment expectations, and review thresholds. Read ledger health before trusting totals. Pending
-transactions remain provisional. Never move money, trade, pay a bill, or create a durable merchant
-rule from an unconfirmed guess.
-
 ## Attention items
 
 Use the same four kinds across domains:

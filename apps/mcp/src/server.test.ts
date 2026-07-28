@@ -206,6 +206,45 @@ function mockApi() {
       ],
     })),
     getDomainProfile: vi.fn(async () => domainProfile),
+    getFinanceGuidedSetup: vi.fn(async () => ({
+      accountSources: [],
+      alertSummary: { open: 0, warnings: 0 },
+      asOf: now,
+      budgetSummary: { count: 0, month: "2026-07", planned: 0 },
+      cashflowSummary: {
+        financialProfileConfigured: false,
+        incomeStreams: 0,
+        recurringNeedsReview: 0,
+        recurringObligations: 0,
+      },
+      humanOnlyActions: [
+        "connect_or_disconnect_source" as const,
+        "confirm_ambiguous_transfer" as const,
+      ],
+      ledgerHealth: {
+        asOf: now,
+        balanceOnlyAccounts: 0,
+        candidateTransfers: 0,
+        missingProvenance: 0,
+        pendingTransactions: 0,
+        possibleDuplicates: 0,
+        staleAccounts: 0,
+        unresolvedReviews: 0,
+      },
+      reviewSummary: {
+        count: 0,
+        reasons: {
+          ambiguous_merchant: 0,
+          low_confidence: 0,
+          one_time: 0,
+          possible_duplicate: 0,
+          possible_transfer: 0,
+          refund_or_reversal: 0,
+          unknown_merchant: 0,
+        },
+      },
+      suggestedWorkflows: [],
+    })),
     upsertDomainProfile: vi.fn(async () => domainProfile),
     listAttentionItems: vi.fn(async () => [attentionItem]),
     createAttentionItem: vi.fn(async () => attentionItem),
@@ -434,6 +473,7 @@ describe("ilo MCP server", () => {
       "list_attention_items",
       "create_attention_item",
       "update_attention_item",
+      "get_finance_guided_setup",
       "get_finance_wealth_summary",
       "get_finance_cashflow",
       "review_finance_recurring_payment",
@@ -496,6 +536,22 @@ describe("ilo MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
+    expect(
+      tools.tools.find((tool) => tool.name === "propose_finance_categorizations")?.annotations,
+    ).toMatchObject({ openWorldHint: false, readOnlyHint: true });
+    expect(
+      tools.tools.find((tool) => tool.name === "apply_finance_categorizations")?.annotations,
+    ).toMatchObject({
+      destructiveHint: true,
+      idempotentHint: false,
+      readOnlyHint: false,
+    });
+    expect(
+      tools.tools.find((tool) => tool.name === "merge_finance_merchants")?.annotations,
+    ).toMatchObject({
+      destructiveHint: true,
+      idempotentHint: false,
+    });
 
     await client.callTool({ name: "get_agent_setup_status", arguments: {} });
     await client.callTool({ name: "get_domain_profile", arguments: { domain: "mail" } });
@@ -542,6 +598,7 @@ describe("ilo MCP server", () => {
       arguments: { detail: null, title: "Act with care" },
     });
 
+    await client.callTool({ name: "get_finance_guided_setup", arguments: {} });
     await client.callTool({ name: "get_finance_overview", arguments: {} });
     await client.callTool({ name: "get_finance_wealth_summary", arguments: {} });
     await client.callTool({ name: "get_finance_cashflow", arguments: {} });
@@ -564,7 +621,11 @@ describe("ilo MCP server", () => {
     });
     await client.callTool({
       name: "merge_finance_merchants",
-      arguments: { sourceMerchantId: accountId, targetMerchantId: id },
+      arguments: {
+        rationale: "Confirmed duplicate aliases.",
+        sourceMerchantId: accountId,
+        targetMerchantId: id,
+      },
     });
     await client.callTool({ name: "get_finance_review_queue", arguments: {} });
     await client.callTool({ name: "propose_finance_categorizations", arguments: {} });
@@ -575,6 +636,7 @@ describe("ilo MCP server", () => {
           {
             categoryId: id,
             confidence: 0.99,
+            expectedTransactionUpdatedAt: now,
             rationale: "Known merchant history.",
             transactionId: accountId,
           },

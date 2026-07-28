@@ -6,6 +6,7 @@ import {
   agentConnectionGuideSchema,
   agentMutationPolicies,
   apiErrorSchema,
+  applyFinanceCategorizationsInputSchema,
   automationRoutineSchema,
   automationRunSchema,
   calendarEventSchema,
@@ -28,6 +29,7 @@ import {
   eventListQuerySchema,
   featureAccessPolicies,
   featureIds,
+  financeGuidedPreferencesSchema,
   formatDateOnly,
   formatDateWithOrdinal,
   formatMonth,
@@ -681,6 +683,40 @@ describe("domain schemas", () => {
         calendar: false,
         email: "apple@icloud.com",
         mail: false,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("finance agent contracts", () => {
+  it("uses percentage points for recurring-change preferences", () => {
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        recurringAmountChangePercent: 20,
+      }).recurringAmountChangePercent,
+    ).toBe(20);
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        recurringAmountChangePercent: 101,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("requires one revision-guarded decision per transaction", () => {
+    const decision = {
+      categoryId: accountId,
+      confidence: 0.95,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: "suggest" as const,
+      rationale: "The user accepted this proposal.",
+      transactionId: id,
+    };
+    expect(
+      applyFinanceCategorizationsInputSchema.safeParse({ decisions: [decision] }).success,
+    ).toBe(true);
+    expect(
+      applyFinanceCategorizationsInputSchema.safeParse({
+        decisions: [decision, decision],
       }).success,
     ).toBe(false);
   });

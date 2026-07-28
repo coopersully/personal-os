@@ -4,13 +4,47 @@ import { z } from "zod";
 import { result } from "../tool-result.js";
 
 const id = z.string().uuid().describe("ilo object identifier");
+const readAnnotations = {
+  openWorldHint: false,
+  readOnlyHint: true,
+} as const;
+const reviewedMutationAnnotations = {
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+  readOnlyHint: false,
+} as const;
+const consequentialMutationAnnotations = {
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: false,
+  readOnlyHint: false,
+} as const;
 
 /** Finance-owned MCP surface. Domain policy remains enforced by the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
   server.registerTool(
+    "get_finance_guided_setup",
+    {
+      annotations: readAnnotations,
+      description:
+        "Start Finance setup here. Read the durable Finance profile, source/readiness context, ledger health, human-only boundaries, and currently useful reviewed workflows before interviewing the user.",
+      inputSchema: {},
+      title: "Get Finance guided setup",
+    },
+    async () => {
+      const [context, profile] = await Promise.all([
+        api.getFinanceGuidedSetup(),
+        api.getDomainProfile("finances"),
+      ]);
+      return result({ context, profile });
+    },
+  );
+
+  server.registerTool(
     "get_finance_wealth_summary",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
         "Read net worth split into cash, investments, debt, and other assets plus annualized income and current monthly budget capacity.",
       inputSchema: {},
@@ -22,28 +56,30 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "get_finance_cashflow",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
-        "Read the user's financial profile, expected income streams, recurring obligations, and conservative cash-flow forecast before giving financial-planning guidance.",
+        "Read the user's human-managed financial profile, expected income streams, recurring obligations, and conservative forecast for informational cash-flow guidance. Forecasts are not balances or guarantees.",
       inputSchema: {},
       title: "Get finance cash flow",
     },
-    async () =>
-      result({
-        alerts: await api.listFinanceAlerts(),
-        forecast: await api.getFinanceForecast(),
-        incomeStreams: await api.listFinanceIncomeStreams(),
-        profile: await api.getFinanceProfile(),
-        recurringObligations: await api.listFinanceRecurringObligations(),
-      }),
+    async () => {
+      const [alerts, forecast, incomeStreams, profile, recurringObligations] = await Promise.all([
+        api.listFinanceAlerts(),
+        api.getFinanceForecast(),
+        api.listFinanceIncomeStreams(),
+        api.getFinanceProfile(),
+        api.listFinanceRecurringObligations(),
+      ]);
+      return result({ alerts, forecast, incomeStreams, profile, recurringObligations });
+    },
   );
 
   server.registerTool(
     "review_finance_recurring_payment",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: reviewedMutationAnnotations,
       description:
-        "Confirm, pause, or cancel a detected recurring bill or subscription after inspecting its evidence. Confirmation makes the inferred pattern user-owned.",
+        "Change Ilo's review state for a detected recurring bill or subscription only after explicit user confirmation. This changes forecast context; it does not cancel or modify a provider payment.",
       inputSchema: {
         id,
         status: z.enum(["active", "cancelled", "paused"]),
@@ -57,9 +93,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "resolve_finance_alert",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: consequentialMutationAnnotations,
       description:
-        "Dismiss or resolve an in-app financial alert after checking its evidence. This does not change a paycheck, bill, category, or subscription automatically.",
+        "Dismiss or resolve an Ilo financial alert only after checking its evidence and confirming the user no longer needs it. This does not change a paycheck, bill, category, or subscription.",
       inputSchema: {
         action: z.enum(["dismiss", "resolve"]),
         id,
@@ -74,7 +110,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "get_finance_ledger_health",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
         "Read the integrity health of the finance ledger: pending activity, unmatched transfer candidates, possible duplicates, stale accounts, missing provenance, and open review work. Use this before trusting a budget or cash-flow total.",
       inputSchema: {},
@@ -86,13 +122,13 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "list_finance_transactions",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
         "List transactions with explicit date, account, category, pending, and review filters. Use this instead of the overview for investigation or monthly analysis.",
       inputSchema: {
         accountId: id.optional(),
         categoryId: id.optional(),
-        cursor: z.string().datetime().optional(),
+        cursor: z.string().min(1).max(600).optional(),
         from: z.iso.date().optional(),
         limit: z.number().int().min(1).max(200).default(50),
         pending: z.boolean().optional(),
@@ -107,7 +143,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "get_finance_categories",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
         "List the user's stable finance categories before proposing or applying a category.",
       inputSchema: {},
@@ -119,7 +155,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "get_finance_budget_status",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
         "Read budget limits, month-to-date spending, and remaining funds. Use this before suggesting a spending change or flagging an over-budget category.",
       inputSchema: {
@@ -136,7 +172,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "list_finance_merchants",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
         "List canonical merchant display names and their raw provider aliases. Inspect this before renaming or merging merchant records.",
       inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
@@ -148,9 +184,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "rename_finance_merchant",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: reviewedMutationAnnotations,
       description:
-        "Set a clear, user-facing display name for one canonical merchant. This never changes historical amounts or categories.",
+        "Set a clear display name for one canonical merchant after the user confirms the identity. This never changes historical amounts or categories and is audited as an agent action.",
       inputSchema: { displayName: z.string().min(1).max(240), id },
       title: "Rename finance merchant",
     },
@@ -161,10 +197,14 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "merge_finance_merchants",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: consequentialMutationAnnotations,
       description:
-        "Merge duplicate merchant records only after confirming their aliases represent the same real place. Moves aliases and transactions to the target merchant while preserving the target display name.",
-      inputSchema: { sourceMerchantId: id, targetMerchantId: id },
+        "Merge duplicate merchant records only after explicit user confirmation that their aliases represent the same real place. This removes the source record, moves its aliases and transactions, and cannot be replayed.",
+      inputSchema: {
+        rationale: z.string().min(1).max(1_000),
+        sourceMerchantId: id,
+        targetMerchantId: id,
+      },
       title: "Merge finance merchants",
     },
     async (input) => result(await api.mergeFinanceMerchants(input)),
@@ -173,7 +213,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "get_finance_review_queue",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
         "Read transactions deliberately held for review, including the reason, candidate category, merchant evidence, and current status.",
       inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
@@ -185,9 +225,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "propose_finance_categorizations",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
-        "Prepare conservative category proposals for transactions needing review. This does not change any transaction or create a reusable merchant rule.",
+        "Prepare conservative category proposals for transactions needing review. This read-scoped preview does not change a transaction or create a merchant rule; meetsPolicyThreshold is eligibility, not automatic execution.",
       inputSchema: {
         accountId: id.optional(),
         from: z.iso.date().optional(),
@@ -203,16 +243,20 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "apply_finance_categorizations",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: consequentialMutationAnnotations,
       description:
-        "Apply proposed agent categorizations. The service enforces an adaptive high-confidence threshold; below it, the transaction stays in review. Set learnMerchant to always only when a durable rule is explicitly intended.",
+        "Apply accepted category proposals. The API enforces its adaptive threshold; lower-confidence items remain in review. Agents cannot create permanent merchant rules. Inspect every returned status because a batch reports any partial failures per transaction.",
       inputSchema: {
         decisions: z
           .array(
             z.object({
               categoryId: id,
               confidence: z.number().min(0).max(1),
-              learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
+              expectedTransactionUpdatedAt: z
+                .string()
+                .datetime()
+                .describe("updatedAt returned by the accepted categorization proposal"),
+              learnMerchant: z.enum(["never", "suggest"]).default("suggest"),
               rationale: z.string().min(1).max(1_000),
               transactionId: id,
             }),
@@ -228,14 +272,14 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "resolve_finance_review",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: consequentialMutationAnnotations,
       description:
-        "Record a user's review decision: approve, recategorize, defer, or mark a transfer. User confirmations build confidence gradually; no permanent rule is created unless requested.",
+        "Record an accepted category decision or defer a review case. Agents cannot confirm ambiguous transfers or create merchant rules; direct the user to Finance for those human-only decisions.",
       inputSchema: {
-        action: z.enum(["approve", "defer", "not_purchase", "recategorize"]),
+        action: z.enum(["approve", "defer", "recategorize"]),
         categoryId: id.optional(),
         id,
-        learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
+        learnMerchant: z.enum(["never", "suggest"]).default("suggest"),
         rationale: z.string().max(1_000).nullable().default(null),
       },
       title: "Resolve finance review",
@@ -246,7 +290,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "get_finance_overview",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: readAnnotations,
       description:
         "Read finance accounts, budgets, recent transactions, spending, and the uncategorized review queue.",
       inputSchema: {},
@@ -258,9 +302,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "add_finance_transaction",
     {
-      annotations: { openWorldHint: false },
+      annotations: reviewedMutationAnnotations,
       description:
-        "Add a finance transaction. Omit category only when the agent is genuinely uncertain; it will enter the user's review queue.",
+        "Add a manual Ilo transaction only after the user confirms the account, amount, date, direction, and merchant. This is not provider import. Omit category when uncertain so it enters review.",
       inputSchema: {
         accountId: id,
         amount: z.number().positive(),
@@ -284,17 +328,16 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "categorize_finance_transaction",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: reviewedMutationAnnotations,
       description:
-        "Legacy direct categorization. Prefer propose_finance_categorizations and apply_finance_categorizations so confidence, review, and learning intent are recorded.",
+        "Legacy direct categorization for one explicitly accepted transaction. Prefer proposal/apply. This tool never creates or removes a permanent merchant rule.",
       inputSchema: {
         category: z.string().min(1).max(80),
         id,
-        learnMerchant: z.boolean().default(false),
       },
       title: "Categorize finance transaction",
     },
-    async ({ id: transactionId, category, learnMerchant }) =>
-      result(await api.updateFinanceTransaction(transactionId, { category, learnMerchant })),
+    async ({ id: transactionId, category }) =>
+      result(await api.updateFinanceTransaction(transactionId, { category, learnMerchant: false })),
   );
 }

@@ -31,16 +31,30 @@ first executable implementation: agents can list, preview, create, and update ma
 are disabled and preview-only by default, and connector sync executes only enabled
 `approved_rule` rules.
 
-Finance tools are an adapter over the same Finance API used by the web app. They
-include ledger health, transactions, categories, budgets, merchants, review
+Finance tools are an adapter over the same Finance API used by the web app.
+`get_finance_guided_setup` is the entry point for a short Finance interview: it
+returns the shared durable profile together with owned account sources, review
+and ledger readiness, human-only boundaries, and suggested workflows. The
+remaining tools include transactions, categories, budgets, merchants, review
 work, wealth, cash flow, recurring-payment review, and alerts. Agents should
 read ledger health and the relevant transactions before offering a budget or
-cash-flow recommendation. Categorization is intentionally proposal-first:
-`propose_finance_categorizations` does not mutate anything, while
-`apply_finance_categorizations` remains subject to the API's adaptive confidence
-policy. Merchant merges and recurring-payment, alert, and review decisions are
-bounded mutations; an agent must not infer a permanent merchant rule or mark an
-uncertain transfer as non-spending without the user-visible review path.
+cash-flow recommendation.
+
+Categorization is intentionally proposal-first:
+`propose_finance_categorizations` is a read-scoped `GET` and does not mutate
+anything. An accepted apply must echo the proposal transaction's exact
+`updatedAt` as `expectedTransactionUpdatedAt`; stale decisions fail without
+overwriting newer data. Each decision is atomic, while a batch can truthfully
+report `applied`, `review_required`, and structured `failed` results for
+different transactions. Merchant merges and recurring-payment, alert, and
+ordinary review decisions are bounded mutations. Provider administration,
+account/import/profile/budget changes, permanent merchant rules, and ambiguous
+transfer confirmation remain human-only.
+
+Tool annotations are host UX hints, not authorization. API scopes, policy,
+revision checks, database invariants, and audit records enforce Finance safety.
+The shared result helper supplies `structuredContent`; hosts must inspect
+per-item results and disclose partial effects between decisions.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
 

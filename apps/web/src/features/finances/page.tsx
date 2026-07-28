@@ -3,6 +3,7 @@ import type {
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
   FinanceForecast,
+  FinanceGuidedSetupContext,
   FinanceLedgerHealth,
   FinanceRecurringObligation,
   FinanceReviewCase,
@@ -155,6 +156,16 @@ export function FinancesPage() {
     enabled: section === "profile" || section === "cashflow" || section === "overview",
     queryFn: api.getFinanceProfile,
     queryKey: ["finance-profile"],
+  });
+  const agentSetup = useQuery({
+    enabled: section === "profile",
+    queryFn: () => api.getFinanceGuidedSetup(),
+    queryKey: ["finance-guided-setup"],
+  });
+  const agentProfile = useQuery({
+    enabled: section === "profile",
+    queryFn: () => api.getDomainProfile("finances"),
+    queryKey: ["domain-profile", "finances"],
   });
   const incomeStreams = useQuery({
     enabled: section === "cashflow" || section === "profile" || section === "overview",
@@ -487,13 +498,21 @@ export function FinancesPage() {
         </div>
       ) : null}
       {section === "profile" ? (
-        <FinancialProfilePanel
-          accounts={overview.data?.accounts ?? []}
-          form={profileForm}
-          onChange={setProfileForm}
-          onSave={() => saveProfile.mutate()}
-          saving={saveProfile.isPending}
-        />
+        <>
+          <FinanceAgentGuidancePanel
+            error={agentSetup.error ?? agentProfile.error}
+            loading={agentSetup.isPending || agentProfile.isPending}
+            profileStatus={agentProfile.data?.status ?? null}
+            setup={agentSetup.data}
+          />
+          <FinancialProfilePanel
+            accounts={overview.data?.accounts ?? []}
+            form={profileForm}
+            onChange={setProfileForm}
+            onSave={() => saveProfile.mutate()}
+            saving={saveProfile.isPending}
+          />
+        </>
       ) : null}
       {section === "cashflow" ? (
         <CashflowPanel
@@ -1818,6 +1837,82 @@ function FinanceBudgetDetailDialog({
         </div>
       </ShadcnDialogContent>
     </ShadcnDialog>
+  );
+}
+
+function FinanceAgentGuidancePanel({
+  error,
+  loading,
+  profileStatus,
+  setup,
+}: {
+  error: Error | null;
+  loading: boolean;
+  profileStatus: "active" | "draft" | null;
+  setup: FinanceGuidedSetupContext | undefined;
+}) {
+  const availableWorkflows =
+    setup?.suggestedWorkflows.filter((workflow) => workflow.available).length ?? 0;
+  return (
+    <ShadcnCard>
+      <ShadcnCardHeader>
+        <ShadcnCardTitle>Agent guidance</ShadcnCardTitle>
+        <ShadcnCardDescription>
+          Durable source meanings, review preferences, terminology, thresholds, and safety
+          constraints for Claude, Codex, and other scoped hosts.
+        </ShadcnCardDescription>
+        <ShadcnCardAction>
+          <ShadcnBadge variant={profileStatus === "active" ? "default" : "secondary"}>
+            {profileStatus === "active"
+              ? "Active"
+              : profileStatus === "draft"
+                ? "Draft"
+                : "Not configured"}
+          </ShadcnBadge>
+        </ShadcnCardAction>
+      </ShadcnCardHeader>
+      <ShadcnCardContent className="flex flex-col gap-4">
+        {loading ? <Spinner label="Loading Finance agent guidance" /> : null}
+        {error ? <InlineError error={error} /> : null}
+        {setup ? (
+          <ShadcnItemGroup>
+            <ShadcnItem size="sm" variant="muted">
+              <ShadcnItemContent>
+                <ShadcnItemTitle>Sources ready</ShadcnItemTitle>
+                <ShadcnItemDescription>
+                  {setup.accountSources.length} account
+                  {setup.accountSources.length === 1 ? "" : "s"} available for a short,
+                  example-based interview.
+                </ShadcnItemDescription>
+              </ShadcnItemContent>
+            </ShadcnItem>
+            <ShadcnItem size="sm" variant="muted">
+              <ShadcnItemContent>
+                <ShadcnItemTitle>Suggested workflows</ShadcnItemTitle>
+                <ShadcnItemDescription>
+                  {availableWorkflows} available now. Ledger health and evidence come before
+                  categorization, cash-flow, or monthly-review guidance.
+                </ShadcnItemDescription>
+              </ShadcnItemContent>
+            </ShadcnItem>
+            <ShadcnItem size="sm" variant="muted">
+              <ShadcnItemContent>
+                <ShadcnItemTitle>Human-only boundaries</ShadcnItemTitle>
+                <ShadcnItemDescription>
+                  Account connections, imports, budgets, financial-profile changes, permanent
+                  merchant rules, and ambiguous transfers stay in Finance.
+                </ShadcnItemDescription>
+              </ShadcnItemContent>
+              <ShadcnItemActions>
+                <ShadcnButton asChild size="sm" variant="outline">
+                  <Link to="/settings?section=agent-access">Connect an agent</Link>
+                </ShadcnButton>
+              </ShadcnItemActions>
+            </ShadcnItem>
+          </ShadcnItemGroup>
+        ) : null}
+      </ShadcnCardContent>
+    </ShadcnCard>
   );
 }
 

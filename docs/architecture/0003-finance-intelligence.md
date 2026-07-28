@@ -30,9 +30,19 @@ seams are:
 - `apps/web/src/features/finances` for the user interface.
 
 All finance endpoints require `finances:read` for reads and `finances:write`
-for mutations. Provider connection, import, profile, and income-stream setup
-remain human-only; the bounded recurring-payment and alert decisions exposed to
-MCP are available to a scoped agent and always carry the normal audit context.
+for mutations. Provider connection, import, account, budget, financial-profile,
+and income-stream administration remain human-only. Permanent merchant rules
+and ambiguous-transfer confirmation also require an interactive human session.
+The bounded recurring-payment, alert, categorization, and ordinary review
+decisions exposed to MCP are available to a scoped agent and always carry the
+normal audit context.
+
+Finance guided setup reuses the shared versioned domain-profile envelope. Its
+`sourceContexts` are canonical Finance account IDs, not arbitrary labels, and
+the API rejects duplicates, stale accounts, and accounts owned by another
+user. Finance preference keys use explicit units: confidence is a 0–1 fraction,
+currency thresholds are account currency amounts, and
+`recurringAmountChangePercent` is percentage points (`20` means 20%).
 
 ## Ledger and learning model
 
@@ -47,6 +57,14 @@ confidence threshold, records the rationale and confidence for every decision,
 and only broadens a merchant rule when the user explicitly chooses that intent
 or confirms consistent results. Ambiguous merchants, low confidence, possible
 duplicates, transfers, reversals, and one-off behavior remain reviewable.
+
+Every categorization proposal includes the transaction's `updatedAt` revision.
+Apply requires that exact revision and performs the transaction update,
+classification evidence, review resolution, optional human-approved merchant
+rule, and audit insert in one database transaction. A batch can succeed for
+some decisions and fail for others, but a single decision never reports failure
+after committing only part of itself. Transfer confirmation uses the same
+transactional path.
 
 Provider transfer labels and matching amounts alone are insufficient to exclude
 a record from spending. A transfer is excluded only after a supported account
@@ -95,14 +113,20 @@ destructive colors, while neutral activity is muted.
 
 ## MCP tool policy
 
-Read tools expose the overview, ledger health, transactions, budgets, merchants,
-review queue, wealth, and cash flow. Agents should inspect ledger health and
-relevant transactions before offering financial guidance. Categorization uses a
+Read tools expose guided-setup readiness, the durable shared profile, overview,
+ledger health, transactions, budgets, merchants, review queue, wealth, and cash
+flow. Agents should inspect guided context, ledger health, and relevant
+transactions before offering financial guidance. Categorization uses a
 proposal/apply pair; applying is still constrained by the service's adaptive
-confidence policy. Merchant merges, names, review decisions, recurring status,
-and alerts have explicit bounded mutation tools. Agents must not turn an
-ambiguous result into a category, transfer, subscription, or permanent rule on
-their own.
+confidence policy and a transaction revision. Merchant merges, names, review
+decisions, recurring status, and alerts have explicit bounded mutation tools.
+Agents must not turn an ambiguous result into a category, transfer,
+subscription, or permanent rule on their own.
+
+MCP annotations describe expected host UX only. The API's scopes, human-session
+guards, adaptive policy, revision checks, transactions, and audit trail remain
+the security and integrity boundary. Batch apply responses preserve structured
+per-decision errors so hosts can disclose partial effects between decisions.
 
 ## Migration policy
 

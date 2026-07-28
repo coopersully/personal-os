@@ -5,6 +5,7 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   domainProfiles,
+  financeAccounts,
   migrateDatabase,
   users,
 } from "@personal-os/database";
@@ -193,6 +194,74 @@ describe.sequential("assistant setup service", () => {
       ]),
     });
     await expect(database.db.select().from(domainProfiles)).resolves.toHaveLength(2);
+  });
+
+  it("requires Finance source contexts to reference distinct owned accounts", async () => {
+    const [financeUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance Setup",
+        email: "finance-setup@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!financeUser) throw new Error("Finance setup fixture user was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Example Bank",
+        name: "Checking",
+        provider: "manual",
+        status: "manual",
+        userId: financeUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Finance setup fixture account was not created.");
+    const financeContext = {
+      principal: {
+        actorId: financeUser.id,
+        actorType: "agent" as const,
+        scopes: new Set(["finances:read" as const, "finances:write" as const]),
+        userId: financeUser.id,
+      },
+      requestId: "finance-profile",
+    };
+    const sourceContext = {
+      notes: null,
+      purpose: "Bills and daily spending",
+      sourceId: account.id,
+      sourceLabel: "Checking",
+    };
+    const input = {
+      categories: [],
+      domain: "finances" as const,
+      instructions: ["Never infer a permanent merchant rule."],
+      objective: "Keep financial review trustworthy.",
+      preferences: { reviewCadence: "weekly" },
+      sourceContexts: [sourceContext],
+      status: "draft" as const,
+      summary: "Review weekly and keep uncertain transfers visible.",
+    };
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          sourceContexts: [{ ...sourceContext, sourceId: userId }],
+        },
+        financeContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile(
+        { ...input, sourceContexts: [sourceContext, sourceContext] },
+        financeContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(service.upsertProfile(input, financeContext)).resolves.toMatchObject({
+      domain: "finances",
+      sourceContexts: [expect.objectContaining({ sourceId: account.id })],
+    });
   });
 
   it("uses one cross-domain attention shape and audits changes", async () => {

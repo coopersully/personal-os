@@ -2,6 +2,21 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-07-28 — Finance agent-guided setup and safe review workflows
+
+- Added a Finance-owned guided context that combines owned account sources, ledger and review
+  readiness, cash-flow context, human-only boundaries, and trustworthy suggested workflows with
+  the shared durable Finance profile.
+- Added a short Finance interview reference with explicit preference units, user terminology,
+  source meanings, review cadence, thresholds, and safety constraints.
+- Made categorization preview read-scoped and revision-guarded. Each accepted decision now commits
+  its ledger change, evidence, review resolution, optional human merchant rule, and audit record
+  atomically; batches retain structured per-decision partial-result reporting.
+- Kept account/provider/import/profile/budget administration, permanent merchant rules, and
+  ambiguous transfers behind interactive human review. Agent attribution remains intact for
+  categorization, recurring-state, and merchant-display changes.
+- Added Finance-owned readiness presentation without expanding the shared Settings handoff.
+
 ## 2026-07-28 — Agent-guided setup and shared assistant contracts
 
 - Added versioned domain profiles for durable preferences, source meanings, user-defined categories,

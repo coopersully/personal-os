@@ -159,8 +159,8 @@ export function SetupPage({ user }: { user: User }) {
   const stepIndex = Math.max(0, steps.indexOf(currentStep));
   const exitSetup = () =>
     save.mutate({ action: "dismiss" }, { onSuccess: () => setDestination("/today") });
-  const completeSetup = (destination = "/today") =>
-    save.mutate({ action: "complete" }, { onSuccess: () => setDestination(destination) });
+  const completeSetup = (redirectDestination = "/today") =>
+    save.mutate({ action: "complete" }, { onSuccess: () => setDestination(redirectDestination) });
 
   useEffect(() => {
     if (window.scrollY !== 0) window.scrollTo({ behavior: "auto", left: 0, top: 0 });

@@ -20,6 +20,7 @@ import {
   createEventInputSchema,
   createGoalInputSchema,
   createLocalCalendarInputSchema,
+  createMailRuleInputSchema,
   createMotiveInputSchema,
   createReminderInputSchema,
   createTaskInputSchema,
@@ -67,6 +68,7 @@ import {
   updateFinanceTransactionInputSchema,
   updateGoalInputSchema,
   updateLocalCalendarInputSchema,
+  updateMailRuleInputSchema,
   updateMotiveInputSchema,
   updateReminderInputSchema,
   updateTaskInputSchema,
@@ -244,6 +246,24 @@ describe("domain schemas", () => {
       condition: { field: "any", operator: "contains", value: "legacy sender" },
       policy: "approved_rule",
     });
+    expect(
+      updateMailRuleInputSchema.parse({
+        expectedVersion: 1,
+        name: "Updated rule",
+      }),
+    ).toEqual({
+      expectedVersion: 1,
+      name: "Updated rule",
+    });
+    expect(
+      createMailRuleInputSchema.safeParse({
+        actions: [{ afterDays: 0, mailboxId: null, type: "archive" }],
+        condition: { field: "sender", operator: "contains", value: "news" },
+        enabled: true,
+        name: "Unsafe active rule",
+        policy: "approved_rule",
+      }).success,
+    ).toBe(false);
   });
 
   it("formats calendar dates without timezone drift", () => {

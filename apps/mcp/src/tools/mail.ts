@@ -1,31 +1,23 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
-import { idSchema, mailRuleActionSchema, mailRuleConditionSchema } from "@personal-os/domain";
+import { createMailRuleInputSchema, idSchema, mailRuleSchema } from "@personal-os/domain";
 import { z } from "zod";
 import { result } from "../tool-result.js";
 
 const id = idSchema.describe("ilo object identifier");
-const mailRuleCondition = mailRuleConditionSchema;
-const mailRuleAction = mailRuleActionSchema;
 const mailRuleFields = {
-  actions: z.array(mailRuleAction).min(1).max(10),
-  condition: mailRuleCondition,
-  confidenceThreshold: z.number().min(0).max(1).nullable(),
-  description: z.string().max(2_000),
-  enabled: z.boolean(),
-  name: z.string().min(1).max(120),
-  policy: z.enum(["preview", "approve_each", "approved_rule"]),
-  profileId: id.nullable(),
-  sourceIds: z.array(id).max(50),
+  actions: mailRuleSchema.shape.actions,
+  condition: mailRuleSchema.shape.condition,
+  confidenceThreshold: mailRuleSchema.shape.confidenceThreshold,
+  description: mailRuleSchema.shape.description,
+  enabled: mailRuleSchema.shape.enabled,
+  name: mailRuleSchema.shape.name,
+  policy: mailRuleSchema.shape.policy,
+  profileId: mailRuleSchema.shape.profileId,
+  sourceIds: mailRuleSchema.shape.sourceIds,
 } as const;
 const createMailRuleFields = {
-  ...mailRuleFields,
-  confidenceThreshold: mailRuleFields.confidenceThreshold.default(null),
-  description: mailRuleFields.description.default(""),
-  enabled: mailRuleFields.enabled.default(false),
-  policy: mailRuleFields.policy.default("preview"),
-  profileId: mailRuleFields.profileId.default(null),
-  sourceIds: mailRuleFields.sourceIds.default([]),
+  ...createMailRuleInputSchema.shape,
 } as const;
 
 /** Mail-owned MCP surface; the API remains the authorization boundary. */

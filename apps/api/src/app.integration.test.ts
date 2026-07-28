@@ -2564,6 +2564,30 @@ describe.sequential("ilo API", () => {
     expect(exchange.status).toBe(200);
     const tokens = (await exchange.json()) as { access_token: string; refresh_token: string };
     expect(
+      (
+        await (
+          await app.request("/v1/access-tokens", {
+            headers: { authorization: `Session ${oauthSessionToken}` },
+          })
+        ).json()
+      ).tokens,
+    ).toEqual([]);
+    expect(
+      (
+        await (
+          await app.request("/v1/oauth/clients", {
+            headers: { authorization: `Session ${oauthSessionToken}` },
+          })
+        ).json()
+      ).clients,
+    ).toEqual([
+      expect.objectContaining({
+        id: client.client_id,
+        name: "Protocol test client",
+        scopes: ["tasks:read"],
+      }),
+    ]);
+    expect(
       (await app.request("/v1/me", { headers: { authorization: `Bearer ${tokens.access_token}` } }))
         .status,
     ).toBe(401);

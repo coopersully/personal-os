@@ -239,10 +239,14 @@ describe.sequential("assistant setup service", () => {
     await expect(
       service.updateAttentionItem("mail", userId, { status: "dismissed" }, context()),
     ).rejects.toMatchObject({ code: "not_found" });
-    await expect(database.db.select().from(attentionItems)).resolves.toEqual([
-      expect.objectContaining({ id: item.id, status: "resolved" }),
-      expect.objectContaining({ id: expiring.id, status: "open" }),
-    ]);
+    const storedItems = await database.db.select().from(attentionItems);
+    expect(storedItems).toHaveLength(2);
+    expect(storedItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: item.id, status: "resolved" }),
+        expect.objectContaining({ id: expiring.id, status: "open" }),
+      ]),
+    );
     const events = await database.db
       .select()
       .from(auditEvents)

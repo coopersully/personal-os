@@ -42,10 +42,6 @@ function renderSettings() {
 describe("agent access settings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    Object.defineProperty(navigator, "clipboard", {
-      configurable: true,
-      value: { writeText: vi.fn().mockResolvedValue(undefined) },
-    });
     mocks.getAgentConnectionGuide.mockResolvedValue({
       domains: [
         {

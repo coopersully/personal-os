@@ -14,7 +14,7 @@ import {
 import { and, desc, eq } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
-import { AppError } from "./errors.js";
+import { AppError, isUniqueViolation } from "./errors.js";
 import { auditSnapshot } from "./serialization.js";
 import type { Principal } from "./types.js";
 
@@ -93,44 +93,45 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
         summary: input.summary,
       };
       const updatedAt = now();
-      const saved = await db.transaction(async (transaction) => {
-        const profile = existing
-          ? requireDatabaseRecord(
-              (
-                await transaction
-                  .update(domainProfiles)
-                  .set({ ...values, updatedAt, version: existing.version + 1 })
-                  .where(
-                    and(
-                      eq(domainProfiles.id, existing.id),
-                      eq(domainProfiles.version, existing.version),
-                    ),
-                  )
-                  .returning()
-              )[0],
-              "The domain profile changed while it was being saved.",
-            )
-          : requireDatabaseRecord(
-              (
-                await transaction
-                  .insert(domainProfiles)
-                  .values({ ...values, userId: context.principal.userId })
-                  .returning()
-              )[0],
-              "The domain profile could not be created.",
-            );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: existing ? "assistant.profile.updated" : "assistant.profile.created",
-            after: auditSnapshot(profile),
-            before: auditSnapshot(existing ?? null),
-            entityId: profile.id,
-            entityType: "domain_profile",
-            ...context,
-          }),
-        );
-        return profile;
-      });
+      let saved: typeof domainProfiles.$inferSelect;
+      try {
+        saved = await db.transaction(async (transaction) => {
+          const [profile] = existing
+            ? await transaction
+                .update(domainProfiles)
+                .set({ ...values, updatedAt, version: existing.version + 1 })
+                .where(
+                  and(
+                    eq(domainProfiles.id, existing.id),
+                    eq(domainProfiles.version, existing.version),
+                  ),
+                )
+                .returning()
+            : await transaction
+                .insert(domainProfiles)
+                .values({ ...values, userId: context.principal.userId })
+                .returning();
+          if (!profile) {
+            throw new AppError("conflict", "The domain profile changed while it was being saved.");
+          }
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: existing ? "assistant.profile.updated" : "assistant.profile.created",
+              after: auditSnapshot(profile),
+              before: auditSnapshot(existing ?? null),
+              entityId: profile.id,
+              entityType: "domain_profile",
+              ...context,
+            }),
+          );
+          return profile;
+        });
+      } catch (error) {
+        if (!existing && isUniqueViolation(error, "domain_profiles_user_domain_idx")) {
+          throw new AppError("conflict", "The domain profile changed while it was being created.");
+        }
+        throw error;
+      }
       return serializeProfile(saved);
     },
 

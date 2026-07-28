@@ -5,12 +5,26 @@ import type {
   MailListQuery,
   MailMessage,
   MailRule,
+  MailRuleAction,
   MailThread,
   PreviewMailRuleInput,
   SendMailInput,
   UpdateMailRuleInput,
   UpdateMailThreadInput,
 } from "@personal-os/domain";
+
+type MailRulePreview = {
+  candidates: Array<{
+    accountId: string;
+    actions: Array<MailRuleAction & { due: boolean }>;
+    from: { address: string; name: string | null };
+    id: string;
+    receivedAt: string;
+    subject: string;
+  }>;
+  matchedCount: number;
+  scannedCount: number;
+};
 
 export type MailApiClient = {
   createMailDraft(input: MailDraftInput): Promise<{ id: string }>;
@@ -23,18 +37,7 @@ export type MailApiClient = {
   listMailThreads(query?: Partial<MailListQuery>): Promise<MailThread[]>;
   snoozeMailThread(id: string, until: string): Promise<void>;
   sendMail(input: SendMailInput): Promise<void>;
-  previewMailRule(input: PreviewMailRuleInput): Promise<{
-    candidates: Array<{
-      accountId: string;
-      actions: Array<import("@personal-os/domain").MailRuleAction & { due: boolean }>;
-      from: { address: string; name: string | null };
-      id: string;
-      receivedAt: string;
-      subject: string;
-    }>;
-    matchedCount: number;
-    scannedCount: number;
-  }>;
+  previewMailRule(input: PreviewMailRuleInput): Promise<MailRulePreview>;
   updateMailRule(id: string, input: UpdateMailRuleInput): Promise<MailRule>;
   updateMailThread(id: string, input: UpdateMailThreadInput): Promise<MailThread>;
 };
@@ -86,20 +89,7 @@ export function createMailApiClient(
       return response.rules;
     },
     async previewMailRule(input) {
-      const response = await request<{
-        preview: {
-          candidates: Array<{
-            accountId: string;
-            actions: Array<import("@personal-os/domain").MailRuleAction & { due: boolean }>;
-            from: { address: string; name: string | null };
-            id: string;
-            receivedAt: string;
-            subject: string;
-          }>;
-          matchedCount: number;
-          scannedCount: number;
-        };
-      }>("/v1/mail/rules/preview", {
+      const response = await request<{ preview: MailRulePreview }>("/v1/mail/rules/preview", {
         body: JSON.stringify(input),
         method: "POST",
       });

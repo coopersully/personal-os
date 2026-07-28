@@ -1,5 +1,6 @@
 import type { AccessScope } from "@personal-os/domain";
 import { Hono } from "hono";
+import { errorResponse } from "../errors.js";
 import type { createMailService } from "../mail-service.js";
 import type { AppEnv } from "../types.js";
 import { registerMailRoutes } from "./mail.js";
@@ -52,6 +53,7 @@ describe("Mail routes", () => {
       context.set("requestId", "request-1");
       await next();
     });
+    app.onError(errorResponse);
     registerMailRoutes({
       app,
       mail: mail as unknown as ReturnType<typeof createMailService>,
@@ -157,5 +159,17 @@ describe("Mail routes", () => {
         })
       ).status,
     ).toBe(200);
+    expect(
+      (
+        await request("/v1/mail/rules", {
+          body: JSON.stringify({
+            actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
+            condition: { field: "any", operator: "contains", value: "news" },
+            name: "Newsletter archive",
+          }),
+          method: "POST",
+        })
+      ).status,
+    ).toBe(403);
   });
 });

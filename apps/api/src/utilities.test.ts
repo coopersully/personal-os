@@ -65,6 +65,18 @@ describe("pagination, errors, and OpenAPI", () => {
   it("classifies unique violations", () => {
     expect(isUniqueViolation({ code: "23505" })).toBe(true);
     expect(isUniqueViolation({ cause: { code: "23505" } })).toBe(true);
+    expect(
+      isUniqueViolation(
+        { cause: { code: "23505", constraint: "domain_profiles_user_domain_idx" } },
+        "domain_profiles_user_domain_idx",
+      ),
+    ).toBe(true);
+    expect(
+      isUniqueViolation(
+        { code: "23505", constraint: "unrelated_idx" },
+        "domain_profiles_user_domain_idx",
+      ),
+    ).toBe(false);
     const cyclic: { cause?: unknown } = {};
     cyclic.cause = cyclic;
     expect(isUniqueViolation(cyclic)).toBe(false);

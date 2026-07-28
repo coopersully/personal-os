@@ -312,29 +312,25 @@ export function createMailService({
       } = input;
       const updatedAt = now();
       const updated = await db.transaction(async (transaction) => {
-        const rule = requireDatabaseRecord(
-          (
-            await transaction
-              .update(mailRules)
-              .set({
-                ...changes,
-                ...(confidenceThreshold === undefined
-                  ? {}
-                  : {
-                      confidenceThreshold:
-                        confidenceThreshold === null
-                          ? null
-                          : Math.round(confidenceThreshold * 10_000),
-                    }),
-                ...(sourceIds === undefined ? {} : { sourceAccountIds: sourceIds }),
-                updatedAt,
-                version: existing.version + 1,
-              })
-              .where(and(eq(mailRules.id, id), eq(mailRules.version, existing.version)))
-              .returning()
-          )[0],
-          "The mail rule changed while it was being saved.",
-        );
+        const [rule] = await transaction
+          .update(mailRules)
+          .set({
+            ...changes,
+            ...(confidenceThreshold === undefined
+              ? {}
+              : {
+                  confidenceThreshold:
+                    confidenceThreshold === null ? null : Math.round(confidenceThreshold * 10_000),
+                }),
+            ...(sourceIds === undefined ? {} : { sourceAccountIds: sourceIds }),
+            updatedAt,
+            version: existing.version + 1,
+          })
+          .where(and(eq(mailRules.id, id), eq(mailRules.version, existing.version)))
+          .returning();
+        if (!rule) {
+          throw new AppError("conflict", "The mail rule changed while it was being saved.");
+        }
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "mail.rule.updated",

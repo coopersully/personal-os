@@ -188,29 +188,29 @@ export const mailRuleSchema = configuredRuleBaseSchema.extend({
 });
 export type MailRule = z.infer<typeof mailRuleSchema>;
 
-export const createMailRuleInputSchema = mailRuleSchema
-  .pick({
-    actions: true,
-    condition: true,
-    confidenceThreshold: true,
-    description: true,
-    enabled: true,
-    name: true,
-    policy: true,
-    profileId: true,
-    sourceIds: true,
-  })
-  .extend({
-    confidenceThreshold: z.number().min(0).max(1).nullable().default(null),
-    description: z.string().max(2_000).default(""),
-    enabled: z.boolean().default(false),
-    policy: z.enum(["preview", "approve_each", "approved_rule"]).default("preview"),
-    profileId: idSchema.nullable().default(null),
-    sourceIds: z.array(idSchema).max(50).default([]),
-  });
+const mailRuleInputSchema = mailRuleSchema.pick({
+  actions: true,
+  condition: true,
+  confidenceThreshold: true,
+  description: true,
+  enabled: true,
+  name: true,
+  policy: true,
+  profileId: true,
+  sourceIds: true,
+});
+
+export const createMailRuleInputSchema = mailRuleInputSchema.extend({
+  confidenceThreshold: z.number().min(0).max(1).nullable().default(null),
+  description: z.string().max(2_000).default(""),
+  enabled: z.literal(false).default(false),
+  policy: z.literal("preview").default("preview"),
+  profileId: idSchema.nullable().default(null),
+  sourceIds: z.array(idSchema).max(50).default([]),
+});
 export type CreateMailRuleInput = z.infer<typeof createMailRuleInputSchema>;
 
-export const updateMailRuleInputSchema = createMailRuleInputSchema
+export const updateMailRuleInputSchema = mailRuleInputSchema
   .partial()
   .extend({ expectedVersion: z.int().positive() })
   .refine(

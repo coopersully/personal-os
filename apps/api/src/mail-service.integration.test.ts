@@ -486,7 +486,7 @@ describe.sequential("mail service", () => {
       },
       confidenceThreshold: 0.9,
       description: "Read known senders.",
-      enabled: false,
+      enabled: false as const,
       name: "Known senders",
       policy: "preview" as const,
       profileId,

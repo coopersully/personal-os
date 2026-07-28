@@ -3753,7 +3753,6 @@ describe("ilo web app", () => {
     );
     await browser.click(screen.getByText(/Fine-tune permissions/));
     await browser.click(screen.getByLabelText("Read mail"));
-    await browser.click(screen.getByLabelText("Read mail"));
     await browser.click(screen.getByRole("button", { name: "Create local token" }));
     await waitFor(() =>
       expect(mocks.createAccessToken).toHaveBeenCalledWith(

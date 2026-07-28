@@ -16,6 +16,12 @@ This log records delivered vertical slices against the master plan. It does not 
 - Added matching API-client and MCP verbs plus the installable `ilo-setup` skill. Its short adaptive
   interview saves drafts first, previews exact candidates, and requires explicit acceptance before
   automatic behavior becomes active.
+- Added a deployment-aware Agent access handoff to account setup and Settings:
+  users can copy the remote MCP URL, install the guided-setup skill, choose a
+  domain starter prompt, inspect Mail readiness, and manage connected hosts.
+- Made remote OAuth the primary host connection with named, plain-language
+  consent and the complete supported scope set, including `mail:write`; retained
+  purpose-built personal-token presets as an advanced local fallback.
 
 ## 2026-07-27 — Immediate, resumable account setup
 

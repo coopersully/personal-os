@@ -1,4 +1,5 @@
 import {
+  type AgentConnectionGuide,
   type AssistantDomain,
   assistantDomainSchema,
   attentionItemQuerySchema,
@@ -16,6 +17,7 @@ import { parseBody } from "./support.js";
 type MutationContext = { principal: Principal; requestId: string };
 
 type AssistantRouteOptions = {
+  connectionGuide: AgentConnectionGuide;
   app: Hono<AppEnv>;
   assistant: ReturnType<typeof createAssistantService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
@@ -24,8 +26,10 @@ type AssistantRouteOptions = {
 export function registerAssistantRoutes({
   app,
   assistant,
+  connectionGuide,
   mutationContext,
 }: AssistantRouteOptions) {
+  app.get("/v1/assistant/connection-guide", (context) => context.json({ guide: connectionGuide }));
   app.get("/v1/assistant/setup-status", async (context) =>
     context.json({ setup: await assistant.getSetupStatus(context.get("principal")) }),
   );

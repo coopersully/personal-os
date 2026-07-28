@@ -63,6 +63,9 @@ provider internals.
   provider-supported thread actions.
 - Versioned domain preference profiles, cross-domain attention items, exact Mail-rule previews, and
   an installable guided-setup skill for scoped MCP hosts.
+- A deployment-aware Agent access handoff with remote MCP OAuth, readable
+  consent, skill-install and starter prompts, readiness state, revocation, and
+  advanced personal-token fallback.
 - Unified agenda and calendar views.
 - Current conditions in Today, preferring transient device location after the
   browser grants permission and falling back to an account-saved place selected
@@ -118,17 +121,20 @@ The MVP is complete only when all of the following are demonstrated:
 6. A connected Google or iCloud mailbox can synchronize and be searched/read from both the UI and
    a `mail:read` MCP token without exposing credentials; supported mutations require
    `mail:write`, and automatic Google Mail rules require an enabled `approved_rule`.
-7. The agenda shows local and connected events together without losing source
+7. A person can copy the deployed MCP endpoint and skill install request,
+   authorize a remote agent with visible scoped consent, start the Mail setup
+   interview, and revoke the host from Settings.
+8. The agenda shows local and connected events together without losing source
    identity.
-8. The activity view identifies human, agent, connector, and system changes.
-9. The PWA passes its installability checks and works on narrow mobile viewports.
-10. The desktop shell builds on macOS and Windows CI runners and its pin mode is
+9. The activity view identifies human, agent, connector, and system changes.
+10. The PWA passes its installability checks and works on narrow mobile viewports.
+11. The desktop shell builds on macOS and Windows CI runners and its pin mode is
    functional.
-11. Fresh local setup succeeds from documented commands.
-12. The production container starts, migrates safely, reports readiness, and can
+12. Fresh local setup succeeds from documented commands.
+13. The production container starts, migrates safely, reports readiness, and can
    be deployed with documented environment variables.
-13. Lint, formatting, type checking, unit, integration, end-to-end, migration,
+14. Lint, formatting, type checking, unit, integration, end-to-end, migration,
    build, and repository checks all pass.
-14. Enforced statement/function/line coverage is 95% and branch coverage is 94% for product
+15. Enforced statement/function/line coverage is 95% and branch coverage is 94% for product
     source code. Generated files, declarative configuration, and process entry
     points may be excluded, but not domain or application logic.

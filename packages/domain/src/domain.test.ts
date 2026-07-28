@@ -3,6 +3,7 @@ import {
   actorTypeSchema,
   addLocalDays,
   addMonths,
+  agentConnectionGuideSchema,
   agentMutationPolicies,
   apiErrorSchema,
   automationRoutineSchema,
@@ -114,6 +115,28 @@ describe("domain schemas", () => {
   });
 
   it("uses shared profile and attention envelopes with domain-owned mail rules", () => {
+    expect(
+      agentConnectionGuideSchema.parse({
+        domains: [
+          {
+            domain: "mail",
+            readScope: "mail:read",
+            support: "executable_rules",
+            writeScope: "mail:write",
+          },
+        ],
+        mcpUrl: "https://mcp.example.com/mcp",
+        skill: {
+          displayName: "Ilo Guided Setup",
+          installPrompt: "Install the Ilo skill.",
+          invocation: "$ilo-setup",
+          name: "ilo-setup",
+          setupPrompt: "Set up Ilo.",
+          sourceUrl: "https://example.com/ilo-setup",
+          version: "0.1.0",
+        },
+      }),
+    ).toMatchObject({ domains: [{ domain: "mail", support: "executable_rules" }] });
     expect(
       upsertDomainProfileInputSchema.parse({
         categories: [],

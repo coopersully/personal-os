@@ -228,6 +228,9 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/assistant/setup-status": {
         get: { security, responses: { 200: { description: "Agent setup status" } } },
       },
+      "/v1/assistant/connection-guide": {
+        get: { security, responses: { 200: { description: "Agent connection guide" } } },
+      },
       "/v1/assistant/profiles/{domain}": {
         get: { security, responses: { 200: { description: "Domain preference profile" } } },
         put: { security, responses: { 200: { description: "Domain preference profile saved" } } },

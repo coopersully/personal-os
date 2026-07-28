@@ -700,6 +700,29 @@ function apiFetch() {
           ],
         },
       });
+    if (url.pathname === "/v1/assistant/connection-guide")
+      return json({
+        guide: {
+          domains: [
+            {
+              domain: "mail",
+              readScope: "mail:read",
+              support: "executable_rules",
+              writeScope: "mail:write",
+            },
+          ],
+          mcpUrl: "https://mcp.example.com/mcp",
+          skill: {
+            displayName: "Ilo Guided Setup",
+            installPrompt: "Install the Ilo skill.",
+            invocation: "$ilo-setup",
+            name: "ilo-setup",
+            setupPrompt: "Set up Ilo.",
+            sourceUrl: "https://example.com/ilo-setup",
+            version: "0.1.0",
+          },
+        },
+      });
     if (url.pathname === "/v1/assistant/profiles/mail") return json({ profile: domainProfile });
     if (url.pathname === `/v1/assistant/attention/mail/${id}`)
       return json({ item: { ...attentionItem, status: "resolved" } });
@@ -1028,6 +1051,10 @@ describe("ilo API client", () => {
     await expect(api.listMailboxes()).resolves.toEqual([mailbox]);
     await expect(api.getAssistantSetupStatus()).resolves.toMatchObject({
       domains: [expect.objectContaining({ domain: "mail" })],
+    });
+    await expect(api.getAgentConnectionGuide()).resolves.toMatchObject({
+      mcpUrl: "https://mcp.example.com/mcp",
+      skill: { name: "ilo-setup" },
     });
     await expect(api.getDomainProfile("mail")).resolves.toEqual(domainProfile);
     await expect(

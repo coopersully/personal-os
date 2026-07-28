@@ -5,11 +5,14 @@ import {
   createXConnector,
 } from "@personal-os/connectors";
 import {
+  type AgentConnectionGuide,
+  assistantDomains,
   confirmEmailVerificationInputSchema,
   connectICloudInputSchema,
   createAccessTokenInputSchema,
   createAutomationRoutineInputSchema,
   createInvitationInputSchema,
+  featureAccessPolicies,
   loginInputSchema,
   registerInputSchema,
   requestPasswordResetInputSchema,
@@ -105,6 +108,8 @@ const xFolderInputSchema = z.object({ folderId: z.string().min(1).max(100) });
 const pinterestPinsQuerySchema = z.object({
   limit: z.coerce.number().int().min(4).max(20).default(12),
 });
+const defaultAgentSkillSourceUrl =
+  "https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup";
 
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
@@ -179,6 +184,26 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const audit = createAuditService(dependencies.db);
   const assistant = createAssistantService({ db: dependencies.db, now });
+  const agentSkillSourceUrl = dependencies.config.agentSkillSourceUrl ?? defaultAgentSkillSourceUrl;
+  const agentConnectionGuide: AgentConnectionGuide = {
+    domains: assistantDomains.map((domain) => ({
+      domain,
+      readScope: featureAccessPolicies[domain].readScope,
+      support: domain === "mail" ? "executable_rules" : "profile_and_attention",
+      writeScope: featureAccessPolicies[domain].writeScope,
+    })),
+    mcpUrl: dependencies.config.mcpResourceUrl ?? `${dependencies.config.apiBaseUrl}/mcp`,
+    skill: {
+      displayName: "Ilo Guided Setup",
+      installPrompt: `Install the Ilo Guided Setup skill from ${agentSkillSourceUrl}. Make it available as $ilo-setup, then tell me when it is ready.`,
+      invocation: "$ilo-setup",
+      name: "ilo-setup",
+      setupPrompt:
+        "Use $ilo-setup to inspect my connected Ilo domains and run the shortest useful setup interview.",
+      sourceUrl: agentSkillSourceUrl,
+      version: "0.1.0",
+    },
+  };
   const mail = createMailService({ db: dependencies.db, gateway: connectors.mailGateway, now });
   const weather = createWeatherService({
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
@@ -371,9 +396,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         "This authorization server only issues tokens for the ilo MCP resource.",
       );
     await oauthSession(context);
-    return context.html(
-      `<main><h1>Authorize ilo MCP</h1><p>This authorizes the requesting MCP client to use your ilo account. Connected services remain inside ilo.</p><form method="post"><input type="hidden" name="client_id" value="${escapeHtml(query.client_id)}"><input type="hidden" name="code_challenge" value="${escapeHtml(query.code_challenge)}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="redirect_uri" value="${escapeHtml(query.redirect_uri)}"><input type="hidden" name="resource" value="${escapeHtml(query.resource)}"><input type="hidden" name="scope" value="${escapeHtml(query.scope ?? "")}"><input type="hidden" name="state" value="${escapeHtml(query.state ?? "")}"><button type="submit">Authorize</button></form></main>`,
-    );
+    const client = await oauth.getAuthorizationClient(query.client_id, query.redirect_uri);
+    const scopes = oauth.parseScopes(query.scope);
+    return context.html(oauthConsentPage({ clientName: client.name, query, scopes }));
   });
   app.post("/oauth/authorize", async (context) => {
     const input = oauthAuthorizeSchema.parse(await context.req.parseBody());
@@ -750,7 +775,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerMailRoutes({ app, mail, mutationContext });
 
-  registerAssistantRoutes({ app, assistant, mutationContext });
+  registerAssistantRoutes({
+    app,
+    assistant,
+    connectionGuide: agentConnectionGuide,
+    mutationContext,
+  });
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 
@@ -834,4 +864,74 @@ function escapeHtml(value: string): string {
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ??
       character,
   );
+}
+
+const oauthScopeLabels: Record<string, string> = {
+  "audit:read": "Read Ilo activity history",
+  "automations:read": "Read automations",
+  "automations:write": "Run approved automations",
+  "bookmarks:read": "Read synchronized bookmarks",
+  "calendar:read": "Read calendars and events",
+  "calendar:write": "Create and manage events",
+  "finances:read": "Read financial accounts and activity",
+  "finances:write": "Manage supported financial organization",
+  "goals:read": "Read goals and motives",
+  "goals:write": "Manage goals and motives",
+  "mail:read": "Read connected mail",
+  "mail:write": "Manage mail and approved Mail rules",
+  "reminders:read": "Read reminders",
+  "reminders:write": "Create and manage reminders",
+  "tasks:read": "Read tasks",
+  "tasks:write": "Create and manage tasks",
+};
+
+function oauthConsentPage({
+  clientName,
+  query,
+  scopes,
+}: {
+  clientName: string;
+  query: z.infer<typeof oauthAuthorizeSchema>;
+  scopes: string[];
+}): string {
+  const cancel = new URL(query.redirect_uri);
+  cancel.searchParams.set("error", "access_denied");
+  if (query.state) cancel.searchParams.set("state", query.state);
+  const fields = {
+    client_id: query.client_id,
+    code_challenge: query.code_challenge,
+    code_challenge_method: "S256",
+    redirect_uri: query.redirect_uri,
+    resource: query.resource,
+    scope: scopes.join(" "),
+    state: query.state ?? "",
+  };
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize ${escapeHtml(clientName)} · Ilo</title>
+</head>
+<body>
+  <main>
+    <p>Ilo agent access</p>
+    <h1>Connect ${escapeHtml(clientName)}</h1>
+    <p>This agent host is requesting access to your Ilo account. Connected provider credentials remain inside Ilo.</p>
+    <h2>Requested permissions</h2>
+    <ul>${scopes.map((scope) => `<li>${escapeHtml(oauthScopeLabels[scope] ?? scope)}</li>`).join("")}</ul>
+    <p>You can revoke this connection at any time from Settings → Agent access.</p>
+    <form method="post">
+      ${Object.entries(fields)
+        .map(
+          ([name, value]) =>
+            `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+        )
+        .join("")}
+      <button type="submit">Authorize ${escapeHtml(clientName)}</button>
+      <a href="${escapeHtml(cancel.toString())}">Cancel</a>
+    </form>
+  </main>
+</body>
+</html>`;
 }

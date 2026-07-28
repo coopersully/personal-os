@@ -43,13 +43,13 @@ describe.sequential("mail service", () => {
     const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
     temporaryMigrationsFolder = await mkdtemp(join(tmpdir(), "ilo-mail-migrations-"));
     await cp(migrationsFolder, temporaryMigrationsFolder, { recursive: true });
-    await unlink(join(temporaryMigrationsFolder, "0037_agent_setup_foundation.sql"));
+    await unlink(join(temporaryMigrationsFolder, "0038_agent_setup_foundation.sql"));
     const journalPath = join(temporaryMigrationsFolder, "meta/_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
     journal.entries = journal.entries.filter(
-      (entry) => entry.tag !== "0037_agent_setup_foundation",
+      (entry) => entry.tag !== "0038_agent_setup_foundation",
     );
     await writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
     await migrateDatabase(database.db, temporaryMigrationsFolder);

@@ -210,7 +210,7 @@ Mail policy tiers:
 
 ### 6.8 Agent access, routines, and activity
 
-**Guided setup:** after connecting sources, the user may open ilo in Claude, Codex, or another MCP host and install the repository-backed `ilo-setup` skill. The agent discovers its scoped domains, reads any existing domain profile, inspects a bounded representative sample, asks a short adaptive interview, saves a draft profile, previews exact rule candidates, and activates behavior only after the user accepts the summary. Personal preferences live in ilo rather than in a host skill or conversation memory.
+**Guided setup:** after connecting sources, the Ready step and Settings → Agent access provide the deployment's remote MCP URL, the repository-backed `ilo-setup` skill install request, and a domain-specific starter prompt. The user may paste these into Claude, Codex, or another compatible MCP host. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. The agent discovers its scoped domains, reads any existing domain profile, inspects a bounded representative sample, asks a short adaptive interview, saves a draft profile, previews exact rule candidates, and activates behavior only after the user accepts the summary. Personal preferences live in ilo rather than in a host skill or conversation memory.
 
 Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
 

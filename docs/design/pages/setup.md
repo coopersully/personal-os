@@ -58,8 +58,9 @@ Movement
    app-specific password connection.
 6. **Finances** appears when Finances was selected and launches the existing
    Plaid connection flow. Multiple institutions can be added in sequence.
-7. **Ready** summarizes selected workspaces and connected sources, then opens
-   Today.
+7. **Ready** summarizes selected workspaces and connected sources, then offers
+   either Today or the agent-access handoff. Both actions persist setup as
+   complete before navigating.
 
 Tasks require no external connection and therefore add no setup step. A person
 may skip every provider and still complete setup.
@@ -73,7 +74,7 @@ may skip every provider and still complete setup.
 | `connection` | One bounded card contains provider context, the real connection action, and no speculative account preview. | The forward action says “Skip …” when no account is connected. |
 | `sequence` | Connected sources render as compact material rows above the add-another action. | Omit the list; never render placeholder accounts. |
 | `attention` | Email verification is a dedicated prerequisite step, not an inline provider warning. Provider failures appear beside the connection they affect. | A working recovery action is shown when available. |
-| `summary` | The ready step reports selected workspaces, source count, and agent-access posture. | “None yet” is explicit and points to later setup. |
+| `summary` | The ready step reports selected workspaces, source count, and agent-access posture, then offers Today and Connect an agent. | “None yet” is explicit and points to later setup. |
 
 ## Provider handoff contract
 
@@ -126,6 +127,8 @@ may skip every provider and still complete setup.
 7. Return from Google OAuth and confirm the setup route and real connected
    account are restored.
 8. Complete without connections and with multiple connections.
-9. Verify keyboard operation, heading focus and scroll reset, reduced motion,
+9. Choose **Connect an agent** from Ready and confirm setup is completed before
+   Settings opens the agent-access section.
+10. Verify keyboard operation, heading focus and scroll reset, reduced motion,
    error recovery, blank provider credentials, 320 px layout, and normal
    desktop layout.

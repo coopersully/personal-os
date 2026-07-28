@@ -63,6 +63,19 @@ describe("assistant setup routes", () => {
     registerAssistantRoutes({
       app,
       assistant: assistant as unknown as ReturnType<typeof createAssistantService>,
+      connectionGuide: {
+        domains: [],
+        mcpUrl: "https://mcp.example.com/mcp",
+        skill: {
+          displayName: "Ilo Guided Setup",
+          installPrompt: "Install the Ilo skill.",
+          invocation: "$ilo-setup",
+          name: "ilo-setup",
+          setupPrompt: "Set up Ilo.",
+          sourceUrl: "https://example.com/ilo-setup",
+          version: "0.1.0",
+        },
+      },
       mutationContext: (context) => ({
         principal: context.get("principal"),
         requestId: context.get("requestId"),
@@ -70,6 +83,7 @@ describe("assistant setup routes", () => {
     });
     const json = { headers: { "content-type": "application/json" } };
 
+    expect((await app.request("/v1/assistant/connection-guide")).status).toBe(200);
     expect((await app.request("/v1/assistant/setup-status")).status).toBe(200);
     expect((await app.request("/v1/assistant/profiles/mail")).status).toBe(200);
     expect(

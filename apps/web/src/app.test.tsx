@@ -218,6 +218,8 @@ const mocks = vi.hoisted(() => ({
   deleteMotive: vi.fn(),
   createAutomation: vi.fn(),
   getDailyBrief: vi.fn(),
+  getAgentConnectionGuide: vi.fn(),
+  getAssistantSetupStatus: vi.fn(),
   getWeather: vi.fn(),
   searchWeatherLocations: vi.fn(),
   getGoogleAuthorizationUrl: vi.fn(),
@@ -238,6 +240,7 @@ const mocks = vi.hoisted(() => ({
   listEvents: vi.fn(),
   listMailboxes: vi.fn(),
   listMailMessages: vi.fn(),
+  listMailRules: vi.fn(),
   listMailThreads: vi.fn(),
   listInvitations: vi.fn(),
   listOAuthClients: vi.fn(),
@@ -591,10 +594,48 @@ function defaults() {
     },
   ]);
   mocks.getXBookmarkAccount.mockResolvedValue(null);
+  mocks.getAgentConnectionGuide.mockResolvedValue({
+    domains: [
+      {
+        domain: "mail",
+        readScope: "mail:read",
+        support: "executable_rules",
+        writeScope: "mail:write",
+      },
+      {
+        domain: "calendar",
+        readScope: "calendar:read",
+        support: "profile_and_attention",
+        writeScope: "calendar:write",
+      },
+    ],
+    mcpUrl: "https://mcp.example.com/mcp",
+    skill: {
+      displayName: "Ilo Guided Setup",
+      installPrompt: "Install Ilo Guided Setup from https://example.com/ilo-setup.",
+      invocation: "$ilo-setup",
+      name: "ilo-setup",
+      setupPrompt: "Use $ilo-setup to set up Ilo.",
+      sourceUrl: "https://example.com/ilo-setup",
+      version: "0.1.0",
+    },
+  });
+  mocks.getAssistantSetupStatus.mockResolvedValue({
+    domains: [
+      {
+        canRead: true,
+        canWrite: true,
+        domain: "mail",
+        profileStatus: null,
+        profileVersion: null,
+      },
+    ],
+  });
   mocks.listXBookmarkFolders.mockResolvedValue([]);
   mocks.listMailboxes.mockResolvedValue([mailbox]);
   mocks.listMailThreads.mockResolvedValue([mailThread, secondMailThread]);
   mocks.listMailMessages.mockResolvedValue([]);
+  mocks.listMailRules.mockResolvedValue([]);
   mocks.getMailThread.mockResolvedValue(mailThread);
   mocks.sendMail.mockResolvedValue(undefined);
   mocks.createMailDraft.mockResolvedValue({ id });
@@ -1302,6 +1343,38 @@ describe("ilo web app", () => {
         expect.anything(),
       );
     });
+  });
+
+  it("completes setup before handing a ready account to agent access", async () => {
+    const setupUser: User = {
+      ...user,
+      setup: {
+        completedAt: null,
+        currentStep: "ready" as const,
+        dismissedAt: null,
+        selectedWorkspaces: ["mail"] as const,
+        startedAt: now,
+        status: "in_progress" as const,
+      },
+    };
+    mocks.getMe.mockResolvedValue(setupUser);
+    mocks.updateAccountSetup.mockResolvedValue({
+      ...setupUser,
+      setup: { ...setupUser.setup, completedAt: now, status: "complete" },
+    });
+    setup("/setup");
+    const browser = userEvent.setup();
+
+    expect(
+      await screen.findByRole("heading", { name: "Your workspace is ready." }),
+    ).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Connect an agent" }));
+
+    expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
+    expect(mocks.updateAccountSetup).toHaveBeenCalledWith(
+      { action: "complete" },
+      expect.anything(),
+    );
   });
 
   it("uses the real provider flows while progressing through full setup", async () => {
@@ -3666,12 +3739,14 @@ describe("ilo web app", () => {
     );
 
     await browser.click(settingsNavigation.getByRole("link", { name: "Agent access" }));
+    expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.clear(screen.getByLabelText("Token name"));
-    expect(screen.getByRole("button", { name: "Create agent token" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create local token" })).toBeDisabled();
     await browser.type(screen.getByLabelText("Token name"), "Codex morning");
-    await browser.click(screen.getByRole("radio", { name: /Morning brief/ }));
+    await browser.click(screen.getByRole("radio", { name: /Daily brief/ }));
     await waitFor(() =>
-      expect(screen.getByRole("radio", { name: /Morning brief/ })).toHaveAttribute(
+      expect(screen.getByRole("radio", { name: /Daily brief/ })).toHaveAttribute(
         "data-state",
         "on",
       ),
@@ -3679,7 +3754,7 @@ describe("ilo web app", () => {
     await browser.click(screen.getByText(/Fine-tune permissions/));
     await browser.click(screen.getByLabelText("Read mail"));
     await browser.click(screen.getByLabelText("Read mail"));
-    await browser.click(screen.getByRole("button", { name: "Create agent token" }));
+    await browser.click(screen.getByRole("button", { name: "Create local token" }));
     await waitFor(() =>
       expect(mocks.createAccessToken).toHaveBeenCalledWith(
         expect.objectContaining({ name: "Codex morning" }),

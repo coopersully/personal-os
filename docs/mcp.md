@@ -46,11 +46,25 @@ The fixed `personal-os://agenda/today` resource merges open reminders due throug
 
 ## Authorization
 
-Create a token in the product settings. Grant only the scopes the host needs:
+Open **Settings → Agent access** for the current deployment's MCP URL, the
+install request for the versioned `ilo-setup` skill, and a domain-specific
+starter prompt. A new account can go directly there from the Ready step.
+
+Remote MCP OAuth is the recommended connection. The host dynamically registers,
+the user signs in to Ilo, and the consent page lists the requested permissions
+before issuing audience-bound access and rotating refresh tokens. Provider
+credentials remain inside Ilo. Local or manual hosts that cannot complete OAuth
+can use an explicitly scoped personal access token from the advanced section.
+
+Grant only the scopes the host needs:
 
 - `reminders:read`, `reminders:write`
 - `calendar:read`, `calendar:write`
 - `mail:read`, `mail:write`
+- `tasks:read`, `tasks:write`
+- `goals:read`, `goals:write`
+- `automations:read`, `automations:write`
+- `bookmarks:read`
 - `audit:read`
 - `finances:read`, `finances:write`
 

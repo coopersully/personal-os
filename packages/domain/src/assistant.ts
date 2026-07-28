@@ -160,3 +160,26 @@ export const assistantSetupStatusSchema = z.object({
   ),
 });
 export type AssistantSetupStatus = z.infer<typeof assistantSetupStatusSchema>;
+
+export const agentDomainSupportSchema = z.object({
+  domain: assistantDomainSchema,
+  readScope: z.string().min(1),
+  support: z.enum(["profile_and_attention", "executable_rules"]),
+  writeScope: z.string().min(1),
+});
+export type AgentDomainSupport = z.infer<typeof agentDomainSupportSchema>;
+
+export const agentConnectionGuideSchema = z.object({
+  domains: z.array(agentDomainSupportSchema),
+  mcpUrl: z.url(),
+  skill: z.object({
+    displayName: z.string().min(1),
+    installPrompt: z.string().min(1),
+    invocation: z.string().min(1),
+    name: z.string().min(1),
+    setupPrompt: z.string().min(1),
+    sourceUrl: z.url(),
+    version: z.string().min(1),
+  }),
+});
+export type AgentConnectionGuide = z.infer<typeof agentConnectionGuideSchema>;

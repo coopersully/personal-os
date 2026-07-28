@@ -1,4 +1,5 @@
 import type {
+  AgentConnectionGuide,
   AssistantDomain,
   AssistantSetupStatus,
   AttentionItem,
@@ -25,6 +26,12 @@ export function createAssistantApiClient(request: Request, toQuery: ToQuery) {
     async getAssistantSetupStatus(): Promise<AssistantSetupStatus> {
       const response = await request<{ setup: AssistantSetupStatus }>("/v1/assistant/setup-status");
       return response.setup;
+    },
+    async getAgentConnectionGuide(): Promise<AgentConnectionGuide> {
+      const response = await request<{ guide: AgentConnectionGuide }>(
+        "/v1/assistant/connection-guide",
+      );
+      return response.guide;
     },
     async getDomainProfile(domain: AssistantDomain): Promise<DomainProfile | null> {
       const response = await request<{ profile: DomainProfile | null }>(

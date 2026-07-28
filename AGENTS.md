@@ -29,3 +29,12 @@ pnpm verify
 ```
 
 This includes repository mirror checks, lint, type checking, coverage enforcement (95% statements/functions/lines and 94% branches), production builds, and desktop/mobile E2E acceptance tests.
+
+## Connector Reliability
+
+- Before changing a provider integration, callback, sync path, or provider network requirement,
+  read `docs/engineering/connector-reliability.md`.
+- A connection endpoint or OAuth callback may persist identity and credentials, but must not wait
+  for source discovery, pagination, projection, or an initial full sync.
+- Keep provider timeouts and required ports in the checked provider network contract. Connector
+  changes are incomplete when application code and production infrastructure disagree.

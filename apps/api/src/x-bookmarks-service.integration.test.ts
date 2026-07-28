@@ -89,6 +89,7 @@ describe.sequential("X Bookmarks service", () => {
       username: "example_user",
       selectedFolderId: null,
     });
+    expect(x.listBookmarkFolders).not.toHaveBeenCalled();
     await expect(service.completeAuthorization(state, "code")).rejects.toThrow(
       "invalid or expired",
     );
@@ -124,6 +125,16 @@ describe.sequential("X Bookmarks service", () => {
       new ConnectorError("X is unavailable", 503),
     );
     await expect(service.folders(userId)).rejects.toThrow("X is unavailable");
+    await expect(service.getAccount(userId)).resolves.toMatchObject({
+      syncError: "X is unavailable",
+      syncStatus: "error",
+    });
+    vi.mocked(x.listBookmarkFolders).mockRejectedValueOnce("opaque provider failure");
+    await expect(service.folders(userId)).rejects.toMatchObject({ code: "internal_error" });
+    await expect(service.getAccount(userId)).resolves.toMatchObject({
+      syncError: "Unknown X folder discovery error",
+      syncStatus: "error",
+    });
     await service.selectFolder(userId, "folder-calendar");
     vi.mocked(x.listFolderBookmarks).mockRejectedValueOnce(
       new ConnectorError("X needs reauthorization", 401),

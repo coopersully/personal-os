@@ -45,6 +45,7 @@ describe("email delivery", () => {
         "content-type": "application/json",
       },
       method: "POST",
+      signal: expect.any(AbortSignal),
     });
     request.mockRestore();
   });

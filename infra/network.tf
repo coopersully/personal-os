@@ -165,6 +165,22 @@ resource "aws_security_group" "application" {
   }
 
   egress {
+    description = "iCloud Mail IMAP over TLS"
+    from_port   = 993
+    to_port     = 993
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    description = "iCloud Mail SMTP submission"
+    from_port   = 587
+    to_port     = 587
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
     description = "PostgreSQL in private database subnets"
     from_port   = 5432
     to_port     = 5432

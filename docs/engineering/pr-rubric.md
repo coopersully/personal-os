@@ -129,6 +129,12 @@ Block a pull request when it has a correctness, security, privacy, data-integrit
 test, documentation, or operational gap. Do not approve with failing required checks or unresolved
 actionable review threads.
 
+For connector changes, reviewers must also verify the
+[connector reliability contract](connector-reliability.md): callback/connect response boundaries,
+bounded provider requests, durable error state and retry behavior, and parity between provider
+transports and production egress. A passing unit test with a mocked provider is not evidence that
+the production network path exists.
+
 ## PR workflow output contract
 
 Any PR-oriented workflow response must make the pull request immediately actionable. Use this

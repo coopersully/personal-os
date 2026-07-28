@@ -41,6 +41,22 @@ against the same migrations.
 - Connector callbacks bind OAuth state to a user, expire quickly, and are
   one-time-use.
 
+## Connector lifecycle
+
+Connection is a durable handoff, not a full synchronization transaction. An
+OAuth callback may exchange its one-time code, resolve the minimum provider
+identity needed for an account key, encrypt credentials, persist the account,
+and redirect. An app-password endpoint may validate its input and persist a
+pending account. Source discovery, pagination, projection, and initial sync run
+after that durable handoff and report progress or a redacted error on the
+account.
+
+All provider calls use bounded timeouts below the public edge timeout. Provider
+transports must also be declared in production infrastructure; connector code
+and security-group egress are one contract. The detailed invariant and review
+checklist live in
+[`docs/engineering/connector-reliability.md`](../engineering/connector-reliability.md).
+
 ## Calendar projection
 
 Every calendar event includes:

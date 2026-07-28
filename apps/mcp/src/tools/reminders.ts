@@ -7,7 +7,7 @@ import {
   timeZoneSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
-import { emptyResult, result } from "../tool-result.js";
+import { result } from "../tool-result.js";
 
 const id = idSchema.describe("ilo reminder identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
@@ -132,24 +132,25 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
     "complete_reminder",
     {
       annotations: annotations.update,
-      description: `Mark one reminder complete or reopen it. This records an audit event even when the requested state matches the current state, so it is not idempotent. ${directMutation}`,
-      inputSchema: { completed: z.boolean().default(true), id },
+      description: `Mark one loaded reminder complete or reopen it. Pass expectedUpdatedAt from get_reminder so a concurrent change fails safely. This records an audit event even when the requested state matches the current state, so it is not idempotent. ${directMutation}`,
+      inputSchema: { completed: z.boolean().default(true), expectedUpdatedAt: isoDateTime, id },
       title: "Complete or reopen reminder",
     },
-    async (input) => result(await api.completeReminder(input.id, input.completed)),
+    async (input) =>
+      result(await api.completeReminder(input.id, input.completed, input.expectedUpdatedAt)),
   );
 
   server.registerTool(
     "delete_reminder",
     {
       annotations: annotations.delete,
-      description: `Move one reminder to recoverable trash; this is not permanent deletion. Its source, before/after state, actor, and policy remain in audit history. ${directMutation}`,
-      inputSchema: { id },
+      description: `Move one loaded reminder to recoverable trash; this is not permanent deletion. Pass expectedUpdatedAt so a concurrent change fails safely. The result contains the deleted revision needed for guarded restore; audit history retains source, before/after state, actor, and policy. ${directMutation}`,
+      inputSchema: { expectedUpdatedAt: isoDateTime, id },
       title: "Move reminder to trash",
     },
     async (input) => {
-      await api.deleteReminder(input.id);
-      return emptyResult("Reminder moved to recoverable trash.");
+      const reminder = await api.trashReminder(input.id, input.expectedUpdatedAt);
+      return result(reminder);
     },
   );
 
@@ -157,10 +158,10 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
     "restore_reminder",
     {
       annotations: annotations.update,
-      description: `Restore one reminder from recoverable trash by identifier and record the restoration in audit history. ${directMutation}`,
-      inputSchema: { id },
+      description: `Restore one reminder from recoverable trash using the updatedAt revision returned by delete_reminder. A concurrent change fails safely, and restoration is recorded in audit history. ${directMutation}`,
+      inputSchema: { expectedUpdatedAt: isoDateTime, id },
       title: "Restore reminder",
     },
-    async (input) => result(await api.restoreReminder(input.id)),
+    async (input) => result(await api.restoreReminder(input.id, input.expectedUpdatedAt)),
   );
 }

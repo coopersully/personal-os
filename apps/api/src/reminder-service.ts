@@ -7,7 +7,7 @@ import type {
   ReminderListQuery,
   UpdateReminderInput,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -56,24 +56,96 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
     return record;
   }
 
+  async function findCurrent(userId: string, id: string) {
+    return (
+      await db
+        .select()
+        .from(reminders)
+        .where(
+          and(eq(reminders.id, id), eq(reminders.userId, userId), eq(reminders.kind, "reminder")),
+        )
+        .limit(1)
+    )[0];
+  }
+
+  function assertExpectedRevision(
+    record: typeof reminders.$inferSelect,
+    expectedUpdatedAt: string | undefined,
+  ): void {
+    if (expectedUpdatedAt && expectedUpdatedAt !== record.updatedAt.toISOString()) {
+      throw new AppError("conflict", "The reminder changed since it was loaded.", {
+        currentUpdatedAt: record.updatedAt.toISOString(),
+      });
+    }
+  }
+
+  async function throwRevisionConflict(userId: string, id: string): Promise<never> {
+    const current = await findCurrent(userId, id);
+    throw new AppError("conflict", "The reminder changed while the mutation was being applied.", {
+      currentUpdatedAt: current?.updatedAt.toISOString() ?? null,
+    });
+  }
+
+  function nextUpdatedAt(previous: Date): Date {
+    const current = now();
+    return current.getTime() > previous.getTime() ? current : new Date(previous.getTime() + 1);
+  }
+
+  function matchesStoredRevision(revision: Date) {
+    return sql`date_trunc('milliseconds', ${reminders.updatedAt}) = ${revision}`;
+  }
+
+  async function findActiveForMutation(
+    userId: string,
+    id: string,
+    expectedUpdatedAt: string | undefined,
+  ) {
+    try {
+      const record = await findActive(userId, id);
+      assertExpectedRevision(record, expectedUpdatedAt);
+      return record;
+    } catch (error) {
+      if (
+        error instanceof AppError &&
+        error.code === "not_found" &&
+        expectedUpdatedAt &&
+        (await findCurrent(userId, id))
+      ) {
+        return throwRevisionConflict(userId, id);
+      }
+      throw error;
+    }
+  }
+
   return {
-    async complete(id: string, completed: boolean, context: MutationContext): Promise<Reminder> {
-      const before = await findActive(context.principal.userId, id);
+    async complete(
+      id: string,
+      completed: boolean,
+      context: MutationContext,
+      expectedUpdatedAt?: string,
+    ): Promise<Reminder> {
+      const before = await findActiveForMutation(context.principal.userId, id, expectedUpdatedAt);
       const after = await db.transaction(async (transaction) => {
-        const updated = requireDatabaseRecord(
-          (
-            await transaction
-              .update(reminders)
-              .set({
-                completedAt: completed ? now() : null,
-                status: completed ? "completed" : "inbox",
-                updatedAt: now(),
-              })
-              .where(eq(reminders.id, before.id))
-              .returning()
-          )[0],
-          "The reminder could not be updated.",
-        );
+        const [updated] = await transaction
+          .update(reminders)
+          .set({
+            completedAt: completed ? now() : null,
+            status: completed ? "completed" : "inbox",
+            updatedAt: nextUpdatedAt(before.updatedAt),
+          })
+          .where(
+            and(
+              eq(reminders.id, before.id),
+              eq(reminders.userId, before.userId),
+              eq(reminders.kind, "reminder"),
+              matchesStoredRevision(before.updatedAt),
+              isNull(reminders.deletedAt),
+            ),
+          )
+          .returning();
+        if (!updated) {
+          return throwRevisionConflict(context.principal.userId, before.id);
+        }
         await transaction.insert(auditEvents).values(
           auditValues({
             action: completed ? "reminder.completed" : "reminder.reopened",
@@ -123,19 +195,30 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       return serializeReminder(record);
     },
 
-    async delete(id: string, context: MutationContext): Promise<void> {
-      const before = await findActive(context.principal.userId, id);
-      await db.transaction(async (transaction) => {
-        const after = requireDatabaseRecord(
-          (
-            await transaction
-              .update(reminders)
-              .set({ deletedAt: now(), updatedAt: now() })
-              .where(eq(reminders.id, before.id))
-              .returning()
-          )[0],
-          "The reminder could not be deleted.",
-        );
+    async delete(
+      id: string,
+      context: MutationContext,
+      expectedUpdatedAt?: string,
+    ): Promise<Reminder> {
+      const before = await findActiveForMutation(context.principal.userId, id, expectedUpdatedAt);
+      const deleted = await db.transaction(async (transaction) => {
+        const deletedAt = now();
+        const [after] = await transaction
+          .update(reminders)
+          .set({ deletedAt, updatedAt: nextUpdatedAt(before.updatedAt) })
+          .where(
+            and(
+              eq(reminders.id, before.id),
+              eq(reminders.userId, before.userId),
+              eq(reminders.kind, "reminder"),
+              matchesStoredRevision(before.updatedAt),
+              isNull(reminders.deletedAt),
+            ),
+          )
+          .returning();
+        if (!after) {
+          return throwRevisionConflict(context.principal.userId, before.id);
+        }
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "reminder.deleted",
@@ -146,7 +229,9 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
             ...context,
           }),
         );
+        return after;
       });
+      return serializeReminder(deleted);
     },
 
     async get(id: string, userId: string): Promise<Reminder> {
@@ -212,6 +297,12 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       userId: string,
       input: ReminderDeferralPreviewInput,
     ): Promise<ReminderDeferralPreview> {
+      if (new Date(input.proposedDueAt).getTime() <= now().getTime()) {
+        throw new AppError(
+          "invalid_request",
+          "The proposed due time must be in the future when the preview is created.",
+        );
+      }
       const conditions = [
         eq(reminders.userId, userId),
         eq(reminders.kind, "reminder"),
@@ -255,7 +346,11 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       };
     },
 
-    async restore(id: string, context: MutationContext): Promise<Reminder> {
+    async restore(
+      id: string,
+      context: MutationContext,
+      expectedUpdatedAt?: string,
+    ): Promise<Reminder> {
       const [before] = await db
         .select()
         .from(reminders)
@@ -269,19 +364,29 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         )
         .limit(1);
       if (!before) {
+        if (expectedUpdatedAt && (await findCurrent(context.principal.userId, id))) {
+          return throwRevisionConflict(context.principal.userId, id);
+        }
         throw new AppError("not_found", "The deleted reminder was not found.");
       }
+      assertExpectedRevision(before, expectedUpdatedAt);
       const after = await db.transaction(async (transaction) => {
-        const restored = requireDatabaseRecord(
-          (
-            await transaction
-              .update(reminders)
-              .set({ deletedAt: null, updatedAt: now() })
-              .where(eq(reminders.id, before.id))
-              .returning()
-          )[0],
-          "The reminder could not be restored.",
-        );
+        const [restored] = await transaction
+          .update(reminders)
+          .set({ deletedAt: null, updatedAt: nextUpdatedAt(before.updatedAt) })
+          .where(
+            and(
+              eq(reminders.id, before.id),
+              eq(reminders.userId, before.userId),
+              eq(reminders.kind, "reminder"),
+              matchesStoredRevision(before.updatedAt),
+              isNotNull(reminders.deletedAt),
+            ),
+          )
+          .returning();
+        if (!restored) {
+          return throwRevisionConflict(context.principal.userId, before.id);
+        }
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "reminder.restored",
@@ -302,32 +407,37 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       input: UpdateReminderInput,
       context: MutationContext,
     ): Promise<Reminder> {
-      const before = await findActive(context.principal.userId, id);
-      if (input.expectedUpdatedAt && input.expectedUpdatedAt !== before.updatedAt.toISOString()) {
-        throw new AppError("conflict", "The reminder changed since it was loaded.", {
-          currentUpdatedAt: before.updatedAt.toISOString(),
-        });
-      }
+      const before = await findActiveForMutation(
+        context.principal.userId,
+        id,
+        input.expectedUpdatedAt,
+      );
       const after = await db.transaction(async (transaction) => {
-        const updated = requireDatabaseRecord(
-          (
-            await transaction
-              .update(reminders)
-              .set({
-                ...(input.dueAt === undefined
-                  ? {}
-                  : { dueAt: input.dueAt ? new Date(input.dueAt) : null }),
-                ...(input.notes === undefined ? {} : { notes: input.notes }),
-                ...(input.priority === undefined ? {} : { priority: input.priority }),
-                ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
-                ...(input.title === undefined ? {} : { title: input.title }),
-                updatedAt: now(),
-              })
-              .where(eq(reminders.id, before.id))
-              .returning()
-          )[0],
-          "The reminder could not be updated.",
-        );
+        const [updated] = await transaction
+          .update(reminders)
+          .set({
+            ...(input.dueAt === undefined
+              ? {}
+              : { dueAt: input.dueAt ? new Date(input.dueAt) : null }),
+            ...(input.notes === undefined ? {} : { notes: input.notes }),
+            ...(input.priority === undefined ? {} : { priority: input.priority }),
+            ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
+            ...(input.title === undefined ? {} : { title: input.title }),
+            updatedAt: nextUpdatedAt(before.updatedAt),
+          })
+          .where(
+            and(
+              eq(reminders.id, before.id),
+              eq(reminders.userId, before.userId),
+              eq(reminders.kind, "reminder"),
+              matchesStoredRevision(before.updatedAt),
+              isNull(reminders.deletedAt),
+            ),
+          )
+          .returning();
+        if (!updated) {
+          return throwRevisionConflict(context.principal.userId, before.id);
+        }
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "reminder.updated",

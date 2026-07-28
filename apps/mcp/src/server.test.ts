@@ -363,6 +363,7 @@ function mockApi() {
       policy: "preview" as const,
     })),
     restoreReminder: vi.fn(async () => reminder),
+    trashReminder: vi.fn(async () => reminder),
     listTasks: vi.fn(async () => ({ items: [task], nextCursor: null })),
     listGoals: vi.fn(async () => []),
     createGoal: vi.fn(async () => ({
@@ -695,10 +696,19 @@ describe("ilo MCP server", () => {
         priority: "high",
       },
     });
-    await client.callTool({ name: "complete_reminder", arguments: { id } });
-    const deletedReminder = await client.callTool({ name: "delete_reminder", arguments: { id } });
-    expect(deletedReminder.structuredContent).toEqual({ ok: true });
-    await client.callTool({ name: "restore_reminder", arguments: { id } });
+    await client.callTool({
+      name: "complete_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
+    const deletedReminder = await client.callTool({
+      name: "delete_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
+    expect(deletedReminder.structuredContent).toEqual({ result: reminder });
+    await client.callTool({
+      name: "restore_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
     await client.callTool({ name: "list_tasks", arguments: { status: "scheduled" } });
     await client.callTool({
       name: "create_task",
@@ -804,7 +814,7 @@ describe("ilo MCP server", () => {
       timezone: null,
       priority: "medium",
     });
-    expect(api.completeReminder).toHaveBeenCalledWith(id, true);
+    expect(api.completeReminder).toHaveBeenCalledWith(id, true, now);
     expect(api.getReminder).toHaveBeenCalledWith(id);
     expect(api.previewOverdueReminderDeferral).toHaveBeenCalledWith({
       limit: 100,
@@ -817,7 +827,8 @@ describe("ilo MCP server", () => {
       id,
       expect.objectContaining({ expectedUpdatedAt: now, title: "Changed" }),
     );
-    expect(api.restoreReminder).toHaveBeenCalledWith(id);
+    expect(api.trashReminder).toHaveBeenCalledWith(id, now);
+    expect(api.restoreReminder).toHaveBeenCalledWith(id, now);
     expect(api.createTask).toHaveBeenCalledWith({
       title: "Plan task",
       dueAt: null,

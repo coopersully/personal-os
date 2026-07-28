@@ -1,8 +1,9 @@
 import {
-  completeInputSchema,
+  completeReminderInputSchema,
   createReminderInputSchema,
   reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
+  reminderRevisionInputSchema,
   updateReminderInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
@@ -62,22 +63,34 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
     }),
   );
   app.delete("/v1/reminders/:id", async (context) => {
-    await reminders.delete(context.req.param("id"), mutationContext(context));
+    const input = reminderRevisionInputSchema.parse(context.req.query());
+    const reminder = await reminders.delete(
+      context.req.param("id"),
+      mutationContext(context),
+      input.expectedUpdatedAt,
+    );
+    if (input.expectedUpdatedAt) return context.json({ reminder });
     return context.body(null, 204);
   });
   app.post("/v1/reminders/:id/complete", async (context) => {
-    const input = await parseBody(context, completeInputSchema);
+    const input = await parseBody(context, completeReminderInputSchema);
     return context.json({
       reminder: await reminders.complete(
         context.req.param("id"),
         input.completed,
         mutationContext(context),
+        input.expectedUpdatedAt,
       ),
     });
   });
-  app.post("/v1/reminders/:id/restore", async (context) =>
-    context.json({
-      reminder: await reminders.restore(context.req.param("id"), mutationContext(context)),
-    }),
-  );
+  app.post("/v1/reminders/:id/restore", async (context) => {
+    const input = reminderRevisionInputSchema.parse(context.req.query());
+    return context.json({
+      reminder: await reminders.restore(
+        context.req.param("id"),
+        mutationContext(context),
+        input.expectedUpdatedAt,
+      ),
+    });
+  });
 }

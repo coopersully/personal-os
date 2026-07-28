@@ -1056,14 +1056,16 @@ describe.sequential("ilo API", () => {
     );
     agentToken = limitedToken.token.token;
     expect((await request("/v1/reminders", { auth: "agent" })).status).toBe(200);
-    expect(
-      (
-        await request(
-          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T12%3A00%3A00.000Z",
-          { auth: "agent" },
-        )
-      ).status,
-    ).toBe(200);
+    const emptyDeferralPreview = await request(
+      "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T12%3A00%3A00.000Z",
+      { auth: "agent" },
+    );
+    expect(emptyDeferralPreview.status).toBe(200);
+    expect((await payload(emptyDeferralPreview)).preview).toEqual({
+      candidates: [],
+      matchedCount: 0,
+      policy: "preview",
+    });
     expect(
       (
         await request("/v1/reminders", {
@@ -1335,6 +1337,14 @@ describe.sequential("ilo API", () => {
         )
       ).status,
     ).toBe(400);
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-10T12%3A00%3A00.000Z&proposedDueAt=2026-07-12T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
     await request(`/v1/reminders/${overdueOne.id}`, { auth: "agent", method: "DELETE" });
     await request(`/v1/reminders/${overdueTwo.id}`, { auth: "agent", method: "DELETE" });
     await expect(
@@ -1484,6 +1494,102 @@ describe.sequential("ilo API", () => {
       (await request(`/v1/reminders/${second.id}/restore`, { auth: "agent", method: "POST" }))
         .status,
     ).toBe(404);
+
+    const updateRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent update" },
+        }),
+      )
+    ).reminder;
+    const updateRace = await Promise.all([
+      request(`/v1/reminders/${updateRaceReminder.id}`, {
+        auth: "agent",
+        body: {
+          expectedUpdatedAt: updateRaceReminder.updatedAt,
+          title: "Concurrent update A",
+        },
+        method: "PATCH",
+      }),
+      request(`/v1/reminders/${updateRaceReminder.id}`, {
+        auth: "agent",
+        body: {
+          expectedUpdatedAt: updateRaceReminder.updatedAt,
+          title: "Concurrent update B",
+        },
+        method: "PATCH",
+      }),
+    ]);
+    expect(updateRace.map((response) => response.status).sort()).toEqual([200, 409]);
+
+    const stateRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent state change" },
+        }),
+      )
+    ).reminder;
+    const completionRace = await Promise.all([
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: true, expectedUpdatedAt: stateRaceReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: true, expectedUpdatedAt: stateRaceReminder.updatedAt },
+      }),
+    ]);
+    expect(completionRace.map((response) => response.status).sort()).toEqual([200, 409]);
+
+    const trashRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent trash" },
+        }),
+      )
+    ).reminder;
+    const trashRevision = encodeURIComponent(trashRaceReminder.updatedAt);
+    const trashRace = await Promise.all([
+      request(`/v1/reminders/${trashRaceReminder.id}?expectedUpdatedAt=${trashRevision}`, {
+        auth: "agent",
+        method: "DELETE",
+      }),
+      request(`/v1/reminders/${trashRaceReminder.id}?expectedUpdatedAt=${trashRevision}`, {
+        auth: "agent",
+        method: "DELETE",
+      }),
+    ]);
+    expect(trashRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    const trashedReminder = (
+      await payload(trashRace.find((response) => response.status === 200) as Response)
+    ).reminder;
+    const restoreRevision = encodeURIComponent(trashedReminder.updatedAt);
+    const restoreRace = await Promise.all([
+      request(
+        `/v1/reminders/${trashRaceReminder.id}/restore?expectedUpdatedAt=${restoreRevision}`,
+        { auth: "agent", method: "POST" },
+      ),
+      request(
+        `/v1/reminders/${trashRaceReminder.id}/restore?expectedUpdatedAt=${restoreRevision}`,
+        { auth: "agent", method: "POST" },
+      ),
+    ]);
+    expect(restoreRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    await request(`/v1/reminders/${updateRaceReminder.id}`, {
+      auth: "agent",
+      method: "DELETE",
+    });
+    await request(`/v1/reminders/${stateRaceReminder.id}`, {
+      auth: "agent",
+      method: "DELETE",
+    });
+    await request(`/v1/reminders/${trashRaceReminder.id}`, {
+      auth: "agent",
+      method: "DELETE",
+    });
 
     expect(
       (

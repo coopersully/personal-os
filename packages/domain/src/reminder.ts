@@ -20,9 +20,8 @@ export const reminderAutomaticActionSchema = z.enum([
  */
 export const reminderProfilePreferencesSchema = z
   .object({
-    automaticActions: z.array(reminderAutomaticActionSchema).max(6),
+    preferredAutomaticActions: z.array(reminderAutomaticActionSchema).max(6),
     defaultCapture: z.enum(["anytime", "due_when_stated", "ask_for_due_time"]),
-    defaultMutationPolicy: z.enum(agentMutationPolicies),
     dueAtMeaning: z.enum(["deadline", "notification_time", "ask_when_ambiguous"]),
     notificationLeadMinutes: z.union([
       z
@@ -37,6 +36,7 @@ export const reminderProfilePreferencesSchema = z
     priorityHighMeaning: z.string().trim().min(1).max(500),
     priorityLowMeaning: z.string().trim().min(1).max(500),
     priorityMediumMeaning: z.string().trim().min(1).max(500),
+    preferredMutationPolicy: z.enum(agentMutationPolicies),
     reviewPriorityAtOrAbove: z.enum(["low", "medium", "high", "none"]),
     timezoneBehavior: z.enum(["profile_default", "preserve_explicit", "ask_when_ambiguous"]),
   })
@@ -68,6 +68,16 @@ export const updateReminderInputSchema = z
     "At least one reminder field is required",
   );
 export type UpdateReminderInput = z.infer<typeof updateReminderInputSchema>;
+
+export const reminderRevisionInputSchema = z.object({
+  expectedUpdatedAt: isoDateTimeSchema.optional(),
+});
+export type ReminderRevisionInput = z.infer<typeof reminderRevisionInputSchema>;
+
+export const completeReminderInputSchema = reminderRevisionInputSchema.extend({
+  completed: z.boolean().default(true),
+});
+export type CompleteReminderInput = z.infer<typeof completeReminderInputSchema>;
 
 export const reminderSchema = reminderFieldsSchema.extend({
   id: idSchema,

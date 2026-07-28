@@ -154,9 +154,8 @@ describe("domain schemas", () => {
       }),
     ).toMatchObject({ domain: "mail", status: "draft" });
     const reminderPreferences = {
-      automaticActions: ["create", "complete"],
+      preferredAutomaticActions: ["create", "complete"],
       defaultCapture: "due_when_stated",
-      defaultMutationPolicy: "approve_each",
       dueAtMeaning: "deadline",
       notificationLeadMinutes: 30,
       overdueBehavior: "propose_deferral",
@@ -164,24 +163,13 @@ describe("domain schemas", () => {
       priorityHighMeaning: "Needs attention today",
       priorityLowMeaning: "Optional when convenient",
       priorityMediumMeaning: "Should happen soon",
+      preferredMutationPolicy: "approve_each",
       reviewPriorityAtOrAbove: "medium",
       timezoneBehavior: "ask_when_ambiguous",
     };
     expect(reminderProfilePreferencesSchema.parse(reminderPreferences)).toEqual(
       reminderPreferences,
     );
-    expect(
-      upsertDomainProfileInputSchema.safeParse({
-        categories: [],
-        domain: "reminders",
-        instructions: [],
-        objective: "Keep commitments visible.",
-        preferences: {},
-        sourceContexts: [],
-        status: "draft",
-        summary: "Review overdue commitments.",
-      }).success,
-    ).toBe(false);
     expect(
       upsertDomainProfileInputSchema.parse({
         categories: [],

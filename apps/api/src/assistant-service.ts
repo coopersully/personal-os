@@ -14,6 +14,7 @@ import {
 import { and, desc, eq } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
+import { validateDomainProfilePreferences } from "./domain-profile-validation.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import { auditSnapshot } from "./serialization.js";
 import type { Principal } from "./types.js";
@@ -67,6 +68,7 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       input: UpsertDomainProfileInput,
       context: MutationContext,
     ): Promise<DomainProfile> {
+      validateDomainProfilePreferences(input);
       const existing = await findProfile(context.principal.userId, input.domain);
       if (existing && input.expectedVersion === undefined) {
         throw new AppError(

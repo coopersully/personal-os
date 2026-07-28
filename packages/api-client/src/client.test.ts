@@ -293,6 +293,12 @@ function apiFetch() {
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     if (method === "DELETE" && url.pathname.includes("/blocks/")) return json({ event });
+    if (
+      method === "DELETE" &&
+      url.pathname.includes("/reminders/") &&
+      url.searchParams.has("expectedUpdatedAt")
+    )
+      return json({ reminder });
     if (method === "DELETE" || url.pathname === "/v1/auth/logout")
       return new Response(null, { status: 204 });
     if (url.pathname === "/v1/auth/invitations/validate") return json({ valid: true });
@@ -881,6 +887,7 @@ describe("ilo API client", () => {
     await expect(api.updateReminder(id, { title: "Changed" })).resolves.toEqual(reminder);
     await expect(api.completeReminder(id, true)).resolves.toEqual(reminder);
     await expect(api.restoreReminder(id)).resolves.toEqual(reminder);
+    await expect(api.trashReminder(id, now)).resolves.toEqual(reminder);
     await api.deleteReminder(id);
     await expect(api.listTasks({ status: "scheduled", limit: 10 })).resolves.toEqual({
       items: [task],

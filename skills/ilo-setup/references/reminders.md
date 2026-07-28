@@ -26,26 +26,29 @@ from age alone.
 Use the shared profile fields for the objective, summary, instructions, and any user-defined
 categories. Save these exact preference keys:
 
-- `automaticActions`: any of `create`, `update`, `complete`, `reopen`, `trash`, `restore`
+- `preferredAutomaticActions`: any of `create`, `update`, `complete`, `reopen`, `trash`, `restore`
 - `defaultCapture`: `anytime`, `due_when_stated`, or `ask_for_due_time`
-- `defaultMutationPolicy`: the shared mutation-policy value
 - `dueAtMeaning`: `deadline`, `notification_time`, or `ask_when_ambiguous`
 - `notificationLeadMinutes`: the expected lead time or `none`; this records intent but does not
   install a notification
 - `overdueBehavior`: `keep_due_date`, `review`, or `propose_deferral`
 - `overdueReviewAfterDays`: whole days before review
 - `priorityLowMeaning`, `priorityMediumMeaning`, `priorityHighMeaning`: the user's wording
+- `preferredMutationPolicy`: the shared mutation-policy value the user wants the agent to follow
 - `reviewPriorityAtOrAbove`: `low`, `medium`, `high`, or `none`
 - `timezoneBehavior`: `profile_default`, `preserve_explicit`, or `ask_when_ambiguous`
 
-The profile guides agent behavior but does not grant authority. Token scopes and Ilo's API policy
-still decide whether a mutation is allowed. Save a draft first and activate it only after the user
-accepts the summary.
+Both `preferredAutomaticActions` and `preferredMutationPolicy` are durable guidance for the agent,
+not access control. Saving or activating either value does not grant, revoke, or enforce mutation
+authority. Token scopes and Ilo's API policy remain authoritative. Save a draft first and activate
+it only after the user accepts the summary.
 
 ## Act safely
 
-- Read a Reminder before updating it and pass its `updatedAt` as `expectedUpdatedAt`. On a conflict,
-  reload it and ask again if the changed fields affect intent.
+- Read a Reminder before updating, completing, reopening, or trashing it and pass its `updatedAt` as
+  `expectedUpdatedAt`. `delete_reminder` returns the deleted revision required by
+  `restore_reminder`. On a conflict, reload available state and ask again if the changed fields
+  affect intent.
 - Create, update, complete, reopen, trash, and restore only one identified Reminder per direct tool
   call. Trash is recoverable; do not describe it as permanent deletion.
 - Before deferring multiple overdue Reminders, call `preview_overdue_reminder_deferral`. A

@@ -15,9 +15,13 @@ export function createReminderApiClient(
   toQuery: (query: object) => string,
 ) {
   return {
-    async completeReminder(id: string, completed: boolean): Promise<Reminder> {
+    async completeReminder(
+      id: string,
+      completed: boolean,
+      expectedUpdatedAt?: string,
+    ): Promise<Reminder> {
       const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}/complete`, {
-        body: JSON.stringify({ completed }),
+        body: JSON.stringify({ completed, expectedUpdatedAt }),
         method: "POST",
       });
       return response.reminder;
@@ -50,10 +54,18 @@ export function createReminderApiClient(
       );
       return response.preview;
     },
-    async restoreReminder(id: string): Promise<Reminder> {
-      const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}/restore`, {
-        method: "POST",
-      });
+    async restoreReminder(id: string, expectedUpdatedAt?: string): Promise<Reminder> {
+      const response = await request<{ reminder: Reminder }>(
+        `/v1/reminders/${id}/restore?${toQuery({ expectedUpdatedAt })}`,
+        { method: "POST" },
+      );
+      return response.reminder;
+    },
+    async trashReminder(id: string, expectedUpdatedAt: string): Promise<Reminder> {
+      const response = await request<{ reminder: Reminder }>(
+        `/v1/reminders/${id}?${toQuery({ expectedUpdatedAt })}`,
+        { method: "DELETE" },
+      );
       return response.reminder;
     },
     async updateReminder(id: string, input: UpdateReminderInput): Promise<Reminder> {

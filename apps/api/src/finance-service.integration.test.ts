@@ -301,14 +301,25 @@ describe.sequential("finance service", () => {
         amount: 900,
         category: null,
         direction: "expense",
-        merchant: "Read Only Proposal",
+        merchant: "SQ *READ ONLY 8821",
         needsReview: true,
         transactionDate: "2026-07-19",
         userId,
       })
       .returning();
     if (!readOnlyCandidate) throw new Error("Read-only proposal fixture was not created.");
-    await service.proposeCategorizations(userId, { limit: 50, review: "needs_review" });
+    const readOnlyProposals = await service.proposeCategorizations(userId, {
+      limit: 50,
+      review: "needs_review",
+    });
+    expect(
+      readOnlyProposals.items.find((item) => item.transaction.id === readOnlyCandidate.id),
+    ).toMatchObject({
+      transaction: {
+        merchant: "Sq Read Only",
+        rawMerchant: "SQ *READ ONLY 8821",
+      },
+    });
     const [readOnlyCandidateAfter] = await database.db
       .select()
       .from(financeTransactions)

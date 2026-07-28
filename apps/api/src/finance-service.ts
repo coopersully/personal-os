@@ -851,7 +851,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
             .limit(1)
         )[0]
       : null;
-    return transaction(row, merchant?.displayName ?? titleCaseMerchant(row.merchant));
+    const normalizedDisplayName = normalizedMerchant(row.merchant).replaceAll("-", " ");
+    return transaction(
+      row,
+      merchant?.displayName ?? titleCaseMerchant(normalizedDisplayName || row.merchant),
+    );
   }
 
   async function persistTransactionEnrichment(row: typeof financeTransactions.$inferSelect) {

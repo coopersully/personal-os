@@ -29,3 +29,16 @@ pnpm verify
 ```
 
 This includes repository mirror checks, lint, type checking, coverage enforcement (95% statements/functions/lines and 94% branches), production builds, and desktop/mobile E2E acceptance tests.
+
+## External Boundary Reliability
+
+- Before changing any external dependency, callback, webhook, scheduled handoff, network
+  requirement, or production configuration, read
+  `docs/engineering/external-boundary-reliability.md`.
+- Do not treat a present secret, passing mock, healthy process, or valid infrastructure plan as
+  proof that an external capability works. Review configuration, authority, transport, time,
+  lifecycle, recovery, observation, and production-equivalent evidence separately.
+- Work that can outlive its caller must cross a durable handoff and expose honest pending, success,
+  and failure states. Record what could still fail in production despite green tests.
+- Connector changes also follow `docs/engineering/connector-reliability.md` and keep provider
+  timeouts and required ports aligned with the checked production network contract.

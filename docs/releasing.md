@@ -18,7 +18,11 @@ release is ready for broader use.
    publishing the draft. Do not publish an unsigned desktop installer.
 6. Build and deploy the API, MCP, and web images from the same release commit;
    keep exactly one API replica during migration-capable rollouts.
-7. Publish the GitHub release, deployment notes, and any security advisory.
+7. For every changed external boundary, reconcile the
+   [boundary record](engineering/external-boundary-reliability.md) against the deployed environment,
+   then run its least-privileged, non-destructive smoke from the real runtime. Record configured,
+   authorized, reachable, and verified as separate results; process health alone is insufficient.
+8. Publish the GitHub release, deployment notes, and any security advisory.
 
 ## Signing requirements
 

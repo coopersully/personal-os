@@ -6,6 +6,7 @@ import { type AddressObject, simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject } from "tsdav";
 import { ConnectorError } from "./google.js";
+import { PROVIDER_REQUEST_TIMEOUT_MS } from "./http.js";
 import type {
   ICloudConnector,
   ICloudCredentials,
@@ -57,10 +58,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     ((credentials: ICloudCredentials) =>
       new ImapFlow({
         auth: { pass: credentials.appSpecificPassword, user: credentials.email },
+        connectionTimeout: PROVIDER_REQUEST_TIMEOUT_MS,
+        greetingTimeout: 10_000,
         host: "imap.mail.me.com",
         logger: false,
         port: 993,
         secure: true,
+        socketTimeout: 60_000,
       }));
   /* v8 ignore stop */
 
@@ -221,9 +225,12 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         ((smtpCredentials: ICloudCredentials) =>
           nodemailer.createTransport({
             auth: { pass: smtpCredentials.appSpecificPassword, user: smtpCredentials.email },
+            connectionTimeout: PROVIDER_REQUEST_TIMEOUT_MS,
+            greetingTimeout: 10_000,
             host: "smtp.mail.me.com",
             port: 587,
             secure: false,
+            socketTimeout: 60_000,
           }))
       )(credentials);
       /* v8 ignore stop */

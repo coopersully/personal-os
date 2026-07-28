@@ -278,6 +278,8 @@ export function createConnectorService({
           const remoteCalendars = await google.listCalendars(googleCredentials);
           googleCredentials = remoteCalendars.credentials;
           await saveCalendars(account, remoteCalendars.value, "google");
+        } else if (account.provider === "icloud" && icloudCredentials) {
+          await saveCalendars(account, await icloud.listCalendars(icloudCredentials), "icloud");
         }
         const accountCalendars = await db
           .select()
@@ -855,10 +857,6 @@ export function createConnectorService({
         appSpecificPassword: input.appSpecificPassword,
         email: input.email,
       };
-      const [remoteCalendars, remoteMail] = await Promise.all([
-        input.calendar ? icloud.listCalendars(icloudCredentials) : Promise.resolve([]),
-        input.mail ? icloud.syncMail(icloudCredentials) : Promise.resolve(null),
-      ]);
       const account = requireDatabaseRecord(
         (
           await db
@@ -871,6 +869,7 @@ export function createConnectorService({
               mailEnabled: input.mail,
               provider: "icloud",
               providerAccountId: input.email,
+              syncStatus: "syncing",
               userId,
             })
             .onConflictDoUpdate({
@@ -879,7 +878,7 @@ export function createConnectorService({
                 encryptedCredentials: encryptJson(icloudCredentials, encryptionKey),
                 mailEnabled: input.mail,
                 syncError: null,
-                syncStatus: "idle",
+                syncStatus: "syncing",
                 updatedAt: now(),
               },
               target: [
@@ -892,24 +891,7 @@ export function createConnectorService({
         )[0],
         "The iCloud account could not be saved.",
       );
-      await saveCalendars(account, remoteCalendars, "icloud");
-      if (remoteMail) {
-        const requestId = `connect:${randomUUID()}`;
-        await projectMail(
-          {
-            ...account,
-            encryptedCredentials: account.encryptedCredentials as NonNullable<
-              typeof account.encryptedCredentials
-            >,
-          },
-          remoteMail,
-          { actorId: account.id, actorType: "connector", userId },
-          requestId,
-          null,
-        );
-      }
-      await syncAccount(userId, account.id, { skipMail: true });
-      return { accountId: account.id, email: account.email };
+      return { accountId: account.id, email: account.email, userId };
     },
 
     async disconnect(userId: string, accountId: string): Promise<void> {
@@ -983,16 +965,30 @@ export function createConnectorService({
     },
 
     syncAccount,
-    async syncStaleMailAccounts(intervalMs = 5 * 60_000): Promise<void> {
+    async syncStaleAccounts(intervalMs = 5 * 60_000): Promise<void> {
       const threshold = new Date(now().getTime() - intervalMs);
       const accounts = await db
         .select({ id: calendarAccounts.id, userId: calendarAccounts.userId })
         .from(calendarAccounts)
         .where(
           and(
-            eq(calendarAccounts.mailEnabled, true),
             ne(calendarAccounts.provider, "local"),
-            or(isNull(calendarAccounts.lastSyncedAt), lt(calendarAccounts.lastSyncedAt, threshold)),
+            or(
+              and(
+                eq(calendarAccounts.syncStatus, "idle"),
+                or(
+                  isNull(calendarAccounts.lastSyncedAt),
+                  and(
+                    eq(calendarAccounts.mailEnabled, true),
+                    lt(calendarAccounts.lastSyncedAt, threshold),
+                  ),
+                ),
+              ),
+              and(
+                eq(calendarAccounts.syncStatus, "syncing"),
+                lt(calendarAccounts.updatedAt, threshold),
+              ),
+            ),
           ),
         );
       await Promise.all(

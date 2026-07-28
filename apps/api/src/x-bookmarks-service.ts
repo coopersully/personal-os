@@ -84,11 +84,28 @@ export function createXBookmarksService({ db, encryptionKey, now, x }: Options) 
 
   async function folders(userId: string) {
     const account = await accountFor(userId);
+    await db
+      .update(xBookmarkAccounts)
+      .set({ syncError: null, syncStatus: "syncing", updatedAt: now() })
+      .where(eq(xBookmarkAccounts.id, account.id));
     try {
       const result = await x.listBookmarkFolders(credentials(account), account.providerAccountId);
       await saveCredentials(account.id, result.credentials);
-      return saveFolders(account, result.value);
+      const saved = await saveFolders(account, result.value);
+      await db
+        .update(xBookmarkAccounts)
+        .set({ syncError: null, syncStatus: "idle", updatedAt: now() })
+        .where(eq(xBookmarkAccounts.id, account.id));
+      return saved;
     } catch (error) {
+      await db
+        .update(xBookmarkAccounts)
+        .set({
+          syncError: error instanceof Error ? error.message : "Unknown X folder discovery error",
+          syncStatus: "error",
+          updatedAt: now(),
+        })
+        .where(eq(xBookmarkAccounts.id, account.id));
       throw connectorError(error);
     }
   }
@@ -249,9 +266,6 @@ export function createXBookmarksService({ db, encryptionKey, now, x }: Options) 
           )[0],
           "The X account could not be saved.",
         );
-        const result = await x.listBookmarkFolders(value, profile.value.id);
-        await saveCredentials(account.id, result.credentials);
-        await saveFolders(account, result.value);
         return publicAccount(account);
       } catch (error) {
         throw connectorError(error);

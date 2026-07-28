@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { providerFetch } from "@personal-os/connectors";
 import {
   auditEvents,
   type Database,
@@ -681,7 +682,8 @@ export function createFinanceService({ db, now, plaid }: Options) {
   }
   async function plaidRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
     const config = getPlaid();
-    const response = await (config.fetch ?? globalThis.fetch)(
+    const response = await providerFetch(
+      config.fetch ?? globalThis.fetch,
       `https://${config.environment}.plaid.com${path}`,
       {
         body: JSON.stringify({ client_id: config.clientId, secret: config.secret, ...body }),

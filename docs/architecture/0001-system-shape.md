@@ -41,6 +41,40 @@ against the same migrations.
 - Connector callbacks bind OAuth state to a user, expire quickly, and are
   one-time-use.
 
+## External system boundaries
+
+Every external dependency is treated as independently fallible across
+configuration, authority, transport, timing, capacity, delivery semantics, and
+availability. A configured runtime value does not establish that its credential
+is valid, its requested capability is authorized, or its network path is
+reachable.
+
+The owning service defines the caller deadline, downstream timeout, durable
+commit point, idempotency or reconciliation rule, degraded state, retry and
+repair behavior, and observable evidence. Work that can outlive an interactive
+request crosses a durable handoff before the response; eventual completion
+cannot depend only on an in-memory promise. Application code, deployment
+configuration, and infrastructure policy form one boundary contract.
+
+The required reasoning method and evidence levels live in
+[`docs/engineering/external-boundary-reliability.md`](../engineering/external-boundary-reliability.md).
+
+## Connector lifecycle
+
+Connection is a durable handoff, not a full synchronization transaction. An
+OAuth callback may exchange its one-time code, resolve the minimum provider
+identity needed for an account key, encrypt credentials, persist the account,
+and redirect. An app-password endpoint may validate its input and persist a
+pending account. Source discovery, pagination, projection, and initial sync run
+after that durable handoff and report progress or a redacted error on the
+account.
+
+All provider calls use bounded timeouts below the public edge timeout. Provider
+transports must also be declared in production infrastructure; connector code
+and security-group egress are one contract. The detailed invariant and review
+checklist live in
+[`docs/engineering/connector-reliability.md`](../engineering/connector-reliability.md).
+
 ## Calendar projection
 
 Every calendar event includes:

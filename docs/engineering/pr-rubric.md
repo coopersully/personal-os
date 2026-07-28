@@ -78,6 +78,17 @@ If no GitHub issue is warranted after a duplicate and coverage audit, say
 | --- | --- |
 | `pnpm verify` | Repository checks, lint, types, coverage, builds, and acceptance tests pass |
 
+## Boundary analysis
+
+Include this section whenever the change adds or alters an external dependency, credential,
+callback/webhook, network path, scheduled handoff, or production-only capability.
+
+- **Durable commit point:** what state is accepted before later work can fail
+- **Production disconfirming case:** what could still fail in production while current tests pass
+- **Evidence:** which configured, authorized, reachable, bounded, recoverable, observable, and
+  verified states this PR actually proves
+- **Remaining proof:** the owner and safe action for evidence available only after deployment
+
 ### Manual checks
 
 - Step: expected result
@@ -91,8 +102,8 @@ If no GitHub issue is warranted after a duplicate and coverage audit, say
 - Intentional non-goals, breaking changes, migration/rollout risks, or deferred work
 ```
 
-Omit optional subsections when empty. Use `N/A` only for a required statement with no supported
-content.
+Omit optional subsections when empty. **Boundary analysis** is conditionally required for the
+changes it names. Use `N/A` only for a required statement with no supported content.
 
 ## GitHub work map
 
@@ -121,6 +132,10 @@ the pull request is a reviewer snapshot.
 - Run `pnpm verify` before requesting review unless a maintainer explicitly approves a narrower
   check.
 - Verify changed behavior with focused tests as well as the required suite.
+- For every changed external dependency, complete the boundary reasoning in
+  [`external-boundary-reliability.md`](external-boundary-reliability.md). Separate configuration,
+  authority, reachability, bounded execution, recovery, observation, and actual verification; list
+  production-only evidence under **Not covered locally**.
 - Re-read the pushed PR and checks; do not report local intent as GitHub state.
 
 ## Review checklist
@@ -128,6 +143,18 @@ the pull request is a reviewer snapshot.
 Block a pull request when it has a correctness, security, privacy, data-integrity, architecture,
 test, documentation, or operational gap. Do not approve with failing required checks or unresolved
 actionable review threads.
+
+For changes that cross an external boundary, reviewers must use the
+[external boundary reliability standard](external-boundary-reliability.md). Trace the complete
+caller-to-dependency-to-recovery path and ask what could still fail in production while every
+current test remains green. Block when the PR conflates a present secret with valid authority, a
+mock with reachability, a process health check with capability health, or an infrastructure plan
+with runtime verification.
+
+Connector changes additionally follow the
+[connector reliability contract](connector-reliability.md). A passing provider mock is not evidence
+that callback registration, consent, production credentials, network policy, time budgets, or the
+repair path work together.
 
 ## PR workflow output contract
 

@@ -491,6 +491,12 @@ describe.sequential("connector service", () => {
       calendarEnabled: true,
       mailEnabled: true,
       provider: "icloud",
+      syncStatus: "syncing",
+    });
+    expect(icloud.listCalendars).not.toHaveBeenCalled();
+    expect(icloud.syncMail).not.toHaveBeenCalled();
+    await expect(service.syncAccount(userId, connected.accountId)).resolves.toMatchObject({
+      changed: expect.any(Number),
     });
     await service.mailGateway.send(userId, connected.accountId, {
       body: "Hello",
@@ -543,9 +549,6 @@ describe.sequential("connector service", () => {
       title: "iCloud update",
     });
     await expect(service.eventGateway.delete(calendar, event)).resolves.toBeUndefined();
-    await expect(service.syncAccount(userId, connected.accountId)).resolves.toMatchObject({
-      changed: expect.any(Number),
-    });
     expect(
       await database.db
         .select()
@@ -562,17 +565,40 @@ describe.sequential("connector service", () => {
       code: "invalid_request",
     });
 
-    await service.connectICloud(userId, {
+    const mailOnly = await service.connectICloud(userId, {
       appSpecificPassword: "mail-only",
       calendar: false,
       email: "mail-only@icloud.com",
       mail: true,
     });
-    await service.connectICloud(userId, {
+    await service.syncAccount(userId, mailOnly.accountId);
+    const calendarOnly = await service.connectICloud(userId, {
       appSpecificPassword: "calendar-only",
       calendar: true,
       email: "calendar-only@icloud.com",
       mail: false,
+    });
+    await service.syncAccount(userId, calendarOnly.accountId);
+  });
+
+  it("keeps a failed iCloud bootstrap available for retry", async () => {
+    const connected = await service.connectICloud(userId, {
+      appSpecificPassword: "invalid-provider-password",
+      calendar: false,
+      email: "unavailable@icloud.com",
+      mail: true,
+    });
+    vi.mocked(icloud.syncMail).mockRejectedValueOnce(new Error("Apple Mail is unavailable"));
+
+    await expect(service.syncAccount(userId, connected.accountId)).rejects.toThrow(
+      "Apple Mail is unavailable",
+    );
+    expect(
+      (await service.listAccounts(userId)).find((item) => item.id === connected.accountId),
+    ).toMatchObject({
+      email: "unavailable@icloud.com",
+      syncError: "Apple Mail is unavailable",
+      syncStatus: "error",
     });
   });
 

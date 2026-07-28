@@ -622,17 +622,17 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       url: await connectors.startGoogleAuthorization(context.get("principal").userId, input),
     });
   });
-  app.post("/v1/connectors/icloud", async (context) =>
-    context.json(
-      {
-        account: await connectors.connectICloud(
-          context.get("principal").userId,
-          await parseBody(context, connectICloudInputSchema),
-        ),
-      },
-      201,
-    ),
-  );
+  app.post("/v1/connectors/icloud", async (context) => {
+    const result = await connectors.connectICloud(
+      context.get("principal").userId,
+      await parseBody(context, connectICloudInputSchema),
+    );
+    void connectors.syncAccount(result.userId, result.accountId).catch(() => {
+      // The account and credentials are already saved, while syncAccount records
+      // the provider error for the settings UI and a later manual retry.
+    });
+    return context.json({ account: { accountId: result.accountId, email: result.email } }, 201);
+  });
   app.post("/v1/connectors/:id/sync", async (context) =>
     context.json({
       result: await connectors.syncAccount(
@@ -829,7 +829,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       return finances.backfillLearning();
     },
     async dispatchDueAutomations() {
-      await connectors.syncStaleMailAccounts();
+      await connectors.syncStaleAccounts();
       await automations.dispatchDue();
     },
     async syncDueFinances() {

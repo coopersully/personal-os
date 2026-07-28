@@ -78,6 +78,7 @@ describe("Calendar routes", () => {
       previewCommitment: vi.fn(async () => proposal),
       restoreEvent: vi.fn(async () => ({ id })),
       setSelected: vi.fn(async () => calendar),
+      upsertAttentionItem: vi.fn(async () => ({ id })),
       updateEvent: vi.fn(async () => ({ id })),
       updateEventBlock: vi.fn(async () => ({ id })),
       updateLocalCalendar: vi.fn(async () => calendar),
@@ -127,5 +128,53 @@ describe("Calendar routes", () => {
     });
     expect(writeResponse.status).toBe(201);
     expect(calendarService.createLocalCalendar).toHaveBeenCalled();
+
+    const attentionResponse = await request(`/v1/events/${id}/attention`, {
+      body: JSON.stringify({
+        expiresAt: null,
+        importance: "high",
+        kind: "upcoming",
+        occursAt: now,
+        summary: "Starts soon.",
+        title: "Upcoming commitment",
+      }),
+      method: "PUT",
+    });
+    expect(attentionResponse.status).toBe(200);
+    expect(calendarService.upsertAttentionItem).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ kind: "upcoming", title: "Upcoming commitment" }),
+      expect.objectContaining({ requestId: "calendar-route-test" }),
+    );
+
+    const unblockResponse = await request(`/v1/events/${id}/blocks/${id}`, {
+      body: JSON.stringify({
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+      }),
+      method: "DELETE",
+    });
+    expect(unblockResponse.status).toBe(200);
+    expect(calendarService.deleteEventBlock).toHaveBeenCalledWith(
+      id,
+      id,
+      expect.objectContaining({ requestId: "calendar-route-test" }),
+      { expectedBlockUpdatedAt: now, expectedUpdatedAt: now },
+    );
+
+    const legacyDeleteResponse = await request(`/v1/events/${id}`, { method: "DELETE" });
+    expect(legacyDeleteResponse.status).toBe(204);
+    expect(calendarService.deleteEvent).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ requestId: "calendar-route-test" }),
+      {},
+    );
+
+    const invalidOptionalBody = await request(`/v1/events/${id}/restore`, {
+      body: "{",
+      method: "POST",
+    });
+    expect(invalidOptionalBody.status).toBe(400);
+    expect(calendarService.restoreEvent).not.toHaveBeenCalled();
   });
 });

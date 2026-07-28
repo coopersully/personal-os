@@ -81,7 +81,7 @@ export function createCalendarProviderEffectLedger(
           ? originalDetails.remoteEventId
           : onlyCompleted?.remoteEventId,
     };
-    if (original && !projectionFailure) {
+    if (original && (!projectionFailure || original.code === "conflict")) {
       return new AppError(original.code, original.message, details);
     }
     return new AppError(

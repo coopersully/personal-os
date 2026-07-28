@@ -123,7 +123,7 @@ export function serializeEvent(
       accountId,
       provider: row.provider,
       remoteId: row.remoteEventId ?? (row.provider === "local" ? row.id : null),
-      revision: row.remoteEtag,
+      revision: row.remoteEtag ?? row.updatedAt.toISOString(),
       sourceType: "calendar_event",
     },
     startsAt: row.startsAt.toISOString(),

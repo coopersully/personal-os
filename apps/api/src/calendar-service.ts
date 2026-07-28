@@ -1,4 +1,5 @@
 import {
+  attentionItems,
   auditEvents,
   calendarAccounts,
   calendarEvents,
@@ -7,21 +8,40 @@ import {
   domainProfiles,
 } from "@personal-os/database";
 import type {
+  AttentionItem,
   Calendar,
   CalendarCommitmentProposal,
   CalendarEvent,
   CalendarEventBlock,
+  CalendarEventMutationRevision,
   CreateEventBlockInput,
   CreateEventInput,
   CreateLocalCalendarInput,
+  DeleteEventBlockInput,
+  DeleteEventInput,
   EventBlockMode,
   EventListQuery,
   ParsedPreviewCalendarCommitmentInput,
+  RestoreEventInput,
   UpdateEventBlockInput,
   UpdateEventInput,
   UpdateLocalCalendarInput,
+  UpsertCalendarAttentionItemInput,
 } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gt,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  or,
+  sql,
+} from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { buildCalendarCommitmentProposal } from "./calendar-proposal.js";
 import {
@@ -45,6 +65,7 @@ type CalendarServiceOptions = {
   now: () => Date;
 };
 
+type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type CalendarRecord = typeof calendars.$inferSelect;
 type CalendarAccountRecord = typeof calendarAccounts.$inferSelect;
 type CalendarEventRecord = typeof calendarEvents.$inferSelect;
@@ -139,7 +160,110 @@ function eventBlock(record: CalendarEventRecord): CalendarEventBlock {
     eventId: record.id,
     mode: record.blockMode as EventBlockMode,
     provider: record.provider,
+    updatedAt: record.updatedAt.toISOString(),
   };
+}
+
+function eventRevisionWhere(record: CalendarEventRecord, deleted: boolean) {
+  return and(
+    eq(calendarEvents.id, record.id),
+    eq(calendarEvents.userId, record.userId),
+    sql`date_trunc('milliseconds', ${calendarEvents.updatedAt}) = ${record.updatedAt}`,
+    deleted ? isNotNull(calendarEvents.deletedAt) : isNull(calendarEvents.deletedAt),
+    record.remoteEtag === null
+      ? isNull(calendarEvents.remoteEtag)
+      : eq(calendarEvents.remoteEtag, record.remoteEtag),
+  );
+}
+
+function assertExpectedUpdatedAt(
+  record: CalendarEventRecord,
+  expectedUpdatedAt: string | undefined,
+): void {
+  if (expectedUpdatedAt && record.updatedAt.toISOString() !== expectedUpdatedAt) {
+    throw new AppError("conflict", "The calendar event changed since it was loaded.", {
+      currentUpdatedAt: record.updatedAt.toISOString(),
+      eventId: record.id,
+    });
+  }
+}
+
+function assertExpectedBlockUpdatedAt(
+  blocks: CalendarEventRecord[],
+  expectedById: Record<string, string> | undefined,
+): void {
+  if (!expectedById) return;
+  const currentById = Object.fromEntries(
+    blocks.map((block) => [block.id, block.updatedAt.toISOString()]),
+  );
+  const expectedIds = Object.keys(expectedById).sort();
+  const currentIds = Object.keys(currentById).sort();
+  if (
+    expectedIds.length !== currentIds.length ||
+    expectedIds.some(
+      (id, index) => id !== currentIds[index] || expectedById[id] !== currentById[id],
+    )
+  ) {
+    throw new AppError("conflict", "The linked calendar blocks changed since they were loaded.", {
+      currentBlockUpdatedAtById: currentById,
+    });
+  }
+}
+
+function requireRevisionWrite<T>(record: T | undefined, eventId: string): T {
+  if (!record) {
+    throw new AppError(
+      "conflict",
+      "The calendar event changed while provider effects were being projected.",
+      { eventId },
+    );
+  }
+  return record;
+}
+
+function auditCalendarAttentionMetadata(
+  value: typeof attentionItems.$inferSelect | null,
+): Record<string, unknown> | null {
+  if (!value) return null;
+  return {
+    domain: value.domain,
+    importance: value.importance,
+    kind: value.kind,
+    relatedEntityType: value.relatedEntityType,
+    status: value.status,
+  };
+}
+
+function serializeCalendarAttentionItem(row: typeof attentionItems.$inferSelect): AttentionItem {
+  return {
+    createdAt: row.createdAt.toISOString(),
+    domain: row.domain,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    id: row.id,
+    importance: row.importance,
+    kind: row.kind,
+    occursAt: row.occursAt?.toISOString() ?? null,
+    relatedEntityId: row.relatedEntityId,
+    relatedEntityType: row.relatedEntityType,
+    source: row.source,
+    status: row.status,
+    summary: row.summary,
+    title: row.title,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+async function requireCurrentRevision(
+  transaction: DatabaseTransaction,
+  record: CalendarEventRecord,
+  deleted: boolean,
+): Promise<void> {
+  const [current] = await transaction
+    .select({ id: calendarEvents.id })
+    .from(calendarEvents)
+    .where(eventRevisionWhere(record, deleted))
+    .limit(1);
+  requireRevisionWrite(current, record.id);
 }
 
 function providerEffect(
@@ -377,6 +501,104 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       return previewCommitment(userId, input);
     },
 
+    async upsertAttentionItem(
+      eventId: string,
+      input: UpsertCalendarAttentionItemInput,
+      context: MutationContext,
+    ): Promise<AttentionItem> {
+      const saved = await db.transaction(async (transaction) => {
+        const event = (
+          await transaction
+            .select()
+            .from(calendarEvents)
+            .where(
+              and(
+                eq(calendarEvents.id, eventId),
+                eq(calendarEvents.userId, context.principal.userId),
+                isNull(calendarEvents.deletedAt),
+              ),
+            )
+            .for("update")
+            .limit(1)
+        )[0];
+        if (!event) throw new AppError("not_found", "The calendar event was not found.");
+        requireSourceEvent(event);
+        const calendar = (
+          await transaction
+            .select()
+            .from(calendars)
+            .where(
+              and(
+                eq(calendars.id, event.calendarId),
+                eq(calendars.userId, context.principal.userId),
+                isNull(calendars.deletedAt),
+              ),
+            )
+            .limit(1)
+        )[0];
+        if (!calendar) throw new AppError("not_found", "The event calendar was not found.");
+        const existing = (
+          await transaction
+            .select()
+            .from(attentionItems)
+            .where(
+              and(
+                eq(attentionItems.userId, context.principal.userId),
+                eq(attentionItems.domain, "calendar"),
+                eq(attentionItems.relatedEntityId, event.id),
+                eq(attentionItems.relatedEntityType, "calendar_event"),
+                eq(attentionItems.kind, input.kind),
+                eq(attentionItems.status, "open"),
+              ),
+            )
+            .limit(1)
+        )[0];
+        const values = {
+          domain: "calendar" as const,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          importance: input.importance,
+          kind: input.kind,
+          occursAt: input.occursAt ? new Date(input.occursAt) : null,
+          relatedEntityId: event.id,
+          relatedEntityType: "calendar_event",
+          source: {
+            accountId: calendar.accountId,
+            provider: event.provider,
+            remoteId: event.remoteEventId ?? (event.provider === "local" ? event.id : null),
+            revision: event.remoteEtag ?? event.updatedAt.toISOString(),
+            sourceType: "calendar_event" as const,
+          },
+          status: "open" as const,
+          summary: input.summary,
+          title: input.title,
+          userId: context.principal.userId,
+        };
+        const updatedAt = now();
+        const item = requireDatabaseRecord(
+          (existing
+            ? await transaction
+                .update(attentionItems)
+                .set({ ...values, updatedAt })
+                .where(eq(attentionItems.id, existing.id))
+                .returning()
+            : await transaction.insert(attentionItems).values(values).returning())[0],
+          "The Calendar attention item could not be saved.",
+        );
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: existing ? "assistant.attention.updated" : "assistant.attention.created",
+            after: auditCalendarAttentionMetadata(item),
+            before: auditCalendarAttentionMetadata(existing ?? null),
+            entityId: item.id,
+            entityType: "attention_item",
+            ...context,
+          }),
+        );
+        return item;
+      });
+      return serializeCalendarAttentionItem(saved);
+    },
+
     async createEventBlock(
       sourceEventId: string,
       input: CreateEventBlockInput,
@@ -384,6 +606,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
     ): Promise<CalendarEvent> {
       const source = await findActiveEvent(context.principal.userId, sourceEventId);
       requireSourceEvent(source);
+      assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
       const destination = await findCalendar(context.principal.userId, input.calendarId);
       requireWritable(destination);
       if (destination.id === source.calendarId) {
@@ -440,16 +663,17 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
           : null;
       await ledger.commit(() =>
         db.transaction(async (transaction) => {
+          await requireCurrentRevision(transaction, source, false);
           const created = adopted
-            ? requireDatabaseRecord(
+            ? requireRevisionWrite(
                 (
                   await transaction
                     .update(calendarEvents)
                     .set({ blockMode: input.mode, blockSourceEventId: source.id, updatedAt: now() })
-                    .where(eq(calendarEvents.id, adopted.id))
+                    .where(eventRevisionWhere(adopted, false))
                     .returning()
                 )[0],
-                "The existing busy block could not be linked.",
+                adopted.id,
               )
             : requireDatabaseRecord(
                 (
@@ -582,13 +806,16 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       sourceEventId: string,
       blockEventId: string,
       context: MutationContext,
+      input: DeleteEventBlockInput = {},
     ): Promise<CalendarEvent> {
       const source = await findActiveEvent(context.principal.userId, sourceEventId);
       requireSourceEvent(source);
+      assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
       const block = await findActiveEvent(context.principal.userId, blockEventId);
       if (block.blockSourceEventId !== source.id) {
         throw new AppError("not_found", "The linked calendar block was not found.");
       }
+      assertExpectedUpdatedAt(block, input.expectedBlockUpdatedAt);
       const destination = await findCalendar(context.principal.userId, block.calendarId);
       requireWritable(destination);
       const effect =
@@ -604,16 +831,17 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       }
       await ledger.commit(() =>
         db.transaction(async (transaction) => {
+          await requireCurrentRevision(transaction, source, false);
           const deletedAt = now();
-          const after = requireDatabaseRecord(
+          const after = requireRevisionWrite(
             (
               await transaction
                 .update(calendarEvents)
                 .set({ deletedAt, updatedAt: deletedAt })
-                .where(eq(calendarEvents.id, block.id))
+                .where(eventRevisionWhere(block, false))
                 .returning()
             )[0],
-            "The linked calendar block could not be removed.",
+            block.id,
           );
           await transaction.insert(auditEvents).values(
             auditValues({
@@ -630,12 +858,18 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       return serializeWithBlocks(source);
     },
 
-    async deleteEvent(id: string, context: MutationContext): Promise<void> {
+    async deleteEvent(
+      id: string,
+      context: MutationContext,
+      input: DeleteEventInput = {},
+    ): Promise<CalendarEventMutationRevision> {
       const before = await findActiveEvent(context.principal.userId, id);
       requireSourceEvent(before);
+      assertExpectedUpdatedAt(before, input.expectedUpdatedAt);
       const calendar = await findCalendar(context.principal.userId, before.calendarId);
       requireWritable(calendar);
       const blocks = await findActiveBlocks(context.principal.userId, before.id);
+      assertExpectedBlockUpdatedAt(blocks, input.expectedBlockUpdatedAtById);
       const blockTargets = [];
       for (const block of blocks) {
         const destination = await findCalendar(context.principal.userId, block.calendarId);
@@ -663,18 +897,18 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       if (sourceEffect) {
         await ledger.run(sourceEffect, () => connectedEvents.delete(calendar, before));
       }
-      await ledger.commit(() =>
+      return ledger.commit(() =>
         db.transaction(async (transaction) => {
           const deletedAt = now();
-          const after = requireDatabaseRecord(
+          const after = requireRevisionWrite(
             (
               await transaction
                 .update(calendarEvents)
                 .set({ deletedAt, updatedAt: deletedAt })
-                .where(eq(calendarEvents.id, before.id))
+                .where(eventRevisionWhere(before, false))
                 .returning()
             )[0],
-            "The calendar event could not be deleted.",
+            before.id,
           );
           await transaction.insert(auditEvents).values(
             auditValues({
@@ -686,17 +920,25 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
               ...context,
             }),
           );
-          if (blocks.length > 0) {
-            await transaction
-              .update(calendarEvents)
-              .set({ deletedAt, updatedAt: deletedAt })
-              .where(
-                inArray(
-                  calendarEvents.id,
-                  blocks.map((block) => block.id),
-                ),
-              );
+          const blockUpdatedAtById: Record<string, string> = {};
+          for (const block of blocks) {
+            const deletedBlock = requireRevisionWrite(
+              (
+                await transaction
+                  .update(calendarEvents)
+                  .set({ deletedAt, updatedAt: deletedAt })
+                  .where(eventRevisionWhere(block, false))
+                  .returning()
+              )[0],
+              block.id,
+            );
+            blockUpdatedAtById[deletedBlock.id] = deletedBlock.updatedAt.toISOString();
           }
+          return {
+            blockUpdatedAtById,
+            eventId: after.id,
+            updatedAt: after.updatedAt.toISOString(),
+          };
         }),
       );
     },
@@ -847,7 +1089,11 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       );
     },
 
-    async restoreEvent(id: string, context: MutationContext): Promise<CalendarEvent> {
+    async restoreEvent(
+      id: string,
+      context: MutationContext,
+      input: RestoreEventInput = {},
+    ): Promise<CalendarEvent> {
       const [before] = await db
         .select()
         .from(calendarEvents)
@@ -863,6 +1109,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         throw new AppError("not_found", "The deleted calendar event was not found.");
       }
       requireSourceEvent(before);
+      assertExpectedUpdatedAt(before, input.expectedUpdatedAt);
       const calendar = await findCalendar(context.principal.userId, before.calendarId);
       requireWritable(calendar);
       const deletedBlocks = await db
@@ -876,6 +1123,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
           ),
         )
         .orderBy(asc(calendarEvents.createdAt), asc(calendarEvents.id));
+      assertExpectedBlockUpdatedAt(deletedBlocks, input.expectedBlockUpdatedAtById);
       const blockTargets = [];
       for (const block of deletedBlocks) {
         const destination = await findCalendar(context.principal.userId, block.calendarId);
@@ -937,7 +1185,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       const after = await ledger.commit(() =>
         db.transaction(async (transaction) => {
           const restoredAt = now();
-          const restored = requireDatabaseRecord(
+          const restored = requireRevisionWrite(
             (
               await transaction
                 .update(calendarEvents)
@@ -963,10 +1211,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
                   deletedAt: null,
                   updatedAt: restoredAt,
                 })
-                .where(eq(calendarEvents.id, before.id))
+                .where(eventRevisionWhere(before, true))
                 .returning()
             )[0],
-            "The calendar event could not be restored.",
+            before.id,
           );
           await transaction.insert(auditEvents).values(
             auditValues({
@@ -980,24 +1228,30 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
           );
           for (const restoredBlock of restoredBlocks) {
             const blockRemote = restoredBlock.remote;
-            await transaction
-              .update(calendarEvents)
-              .set({
-                ...(blockRemote
-                  ? connectedEventValues(blockRemote, restoredAt)
-                  : {
-                      allDay: restoredBlock.values.allDay,
-                      endsAt: new Date(restoredBlock.values.endsAt),
-                      location: restoredBlock.values.location,
-                      notes: restoredBlock.values.notes,
-                      startsAt: new Date(restoredBlock.values.startsAt),
-                      timezone: restoredBlock.values.timezone,
-                      title: restoredBlock.values.title,
-                    }),
-                deletedAt: null,
-                updatedAt: restoredAt,
-              })
-              .where(eq(calendarEvents.id, restoredBlock.block.id));
+            requireRevisionWrite(
+              (
+                await transaction
+                  .update(calendarEvents)
+                  .set({
+                    ...(blockRemote
+                      ? connectedEventValues(blockRemote, restoredAt)
+                      : {
+                          allDay: restoredBlock.values.allDay,
+                          endsAt: new Date(restoredBlock.values.endsAt),
+                          location: restoredBlock.values.location,
+                          notes: restoredBlock.values.notes,
+                          startsAt: new Date(restoredBlock.values.startsAt),
+                          timezone: restoredBlock.values.timezone,
+                          title: restoredBlock.values.title,
+                        }),
+                    deletedAt: null,
+                    updatedAt: restoredAt,
+                  })
+                  .where(eventRevisionWhere(restoredBlock.block, true))
+                  .returning()
+              )[0],
+              restoredBlock.block.id,
+            );
           }
           return restored;
         }),
@@ -1045,10 +1299,12 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
     ): Promise<CalendarEvent> {
       const source = await findActiveEvent(context.principal.userId, sourceEventId);
       requireSourceEvent(source);
+      assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
       const block = await findActiveEvent(context.principal.userId, blockEventId);
       if (block.blockSourceEventId !== source.id) {
         throw new AppError("not_found", "The linked calendar block was not found.");
       }
+      assertExpectedUpdatedAt(block, input.expectedBlockUpdatedAt);
       if (block.blockMode === input.mode) return serializeWithBlocks(source);
       const destination = await findCalendar(context.principal.userId, block.calendarId);
       requireWritable(destination);
@@ -1068,8 +1324,9 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
           : null;
       await ledger.commit(() =>
         db.transaction(async (transaction) => {
+          await requireCurrentRevision(transaction, source, false);
           const updatedAt = now();
-          const after = requireDatabaseRecord(
+          const after = requireRevisionWrite(
             (
               await transaction
                 .update(calendarEvents)
@@ -1088,10 +1345,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
                   blockMode: input.mode,
                   updatedAt,
                 })
-                .where(eq(calendarEvents.id, block.id))
+                .where(eventRevisionWhere(block, false))
                 .returning()
             )[0],
-            "The linked calendar block could not be updated.",
+            block.id,
           );
           await transaction.insert(auditEvents).values(
             auditValues({
@@ -1115,14 +1372,17 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
     ): Promise<CalendarEvent> {
       const before = await findActiveEvent(context.principal.userId, id);
       requireSourceEvent(before);
+      const { expectedBlockUpdatedAtById, expectedUpdatedAt, ...changes } = input;
+      assertExpectedUpdatedAt(before, expectedUpdatedAt);
       const calendar = await findCalendar(context.principal.userId, before.calendarId);
       requireWritable(calendar);
-      const startsAt = input.startsAt ? new Date(input.startsAt) : before.startsAt;
-      const endsAt = input.endsAt ? new Date(input.endsAt) : before.endsAt;
+      const startsAt = changes.startsAt ? new Date(changes.startsAt) : before.startsAt;
+      const endsAt = changes.endsAt ? new Date(changes.endsAt) : before.endsAt;
       if (endsAt <= startsAt) {
         throw new AppError("invalid_request", "Event end must be after its start.");
       }
       const blocks = await findActiveBlocks(context.principal.userId, before.id);
+      assertExpectedBlockUpdatedAt(blocks, expectedBlockUpdatedAtById);
       const blockTargets = [];
       for (const block of blocks) {
         const destination = await findCalendar(context.principal.userId, block.calendarId);
@@ -1144,24 +1404,24 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       ]);
       const remote =
         sourceEffect !== null
-          ? await ledger.run(sourceEffect, () => connectedEvents.update(calendar, before, input))
+          ? await ledger.run(sourceEffect, () => connectedEvents.update(calendar, before, changes))
           : null;
       const localValues = {
-        ...(input.allDay === undefined ? {} : { allDay: input.allDay }),
-        ...(input.attendees === undefined
+        ...(changes.allDay === undefined ? {} : { allDay: changes.allDay }),
+        ...(changes.attendees === undefined
           ? {}
-          : { attendees: normalizeAttendees(input.attendees) }),
-        ...(input.endsAt === undefined ? {} : { endsAt }),
-        ...(input.eventType === undefined ? {} : { eventType: input.eventType }),
-        ...(input.location === undefined ? {} : { location: input.location }),
-        ...(input.notes === undefined ? {} : { notes: input.notes }),
-        ...(input.recurrence === undefined ? {} : { recurrence: input.recurrence }),
-        ...(input.reminders === undefined ? {} : { reminders: input.reminders }),
-        ...(input.startsAt === undefined ? {} : { startsAt }),
-        ...(input.timezone === undefined ? {} : { timezone: input.timezone }),
-        ...(input.title === undefined ? {} : { title: input.title }),
-        ...(input.transparency === undefined ? {} : { transparency: input.transparency }),
-        ...(input.visibility === undefined ? {} : { visibility: input.visibility }),
+          : { attendees: normalizeAttendees(changes.attendees) }),
+        ...(changes.endsAt === undefined ? {} : { endsAt }),
+        ...(changes.eventType === undefined ? {} : { eventType: changes.eventType }),
+        ...(changes.location === undefined ? {} : { location: changes.location }),
+        ...(changes.notes === undefined ? {} : { notes: changes.notes }),
+        ...(changes.recurrence === undefined ? {} : { recurrence: changes.recurrence }),
+        ...(changes.reminders === undefined ? {} : { reminders: changes.reminders }),
+        ...(changes.startsAt === undefined ? {} : { startsAt }),
+        ...(changes.timezone === undefined ? {} : { timezone: changes.timezone }),
+        ...(changes.title === undefined ? {} : { title: changes.title }),
+        ...(changes.transparency === undefined ? {} : { transparency: changes.transparency }),
+        ...(changes.visibility === undefined ? {} : { visibility: changes.visibility }),
       };
       const projectedSource: CalendarEventRecord = {
         ...before,
@@ -1190,7 +1450,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       const after = await ledger.commit(() =>
         db.transaction(async (transaction) => {
           const updatedAt = now();
-          const updated = requireDatabaseRecord(
+          const updated = requireRevisionWrite(
             (
               await transaction
                 .update(calendarEvents)
@@ -1198,10 +1458,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
                   ...(remote ? connectedEventValues(remote, updatedAt) : localValues),
                   updatedAt,
                 })
-                .where(eq(calendarEvents.id, before.id))
+                .where(eventRevisionWhere(before, false))
                 .returning()
             )[0],
-            "The calendar event could not be updated.",
+            before.id,
           );
           await transaction.insert(auditEvents).values(
             auditValues({
@@ -1214,23 +1474,29 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
             }),
           );
           for (const reconciled of reconciledBlocks) {
-            await transaction
-              .update(calendarEvents)
-              .set({
-                ...(reconciled.remote
-                  ? connectedEventValues(reconciled.remote, updatedAt)
-                  : {
-                      allDay: reconciled.values.allDay,
-                      endsAt: new Date(reconciled.values.endsAt),
-                      location: reconciled.values.location,
-                      notes: reconciled.values.notes,
-                      startsAt: new Date(reconciled.values.startsAt),
-                      timezone: reconciled.values.timezone,
-                      title: reconciled.values.title,
-                    }),
-                updatedAt,
-              })
-              .where(eq(calendarEvents.id, reconciled.block.id));
+            requireRevisionWrite(
+              (
+                await transaction
+                  .update(calendarEvents)
+                  .set({
+                    ...(reconciled.remote
+                      ? connectedEventValues(reconciled.remote, updatedAt)
+                      : {
+                          allDay: reconciled.values.allDay,
+                          endsAt: new Date(reconciled.values.endsAt),
+                          location: reconciled.values.location,
+                          notes: reconciled.values.notes,
+                          startsAt: new Date(reconciled.values.startsAt),
+                          timezone: reconciled.values.timezone,
+                          title: reconciled.values.title,
+                        }),
+                    updatedAt,
+                  })
+                  .where(eventRevisionWhere(reconciled.block, false))
+                  .returning()
+              )[0],
+              reconciled.block.id,
+            );
           }
           return updated;
         }),

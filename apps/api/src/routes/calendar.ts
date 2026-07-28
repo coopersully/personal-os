@@ -2,15 +2,20 @@ import {
   createEventBlockInputSchema,
   createEventInputSchema,
   createLocalCalendarInputSchema,
+  deleteEventBlockInputSchema,
+  deleteEventInputSchema,
   eventListQuerySchema,
   previewCalendarCommitmentInputSchema,
+  restoreEventInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
   updateLocalCalendarInputSchema,
+  upsertCalendarAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
-import { z } from "zod";
+import { type ZodType, z } from "zod";
 import type { createCalendarService } from "../calendar-service.js";
+import { AppError } from "../errors.js";
 import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
 
@@ -127,6 +132,7 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
         context.req.param("id"),
         context.req.param("blockId"),
         mutationContext(context),
+        await parseOptionalBody(context, deleteEventBlockInputSchema),
       ),
     }),
   );
@@ -145,14 +151,53 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
     }),
   );
   app.delete("/v1/events/:id", async (context) => {
-    await calendar.deleteEvent(context.req.param("id"), mutationContext(context));
+    await calendar.deleteEvent(
+      context.req.param("id"),
+      mutationContext(context),
+      await parseOptionalBody(context, deleteEventInputSchema),
+    );
     return context.body(null, 204);
   });
+  app.post("/v1/events/:id/trash", async (context) =>
+    context.json({
+      revision: await calendar.deleteEvent(
+        context.req.param("id"),
+        mutationContext(context),
+        await parseBody(context, deleteEventInputSchema),
+      ),
+    }),
+  );
   app.post("/v1/events/:id/restore", async (context) =>
     context.json({
-      event: await calendar.restoreEvent(context.req.param("id"), mutationContext(context)),
+      event: await calendar.restoreEvent(
+        context.req.param("id"),
+        mutationContext(context),
+        await parseOptionalBody(context, restoreEventInputSchema),
+      ),
+    }),
+  );
+  app.put("/v1/events/:id/attention", async (context) =>
+    context.json({
+      item: await calendar.upsertAttentionItem(
+        context.req.param("id"),
+        await parseBody(context, upsertCalendarAttentionItemInputSchema),
+        mutationContext(context),
+      ),
     }),
   );
 }
 
 const createSelectedInputSchema = z.object({ selected: z.boolean() });
+
+async function parseOptionalBody<T>(context: Context<AppEnv>, schema: ZodType<T>): Promise<T> {
+  const raw = await context.req.text();
+  if (!raw.trim()) return schema.parse({});
+  try {
+    return schema.parse(JSON.parse(raw));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new AppError("invalid_request", "The request body must be valid JSON.");
+    }
+    throw error;
+  }
+}

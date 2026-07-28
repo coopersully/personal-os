@@ -276,6 +276,16 @@ export function createAssistantService({
           "Mail source, account, rule, and conversation provenance is reserved for Mail-owned attention paths.",
         );
       }
+      if (
+        input.domain === "calendar" &&
+        (input.relatedEntityType === "calendar_event" ||
+          input.source?.sourceType === "calendar_event")
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Use the Calendar attention endpoint so Ilo can validate and derive the event source.",
+        );
+      }
       const created = await db.transaction(async (transaction) => {
         const item = requireDatabaseRecord(
           (

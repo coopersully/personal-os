@@ -168,8 +168,20 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           responses: { 200: { description: "Linked calendar block privacy changed" } },
         },
       },
+      "/v1/events/{id}/attention": {
+        put: {
+          security,
+          responses: { 200: { description: "Calendar event attention item created or refreshed" } },
+        },
+      },
       "/v1/events/{id}/restore": {
         post: { security, responses: { 200: { description: "Event restored" } } },
+      },
+      "/v1/events/{id}/trash": {
+        post: {
+          security,
+          responses: { 200: { description: "Event trashed with restorable revisions" } },
+        },
       },
       "/v1/connectors": {
         get: { security, responses: { 200: { description: "Calendar connections" } } },

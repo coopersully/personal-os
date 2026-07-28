@@ -802,14 +802,75 @@ describe.sequential("assistant setup service", () => {
       occursAt: null,
     });
     await expect(
+      service.createAttentionItem(
+        {
+          domain: "calendar",
+          expiresAt: null,
+          importance: "high",
+          kind: "upcoming",
+          occursAt: "2026-08-01T15:00:00.000Z",
+          relatedEntityId: crypto.randomUUID(),
+          relatedEntityType: "calendar_event",
+          source: null,
+          summary: "Caller-supplied Calendar provenance.",
+          title: "Forged Calendar event",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createAttentionItem(
+        {
+          domain: "calendar",
+          expiresAt: null,
+          importance: "high",
+          kind: "important",
+          occursAt: null,
+          relatedEntityId: null,
+          relatedEntityType: null,
+          source: {
+            accountId: null,
+            provider: "local",
+            remoteId: crypto.randomUUID(),
+            revision: "caller-revision",
+            sourceType: "calendar_event",
+          },
+          summary: "Caller-supplied Calendar source.",
+          title: "Forged Calendar source",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const unlinkedCalendarNote = await service.createAttentionItem(
+      {
+        domain: "calendar",
+        expiresAt: null,
+        importance: "normal",
+        kind: "important",
+        occursAt: null,
+        relatedEntityId: null,
+        relatedEntityType: null,
+        source: null,
+        summary: "An intentional unlinked Calendar note.",
+        title: "Review scheduling preferences",
+      },
+      context(),
+    );
+    await expect(
       service.updateAttentionItem("mail", userId, { status: "dismissed" }, context()),
     ).rejects.toMatchObject({ code: "not_found" });
     const storedItems = await database.db.select().from(attentionItems);
-    expect(storedItems).toHaveLength(2);
+    expect(storedItems).toHaveLength(3);
     expect(storedItems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: item.id, status: "resolved" }),
         expect.objectContaining({ id: expiring.id, status: "open" }),
+        expect.objectContaining({
+          id: unlinkedCalendarNote.id,
+          relatedEntityId: null,
+          source: null,
+          status: "open",
+        }),
       ]),
     );
     const events = await database.db

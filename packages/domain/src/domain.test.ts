@@ -735,8 +735,25 @@ describe("domain schemas", () => {
         .success,
     ).toBe(false);
     expect(updateEventInputSchema.safeParse({}).success).toBe(false);
+    expect(
+      updateEventInputSchema.safeParse({
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: start,
+      }).success,
+    ).toBe(false);
     expect(updateEventInputSchema.safeParse({ startsAt: end, endsAt: start }).success).toBe(false);
     expect(updateEventInputSchema.parse({ startsAt: start })).toEqual({ startsAt: start });
+    expect(
+      updateEventInputSchema.parse({
+        expectedBlockUpdatedAtById: { [accountId]: start },
+        expectedUpdatedAt: start,
+        title: "Revised focus",
+      }),
+    ).toEqual({
+      expectedBlockUpdatedAtById: { [accountId]: start },
+      expectedUpdatedAt: start,
+      title: "Revised focus",
+    });
     expect(createEventBlockInputSchema.parse({ calendarId: id })).toEqual({
       calendarId: id,
       mode: "busy",

@@ -130,6 +130,18 @@ describe("pagination, errors, and OpenAPI", () => {
         responses: { 200: { description: "Calendar commitment proposal preview" } },
       },
     });
+    expect(document.paths["/v1/events/{id}/attention"]).toEqual({
+      put: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Calendar event attention item created or refreshed" } },
+      },
+    });
+    expect(document.paths["/v1/events/{id}/trash"]).toEqual({
+      post: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Event trashed with restorable revisions" } },
+      },
+    });
     expect(Object.keys(document.paths)).toEqual(
       expect.arrayContaining(["/v1/goals", "/v1/goals/{id}", "/v1/motives", "/v1/motives/{id}"]),
     );

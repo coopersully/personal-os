@@ -1,12 +1,14 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import {
+  calendarBlockRevisionMapSchema,
   calendarCommitmentCandidateSchema,
   idSchema,
   isoDateTimeSchema,
+  upsertCalendarAttentionItemInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
-import { emptyResult, result } from "../tool-result.js";
+import { result } from "../tool-result.js";
 
 const id = idSchema.describe("ilo object identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
@@ -57,6 +59,22 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
     async (input) => result(await api.listEvents(input)),
   );
   server.registerTool(
+    "get_event",
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
+      description:
+        "Read one current Calendar event with its updatedAt mutation revision, provider source revision, and every linked block's independent updatedAt revision. Read immediately before a guarded mutation.",
+      inputSchema: { id },
+      title: "Get calendar event",
+    },
+    async (input) => result(await api.getEvent(input.id)),
+  );
+  server.registerTool(
     "create_event",
     {
       annotations: {
@@ -98,6 +116,12 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       inputSchema: {
         allDay: z.boolean().optional(),
         endsAt: isoDateTime.optional(),
+        expectedBlockUpdatedAtById: calendarBlockRevisionMapSchema.describe(
+          "Exact eventId-to-updatedAt map for every linked block returned by get_event; pass an empty object only when the event has no blocks.",
+        ),
+        expectedUpdatedAt: isoDateTime.describe(
+          "The source event updatedAt returned by get_event. This is the local mutation CAS; source.revision is provider provenance.",
+        ),
         id,
         location: z.string().max(1_000).nullable().optional(),
         notes: z.string().max(50_000).nullable().optional(),
@@ -125,6 +149,9 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         "Link an event to an opaque Busy block or a detailed mirror on another writable calendar. This writes to the destination provider. Default to Busy unless the user explicitly permits details; the source event is never moved.",
       inputSchema: {
         calendarId: id.describe("Destination calendar identifier"),
+        expectedUpdatedAt: isoDateTime.describe(
+          "The source event updatedAt returned by get_event.",
+        ),
         id: id.describe("Source event identifier"),
         mode: z.enum(["busy", "details"]).default("busy"),
       },
@@ -145,13 +172,19 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         "Switch a linked provider block between private Busy and included details. Including details can disclose title, notes, and location to the destination account.",
       inputSchema: {
         blockId: id.describe("Linked block event identifier"),
+        expectedBlockUpdatedAt: isoDateTime.describe(
+          "The linked block updatedAt returned by get_event.",
+        ),
+        expectedUpdatedAt: isoDateTime.describe(
+          "The source event updatedAt returned by get_event.",
+        ),
         id: id.describe("Source event identifier"),
         mode: z.enum(["busy", "details"]),
       },
       title: "Change event block privacy",
     },
-    async ({ blockId, id: eventId, mode }) =>
-      result(await api.updateEventBlock(eventId, blockId, { mode })),
+    async ({ blockId, id: eventId, ...input }) =>
+      result(await api.updateEventBlock(eventId, blockId, input)),
   );
   server.registerTool(
     "unblock_event",
@@ -165,11 +198,18 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       description: "Remove one linked destination block without deleting the source event.",
       inputSchema: {
         blockId: id.describe("Linked block event identifier"),
+        expectedBlockUpdatedAt: isoDateTime.describe(
+          "The linked block updatedAt returned by get_event.",
+        ),
+        expectedUpdatedAt: isoDateTime.describe(
+          "The source event updatedAt returned by get_event.",
+        ),
         id: id.describe("Source event identifier"),
       },
       title: "Unblock event calendar",
     },
-    async ({ blockId, id: eventId }) => result(await api.deleteEventBlock(eventId, blockId)),
+    async ({ blockId, id: eventId, ...input }) =>
+      result(await api.deleteEventBlock(eventId, blockId, input)),
   );
   server.registerTool(
     "delete_event",
@@ -181,14 +221,56 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         readOnlyHint: false,
       },
       description:
-        "Delete an event locally and, when connected, at its provider. Provider deletion can cancel an attendee-facing event; inspect the event and source before calling.",
-      inputSchema: { id },
+        "Move an event and all linked blocks to recoverable trash locally and at connected providers. Requires the source and exact independent block revisions from get_event, and returns the deleted revisions required by restore_event. Provider deletion can cancel an attendee-facing event.",
+      inputSchema: {
+        expectedBlockUpdatedAtById: calendarBlockRevisionMapSchema.describe(
+          "Exact eventId-to-updatedAt map for every linked block.",
+        ),
+        expectedUpdatedAt: isoDateTime.describe("The source event updatedAt from get_event."),
+        id,
+      },
       title: "Delete calendar event",
     },
-    async (input) => {
-      await api.deleteEvent(input.id);
-      return emptyResult("Event moved to trash.");
+    async ({ id: eventId, ...input }) => result(await api.trashEvent(eventId, input)),
+  );
+  server.registerTool(
+    "restore_event",
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+      description:
+        "Restore one trashed event and its linked blocks using the exact source and block updatedAt revisions returned by delete_event. Connected restoration creates provider events and is not safe to replay blindly.",
+      inputSchema: {
+        expectedBlockUpdatedAtById: calendarBlockRevisionMapSchema,
+        expectedUpdatedAt: isoDateTime,
+        id,
+      },
+      title: "Restore calendar event",
     },
+    async ({ id: eventId, ...input }) => result(await api.restoreEvent(eventId, input)),
+  );
+  server.registerTool(
+    "create_calendar_attention_item",
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
+      description:
+        "Create or refresh one open important, upcoming, or follow-up item for an owned Calendar event. Ilo locks and validates the event, derives provider provenance and current revision, deduplicates the open event/kind pair, and never copies event notes.",
+      inputSchema: {
+        ...upsertCalendarAttentionItemInputSchema.shape,
+        eventId: id,
+      },
+      title: "Create Calendar attention item",
+    },
+    async ({ eventId, ...input }) => result(await api.upsertCalendarAttentionItem(eventId, input)),
   );
 
   server.registerTool(

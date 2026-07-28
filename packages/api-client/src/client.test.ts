@@ -942,6 +942,10 @@ function apiFetch() {
     if (url.pathname.includes("/calendars/")) return json({ calendar });
     if (url.pathname === "/v1/events" && method === "POST") return json({ event }, 201);
     if (url.pathname === "/v1/events") return json({ events: [event] });
+    if (url.pathname.endsWith("/trash"))
+      return json({ revision: { blockUpdatedAtById: {}, eventId: id, updatedAt: now } });
+    if (url.pathname.endsWith("/attention") && url.pathname.includes("/events/"))
+      return json({ item: attentionItem });
     if (url.pathname.includes("/events/")) return json({ event });
     if (url.pathname === "/v1/reminders" && method === "POST") return json({ reminder }, 201);
     if (url.pathname === "/v1/reminders") return json({ items: [reminder], nextCursor: null });
@@ -1003,6 +1007,7 @@ describe("ilo API client", () => {
         location: null,
       }),
     ).resolves.toEqual(event);
+    await expect(api.getEvent(id)).resolves.toEqual(event);
     await expect(api.updateEvent(id, { title: "Deep focus" })).resolves.toEqual(event);
     await expect(api.createEventBlock(id, { calendarId: id, mode: "busy" })).resolves.toEqual(
       event,
@@ -1010,6 +1015,19 @@ describe("ilo API client", () => {
     await expect(api.updateEventBlock(id, id, { mode: "details" })).resolves.toEqual(event);
     await expect(api.deleteEventBlock(id, id)).resolves.toEqual(event);
     await expect(api.restoreEvent(id)).resolves.toEqual(event);
+    await expect(
+      api.trashEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now }),
+    ).resolves.toEqual({ blockUpdatedAtById: {}, eventId: id, updatedAt: now });
+    await expect(
+      api.upsertCalendarAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "upcoming",
+        occursAt: now,
+        summary: "Prepare.",
+        title: "Upcoming event",
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.deleteEvent(id);
     await expect(api.listReminders({ completed: false, query: "", limit: 10 })).resolves.toEqual({
       items: [reminder],

@@ -2734,7 +2734,10 @@ describe.sequential("connector service", () => {
       calendarService.updateEvent(created.id, { title: "Changed" }, context),
     ).resolves.toMatchObject({ title: "Provider update" });
     expect(gateway.update).toHaveBeenCalled();
-    await expect(calendarService.deleteEvent(created.id, context)).resolves.toBeUndefined();
+    await expect(calendarService.deleteEvent(created.id, context)).resolves.toMatchObject({
+      blockUpdatedAtById: {},
+      eventId: created.id,
+    });
     expect(gateway.delete).toHaveBeenCalled();
     await expect(calendarService.restoreEvent(created.id, context)).resolves.toMatchObject({
       title: "Provider create",
@@ -2953,7 +2956,10 @@ describe.sequential("connector service", () => {
     await expect(
       calendarService.updateEvent(localEvent.id, { title: "Linked title" }, context),
     ).resolves.toMatchObject({ title: "Linked title" });
-    await expect(calendarService.deleteEvent(localEvent.id, context)).resolves.toBeUndefined();
+    await expect(calendarService.deleteEvent(localEvent.id, context)).resolves.toMatchObject({
+      blockUpdatedAtById: { [blockId]: expect.any(String) },
+      eventId: localEvent.id,
+    });
     await expect(calendarService.restoreEvent(localEvent.id, context)).resolves.toMatchObject({
       blocks: [expect.objectContaining({ eventId: blockId, mode: "details" })],
       title: "Linked title",

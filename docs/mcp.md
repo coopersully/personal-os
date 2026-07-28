@@ -29,6 +29,10 @@ The shared assistant tools give Claude, Codex, and other MCP hosts one consisten
   source meanings, categories, and instructions.
 - `list_attention_items`, `create_attention_item`, and `update_attention_item` use the same shape
   for important items, upcoming commitments, follow-ups, and post-run summaries across domains.
+  Linked Calendar event attention must instead use `create_calendar_attention_item`: the API locks
+  the owned event, derives its source reference, refreshes the open event/kind item, and writes a
+  redacted audit atomically. Generic unlinked Calendar notes remain available, but generic callers
+  cannot claim `calendar_event` provenance.
 
 Rules share a versioned envelope—name, description, profile, sources, nullable confidence
 threshold, policy, enabled state, and version—while each feature owns its condition and action
@@ -134,7 +138,14 @@ independent broad authority for direct event mutations; proposal-only agents sho
 that scope. When one or more provider event mutations finish before a later provider or local
 projection/audit failure, the API returns a reconciliation ledger with the Calendar operation,
 completed and pending provider effects, provider/calendar/remote identities, and sync-before-retry
-recovery. These failures are not safe to replay blindly.
+recovery. These failures are not safe to replay blindly. Agent mutations first read the event and
+then pass its `updatedAt` as the local compare-and-swap revision. Compound mutations also pass the
+exact event-ID-to-`updatedAt` map for every linked block because those blocks can change
+independently. `source.revision` is provider provenance (the provider ETag when present, otherwise
+the local `updatedAt`) and is not a substitute for the mutation fields. Delete returns the deleted
+source and block revisions needed by restore. The public `updatedAt` contract and local CAS use
+millisecond precision; a purely local event changed twice inside the same millisecond is the
+remaining race. Connected projections also compare the provider ETag.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
 

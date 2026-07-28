@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  attentionItems,
   auditEvents,
   calendarAccounts,
   calendarEvents,
@@ -11,7 +12,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createCalendarService } from "./calendar-service.js";
 import type { Principal } from "./types.js";
 
@@ -505,6 +506,81 @@ describe.sequential("Calendar commitment proposals", () => {
     });
   });
 
+  it("reports completed provider effects when a block changes before projection", async () => {
+    const { blocks, source } = await createCompoundFixture("concurrent-update");
+    const firstBlock = blocks[0];
+    const secondBlock = blocks[1];
+    if (!firstBlock || !secondBlock) throw new Error("Compound blocks were not created.");
+    await database.db
+      .update(calendarEvents)
+      .set({ deletedAt: timestamp, updatedAt: timestamp })
+      .where(eq(calendarEvents.id, secondBlock.id));
+    await expect(
+      service.updateEvent(
+        source.id,
+        {
+          expectedBlockUpdatedAtById: {},
+          expectedUpdatedAt: source.updatedAt.toISOString(),
+          title: "Missing block revision",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: {
+        currentBlockUpdatedAtById: {
+          [firstBlock.id]: firstBlock.updatedAt.toISOString(),
+        },
+      },
+    });
+    const concurrentTimestamp = new Date(timestamp.getTime() + 60_000);
+    gateway.update.mockImplementationOnce(async () => {
+      await database.db
+        .update(calendarEvents)
+        .set({ updatedAt: concurrentTimestamp })
+        .where(eq(calendarEvents.id, firstBlock.id));
+      return {
+        allDay: false,
+        conferenceUrl: null,
+        endsAt: source.endsAt,
+        etag: "concurrent-etag",
+        location: null,
+        notes: null,
+        raw: { id: "concurrent-block" },
+        recurrence: [],
+        remoteEventId: "concurrent-block",
+        startsAt: source.startsAt,
+        status: "confirmed",
+        timezone: "UTC",
+        title: "Busy",
+      };
+    });
+
+    await expect(
+      service.updateEvent(source.id, { title: "Concurrent change" }, context()),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: {
+        completedEffects: [
+          expect.objectContaining({
+            action: "update",
+            eventId: firstBlock.id,
+            remoteEventId: "concurrent-block",
+            role: "block",
+          }),
+        ],
+        operation: "update_event",
+        pendingEffects: [],
+      },
+    });
+    const [currentBlock] = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(eq(calendarEvents.id, firstBlock.id));
+    expect(currentBlock?.updatedAt).toEqual(concurrentTimestamp);
+    expect(currentBlock?.remoteEventId).toBe(firstBlock.remoteEventId);
+  });
+
   it("reports completed and pending provider effects when deletion fails mid-block", async () => {
     const { blocks, source } = await createCompoundFixture("delete");
     gateway.delete
@@ -570,6 +646,139 @@ describe.sequential("Calendar commitment proposals", () => {
           }),
         ],
       },
+    });
+  });
+
+  it("upserts event attention with derived provenance and redacted atomic audits", async () => {
+    const privateNotes = "private event notes never copy";
+    const created = await service.createEvent(
+      {
+        allDay: false,
+        calendarId: localCalendarId,
+        endsAt: "2026-08-06T17:00:00.000Z",
+        location: null,
+        notes: privateNotes,
+        startsAt: "2026-08-06T16:00:00.000Z",
+        timezone: "UTC",
+        title: "Important local commitment",
+      },
+      context(),
+    );
+    const input = {
+      expiresAt: null,
+      importance: "high" as const,
+      kind: "upcoming" as const,
+      occursAt: "2026-08-06T16:00:00.000Z",
+      summary: "Starts soon.",
+      title: "Upcoming commitment",
+    };
+
+    await expect(
+      service.updateEvent(
+        created.id,
+        {
+          expectedBlockUpdatedAtById: {},
+          expectedUpdatedAt: "2026-07-28T14:59:59.000Z",
+          title: "Stale update",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: { currentUpdatedAt: created.updatedAt, eventId: created.id },
+    });
+
+    const [first, concurrent] = await Promise.all([
+      service.upsertAttentionItem(created.id, input, context()),
+      service.upsertAttentionItem(created.id, input, context()),
+    ]);
+    const [sourceCalendar] = await database.db
+      .select()
+      .from(calendars)
+      .where(eq(calendars.id, localCalendarId));
+    expect(concurrent.id).toBe(first.id);
+    expect(first.source).toMatchObject({
+      accountId: sourceCalendar?.accountId,
+      provider: "local",
+      remoteId: created.id,
+      revision: created.updatedAt,
+      sourceType: "calendar_event",
+    });
+    const storedAfterConcurrent = await database.db
+      .select()
+      .from(attentionItems)
+      .where(
+        and(
+          eq(attentionItems.userId, userId),
+          eq(attentionItems.relatedEntityId, created.id),
+          eq(attentionItems.kind, "upcoming"),
+          eq(attentionItems.status, "open"),
+        ),
+      );
+    expect(storedAfterConcurrent).toHaveLength(1);
+
+    const refreshedAt = new Date(timestamp.getTime() + 120_000);
+    await database.db
+      .update(calendarEvents)
+      .set({ updatedAt: refreshedAt })
+      .where(eq(calendarEvents.id, created.id));
+    const refreshed = await service.upsertAttentionItem(
+      created.id,
+      {
+        ...input,
+        expiresAt: "2026-08-07T16:00:00.000Z",
+        occursAt: null,
+      },
+      context(),
+    );
+    expect(refreshed.id).toBe(first.id);
+    expect(refreshed.expiresAt).toBe("2026-08-07T16:00:00.000Z");
+    expect(refreshed.occursAt).toBeNull();
+    expect(refreshed.source?.revision).toBe(refreshedAt.toISOString());
+
+    const [otherUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Other Calendar",
+        email: "other-calendar-proposal@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!otherUser) throw new Error("Cross-user fixture was not created.");
+    await expect(
+      service.upsertAttentionItem(created.id, input, {
+        principal: {
+          actorId: otherUser.id,
+          actorType: "user",
+          scopes: new Set(["calendar:read", "calendar:write"]),
+          userId: otherUser.id,
+        },
+        requestId: "calendar-cross-user-attention",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    const attentionAudits = (
+      await database.db.select().from(auditEvents).where(eq(auditEvents.userId, userId))
+    ).filter(
+      (event) =>
+        event.entityType === "attention_item" &&
+        event.entityId === first.id &&
+        event.requestId === "calendar-proposal-test",
+    );
+    expect(attentionAudits).toHaveLength(3);
+    expect(
+      JSON.stringify({
+        audits: attentionAudits.map(({ after, before }) => ({ after, before })),
+        items: storedAfterConcurrent,
+      }),
+    ).not.toContain(privateNotes);
+    expect(attentionAudits.at(-1)?.after).toEqual({
+      domain: "calendar",
+      importance: "high",
+      kind: "upcoming",
+      relatedEntityType: "calendar_event",
+      status: "open",
     });
   });
 });

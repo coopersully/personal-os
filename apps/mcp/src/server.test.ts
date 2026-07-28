@@ -502,6 +502,7 @@ function mockApi() {
     snoozeMailThread: vi.fn(async () => undefined),
     sendMail: vi.fn(async () => undefined),
     listEvents: vi.fn(async () => [event]),
+    getEvent: vi.fn(async () => event),
     createEvent: vi.fn(async () => event),
     createEventBlock: vi.fn(async () => event),
     previewCalendarCommitment: vi.fn(async () => ({
@@ -524,6 +525,13 @@ function mockApi() {
     updateEventBlock: vi.fn(async () => event),
     deleteEvent: vi.fn(async () => undefined),
     deleteEventBlock: vi.fn(async () => event),
+    restoreEvent: vi.fn(async () => event),
+    trashEvent: vi.fn(async () => ({
+      blockUpdatedAtById: {},
+      eventId: id,
+      updatedAt: now,
+    })),
+    upsertCalendarAttentionItem: vi.fn(async () => attentionItem),
     listActivity: vi.fn(async () => [
       {
         id,
@@ -606,12 +614,15 @@ describe("ilo MCP server", () => {
       "create_mail_rule",
       "update_mail_rule",
       "list_events",
+      "get_event",
       "create_event",
       "update_event",
       "block_event",
       "set_event_block_privacy",
       "unblock_event",
       "delete_event",
+      "restore_event",
+      "create_calendar_attention_item",
       "preview_calendar_commitment",
       "list_goals",
       "create_goal",
@@ -727,12 +738,15 @@ describe("ilo MCP server", () => {
           [
             "list_calendars",
             "list_events",
+            "get_event",
             "create_event",
             "update_event",
             "block_event",
             "set_event_block_privacy",
             "unblock_event",
             "delete_event",
+            "restore_event",
+            "create_calendar_attention_item",
             "preview_calendar_commitment",
           ].includes(tool.name),
         )
@@ -751,6 +765,15 @@ describe("ilo MCP server", () => {
         ],
         [
           "list_events",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "get_event",
           {
             destructiveHint: false,
             idempotentHint: true,
@@ -809,6 +832,24 @@ describe("ilo MCP server", () => {
             destructiveHint: true,
             idempotentHint: false,
             openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "restore_event",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "create_calendar_attention_item",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: false,
             readOnlyHint: false,
           },
         ],
@@ -1014,6 +1055,7 @@ describe("ilo MCP server", () => {
       name: "list_events",
       arguments: { from: now, to: event.endsAt, calendarIds: [id], query: "Focus" },
     });
+    await client.callTool({ name: "get_event", arguments: { id } });
     await client.callTool({
       name: "create_event",
       arguments: {
@@ -1026,19 +1068,60 @@ describe("ilo MCP server", () => {
     });
     await client.callTool({
       name: "update_event",
-      arguments: { id, title: "Changed", notes: null, location: null, allDay: true },
+      arguments: {
+        allDay: true,
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: now,
+        id,
+        location: null,
+        notes: null,
+        title: "Changed",
+      },
     });
     await client.callTool({
       name: "block_event",
-      arguments: { calendarId: id, id },
+      arguments: { calendarId: id, expectedUpdatedAt: now, id },
     });
     await client.callTool({
       name: "set_event_block_privacy",
-      arguments: { blockId: id, id, mode: "details" },
+      arguments: {
+        blockId: id,
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+        id,
+        mode: "details",
+      },
     });
-    await client.callTool({ name: "unblock_event", arguments: { blockId: id, id } });
-    const deletedEvent = await client.callTool({ name: "delete_event", arguments: { id } });
-    expect(deletedEvent.content).toEqual([{ type: "text", text: "Event moved to trash." }]);
+    await client.callTool({
+      name: "unblock_event",
+      arguments: {
+        blockId: id,
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+        id,
+      },
+    });
+    const deletedEvent = await client.callTool({
+      name: "delete_event",
+      arguments: { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now, id },
+    });
+    expect(deletedEvent.structuredContent).toEqual({
+      result: { blockUpdatedAtById: {}, eventId: id, updatedAt: now },
+    });
+    await client.callTool({
+      name: "restore_event",
+      arguments: { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now, id },
+    });
+    await client.callTool({
+      name: "create_calendar_attention_item",
+      arguments: {
+        eventId: id,
+        importance: "high",
+        kind: "upcoming",
+        summary: "Prepare the agenda.",
+        title: "Upcoming focus",
+      },
+    });
     await client.callTool({
       name: "preview_calendar_commitment",
       arguments: { candidate: commitmentCandidate, requestedPolicy: "approved_rule" },
@@ -1077,9 +1160,33 @@ describe("ilo MCP server", () => {
         visibility: "default",
       }),
     );
-    expect(api.createEventBlock).toHaveBeenCalledWith(id, { calendarId: id, mode: "busy" });
-    expect(api.updateEventBlock).toHaveBeenCalledWith(id, id, { mode: "details" });
-    expect(api.deleteEventBlock).toHaveBeenCalledWith(id, id);
+    expect(api.getEvent).toHaveBeenCalledWith(id);
+    expect(api.createEventBlock).toHaveBeenCalledWith(id, {
+      calendarId: id,
+      expectedUpdatedAt: now,
+      mode: "busy",
+    });
+    expect(api.updateEventBlock).toHaveBeenCalledWith(id, id, {
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+      mode: "details",
+    });
+    expect(api.deleteEventBlock).toHaveBeenCalledWith(id, id, {
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+    });
+    expect(api.trashEvent).toHaveBeenCalledWith(id, {
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    expect(api.restoreEvent).toHaveBeenCalledWith(id, {
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    expect(api.upsertCalendarAttentionItem).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ kind: "upcoming", summary: "Prepare the agenda." }),
+    );
     expect(api.previewCalendarCommitment).toHaveBeenCalledWith(
       expect.objectContaining({
         candidate: commitmentCandidate,

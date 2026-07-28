@@ -144,6 +144,50 @@ describe("Calendar commitment proposal policy", () => {
     expect(proposal.warnings).toContainEqual(expect.stringContaining("not fully fresh"));
   });
 
+  it("reports all draft Calendar profile differences without treating them as authority", () => {
+    const proposal = buildCalendarCommitmentProposal(baseInput, {
+      destination: localDestination,
+      evaluatedAt: new Date("2026-07-28T15:00:00.000Z"),
+      possibleDuplicateEventId: null,
+      profile: {
+        preferences: {
+          afterBufferMinutes: 20,
+          automaticEventCreation: false,
+          automaticEventEvidence: ["ticket"],
+          beforeBufferMinutes: 10,
+          busyBlockPrivacy: "busy",
+          defaultCalendarId: accountId,
+          defaultTimezone: "America/New_York",
+        },
+        status: "draft",
+        version: 1,
+      },
+    });
+    expect(proposal.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("still a draft"),
+        expect.stringContaining("disables automatic"),
+        expect.stringContaining("does not list this evidence"),
+        expect.stringContaining("default destination"),
+        expect.stringContaining("default time zone"),
+        expect.stringContaining("default buffers"),
+      ]),
+    );
+    expect(proposal.policy.canApply).toBe(false);
+  });
+
+  it("reports a profile that predates the current Calendar setup contract", () => {
+    const proposal = buildCalendarCommitmentProposal(baseInput, {
+      destination: localDestination,
+      evaluatedAt: new Date("2026-07-28T15:00:00.000Z"),
+      possibleDuplicateEventId: null,
+      profile: { preferences: {}, status: "active", version: 1 },
+    });
+    expect(proposal.warnings).toContainEqual(
+      expect.stringContaining("current Calendar setup contract"),
+    );
+  });
+
   it("explains every degraded or misleading rule-authorized condition", () => {
     const remoteDestination: Calendar = {
       ...localDestination,

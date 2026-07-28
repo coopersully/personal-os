@@ -730,6 +730,10 @@ describe("domain schemas", () => {
       location: null,
     });
     expect(createEventInputSchema.safeParse({ ...input, endsAt: start }).success).toBe(false);
+    expect(
+      createEventInputSchema.safeParse({ ...input, timezone: "Definitely/Not_A_Time_Zone" })
+        .success,
+    ).toBe(false);
     expect(updateEventInputSchema.safeParse({}).success).toBe(false);
     expect(updateEventInputSchema.safeParse({ startsAt: end, endsAt: start }).success).toBe(false);
     expect(updateEventInputSchema.parse({ startsAt: start })).toEqual({ startsAt: start });
@@ -780,6 +784,17 @@ describe("domain schemas", () => {
         defaultTimezone: "UTC",
       }).defaultCalendarId,
     ).toBe(id);
+    expect(
+      calendarProfilePreferencesSchema.safeParse({
+        afterBufferMinutes: 15,
+        automaticEventCreation: false,
+        automaticEventEvidence: ["ticket"],
+        beforeBufferMinutes: 15,
+        busyBlockPrivacy: "busy",
+        defaultCalendarId: id,
+        defaultTimezone: "Eastern",
+      }).success,
+    ).toBe(false);
     expect(updateAutomationRoutineInputSchema.safeParse({}).success).toBe(false);
     expect(
       updateAutomationRoutineInputSchema.parse({ enabled: false, schedule: "Daily at 8:00 PM" }),

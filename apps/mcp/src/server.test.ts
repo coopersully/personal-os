@@ -770,8 +770,8 @@ describe("ilo MCP server", () => {
         [
           "update_event",
           {
-            destructiveHint: false,
-            idempotentHint: true,
+            destructiveHint: true,
+            idempotentHint: false,
             openWorldHint: true,
             readOnlyHint: false,
           },
@@ -780,7 +780,7 @@ describe("ilo MCP server", () => {
           "block_event",
           {
             destructiveHint: false,
-            idempotentHint: true,
+            idempotentHint: false,
             openWorldHint: true,
             readOnlyHint: false,
           },
@@ -788,7 +788,7 @@ describe("ilo MCP server", () => {
         [
           "set_event_block_privacy",
           {
-            destructiveHint: false,
+            destructiveHint: true,
             idempotentHint: true,
             openWorldHint: true,
             readOnlyHint: false,
@@ -1070,7 +1070,12 @@ describe("ilo MCP server", () => {
     expect(api.completeTask).toHaveBeenCalledWith(id, true);
     expect(api.deleteTask).toHaveBeenCalledWith(id);
     expect(api.createEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ allDay: false, notes: null, location: null }),
+      expect.objectContaining({
+        allDay: false,
+        location: null,
+        notes: null,
+        visibility: "default",
+      }),
     );
     expect(api.createEventBlock).toHaveBeenCalledWith(id, { calendarId: id, mode: "busy" });
     expect(api.updateEventBlock).toHaveBeenCalledWith(id, id, { mode: "details" });

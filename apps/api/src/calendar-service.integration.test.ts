@@ -118,7 +118,21 @@ describe.sequential("Calendar commitment proposals", () => {
         userId,
       })
       .returning();
-    if (!localCalendar || !remoteCalendar) throw new Error("Calendar fixtures were not created.");
+    const [secondRemoteCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: remoteAccount.id,
+        isWritable: true,
+        lastSyncedAt: timestamp,
+        name: "Connected team",
+        provider: "google",
+        remoteCalendarId: "remote-calendar-2",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!localCalendar || !remoteCalendar || !secondRemoteCalendar)
+      throw new Error("Calendar fixtures were not created.");
     localCalendarId = localCalendar.id;
     remoteCalendarId = remoteCalendar.id;
     const [profile] = await database.db
@@ -164,6 +178,30 @@ describe.sequential("Calendar commitment proposals", () => {
       title: "Existing provider event",
       userId,
     });
+    await database.db.insert(calendarEvents).values([
+      {
+        allDay: false,
+        calendarId: remoteCalendar.id,
+        endsAt: new Date("2026-08-03T17:00:00.000Z"),
+        provider: "google",
+        remoteEventId: "focus-1",
+        startsAt: new Date("2026-08-03T16:00:00.000Z"),
+        timezone: "UTC",
+        title: "Independent focus",
+        userId,
+      },
+      {
+        allDay: false,
+        calendarId: secondRemoteCalendar.id,
+        endsAt: new Date("2026-08-03T17:00:00.000Z"),
+        provider: "google",
+        remoteEventId: "focus-2",
+        startsAt: new Date("2026-08-03T16:00:00.000Z"),
+        timezone: "UTC",
+        title: "Independent focus",
+        userId,
+      },
+    ]);
     service = createCalendarService({
       connectedEvents: gateway,
       db: database.db,
@@ -254,6 +292,15 @@ describe.sequential("Calendar commitment proposals", () => {
         }),
       ]),
     );
+    const sameTimeEvents = await service.listEvents(userId, {
+      from: "2026-08-03T00:00:00.000Z",
+      to: "2026-08-04T00:00:00.000Z",
+    });
+    expect(sameTimeEvents).toHaveLength(2);
+    expect(sameTimeEvents.map((event) => event.source?.remoteId).sort()).toEqual([
+      "focus-1",
+      "focus-2",
+    ]);
   });
 
   it("reports profile drift, weak/flexible evidence, and exact projection duplicates", async () => {

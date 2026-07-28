@@ -82,15 +82,9 @@ function deduplicateCalendars(records: CalendarRecord[]): CalendarRecord[] {
 function deduplicateEvents(records: CalendarEventRecord[]): CalendarEventRecord[] {
   const seen = new Set<string>();
   return records.filter((record) => {
-    // Google can mirror one appointment into multiple connected primary calendars with
-    // different provider IDs. The unified projection should still show one visible event.
-    const key = JSON.stringify([
-      record.provider,
-      record.title.trim().toLocaleLowerCase(),
-      record.startsAt.toISOString(),
-      record.endsAt.toISOString(),
-      record.allDay,
-    ]);
+    const key = record.remoteEventId
+      ? `${record.provider}:${record.calendarId}:${record.remoteEventId}`
+      : record.id;
     if (seen.has(key)) {
       return false;
     }

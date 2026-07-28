@@ -2,6 +2,15 @@ import { z } from "zod";
 import { idSchema, isoDateTimeSchema, timeZoneSchema } from "./common.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
+export const calendarTimeZoneSchema = timeZoneSchema.refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}, "Must be a valid IANA time zone");
+
 export const calendarProviderSchema = z.enum(["local", "google", "icloud"]);
 export type CalendarProvider = z.infer<typeof calendarProviderSchema>;
 
@@ -11,7 +20,7 @@ export const calendarSchema = z.object({
   provider: calendarProviderSchema,
   name: z.string(),
   color: z.string().nullable(),
-  timezone: timeZoneSchema,
+  timezone: calendarTimeZoneSchema,
   isPrimary: z.boolean(),
   isSelected: z.boolean(),
   isWritable: z.boolean(),
@@ -34,7 +43,7 @@ export const createLocalCalendarInputSchema = z.object({
     .regex(/^#[0-9a-fA-F]{6}$/)
     .nullable()
     .default(null),
-  timezone: timeZoneSchema,
+  timezone: calendarTimeZoneSchema,
 });
 export type CreateLocalCalendarInput = z.infer<typeof createLocalCalendarInputSchema>;
 
@@ -46,7 +55,7 @@ export const updateLocalCalendarInputSchema = z
       .regex(/^#[0-9a-fA-F]{6}$/)
       .nullable()
       .optional(),
-    timezone: timeZoneSchema.optional(),
+    timezone: calendarTimeZoneSchema.optional(),
   })
   .refine((value) => Object.keys(value).length > 0, "At least one calendar field is required");
 export type UpdateLocalCalendarInput = z.infer<typeof updateLocalCalendarInputSchema>;
@@ -57,7 +66,7 @@ const eventFieldsSchema = z.object({
   location: z.string().trim().max(1_000).nullable().default(null),
   startsAt: isoDateTimeSchema,
   endsAt: isoDateTimeSchema,
-  timezone: timeZoneSchema,
+  timezone: calendarTimeZoneSchema,
   allDay: z.boolean().default(false),
   eventType: z.enum(["default", "focus", "out_of_office"]).default("default"),
   transparency: z.enum(["busy", "free"]).default("busy"),
@@ -100,7 +109,7 @@ export const updateEventInputSchema = z
     location: z.string().trim().max(1_000).nullable().optional(),
     startsAt: isoDateTimeSchema.optional(),
     endsAt: isoDateTimeSchema.optional(),
-    timezone: timeZoneSchema.optional(),
+    timezone: calendarTimeZoneSchema.optional(),
     allDay: z.boolean().optional(),
     eventType: z.enum(["default", "focus", "out_of_office"]).optional(),
     transparency: z.enum(["busy", "free"]).optional(),
@@ -214,7 +223,7 @@ export const calendarProfilePreferencesSchema = z.object({
   beforeBufferMinutes: z.number().int().min(0).max(1_440),
   busyBlockPrivacy: z.enum(["busy", "details"]),
   defaultCalendarId: idSchema,
-  defaultTimezone: timeZoneSchema,
+  defaultTimezone: calendarTimeZoneSchema,
 });
 export type CalendarProfilePreferences = z.infer<typeof calendarProfilePreferencesSchema>;
 

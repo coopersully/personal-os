@@ -11,6 +11,7 @@ import { emptyResult, result } from "../tool-result.js";
 const id = idSchema.describe("ilo object identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
 const timeZone = z.string().min(1).describe("IANA time zone, for example America/New_York");
+const visibility = z.enum(["default", "private", "public"]);
 
 /** Register the calendar discovery tool in the shell's established tool order. */
 export function registerCalendarListTools(server: McpServer, api: PersonalOsApiClient) {
@@ -75,6 +76,9 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         startsAt: isoDateTime,
         timezone: timeZone,
         title: z.string().min(1).max(500),
+        visibility: visibility
+          .default("default")
+          .describe("Event visibility at the destination calendar."),
       },
       title: "Create calendar event",
     },
@@ -84,8 +88,8 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
     "update_event",
     {
       annotations: {
-        destructiveHint: false,
-        idempotentHint: true,
+        destructiveHint: true,
+        idempotentHint: false,
         openWorldHint: true,
         readOnlyHint: false,
       },
@@ -100,6 +104,9 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         startsAt: isoDateTime.optional(),
         timezone: timeZone.optional(),
         title: z.string().min(1).max(500).optional(),
+        visibility: visibility
+          .optional()
+          .describe("Replacement visibility; this can change disclosure to calendar viewers."),
       },
       title: "Update calendar event",
     },
@@ -110,7 +117,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
     {
       annotations: {
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true,
         readOnlyHint: false,
       },
@@ -129,7 +136,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
     "set_event_block_privacy",
     {
       annotations: {
-        destructiveHint: false,
+        destructiveHint: true,
         idempotentHint: true,
         openWorldHint: true,
         readOnlyHint: false,

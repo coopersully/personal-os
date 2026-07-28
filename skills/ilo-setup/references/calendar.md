@@ -60,6 +60,10 @@ This bounded path cannot add attendees, send invitations, create recurrence, or 
 existing event. Use direct event tools only for an explicit user instruction. Never silently move,
 resize, delete, or replace a non-flexible event.
 
+An access token with `calendar:write` is separate, broad authority for direct Calendar mutations.
+Proposal-only agents should use a token without that scope: previewing a candidate never grants or
+expands write authority.
+
 ## Keep attention useful
 
 After a person creates or confirms a commitment, use one linked `upcoming` Calendar attention item

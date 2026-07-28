@@ -84,14 +84,31 @@ export function buildCalendarCommitmentProposal(
     reasons.push(
       "This preview does not authorize a write; a person must use an interactive Calendar action to create the event.",
     );
-  if (profile?.status === "active" && preferences?.success) {
-    if (
-      input.candidate.evidence.kind === "other" ||
-      !preferences.data.automaticEventEvidence.includes(input.candidate.evidence.kind)
-    )
-      warnings.push("The active Calendar profile does not list this evidence kind.");
-    if (preferences.data.defaultCalendarId !== destination.id)
-      warnings.push("The candidate does not use the profile's default destination.");
+  if (profile) {
+    if (profile.status === "draft")
+      warnings.push(
+        "The Calendar profile is still a draft and cannot represent active setup policy.",
+      );
+    if (!preferences?.success) {
+      warnings.push("The Calendar profile does not match the current Calendar setup contract.");
+    } else {
+      if (!preferences.data.automaticEventCreation)
+        warnings.push("The Calendar profile disables automatic event creation.");
+      if (
+        input.candidate.evidence.kind === "other" ||
+        !preferences.data.automaticEventEvidence.includes(input.candidate.evidence.kind)
+      )
+        warnings.push("The Calendar profile does not list this evidence kind.");
+      if (preferences.data.defaultCalendarId !== destination.id)
+        warnings.push("The candidate does not use the profile's default destination.");
+      if (preferences.data.defaultTimezone !== input.candidate.timezone)
+        warnings.push("The candidate does not use the profile's default time zone.");
+      if (
+        preferences.data.beforeBufferMinutes !== input.candidate.buffer.beforeMinutes ||
+        preferences.data.afterBufferMinutes !== input.candidate.buffer.afterMinutes
+      )
+        warnings.push("The candidate does not use the profile's default buffers.");
+    }
   }
   if (destination.provider !== "local")
     warnings.push(

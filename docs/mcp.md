@@ -129,7 +129,9 @@ not evidence authority. Caller-supplied evidence never permits
 `approved_rule`; event creation remains an interactive action until a later integration persists a
 server-verified source ownership/revision and idempotency identity. The bounded candidate cannot
 add attendees, recurrence, or buffer events and never moves another event. Mail ingestion and
-Mail-to-Calendar wiring are not part of this Calendar contract.
+Mail-to-Calendar wiring are not part of this Calendar contract. The `calendar:write` scope remains
+independent broad authority for direct event mutations; proposal-only agents should not receive
+that scope.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
 

@@ -67,8 +67,15 @@ after committing only part of itself. Agent apply also recomputes the current
 server proposal and rejects substituted categories or confidence. Work is
 bounded to four concurrent decisions so a large batch does not exhaust the
 database pool. A below-threshold decision records its review case, evidence,
-and redacted deferred audit event in the same transaction. Transfer
+and a minimal deferred audit event in the same transaction. Finance audit
+metadata omits transaction amounts, merchants, notes, and rationales so an
+`audit:read` grant does not imply `finances:read`. Transfer
 confirmation uses the same transactional path.
+
+An exact retry of an unchanged below-threshold decision reuses the existing
+open review and deferred evidence. The result reports `replayed: true` and does
+not update timestamps or append classification/audit rows; a changed revision,
+category, confidence, source, or rationale is not treated as that replay.
 
 Provider transfer labels and matching amounts alone are insufficient to exclude
 a record from spending. A transfer is excluded only after a supported account

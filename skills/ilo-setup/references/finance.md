@@ -70,6 +70,7 @@ categorization threshold or silently reconfigure alert generation.
    `expectedTransactionUpdatedAt`.
 5. Inspect every result. A batch can report `applied`, `review_required`, and `failed` items
    together; disclose partial effects and leave failed or low-confidence items in review.
+   `replayed: true` means an exact lost-response retry reused the existing durable decision.
 
 Permanent merchant rules are human-only. Never infer one from a repeated name, a high score, or a
 broad token.

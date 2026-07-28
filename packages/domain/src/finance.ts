@@ -412,6 +412,7 @@ export const financeCategorizationApplyResultSchema = z.object({
       message: z.string().min(1),
     })
     .nullable(),
+  replayed: z.boolean(),
   status: z.enum(["applied", "failed", "review_required"]),
   threshold: z.number().min(0).max(1).nullable(),
   transaction: financeTransactionSchema.nullable(),

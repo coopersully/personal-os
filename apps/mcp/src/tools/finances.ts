@@ -246,7 +246,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: consequentialMutationAnnotations,
       description:
-        "Apply accepted category proposals. The API enforces its adaptive threshold; lower-confidence items remain in review. Agents cannot create permanent merchant rules. Inspect every returned status because a batch reports any partial failures per transaction.",
+        "Apply accepted category proposals. The API enforces its adaptive threshold; lower-confidence items remain in review. Exact lost-response retries return replayed=true without duplicating evidence. Agents cannot create permanent merchant rules. Inspect every returned status because a batch reports any partial failures per transaction.",
       inputSchema: {
         decisions: z
           .array(

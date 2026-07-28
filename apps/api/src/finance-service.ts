@@ -939,7 +939,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
     }
     const canApply = source !== "agent" || confidence >= threshold;
     if (!canApply) {
-      await db.transaction(async (tx) => {
+      const replayed = await db.transaction(async (tx) => {
         const [current] = await tx
           .select()
           .from(financeTransactions)
@@ -990,6 +990,30 @@ export function createFinanceService({ db, now, plaid }: Options) {
           )
           .orderBy(desc(financeReviewCases.updatedAt))
           .limit(1);
+        const [existingDecision] = await tx
+          .select({ id: financeClassificationDecisions.id })
+          .from(financeClassificationDecisions)
+          .where(
+            and(
+              eq(financeClassificationDecisions.transactionId, before.id),
+              eq(financeClassificationDecisions.userId, context.principal.userId),
+              eq(financeClassificationDecisions.categoryId, category.id),
+              eq(financeClassificationDecisions.confidence, Math.round(confidence * 10_000)),
+              eq(financeClassificationDecisions.outcome, "deferred"),
+              eq(financeClassificationDecisions.rationale, decision.rationale),
+              eq(financeClassificationDecisions.source, source),
+            ),
+          )
+          .limit(1);
+        if (
+          existingReview?.status === "open" &&
+          existingReview.reason === "low_confidence" &&
+          existingReview.suggestedCategoryId === category.id &&
+          existingReview.rationale === decision.rationale &&
+          existingDecision
+        ) {
+          return true;
+        }
         const review = existingReview
           ? requireDatabaseRecord(
               (
@@ -998,6 +1022,8 @@ export function createFinanceService({ db, now, plaid }: Options) {
                   .set({
                     rationale: decision.rationale,
                     reason: "low_confidence",
+                    resolvedAt: null,
+                    status: "open",
                     suggestedCategoryId: category.id,
                     updatedAt: now(),
                   })
@@ -1043,14 +1069,19 @@ export function createFinanceService({ db, now, plaid }: Options) {
               status: "review_required",
               threshold,
             },
-            before: beforeValue,
+            before: {
+              categoryId: beforeValue.categoryId ?? null,
+              needsReview: beforeValue.needsReview,
+              updatedAt: beforeValue.updatedAt,
+            },
             entityId: before.id,
             entityType: "finance_transaction",
             ...context,
           }),
         );
+        return false;
       });
-      return { applied: false, threshold, transaction: beforeValue };
+      return { applied: false, replayed, threshold, transaction: beforeValue };
     }
     const value = await db.transaction(async (tx) => {
       const [current] = await tx
@@ -1157,7 +1188,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
       );
       return after;
     });
-    return { applied: true, threshold, transaction: value };
+    return { applied: true, replayed: false, threshold, transaction: value };
   }
 
   const profileValue = (row: typeof financeProfiles.$inferSelect): FinanceProfile => ({
@@ -2474,6 +2505,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           return {
             applied: false,
             error: categorizationApplyError(error),
+            replayed: false,
             status: "failed" as const,
             threshold: null,
             transaction: null,
@@ -2586,8 +2618,16 @@ export function createFinanceService({ db, now, plaid }: Options) {
           await db.insert(auditEvents).values(
             auditValues({
               action: "finance.transaction_enriched",
-              after: transaction(enriched),
-              before: transaction(row),
+              after: {
+                categoryId: enriched.categoryId,
+                merchantId: enriched.merchantId,
+                updatedAt: enriched.updatedAt.toISOString(),
+              },
+              before: {
+                categoryId: row.categoryId,
+                merchantId: row.merchantId,
+                updatedAt: row.updatedAt.toISOString(),
+              },
               entityId: row.id,
               entityType: "finance_transaction",
               principal: { actorId: row.userId, actorType: "system", userId: row.userId },

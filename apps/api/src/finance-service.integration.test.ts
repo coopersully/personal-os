@@ -5,6 +5,8 @@ import {
   type DatabaseClient,
   domainProfiles,
   financeAlerts,
+  financeClassificationDecisions,
+  financeReviewCases,
   financeTransactions,
   migrateDatabase,
   users,
@@ -355,27 +357,28 @@ describe.sequential("finance service", () => {
         }),
       ]),
     });
-    await expect(
-      service.applyCategorizations(
+    const lowConfidenceInput = {
+      decisions: [
         {
-          decisions: [
-            {
-              categoryId: shopping.id,
-              confidence: 0.95,
-              expectedTransactionUpdatedAt: lowConfidenceCandidate.updatedAt,
-              learnMerchant: "suggest",
-              rationale: "One confirmation remains below the adaptive threshold.",
-              transactionId: lowConfidenceCandidate.id,
-            },
-          ],
+          categoryId: shopping.id,
+          confidence: 0.95,
+          expectedTransactionUpdatedAt: lowConfidenceCandidate.updatedAt,
+          learnMerchant: "suggest" as const,
+          rationale: "One confirmation remains below the adaptive threshold.",
+          transactionId: lowConfidenceCandidate.id,
         },
-        agentContext,
-      ),
-    ).resolves.toEqual([
-      expect.objectContaining({ applied: false, status: "review_required", threshold: 0.9725 }),
+      ],
+    };
+    await expect(service.applyCategorizations(lowConfidenceInput, agentContext)).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        replayed: false,
+        status: "review_required",
+        threshold: 0.9725,
+      }),
     ]);
     const lowConfidenceAudits = await database.db
-      .select({ id: auditEvents.id })
+      .select({ after: auditEvents.after, before: auditEvents.before })
       .from(auditEvents)
       .where(
         and(
@@ -384,10 +387,65 @@ describe.sequential("finance service", () => {
         ),
       );
     expect(lowConfidenceAudits).toHaveLength(1);
+    expect(lowConfidenceAudits[0]).toEqual({
+      after: {
+        categoryId: shopping.id,
+        confidence: 0.95,
+        reviewId: expect.any(String),
+        status: "review_required",
+        threshold: 0.9725,
+      },
+      before: {
+        categoryId: null,
+        needsReview: true,
+        updatedAt: lowConfidenceCandidate.updatedAt,
+      },
+    });
     const lowConfidenceReview = (await service.listReviewQueue(userId)).find(
       (item) => item.transaction.id === lowConfidenceCandidate.id,
     );
     if (!lowConfidenceReview) throw new Error("Low-confidence review was not created.");
+    const [reviewBeforeRetry] = await database.db
+      .select({ updatedAt: financeReviewCases.updatedAt })
+      .from(financeReviewCases)
+      .where(eq(financeReviewCases.id, lowConfidenceReview.id));
+    if (!reviewBeforeRetry) throw new Error("Low-confidence review row was not found.");
+    await expect(service.applyCategorizations(lowConfidenceInput, agentContext)).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        replayed: true,
+        status: "review_required",
+        threshold: 0.9725,
+      }),
+    ]);
+    const replayReviews = await database.db
+      .select()
+      .from(financeReviewCases)
+      .where(eq(financeReviewCases.transactionId, lowConfidenceCandidate.id));
+    const replayDecisions = await database.db
+      .select()
+      .from(financeClassificationDecisions)
+      .where(
+        and(
+          eq(financeClassificationDecisions.transactionId, lowConfidenceCandidate.id),
+          eq(financeClassificationDecisions.outcome, "deferred"),
+        ),
+      );
+    const replayAudits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "finance.categorization_deferred"),
+          eq(auditEvents.entityId, lowConfidenceCandidate.id),
+        ),
+      );
+    expect(replayReviews).toHaveLength(1);
+    expect(replayReviews[0]?.updatedAt.toISOString()).toBe(
+      reviewBeforeRetry.updatedAt.toISOString(),
+    );
+    expect(replayDecisions).toHaveLength(1);
+    expect(replayAudits).toHaveLength(1);
     await service.resolveReview(
       lowConfidenceReview.id,
       {

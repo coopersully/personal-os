@@ -699,6 +699,7 @@ function apiFetch() {
           {
             applied: true,
             error: null,
+            replayed: false,
             status: "applied",
             threshold: 0.985,
             transaction: financeTransaction,

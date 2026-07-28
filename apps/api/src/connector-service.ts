@@ -273,6 +273,11 @@ export function createConnectorService({
       .where(eq(calendarAccounts.id, account.id));
     try {
       if (account.calendarEnabled) {
+        if (account.provider === "google" && googleCredentials) {
+          const remoteCalendars = await google.listCalendars(googleCredentials);
+          googleCredentials = remoteCalendars.credentials;
+          await saveCalendars(account, remoteCalendars.value, "google");
+        }
         const accountCalendars = await db
           .select()
           .from(calendars)
@@ -726,10 +731,6 @@ export function createConnectorService({
               ),
             )
             .limit(1);
-      const calendarResult = requestedServices.includes("calendar")
-        ? await google.listCalendars(googleCredentials)
-        : null;
-      if (calendarResult) googleCredentials = calendarResult.credentials;
       const calendarEnabled =
         matchedAccount?.calendarEnabled === true || requestedServices.includes("calendar");
       const mailEnabled =
@@ -772,13 +773,6 @@ export function createConnectorService({
         )[0],
         "The Google account could not be saved.",
       );
-      if (calendarResult) await saveCalendars(account, calendarResult.value, "google");
-      try {
-        await syncAccount(oauthState.userId, account.id);
-      } catch {
-        // The account and credentials are already saved, while syncAccount records
-        // the provider error for the settings UI and a later manual retry.
-      }
       return {
         accountId: account.id,
         email: account.email,
@@ -787,6 +781,7 @@ export function createConnectorService({
           oauthState.returnPath === "/settings?section=connections"
             ? oauthState.returnPath
             : "/settings?section=connections",
+        userId: oauthState.userId,
       };
     },
 

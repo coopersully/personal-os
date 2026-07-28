@@ -78,6 +78,12 @@ Forward `X-Request-Id` from the edge when present. Do not log authorization head
 
 Register the exact public `GOOGLE_REDIRECT_URI` in Google Cloud. Request Calendar read/write and user email scopes. OAuth state is random, user-bound, one-time-use, and expires after ten minutes. Use separate OAuth clients and encryption keys for development and production.
 
+The OAuth callback persists the authorized account and returns to the browser before initial
+Calendar discovery and provider synchronization complete. Initial sync continues asynchronously;
+provider failures remain visible on the connector account and can be retried manually. Keep the
+callback itself below the public edge timeout instead of extending the timeout to cover provider
+bootstrap work.
+
 ## X Bookmarks configuration
 
 Create an X OAuth 2.0 app, register the exact public `X_REDIRECT_URI`, and set its client ID (plus client secret for a confidential client). The connector requests only `bookmark.read`, `tweet.read`, `users.read`, and `offline.access`. After connecting in **Settings → Connections**, select one bookmark folder. ilo stores the OAuth refresh token encrypted, projects only that folder's posts, and exposes the projection to agents through the `bookmarks:read` scope and the `list_x_bookmarks` MCP tool. It never writes to X.

@@ -14,6 +14,7 @@ import {
   type CreateAttentionItemInput,
   type DomainProfile,
   featureAccessPolicies,
+  idSchema,
   type UpdateAttentionItemInput,
   type UpsertDomainProfileInput,
 } from "@personal-os/domain";
@@ -79,6 +80,12 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
           throw new AppError(
             "invalid_request",
             "Include each Finance account once in source contexts.",
+          );
+        }
+        if (sourceIds.some((sourceId) => !idSchema.safeParse(sourceId).success)) {
+          throw new AppError(
+            "invalid_request",
+            "Finance source contexts must use canonical Finance account IDs.",
           );
         }
         const ownedSources = await db

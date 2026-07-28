@@ -491,7 +491,6 @@ describe("ilo MCP server", () => {
       "resolve_finance_review",
       "get_finance_overview",
       "add_finance_transaction",
-      "categorize_finance_transaction",
       "list_x_bookmarks",
       "sync_x_bookmarks",
       "list_reminders",
@@ -681,11 +680,6 @@ describe("ilo MCP server", () => {
         merchant: "Categorized",
       },
     });
-    await client.callTool({
-      name: "categorize_finance_transaction",
-      arguments: { id, category: "Dining" },
-    });
-
     await client.callTool({
       name: "list_reminders",
       arguments: { completed: false, query: "Test" },

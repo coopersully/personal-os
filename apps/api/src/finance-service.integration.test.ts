@@ -329,33 +329,55 @@ describe.sequential("finance service", () => {
           decisions: [
             {
               categoryId: shopping.id,
-              confidence: 0.9,
+              confidence: 1,
               expectedTransactionUpdatedAt: review.updatedAt,
               learnMerchant: "suggest",
-              rationale: "A plausible first-pass merchant match.",
+              rationale: "An agent cannot substitute its own confidence and category.",
               transactionId: review.id,
             },
           ],
         },
         agentContext,
       ),
-    ).resolves.toEqual([expect.objectContaining({ applied: false, threshold: 0.985 })]);
-    const reviewCase = (await service.listReviewQueue(userId)).find(
-      (item) => item.transaction.id === review.id,
-    );
-    if (!reviewCase) throw new Error("Low-confidence categorization was not queued for review.");
+    ).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        error: expect.objectContaining({ code: "conflict" }),
+        status: "failed",
+      }),
+    ]);
     await expect(
-      service.resolveReview(
-        reviewCase.id,
+      service.applyCategorizations(
         {
-          action: "recategorize",
-          categoryId: shopping.id,
-          learnMerchant: "never",
-          rationale: "A user confirmed this individual purchase.",
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 0.965,
+              expectedTransactionUpdatedAt: now.toISOString(),
+              learnMerchant: "never",
+              rationale: "This missing transaction should fail independently.",
+              transactionId: "00000000-0000-4000-8000-000000000000",
+            },
+            {
+              categoryId: shopping.id,
+              confidence: 0.965,
+              expectedTransactionUpdatedAt: evidenceCandidate.updatedAt,
+              learnMerchant: "suggest",
+              rationale: "The user accepted the current server proposal.",
+              transactionId: evidenceCandidate.id,
+            },
+          ],
         },
-        context,
+        agentContext,
       ),
-    ).resolves.toEqual(expect.objectContaining({ applied: true }));
+    ).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        error: expect.objectContaining({ code: "not_found" }),
+        status: "failed",
+      }),
+      expect.objectContaining({ applied: true, status: "applied" }),
+    ]);
     const transferCandidate = await service.createTransaction(
       {
         accountId: account.id,
@@ -542,7 +564,7 @@ describe.sequential("finance service", () => {
     ).rejects.toThrow("transaction was not found");
     await service.createBudget({ category: "Groceries", limit: 400, month: "2026-07" }, context);
     const overview = await service.listOverview(userId);
-    expect(overview).toMatchObject({ reviewCount: 4, spendingThisMonth: 76.75 });
+    expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 76.75 });
     expect(overview.budgets).toHaveLength(1);
     await expect(service.listOverview(userId, "2026-06")).resolves.toMatchObject({
       budgets: [],

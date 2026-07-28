@@ -324,20 +324,4 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
         }),
       ),
   );
-
-  server.registerTool(
-    "categorize_finance_transaction",
-    {
-      annotations: reviewedMutationAnnotations,
-      description:
-        "Legacy direct categorization for one explicitly accepted transaction. Prefer proposal/apply. This tool never creates or removes a permanent merchant rule.",
-      inputSchema: {
-        category: z.string().min(1).max(80),
-        id,
-      },
-      title: "Categorize finance transaction",
-    },
-    async ({ id: transactionId, category }) =>
-      result(await api.updateFinanceTransaction(transactionId, { category, learnMerchant: false })),
-  );
 }

@@ -247,6 +247,15 @@ describe.sequential("assistant setup service", () => {
       service.upsertProfile(
         {
           ...input,
+          sourceContexts: [{ ...sourceContext, sourceId: "checking" }],
+        },
+        financeContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
           sourceContexts: [{ ...sourceContext, sourceId: userId }],
         },
         financeContext,

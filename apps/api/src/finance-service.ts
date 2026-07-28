@@ -565,6 +565,35 @@ export function createFinanceService({ db, now, plaid }: Options) {
   async function automaticCategorization(userId: string, merchant: string) {
     return categorization(merchant, await learnedCategory(userId, merchant));
   }
+  async function categorizationProposal(
+    userId: string,
+    item: FinanceTransaction,
+  ): Promise<FinanceCategorizationProposal> {
+    const automatic = await automaticCategorization(userId, item.rawMerchant ?? item.merchant);
+    const evidence = automatic.category
+      ? null
+      : await merchantCategoryEvidence(userId, item.merchantId ?? null);
+    const categoryName = automatic.category ?? evidence?.category ?? null;
+    const suggestedCategory = categoryName ? await categoryForName(userId, categoryName) : null;
+    const threshold = suggestedCategory
+      ? await merchantConfidenceThreshold(userId, item.merchantId ?? null, suggestedCategory.id)
+      : initialAgentThreshold;
+    const confidence =
+      automatic.confidence === null ? (evidence?.confidence ?? 0) : automatic.confidence / 10_000;
+    return {
+      confidence,
+      meetsPolicyThreshold: suggestedCategory !== null && confidence >= threshold,
+      policy: "preview",
+      rationale: automatic.category
+        ? `Matched ${item.merchant} using a confirmed merchant rule.`
+        : evidence
+          ? `Matched ${item.merchant} to ${evidence.confirmations} user confirmation${evidence.confirmations === 1 ? "" : "s"}.`
+          : "No durable merchant or category evidence is available yet.",
+      suggestedCategory: suggestedCategory ? categoryValue(suggestedCategory) : null,
+      threshold,
+      transaction: item,
+    };
+  }
   async function reconcileBudgetTransfers(userId: string) {
     const [accounts, transactions, transfers] = await Promise.all([
       db.select().from(financeAccounts).where(eq(financeAccounts.userId, userId)),
@@ -838,12 +867,27 @@ export function createFinanceService({ db, now, plaid }: Options) {
         currentUpdatedAt: beforeValue.updatedAt,
       });
     }
-    const threshold = await merchantConfidenceThreshold(
+    let threshold = await merchantConfidenceThreshold(
       context.principal.userId,
       before.merchantId,
       category.id,
     );
-    const canApply = source !== "agent" || decision.confidence >= threshold;
+    let confidence = decision.confidence;
+    if (source === "agent") {
+      const proposal = await categorizationProposal(context.principal.userId, beforeValue);
+      if (
+        proposal.suggestedCategory?.id !== category.id ||
+        proposal.confidence !== decision.confidence
+      ) {
+        throw new AppError(
+          "conflict",
+          "The accepted categorization no longer matches the server proposal.",
+        );
+      }
+      confidence = proposal.confidence;
+      threshold = proposal.threshold;
+    }
+    const canApply = source !== "agent" || confidence >= threshold;
     if (!canApply) {
       await db.transaction(async (tx) => {
         const [current] = await tx
@@ -859,6 +903,30 @@ export function createFinanceService({ db, now, plaid }: Options) {
           .limit(1);
         if (!current || current.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) {
           throw new AppError("conflict", "The transaction changed while it was being reviewed.");
+        }
+        const [protectedReview] =
+          source === "agent"
+            ? await tx
+                .select({ id: financeReviewCases.id })
+                .from(financeReviewCases)
+                .where(
+                  and(
+                    eq(financeReviewCases.transactionId, before.id),
+                    eq(financeReviewCases.userId, context.principal.userId),
+                    eq(financeReviewCases.reason, "possible_transfer"),
+                    inArray(financeReviewCases.status, ["deferred", "open"]),
+                  ),
+                )
+                .limit(1)
+            : [];
+        if (
+          source === "agent" &&
+          (current.reconciliationStatus === "candidate" || protectedReview)
+        ) {
+          throw new AppError(
+            "forbidden",
+            "Confirming an ambiguous transfer requires an interactive user session.",
+          );
         }
         const [existingReview] = await tx
           .select()
@@ -895,7 +963,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         await tx.insert(financeClassificationDecisions).values({
           categoryId: category.id,
           categoryName: category.name,
-          confidence: Math.round(decision.confidence * 10_000),
+          confidence: Math.round(confidence * 10_000),
           merchantId: before.merchantId,
           outcome: "deferred",
           rationale: decision.rationale,
@@ -921,11 +989,32 @@ export function createFinanceService({ db, now, plaid }: Options) {
       if (!current || current.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) {
         throw new AppError("conflict", "The transaction changed while it was being categorized.");
       }
+      const [protectedReview] =
+        source === "agent"
+          ? await tx
+              .select({ id: financeReviewCases.id })
+              .from(financeReviewCases)
+              .where(
+                and(
+                  eq(financeReviewCases.transactionId, before.id),
+                  eq(financeReviewCases.userId, context.principal.userId),
+                  eq(financeReviewCases.reason, "possible_transfer"),
+                  inArray(financeReviewCases.status, ["deferred", "open"]),
+                ),
+              )
+              .limit(1)
+          : [];
+      if (source === "agent" && (current.reconciliationStatus === "candidate" || protectedReview)) {
+        throw new AppError(
+          "forbidden",
+          "Confirming an ambiguous transfer requires an interactive user session.",
+        );
+      }
       const [updated] = await tx
         .update(financeTransactions)
         .set({
           category: category.name,
-          categoryConfidence: Math.round(decision.confidence * 10_000),
+          categoryConfidence: Math.round(confidence * 10_000),
           categoryDecidedAt: now(),
           categoryId: category.id,
           categoryRationale: decision.rationale,
@@ -947,7 +1036,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
       await tx.insert(financeClassificationDecisions).values({
         categoryId: category.id,
         categoryName: category.name,
-        confidence: Math.round(decision.confidence * 10_000),
+        confidence: Math.round(confidence * 10_000),
         merchantId: before.merchantId,
         outcome: source === "user" ? userOutcome : "applied",
         rationale: decision.rationale,
@@ -2265,45 +2354,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         ...query,
         review: "needs_review",
       });
-      return Promise.all(
-        transactions.items.map(async (item) => {
-          const automatic = await automaticCategorization(
-            userId,
-            item.rawMerchant ?? item.merchant,
-          );
-          const evidence = automatic.category
-            ? null
-            : await merchantCategoryEvidence(userId, item.merchantId ?? null);
-          const categoryName = automatic.category ?? evidence?.category ?? null;
-          const suggestedCategory = categoryName
-            ? await categoryForName(userId, categoryName)
-            : null;
-          const threshold = suggestedCategory
-            ? await merchantConfidenceThreshold(
-                userId,
-                item.merchantId ?? null,
-                suggestedCategory.id,
-              )
-            : initialAgentThreshold;
-          const confidence =
-            automatic.confidence === null
-              ? (evidence?.confidence ?? 0)
-              : automatic.confidence / 10_000;
-          return {
-            confidence,
-            meetsPolicyThreshold: suggestedCategory !== null && confidence >= threshold,
-            policy: "preview" as const,
-            rationale: automatic.category
-              ? `Matched ${item.merchant} using a confirmed merchant rule.`
-              : evidence
-                ? `Matched ${item.merchant} to ${evidence.confirmations} user confirmation${evidence.confirmations === 1 ? "" : "s"}.`
-                : "No durable merchant or category evidence is available yet.",
-            suggestedCategory: suggestedCategory ? categoryValue(suggestedCategory) : null,
-            threshold,
-            transaction: item,
-          };
-        }),
-      );
+      return Promise.all(transactions.items.map((item) => categorizationProposal(userId, item)));
     },
     async applyCategorizations(
       input: ApplyFinanceCategorizationsInput,
@@ -2318,12 +2369,6 @@ export function createFinanceService({ db, now, plaid }: Options) {
           "Permanent merchant rules require review in an interactive user session.",
         );
       }
-      await Promise.all(
-        input.decisions.flatMap((decision) => [
-          ownedTransaction(context.principal.userId, decision.transactionId),
-          categoryForId(context.principal.userId, decision.categoryId),
-        ]),
-      );
       return Promise.all(
         input.decisions.map(async (decision) => {
           try {

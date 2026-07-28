@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema, timeZoneSchema } from "./common.js";
+import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
 export const calendarProviderSchema = z.enum(["local", "google", "icloud"]);
 export type CalendarProvider = z.infer<typeof calendarProviderSchema>;
@@ -15,6 +16,14 @@ export const calendarSchema = z.object({
   isSelected: z.boolean(),
   isWritable: z.boolean(),
   lastSyncedAt: isoDateTimeSchema.nullable(),
+  source: z
+    .object({
+      accountLabel: z.string().min(1),
+      remoteCalendarId: z.string().nullable(),
+      syncError: z.string().nullable(),
+      syncStatus: z.enum(["idle", "syncing", "error"]),
+    })
+    .optional(),
 });
 export type Calendar = z.infer<typeof calendarSchema>;
 
@@ -154,6 +163,7 @@ export const calendarEventSchema = eventFieldsSchema
     blockMode: eventBlockModeSchema.nullable().default(null),
     blocks: z.array(calendarEventBlockSchema).default([]),
     remoteEventId: z.string().nullable(),
+    source: materialSourceReferenceSchema.optional(),
     status: calendarEventStatusSchema,
     recurrence: z.array(z.string()),
     eventType: z.enum(["default", "focus", "out_of_office"]).optional(),
@@ -178,6 +188,106 @@ export const calendarEventSchema = eventFieldsSchema
     path: ["endsAt"],
   });
 export type CalendarEvent = z.infer<typeof calendarEventSchema>;
+
+export const calendarCommitmentEvidenceKindSchema = z.enum([
+  "ticket",
+  "booking",
+  "registration",
+  "explicit_acceptance",
+  "other",
+]);
+export type CalendarCommitmentEvidenceKind = z.infer<typeof calendarCommitmentEvidenceKindSchema>;
+export const calendarAutomaticEvidenceKindSchema = z.enum([
+  "ticket",
+  "booking",
+  "registration",
+  "explicit_acceptance",
+]);
+
+export const calendarCommitmentFlexibilitySchema = z.enum(["hard", "flexible"]);
+export type CalendarCommitmentFlexibility = z.infer<typeof calendarCommitmentFlexibilitySchema>;
+
+export const calendarProfilePreferencesSchema = z.object({
+  afterBufferMinutes: z.number().int().min(0).max(1_440),
+  automaticEventCreation: z.boolean(),
+  automaticEventEvidence: z.array(calendarAutomaticEvidenceKindSchema).max(4),
+  beforeBufferMinutes: z.number().int().min(0).max(1_440),
+  busyBlockPrivacy: z.enum(["busy", "details"]),
+  defaultCalendarId: idSchema,
+  defaultTimezone: timeZoneSchema,
+});
+export type CalendarProfilePreferences = z.infer<typeof calendarProfilePreferencesSchema>;
+
+export const calendarCommitmentCandidateSchema = eventFieldsSchema
+  .pick({
+    allDay: true,
+    endsAt: true,
+    location: true,
+    notes: true,
+    startsAt: true,
+    timezone: true,
+    title: true,
+    visibility: true,
+  })
+  .extend({
+    buffer: z
+      .object({
+        afterMinutes: z.number().int().min(0).max(1_440),
+        beforeMinutes: z.number().int().min(0).max(1_440),
+      })
+      .default({ afterMinutes: 0, beforeMinutes: 0 })
+      .describe("Requested buffers shown in preview; this contract does not create them"),
+    calendarId: idSchema.describe("Owned Calendar destination identifier"),
+    evidence: z.object({
+      kind: calendarCommitmentEvidenceKindSchema.describe(
+        "Caller classification; it is not verified evidence authority",
+      ),
+      source: materialSourceReferenceSchema,
+      summary: z.string().trim().min(1).max(1_000),
+    }),
+    flexibility: calendarCommitmentFlexibilitySchema.describe(
+      "Hard commitments are never silently rearranged; flexible remains proposal-only",
+    ),
+  })
+  .refine((value) => new Date(value.endsAt) > new Date(value.startsAt), {
+    message: "Commitment end must be after its start",
+    path: ["endsAt"],
+  });
+export type CalendarCommitmentCandidate = z.infer<typeof calendarCommitmentCandidateSchema>;
+
+export const previewCalendarCommitmentInputSchema = z.object({
+  candidate: calendarCommitmentCandidateSchema,
+  expectedProfileVersion: z.number().int().positive().nullable().default(null),
+  profileId: idSchema.nullable().default(null),
+  requestedPolicy: z.enum(agentMutationPolicies).default("preview"),
+});
+export type PreviewCalendarCommitmentInput = z.input<typeof previewCalendarCommitmentInputSchema>;
+export type ParsedPreviewCalendarCommitmentInput = z.output<
+  typeof previewCalendarCommitmentInputSchema
+>;
+
+export const calendarCommitmentPolicyDecisionSchema = z.object({
+  canApply: z.boolean(),
+  effectivePolicy: z.enum(agentMutationPolicies),
+  reasons: z.array(z.string().min(1)).max(20),
+  requestedPolicy: z.enum(agentMutationPolicies),
+  requiresInteractiveApproval: z.boolean(),
+});
+export type CalendarCommitmentPolicyDecision = z.infer<
+  typeof calendarCommitmentPolicyDecisionSchema
+>;
+
+export const calendarCommitmentProposalSchema = z.object({
+  authority: z.literal("caller_supplied_unverified"),
+  candidate: calendarCommitmentCandidateSchema,
+  destination: calendarSchema,
+  possibleDuplicateEventId: idSchema.nullable(),
+  fingerprint: z.string().regex(/^[0-9a-f]{64}$/),
+  policy: calendarCommitmentPolicyDecisionSchema,
+  providerEffect: z.enum(["local_write", "provider_write"]),
+  warnings: z.array(z.string().min(1)).max(20),
+});
+export type CalendarCommitmentProposal = z.infer<typeof calendarCommitmentProposalSchema>;
 
 export const eventListQuerySchema = z.object({
   from: isoDateTimeSchema,

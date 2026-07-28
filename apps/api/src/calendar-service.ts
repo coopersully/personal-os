@@ -4,9 +4,11 @@ import {
   calendarEvents,
   calendars,
   type Database,
+  domainProfiles,
 } from "@personal-os/database";
 import type {
   Calendar,
+  CalendarCommitmentProposal,
   CalendarEvent,
   CalendarEventBlock,
   CreateEventBlockInput,
@@ -14,12 +16,14 @@ import type {
   CreateLocalCalendarInput,
   EventBlockMode,
   EventListQuery,
+  ParsedPreviewCalendarCommitmentInput,
   UpdateEventBlockInput,
   UpdateEventInput,
   UpdateLocalCalendarInput,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { auditValues } from "./audit.js";
+import { buildCalendarCommitmentProposal } from "./calendar-proposal.js";
 import type { ConnectedEventGateway } from "./connector-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -38,6 +42,7 @@ type CalendarServiceOptions = {
 };
 
 type CalendarRecord = typeof calendars.$inferSelect;
+type CalendarAccountRecord = typeof calendarAccounts.$inferSelect;
 type CalendarEventRecord = typeof calendarEvents.$inferSelect;
 type ConnectedEvent = Awaited<ReturnType<ConnectedEventGateway["update"]>>;
 type CalendarEventAttendee = NonNullable<CalendarEventRecord["attendees"]>[number];
@@ -139,6 +144,21 @@ function eventBlock(record: CalendarEventRecord): CalendarEventBlock {
   };
 }
 
+function serializeCalendarSource(
+  calendar: CalendarRecord,
+  account: CalendarAccountRecord,
+): Calendar {
+  return {
+    ...serializeCalendar(calendar),
+    source: {
+      accountLabel: account.label,
+      remoteCalendarId: calendar.remoteCalendarId,
+      syncError: account.syncError,
+      syncStatus: account.syncStatus,
+    },
+  };
+}
+
 export function createCalendarService({ connectedEvents, db, now }: CalendarServiceOptions) {
   async function findCalendar(userId: string, id: string) {
     const [record] = await db
@@ -211,58 +231,139 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
     }
   }
 
-  return {
+  async function findCalendarAccount(accountId: string, userId: string) {
+    const [account] = await db
+      .select()
+      .from(calendarAccounts)
+      .where(and(eq(calendarAccounts.id, accountId), eq(calendarAccounts.userId, userId)))
+      .limit(1);
+    if (!account) {
+      throw new AppError("not_found", "The calendar source account was not found.");
+    }
+    return account;
+  }
+
+  async function previewCommitment(
+    userId: string,
+    input: ParsedPreviewCalendarCommitmentInput,
+  ): Promise<CalendarCommitmentProposal> {
+    const destination = await findCalendar(userId, input.candidate.calendarId);
+    const account = await findCalendarAccount(destination.accountId, userId);
+    const [duplicate] = await db
+      .select({ id: calendarEvents.id })
+      .from(calendarEvents)
+      .where(
+        and(
+          eq(calendarEvents.userId, userId),
+          eq(calendarEvents.calendarId, destination.id),
+          eq(calendarEvents.title, input.candidate.title),
+          eq(calendarEvents.startsAt, new Date(input.candidate.startsAt)),
+          eq(calendarEvents.endsAt, new Date(input.candidate.endsAt)),
+          isNull(calendarEvents.deletedAt),
+        ),
+      )
+      .limit(1);
+    const [profile] = await db
+      .select()
+      .from(domainProfiles)
+      .where(
+        and(
+          eq(domainProfiles.userId, userId),
+          eq(domainProfiles.domain, "calendar"),
+          ...(input.profileId ? [eq(domainProfiles.id, input.profileId)] : []),
+        ),
+      )
+      .limit(1);
+    if (input.profileId && !profile) {
+      throw new AppError("not_found", "The Calendar profile was not found.");
+    }
+    return buildCalendarCommitmentProposal(input, {
+      destination: serializeCalendarSource(destination, account),
+      possibleDuplicateEventId: duplicate?.id ?? null,
+      profile: profile
+        ? {
+            preferences: profile.preferences,
+            status: profile.status,
+            version: profile.version,
+          }
+        : null,
+    });
+  }
+
+  const service = {
     async createEvent(input: CreateEventInput, context: MutationContext): Promise<CalendarEvent> {
       const calendar = await findCalendar(context.principal.userId, input.calendarId);
       requireWritable(calendar);
       const remote =
         calendar.provider !== "local" ? await connectedEvents.create(calendar, input) : null;
-      const record = await db.transaction(async (transaction) => {
-        const created = requireDatabaseRecord(
-          (
-            await transaction
-              .insert(calendarEvents)
-              .values({
-                allDay: remote?.allDay ?? input.allDay,
-                attendees: normalizeAttendees(input.attendees),
-                calendarId: calendar.id,
-                conferenceUrl: remote?.conferenceUrl ?? null,
-                endsAt: remote?.endsAt ?? new Date(input.endsAt),
-                eventType: input.eventType ?? "default",
-                location: remote?.location ?? input.location,
-                notes: remote?.notes ?? input.notes,
-                provider: calendar.provider,
-                raw: remote?.raw,
-                recurrence: remote?.recurrence ?? [],
-                reminders: input.reminders ?? [],
-                remoteEtag: remote?.etag,
-                remoteEventId: remote?.remoteEventId,
-                startsAt: remote?.startsAt ?? new Date(input.startsAt),
-                status: remote?.status ?? "confirmed",
-                syncedAt: remote ? now() : null,
-                timezone: remote?.timezone ?? input.timezone,
-                title: remote?.title ?? input.title,
-                transparency: input.transparency ?? "busy",
-                userId: context.principal.userId,
-                visibility: input.visibility ?? "default",
-              })
-              .returning()
-          )[0],
-          "The calendar event could not be created.",
+      let record: CalendarEventRecord;
+      try {
+        record = await db.transaction(async (transaction) => {
+          const created = requireDatabaseRecord(
+            (
+              await transaction
+                .insert(calendarEvents)
+                .values({
+                  allDay: remote?.allDay ?? input.allDay,
+                  attendees: normalizeAttendees(input.attendees),
+                  calendarId: calendar.id,
+                  conferenceUrl: remote?.conferenceUrl ?? null,
+                  endsAt: remote?.endsAt ?? new Date(input.endsAt),
+                  eventType: input.eventType ?? "default",
+                  location: remote?.location ?? input.location,
+                  notes: remote?.notes ?? input.notes,
+                  provider: calendar.provider,
+                  raw: remote?.raw,
+                  recurrence: remote?.recurrence ?? [],
+                  reminders: input.reminders ?? [],
+                  remoteEtag: remote?.etag,
+                  remoteEventId: remote?.remoteEventId,
+                  startsAt: remote?.startsAt ?? new Date(input.startsAt),
+                  status: remote?.status ?? "confirmed",
+                  syncedAt: remote ? now() : null,
+                  timezone: remote?.timezone ?? input.timezone,
+                  title: remote?.title ?? input.title,
+                  transparency: input.transparency ?? "busy",
+                  userId: context.principal.userId,
+                  visibility: input.visibility ?? "default",
+                })
+                .returning()
+            )[0],
+            "The calendar event could not be created.",
+          );
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "calendar_event.created",
+              after: auditSnapshot(created),
+              before: null,
+              entityId: created.id,
+              entityType: "calendar_event",
+              ...context,
+            }),
+          );
+          return created;
+        });
+      } catch (error) {
+        if (!remote) throw error;
+        throw new AppError(
+          "service_unavailable",
+          "The provider event was created, but Ilo could not commit its local projection.",
+          {
+            partialEffect: "provider_event_created",
+            provider: calendar.provider,
+            recovery:
+              "Refresh or synchronize Calendar before retrying so the provider event is not duplicated.",
+          },
         );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "calendar_event.created",
-            after: auditSnapshot(created),
-            before: null,
-            entityId: created.id,
-            entityType: "calendar_event",
-            ...context,
-          }),
-        );
-        return created;
-      });
+      }
       return serializeEvent(record);
+    },
+
+    async previewCommitment(
+      userId: string,
+      input: ParsedPreviewCalendarCommitmentInput,
+    ): Promise<CalendarCommitmentProposal> {
+      return previewCommitment(userId, input);
     },
 
     async createEventBlock(
@@ -555,9 +656,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
     },
 
     async list(userId: string): Promise<Calendar[]> {
-      const records = await db
-        .select()
+      const rows = await db
+        .select({ account: calendarAccounts, calendar: calendars })
         .from(calendars)
+        .innerJoin(calendarAccounts, eq(calendarAccounts.id, calendars.accountId))
         .where(and(eq(calendars.userId, userId), isNull(calendars.deletedAt)))
         .orderBy(
           desc(calendars.isPrimary),
@@ -565,9 +667,16 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
           asc(calendars.name),
           asc(calendars.id),
         );
-      return deduplicateCalendars(records)
+      const accountsById = new Map(rows.map(({ account }) => [account.id, account]));
+      return deduplicateCalendars(rows.map(({ calendar }) => calendar))
         .sort((left, right) => left.name.localeCompare(right.name))
-        .map(serializeCalendar);
+        .map((calendar) => {
+          const account = accountsById.get(calendar.accountId);
+          if (!account) {
+            throw new AppError("internal_error", "The Calendar source account is missing.");
+          }
+          return serializeCalendarSource(calendar, account);
+        });
     },
 
     async listEvents(userId: string, query: EventListQuery): Promise<CalendarEvent[]> {
@@ -1062,4 +1171,5 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       return serializeCalendar(after);
     },
   };
+  return service;
 }

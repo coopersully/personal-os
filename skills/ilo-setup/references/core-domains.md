@@ -3,12 +3,6 @@
 Use the same sequence for every domain: inspect sources, ask concise example-based questions, save a
 draft profile, preview proposed behavior, and activate only after acceptance.
 
-## Calendar
-
-Learn the purpose of each calendar, the default writable destination, hard versus flexible
-commitments, time zone expectations, privacy for busy blocks, buffers, and what evidence permits an
-automatic event. Never silently rearrange a non-flexible event.
-
 ## Reminders and tasks
 
 Learn when the user means a simple reminder versus a planned task, default capture location,

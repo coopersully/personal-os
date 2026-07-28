@@ -38,6 +38,21 @@ This log records delivered vertical slices against the master plan. It does not 
 - Audited Mail MCP annotations and descriptions, preserved structured results, and added
   per-conversation partial-failure reporting for bulk provider writes.
 
+## 2026-07-28 — Calendar agent-guided setup and evidence proposals
+
+- Added a dedicated Calendar setup interview for source meanings, default writable destination,
+  hard/flexible commitments, time zone, busy-block privacy, buffers, and automatic-creation
+  evidence.
+- Added a Calendar-owned strong-evidence candidate and preview contract with payload fingerprints,
+  possible exact-match hints, profile-alignment checks, provider-effect disclosure, and explicit
+  unverified-source status.
+- Calendar MCP discovery now exposes source capability and sync state, clarifies external provider
+  effects for every mutation, and routes ticket, booking, registration, and explicit-acceptance
+  evidence through proposal-first tools.
+- The bounded proposal path does not apply caller-supplied evidence, scan Mail, send invitations,
+  create recurrence or buffer events, or rearrange existing commitments. Durable verified intake,
+  idempotent apply/repair, and Mail-to-Calendar ingestion remain integration work.
+
 ## 2026-07-28 — Agent-guided setup and shared assistant contracts
 
 - Added versioned domain profiles for durable preferences, source meanings, user-defined categories,

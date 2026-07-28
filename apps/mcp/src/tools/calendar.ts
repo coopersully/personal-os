@@ -1,13 +1,15 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
+import {
+  calendarCommitmentCandidateSchema,
+  idSchema,
+  isoDateTimeSchema,
+} from "@personal-os/domain";
 import { z } from "zod";
 import { emptyResult, result } from "../tool-result.js";
 
-const id = z.string().uuid().describe("ilo object identifier");
-const isoDateTime = z
-  .string()
-  .datetime({ offset: true })
-  .describe("ISO 8601 date-time with offset");
+const id = idSchema.describe("ilo object identifier");
+const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
 const timeZone = z.string().min(1).describe("IANA time zone, for example America/New_York");
 
 /** Register the calendar discovery tool in the shell's established tool order. */
@@ -15,9 +17,14 @@ export function registerCalendarListTools(server: McpServer, api: PersonalOsApiC
   server.registerTool(
     "list_calendars",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
       description:
-        "List local and connected calendars, including their writable and selected state.",
+        "List Calendar destinations and source fidelity: provider/account identity, remote calendar identity, writable/selected state, time zone, sync status, freshness timestamp, and source error. Call this before choosing a destination.",
       inputSchema: {},
       title: "List calendars",
     },
@@ -30,8 +37,14 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
   server.registerTool(
     "list_events",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
-      description: "List unified events across selected local and connected calendars.",
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
+      description:
+        "List the unified Calendar projection for an explicit time window. Results retain calendar/source identity and provider revision; use list_calendars to interpret capability and freshness.",
       inputSchema: {
         calendarIds: z.array(id).optional(),
         from: isoDateTime,
@@ -45,9 +58,14 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
   server.registerTool(
     "create_event",
     {
-      annotations: { openWorldHint: true },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
       description:
-        "Create an event on a writable local or connected calendar. Connected calendars write through to their provider.",
+        "Create one event only from the user's direct instruction on a writable destination. This can write to an external provider; it never authorizes inference from mail or other sourced material. For ticket, booking, registration, or accepted-commitment evidence, use preview_calendar_commitment and leave creation to an interactive user action.",
       inputSchema: {
         allDay: z.boolean().default(false),
         calendarId: id,
@@ -65,8 +83,14 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
   server.registerTool(
     "update_event",
     {
-      annotations: { idempotentHint: true, openWorldHint: true },
-      description: "Update an event locally and, when connected, at its calendar provider.",
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+      description:
+        "Update an event after the user has specified the exact change. Connected writes can update an external provider and may notify existing attendees under provider semantics. Never silently move or resize a hard/non-flexible commitment.",
       inputSchema: {
         allDay: z.boolean().optional(),
         endsAt: isoDateTime.optional(),
@@ -84,9 +108,14 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
   server.registerTool(
     "block_event",
     {
-      annotations: { idempotentHint: true, openWorldHint: true },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
       description:
-        "Link an event to an opaque Busy block or a detailed mirror on another writable calendar. The unified calendar shows the source once while the destination provider remains blocked.",
+        "Link an event to an opaque Busy block or a detailed mirror on another writable calendar. This writes to the destination provider. Default to Busy unless the user explicitly permits details; the source event is never moved.",
       inputSchema: {
         calendarId: id.describe("Destination calendar identifier"),
         id: id.describe("Source event identifier"),
@@ -99,8 +128,14 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
   server.registerTool(
     "set_event_block_privacy",
     {
-      annotations: { idempotentHint: true, openWorldHint: true },
-      description: "Switch a linked calendar block between private Busy and included details.",
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+      description:
+        "Switch a linked provider block between private Busy and included details. Including details can disclose title, notes, and location to the destination account.",
       inputSchema: {
         blockId: id.describe("Linked block event identifier"),
         id: id.describe("Source event identifier"),
@@ -114,7 +149,12 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
   server.registerTool(
     "unblock_event",
     {
-      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: true },
+      annotations: {
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
       description: "Remove one linked destination block without deleting the source event.",
       inputSchema: {
         blockId: id.describe("Linked block event identifier"),
@@ -127,8 +167,14 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
   server.registerTool(
     "delete_event",
     {
-      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: true },
-      description: "Delete an event locally and, when connected, at its calendar provider.",
+      annotations: {
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: true,
+        readOnlyHint: false,
+      },
+      description:
+        "Delete an event locally and, when connected, at its provider. Provider deletion can cancel an attendee-facing event; inspect the event and source before calling.",
       inputSchema: { id },
       title: "Delete calendar event",
     },
@@ -136,5 +182,29 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       await api.deleteEvent(input.id);
       return emptyResult("Event moved to trash.");
     },
+  );
+
+  server.registerTool(
+    "preview_calendar_commitment",
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
+      description:
+        "Preview one exact Calendar candidate from caller-supplied commitment evidence. The API checks destination capability, projection freshness, exact duplicates, profile alignment, and requested policy without writing an event. Caller-supplied evidence remains unverified and can never authorize approved_rule. This is the Calendar-owned intake shape for a later durable integration; do not scan Mail here.",
+      inputSchema: {
+        candidate: calendarCommitmentCandidateSchema,
+        expectedProfileVersion: z.number().int().positive().nullable().default(null),
+        profileId: id.nullable().default(null),
+        requestedPolicy: z
+          .enum(["read_only", "preview", "approve_each", "approved_rule"])
+          .default("preview"),
+      },
+      title: "Preview evidence-based Calendar commitment",
+    },
+    async (input) => result(await api.previewCalendarCommitment(input)),
   );
 }

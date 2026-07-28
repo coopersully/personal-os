@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 import {
   attentionItems,
   auditEvents,
+  calendarAccounts,
+  calendars,
   createDatabaseClient,
   type DatabaseClient,
   domainProfileApprovals,
@@ -20,7 +22,9 @@ describe.sequential("assistant setup service", () => {
   let database: DatabaseClient;
   let finances: ReturnType<typeof createFinanceService>;
   let service: ReturnType<typeof createAssistantService>;
+  let readOnlyCalendarId: string;
   let userId: string;
+  let writableCalendarId: string;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
@@ -45,6 +49,37 @@ describe.sequential("assistant setup service", () => {
       db: database.db,
       now: () => new Date("2026-07-28T16:00:00.000Z"),
     });
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({ label: "Local", provider: "local", userId })
+      .returning();
+    if (!account) throw new Error("Calendar account fixture was not created.");
+    const createdCalendars = await database.db
+      .insert(calendars)
+      .values([
+        {
+          accountId: account.id,
+          isWritable: true,
+          name: "Personal",
+          provider: "local",
+          timezone: "UTC",
+          userId,
+        },
+        {
+          accountId: account.id,
+          isWritable: false,
+          name: "Subscribed",
+          provider: "local",
+          timezone: "UTC",
+          userId,
+        },
+      ])
+      .returning();
+    const writable = createdCalendars.find((calendar) => calendar.isWritable);
+    const readOnly = createdCalendars.find((calendar) => !calendar.isWritable);
+    if (!writable || !readOnly) throw new Error("Calendar fixtures were not created.");
+    writableCalendarId = writable.id;
+    readOnlyCalendarId = readOnly.id;
     service = createAssistantService({
       db: database.db,
       now: () => new Date("2026-07-28T15:00:00.000Z"),
@@ -835,5 +870,160 @@ describe.sequential("assistant setup service", () => {
       relatedEntityType: null,
       status: "resolved",
     });
+  });
+
+  it("validates Calendar profile sources and the default writable destination", async () => {
+    const base = {
+      categories: [],
+      domain: "calendar" as const,
+      instructions: ["Never move a hard commitment automatically."],
+      objective: "Keep confirmed commitments accurate.",
+      status: "active" as const,
+      summary: "Personal is the default destination.",
+    };
+    const preferences = {
+      afterBufferMinutes: 15,
+      automaticEventCreation: true,
+      automaticEventEvidence: ["booking"] as ["booking"],
+      beforeBufferMinutes: 15,
+      busyBlockPrivacy: "busy" as const,
+      defaultCalendarId: writableCalendarId,
+      defaultTimezone: "UTC",
+    };
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences: {},
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Unknown",
+              sourceId: crypto.randomUUID(),
+              sourceLabel: "Unknown",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences: {},
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Personal commitments",
+              sourceId: writableCalendarId,
+              sourceLabel: "Personal",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("complete Calendar preference contract");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences,
+          sourceContexts: [],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("at least one owned Calendar source context");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences,
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Personal commitments",
+              sourceId: writableCalendarId,
+              sourceLabel: "Personal",
+            },
+            {
+              notes: null,
+              purpose: "Duplicate",
+              sourceId: writableCalendarId,
+              sourceLabel: "Personal again",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("must be unique");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences,
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Reference only",
+              sourceId: readOnlyCalendarId,
+              sourceLabel: "Subscribed",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("must have a source context");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences: {
+            afterBufferMinutes: 15,
+            automaticEventCreation: true,
+            automaticEventEvidence: ["booking"],
+            beforeBufferMinutes: 15,
+            busyBlockPrivacy: "busy",
+            defaultCalendarId: readOnlyCalendarId,
+            defaultTimezone: "UTC",
+          },
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Reference only",
+              sourceId: readOnlyCalendarId,
+              sourceLabel: "Subscribed",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("must be writable");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences: {
+            ...preferences,
+            automaticEventEvidence: ["ticket", "booking", "registration"],
+          },
+          sourceContexts: [
+            {
+              notes: "Default destination",
+              purpose: "Personal commitments",
+              sourceId: writableCalendarId,
+              sourceLabel: "Personal",
+            },
+            {
+              notes: null,
+              purpose: "Reference only",
+              sourceId: readOnlyCalendarId,
+              sourceLabel: "Subscribed",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).resolves.toMatchObject({ domain: "calendar", status: "active", version: 1 });
   });
 });

@@ -76,6 +76,30 @@ const event: CalendarEvent = {
   createdAt: now,
   updatedAt: now,
 };
+const commitmentCandidate = {
+  allDay: false,
+  buffer: { afterMinutes: 15, beforeMinutes: 15 },
+  calendarId: id,
+  endsAt: event.endsAt,
+  evidence: {
+    kind: "booking" as const,
+    source: {
+      accountId,
+      provider: "google" as const,
+      remoteId: "booking-1",
+      revision: "v1",
+      sourceType: "mail_thread" as const,
+    },
+    summary: "Confirmed reservation.",
+  },
+  flexibility: "hard" as const,
+  location: null,
+  notes: null,
+  startsAt: now,
+  timezone: "UTC",
+  title: "Reservation",
+  visibility: "private" as const,
+};
 const mailbox: Mailbox = {
   accountId,
   id,
@@ -480,6 +504,22 @@ function mockApi() {
     listEvents: vi.fn(async () => [event]),
     createEvent: vi.fn(async () => event),
     createEventBlock: vi.fn(async () => event),
+    previewCalendarCommitment: vi.fn(async () => ({
+      authority: "caller_supplied_unverified" as const,
+      candidate: commitmentCandidate,
+      destination: calendar,
+      possibleDuplicateEventId: null,
+      fingerprint: "a".repeat(64),
+      policy: {
+        canApply: false,
+        effectivePolicy: "preview" as const,
+        reasons: ["Caller-supplied evidence is not authority."],
+        requestedPolicy: "approved_rule" as const,
+        requiresInteractiveApproval: true,
+      },
+      providerEffect: "local_write" as const,
+      warnings: [],
+    })),
     updateEvent: vi.fn(async () => event),
     updateEventBlock: vi.fn(async () => event),
     deleteEvent: vi.fn(async () => undefined),
@@ -572,6 +612,7 @@ describe("ilo MCP server", () => {
       "set_event_block_privacy",
       "unblock_event",
       "delete_event",
+      "preview_calendar_commitment",
       "list_goals",
       "create_goal",
       "update_goal",
@@ -680,6 +721,108 @@ describe("ilo MCP server", () => {
         false,
       );
     }
+    const calendarAnnotations = new Map(
+      tools.tools
+        .filter((tool) =>
+          [
+            "list_calendars",
+            "list_events",
+            "create_event",
+            "update_event",
+            "block_event",
+            "set_event_block_privacy",
+            "unblock_event",
+            "delete_event",
+            "preview_calendar_commitment",
+          ].includes(tool.name),
+        )
+        .map((tool) => [tool.name, tool.annotations]),
+    );
+    expect(calendarAnnotations).toEqual(
+      new Map([
+        [
+          "list_calendars",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "list_events",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "create_event",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "update_event",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "block_event",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "set_event_block_privacy",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "unblock_event",
+          {
+            destructiveHint: true,
+            idempotentHint: true,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "delete_event",
+          {
+            destructiveHint: true,
+            idempotentHint: true,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "preview_calendar_commitment",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+      ]),
+    );
 
     await client.callTool({ name: "get_agent_setup_status", arguments: {} });
     await client.callTool({ name: "get_domain_profile", arguments: { domain: "mail" } });
@@ -896,6 +1039,10 @@ describe("ilo MCP server", () => {
     await client.callTool({ name: "unblock_event", arguments: { blockId: id, id } });
     const deletedEvent = await client.callTool({ name: "delete_event", arguments: { id } });
     expect(deletedEvent.content).toEqual([{ type: "text", text: "Event moved to trash." }]);
+    await client.callTool({
+      name: "preview_calendar_commitment",
+      arguments: { candidate: commitmentCandidate, requestedPolicy: "approved_rule" },
+    });
     await client.callTool({ name: "list_activity", arguments: {} });
     await client.callTool({ name: "get_daily_brief", arguments: {} });
     await client.callTool({ name: "list_automations", arguments: {} });
@@ -928,6 +1075,12 @@ describe("ilo MCP server", () => {
     expect(api.createEventBlock).toHaveBeenCalledWith(id, { calendarId: id, mode: "busy" });
     expect(api.updateEventBlock).toHaveBeenCalledWith(id, id, { mode: "details" });
     expect(api.deleteEventBlock).toHaveBeenCalledWith(id, id);
+    expect(api.previewCalendarCommitment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidate: commitmentCandidate,
+        requestedPolicy: "approved_rule",
+      }),
+    );
     expect(api.listActivity).toHaveBeenCalledWith(50);
     expect(api.runAutomation).toHaveBeenCalledWith(id, true);
     expect(api.proposeFinanceCategorizations).toHaveBeenCalledWith({

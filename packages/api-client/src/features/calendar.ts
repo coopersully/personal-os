@@ -1,10 +1,12 @@
 import type {
   Calendar,
+  CalendarCommitmentProposal,
   CalendarEvent,
   CreateEventBlockInput,
   CreateEventInput,
   CreateLocalCalendarInput,
   EventListQuery,
+  PreviewCalendarCommitmentInput,
   UpdateEventBlockInput,
   UpdateEventInput,
   UpdateLocalCalendarInput,
@@ -58,6 +60,18 @@ export function createCalendarApiClient(request: ApiRequest) {
     async listEvents(query: EventListQuery): Promise<CalendarEvent[]> {
       const response = await request<{ events: CalendarEvent[] }>(`/v1/events?${toQuery(query)}`);
       return response.events;
+    },
+    async previewCalendarCommitment(
+      input: PreviewCalendarCommitmentInput,
+    ): Promise<CalendarCommitmentProposal> {
+      const response = await request<{ proposal: CalendarCommitmentProposal }>(
+        "/v1/calendars/commitments/preview",
+        {
+          body: JSON.stringify(input),
+          method: "POST",
+        },
+      );
+      return response.proposal;
     },
     async restoreEvent(id: string): Promise<CalendarEvent> {
       const response = await request<{ event: CalendarEvent }>(`/v1/events/${id}/restore`, {

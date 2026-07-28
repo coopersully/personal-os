@@ -2,6 +2,7 @@ import type {
   AutomationRoutine,
   AutomationRun,
   Calendar,
+  CalendarCommitmentProposal,
   CalendarEvent,
   DailyBrief,
   FinanceAccount,
@@ -102,6 +103,46 @@ const event: CalendarEvent = {
   recurrence: [],
   createdAt: now,
   updatedAt: now,
+};
+const commitmentCandidate = {
+  allDay: false,
+  buffer: { afterMinutes: 15, beforeMinutes: 15 },
+  calendarId: id,
+  endsAt: event.endsAt,
+  evidence: {
+    kind: "booking" as const,
+    source: {
+      accountId,
+      provider: "google" as const,
+      remoteId: "booking-1",
+      revision: "v1",
+      sourceType: "mail_thread" as const,
+    },
+    summary: "Confirmed reservation.",
+  },
+  flexibility: "hard" as const,
+  location: null,
+  notes: null,
+  startsAt: now,
+  timezone: "UTC",
+  title: "Reservation",
+  visibility: "private" as const,
+};
+const commitmentProposal: CalendarCommitmentProposal = {
+  authority: "caller_supplied_unverified",
+  candidate: commitmentCandidate,
+  destination: calendar,
+  possibleDuplicateEventId: null,
+  fingerprint: "a".repeat(64),
+  policy: {
+    canApply: false,
+    effectivePolicy: "preview",
+    reasons: ["Caller-supplied evidence is not authority."],
+    requestedPolicy: "approved_rule",
+    requiresInteractiveApproval: true,
+  },
+  providerEffect: "local_write",
+  warnings: [],
 };
 const mailbox: Mailbox = {
   accountId,
@@ -896,6 +937,8 @@ function apiFetch() {
     if (url.pathname === "/v1/mailboxes") return json({ mailboxes: [mailbox] });
     if (url.pathname === "/v1/calendars" && method === "POST") return json({ calendar }, 201);
     if (url.pathname === "/v1/calendars") return json({ calendars: [calendar] });
+    if (url.pathname === "/v1/calendars/commitments/preview")
+      return json({ proposal: commitmentProposal });
     if (url.pathname.includes("/calendars/")) return json({ calendar });
     if (url.pathname === "/v1/events" && method === "POST") return json({ event }, 201);
     if (url.pathname === "/v1/events") return json({ events: [event] });
@@ -939,6 +982,12 @@ describe("ilo API client", () => {
     await expect(api.updateCalendar(id, { name: "Home" })).resolves.toEqual(calendar);
     await expect(api.setCalendarSelected(id, false)).resolves.toEqual(calendar);
     await api.deleteCalendar(id);
+    await expect(
+      api.previewCalendarCommitment({
+        candidate: commitmentCandidate,
+        requestedPolicy: "approved_rule",
+      }),
+    ).resolves.toEqual(commitmentProposal);
     await expect(
       api.listEvents({ from: now, to: event.endsAt, calendarIds: [id], query: "" }),
     ).resolves.toEqual([event]);

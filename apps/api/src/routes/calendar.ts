@@ -3,6 +3,7 @@ import {
   createEventInputSchema,
   createLocalCalendarInputSchema,
   eventListQuerySchema,
+  previewCalendarCommitmentInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
   updateLocalCalendarInputSchema,
@@ -11,7 +12,7 @@ import type { Context, Hono } from "hono";
 import { z } from "zod";
 import type { createCalendarService } from "../calendar-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess } from "./support.js";
+import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
@@ -23,11 +24,16 @@ type CalendarRouteOptions = {
 
 /** Register the Calendar-owned HTTP surface without constructing shared services. */
 export function registerCalendarRoutes({ app, calendar, mutationContext }: CalendarRouteOptions) {
-  const requireCalendarScope = requireFeatureAccess("calendar");
-  app.use("/v1/calendars", requireCalendarScope);
-  app.use("/v1/calendars/*", requireCalendarScope);
-  app.use("/v1/events", requireCalendarScope);
-  app.use("/v1/events/*", requireCalendarScope);
+  const calendarFeatureAccess = requireFeatureAccess("calendar");
+  const calendarReadAccess = requireScope("calendar:read");
+  app.use("/v1/calendars", calendarFeatureAccess);
+  app.use("/v1/calendars/*", (context, next) =>
+    context.req.method === "POST" && context.req.path === "/v1/calendars/commitments/preview"
+      ? calendarReadAccess(context, next)
+      : calendarFeatureAccess(context, next),
+  );
+  app.use("/v1/events", calendarFeatureAccess);
+  app.use("/v1/events/*", calendarFeatureAccess);
 
   app.get("/v1/calendars", async (context) =>
     context.json({ calendars: await calendar.list(context.get("principal").userId) }),
@@ -42,6 +48,14 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
       },
       201,
     ),
+  );
+  app.post("/v1/calendars/commitments/preview", async (context) =>
+    context.json({
+      proposal: await calendar.previewCommitment(
+        context.get("principal").userId,
+        await parseBody(context, previewCalendarCommitmentInputSchema),
+      ),
+    }),
   );
   app.patch("/v1/calendars/:id", async (context) =>
     context.json({

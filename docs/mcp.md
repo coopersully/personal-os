@@ -16,9 +16,11 @@ exchange is a bounded shared-MCP follow-up; Finance does not invent a domain-loc
 ## Tools
 
 The server exposes read/create/update/complete/delete reminder tools; read/create/update/delete event
-tools; calendar discovery; mailbox, mail search, conversation, and mail rule tools; actor-aware
-activity history; and Finance tools. Destructive and read-only annotations are included for
-compatible MCP hosts.
+tools; calendar discovery and an evidence-based commitment preview tool; mailbox, mail search,
+conversation, and mail rule tools; actor-aware activity history; and Finance tools. Destructive,
+read-only, idempotent, and open-world annotations are compatible-host UX hints only. Authorization,
+policy, source evidence, provider capability, conflict handling, and partial-effect reporting remain
+deterministic API behavior.
 
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
 
@@ -116,6 +118,18 @@ while combined API responses lack a shared MCP schema convention; capability
 negotiation and output schemas are a bounded shared-MCP follow-up. OAuth uses
 the MCP resource indicator, scopes remain least-privilege read/write grants,
 and provider tokens never cross the MCP boundary.
+
+Calendar setup records source meanings, default writable destination, hard/flexible semantics,
+time zone, busy-block privacy, buffers, and the evidence kinds that would be eligible for automatic
+creation after verified intake exists. `preview_calendar_commitment` accepts one exact,
+caller-supplied ticket, booking, registration, or explicit-acceptance candidate and returns
+destination/provider effects, a possible exact-match hint, policy reasons, warnings, and a payload
+fingerprint without mutation. Exact matching is not durable deduplication, and the fingerprint is
+not evidence authority. Caller-supplied evidence never permits
+`approved_rule`; event creation remains an interactive action until a later integration persists a
+server-verified source ownership/revision and idempotency identity. The bounded candidate cannot
+add attendees, recurrence, or buffer events and never moves another event. Mail ingestion and
+Mail-to-Calendar wiring are not part of this Calendar contract.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
 

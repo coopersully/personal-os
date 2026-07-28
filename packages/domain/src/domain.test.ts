@@ -10,7 +10,9 @@ import {
   automationRoutineSchema,
   automationRunSchema,
   bulkUpdateMailInputSchema,
+  calendarCommitmentCandidateSchema,
   calendarEventSchema,
+  calendarProfilePreferencesSchema,
   calendarProviderSchema,
   calendarSchema,
   connectICloudInputSchema,
@@ -56,6 +58,7 @@ import {
   paginationSchema,
   passwordRequirementState,
   passwordSchema,
+  previewCalendarCommitmentInputSchema,
   registerInputSchema,
   reminderListQuerySchema,
   reminderPrioritySchema,
@@ -735,6 +738,48 @@ describe("domain schemas", () => {
       mode: "busy",
     });
     expect(updateEventBlockInputSchema.parse({ mode: "details" })).toEqual({ mode: "details" });
+    const candidate = {
+      allDay: false,
+      buffer: { afterMinutes: 15, beforeMinutes: 15 },
+      calendarId: id,
+      endsAt: end,
+      evidence: {
+        kind: "ticket",
+        source: {
+          accountId,
+          provider: "google",
+          remoteId: "ticket-1",
+          revision: "v1",
+          sourceType: "mail_thread",
+        },
+        summary: "Confirmed ticket.",
+      },
+      flexibility: "hard",
+      location: null,
+      notes: null,
+      startsAt: start,
+      timezone: "UTC",
+      title: "Train",
+      visibility: "private",
+    };
+    expect(calendarCommitmentCandidateSchema.parse(candidate)).toMatchObject(candidate);
+    expect(
+      calendarCommitmentCandidateSchema.safeParse({ ...candidate, endsAt: start }).success,
+    ).toBe(false);
+    expect(previewCalendarCommitmentInputSchema.parse({ candidate }).requestedPolicy).toBe(
+      "preview",
+    );
+    expect(
+      calendarProfilePreferencesSchema.parse({
+        afterBufferMinutes: 15,
+        automaticEventCreation: false,
+        automaticEventEvidence: ["ticket", "booking"],
+        beforeBufferMinutes: 15,
+        busyBlockPrivacy: "busy",
+        defaultCalendarId: id,
+        defaultTimezone: "UTC",
+      }).defaultCalendarId,
+    ).toBe(id);
     expect(updateAutomationRoutineInputSchema.safeParse({}).success).toBe(false);
     expect(
       updateAutomationRoutineInputSchema.parse({ enabled: false, schedule: "Daily at 8:00 PM" }),

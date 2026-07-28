@@ -118,6 +118,13 @@ export function serializeEvent(
     recurrence: row.recurrence,
     reminders: row.reminders,
     remoteEventId: row.remoteEventId,
+    source: {
+      accountId: null,
+      provider: row.provider,
+      remoteId: row.remoteEventId ?? (row.provider === "local" ? row.id : null),
+      revision: row.remoteEtag,
+      sourceType: "calendar_event",
+    },
     startsAt: row.startsAt.toISOString(),
     status: row.status,
     transparency: row.transparency,

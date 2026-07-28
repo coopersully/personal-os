@@ -408,6 +408,34 @@ function merchant(
     isUserConfirmed: row.isUserConfirmed,
   };
 }
+function accountAuditSnapshot(value: FinanceAccount) {
+  return {
+    id: value.id,
+    kind: value.kind,
+    provider: value.provider,
+    status: value.status,
+    updatedAt: value.updatedAt,
+  };
+}
+function transactionAuditSnapshot(value: FinanceTransaction) {
+  return {
+    categoryConfidence: value.categoryConfidence,
+    categoryId: value.categoryId,
+    categorySource: value.categorySource,
+    direction: value.direction,
+    id: value.id,
+    needsReview: value.needsReview,
+    pending: value.pending,
+    reconciliationStatus: value.reconciliationStatus,
+    updatedAt: value.updatedAt,
+  };
+}
+function merchantAuditSnapshot(value: FinanceMerchant) {
+  return {
+    id: value.id,
+    isUserConfirmed: value.isUserConfirmed,
+  };
+}
 
 export function createFinanceService({ db, now, plaid }: Options) {
   async function ensureCategories(userId: string) {
@@ -961,6 +989,30 @@ export function createFinanceService({ db, now, plaid }: Options) {
         if (!current || current.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) {
           throw new AppError("conflict", "The transaction changed while it was being reviewed.");
         }
+        await tx
+          .select({ id: financeCategories.id })
+          .from(financeCategories)
+          .where(eq(financeCategories.userId, context.principal.userId))
+          .orderBy(financeCategories.id)
+          .for("update");
+        if (source === "agent") {
+          const currentProposal = await categorizationProposal(
+            context.principal.userId,
+            transaction(current),
+          );
+          if (
+            currentProposal.suggestedCategory?.id !== category.id ||
+            currentProposal.confidence !== decision.confidence ||
+            currentProposal.meetsPolicyThreshold !== canApply
+          ) {
+            throw new AppError(
+              "conflict",
+              "The categorization policy changed after the proposal was prepared.",
+            );
+          }
+          confidence = currentProposal.confidence;
+          threshold = currentProposal.threshold;
+        }
         const [protectedReview] =
           source === "agent"
             ? await tx
@@ -1105,6 +1157,30 @@ export function createFinanceService({ db, now, plaid }: Options) {
       if (!current || current.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) {
         throw new AppError("conflict", "The transaction changed while it was being categorized.");
       }
+      await tx
+        .select({ id: financeCategories.id })
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, context.principal.userId))
+        .orderBy(financeCategories.id)
+        .for("update");
+      if (source === "agent") {
+        const currentProposal = await categorizationProposal(
+          context.principal.userId,
+          transaction(current),
+        );
+        if (
+          currentProposal.suggestedCategory?.id !== category.id ||
+          currentProposal.confidence !== decision.confidence ||
+          currentProposal.meetsPolicyThreshold !== canApply
+        ) {
+          throw new AppError(
+            "conflict",
+            "The categorization policy changed after the proposal was prepared.",
+          );
+        }
+        confidence = currentProposal.confidence;
+        threshold = currentProposal.threshold;
+      }
       const [protectedReview] =
         source === "agent"
           ? await tx
@@ -1186,8 +1262,8 @@ export function createFinanceService({ db, now, plaid }: Options) {
       await tx.insert(auditEvents).values(
         auditValues({
           action: options.auditAction ?? "finance.transaction_categorized",
-          after,
-          before: beforeValue,
+          after: transactionAuditSnapshot(after),
+          before: transactionAuditSnapshot(beforeValue),
           entityId: updated.id,
           entityType: "finance_transaction",
           ...context,
@@ -1709,8 +1785,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
       await db.insert(auditEvents).values(
         auditValues({
           action: "finance.profile_updated",
-          after: value,
-          before,
+          after: {
+            changedFields: Object.keys(input).sort(),
+            updatedAt: value.updatedAt,
+          },
+          before: before ? { updatedAt: before.updatedAt } : null,
           entityId: saved.id,
           entityType: "finance_profile",
           ...context,
@@ -1754,8 +1833,12 @@ export function createFinanceService({ db, now, plaid }: Options) {
       await db.insert(auditEvents).values(
         auditValues({
           action: "finance.income_stream_updated",
-          after: value,
-          before: incomeStreamValue(before),
+          after: { id: value.id, source: value.source, status: value.status },
+          before: {
+            id: before.id,
+            source: before.source,
+            status: before.status,
+          },
           entityId: id,
           entityType: "finance_income_stream",
           ...context,
@@ -1807,8 +1890,12 @@ export function createFinanceService({ db, now, plaid }: Options) {
       await db.insert(auditEvents).values(
         auditValues({
           action: "finance.recurring_updated",
-          after: value,
-          before: recurringValue(before),
+          after: { id: value.id, source: value.source, status: value.status },
+          before: {
+            id: before.id,
+            source: before.source,
+            status: before.status,
+          },
           entityId: id,
           entityType: "finance_recurring_obligation",
           ...context,
@@ -1847,8 +1934,18 @@ export function createFinanceService({ db, now, plaid }: Options) {
       await db.insert(auditEvents).values(
         auditValues({
           action: "finance.alert_resolved",
-          after: { ...value, rationale: input.rationale },
-          before: alertValue(before),
+          after: {
+            id: value.id,
+            severity: value.severity,
+            status: value.status,
+            type: value.type,
+          },
+          before: {
+            id: before.id,
+            severity: before.severity,
+            status: before.status,
+            type: before.type,
+          },
           entityId: id,
           entityType: "finance_alert",
           ...context,
@@ -2004,7 +2101,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           await tx.insert(auditEvents).values(
             auditValues({
               action: "finance.plaid_connected",
-              after: account(record),
+              after: accountAuditSnapshot(account(record)),
               before: null,
               entityId: record.id,
               entityType: "finance_account",
@@ -2313,8 +2410,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
       await db.insert(auditEvents).values(
         auditValues({
           action: "finance.merchant_renamed",
-          after: merchant(updated),
-          before: merchant(before),
+          after: {
+            ...merchantAuditSnapshot(merchant(updated)),
+            changedFields: ["displayName"],
+          },
+          before: merchantAuditSnapshot(merchant(before)),
           entityId: updated.id,
           entityType: "finance_merchant",
           ...context,
@@ -2339,11 +2439,13 @@ export function createFinanceService({ db, now, plaid }: Options) {
           auditValues({
             action: "finance.merchants_merged",
             after: {
-              rationale: input.rationale,
               sourceMerchantId: source.id,
-              target: merchant(target),
+              targetMerchantId: target.id,
             },
-            before: { source: merchant(source), target: merchant(target) },
+            before: {
+              sourceMerchantId: source.id,
+              targetMerchantId: target.id,
+            },
             entityId: target.id,
             entityType: "finance_merchant",
             ...context,
@@ -2546,6 +2648,16 @@ export function createFinanceService({ db, now, plaid }: Options) {
           "Confirming an ambiguous transfer requires an interactive user session.",
         );
       }
+      if (
+        context.principal.actorType === "agent" &&
+        input.action !== "defer" &&
+        (input.confidence === undefined || input.expectedTransactionUpdatedAt === undefined)
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Agent review decisions require the accepted proposal confidence and transaction revision.",
+        );
+      }
       if (input.action === "defer") {
         if (review.status === "deferred") return { deferred: true };
         await db.transaction(async (tx) => {
@@ -2591,8 +2703,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
       const result = await applyCategorization(
         {
           categoryId,
-          confidence: 1,
-          expectedTransactionUpdatedAt: current.updatedAt.toISOString(),
+          confidence: context.principal.actorType === "agent" ? (input.confidence ?? 0) : 1,
+          expectedTransactionUpdatedAt:
+            context.principal.actorType === "agent"
+              ? (input.expectedTransactionUpdatedAt ?? "")
+              : current.updatedAt.toISOString(),
           learnMerchant: input.learnMerchant,
           rationale:
             input.rationale ??
@@ -2676,7 +2791,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.account_created",
-            after: account(created),
+            after: accountAuditSnapshot(account(created)),
             before: null,
             entityId: created.id,
             entityType: "finance_account",
@@ -2706,7 +2821,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.budget_created",
-            after: budget(created),
+            after: { id: created.id, updatedAt: created.updatedAt.toISOString() },
             before: null,
             entityId: created.id,
             entityType: "finance_budget",
@@ -2740,6 +2855,14 @@ export function createFinanceService({ db, now, plaid }: Options) {
         ? await categoryForName(context.principal.userId, automatic.category)
         : null;
       const row = await db.transaction(async (tx) => {
+        if (input.category !== null && categoryRecord) {
+          await tx
+            .select({ id: financeCategories.id })
+            .from(financeCategories)
+            .where(eq(financeCategories.userId, context.principal.userId))
+            .orderBy(financeCategories.id)
+            .for("update");
+        }
         const created = requireDatabaseRecord(
           (
             await tx
@@ -2768,7 +2891,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.transaction_created",
-            after: transaction(created),
+            after: transactionAuditSnapshot(transaction(created)),
             before: null,
             entityId: created.id,
             entityType: "finance_transaction",
@@ -2900,7 +3023,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           auditValues({
             action: "finance.account_deleted",
             after: null,
-            before: account(before),
+            before: accountAuditSnapshot(account(before)),
             entityId: before.id,
             entityType: "finance_account",
             ...context,
@@ -3214,6 +3337,26 @@ export function createFinanceService({ db, now, plaid }: Options) {
           ? null
           : await categoryForName(context.principal.userId, input.category);
       const row = await db.transaction(async (tx) => {
+        const [current] = await tx
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.id, before.id),
+              eq(financeTransactions.userId, context.principal.userId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!current) throw new AppError("not_found", "The transaction was not found.");
+        if (input.category !== undefined) {
+          await tx
+            .select({ id: financeCategories.id })
+            .from(financeCategories)
+            .where(eq(financeCategories.userId, context.principal.userId))
+            .orderBy(financeCategories.id)
+            .for("update");
+        }
         const updated = requireDatabaseRecord(
           (
             await tx
@@ -3252,9 +3395,16 @@ export function createFinanceService({ db, now, plaid }: Options) {
         );
         await tx.insert(auditEvents).values(
           auditValues({
-            action: "finance.transaction_categorized",
-            after: transaction(updated),
-            before: transaction(before),
+            action:
+              input.category === undefined
+                ? "finance.transaction_updated"
+                : "finance.transaction_categorized",
+            after:
+              input.category === undefined
+                ? { changedFields: ["notes"] }
+                : transactionAuditSnapshot(transaction(updated)),
+            before:
+              input.category === undefined ? null : transactionAuditSnapshot(transaction(current)),
             entityId: updated.id,
             entityType: "finance_transaction",
             ...context,
@@ -3267,7 +3417,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
               .where(
                 and(
                   eq(financeCategoryRules.userId, context.principal.userId),
-                  eq(financeCategoryRules.merchantNormalized, normalizedMerchant(before.merchant)),
+                  eq(financeCategoryRules.merchantNormalized, normalizedMerchant(current.merchant)),
                 ),
               );
           } else {
@@ -3275,11 +3425,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
               categoryId: categoryRecord?.id ?? null,
               categoryName: input.category,
               confidence: 10_000,
-              merchantId: before.merchantId,
+              merchantId: current.merchantId,
               outcome:
                 actorSource === "agent"
                   ? "applied"
-                  : before.categoryId !== null && before.categoryId !== categoryRecord?.id
+                  : current.categoryId !== null && current.categoryId !== categoryRecord?.id
                     ? "corrected"
                     : "confirmed",
               rationale:
@@ -3287,7 +3437,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                   ? "Categorized directly by the user."
                   : "Categorized through a scoped agent action.",
               source: actorSource,
-              transactionId: before.id,
+              transactionId: current.id,
               userId: context.principal.userId,
             });
             await tx
@@ -3295,7 +3445,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
               .set({ resolvedAt: now(), status: "resolved", updatedAt: now() })
               .where(
                 and(
-                  eq(financeReviewCases.transactionId, before.id),
+                  eq(financeReviewCases.transactionId, current.id),
                   inArray(financeReviewCases.status, ["deferred", "open"]),
                 ),
               );
@@ -3305,7 +3455,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
               .insert(financeCategoryRules)
               .values({
                 category: input.category,
-                merchantNormalized: normalizedMerchant(before.merchant),
+                merchantNormalized: normalizedMerchant(current.merchant),
                 userId: context.principal.userId,
               })
               .onConflictDoUpdate({

@@ -49,11 +49,12 @@ report `applied`, `review_required`, and structured `failed` results for
 different transactions. The API runs at most four decisions concurrently.
 Proposal pages return an opaque `nextCursor`, and hosts can continue without
 making read calls mutate the ledger. Direct transaction categorization is not
-an agent tool or agent-permitted raw API shortcut. Merchant merges and
-recurring-payment, alert, and
-ordinary review decisions are bounded mutations. Provider administration,
-account/import/profile/budget changes, permanent merchant rules, and ambiguous
-transfer confirmation remain human-only.
+an agent tool or agent-permitted raw API shortcut. Agent approval or
+recategorization through the review tool must likewise carry the accepted
+proposal confidence and transaction revision. Merchant merges and
+recurring-payment, alert, and ordinary review decisions are bounded mutations.
+Provider administration, account/import/profile/budget changes, permanent
+merchant rules, and ambiguous transfer confirmation remain human-only.
 
 Tool annotations are host UX hints, not authorization. API scopes, policy,
 revision checks, database invariants, and audit records enforce Finance safety.

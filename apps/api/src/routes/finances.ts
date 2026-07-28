@@ -240,6 +240,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       201,
     ),
   );
+  // Scoped agents may add notes; the service keeps category and merchant-rule edits human-only.
   app.patch("/v1/finances/transactions/:id", async (context) =>
     context.json({
       transaction: await finances.updateTransaction(

@@ -30,6 +30,7 @@ import {
   featureAccessPolicies,
   featureIds,
   financeGuidedPreferencesSchema,
+  financeReviewDecisionInputSchema,
   formatDateOnly,
   formatDateWithOrdinal,
   formatMonth,
@@ -427,6 +428,18 @@ describe("domain schemas", () => {
     ).toMatchObject({ condition: "Rain", temperatureF: 72 });
     expect(updateFinanceTransactionInputSchema.parse({ notes: "Receipt saved" })).toEqual({
       notes: "Receipt saved",
+    });
+    expect(
+      financeReviewDecisionInputSchema.parse({
+        action: "recategorize",
+        categoryId: "00000000-0000-4000-8000-000000000000",
+        confidence: 0.965,
+        expectedTransactionUpdatedAt: start,
+      }),
+    ).toMatchObject({
+      confidence: 0.965,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: "suggest",
     });
     expect(() => updateFinanceTransactionInputSchema.parse({ learnMerchant: false })).toThrow();
     expect(

@@ -197,7 +197,7 @@ describe.sequential("assistant setup service", () => {
     await expect(database.db.select().from(domainProfiles)).resolves.toHaveLength(2);
   });
 
-  it("requires Finance source contexts to reference distinct owned accounts", async () => {
+  it("allows source-empty Finance drafts but requires a distinct owned account to activate", async () => {
     const [financeUser] = await database.db
       .insert(users)
       .values({
@@ -268,9 +268,39 @@ describe.sequential("assistant setup service", () => {
         financeContext,
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
-    await expect(service.upsertProfile(input, financeContext)).resolves.toMatchObject({
+    await expect(
+      service.upsertProfile({ ...input, sourceContexts: [] }, financeContext),
+    ).resolves.toMatchObject({
+      domain: "finances",
+      sourceContexts: [],
+      status: "draft",
+      version: 1,
+    });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          sourceContexts: [],
+          status: "active",
+        },
+        financeContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          status: "active",
+        },
+        financeContext,
+      ),
+    ).resolves.toMatchObject({
       domain: "finances",
       sourceContexts: [expect.objectContaining({ sourceId: account.id })],
+      status: "active",
+      version: 2,
     });
     const [raceAccount] = await database.db
       .insert(financeAccounts)
@@ -291,7 +321,7 @@ describe.sequential("assistant setup service", () => {
       service.upsertProfile(
         {
           ...input,
-          expectedVersion: 1,
+          expectedVersion: 2,
           sourceContexts: [{ ...sourceContext, sourceId: raceAccount.id }],
         },
         financeContext,

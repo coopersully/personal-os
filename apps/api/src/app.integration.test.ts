@@ -7,6 +7,7 @@ import type {
   XConnector,
 } from "@personal-os/connectors";
 import {
+  auditEvents,
   automationRoutines,
   automationRuns,
   calendarAccounts,
@@ -1101,6 +1102,42 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(403);
+    const agentNoteResponse = await request(
+      `/v1/finances/transactions/${agentBypassCandidate.id}`,
+      {
+        auth: "agent",
+        body: { notes: "Keep the receipt for review." },
+        method: "PATCH",
+      },
+    );
+    expect(agentNoteResponse.status).toBe(200);
+    expect((await payload(agentNoteResponse)).transaction).toMatchObject({
+      category: null,
+      notes: "Keep the receipt for review.",
+    });
+    const agentNoteAudits = await database.db
+      .select({
+        action: auditEvents.action,
+        actorType: auditEvents.actorType,
+        after: auditEvents.after,
+        before: auditEvents.before,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, agentBypassCandidate.id));
+    expect(agentNoteAudits).toContainEqual({
+      action: "finance.transaction_updated",
+      actorType: "agent",
+      after: { changedFields: ["notes"] },
+      before: null,
+    });
+    expect(agentNoteAudits).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.transaction_categorized",
+          actorType: "agent",
+        }),
+      ]),
+    );
     expect(
       (
         await request("/v1/me", {
@@ -1112,6 +1149,30 @@ describe.sequential("ilo API", () => {
     ).toBe(403);
 
     const fullAgentToken = agentToken;
+    const auditOnlyToken = await payload(
+      await request("/v1/access-tokens", {
+        body: {
+          name: "Audit-only integration agent",
+          scopes: ["audit:read"],
+        },
+      }),
+    );
+    agentToken = auditOnlyToken.token.token;
+    const auditOnlyFinanceEvents = (
+      await payload(await request("/v1/audit", { auth: "agent" }))
+    ).events.filter((event: { action: string }) => event.action.startsWith("finance."));
+    expect(auditOnlyFinanceEvents.length).toBeGreaterThan(0);
+    expect(
+      JSON.stringify(
+        auditOnlyFinanceEvents.map((event: { after: unknown; before: unknown }) => ({
+          after: event.after,
+          before: event.before,
+        })),
+      ),
+    ).not.toMatch(
+      /"(amount|balance|body|displayName|employer|evidence|expectedAmount|institution|limit|merchant|name|notes|payer|rationale|rawMerchant|role|title)"\s*:/,
+    );
+    agentToken = fullAgentToken;
     const limitedToken = await payload(
       await request("/v1/access-tokens", {
         body: {

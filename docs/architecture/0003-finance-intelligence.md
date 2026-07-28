@@ -40,9 +40,10 @@ normal audit context.
 Finance guided setup reuses the shared versioned domain-profile envelope. Its
 `sourceContexts` are canonical Finance account IDs, not arbitrary labels, and
 the API rejects duplicates, stale accounts, and accounts owned by another
-user. Finance preference keys use explicit units: confidence is a 0–1 fraction,
-currency thresholds are account currency amounts, and
-`recurringAmountChangePercent` is percentage points (`20` means 20%).
+user. Source-empty Finance profiles may remain drafts, but activation requires
+at least one owned account source. Finance preference keys use explicit units:
+confidence is a 0–1 fraction, currency thresholds are account currency amounts,
+and `recurringAmountChangePercent` is percentage points (`20` means 20%).
 
 ## Ledger and learning model
 
@@ -64,13 +65,23 @@ classification evidence, review resolution, optional human-approved merchant
 rule, and audit insert in one database transaction. A batch can succeed for
 some decisions and fail for others, but a single decision never reports failure
 after committing only part of itself. Agent apply also recomputes the current
-server proposal and rejects substituted categories or confidence. Work is
-bounded to four concurrent decisions so a large batch does not exhaust the
-database pool. A below-threshold decision records its review case, evidence,
-and a minimal deferred audit event in the same transaction. Finance audit
-metadata omits transaction amounts, merchants, notes, and rationales so an
-`audit:read` grant does not imply `finances:read`. Transfer
-confirmation uses the same transactional path.
+server proposal and rejects substituted categories or confidence. Proposal
+revalidation runs after locking the transaction and the user's categorization
+policy rows; every merchant-rule and classification-evidence writer takes the
+same policy lock. A concurrent policy change therefore commits before
+revalidation or waits until the accepted decision is durable. Work is bounded
+to four concurrent decisions so a large batch does not exhaust the database
+pool. A below-threshold decision records its review case, evidence, and a
+minimal deferred audit event in the same transaction. Finance audit metadata
+omits transaction amounts, merchants, notes, and rationales so an `audit:read`
+grant does not imply `finances:read`. Transfer confirmation uses the same
+transactional path.
+
+An agent resolving an existing category review must submit the accepted
+proposal confidence and transaction `updatedAt`. The API applies the same
+proposal, policy, and stale-revision checks as batch categorization. Interactive
+users may still resolve a current review directly; ambiguous transfer
+confirmation remains human-only.
 
 An exact retry of an unchanged below-threshold decision reuses the existing
 open review and deferred evidence. The result reports `replayed: true` and does

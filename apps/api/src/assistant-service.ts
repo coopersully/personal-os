@@ -92,6 +92,16 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
           );
         }
       }
+      if (
+        input.domain === "finances" &&
+        input.status === "active" &&
+        financeSourceIds.length === 0
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Active Finance setup requires at least one owned account source.",
+        );
+      }
       const existing = await findProfile(context.principal.userId, input.domain);
       if (existing && input.expectedVersion === undefined) {
         throw new AppError(

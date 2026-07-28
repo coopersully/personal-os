@@ -5,6 +5,7 @@ import {
   type DatabaseClient,
   domainProfiles,
   financeAlerts,
+  financeCategories,
   financeClassificationDecisions,
   financeReviewCases,
   financeTransactions,
@@ -12,7 +13,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import type { Principal } from "./types.js";
 
@@ -456,6 +457,93 @@ describe.sequential("finance service", () => {
       },
       context,
     );
+    const policyRaceEvidence = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 2,
+        category: "Shopping",
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Policy Race",
+        notes: null,
+      },
+      context,
+    );
+    const policyRaceCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 3,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Policy Race",
+        notes: null,
+      },
+      context,
+    );
+    const policyRaceProposal = (
+      await service.proposeCategorizations(userId, { limit: 50, review: "needs_review" })
+    ).items.find((item) => item.transaction.id === policyRaceCandidate.id);
+    if (!policyRaceProposal || !policyRaceCandidate.merchantId) {
+      throw new Error("The policy-race proposal fixture was not created.");
+    }
+    let policyLockAcquired = () => {};
+    const policyLocked = new Promise<void>((resolve) => {
+      policyLockAcquired = resolve;
+    });
+    let releasePolicyLock = () => {};
+    const policyLockRelease = new Promise<void>((resolve) => {
+      releasePolicyLock = resolve;
+    });
+    const concurrentPolicyWriter = database.db.transaction(async (tx) => {
+      await tx
+        .select({ id: financeCategories.id })
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, userId))
+        .orderBy(financeCategories.id)
+        .for("update");
+      policyLockAcquired();
+      await policyLockRelease;
+      await tx.insert(financeClassificationDecisions).values({
+        categoryId: shopping.id,
+        categoryName: shopping.name,
+        confidence: 10_000,
+        merchantId: policyRaceCandidate.merchantId,
+        outcome: "confirmed",
+        rationale: "Concurrent user confirmation.",
+        source: "user",
+        transactionId: policyRaceEvidence.id,
+        userId,
+      });
+    });
+    await policyLocked;
+    const concurrentApply = service.applyCategorizations(
+      {
+        decisions: [
+          {
+            categoryId: shopping.id,
+            confidence: policyRaceProposal.confidence,
+            expectedTransactionUpdatedAt: policyRaceProposal.transaction.updatedAt,
+            learnMerchant: "never",
+            rationale: "Apply only if the proposal evidence is still current.",
+            transactionId: policyRaceCandidate.id,
+          },
+        ],
+      },
+      agentContext,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    releasePolicyLock();
+    await concurrentPolicyWriter;
+    await expect(concurrentApply).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        error: expect.objectContaining({ code: "conflict" }),
+        status: "failed",
+      }),
+    ]);
     for (const amount of [3, 4]) {
       await service.createTransaction(
         {
@@ -552,6 +640,121 @@ describe.sequential("finance service", () => {
       }),
       expect.objectContaining({ applied: true, status: "applied" }),
     ]);
+    const agentReviewCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Everyday Supplies",
+        notes: null,
+      },
+      context,
+    );
+    const [agentReview] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        rationale: "Review the current evidence.",
+        reason: "low_confidence",
+        status: "open",
+        suggestedCategoryId: shopping.id,
+        transactionId: agentReviewCandidate.id,
+        userId,
+      })
+      .returning();
+    const agentReviewProposal = (
+      await service.proposeCategorizations(userId, { limit: 50, review: "needs_review" })
+    ).items.find((item) => item.transaction.id === agentReviewCandidate.id);
+    if (!agentReviewProposal || !agentReview) {
+      throw new Error("The agent review proposal fixture was not created.");
+    }
+    await expect(
+      service.resolveReview(
+        agentReview.id,
+        {
+          action: "recategorize",
+          categoryId: agentReviewProposal.suggestedCategory?.id,
+          confidence: agentReviewProposal.confidence,
+          expectedTransactionUpdatedAt: agentReviewProposal.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "The user accepted the current reviewed proposal.",
+        },
+        agentContext,
+      ),
+    ).resolves.toMatchObject({ applied: true });
+    const staleAgentReviewCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 7,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Everyday Supplies",
+        notes: null,
+      },
+      context,
+    );
+    const [staleAgentReview] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        rationale: "Review the current evidence.",
+        reason: "low_confidence",
+        status: "open",
+        suggestedCategoryId: shopping.id,
+        transactionId: staleAgentReviewCandidate.id,
+        userId,
+      })
+      .returning();
+    const staleAgentReviewProposal = (
+      await service.proposeCategorizations(userId, { limit: 50, review: "needs_review" })
+    ).items.find((item) => item.transaction.id === staleAgentReviewCandidate.id);
+    if (!staleAgentReviewProposal || !staleAgentReview) {
+      throw new Error("The stale agent review fixture was not created.");
+    }
+    await database.db
+      .update(financeTransactions)
+      .set({
+        notes: "Changed after the review was displayed.",
+        updatedAt: new Date("2026-07-19T12:02:00.000Z"),
+      })
+      .where(eq(financeTransactions.id, staleAgentReviewCandidate.id));
+    await expect(
+      service.resolveReview(
+        staleAgentReview.id,
+        {
+          action: "recategorize",
+          categoryId: staleAgentReviewProposal.suggestedCategory?.id,
+          confidence: staleAgentReviewProposal.confidence,
+          expectedTransactionUpdatedAt: staleAgentReviewProposal.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "This accepted review is stale.",
+        },
+        agentContext,
+      ),
+    ).rejects.toThrow("changed after the proposal");
+    await service.resolveReview(
+      staleAgentReview.id,
+      {
+        action: "recategorize",
+        categoryId: shopping.id,
+        learnMerchant: "never",
+        rationale: "The user resolved the stale review in Finance.",
+      },
+      context,
+    );
+    await database.db
+      .delete(financeTransactions)
+      .where(
+        inArray(financeTransactions.id, [
+          agentReviewCandidate.id,
+          policyRaceCandidate.id,
+          policyRaceEvidence.id,
+          staleAgentReviewCandidate.id,
+        ]),
+      );
     const transferCandidate = await service.createTransaction(
       {
         accountId: account.id,

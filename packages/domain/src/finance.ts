@@ -426,6 +426,8 @@ export type FinanceCategorizationApplyResult = z.infer<
 export const financeReviewDecisionInputSchema = z.object({
   action: z.enum(["approve", "defer", "not_purchase", "recategorize"]),
   categoryId: idSchema.optional(),
+  confidence: z.number().min(0).max(1).optional(),
+  expectedTransactionUpdatedAt: isoDateTimeSchema.optional(),
   learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
   rationale: z.string().trim().max(1_000).nullable().default(null),
 });

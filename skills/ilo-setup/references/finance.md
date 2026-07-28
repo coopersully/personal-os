@@ -51,7 +51,8 @@ categorization threshold or silently reconfigure alert generation.
 1. Summarize the exact source meanings, context, thresholds, language, and added safety constraints.
 2. Save a `draft` Finance profile with `save_domain_profile`; use `expectedVersion` when revising.
 3. Explain which suggested workflows are currently available and which actions remain human-only.
-4. Activate the profile only after the user accepts the summary. An active profile is durable
+4. Keep the profile in `draft` when no account source is in scope. Activate only after at least one
+   owned account source is recorded and the user accepts the summary. An active profile is durable
    guidance, not approval for a later financial mutation.
 
 ## Use reviewed workflows

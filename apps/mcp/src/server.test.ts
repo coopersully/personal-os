@@ -537,7 +537,12 @@ describe("ilo MCP server", () => {
     });
     expect(
       tools.tools.find((tool) => tool.name === "propose_finance_categorizations")?.annotations,
-    ).toMatchObject({ openWorldHint: false, readOnlyHint: true });
+    ).toMatchObject({
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    });
     expect(
       tools.tools.find((tool) => tool.name === "apply_finance_categorizations")?.annotations,
     ).toMatchObject({

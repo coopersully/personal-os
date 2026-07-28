@@ -5,6 +5,8 @@ import { result } from "../tool-result.js";
 
 const id = z.string().uuid().describe("ilo object identifier");
 const readAnnotations = {
+  destructiveHint: false,
+  idempotentHint: true,
   openWorldHint: false,
   readOnlyHint: true,
 } as const;
@@ -281,10 +283,21 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: consequentialMutationAnnotations,
       description:
-        "Record an accepted category decision or defer a review case. Agents cannot confirm ambiguous transfers or create merchant rules; direct the user to Finance for those human-only decisions.",
+        "Record an accepted current category proposal or defer a review case. For approve or recategorize, pass the proposal confidence and transaction updatedAt exactly; stale or substituted decisions conflict. Agents cannot confirm ambiguous transfers or create merchant rules; direct the user to Finance for those human-only decisions.",
       inputSchema: {
         action: z.enum(["approve", "defer", "recategorize"]),
         categoryId: id.optional(),
+        confidence: z
+          .number()
+          .min(0)
+          .max(1)
+          .optional()
+          .describe("Required for approve or recategorize; use the accepted proposal confidence"),
+        expectedTransactionUpdatedAt: z
+          .string()
+          .datetime()
+          .optional()
+          .describe("Required for approve or recategorize; use the proposal transaction updatedAt"),
         id,
         learnMerchant: z.enum(["never", "suggest"]).default("suggest"),
         rationale: z.string().max(1_000).nullable().default(null),

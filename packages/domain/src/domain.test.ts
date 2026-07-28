@@ -1,4 +1,5 @@
 import {
+  accountSetupStateSchema,
   actorTypeSchema,
   addLocalDays,
   addMonths,
@@ -28,6 +29,7 @@ import {
   formatDateWithOrdinal,
   formatMonth,
   idSchema,
+  invitationCodeSchema,
   isoDateTimeSchema,
   localDateAt,
   localDateRange,
@@ -41,14 +43,18 @@ import {
   mailProviderSchema,
   mailThreadSchema,
   paginationSchema,
+  passwordRequirementState,
+  passwordSchema,
   registerInputSchema,
   reminderListQuerySchema,
   reminderPrioritySchema,
   reminderSchema,
+  startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
   taskSchema,
   taskStatusSchema,
   timeZoneSchema,
+  updateAccountSetupInputSchema,
   updateAutomationRoutineInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
@@ -139,6 +145,44 @@ describe("domain schemas", () => {
     expect(loginInputSchema.parse({ email: "UPPER@EXAMPLE.COM", password: "x" }).email).toBe(
       "upper@example.com",
     );
+    expect(invitationCodeSchema.parse("abcd2345")).toBe("ABCD2345");
+    expect(invitationCodeSchema.safeParse("too-short").success).toBe(false);
+    expect(invitationCodeSchema.safeParse("ABCD-234").success).toBe(false);
+    expect(passwordSchema.safeParse("alllowercase123!").success).toBe(false);
+    expect(passwordSchema.safeParse("ALLUPPERCASE123!").success).toBe(false);
+    expect(passwordSchema.safeParse("NoNumbersHere!").success).toBe(false);
+    expect(passwordSchema.safeParse("NoSymbolsHere123").success).toBe(false);
+    expect(passwordRequirementState("LocalTestOnly123!")).toEqual({
+      length: true,
+      mixedCase: true,
+      number: true,
+      symbol: true,
+    });
+    expect(passwordRequirementState("short")).toEqual({
+      length: false,
+      mixedCase: false,
+      number: false,
+      symbol: false,
+    });
+    expect(
+      updateAccountSetupInputSchema.parse({
+        action: "progress",
+        currentStep: "verify_email",
+        selectedWorkspaces: ["calendar", "mail"],
+      }),
+    ).toMatchObject({ currentStep: "verify_email", selectedWorkspaces: ["calendar", "mail"] });
+    expect(startGoogleAuthorizationInputSchema.parse({})).toEqual({
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
+    const setup = accountSetupStateSchema.parse({
+      completedAt: null,
+      currentStep: "welcome",
+      dismissedAt: null,
+      selectedWorkspaces: ["calendar", "tasks"],
+      startedAt: null,
+      status: "not_started",
+    });
     expect(
       userSchema.parse({
         accentColor: "#c7d23c",
@@ -146,6 +190,7 @@ describe("domain schemas", () => {
         id,
         displayName: "Test",
         email: "a@example.com",
+        setup,
         theme: "system",
         planningTimezone: "UTC",
         workdayEndMinute: 17 * 60,

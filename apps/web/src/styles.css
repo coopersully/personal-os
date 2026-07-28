@@ -156,12 +156,25 @@ textarea {
   font: inherit;
 }
 button:focus-visible,
+a:focus-visible {
+  box-shadow: none;
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible,
-a:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+textarea:focus-visible {
+  border-color: var(--border-strong);
+  box-shadow: none;
+  outline: none;
+}
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: var(--ink);
+  caret-color: var(--ink);
 }
 h1,
 h2,
@@ -455,6 +468,11 @@ p {
   line-height: 1.6;
   margin-top: 8px;
 }
+.auth-field-action {
+  flex: none;
+  font-size: 12px;
+  padding: 0;
+}
 
 .field {
   display: flex;
@@ -473,13 +491,14 @@ p {
   outline: 0;
   padding: 0 11px;
   transition:
-    border-color 0.16s,
-    box-shadow 0.16s;
+    background 0.16s,
+    border-color 0.16s;
 }
 .input:focus,
 .select:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  background: var(--selection);
+  border-color: var(--border-strong);
+  box-shadow: none;
 }
 .field > span {
   color: var(--muted);
@@ -604,7 +623,12 @@ p {
 .sidebar__workspace-trigger .wordmark {
   color: inherit;
 }
-.sidebar__workspace-trigger:focus-visible,
+.sidebar__workspace-trigger:focus-visible {
+  background: var(--selection);
+  border-color: var(--border-strong);
+  box-shadow: none;
+  outline: none;
+}
 .workspace-switcher__item:focus-visible {
   border-color: transparent;
   box-shadow: none;
@@ -612,6 +636,7 @@ p {
 }
 .workspace-switcher__menu {
   --workspace-indicator-y: 0px;
+
   overflow: hidden;
   position: relative;
 }
@@ -655,7 +680,7 @@ p {
 }
 .workspace-switcher__item:focus .workspace-switcher__copy > small,
 .workspace-switcher__item[data-active="true"] .workspace-switcher__copy > small {
-  color: color-mix(in oklab, currentColor 72%, transparent);
+  color: color-mix(in oklab, currentcolor 72%, transparent);
 }
 .sidebar__back {
   align-items: center;
@@ -682,8 +707,9 @@ p {
   color: var(--sidebar-foreground);
 }
 .sidebar__back:focus-visible {
-  outline: 2px solid var(--acid);
-  outline-offset: 2px;
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+  outline: none;
 }
 .sidebar .wordmark {
   color: var(--sidebar-accent-foreground);
@@ -1514,8 +1540,8 @@ p {
   animation: workspace-preview-glow 1.8s ease-in-out infinite alternate;
   border-radius: inherit;
   box-shadow:
-    inset 0 0 0 1px color-mix(in oklab, white 32%, transparent),
-    inset 0 0 2.5rem color-mix(in oklab, white 14%, transparent);
+    inset 0 0 0 1px color-mix(in oklab, var(--surface-raised) 48%, transparent),
+    inset 0 0 2.5rem color-mix(in oklab, var(--surface-raised) 24%, transparent);
   content: "";
   inset: 0;
   pointer-events: none;
@@ -3358,6 +3384,57 @@ p {
   height: 100%;
   margin-left: 0;
 }
+.checkbox-card-group {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.checkbox-card {
+  align-items: flex-start;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  cursor: pointer;
+  min-height: 6.5rem;
+  padding: 1rem;
+  transition:
+    background var(--motion-duration-fast) var(--motion-ease-spatial),
+    border-color var(--motion-duration-fast) var(--motion-ease-spatial),
+    transform var(--motion-duration-fast) var(--motion-ease-spatial);
+  width: 100%;
+}
+.checkbox-card:hover,
+.checkbox-card[data-checked="true"] {
+  background: var(--surface-raised);
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+}
+.checkbox-card:has([role="checkbox"]:focus-visible) {
+  background: var(--selection);
+  border-color: var(--border-strong);
+  outline: none;
+}
+.checkbox-card[data-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.checkbox-card > [data-slot="field"] {
+  align-items: flex-start;
+  padding: 0;
+}
+.checkbox-card [data-slot="field-content"] {
+  gap: 0.35rem;
+}
+.checkbox-card__title {
+  align-items: center;
+  display: flex;
+  font-size: 0.9375rem;
+  gap: 0.5rem;
+}
+.checkbox-card__title svg {
+  height: 1rem;
+  width: 1rem;
+}
 .appearance-preview {
   border: 1px solid var(--line);
   border-radius: calc(var(--radius) * 0.7);
@@ -4446,5 +4523,239 @@ p {
   }
   html {
     @apply font-sans;
+  }
+}
+
+.setup-shell {
+  background:
+    radial-gradient(
+      circle at 50% 0%,
+      color-mix(in srgb, var(--surface-raised) 78%, transparent),
+      transparent 46%
+    ),
+    var(--canvas);
+  min-height: 100vh;
+}
+
+.setup-header,
+.setup-progress,
+.setup-stage {
+  margin-inline: auto;
+  width: min(100% - 2rem, 70rem);
+}
+
+.setup-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  min-height: 4.5rem;
+}
+
+.setup-wordmark {
+  align-items: center;
+  display: flex;
+  font-size: 1rem;
+  font-weight: 700;
+  gap: 0.5rem;
+}
+
+.setup-progress {
+  max-width: 42rem;
+}
+
+.setup-progress > div:first-child {
+  color: var(--content-secondary);
+  display: flex;
+  font-family: var(--app-font-mono);
+  font-size: 0.6875rem;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+}
+
+.setup-progress__track {
+  background: var(--surface-muted);
+  border-radius: 999px;
+  height: 0.25rem;
+  overflow: hidden;
+}
+
+.setup-progress__track > span {
+  background: var(--content-primary);
+  display: block;
+  height: 100%;
+  transform-origin: left center;
+  transition: transform var(--motion-duration-spatial) var(--motion-ease-spatial);
+}
+
+.setup-stage {
+  max-width: 42rem;
+  padding-block: clamp(2.5rem, 8vh, 6rem) 7rem;
+}
+
+.setup-step {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.setup-step > :not(.setup-footer) {
+  animation: setup-step-enter var(--motion-duration-spatial) var(--motion-ease-spatial);
+}
+
+.setup-step--welcome,
+.setup-step--ready {
+  text-align: center;
+}
+
+.setup-step--welcome > *,
+.setup-step--ready > * {
+  align-self: center;
+}
+
+.setup-step__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.setup-step__heading h1 {
+  font-size: clamp(2rem, 7vw, 3.25rem);
+  letter-spacing: -0.045em;
+  line-height: 1.05;
+  outline: none;
+}
+
+.setup-step__heading p {
+  color: var(--content-secondary);
+  font-size: 1rem;
+  max-width: 34rem;
+}
+
+.setup-intro {
+  max-width: 30rem;
+  text-align: left;
+  width: 100%;
+}
+
+.setup-footer {
+  align-items: center;
+  backdrop-filter: blur(18px);
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+  border: 1px solid var(--border-subtle);
+  border-radius: calc(var(--radius) + 0.25rem);
+  bottom: calc(1rem + env(safe-area-inset-bottom));
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  left: 50%;
+  padding: 0.625rem;
+  position: fixed;
+  transform: translateX(-50%);
+  width: min(calc(100% - 2rem), 42rem);
+  z-index: 10;
+}
+
+.setup-note {
+  color: var(--content-secondary);
+  font-size: 0.75rem;
+}
+
+.setup-step a {
+  align-items: center;
+  color: var(--content-primary);
+  display: inline-flex;
+  gap: 0.25rem;
+  text-decoration: underline;
+  text-underline-offset: 0.2rem;
+}
+
+.setup-step a svg {
+  height: 0.75rem;
+  width: 0.75rem;
+}
+
+.setup-ready-mark {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  display: inline-flex;
+  height: 4rem;
+  justify-content: center;
+  margin-inline: auto;
+  width: 4rem;
+}
+
+.setup-ready-mark svg {
+  height: 2rem;
+  width: 2rem;
+}
+
+.plaid-connect {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+@keyframes setup-step-enter {
+  from {
+    opacity: 0;
+    transform: translateY(0.75rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 640px) {
+  .setup-header,
+  .setup-progress,
+  .setup-stage {
+    width: min(100% - 1.5rem, 42rem);
+  }
+
+  .setup-header {
+    min-height: 4rem;
+  }
+
+  .setup-stage {
+    padding-block: 2.5rem 8rem;
+  }
+
+  .checkbox-card-group {
+    grid-template-columns: 1fr;
+  }
+
+  .checkbox-card {
+    min-height: auto;
+  }
+
+  .setup-footer {
+    align-items: stretch;
+    flex-direction: column;
+    width: min(calc(100% - 1.5rem), 42rem);
+  }
+
+  .setup-footer > * {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-step > :not(.setup-footer) {
+    animation: none;
+  }
+
+  .setup-progress__track > span,
+  .checkbox-card {
+    transition: none;
+  }
+
+  .checkbox-card:hover,
+  .checkbox-card[data-checked="true"] {
+    transform: none;
   }
 }

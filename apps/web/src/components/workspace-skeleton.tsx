@@ -1,3 +1,4 @@
+import type { ComponentType } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export type WorkspaceSkeletonKind =
@@ -28,6 +29,14 @@ const calendarSkeletonDays = [
 const taskSkeletonRows = ["capture", "plan", "prepare", "follow-up", "review"] as const;
 const mailSkeletonRows = ["primary", "updates", "people", "receipts", "travel", "archive"] as const;
 const financeSkeletonMetrics = ["spending", "accounts", "review"] as const;
+const workspaceSkeletonComponents: Record<WorkspaceSkeletonKind, ComponentType> = {
+  calendar: CalendarSkeleton,
+  finances: FinancesSkeleton,
+  generic: GenericSkeleton,
+  mail: MailSkeleton,
+  tasks: TasksSkeleton,
+  today: TodaySkeleton,
+};
 
 export function WorkspaceSkeleton({
   kind,
@@ -36,6 +45,7 @@ export function WorkspaceSkeleton({
   kind: WorkspaceSkeletonKind;
   mode?: "loading" | "preview";
 }) {
+  const SkeletonContent = workspaceSkeletonComponents[kind];
   return (
     <section
       aria-busy={mode === "loading" ? "true" : undefined}
@@ -48,19 +58,7 @@ export function WorkspaceSkeleton({
       data-workspace-skeleton={kind}
       role="status"
     >
-      {kind === "today" ? (
-        <TodaySkeleton />
-      ) : kind === "calendar" ? (
-        <CalendarSkeleton />
-      ) : kind === "tasks" ? (
-        <TasksSkeleton />
-      ) : kind === "mail" ? (
-        <MailSkeleton />
-      ) : kind === "finances" ? (
-        <FinancesSkeleton />
-      ) : (
-        <GenericSkeleton />
-      )}
+      <SkeletonContent />
     </section>
   );
 }

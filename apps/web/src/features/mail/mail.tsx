@@ -345,7 +345,7 @@ export function MailPage({ user }: { user: User }) {
       return client.invalidateQueries({ queryKey: ["mail-drafts"] });
     },
   });
-  if (accounts.isPending || mailboxes.isPending) return <PageLoading workspace="mail" />;
+  if (accounts.isPending || mailboxes.isPending) return <WorkspaceSkeleton kind="mail" />;
   if (accounts.isError) return <InlineError error={accounts.error} />;
   if (mailboxes.isError) return <InlineError error={mailboxes.error} />;
   if (!enabled.length)
@@ -586,7 +586,7 @@ function MailboxAccount({
             {links("primary")}
             {(grouped.get("categories")?.length ?? 0) > 0 ? (
               <>
-                <SidebarMenuSubItem className="mail-sidebar__subgroup-label">
+                <SidebarMenuSubItem aria-hidden="true" className="mail-sidebar__subgroup-label">
                   Categories
                 </SidebarMenuSubItem>
                 {links("categories")}

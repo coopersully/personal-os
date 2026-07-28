@@ -4,7 +4,9 @@
  * generic mutable object.
  */
 
+import { z } from "zod";
 import type { AccessScope } from "./auth.js";
+import { idSchema } from "./common.js";
 
 export const featureIds = [
   "automations",
@@ -42,6 +44,18 @@ export const connectorCapabilities = [
 ] as const;
 
 export type ConnectorCapability = (typeof connectorCapabilities)[number];
+
+export const googleConnectionServiceSchema = z.enum(["calendar", "mail"]);
+export type GoogleConnectionService = z.infer<typeof googleConnectionServiceSchema>;
+
+export const startGoogleAuthorizationInputSchema = z.object({
+  accountId: idSchema.optional(),
+  returnTo: z
+    .enum(["/setup", "/settings?section=connections"])
+    .default("/settings?section=connections"),
+  services: z.array(googleConnectionServiceSchema).min(1).default(["calendar", "mail"]),
+});
+export type StartGoogleAuthorizationInput = z.infer<typeof startGoogleAuthorizationInputSchema>;
 
 /**
  * A durable attribution record for a projection, recommendation, or proposed

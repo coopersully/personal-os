@@ -2,6 +2,7 @@ import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
 import { z } from "zod";
 import type {
   CredentialResult,
+  GoogleAuthorizationService,
   GoogleConnector,
   GoogleCredentials,
   NormalizedRemoteEvent,
@@ -282,8 +283,25 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
   }
 
   return {
-    authorizationUrl(state: string, loginHint?: string): string {
+    authorizationUrl(
+      state: string,
+      loginHint?: string,
+      services: GoogleAuthorizationService[] = ["calendar", "mail"],
+    ): string {
       requireConfiguration();
+      const scopes = ["openid", "email", "profile"];
+      if (services.includes("calendar")) {
+        scopes.push(
+          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+          "https://www.googleapis.com/auth/calendar.events",
+        );
+      }
+      if (services.includes("mail")) {
+        scopes.push(
+          "https://www.googleapis.com/auth/gmail.modify",
+          "https://www.googleapis.com/auth/gmail.send",
+        );
+      }
       const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       url.search = new URLSearchParams({
         access_type: "offline",
@@ -292,15 +310,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
         prompt: "consent",
         redirect_uri: options.redirectUri,
         response_type: "code",
-        scope: [
-          "openid",
-          "email",
-          "profile",
-          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-          "https://www.googleapis.com/auth/calendar.events",
-          "https://www.googleapis.com/auth/gmail.modify",
-          "https://www.googleapis.com/auth/gmail.send",
-        ].join(" "),
+        scope: scopes.join(" "),
         state,
       }).toString();
       if (loginHint) url.searchParams.set("login_hint", loginHint);

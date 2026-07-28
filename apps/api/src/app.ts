@@ -14,9 +14,12 @@ import {
   registerInputSchema,
   requestPasswordResetInputSchema,
   resetPasswordInputSchema,
+  startGoogleAuthorizationInputSchema,
+  updateAccountSetupInputSchema,
   updateAutomationRoutineInputSchema,
   updatePinterestWallpaperSettingsInputSchema,
   updateUserInputSchema,
+  validateInvitationInputSchema,
   weatherLocationSearchQuerySchema,
   weatherQuerySchema,
 } from "@personal-os/domain";
@@ -236,6 +239,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     await next();
   };
   app.use("/v1/auth/register", rateLimitAuth);
+  app.use("/v1/auth/invitations/validate", rateLimitAuth);
   app.use("/v1/auth/login", rateLimitAuth);
   app.use("/v1/auth/recovery", rateLimitAuth);
   app.use("/v1/auth/password-reset", rateLimitAuth);
@@ -258,6 +262,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     await sendEmailVerification(result.user.email, result.user.id);
     setSessionCookie(context, dependencies, result.token, result.expiresAt);
     return context.json({ sessionToken: result.token, user: result.user }, 201);
+  });
+  app.post("/v1/auth/invitations/validate", async (context) => {
+    const { inviteCode } = await parseBody(context, validateInvitationInputSchema);
+    return context.json({ valid: await auth.validateInvitationCode(inviteCode) });
   });
   app.post("/v1/auth/login", async (context) => {
     const result = await auth.login(
@@ -298,9 +306,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
           : "Google did not return an authorization code.",
       );
     }
-    await connectors.completeGoogleAuthorization(query.state, query.code);
+    const result = await connectors.completeGoogleAuthorization(query.state, query.code);
+    const separator = result.returnPath.includes("?") ? "&" : "?";
     return context.redirect(
-      `${dependencies.config.appBaseUrl}/settings/connectors?google=connected`,
+      `${dependencies.config.appBaseUrl}${result.returnPath}${separator}google=connected`,
     );
   });
   app.get("/v1/x-bookmarks/callback", async (context) => {
@@ -431,6 +440,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/auth/logout", authenticate);
   app.use("/v1/auth/email-verification", authenticate, requireHuman);
   app.use("/v1/me", authenticate);
+  app.use("/v1/setup", authenticate, requireHuman);
   app.use("/v1/sessions/*", authenticate, requireHuman);
   app.use("/v1/sessions", authenticate, requireHuman);
   app.use("/v1/access-tokens/*", authenticate, requireHuman);
@@ -500,6 +510,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     if (input.email !== undefined) await sendEmailVerification(user.email, user.id);
     return context.json({ user });
   });
+  app.patch("/v1/setup", async (context) =>
+    context.json({
+      user: await auth.updateAccountSetup(
+        context.get("principal").userId,
+        await parseBody(context, updateAccountSetupInputSchema),
+      ),
+    }),
+  );
   app.post("/v1/auth/email-verification", async (context) => {
     const user = await auth.getUser(context.get("principal").userId);
     await sendEmailVerification(user.email, user.id);
@@ -559,14 +577,18 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.get("/v1/connectors", async (context) =>
     context.json({ accounts: await connectors.listAccounts(context.get("principal").userId) }),
   );
-  app.post("/v1/connectors/google/start", async (context) =>
-    context.json({
-      url: await connectors.startGoogleAuthorization(
-        context.get("principal").userId,
-        context.req.query("accountId"),
-      ),
-    }),
-  );
+  app.post("/v1/connectors/google/start", async (context) => {
+    const input = startGoogleAuthorizationInputSchema.parse({
+      ...(context.req.query("accountId") ? { accountId: context.req.query("accountId") } : {}),
+      ...(context.req.query("returnTo") ? { returnTo: context.req.query("returnTo") } : {}),
+      ...(context.req.query("services")
+        ? { services: context.req.query("services")?.split(",") }
+        : {}),
+    });
+    return context.json({
+      url: await connectors.startGoogleAuthorization(context.get("principal").userId, input),
+    });
+  });
   app.post("/v1/connectors/icloud", async (context) =>
     context.json(
       {

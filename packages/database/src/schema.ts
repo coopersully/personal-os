@@ -1,10 +1,14 @@
 import type {
   AccessScope,
+  AccountSetupStatus,
+  AccountSetupStep,
+  AccountSetupWorkspace,
   ActorType,
   AutomationRunStatus,
   AutomationTemplate,
   CalendarProvider,
   FinanceProvider,
+  GoogleConnectionService,
   HomeLocation,
   MailAddress,
   MailboxRole,
@@ -39,6 +43,18 @@ export const users = pgTable("users", {
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name").notNull(),
+  setupStatus: text("setup_status").$type<AccountSetupStatus>().notNull().default("dismissed"),
+  setupCurrentStep: text("setup_current_step")
+    .$type<AccountSetupStep>()
+    .notNull()
+    .default("welcome"),
+  setupSelectedWorkspaces: jsonb("setup_selected_workspaces")
+    .$type<AccountSetupWorkspace[]>()
+    .notNull()
+    .default(sql`'["calendar","tasks","mail","finances"]'::jsonb`),
+  setupStartedAt: timestamp("setup_started_at", { withTimezone: true }),
+  setupCompletedAt: timestamp("setup_completed_at", { withTimezone: true }),
+  setupDismissedAt: timestamp("setup_dismissed_at", { withTimezone: true }),
   planningTimezone: text("planning_timezone").notNull().default("UTC"),
   homeLocation: jsonb("home_location").$type<HomeLocation>(),
   workdayStartMinute: integer("workday_start_minute")
@@ -298,6 +314,8 @@ export const oauthStates = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     targetAccountId: uuid("target_account_id"),
+    requestedServices: jsonb("requested_services").$type<GoogleConnectionService[]>(),
+    returnPath: text("return_path"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

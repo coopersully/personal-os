@@ -7,6 +7,7 @@ import { decodeCursor, encodeCursor } from "./pagination.js";
 import {
   decryptJson,
   encryptJson,
+  generateInvitationCode,
   generateToken,
   hashPassword,
   hashToken,
@@ -25,6 +26,7 @@ describe("security utilities", () => {
       await expect(verifyPassword("x", malformed)).resolves.toBe(false);
     }
     expect(generateToken("pos")).toMatch(/^pos_[A-Za-z0-9_-]{43}$/);
+    expect(generateInvitationCode()).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
     expect(hashToken("same")).toBe(hashToken("same"));
     expect(hashToken("same")).not.toBe(hashToken("other"));
   });

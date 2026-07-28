@@ -56,7 +56,13 @@ import {
   UserCircleIcon as NavigationUser,
   UsersIcon as NavigationUsers,
 } from "@phosphor-icons/react";
-import { type UseQueryResult, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  type UseQueryResult,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import {
   Activity,
@@ -106,6 +112,7 @@ import {
   Scissors,
   Search,
   Settings,
+  Sparkles,
   Sun,
   Target,
   Trash2,
@@ -143,6 +150,14 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  EmailField,
+  InviteCodeField,
+  isValidEmailAddress,
+  isValidPassword,
+  PasswordFields,
+  TextField,
+} from "@/components/auth-fields";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import {
   Alert as ShadcnAlert,
@@ -276,6 +291,7 @@ import {
   workspaceCalendarSummary,
   workspaceCountSummary,
   workspaceFinanceSummary,
+  workspaceIndicatorOffset,
   workspaceIntentStaleTime,
   workspaceTodaySummary,
 } from "./components/workspace-switching.js";
@@ -298,6 +314,7 @@ import {
 } from "./features/mail/mail.js";
 import { mailNavigationItem } from "./features/mail/manifest.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
+import { SetupPage } from "./features/setup/page.js";
 import { formatOrdinalDate } from "./lib/date-format.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { timeToMinute } from "./time.js";
@@ -389,6 +406,7 @@ const workspaceShortcuts: WorkspaceDefinition[] = [
 ];
 
 const accountNavigationItems: NavigationItemDefinition[] = [
+  { icon: Sparkles, label: "Setup", path: "/setup" },
   settingsNavigationItem,
   { icon: Activity, label: "Activity", path: "/activity" },
 ];
@@ -431,10 +449,24 @@ export function App() {
   if (me.isError) return <FatalState error={me.error} />;
   return (
     <TooltipProvider>
-      <ShadcnSidebarProvider className="contents">
-        <AuthenticatedApp user={me.data} />
-      </ShadcnSidebarProvider>
+      <AuthenticatedExperience user={me.data} />
     </TooltipProvider>
+  );
+}
+
+function AuthenticatedExperience({ user }: { user: User }) {
+  useDocumentTheme(user.theme);
+  const location = useLocation();
+  const verificationToken = new URLSearchParams(location.search).get("verifyEmail");
+  if (verificationToken) return <EmailVerificationScreen token={verificationToken} />;
+  if (location.pathname === "/setup") return <SetupPage user={user} />;
+  if (user.setup.status === "not_started" || user.setup.status === "in_progress") {
+    return <Navigate replace to="/setup" />;
+  }
+  return (
+    <ShadcnSidebarProvider className="contents">
+      <AuthenticatedApp user={user} />
+    </ShadcnSidebarProvider>
   );
 }
 
@@ -493,20 +525,31 @@ function AuthScreen() {
 function CredentialsScreen() {
   const queryClient = useQueryClient();
   const [mode, setMode] = useState<"login" | "recovery" | "register">("login");
+  const [inviteBlurred, setInviteBlurred] = useState(false);
+  const [credentials, setCredentials] = useState({
+    confirmPassword: "",
+    displayName: "",
+    email: "",
+    inviteCode: "",
+    password: "",
+  });
+  const invitationValidation = useMutation({
+    mutationFn: (inviteCode: string) => api.validateInvitation({ inviteCode }),
+  });
   const mutation = useMutation({
-    mutationFn: async (form: FormData) => {
-      const email = String(form.get("email"));
-      const password = String(form.get("password"));
-      if (mode === "login") return api.login({ email, password });
+    mutationFn: async () => {
+      if (mode === "login") {
+        return api.login({ email: credentials.email, password: credentials.password });
+      }
       if (mode === "recovery") {
-        await api.requestPasswordReset({ email });
+        await api.requestPasswordReset({ email: credentials.email });
         return null;
       }
       return api.register({
-        displayName: String(form.get("displayName")),
-        email,
-        inviteCode: String(form.get("inviteCode")).trim() || undefined,
-        password,
+        displayName: credentials.displayName,
+        email: credentials.email,
+        inviteCode: credentials.inviteCode,
+        password: credentials.password,
         planningTimezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       });
     },
@@ -514,9 +557,60 @@ function CredentialsScreen() {
       if (user) queryClient.setQueryData(["me"], user);
     },
   });
+  const emailValid = isValidEmailAddress(credentials.email);
+  const passwordValid = isValidPassword(credentials.password);
+  const passwordsMatch =
+    credentials.confirmPassword.length > 0 && credentials.password === credentials.confirmPassword;
+  const invitationResultIsCurrent =
+    invitationValidation.variables === credentials.inviteCode &&
+    credentials.inviteCode.length === 8;
+  const invitationValid =
+    invitationResultIsCurrent &&
+    invitationValidation.isSuccess &&
+    invitationValidation.data === true;
+  const invitationError = !inviteBlurred
+    ? undefined
+    : credentials.inviteCode.length !== 8
+      ? "Enter all eight characters from your invitation."
+      : invitationResultIsCurrent && invitationValidation.isError
+        ? errorMessage(invitationValidation.error)
+        : invitationResultIsCurrent &&
+            invitationValidation.isSuccess &&
+            invitationValidation.data === false
+          ? "This invitation is invalid or expired."
+          : undefined;
+  const invitationStatus =
+    invitationResultIsCurrent && invitationValidation.isPending
+      ? "checking"
+      : invitationValid
+        ? "valid"
+        : "idle";
+  const canSubmit =
+    mode === "login"
+      ? emailValid && credentials.password.length > 0
+      : mode === "recovery"
+        ? emailValid
+        : emailValid &&
+          credentials.displayName.trim().length > 0 &&
+          invitationValid &&
+          passwordValid &&
+          passwordsMatch;
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    mutation.mutate(new FormData(event.currentTarget));
+    if (!canSubmit) return;
+    mutation.mutate();
+  };
+  const selectMode = (nextMode: "login" | "recovery" | "register") => {
+    mutation.reset();
+    invitationValidation.reset();
+    setInviteBlurred(false);
+    setCredentials((current) => ({
+      ...current,
+      confirmPassword: "",
+      inviteCode: "",
+      password: "",
+    }));
+    setMode(nextMode);
   };
   return (
     <main className="auth-shell">
@@ -562,19 +656,72 @@ function CredentialsScreen() {
           </div>
           {mode === "register" && (
             <>
-              <Field label="Name" name="displayName" autoComplete="name" required />
-              <Field label="Invite code" name="inviteCode" autoComplete="off" required />
+              <InviteCodeField
+                error={invitationError}
+                onBlur={() => {
+                  setInviteBlurred(true);
+                  if (credentials.inviteCode.length === 8) {
+                    invitationValidation.mutate(credentials.inviteCode);
+                  } else {
+                    invitationValidation.reset();
+                  }
+                }}
+                onChange={(inviteCode) => {
+                  invitationValidation.reset();
+                  setInviteBlurred(false);
+                  setCredentials((current) => ({ ...current, inviteCode }));
+                }}
+                status={invitationStatus}
+                value={credentials.inviteCode}
+              />
+              <TextField
+                autoComplete="name"
+                label="Name"
+                name="displayName"
+                onChange={(event) =>
+                  setCredentials((current) => ({ ...current, displayName: event.target.value }))
+                }
+                placeholder="Sam Rivera"
+                required
+                value={credentials.displayName}
+              />
             </>
           )}
-          <Field label="Email" name="email" type="email" autoComplete="email" required />
+          <EmailField
+            autoComplete="email"
+            name="email"
+            onChange={(event) =>
+              setCredentials((current) => ({ ...current, email: event.target.value }))
+            }
+            required
+            value={credentials.email}
+          />
           {mode !== "recovery" ? (
-            <Field
-              label="Password"
-              name="password"
-              type="password"
+            <PasswordFields
               autoComplete={mode === "login" ? "current-password" : "new-password"}
-              minLength={12}
-              required
+              confirmValue={mode === "register" ? credentials.confirmPassword : undefined}
+              error={
+                mode === "register" && credentials.confirmPassword.length > 0 && !passwordsMatch
+                  ? "Passwords must match."
+                  : undefined
+              }
+              labelAction={
+                mode === "login" ? (
+                  <button
+                    className="text-button auth-field-action"
+                    onClick={() => selectMode("recovery")}
+                    type="button"
+                  >
+                    Forgot your password?
+                  </button>
+                ) : undefined
+              }
+              onConfirmValueChange={(confirmPassword) =>
+                setCredentials((current) => ({ ...current, confirmPassword }))
+              }
+              onValueChange={(password) => setCredentials((current) => ({ ...current, password }))}
+              showRequirements={mode === "register"}
+              value={credentials.password}
             />
           ) : null}
           {mutation.isError && (
@@ -589,7 +736,7 @@ function CredentialsScreen() {
           ) : null}
           <Button
             className="button--wide"
-            disabled={mutation.isPending}
+            disabled={mutation.isPending || !canSubmit}
             tone="accent"
             type="submit"
           >
@@ -604,16 +751,11 @@ function CredentialsScreen() {
             )}
           </Button>
           {mode === "login" ? (
-            <>
-              <button className="text-button" type="button" onClick={() => setMode("register")}>
-                Have an invite? Create an account
-              </button>
-              <button className="text-button" type="button" onClick={() => setMode("recovery")}>
-                Forgot your password?
-              </button>
-            </>
+            <button className="text-button" type="button" onClick={() => selectMode("register")}>
+              I have an invite code
+            </button>
           ) : (
-            <button className="text-button" type="button" onClick={() => setMode("login")}>
+            <button className="text-button" type="button" onClick={() => selectMode("login")}>
               {mode === "register" ? "Already have an account? Sign in" : "Back to sign in"}
             </button>
           )}
@@ -654,11 +796,13 @@ function EmailVerificationScreen({ token }: { token: string }) {
 
 function PasswordResetScreen({ token }: { token: string }) {
   const [complete, setComplete] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const reset = useMutation({
-    mutationFn: (form: FormData) =>
-      api.resetPassword({ password: String(form.get("password")), token }),
+    mutationFn: () => api.resetPassword({ password, token }),
     onSuccess: () => setComplete(true),
   });
+  const passwordsMatch = confirmPassword.length > 0 && password === confirmPassword;
   return (
     <AuthActionShell title="Choose a new password">
       {complete ? (
@@ -670,19 +814,27 @@ function PasswordResetScreen({ token }: { token: string }) {
           className="auth-form"
           onSubmit={(event) => {
             event.preventDefault();
-            reset.mutate(new FormData(event.currentTarget));
+            reset.mutate();
           }}
         >
-          <Field
+          <PasswordFields
             autoComplete="new-password"
+            confirmValue={confirmPassword}
+            error={
+              confirmPassword.length > 0 && !passwordsMatch ? "Passwords must match." : undefined
+            }
             label="New password"
-            minLength={12}
-            name="password"
-            required
-            type="password"
+            onConfirmValueChange={setConfirmPassword}
+            onValueChange={setPassword}
+            showRequirements
+            value={password}
           />
           {reset.isError ? <p className="form-error">{errorMessage(reset.error)}</p> : null}
-          <Button disabled={reset.isPending} tone="accent" type="submit">
+          <Button
+            disabled={reset.isPending || !isValidPassword(password) || !passwordsMatch}
+            tone="accent"
+            type="submit"
+          >
             {reset.isPending ? <Spinner label="Resetting password" /> : "Reset password"}
           </Button>
         </form>
@@ -708,7 +860,6 @@ function AuthActionShell({ children, title }: { children: ReactNode; title: stri
 }
 
 function AuthenticatedApp({ user }: { user: User }) {
-  useDocumentTheme(user.theme);
   const [editor, setEditor] = useState<Editor>(null);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -718,17 +869,18 @@ function AuthenticatedApp({ user }: { user: User }) {
   const [workspacePreview, setWorkspacePreview] = useState<WorkspacePreview | null>(null);
   const location = useLocation();
   const activeWorkspace = workspaceForPath(location.pathname);
-  const routeTransition = useRef<{
+  const workspacePath = activeWorkspace?.path ?? null;
+  const [routeTransition, setRouteTransition] = useState<{
     direction: WorkspaceTransitionDirection;
     path: string | null;
-  }>({ direction: "none", path: activeWorkspace?.path ?? null });
-  if (routeTransition.current.path !== (activeWorkspace?.path ?? null)) {
-    routeTransition.current = {
-      direction: workspaceDirection(routeTransition.current.path, activeWorkspace?.path ?? ""),
-      path: activeWorkspace?.path ?? null,
-    };
+  }>({ direction: "none", path: workspacePath });
+  if (routeTransition.path !== workspacePath) {
+    setRouteTransition({
+      direction: workspaceDirection(routeTransition.path, workspacePath ?? ""),
+      path: workspacePath,
+    });
   }
-  const routeDirection = routeTransition.current.direction;
+  const routeDirection = routeTransition.direction;
   const isTodayWorkspace = location.pathname === "/today";
   const deviceWeatherLocation = useDeviceWeatherLocation(isTodayWorkspace);
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
@@ -900,6 +1052,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                 onOpenChange={setWorkspaceSwitcherOpen}
                 onPreviewChange={setWorkspacePreview}
                 pathname={location.pathname}
+                search={location.search}
                 user={user}
                 weather={weather.data}
               />
@@ -1138,9 +1291,10 @@ function AuthenticatedApp({ user }: { user: User }) {
 
 function WorkspacePreviewNavigationBoundary({ children }: { children: ReactNode }) {
   const navigationContext = useContext(UNSAFE_NavigationContext);
-  const navigator = useMemo<Navigator>(() => {
-    const source = navigationContext.navigator;
-    return {
+  const inertNavigationContext = useMemo(() => {
+    const source = navigationContext?.navigator;
+    if (!navigationContext || !isNavigator(source)) return null;
+    const navigator: Navigator = {
       createHref: source.createHref.bind(source),
       ...(source.encodeLocation
         ? {
@@ -1151,15 +1305,24 @@ function WorkspacePreviewNavigationBoundary({ children }: { children: ReactNode 
       push: ignorePreviewNavigation,
       replace: ignorePreviewNavigation,
     };
-  }, [navigationContext.navigator]);
-  const inertNavigationContext = useMemo(
-    () => ({ ...navigationContext, navigator }),
-    [navigationContext, navigator],
-  );
+    return { ...navigationContext, navigator };
+  }, [navigationContext]);
+  if (!inertNavigationContext) return null;
   return (
     <UNSAFE_NavigationContext.Provider value={inertNavigationContext}>
       {children}
     </UNSAFE_NavigationContext.Provider>
+  );
+}
+
+export function isNavigator(value: unknown): value is Navigator {
+  if (!value || typeof value !== "object") return false;
+  const navigator = value as Partial<Record<keyof Navigator, unknown>>;
+  return (
+    typeof navigator.createHref === "function" &&
+    typeof navigator.go === "function" &&
+    typeof navigator.push === "function" &&
+    typeof navigator.replace === "function"
   );
 }
 
@@ -1383,11 +1546,78 @@ function TopNavigation({
   );
 }
 
+function warmWorkspacePreview(queryClient: QueryClient, path: WorkspaceDefinition["path"]) {
+  if (path === "/mail") {
+    void Promise.all([
+      queryClient.prefetchQuery({
+        queryFn: api.listConnectors,
+        queryKey: ["connectors"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.listMailboxes,
+        queryKey: ["mailboxes"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+    ]);
+  }
+  if (path === "/finances") {
+    void Promise.all([
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceWealthSummary,
+        queryKey: ["finance-wealth"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceLedgerHealth,
+        queryKey: ["finance-ledger-health"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceProfile,
+        queryKey: ["finance-profile"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.listFinanceIncomeStreams,
+        queryKey: ["finance-income-streams"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.listFinanceRecurringObligations,
+        queryKey: ["finance-recurring"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.listFinanceAlerts,
+        queryKey: ["finance-alerts"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceForecast,
+        queryKey: ["finance-forecast"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: () => api.getFinanceBudgetPace("week"),
+        queryKey: ["finance-budget-pace", "week"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+      queryClient.prefetchQuery({
+        queryFn: api.getFinanceCategories,
+        queryKey: ["finance-categories"],
+        staleTime: workspaceIntentStaleTime,
+      }),
+    ]);
+  }
+}
+
 function WorkspaceSwitcher({
   onNavigate,
   onOpenChange,
   onPreviewChange,
   pathname,
+  search,
   user,
   weather: currentWeather,
 }: {
@@ -1395,9 +1625,11 @@ function WorkspaceSwitcher({
   onOpenChange: (open: boolean) => void;
   onPreviewChange: (preview: WorkspacePreview | null) => void;
   pathname: string;
+  search: string;
   user: User;
   weather: WeatherSnapshot | undefined;
 }) {
+  const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const workspace = workspaceForPath(pathname);
   const section =
@@ -1415,26 +1647,8 @@ function WorkspaceSwitcher({
   const previewIndex = useRef(activeIndex);
   const previewPath = useRef<string | null>(workspace?.path ?? null);
   const [indicatorIndex, setIndicatorIndex] = useState(activeIndex);
-  const indicatorOffset = indicatorIndex * 44 + (indicatorIndex > 0 ? 9 : 0);
-  const calendarEntry = getWorkspaceCalendarEntry(user);
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.getDailyBrief,
-    queryKey: ["daily-brief", user.planningTimezone],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: () => api.listReminders({ completed: true, limit: 100 }),
-    queryKey: ["reminders", "completed"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  const workspaceWeather = useQuery({
-    enabled: menuOpen && user.homeLocation !== null,
-    queryFn: () => api.getWeather(),
-    queryKey: ["weather", null, user.homeLocation],
-    staleTime: workspaceIntentStaleTime,
-  });
+  const indicatorOffset = workspaceIndicatorOffset(indicatorIndex);
+  const calendarEntry = getWorkspaceCalendarEntry(user, search);
   const calendarEvents = useQuery({
     enabled: menuOpen,
     queryFn: () => api.listEvents(calendarEntry.range),
@@ -1445,28 +1659,10 @@ function WorkspaceSwitcher({
     ),
     staleTime: workspaceIntentStaleTime,
   });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.listCalendars,
-    queryKey: calendarQueryKeys.calendars,
-    staleTime: workspaceIntentStaleTime,
-  });
   const taskInbox = useQuery({
     enabled: menuOpen,
     queryFn: () => api.listTasks({ completed: false, status: "inbox" }),
     queryKey: ["tasks", "inbox"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.listConnectors,
-    queryKey: ["connectors"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.listMailboxes,
-    queryKey: ["mailboxes"],
     staleTime: workspaceIntentStaleTime,
   });
   const mailThreads = useQuery({
@@ -1480,60 +1676,6 @@ function WorkspaceSwitcher({
     enabled: menuOpen,
     queryFn: api.getFinanceOverview,
     queryKey: ["finance-overview", financeMonth],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.getFinanceWealthSummary,
-    queryKey: ["finance-wealth"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.getFinanceLedgerHealth,
-    queryKey: ["finance-ledger-health"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.getFinanceProfile,
-    queryKey: ["finance-profile"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.listFinanceIncomeStreams,
-    queryKey: ["finance-income-streams"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.listFinanceRecurringObligations,
-    queryKey: ["finance-recurring"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.listFinanceAlerts,
-    queryKey: ["finance-alerts"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.getFinanceForecast,
-    queryKey: ["finance-forecast"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: () => api.getFinanceBudgetPace("week"),
-    queryKey: ["finance-budget-pace", "week"],
-    staleTime: workspaceIntentStaleTime,
-  });
-  useQuery({
-    enabled: menuOpen,
-    queryFn: api.getFinanceCategories,
-    queryKey: ["finance-categories"],
     staleTime: workspaceIntentStaleTime,
   });
   const workspaceSummaries: Record<string, string> = {
@@ -1550,10 +1692,7 @@ function WorkspaceSwitcher({
       "All done",
       "in inbox",
     ),
-    "/today": workspaceTodaySummary(
-      currentWeather ?? workspaceWeather.data,
-      user.homeLocation?.label,
-    ),
+    "/today": workspaceTodaySummary(currentWeather, user.homeLocation?.label),
   };
 
   useEffect(() => {
@@ -1564,6 +1703,7 @@ function WorkspaceSwitcher({
 
   const preview = (item: WorkspaceDefinition, index: number) => {
     if (previewPath.current === item.path) return;
+    warmWorkspacePreview(queryClient, item.path);
     const direction = index >= previewIndex.current ? "down" : "up";
     previewIndex.current = index;
     previewPath.current = item.path;
@@ -4646,7 +4786,8 @@ function MailComposeButton() {
       onClick={() =>
         setSearchParams((current) => {
           const next = new URLSearchParams(current);
-          next.set("compose", "1");
+          if (composing) next.delete("compose");
+          else next.set("compose", "1");
           return next;
         })
       }
@@ -5000,7 +5141,9 @@ function ConnectorsSettings() {
   const [showICloud, setShowICloud] = useState(false);
   const googleConnect = useMutation({
     mutationFn: async ({ accountId }: { accountId?: string }) => {
-      const url = await api.getGoogleAuthorizationUrl(accountId);
+      const url = await api.getGoogleAuthorizationUrl({
+        ...(accountId ? { accountId } : {}),
+      });
       if (isTauri()) {
         const { openUrl } = await import("@tauri-apps/plugin-opener");
         await openUrl(url);
@@ -6921,12 +7064,7 @@ function InvitationsSettings() {
             }}
           >
             <ShadcnFieldGroup className="form-grid">
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="invite-email">
-                  Friend’s email (optional)
-                </ShadcnFieldLabel>
-                <ShadcnInput id="invite-email" name="email" type="email" />
-              </ShadcnField>
+              <EmailField id="invite-email" label="Friend’s email (optional)" name="email" />
               <ShadcnField>
                 <ShadcnFieldLabel htmlFor="invite-expiry">Expires after</ShadcnFieldLabel>
                 <ShadcnNativeSelect defaultValue="14" id="invite-expiry" name="expiresInDays">

@@ -45,6 +45,13 @@ performance work.
 - Apply the interface-copy contract: delete helper text that restates an
   obvious label, and use a preview when the result can be shown more clearly
   than it can be explained.
+- Keep labels persistent. When a placeholder is useful, demonstrate the
+  expected shape with obviously fictional reserved material such as
+  `sam@example.com`; never use personal data, production identifiers, or
+  plausible credentials.
+- Keep interaction treatment flat. Shared controls use semantic background and
+  border changes for hover, focus, and selection; do not add rings, outlines,
+  or box shadows as interaction indicators.
 - Keep semantic foreground tokens intact on interactive controls. Never add a
   global color override that can defeat a component's `text-*` contrast class.
 - Keep navigation icon geometry stable across states: use the regular and

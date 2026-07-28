@@ -28,7 +28,6 @@ import {
   Download,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { usePlaidLink } from "react-plaid-link";
 import { Link, useLocation } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
@@ -92,6 +91,7 @@ import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
+import { PlaidConnectButton } from "./plaid-connect.js";
 
 export function FinancesPage() {
   const location = useLocation();
@@ -821,7 +821,7 @@ export function FinancesPage() {
                   >
                     Track account
                   </ShadcnButton>
-                  <PlaidConnect onConnected={refresh} />
+                  <PlaidConnectButton onConnected={refresh} />
                 </div>
               </ShadcnCardAction>
             </ShadcnCardHeader>
@@ -2766,44 +2766,6 @@ function FinanceTextField({
   );
 }
 
-function PlaidConnect({ onConnected }: { onConnected: () => Promise<unknown> }) {
-  const [token, setToken] = useState<string | null>(null);
-  const status = useQuery({ queryFn: api.getPlaidStatus, queryKey: ["plaid-status"] });
-  const exchange = useMutation({
-    mutationFn: (publicToken: string) => api.exchangePlaidToken({ institution: null, publicToken }),
-    onSuccess: onConnected,
-  });
-  const { open, ready } = usePlaidLink({
-    onSuccess: (publicToken) => exchange.mutate(publicToken),
-    token,
-  });
-  useEffect(() => {
-    if (token && ready) open();
-  }, [open, ready, token]);
-  if (status.isPending) {
-    return (
-      <ShadcnButton disabled size="sm" variant="outline">
-        Checking Plaid
-      </ShadcnButton>
-    );
-  }
-  if (status.isError || !status.data.available) {
-    return (
-      <ShadcnButton disabled size="sm" variant="outline">
-        Plaid needs keys
-      </ShadcnButton>
-    );
-  }
-  return (
-    <ShadcnButton
-      disabled={exchange.isPending}
-      onClick={() => api.getPlaidLinkToken().then(setToken)}
-      size="sm"
-    >
-      Connect bank
-    </ShadcnButton>
-  );
-}
 function downloadFinanceCsv(name: string, rows: Array<Record<string, unknown>>) {
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   const csvCell = (value: unknown) => {

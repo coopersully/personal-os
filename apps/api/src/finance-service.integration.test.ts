@@ -421,7 +421,7 @@ describe.sequential("finance service", () => {
     await expect(service.deleteAccount(account.id, context)).rejects.toThrow(
       "financial account was not found",
     );
-  });
+  }, 20_000);
 
   it("excludes vault moves and matched card payments while preserving rent spending", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });

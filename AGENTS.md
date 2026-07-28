@@ -15,7 +15,9 @@ This repository is the ilo monorepo and also stores personal agent skills and ro
 - Use the checked-in lifecycle actions instead of inventing ad hoc background commands.
 - `pnpm env:start` runs the current source and remains attached so failures are visible.
 - Use `pnpm env:status`, `pnpm env:logs`, `pnpm env:restart`, and `pnpm env:stop` to operate it.
-- The local runtime uses stable ports: web `8080`, API `8787`, MCP `8788`, and PostgreSQL `55432`.
+- The registered local runtime uses web `8081`, API `8788`, MCP `8789`, and PostgreSQL `55433`.
+- The primary checkout's ignored `.env` is authoritative. Setup and start synchronize it into Codex worktrees before loading configuration.
+- A linked worktree receives an ignored `.env.codex.local` containing a deterministic whole-set port shift and an isolated Compose project name.
 - Runtime PID and log files live under ignored `.codex/run/`.
 
 ## Validation

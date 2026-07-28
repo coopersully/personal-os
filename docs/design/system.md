@@ -74,6 +74,7 @@ rectangle. Use one of these forms before creating a new container.
 | `detail` | Infrequent controls, provenance, scope, or raw metadata | Closed until requested | `Collapsible`, Popover, or inspector |
 | `history` | Completed, revoked, or past material | Closed by default | Labelled `Collapsible` with a count |
 | `choice` | A small set of mutually exclusive, previewable preferences | Always open | Shared `ChoiceCardGroup`; the entire card selects the option |
+| `connection` | A bounded provider handoff that adds a real source | Open only when setup or recovery is the immediate job | Card with source context, existing material, and one connection action |
 
 Rules:
 
@@ -94,12 +95,45 @@ Rules:
 - A `choice` card is one accessible radio button, not a card beside a radio
   button. Its whole surface is the hit target, and its preview shows the result
   rather than repeating the label in prose.
+- A multi-select choice card follows the same geometry with one nested
+  checkbox. The complete card is its label and hit target; selected, hover, and
+  focus states remain consistent anywhere this pattern appears.
+- A `connection` never substitutes a demonstration or skeleton for provider
+  state. Existing accounts are material rows, and the action launches the same
+  production connection used elsewhere in the product.
+
+### Guided setup
+
+Use a guided setup only when several dependencies must be established before a
+feature can become useful. It is progressive configuration, not a carousel of
+marketing slides.
+
+- Ask one consequential question per step and save it before advancing.
+- Conditional steps follow the person’s choices; do not make them skip
+  irrelevant providers one by one.
+- Keep a visible exit on every step. Exiting must persist before entering the
+  app so an explicit choice cannot become a redirect loop.
+- Resume from durable account state after refresh, sign-in, or provider OAuth.
+  Browser storage is not the source of truth.
+- Use the real production connector in setup, including its permission scope,
+  pending state, error treatment, and resulting account data.
+- Connected material precedes the add-another action. Repeating a connection is
+  a short loop within the same step, not a new wizard branch.
+- Let a person finish with zero external connections. Local capabilities remain
+  useful and Settings retains the same connection controls later.
+- Existing users do not enter a new-account setup automatically. A migration
+  defaults established accounts to dismissed unless a deliberate re-onboarding
+  campaign has its own product contract.
 
 ### Stable choices and controls
 
 Use this contract whenever a setting presents a small, mutually exclusive set
 of visual options:
 
+- Focus, hover, and selection use the same flat semantic surface and border
+  language. Do not use rings, outlines, or box shadows to indicate interaction
+  state. Keyboard focus must remain visible through the same background and
+  border changes used by the control family.
 - Anchor control information at the top/start. Do not center it inside a large
   card merely to fill space.
 - Reserve the marker, border, and padding geometry for every state. Selection,
@@ -193,9 +227,8 @@ durations page by page.
   external-link glyph; reserve that affordance for actions that actually open
   a new browsing context.
 - When a shared moving selection surface already makes keyboard focus
-  unmistakable, remove duplicate per-item rings without removing that visible
-  focus state. Focus must remain at least as clear as hover and current-page
-  selection.
+  unmistakable, do not add a duplicate per-item treatment. Focus must remain at
+  least as clear as hover and current-page selection.
 - `prefers-reduced-motion` removes spatial travel and animated pulsing without
   removing the preview, selection, loading, or navigation state.
 
@@ -214,6 +247,11 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
 - Use direct verbs, concrete nouns, and short clauses. Avoid filler such as
   “choose whether,” “at all times,” “quiet,” “current,” and the product name
   unless omitting it creates ambiguity.
+- A placeholder demonstrates the expected shape with useful, obviously
+  fictional material. Use reserved examples such as `sam@example.com`; never
+  place real people, production identifiers, plausible credentials, or
+  placeholder-only instructions in a field. Labels remain present because a
+  placeholder is not a label.
 - The app-frame title is orientation, not a hero. It stays compact; the block
   that owns the immediate task carries the strongest page-level emphasis.
 - Connected providers use their recognizable service mark when one exists. Do

@@ -1,5 +1,22 @@
 import { expect, test } from "@playwright/test";
 
+test("the repository QA fixture login exposes representative workspace data", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Open ilo" }).click();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
+
+  await page.goto("/calendar");
+  await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
+  await page.goto("/tasks?view=next");
+  await expect(page.getByText("Draft weekly product update", { exact: true })).toBeVisible();
+  await page.goto("/mail");
+  await expect(page.getByText("Board packet for Friday", { exact: true })).toBeVisible();
+  await page.goto("/finances/transactions");
+  await expect(page.getByRole("row", { name: /Sq Unknown Popup Uncategorized/ })).toBeVisible();
+});
+
 test("a person and an agent share one reminder and calendar surface", async ({
   page,
 }, testInfo) => {
@@ -22,12 +39,17 @@ test("a person and an agent share one reminder and calendar surface", async ({
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
-  await page.getByRole("button", { name: "Have an invite? Create an account" }).click();
+  await page.getByRole("button", { name: "I have an invite code" }).click();
+  await page.getByLabel("Invite code").fill("E2E12345");
   await page.getByLabel("Name").fill("E2E Person");
-  await page.getByLabel("Invite code").fill("invite_local_e2e_12345");
+  await expect(page.getByText("Invitation accepted.")).toBeVisible();
   await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill("LocalTestOnly123!");
+  await page.getByLabel("Password", { exact: true }).fill("LocalTestOnly123!");
+  await page.getByLabel("Confirm password").fill("LocalTestOnly123!");
   await page.getByRole("button", { name: "Create account" }).click();
+  await expect(page).toHaveURL(/\/setup$/);
+  await expect(page.getByRole("heading", { name: "Hi, E2E." })).toBeVisible();
+  await page.getByRole("button", { name: "Exit setup" }).click();
   await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const applicationSidebar = page.getByRole("complementary", {
     name: "Application Sidebar",

@@ -79,6 +79,22 @@ describe("Google Calendar connector", () => {
     ).rejects.toMatchObject({ name: "ConnectorError", status: 400 });
   });
 
+  it("requests only the Google services selected during setup", () => {
+    const google = connector(queued());
+    const calendarScopes = new URL(
+      google.authorizationUrl("calendar-state", undefined, ["calendar"]),
+    ).searchParams.get("scope");
+    const mailScopes = new URL(
+      google.authorizationUrl("mail-state", undefined, ["mail"]),
+    ).searchParams.get("scope");
+
+    expect(calendarScopes).toContain("calendar.events");
+    expect(calendarScopes).not.toContain("gmail.modify");
+    expect(mailScopes).toContain("gmail.modify");
+    expect(mailScopes).toContain("gmail.send");
+    expect(mailScopes).not.toContain("calendar.events");
+  });
+
   it("refreshes credentials and reads a paginated profile and calendar list", async () => {
     const fetch = queued(
       response({

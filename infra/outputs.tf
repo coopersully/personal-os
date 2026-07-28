@@ -30,6 +30,18 @@ output "github_deploy_role_arn" {
   value = aws_iam_role.github_deploy.arn
 }
 
+output "operations_topic_arn" {
+  value = aws_sns_topic.operations.arn
+}
+
+output "operations_dashboard_name" {
+  value = aws_cloudwatch_dashboard.operations.dashboard_name
+}
+
+output "audit_bucket_name" {
+  value = aws_s3_bucket.audit.id
+}
+
 output "rds_endpoint" {
   value = aws_db_instance.postgres.address
 }

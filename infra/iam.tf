@@ -102,6 +102,8 @@ data "aws_iam_policy_document" "github_deploy" {
     actions = [
       "ecr:BatchCheckLayerAvailability",
       "ecr:CompleteLayerUpload",
+      "ecr:DescribeImageScanFindings",
+      "ecr:DescribeImages",
       "ecr:InitiateLayerUpload",
       "ecr:PutImage",
       "ecr:UploadLayerPart",
@@ -138,8 +140,18 @@ data "aws_iam_policy_document" "github_deploy" {
 
   statement {
     sid       = "InvalidateWebCache"
-    actions   = ["cloudfront:CreateInvalidation"]
+    actions   = ["cloudfront:CreateInvalidation", "cloudfront:GetInvalidation"]
     resources = [aws_cloudfront_distribution.web.arn]
+  }
+
+  statement {
+    sid = "ObserveProduction"
+    actions = [
+      "cloudwatch:DescribeAlarms",
+      "ecs:DescribeServices",
+      "rds:DescribeDBInstances",
+    ]
+    resources = ["*"]
   }
 }
 

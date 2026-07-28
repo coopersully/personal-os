@@ -7,6 +7,10 @@ This directory defines an AWS deployment baseline in `us-east-1`:
 - private ECS application subnets with outbound-only provider access through a NAT gateway;
 - a public ALB with ACM TLS, strict host routing, managed WAF protections, and CloudWatch logs;
 - a private, encrypted S3 web bucket delivered through CloudFront with browser security headers;
+- external HTTPS checks, CloudWatch alarms/dashboard, and an email-backed SNS operations channel;
+- GuardDuty, IAM Access Analyzer, Security Hub Foundational Best Practices, AWS Config, and a validated multi-Region CloudTrail;
+- weekly database recovery points in AWS Backup in addition to RDS automated backups;
+- monthly budget, low-threshold cost anomaly notifications, and active cost-allocation tags;
 - authoritative DNS records in an existing Cloudflare zone; and
 - a GitHub Actions OIDC deployment role restricted to the repository and branch configured in Terraform.
 
@@ -73,10 +77,12 @@ Because the API applies Drizzle migrations during startup, its least-privilege
 database role needs `CREATE` on the `personal_os` database plus `USAGE, CREATE`
 on the `public` schema.
 
-Set `domain_name`, `cloudflare_zone_id`, `owner_emails`, `email_from`, and
-`google_client_id` in the untracked `terraform.tfvars`. Export a scoped
-`CLOUDFLARE_API_TOKEN` with DNS Read and DNS Write access before planning or
-applying. Terraform derives:
+Set `domain_name`, `cloudflare_zone_id`, `owner_emails`, `alert_email`,
+`monthly_budget_usd`, `email_from`, and `google_client_id` in the untracked
+`terraform.tfvars`. Reuse the account's service Cost Anomaly Detection monitor
+through `cost_anomaly_monitor_arn` to add ilo's immediate lower-threshold
+subscription. Export a scoped `CLOUDFLARE_API_TOKEN` with DNS Read and DNS
+Write access before planning or applying. Terraform derives:
 
 ```text
 https://app.<domain>
@@ -126,11 +132,48 @@ surfaces. ECS deployment circuit breakers roll back unhealthy task revisions.
 
 The task execution role—not the application task roles—can read the named runtime parameters. The deployment role cannot read application secrets.
 
+## Unattended operations
+
+The `personal-os-prod-operations` SNS topic receives alarm, database, backup,
+ECS deployment, AWS Health, GuardDuty, Security Hub, and IAM Access Analyzer
+events. The configured email endpoint must confirm the one-time Amazon SNS
+subscription before runtime alerts can arrive. Budget and Cost Anomaly
+Detection alerts use the same operations topic; budget notifications are also
+sent directly so the budget does not depend only on SNS confirmation.
+AWS Config records continuously to the audit bucket but is intentionally not
+attached directly to this topic because its per-resource change stream is far
+too noisy for an operator alert channel.
+
+CloudWatch alarms cover public HTTPS health, ECS CPU/memory, unhealthy targets,
+5xx responses, latency, RDS CPU/storage/memory/connections, NAT failures, and
+CloudFront 5xx rate. The `personal-os-prod-operations` dashboard collects the
+primary service and database signals. Alarms send both failure and recovery
+notifications.
+
+GitHub records a `production/ilo` commit status for each protected `main`
+release. Failed CI or deployment opens one deduplicated production incident;
+the next successful deployment comments on and closes it. The hourly
+`Production health` workflow independently checks all three public surfaces
+and manages a separate deduplicated health incident.
+
+ECS target tracking keeps one task warm and may scale each service to two tasks
+for CPU or memory pressure. ECR keeps 15 rollback images and removes untagged
+images after one day. Web and Terraform-state noncurrent versions expire after
+bounded recovery windows. CloudTrail and Config history is retained for one
+year, with obsolete object versions removed sooner.
+
+AWS Compute Optimizer and Cost Optimization Hub are account-level opt-ins rather
+than Terraform resources. They are enabled for this account and should remain
+active so AWS continuously produces rightsizing and waste-reduction
+recommendations.
+
 ## Cost and availability posture
 
 This is a secured invite-only-beta baseline: one private API task, one private
 MCP task, a single-AZ `db.t4g.micro` database, CloudFront/S3 web delivery, and a
-public ALB protected by managed WAF rules. Multi-AZ RDS, multi-replica services,
-and an on-call alarm suite should be added before claiming high availability.
+public ALB protected by managed WAF rules. The alarm suite and bounded
+auto-scaling are suitable for unattended beta operation. Multi-AZ RDS and
+multi-replica minimums remain deliberate paid upgrades before claiming high
+availability.
 
 Run `terraform fmt -recursive` and `terraform validate` before every infrastructure pull request. Terraform plans and applies are production changes and should be reviewed separately from application deployment commits.

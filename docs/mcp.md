@@ -31,10 +31,13 @@ Reminders use a typed profile vocabulary for capture defaults, priority meanings
 notification intent, time zones, overdue review, thresholds, and preferred automatic actions.
 Those stored preferences guide agents; they do not grant, revoke, or enforce API authority.
 `dueAt` drives due/overdue views and is not proof of notification delivery. Direct single-Reminder
-mutations remain audited API actions. Bulk overdue deferral begins with
+mutations remain audited API actions. Their audit policy comes from the API's validated interactive
+user or scoped-agent decision, never from profile preferences. Bulk overdue deferral begins with
 `preview_overdue_reminder_deferral`, which returns the complete bounded candidate set, `preview`
 policy, source references, and revisions without mutating. Guarded individual updates and
 consequential state changes use `expectedUpdatedAt` so concurrent changes surface as conflicts.
+Reminder list pagination accepts the returned `nextCursor`, and Reminder MCP failures preserve the
+API error code, safe details, request ID, and HTTP status in structured content.
 
 Rules share a versioned envelope—name, description, profile, sources, confidence threshold, policy,
 enabled state, and version—while each feature owns its condition and action language. Mail is the

@@ -127,5 +127,9 @@ describe("pagination, errors, and OpenAPI", () => {
     expect(Object.keys(document.paths)).toEqual(
       expect.arrayContaining(["/v1/goals", "/v1/goals/{id}", "/v1/motives", "/v1/motives/{id}"]),
     );
+    expect(document.paths["/v1/reminders/{id}"].delete.responses).toMatchObject({
+      200: { description: expect.stringContaining("deleted revision") },
+      204: { description: expect.stringContaining("without a revision") },
+    });
   });
 });

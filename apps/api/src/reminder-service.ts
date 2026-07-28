@@ -1,5 +1,6 @@
 import { auditEvents, type Database, reminders } from "@personal-os/database";
 import type {
+  AgentMutationPolicy,
   CreateReminderInput,
   Reminder,
   ReminderDeferralPreview,
@@ -16,6 +17,7 @@ import { auditSnapshot, serializeReminder } from "./serialization.js";
 import type { Principal } from "./types.js";
 
 type MutationContext = {
+  policy: AgentMutationPolicy;
   principal: Principal;
   requestId: string;
 };
@@ -32,7 +34,12 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
   ): Record<string, unknown> {
     return {
       ...auditSnapshot(row),
-      policy: context.principal.actorType === "user" ? "approve_each" : "approved_rule",
+      authorization: {
+        actorId: context.principal.actorId,
+        kind:
+          context.principal.actorType === "user" ? "interactive_user" : "scoped_agent_permission",
+      },
+      policy: context.policy,
       source: serializeReminder(row).source,
     };
   }
@@ -79,10 +86,9 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
     }
   }
 
-  async function throwRevisionConflict(userId: string, id: string): Promise<never> {
-    const current = await findCurrent(userId, id);
-    throw new AppError("conflict", "The reminder changed while the mutation was being applied.", {
-      currentUpdatedAt: current?.updatedAt.toISOString() ?? null,
+  function revisionConflict(currentUpdatedAt: string | null): AppError {
+    return new AppError("conflict", "The reminder changed while the mutation was being applied.", {
+      currentUpdatedAt,
     });
   }
 
@@ -105,13 +111,9 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       assertExpectedRevision(record, expectedUpdatedAt);
       return record;
     } catch (error) {
-      if (
-        error instanceof AppError &&
-        error.code === "not_found" &&
-        expectedUpdatedAt &&
-        (await findCurrent(userId, id))
-      ) {
-        return throwRevisionConflict(userId, id);
+      if (error instanceof AppError && error.code === "not_found" && expectedUpdatedAt) {
+        const current = await findCurrent(userId, id);
+        if (current) throw revisionConflict(current.updatedAt.toISOString());
       }
       throw error;
     }
@@ -144,7 +146,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           )
           .returning();
         if (!updated) {
-          return throwRevisionConflict(context.principal.userId, before.id);
+          throw revisionConflict(null);
         }
         await transaction.insert(auditEvents).values(
           auditValues({
@@ -217,7 +219,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           )
           .returning();
         if (!after) {
-          return throwRevisionConflict(context.principal.userId, before.id);
+          throw revisionConflict(null);
         }
         await transaction.insert(auditEvents).values(
           auditValues({
@@ -297,7 +299,11 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       userId: string,
       input: ReminderDeferralPreviewInput,
     ): Promise<ReminderDeferralPreview> {
-      if (new Date(input.proposedDueAt).getTime() <= now().getTime()) {
+      const previewedAt = now();
+      if (new Date(input.overdueBefore).getTime() > previewedAt.getTime()) {
+        throw new AppError("invalid_request", "The overdue cutoff cannot be in the future.");
+      }
+      if (new Date(input.proposedDueAt).getTime() <= previewedAt.getTime()) {
         throw new AppError(
           "invalid_request",
           "The proposed due time must be in the future when the preview is created.",
@@ -364,8 +370,11 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         )
         .limit(1);
       if (!before) {
-        if (expectedUpdatedAt && (await findCurrent(context.principal.userId, id))) {
-          return throwRevisionConflict(context.principal.userId, id);
+        const current = expectedUpdatedAt
+          ? await findCurrent(context.principal.userId, id)
+          : undefined;
+        if (current) {
+          throw revisionConflict(current.updatedAt.toISOString());
         }
         throw new AppError("not_found", "The deleted reminder was not found.");
       }
@@ -385,7 +394,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           )
           .returning();
         if (!restored) {
-          return throwRevisionConflict(context.principal.userId, before.id);
+          throw revisionConflict(null);
         }
         await transaction.insert(auditEvents).values(
           auditValues({
@@ -436,7 +445,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           )
           .returning();
         if (!updated) {
-          return throwRevisionConflict(context.principal.userId, before.id);
+          throw revisionConflict(null);
         }
         await transaction.insert(auditEvents).values(
           auditValues({

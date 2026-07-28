@@ -7,13 +7,13 @@ import {
   timeZoneSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
-import { result } from "../tool-result.js";
+import { apiResult } from "../tool-result.js";
 
 const id = idSchema.describe("ilo reminder identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
 const timeZone = timeZoneSchema.describe("IANA time zone, for example America/New_York");
 const directMutation =
-  "This is a direct, audited mutation. Ilo's API scopes and approved_rule policy are authoritative; MCP annotations are only client hints.";
+  "This is a direct, audited mutation. Ilo's API scopes and scoped-agent policy decision are authoritative; profile preferences and MCP annotations do not grant access.";
 
 const annotations = {
   create: {
@@ -49,9 +49,10 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
     {
       annotations: annotations.read,
       description:
-        "List a bounded page of the user's reminders. Use dueAfter/dueBefore as exact instant bounds; dueAt is the reminder's due or attention time, not proof that a notification will be delivered.",
+        "List a bounded page of the user's reminders. Pass a returned nextCursor as cursor to continue. Use dueAfter/dueBefore as exact instant bounds; dueAt is the reminder's due or attention time, not proof that a notification will be delivered.",
       inputSchema: {
         completed: z.boolean().optional(),
+        cursor: z.string().min(1).optional(),
         dueAfter: isoDateTime.optional(),
         dueBefore: isoDateTime.optional(),
         limit: z.number().int().min(1).max(100).default(50),
@@ -59,7 +60,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       },
       title: "List reminders",
     },
-    async (input) => result(await api.listReminders(input)),
+    async (input) => apiResult(() => api.listReminders(input)),
   );
 
   server.registerTool(
@@ -71,7 +72,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       inputSchema: { id },
       title: "Get reminder",
     },
-    async (input) => result(await api.getReminder(input.id)),
+    async (input) => apiResult(() => api.getReminder(input.id)),
   );
 
   server.registerTool(
@@ -89,7 +90,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       },
       title: "Preview overdue reminder deferral",
     },
-    async (input) => result(await api.previewOverdueReminderDeferral(input)),
+    async (input) => apiResult(() => api.previewOverdueReminderDeferral(input)),
   );
 
   server.registerTool(
@@ -106,7 +107,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       },
       title: "Create reminder",
     },
-    async (input) => result(await api.createReminder(input)),
+    async (input) => apiResult(() => api.createReminder(input)),
   );
 
   server.registerTool(
@@ -125,7 +126,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       },
       title: "Update reminder",
     },
-    async ({ id: reminderId, ...input }) => result(await api.updateReminder(reminderId, input)),
+    async ({ id: reminderId, ...input }) => apiResult(() => api.updateReminder(reminderId, input)),
   );
 
   server.registerTool(
@@ -137,7 +138,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       title: "Complete or reopen reminder",
     },
     async (input) =>
-      result(await api.completeReminder(input.id, input.completed, input.expectedUpdatedAt)),
+      apiResult(() => api.completeReminder(input.id, input.completed, input.expectedUpdatedAt)),
   );
 
   server.registerTool(
@@ -148,10 +149,7 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       inputSchema: { expectedUpdatedAt: isoDateTime, id },
       title: "Move reminder to trash",
     },
-    async (input) => {
-      const reminder = await api.trashReminder(input.id, input.expectedUpdatedAt);
-      return result(reminder);
-    },
+    async (input) => apiResult(() => api.trashReminder(input.id, input.expectedUpdatedAt)),
   );
 
   server.registerTool(
@@ -162,6 +160,6 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       inputSchema: { expectedUpdatedAt: isoDateTime, id },
       title: "Restore reminder",
     },
-    async (input) => result(await api.restoreReminder(input.id, input.expectedUpdatedAt)),
+    async (input) => apiResult(() => api.restoreReminder(input.id, input.expectedUpdatedAt)),
   );
 }

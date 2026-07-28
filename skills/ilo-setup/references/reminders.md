@@ -40,8 +40,10 @@ categories. Save these exact preference keys:
 
 Both `preferredAutomaticActions` and `preferredMutationPolicy` are durable guidance for the agent,
 not access control. Saving or activating either value does not grant, revoke, or enforce mutation
-authority. Token scopes and Ilo's API policy remain authoritative. Save a draft first and activate
-it only after the user accepts the summary.
+authority. Token scopes and Ilo's API policy remain authoritative. A draft may contain only the
+answers learned so far; do not invent missing preferences. Activate only after all canonical
+preferences are present and the user accepts the summary. An unchanged legacy active profile may be
+revised without fabricating new answers.
 
 ## Act safely
 
@@ -53,7 +55,8 @@ it only after the user accepts the summary.
   call. Trash is recoverable; do not describe it as permanent deletion.
 - Before deferring multiple overdue Reminders, call `preview_overdue_reminder_deferral`. A
   successful preview is the exact candidate set and carries `preview` policy plus local source
-  references. If the safety limit is exceeded, narrow the cutoff or priority.
+  references. The overdue cutoff must be now or earlier. If the safety limit is exceeded, narrow
+  the cutoff or priority.
 - Show IDs, titles, current due times, proposed due time, and time zone. Apply an accepted set with
   guarded individual updates; stop and report any conflict instead of silently changing the set.
 - Use a Reminders `follow_up` attention item when an ambiguous or conflicted item needs review.

@@ -1,6 +1,8 @@
 import {
+  type AgentMutationPolicy,
   completeReminderInputSchema,
   createReminderInputSchema,
+  featureAccessPolicies,
   reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
   reminderRevisionInputSchema,
@@ -12,6 +14,7 @@ import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
+type ReminderMutationContext = MutationContext & { policy: AgentMutationPolicy };
 
 type ReminderRouteOptions = {
   app: Hono<AppEnv>;
@@ -22,6 +25,16 @@ type ReminderRouteOptions = {
 /** Register the reminder HTTP surface without constructing its service. */
 export function registerReminderRoutes({ app, mutationContext, reminders }: ReminderRouteOptions) {
   const requireRemindersAccess = requireFeatureAccess("reminders");
+  const reminderMutationContext = (context: Context<AppEnv>): ReminderMutationContext => {
+    const base = mutationContext(context);
+    return {
+      ...base,
+      policy:
+        base.principal.actorType === "user"
+          ? "approve_each"
+          : featureAccessPolicies.reminders.mutationPolicy,
+    };
+  };
   app.use("/v1/reminders", requireRemindersAccess);
   app.use("/v1/reminders/*", requireRemindersAccess);
 
@@ -44,7 +57,7 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
   app.post("/v1/reminders", async (context) => {
     const reminder = await reminders.create(
       await parseBody(context, createReminderInputSchema),
-      mutationContext(context),
+      reminderMutationContext(context),
     );
     return context.json({ reminder }, 201);
   });
@@ -58,7 +71,7 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
       reminder: await reminders.update(
         context.req.param("id"),
         await parseBody(context, updateReminderInputSchema),
-        mutationContext(context),
+        reminderMutationContext(context),
       ),
     }),
   );
@@ -66,7 +79,7 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
     const input = reminderRevisionInputSchema.parse(context.req.query());
     const reminder = await reminders.delete(
       context.req.param("id"),
-      mutationContext(context),
+      reminderMutationContext(context),
       input.expectedUpdatedAt,
     );
     if (input.expectedUpdatedAt) return context.json({ reminder });
@@ -78,7 +91,7 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
       reminder: await reminders.complete(
         context.req.param("id"),
         input.completed,
-        mutationContext(context),
+        reminderMutationContext(context),
         input.expectedUpdatedAt,
       ),
     });
@@ -88,7 +101,7 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
     return context.json({
       reminder: await reminders.restore(
         context.req.param("id"),
-        mutationContext(context),
+        reminderMutationContext(context),
         input.expectedUpdatedAt,
       ),
     });

@@ -1,6 +1,6 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { PersonalOsApiClient } from "@personal-os/api-client";
+import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import type {
   AutomationRoutine,
   AutomationRun,
@@ -672,7 +672,7 @@ describe("ilo MCP server", () => {
 
     await client.callTool({
       name: "list_reminders",
-      arguments: { completed: false, limit: 25, query: "Test" },
+      arguments: { completed: false, cursor: "next-page", limit: 25, query: "Test" },
     });
     await client.callTool({ name: "get_reminder", arguments: { id } });
     await client.callTool({
@@ -694,6 +694,30 @@ describe("ilo MCP server", () => {
         notes: null,
         timezone: null,
         priority: "high",
+      },
+    });
+    api.updateReminder.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "conflict",
+        details: { currentUpdatedAt: "2026-07-13T12:01:00.000Z" },
+        message: "The reminder changed since it was loaded.",
+        requestId: "request-conflict",
+        status: 409,
+      }),
+    );
+    const conflict = await client.callTool({
+      name: "update_reminder",
+      arguments: { expectedUpdatedAt: now, id, title: "Stale change" },
+    });
+    expect(conflict).toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: {
+          code: "conflict",
+          details: { currentUpdatedAt: "2026-07-13T12:01:00.000Z" },
+          requestId: "request-conflict",
+          status: 409,
+        },
       },
     });
     await client.callTool({

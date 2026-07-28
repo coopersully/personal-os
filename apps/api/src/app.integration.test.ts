@@ -1345,6 +1345,14 @@ describe.sequential("ilo API", () => {
         )
       ).status,
     ).toBe(400);
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-14T12%3A00%3A00.000Z&proposedDueAt=2026-07-15T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
     await request(`/v1/reminders/${overdueOne.id}`, { auth: "agent", method: "DELETE" });
     await request(`/v1/reminders/${overdueTwo.id}`, { auth: "agent", method: "DELETE" });
     await expect(
@@ -2192,6 +2200,9 @@ describe.sequential("ilo API", () => {
       ),
     ).toMatchObject({
       after: {
+        authorization: {
+          kind: "scoped_agent_permission",
+        },
         policy: "approved_rule",
         source: {
           accountId: null,

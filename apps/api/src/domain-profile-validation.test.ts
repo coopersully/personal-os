@@ -1,5 +1,5 @@
 import type { UpsertDomainProfileInput } from "@personal-os/domain";
-import { validateDomainProfilePreferences } from "./domain-profile-validation.js";
+import { normalizeDomainProfilePreferences } from "./domain-profile-validation.js";
 
 const baseProfile: Omit<UpsertDomainProfileInput, "domain" | "preferences"> = {
   categories: [],
@@ -11,9 +11,16 @@ const baseProfile: Omit<UpsertDomainProfileInput, "domain" | "preferences"> = {
 };
 
 describe("domain profile validation", () => {
-  it("validates Reminder preferences through the domain registry", () => {
+  it("normalizes partial drafts and requires complete new active profiles", () => {
+    expect(
+      normalizeDomainProfilePreferences({
+        ...baseProfile,
+        domain: "reminders",
+        preferences: { priorityHighMeaning: "  Needs attention today  " },
+      }),
+    ).toEqual({ priorityHighMeaning: "Needs attention today" });
     expect(() =>
-      validateDomainProfilePreferences({
+      normalizeDomainProfilePreferences({
         ...baseProfile,
         domain: "reminders",
         preferences: {
@@ -30,20 +37,33 @@ describe("domain profile validation", () => {
           reviewPriorityAtOrAbove: "medium",
           timezoneBehavior: "ask_when_ambiguous",
         },
+        status: "active",
       }),
     ).not.toThrow();
     expect(() =>
-      validateDomainProfilePreferences({
+      normalizeDomainProfilePreferences({
         ...baseProfile,
         domain: "reminders",
         preferences: {},
+        status: "active",
       }),
     ).toThrow();
   });
 
-  it("leaves domains without a registered preference contract generic", () => {
+  it("preserves unchanged legacy active profiles and generic domains", () => {
+    expect(
+      normalizeDomainProfilePreferences(
+        {
+          ...baseProfile,
+          domain: "reminders",
+          preferences: {},
+          status: "active",
+        },
+        { preferences: {}, status: "active" },
+      ),
+    ).toEqual({});
     expect(() =>
-      validateDomainProfilePreferences({
+      normalizeDomainProfilePreferences({
         ...baseProfile,
         domain: "mail",
         preferences: { inboxStyle: "signal_only" },

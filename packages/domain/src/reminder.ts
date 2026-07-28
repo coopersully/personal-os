@@ -42,6 +42,7 @@ export const reminderProfilePreferencesSchema = z
   })
   .passthrough();
 export type ReminderProfilePreferences = z.infer<typeof reminderProfilePreferencesSchema>;
+export const reminderDraftProfilePreferencesSchema = reminderProfilePreferencesSchema.partial();
 
 const reminderFieldsSchema = z.object({
   title: z.string().trim().min(1).max(240),

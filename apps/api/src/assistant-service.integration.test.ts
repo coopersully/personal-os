@@ -195,6 +195,55 @@ describe.sequential("assistant setup service", () => {
     await expect(database.db.select().from(domainProfiles)).resolves.toHaveLength(2);
   });
 
+  it("round-trips legacy Reminder drafts and persists normalized partial answers", async () => {
+    const [legacy] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep reminders visible.",
+        preferences: {},
+        sourceContexts: [],
+        status: "draft",
+        summary: "Legacy Reminder setup.",
+        userId,
+      })
+      .returning();
+    if (!legacy) throw new Error("Legacy Reminder profile was not created.");
+    const revised = await service.upsertProfile(
+      {
+        categories: [],
+        domain: "reminders",
+        expectedVersion: legacy.version,
+        instructions: [],
+        objective: "Keep reminders visible.",
+        preferences: { priorityHighMeaning: "  Needs attention today  " },
+        sourceContexts: [],
+        status: "draft",
+        summary: "Partial Reminder setup.",
+      },
+      context(),
+    );
+    expect(revised.preferences).toEqual({ priorityHighMeaning: "Needs attention today" });
+    await expect(
+      service.upsertProfile(
+        {
+          categories: [],
+          domain: "reminders",
+          expectedVersion: revised.version,
+          instructions: [],
+          objective: "Keep reminders visible.",
+          preferences: revised.preferences,
+          sourceContexts: [],
+          status: "active",
+          summary: "Incomplete active setup.",
+        },
+        context(),
+      ),
+    ).rejects.toBeTruthy();
+  });
+
   it("uses one cross-domain attention shape and audits changes", async () => {
     const item = await service.createAttentionItem(
       {

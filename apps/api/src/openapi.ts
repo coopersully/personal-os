@@ -113,7 +113,23 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         },
       },
       "/v1/reminders/{id}": {
-        delete: { security, responses: { 204: { description: "Reminder deleted" } } },
+        delete: {
+          parameters: [
+            {
+              description:
+                "Optional optimistic revision. When present, guarded trash returns the deleted Reminder revision.",
+              in: "query",
+              name: "expectedUpdatedAt",
+              required: false,
+              schema: { format: "date-time", type: "string" },
+            },
+          ],
+          security,
+          responses: {
+            200: { description: "Reminder moved to trash with its deleted revision" },
+            204: { description: "Reminder moved to trash without a revision response" },
+          },
+        },
         get: { security, responses: { 200: { description: "Reminder" } } },
         patch: { security, responses: { 200: { description: "Reminder updated" } } },
       },

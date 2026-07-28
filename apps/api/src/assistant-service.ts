@@ -14,7 +14,7 @@ import {
 import { and, desc, eq } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
-import { validateDomainProfilePreferences } from "./domain-profile-validation.js";
+import { normalizeDomainProfilePreferences } from "./domain-profile-validation.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import { auditSnapshot } from "./serialization.js";
 import type { Principal } from "./types.js";
@@ -68,8 +68,11 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       input: UpsertDomainProfileInput,
       context: MutationContext,
     ): Promise<DomainProfile> {
-      validateDomainProfilePreferences(input);
       const existing = await findProfile(context.principal.userId, input.domain);
+      const preferences = normalizeDomainProfilePreferences(
+        input,
+        existing ? serializeProfile(existing) : undefined,
+      );
       if (existing && input.expectedVersion === undefined) {
         throw new AppError(
           "invalid_request",
@@ -89,7 +92,7 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
         domain: input.domain,
         instructions: input.instructions,
         objective: input.objective,
-        preferences: input.preferences,
+        preferences,
         sourceContexts: input.sourceContexts,
         status: input.status,
         summary: input.summary,

@@ -1864,6 +1864,10 @@ function FinanceAgentGuidancePanel({
 }) {
   const availableWorkflows =
     setup?.suggestedWorkflows.filter((workflow) => workflow.available).length ?? 0;
+  const humanOnlyActionLabels =
+    setup?.humanOnlyActions
+      .map((action) => financeHumanOnlyActionLabels[action])
+      .filter((label): label is string => Boolean(label)) ?? [];
   return (
     <ShadcnCard>
       <ShadcnCardHeader>
@@ -1910,10 +1914,9 @@ function FinanceAgentGuidancePanel({
               <ShadcnItemContent>
                 <ShadcnItemTitle>Human-only boundaries</ShadcnItemTitle>
                 <ShadcnItemDescription>
-                  {setup.humanOnlyActions
-                    .map((action) => financeHumanOnlyActionLabels[action])
-                    .join(", ")}{" "}
-                  stay in Finance.
+                  {humanOnlyActionLabels.length > 0
+                    ? `${humanOnlyActionLabels.join(", ")} stay in Finance.`
+                    : "Consequential finance actions stay in Finance."}
                 </ShadcnItemDescription>
               </ShadcnItemContent>
               <ShadcnItemActions>

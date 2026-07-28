@@ -643,7 +643,7 @@ describe("ilo MCP server", () => {
           {
             categoryId: id,
             confidence: 0.99,
-            expectedTransactionUpdatedAt: now,
+            expectedTransactionUpdatedAt: "2026-07-19T08:00:00-04:00",
             rationale: "Known merchant history.",
             transactionId: accountId,
           },
@@ -653,6 +653,15 @@ describe("ilo MCP server", () => {
     await client.callTool({
       name: "resolve_finance_review",
       arguments: { action: "defer", id },
+    });
+    await client.callTool({
+      name: "resolve_finance_review",
+      arguments: {
+        action: "approve",
+        confidence: 0.99,
+        expectedTransactionUpdatedAt: "2026-07-19T08:00:00-04:00",
+        id,
+      },
     });
     await client.callTool({ name: "list_x_bookmarks", arguments: {} });
     await client.callTool({ name: "sync_x_bookmarks", arguments: {} });

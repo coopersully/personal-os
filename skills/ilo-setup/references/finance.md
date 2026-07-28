@@ -1,9 +1,9 @@
 # Finance setup
 
-Finance setup records durable context for informational guidance and reviewed organization. It
-never grants authority to connect providers, import data, change the human-managed financial
-profile or budgets, move money, trade, pay bills, create permanent merchant rules, or silently
-confirm ambiguous transfers.
+Finance setup may maintain the durable Finance domain profile used for informational guidance and
+reviewed organization. It never grants authority to connect providers, import data, change the
+separate human-managed financial profile or budgets, move money, trade, pay bills, create permanent
+merchant rules, or silently confirm ambiguous transfers.
 
 ## Inspect before interviewing
 
@@ -49,11 +49,12 @@ categorization threshold or silently reconfigure alert generation.
 ## Save and activate safely
 
 1. Summarize the exact source meanings, context, thresholds, language, and added safety constraints.
-2. Save a `draft` Finance profile with `save_domain_profile`; use `expectedVersion` when revising.
+2. Save a `draft` Finance domain profile with `save_domain_profile("finances")`; use
+   `expectedVersion` when revising.
 3. Explain which suggested workflows are currently available and which actions remain human-only.
-4. Keep the profile in `draft` when no account source is in scope. Activate only after at least one
-   owned account source is recorded and the user accepts the summary. An active profile is durable
-   guidance, not approval for a later financial mutation.
+4. Keep the Finance domain profile in `draft` when no account source is in scope. Activate only
+   after at least one owned account source is recorded and the user accepts the summary. An active
+   Finance domain profile is durable guidance, not approval for a later financial mutation.
 
 ## Use reviewed workflows
 

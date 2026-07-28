@@ -713,6 +713,11 @@ describe("finance agent contracts", () => {
         recurringAmountChangePercent: 101,
       }).success,
     ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        futurePreference: "x".repeat(501),
+      }).success,
+    ).toBe(false);
   });
 
   it("requires one revision-guarded decision per transaction", () => {

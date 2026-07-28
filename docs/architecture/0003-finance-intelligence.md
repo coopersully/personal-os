@@ -37,13 +37,16 @@ The bounded recurring-payment, alert, categorization, and ordinary review
 decisions exposed to MCP are available to a scoped agent and always carry the
 normal audit context.
 
-Finance guided setup reuses the shared versioned domain-profile envelope. Its
-`sourceContexts` are canonical Finance account IDs, not arbitrary labels, and
-the API rejects duplicates, stale accounts, and accounts owned by another
-user. Source-empty Finance profiles may remain drafts, but activation requires
-at least one owned account source. Finance preference keys use explicit units:
-confidence is a 0–1 fraction, currency thresholds are account currency amounts,
-and `recurringAmountChangePercent` is percentage points (`20` means 20%).
+Finance guided setup reuses the shared versioned domain-profile envelope. The
+agent-editable object is the durable Finance domain profile saved through
+`save_domain_profile("finances")`; it is distinct from the human-managed
+financial profile. Its `sourceContexts` are canonical Finance account IDs, not
+arbitrary labels, and the API rejects duplicates, stale accounts, and accounts
+owned by another user. Source-empty Finance domain profiles may remain drafts,
+but activation requires at least one owned account source. Finance preference
+keys use explicit units: confidence is a 0–1 fraction, currency thresholds are
+account currency amounts, and `recurringAmountChangePercent` is percentage
+points (`20` means 20%).
 
 ## Ledger and learning model
 

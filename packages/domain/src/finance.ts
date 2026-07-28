@@ -14,8 +14,8 @@ const categorySchema = z.string().trim().min(1).max(80);
 
 /**
  * Stable preference keys used by the Finance guided interview. Unknown
- * primitive keys remain valid so the shared profile envelope can evolve
- * without forcing Finance-specific storage.
+ * primitive and string-array values remain valid so the shared profile
+ * envelope can evolve without forcing Finance-specific storage.
  */
 export const financeGuidedPreferencesSchema = z
   .object({
@@ -33,7 +33,9 @@ export const financeGuidedPreferencesSchema = z
     termForReviewQueue: z.string().trim().min(1).max(80).optional(),
     termForSpending: z.string().trim().min(1).max(80).optional(),
   })
-  .catchall(z.union([z.boolean(), z.number(), z.string(), z.array(z.string().max(500)).max(100)]));
+  .catchall(
+    z.union([z.boolean(), z.number(), z.string().max(500), z.array(z.string().max(500)).max(100)]),
+  );
 export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSchema>;
 
 export const financeAccountSchema = z.object({

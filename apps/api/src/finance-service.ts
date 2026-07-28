@@ -2443,13 +2443,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
           auditValues({
             action: "finance.merchants_merged",
             after: {
+              rationaleProvided: true,
               sourceMerchantId: source.id,
               targetMerchantId: target.id,
             },
-            before: {
-              sourceMerchantId: source.id,
-              targetMerchantId: target.id,
-            },
+            before: merchantAuditSnapshot(merchant(source)),
             entityId: target.id,
             entityType: "finance_merchant",
             ...context,

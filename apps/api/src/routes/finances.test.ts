@@ -45,16 +45,18 @@ describe("finance routes", () => {
 
     expect((await app.request("/v1/finances/guided-setup")).status).toBe(200);
     expect((await app.request("/v1/finances/categorizations/propose")).status).toBe(200);
-    expect((await app.request("/v1/finances/accounts", json)).status).toBe(403);
-    expect(
-      (
-        await app.request(`/v1/finances/accounts/${id}`, {
-          method: "DELETE",
-        })
-      ).status,
-    ).toBe(403);
-    expect((await app.request("/v1/finances/budgets", json)).status).toBe(403);
-    expect((await app.request(`/v1/finances/accounts/${id}/sync`, json)).status).toBe(403);
+    const humanOnlyResponses = await Promise.all([
+      app.request("/v1/finances/accounts", json),
+      app.request(`/v1/finances/accounts/${id}`, { method: "DELETE" }),
+      app.request("/v1/finances/budgets", json),
+      app.request(`/v1/finances/accounts/${id}/sync`, json),
+    ]);
+    for (const response of humanOnlyResponses) {
+      expect(response.status).toBe(403);
+      await expect(response.json()).resolves.toMatchObject({
+        error: expect.stringContaining("interactive user session"),
+      });
+    }
     expect(finances.getGuidedSetupContext).toHaveBeenCalledWith(id);
     expect(finances.proposeCategorizations).toHaveBeenCalledWith(
       id,

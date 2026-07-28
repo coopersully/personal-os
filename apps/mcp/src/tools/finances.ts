@@ -261,9 +261,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
             z.object({
               categoryId: id,
               confidence: z.number().min(0).max(1),
-              expectedTransactionUpdatedAt: z
-                .string()
-                .datetime()
+              expectedTransactionUpdatedAt: z.iso
+                .datetime({ offset: true })
                 .describe("updatedAt returned by the accepted categorization proposal"),
               learnMerchant: z.enum(["never", "suggest"]).default("suggest"),
               rationale: z.string().min(1).max(1_000),
@@ -293,9 +292,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
           .max(1)
           .optional()
           .describe("Required for approve or recategorize; use the accepted proposal confidence"),
-        expectedTransactionUpdatedAt: z
-          .string()
-          .datetime()
+        expectedTransactionUpdatedAt: z.iso
+          .datetime({ offset: true })
           .optional()
           .describe("Required for approve or recategorize; use the proposal transaction updatedAt"),
         id,

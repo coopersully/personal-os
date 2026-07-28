@@ -1023,6 +1023,82 @@ describe.sequential("finance service", () => {
     );
   }, 20_000);
 
+  it("records merchant merge intent without exposing the supplied rationale", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "merchant-merge-audit" };
+    const account = await service.createAccount(
+      {
+        balance: 100,
+        institution: "Merge audit",
+        name: "Merge audit wallet",
+        provider: "manual",
+      },
+      context,
+    );
+    await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 5,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Merge Audit Source",
+        notes: null,
+      },
+      context,
+    );
+    await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 7,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Merge Audit Target",
+        notes: null,
+      },
+      context,
+    );
+    const merchants = await service.listMerchants(userId, 200);
+    const source = merchants.find((item) => item.displayName === "Merge Audit Source");
+    const target = merchants.find((item) => item.displayName === "Merge Audit Target");
+    if (!source || !target) throw new Error("Merchant merge fixtures were not created.");
+
+    const rationale = "The private receipt confirms these are the same merchant.";
+    await service.mergeMerchants(
+      {
+        rationale,
+        sourceMerchantId: source.id,
+        targetMerchantId: target.id,
+      },
+      context,
+    );
+
+    const [event] = await database.db
+      .select({ after: auditEvents.after, before: auditEvents.before })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "finance.merchants_merged"),
+          eq(auditEvents.entityId, target.id),
+        ),
+      );
+    expect(event).toEqual({
+      after: {
+        rationaleProvided: true,
+        sourceMerchantId: source.id,
+        targetMerchantId: target.id,
+      },
+      before: {
+        id: source.id,
+        isUserConfirmed: false,
+      },
+    });
+    expect(JSON.stringify(event)).not.toContain(rationale);
+  });
+
   it("excludes vault moves and matched card payments while preserving rent spending", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "transfer-reconciliation" };

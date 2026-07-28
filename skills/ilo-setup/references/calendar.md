@@ -64,6 +64,10 @@ An access token with `calendar:write` is separate, broad authority for direct Ca
 Proposal-only agents should use a token without that scope: previewing a candidate never grants or
 expands write authority.
 
+If a provider mutation returns a partial-effect ledger, do not replay it blindly. Show the
+completed and pending effects, synchronize Calendar first, and reconnect the affected account when
+the recovery guidance reports credential persistence or authorization trouble.
+
 ## Keep attention useful
 
 After a person creates or confirms a commitment, use one linked `upcoming` Calendar attention item

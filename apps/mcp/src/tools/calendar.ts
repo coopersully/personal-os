@@ -137,7 +137,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
     {
       annotations: {
         destructiveHint: true,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true,
         readOnlyHint: false,
       },
@@ -158,7 +158,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
     {
       annotations: {
         destructiveHint: true,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true,
         readOnlyHint: false,
       },
@@ -176,7 +176,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
     {
       annotations: {
         destructiveHint: true,
-        idempotentHint: true,
+        idempotentHint: false,
         openWorldHint: true,
         readOnlyHint: false,
       },

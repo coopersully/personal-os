@@ -333,7 +333,21 @@ export function createConnectorService({
           event.remoteEventId,
           event.remoteEtag,
         );
-        await saveGoogleCredentials(account.id, value);
+        try {
+          await saveGoogleCredentials(account.id, value);
+        } catch {
+          throw new AppError(
+            "service_unavailable",
+            "The provider event was deleted, but Ilo could not persist refreshed provider credentials.",
+            {
+              partialEffect: "provider_event_deleted",
+              provider: "google",
+              recovery:
+                "Synchronize Calendar before retrying; reconnect the account if authorization fails.",
+              remoteEventId: event.remoteEventId,
+            },
+          );
+        }
         return;
       }
       if (calendar.provider === "icloud") {
@@ -360,7 +374,21 @@ export function createConnectorService({
           event.remoteEtag,
           providerEventInput(input) as UpdateEventInput,
         );
-        await saveGoogleCredentials(account.id, result.credentials);
+        try {
+          await saveGoogleCredentials(account.id, result.credentials);
+        } catch {
+          throw new AppError(
+            "service_unavailable",
+            "The provider event was updated, but Ilo could not persist refreshed provider credentials.",
+            {
+              partialEffect: "provider_event_updated",
+              provider: "google",
+              recovery:
+                "Synchronize Calendar before retrying; reconnect the account if authorization fails.",
+              remoteEventId: result.value.remoteEventId,
+            },
+          );
+        }
         return result.value;
       }
       if (calendar.provider === "icloud") {

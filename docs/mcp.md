@@ -131,7 +131,10 @@ server-verified source ownership/revision and idempotency identity. The bounded 
 add attendees, recurrence, or buffer events and never moves another event. Mail ingestion and
 Mail-to-Calendar wiring are not part of this Calendar contract. The `calendar:write` scope remains
 independent broad authority for direct event mutations; proposal-only agents should not receive
-that scope.
+that scope. When one or more provider event mutations finish before a later provider or local
+projection/audit failure, the API returns a reconciliation ledger with the Calendar operation,
+completed and pending provider effects, provider/calendar/remote identities, and sync-before-retry
+recovery. These failures are not safe to replay blindly.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
 

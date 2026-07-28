@@ -24,6 +24,10 @@ import type {
 import { and, asc, desc, eq, gt, ilike, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { buildCalendarCommitmentProposal } from "./calendar-proposal.js";
+import {
+  type CalendarProviderEffect,
+  createCalendarProviderEffectLedger,
+} from "./calendar-provider-effects.js";
 import type { ConnectedEventGateway } from "./connector-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -135,6 +139,25 @@ function eventBlock(record: CalendarEventRecord): CalendarEventBlock {
     eventId: record.id,
     mode: record.blockMode as EventBlockMode,
     provider: record.provider,
+  };
+}
+
+function providerEffect(
+  action: CalendarProviderEffect["action"],
+  calendar: CalendarRecord,
+  event: CalendarEventRecord | null,
+  role: CalendarProviderEffect["role"],
+): CalendarProviderEffect {
+  if (calendar.provider === "local") {
+    throw new AppError("internal_error", "Local Calendar changes are not provider effects.");
+  }
+  return {
+    action,
+    calendarId: calendar.id,
+    eventId: event?.id ?? null,
+    provider: calendar.provider,
+    remoteEventId: action === "create" ? null : (event?.remoteEventId ?? null),
+    role,
   };
 }
 
@@ -290,11 +313,15 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
     async createEvent(input: CreateEventInput, context: MutationContext): Promise<CalendarEvent> {
       const calendar = await findCalendar(context.principal.userId, input.calendarId);
       requireWritable(calendar);
+      const effect =
+        calendar.provider === "local" ? null : providerEffect("create", calendar, null, "source");
+      const ledger = createCalendarProviderEffectLedger("create_event", effect ? [effect] : []);
       const remote =
-        calendar.provider !== "local" ? await connectedEvents.create(calendar, input) : null;
-      let record: CalendarEventRecord;
-      try {
-        record = await db.transaction(async (transaction) => {
+        effect === null
+          ? null
+          : await ledger.run(effect, () => connectedEvents.create(calendar, input));
+      const record = await ledger.commit(() =>
+        db.transaction(async (transaction) => {
           const created = requireDatabaseRecord(
             (
               await transaction
@@ -338,20 +365,8 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
             }),
           );
           return created;
-        });
-      } catch (error) {
-        if (!remote) throw error;
-        throw new AppError(
-          "service_unavailable",
-          "The provider event was created, but Ilo could not commit its local projection.",
-          {
-            partialEffect: "provider_event_created",
-            provider: calendar.provider,
-            recovery:
-              "Refresh or synchronize Calendar before retrying so the provider event is not duplicated.",
-          },
-        );
-      }
+        }),
+      );
       return serializeEvent(record, [], calendar.accountId);
     },
 
@@ -410,63 +425,73 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
               .limit(2)
           : [];
       const adopted = adoptionCandidates.length === 1 ? adoptionCandidates[0] : undefined;
+      const effect =
+        !adopted && destination.provider !== "local"
+          ? providerEffect("create", destination, null, "block")
+          : null;
+      const ledger = createCalendarProviderEffectLedger(
+        "create_event_block",
+        effect ? [effect] : [],
+      );
       const remote = adopted
         ? null
-        : destination.provider !== "local"
-          ? await connectedEvents.create(destination, mirrored)
+        : effect
+          ? await ledger.run(effect, () => connectedEvents.create(destination, mirrored))
           : null;
-      await db.transaction(async (transaction) => {
-        const created = adopted
-          ? requireDatabaseRecord(
-              (
-                await transaction
-                  .update(calendarEvents)
-                  .set({ blockMode: input.mode, blockSourceEventId: source.id, updatedAt: now() })
-                  .where(eq(calendarEvents.id, adopted.id))
-                  .returning()
-              )[0],
-              "The existing busy block could not be linked.",
-            )
-          : requireDatabaseRecord(
-              (
-                await transaction
-                  .insert(calendarEvents)
-                  .values({
-                    allDay: remote?.allDay ?? mirrored.allDay,
-                    blockMode: input.mode,
-                    blockSourceEventId: source.id,
-                    calendarId: destination.id,
-                    conferenceUrl: remote?.conferenceUrl ?? null,
-                    endsAt: remote?.endsAt ?? new Date(mirrored.endsAt),
-                    location: remote?.location ?? mirrored.location,
-                    notes: remote?.notes ?? mirrored.notes,
-                    provider: destination.provider,
-                    raw: remote?.raw,
-                    recurrence: remote?.recurrence ?? [],
-                    remoteEtag: remote?.etag,
-                    remoteEventId: remote?.remoteEventId,
-                    startsAt: remote?.startsAt ?? new Date(mirrored.startsAt),
-                    status: remote?.status ?? "confirmed",
-                    syncedAt: remote ? now() : null,
-                    timezone: remote?.timezone ?? mirrored.timezone,
-                    title: remote?.title ?? mirrored.title,
-                    userId: context.principal.userId,
-                  })
-                  .returning()
-              )[0],
-              "The calendar block could not be created.",
-            );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "calendar_event.blocked",
-            after: auditSnapshot({ block: created, source }),
-            before: auditSnapshot(source),
-            entityId: source.id,
-            entityType: "calendar_event",
-            ...context,
-          }),
-        );
-      });
+      await ledger.commit(() =>
+        db.transaction(async (transaction) => {
+          const created = adopted
+            ? requireDatabaseRecord(
+                (
+                  await transaction
+                    .update(calendarEvents)
+                    .set({ blockMode: input.mode, blockSourceEventId: source.id, updatedAt: now() })
+                    .where(eq(calendarEvents.id, adopted.id))
+                    .returning()
+                )[0],
+                "The existing busy block could not be linked.",
+              )
+            : requireDatabaseRecord(
+                (
+                  await transaction
+                    .insert(calendarEvents)
+                    .values({
+                      allDay: remote?.allDay ?? mirrored.allDay,
+                      blockMode: input.mode,
+                      blockSourceEventId: source.id,
+                      calendarId: destination.id,
+                      conferenceUrl: remote?.conferenceUrl ?? null,
+                      endsAt: remote?.endsAt ?? new Date(mirrored.endsAt),
+                      location: remote?.location ?? mirrored.location,
+                      notes: remote?.notes ?? mirrored.notes,
+                      provider: destination.provider,
+                      raw: remote?.raw,
+                      recurrence: remote?.recurrence ?? [],
+                      remoteEtag: remote?.etag,
+                      remoteEventId: remote?.remoteEventId,
+                      startsAt: remote?.startsAt ?? new Date(mirrored.startsAt),
+                      status: remote?.status ?? "confirmed",
+                      syncedAt: remote ? now() : null,
+                      timezone: remote?.timezone ?? mirrored.timezone,
+                      title: remote?.title ?? mirrored.title,
+                      userId: context.principal.userId,
+                    })
+                    .returning()
+                )[0],
+                "The calendar block could not be created.",
+              );
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "calendar_event.blocked",
+              after: auditSnapshot({ block: created, source }),
+              before: auditSnapshot(source),
+              entityId: source.id,
+              entityType: "calendar_event",
+              ...context,
+            }),
+          );
+        }),
+      );
       return serializeWithBlocks(source);
     },
 
@@ -566,32 +591,42 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       }
       const destination = await findCalendar(context.principal.userId, block.calendarId);
       requireWritable(destination);
-      if (destination.provider !== "local") {
-        await connectedEvents.delete(destination, block);
+      const effect =
+        destination.provider === "local"
+          ? null
+          : providerEffect("delete", destination, block, "block");
+      const ledger = createCalendarProviderEffectLedger(
+        "delete_event_block",
+        effect ? [effect] : [],
+      );
+      if (effect) {
+        await ledger.run(effect, () => connectedEvents.delete(destination, block));
       }
-      await db.transaction(async (transaction) => {
-        const deletedAt = now();
-        const after = requireDatabaseRecord(
-          (
-            await transaction
-              .update(calendarEvents)
-              .set({ deletedAt, updatedAt: deletedAt })
-              .where(eq(calendarEvents.id, block.id))
-              .returning()
-          )[0],
-          "The linked calendar block could not be removed.",
-        );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "calendar_event.unblocked",
-            after: auditSnapshot(after),
-            before: auditSnapshot(block),
-            entityId: source.id,
-            entityType: "calendar_event",
-            ...context,
-          }),
-        );
-      });
+      await ledger.commit(() =>
+        db.transaction(async (transaction) => {
+          const deletedAt = now();
+          const after = requireDatabaseRecord(
+            (
+              await transaction
+                .update(calendarEvents)
+                .set({ deletedAt, updatedAt: deletedAt })
+                .where(eq(calendarEvents.id, block.id))
+                .returning()
+            )[0],
+            "The linked calendar block could not be removed.",
+          );
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "calendar_event.unblocked",
+              after: auditSnapshot(after),
+              before: auditSnapshot(block),
+              entityId: source.id,
+              entityType: "calendar_event",
+              ...context,
+            }),
+          );
+        }),
+      );
       return serializeWithBlocks(source);
     },
 
@@ -601,50 +636,69 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       const calendar = await findCalendar(context.principal.userId, before.calendarId);
       requireWritable(calendar);
       const blocks = await findActiveBlocks(context.principal.userId, before.id);
+      const blockTargets = [];
       for (const block of blocks) {
         const destination = await findCalendar(context.principal.userId, block.calendarId);
         requireWritable(destination);
-        if (destination.provider !== "local") {
-          await connectedEvents.delete(destination, block);
+        blockTargets.push({
+          block,
+          destination,
+          effect:
+            destination.provider === "local"
+              ? null
+              : providerEffect("delete", destination, block, "block"),
+        });
+      }
+      const sourceEffect =
+        calendar.provider === "local" ? null : providerEffect("delete", calendar, before, "source");
+      const ledger = createCalendarProviderEffectLedger("delete_event", [
+        ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
+        ...(sourceEffect ? [sourceEffect] : []),
+      ]);
+      for (const { block, destination, effect } of blockTargets) {
+        if (effect) {
+          await ledger.run(effect, () => connectedEvents.delete(destination, block));
         }
       }
-      if (calendar.provider !== "local") {
-        await connectedEvents.delete(calendar, before);
+      if (sourceEffect) {
+        await ledger.run(sourceEffect, () => connectedEvents.delete(calendar, before));
       }
-      await db.transaction(async (transaction) => {
-        const deletedAt = now();
-        const after = requireDatabaseRecord(
-          (
+      await ledger.commit(() =>
+        db.transaction(async (transaction) => {
+          const deletedAt = now();
+          const after = requireDatabaseRecord(
+            (
+              await transaction
+                .update(calendarEvents)
+                .set({ deletedAt, updatedAt: deletedAt })
+                .where(eq(calendarEvents.id, before.id))
+                .returning()
+            )[0],
+            "The calendar event could not be deleted.",
+          );
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "calendar_event.deleted",
+              after: auditSnapshot(after),
+              before: auditSnapshot(before),
+              entityId: after.id,
+              entityType: "calendar_event",
+              ...context,
+            }),
+          );
+          if (blocks.length > 0) {
             await transaction
               .update(calendarEvents)
               .set({ deletedAt, updatedAt: deletedAt })
-              .where(eq(calendarEvents.id, before.id))
-              .returning()
-          )[0],
-          "The calendar event could not be deleted.",
-        );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "calendar_event.deleted",
-            after: auditSnapshot(after),
-            before: auditSnapshot(before),
-            entityId: after.id,
-            entityType: "calendar_event",
-            ...context,
-          }),
-        );
-        if (blocks.length > 0) {
-          await transaction
-            .update(calendarEvents)
-            .set({ deletedAt, updatedAt: deletedAt })
-            .where(
-              inArray(
-                calendarEvents.id,
-                blocks.map((block) => block.id),
-              ),
-            );
-        }
-      });
+              .where(
+                inArray(
+                  calendarEvents.id,
+                  blocks.map((block) => block.id),
+                ),
+              );
+          }
+        }),
+      );
     },
 
     async getEvent(id: string, userId: string): Promise<CalendarEvent> {
@@ -811,24 +865,6 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       requireSourceEvent(before);
       const calendar = await findCalendar(context.principal.userId, before.calendarId);
       requireWritable(calendar);
-      const remote =
-        calendar.provider !== "local"
-          ? await connectedEvents.create(calendar, {
-              allDay: before.allDay,
-              calendarId: before.calendarId,
-              endsAt: before.endsAt.toISOString(),
-              location: before.location,
-              notes: before.notes,
-              startsAt: before.startsAt.toISOString(),
-              timezone: before.timezone,
-              title: before.title,
-            })
-          : null;
-      const projectedSource = {
-        ...before,
-        ...(remote ? connectedEventValues(remote, now()) : {}),
-        deletedAt: null,
-      };
       const deletedBlocks = await db
         .select()
         .from(calendarEvents)
@@ -840,14 +876,51 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
           ),
         )
         .orderBy(asc(calendarEvents.createdAt), asc(calendarEvents.id));
+      const blockTargets = [];
+      for (const block of deletedBlocks) {
+        const destination = await findCalendar(context.principal.userId, block.calendarId);
+        requireWritable(destination);
+        blockTargets.push({
+          block,
+          destination,
+          effect:
+            destination.provider === "local"
+              ? null
+              : providerEffect("create", destination, block, "block"),
+        });
+      }
+      const sourceEffect =
+        calendar.provider === "local" ? null : providerEffect("create", calendar, before, "source");
+      const ledger = createCalendarProviderEffectLedger("restore_event", [
+        ...(sourceEffect ? [sourceEffect] : []),
+        ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
+      ]);
+      const remote =
+        sourceEffect !== null
+          ? await ledger.run(sourceEffect, () =>
+              connectedEvents.create(calendar, {
+                allDay: before.allDay,
+                calendarId: before.calendarId,
+                endsAt: before.endsAt.toISOString(),
+                location: before.location,
+                notes: before.notes,
+                startsAt: before.startsAt.toISOString(),
+                timezone: before.timezone,
+                title: before.title,
+              }),
+            )
+          : null;
+      const projectedSource = {
+        ...before,
+        ...(remote ? connectedEventValues(remote, now()) : {}),
+        deletedAt: null,
+      };
       const restoredBlocks: Array<{
         block: CalendarEventRecord;
         remote: ConnectedEvent | null;
         values: CreateEventInput;
       }> = [];
-      for (const block of deletedBlocks) {
-        const destination = await findCalendar(context.principal.userId, block.calendarId);
-        requireWritable(destination);
+      for (const { block, destination, effect } of blockTargets) {
         const values = blockInput(
           projectedSource,
           destination.id,
@@ -855,79 +928,80 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         );
         restoredBlocks.push({
           block,
-          remote:
-            destination.provider !== "local"
-              ? await connectedEvents.create(destination, values)
-              : null,
+          remote: effect
+            ? await ledger.run(effect, () => connectedEvents.create(destination, values))
+            : null,
           values,
         });
       }
-      const after = await db.transaction(async (transaction) => {
-        const restoredAt = now();
-        const restored = requireDatabaseRecord(
-          (
+      const after = await ledger.commit(() =>
+        db.transaction(async (transaction) => {
+          const restoredAt = now();
+          const restored = requireDatabaseRecord(
+            (
+              await transaction
+                .update(calendarEvents)
+                .set({
+                  ...(remote
+                    ? {
+                        allDay: remote.allDay,
+                        conferenceUrl: remote.conferenceUrl,
+                        endsAt: remote.endsAt,
+                        location: remote.location,
+                        notes: remote.notes,
+                        raw: remote.raw,
+                        recurrence: remote.recurrence,
+                        remoteEtag: remote.etag,
+                        remoteEventId: remote.remoteEventId,
+                        startsAt: remote.startsAt,
+                        status: remote.status,
+                        syncedAt: restoredAt,
+                        timezone: remote.timezone,
+                        title: remote.title,
+                      }
+                    : {}),
+                  deletedAt: null,
+                  updatedAt: restoredAt,
+                })
+                .where(eq(calendarEvents.id, before.id))
+                .returning()
+            )[0],
+            "The calendar event could not be restored.",
+          );
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "calendar_event.restored",
+              after: auditSnapshot(restored),
+              before: auditSnapshot(before),
+              entityId: restored.id,
+              entityType: "calendar_event",
+              ...context,
+            }),
+          );
+          for (const restoredBlock of restoredBlocks) {
+            const blockRemote = restoredBlock.remote;
             await transaction
               .update(calendarEvents)
               .set({
-                ...(remote
-                  ? {
-                      allDay: remote.allDay,
-                      conferenceUrl: remote.conferenceUrl,
-                      endsAt: remote.endsAt,
-                      location: remote.location,
-                      notes: remote.notes,
-                      raw: remote.raw,
-                      recurrence: remote.recurrence,
-                      remoteEtag: remote.etag,
-                      remoteEventId: remote.remoteEventId,
-                      startsAt: remote.startsAt,
-                      status: remote.status,
-                      syncedAt: restoredAt,
-                      timezone: remote.timezone,
-                      title: remote.title,
-                    }
-                  : {}),
+                ...(blockRemote
+                  ? connectedEventValues(blockRemote, restoredAt)
+                  : {
+                      allDay: restoredBlock.values.allDay,
+                      endsAt: new Date(restoredBlock.values.endsAt),
+                      location: restoredBlock.values.location,
+                      notes: restoredBlock.values.notes,
+                      startsAt: new Date(restoredBlock.values.startsAt),
+                      timezone: restoredBlock.values.timezone,
+                      title: restoredBlock.values.title,
+                    }),
                 deletedAt: null,
                 updatedAt: restoredAt,
               })
-              .where(eq(calendarEvents.id, before.id))
-              .returning()
-          )[0],
-          "The calendar event could not be restored.",
-        );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "calendar_event.restored",
-            after: auditSnapshot(restored),
-            before: auditSnapshot(before),
-            entityId: restored.id,
-            entityType: "calendar_event",
-            ...context,
-          }),
-        );
-        for (const restoredBlock of restoredBlocks) {
-          const blockRemote = restoredBlock.remote;
-          await transaction
-            .update(calendarEvents)
-            .set({
-              ...(blockRemote
-                ? connectedEventValues(blockRemote, restoredAt)
-                : {
-                    allDay: restoredBlock.values.allDay,
-                    endsAt: new Date(restoredBlock.values.endsAt),
-                    location: restoredBlock.values.location,
-                    notes: restoredBlock.values.notes,
-                    startsAt: new Date(restoredBlock.values.startsAt),
-                    timezone: restoredBlock.values.timezone,
-                    title: restoredBlock.values.title,
-                  }),
-              deletedAt: null,
-              updatedAt: restoredAt,
-            })
-            .where(eq(calendarEvents.id, restoredBlock.block.id));
-        }
-        return restored;
-      });
+              .where(eq(calendarEvents.id, restoredBlock.block.id));
+          }
+          return restored;
+        }),
+      );
       return serializeWithBlocks(after);
     },
 
@@ -980,47 +1054,57 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       requireWritable(destination);
       const values = blockInput(source, destination.id, input.mode);
       const { calendarId: _calendarId, ...update } = values;
+      const effect =
+        destination.provider === "local"
+          ? null
+          : providerEffect("update", destination, block, "block");
+      const ledger = createCalendarProviderEffectLedger(
+        "update_event_block",
+        effect ? [effect] : [],
+      );
       const remote =
-        destination.provider !== "local"
-          ? await connectedEvents.update(destination, block, update)
+        effect !== null
+          ? await ledger.run(effect, () => connectedEvents.update(destination, block, update))
           : null;
-      await db.transaction(async (transaction) => {
-        const updatedAt = now();
-        const after = requireDatabaseRecord(
-          (
-            await transaction
-              .update(calendarEvents)
-              .set({
-                ...(remote
-                  ? connectedEventValues(remote, updatedAt)
-                  : {
-                      allDay: values.allDay,
-                      endsAt: new Date(values.endsAt),
-                      location: values.location,
-                      notes: values.notes,
-                      startsAt: new Date(values.startsAt),
-                      timezone: values.timezone,
-                      title: values.title,
-                    }),
-                blockMode: input.mode,
-                updatedAt,
-              })
-              .where(eq(calendarEvents.id, block.id))
-              .returning()
-          )[0],
-          "The linked calendar block could not be updated.",
-        );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "calendar_event.block_privacy_changed",
-            after: auditSnapshot(after),
-            before: auditSnapshot(block),
-            entityId: source.id,
-            entityType: "calendar_event",
-            ...context,
-          }),
-        );
-      });
+      await ledger.commit(() =>
+        db.transaction(async (transaction) => {
+          const updatedAt = now();
+          const after = requireDatabaseRecord(
+            (
+              await transaction
+                .update(calendarEvents)
+                .set({
+                  ...(remote
+                    ? connectedEventValues(remote, updatedAt)
+                    : {
+                        allDay: values.allDay,
+                        endsAt: new Date(values.endsAt),
+                        location: values.location,
+                        notes: values.notes,
+                        startsAt: new Date(values.startsAt),
+                        timezone: values.timezone,
+                        title: values.title,
+                      }),
+                  blockMode: input.mode,
+                  updatedAt,
+                })
+                .where(eq(calendarEvents.id, block.id))
+                .returning()
+            )[0],
+            "The linked calendar block could not be updated.",
+          );
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "calendar_event.block_privacy_changed",
+              after: auditSnapshot(after),
+              before: auditSnapshot(block),
+              entityId: source.id,
+              entityType: "calendar_event",
+              ...context,
+            }),
+          );
+        }),
+      );
       return serializeWithBlocks(source);
     },
 
@@ -1038,9 +1122,29 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       if (endsAt <= startsAt) {
         throw new AppError("invalid_request", "Event end must be after its start.");
       }
+      const blocks = await findActiveBlocks(context.principal.userId, before.id);
+      const blockTargets = [];
+      for (const block of blocks) {
+        const destination = await findCalendar(context.principal.userId, block.calendarId);
+        requireWritable(destination);
+        blockTargets.push({
+          block,
+          destination,
+          effect:
+            destination.provider === "local"
+              ? null
+              : providerEffect("update", destination, block, "block"),
+        });
+      }
+      const sourceEffect =
+        calendar.provider === "local" ? null : providerEffect("update", calendar, before, "source");
+      const ledger = createCalendarProviderEffectLedger("update_event", [
+        ...(sourceEffect ? [sourceEffect] : []),
+        ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
+      ]);
       const remote =
-        calendar.provider !== "local"
-          ? await connectedEvents.update(calendar, before, input)
+        sourceEffect !== null
+          ? await ledger.run(sourceEffect, () => connectedEvents.update(calendar, before, input))
           : null;
       const localValues = {
         ...(input.allDay === undefined ? {} : { allDay: input.allDay }),
@@ -1063,15 +1167,12 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         ...before,
         ...(remote ? connectedEventValues(remote, now()) : localValues),
       };
-      const blocks = await findActiveBlocks(context.principal.userId, before.id);
       const reconciledBlocks: Array<{
         block: CalendarEventRecord;
         remote: ConnectedEvent | null;
         values: CreateEventInput;
       }> = [];
-      for (const block of blocks) {
-        const destination = await findCalendar(context.principal.userId, block.calendarId);
-        requireWritable(destination);
+      for (const { block, destination, effect } of blockTargets) {
         const values = blockInput(
           projectedSource,
           destination.id,
@@ -1080,59 +1181,60 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         const { calendarId: _calendarId, ...update } = values;
         reconciledBlocks.push({
           block,
-          remote:
-            destination.provider !== "local"
-              ? await connectedEvents.update(destination, block, update)
-              : null,
+          remote: effect
+            ? await ledger.run(effect, () => connectedEvents.update(destination, block, update))
+            : null,
           values,
         });
       }
-      const after = await db.transaction(async (transaction) => {
-        const updatedAt = now();
-        const updated = requireDatabaseRecord(
-          (
+      const after = await ledger.commit(() =>
+        db.transaction(async (transaction) => {
+          const updatedAt = now();
+          const updated = requireDatabaseRecord(
+            (
+              await transaction
+                .update(calendarEvents)
+                .set({
+                  ...(remote ? connectedEventValues(remote, updatedAt) : localValues),
+                  updatedAt,
+                })
+                .where(eq(calendarEvents.id, before.id))
+                .returning()
+            )[0],
+            "The calendar event could not be updated.",
+          );
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "calendar_event.updated",
+              after: auditSnapshot(updated),
+              before: auditSnapshot(before),
+              entityId: updated.id,
+              entityType: "calendar_event",
+              ...context,
+            }),
+          );
+          for (const reconciled of reconciledBlocks) {
             await transaction
               .update(calendarEvents)
               .set({
-                ...(remote ? connectedEventValues(remote, updatedAt) : localValues),
+                ...(reconciled.remote
+                  ? connectedEventValues(reconciled.remote, updatedAt)
+                  : {
+                      allDay: reconciled.values.allDay,
+                      endsAt: new Date(reconciled.values.endsAt),
+                      location: reconciled.values.location,
+                      notes: reconciled.values.notes,
+                      startsAt: new Date(reconciled.values.startsAt),
+                      timezone: reconciled.values.timezone,
+                      title: reconciled.values.title,
+                    }),
                 updatedAt,
               })
-              .where(eq(calendarEvents.id, before.id))
-              .returning()
-          )[0],
-          "The calendar event could not be updated.",
-        );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "calendar_event.updated",
-            after: auditSnapshot(updated),
-            before: auditSnapshot(before),
-            entityId: updated.id,
-            entityType: "calendar_event",
-            ...context,
-          }),
-        );
-        for (const reconciled of reconciledBlocks) {
-          await transaction
-            .update(calendarEvents)
-            .set({
-              ...(reconciled.remote
-                ? connectedEventValues(reconciled.remote, updatedAt)
-                : {
-                    allDay: reconciled.values.allDay,
-                    endsAt: new Date(reconciled.values.endsAt),
-                    location: reconciled.values.location,
-                    notes: reconciled.values.notes,
-                    startsAt: new Date(reconciled.values.startsAt),
-                    timezone: reconciled.values.timezone,
-                    title: reconciled.values.title,
-                  }),
-              updatedAt,
-            })
-            .where(eq(calendarEvents.id, reconciled.block.id));
-        }
-        return updated;
-      });
+              .where(eq(calendarEvents.id, reconciled.block.id));
+          }
+          return updated;
+        }),
+      );
       return serializeWithBlocks(after);
     },
 

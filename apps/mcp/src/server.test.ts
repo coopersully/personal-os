@@ -789,7 +789,7 @@ describe("ilo MCP server", () => {
           "set_event_block_privacy",
           {
             destructiveHint: true,
-            idempotentHint: true,
+            idempotentHint: false,
             openWorldHint: true,
             readOnlyHint: false,
           },
@@ -798,7 +798,7 @@ describe("ilo MCP server", () => {
           "unblock_event",
           {
             destructiveHint: true,
-            idempotentHint: true,
+            idempotentHint: false,
             openWorldHint: true,
             readOnlyHint: false,
           },
@@ -807,7 +807,7 @@ describe("ilo MCP server", () => {
           "delete_event",
           {
             destructiveHint: true,
-            idempotentHint: true,
+            idempotentHint: false,
             openWorldHint: true,
             readOnlyHint: false,
           },

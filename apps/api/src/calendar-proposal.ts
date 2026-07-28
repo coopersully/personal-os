@@ -84,6 +84,8 @@ export function buildCalendarCommitmentProposal(
     reasons.push(
       "This preview does not authorize a write; a person must use an interactive Calendar action to create the event.",
     );
+  if (input.requestedPolicy === "read_only")
+    reasons.push("Read-only policy evaluates the candidate without authorizing a write.");
   if (profile) {
     if (profile.status === "draft")
       warnings.push(

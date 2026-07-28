@@ -95,6 +95,7 @@ describe("Calendar commitment proposal policy", () => {
       effectivePolicy: "read_only",
       requiresInteractiveApproval: false,
     });
+    expect(proposal.policy.reasons).toContainEqual(expect.stringContaining("Read-only policy"));
   });
 
   it("keeps approve-each interactive and reports a missing expected profile", () => {

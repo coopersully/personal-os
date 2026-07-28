@@ -24,6 +24,7 @@ describe.sequential("Calendar commitment proposals", () => {
   let profileId: string;
   let remoteAccountId: string;
   let remoteCalendarId: string;
+  let secondRemoteCalendarId: string;
   let service: ReturnType<typeof createCalendarService>;
   let userId: string;
   const gateway = {
@@ -43,9 +44,21 @@ describe.sequential("Calendar commitment proposals", () => {
       title: "Provider reservation",
     })),
     delete: vi.fn(async () => undefined),
-    update: vi.fn(async () => {
-      throw new Error("not used");
-    }),
+    update: vi.fn(async () => ({
+      allDay: false,
+      conferenceUrl: null,
+      endsAt: new Date("2026-08-01T17:00:00.000Z"),
+      etag: "remote-etag-updated",
+      location: null,
+      notes: null,
+      raw: { id: "remote-updated" },
+      recurrence: [],
+      remoteEventId: "remote-updated",
+      startsAt: new Date("2026-08-01T16:00:00.000Z"),
+      status: "confirmed" as const,
+      timezone: "UTC",
+      title: "Updated provider event",
+    })),
   };
   const context = () => ({
     principal: {
@@ -135,6 +148,7 @@ describe.sequential("Calendar commitment proposals", () => {
       throw new Error("Calendar fixtures were not created.");
     localCalendarId = localCalendar.id;
     remoteCalendarId = remoteCalendar.id;
+    secondRemoteCalendarId = secondRemoteCalendar.id;
     const [profile] = await database.db
       .insert(domainProfiles)
       .values({
@@ -239,6 +253,60 @@ describe.sequential("Calendar commitment proposals", () => {
       title: "Reservation",
       visibility: "private" as const,
     };
+  }
+
+  async function createCompoundFixture(label: string, deleted = false) {
+    const [source] = await database.db
+      .insert(calendarEvents)
+      .values({
+        allDay: false,
+        calendarId: localCalendarId,
+        deletedAt: deleted ? timestamp : null,
+        endsAt: new Date("2026-08-04T17:00:00.000Z"),
+        provider: "local",
+        startsAt: new Date("2026-08-04T16:00:00.000Z"),
+        timezone: "UTC",
+        title: `${label} source`,
+        userId,
+      })
+      .returning();
+    if (!source) throw new Error("Compound source fixture was not created.");
+    const blocks = await database.db
+      .insert(calendarEvents)
+      .values([
+        {
+          allDay: false,
+          blockMode: "busy",
+          blockSourceEventId: source.id,
+          calendarId: remoteCalendarId,
+          createdAt: new Date(timestamp.getTime() + 1_000),
+          deletedAt: deleted ? timestamp : null,
+          endsAt: source.endsAt,
+          provider: "google",
+          remoteEventId: `${label}-block-1`,
+          startsAt: source.startsAt,
+          timezone: "UTC",
+          title: "Busy",
+          userId,
+        },
+        {
+          allDay: false,
+          blockMode: "busy",
+          blockSourceEventId: source.id,
+          calendarId: secondRemoteCalendarId,
+          createdAt: new Date(timestamp.getTime() + 2_000),
+          deletedAt: deleted ? timestamp : null,
+          endsAt: source.endsAt,
+          provider: "google",
+          remoteEventId: `${label}-block-2`,
+          startsAt: source.startsAt,
+          timezone: "UTC",
+          title: "Busy",
+          userId,
+        },
+      ])
+      .returning();
+    return { blocks, source };
   }
 
   it("keeps caller-supplied strong evidence preview-only and exposes source state", async () => {
@@ -349,6 +417,9 @@ describe.sequential("Calendar commitment proposals", () => {
   });
 
   it("discloses a completed provider write when projection persistence fails", async () => {
+    const auditsBefore = (
+      await database.db.select().from(auditEvents).where(eq(auditEvents.userId, userId))
+    ).filter((event) => event.requestId === "calendar-proposal-test").length;
     await expect(
       service.createEvent(
         {
@@ -366,8 +437,18 @@ describe.sequential("Calendar commitment proposals", () => {
     ).rejects.toMatchObject({
       code: "service_unavailable",
       details: {
+        completedEffects: [
+          expect.objectContaining({
+            action: "create",
+            remoteEventId: "remote-duplicate",
+            role: "source",
+          }),
+        ],
+        operation: "create_event",
         partialEffect: "provider_event_created",
+        pendingEffects: [],
         provider: "google",
+        remoteEventId: "remote-duplicate",
       },
     });
     expect(gateway.create).toHaveBeenCalled();
@@ -375,6 +456,120 @@ describe.sequential("Calendar commitment proposals", () => {
       .select()
       .from(auditEvents)
       .where(eq(auditEvents.userId, userId));
-    expect(audits.some((event) => event.action === "calendar_event.created")).toBe(true);
+    expect(audits.filter((event) => event.requestId === "calendar-proposal-test")).toHaveLength(
+      auditsBefore,
+    );
+  });
+
+  it("reports completed and pending provider effects when an event update fails mid-block", async () => {
+    const { blocks, source } = await createCompoundFixture("update");
+    gateway.update
+      .mockImplementationOnce(async () => ({
+        allDay: false,
+        conferenceUrl: null,
+        endsAt: source.endsAt,
+        etag: "update-etag",
+        location: null,
+        notes: null,
+        raw: { id: "updated-block-1" },
+        recurrence: [],
+        remoteEventId: "updated-block-1",
+        startsAt: source.startsAt,
+        status: "confirmed",
+        timezone: "UTC",
+        title: "Busy",
+      }))
+      .mockRejectedValueOnce(new Error("Injected second block update failure."));
+    await expect(
+      service.updateEvent(source.id, { title: "Changed" }, context()),
+    ).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: {
+        completedEffects: [
+          expect.objectContaining({
+            action: "update",
+            remoteEventId: "updated-block-1",
+            role: "block",
+          }),
+        ],
+        operation: "update_event",
+        pendingEffects: [
+          expect.objectContaining({
+            action: "update",
+            remoteEventId: blocks[1]?.remoteEventId,
+            role: "block",
+          }),
+        ],
+        recovery: expect.stringContaining("Synchronize Calendar before retrying"),
+      },
+    });
+  });
+
+  it("reports completed and pending provider effects when deletion fails mid-block", async () => {
+    const { blocks, source } = await createCompoundFixture("delete");
+    gateway.delete
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Injected second block delete failure."));
+    await expect(service.deleteEvent(source.id, context())).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: {
+        completedEffects: [
+          expect.objectContaining({
+            action: "delete",
+            remoteEventId: blocks[0]?.remoteEventId,
+            role: "block",
+          }),
+        ],
+        operation: "delete_event",
+        pendingEffects: [
+          expect.objectContaining({
+            action: "delete",
+            remoteEventId: blocks[1]?.remoteEventId,
+            role: "block",
+          }),
+        ],
+      },
+    });
+  });
+
+  it("reports completed and pending provider effects when restoration fails mid-block", async () => {
+    const { source } = await createCompoundFixture("restore", true);
+    gateway.create
+      .mockImplementationOnce(async () => ({
+        allDay: false,
+        conferenceUrl: null,
+        endsAt: source.endsAt,
+        etag: "restore-etag",
+        location: null,
+        notes: null,
+        raw: { id: "restored-block-1" },
+        recurrence: [],
+        remoteEventId: "restored-block-1",
+        startsAt: source.startsAt,
+        status: "confirmed",
+        timezone: "UTC",
+        title: "Busy",
+      }))
+      .mockRejectedValueOnce(new Error("Injected second block restore failure."));
+    await expect(service.restoreEvent(source.id, context())).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: {
+        completedEffects: [
+          expect.objectContaining({
+            action: "create",
+            remoteEventId: "restored-block-1",
+            role: "block",
+          }),
+        ],
+        operation: "restore_event",
+        pendingEffects: [
+          expect.objectContaining({
+            action: "create",
+            remoteEventId: null,
+            role: "block",
+          }),
+        ],
+      },
+    });
   });
 });

@@ -2443,6 +2443,32 @@ describe.sequential("connector service", () => {
           remoteEventId: "created-remote",
         },
       });
+      const [event] = await database.db
+        .select()
+        .from(calendarEvents)
+        .where(eq(calendarEvents.calendarId, calendar.id))
+        .limit(1);
+      if (!event) throw new Error("Google event fixture is missing.");
+      await expect(
+        service.eventGateway.update(calendar, event, { title: "Credential failure update" }),
+      ).rejects.toMatchObject({
+        code: "service_unavailable",
+        details: {
+          partialEffect: "provider_event_updated",
+          provider: "google",
+          recovery: expect.stringContaining("reconnect"),
+          remoteEventId: "updated-remote",
+        },
+      });
+      await expect(service.eventGateway.delete(calendar, event)).rejects.toMatchObject({
+        code: "service_unavailable",
+        details: {
+          partialEffect: "provider_event_deleted",
+          provider: "google",
+          recovery: expect.stringContaining("reconnect"),
+          remoteEventId: event.remoteEventId,
+        },
+      });
     } finally {
       await database.db.execute(
         sql`DROP TRIGGER reject_calendar_credential_update ON calendar_accounts`,
@@ -2795,7 +2821,7 @@ describe.sequential("connector service", () => {
       expect.objectContaining({ calendarId: primary.id }),
     ]);
     expect(unifiedEvents.some((value) => value.remoteEventId === mirroredEvent.remoteEventId)).toBe(
-      false,
+      true,
     );
     await expect(
       calendarService.listEvents(userId, {

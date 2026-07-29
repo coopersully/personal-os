@@ -1,7 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
-import { domainProfileApprovals, mailRuleWorkItems } from "./schema.js";
+import {
+  domainProfileApprovals,
+  mailCalendarCommitmentIntakes,
+  mailRuleWorkItems,
+} from "./schema.js";
 
 describe("database schema contracts", () => {
   it("keeps approval snapshot integrity identical in the schema and migration", async () => {
@@ -71,5 +75,44 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE INDEX "mail_rule_work_user_status_idx"');
     expect(migrationSql).toContain('"attempt_count" >= 0 AND "attempt_count" <= 5');
     expect(migrationSql).toContain("\"status\" IN ('succeeded', 'failed')");
+  });
+
+  it("keeps Mail-to-Calendar source identity and preview-only intake aligned", async () => {
+    const table = getTableConfig(mailCalendarCommitmentIntakes);
+    const fingerprintCheck = table.checks.find(
+      (candidate) => candidate.name === "mail_calendar_commitment_intake_source_fingerprint_check",
+    );
+    if (!fingerprintCheck) throw new Error("Commitment intake fingerprint check is missing.");
+    const accountAddressCheck = table.checks.find(
+      (candidate) =>
+        candidate.name === "mail_calendar_commitment_intake_account_address_hash_check",
+    );
+    if (!accountAddressCheck)
+      throw new Error("Commitment intake account-address check is missing.");
+    const schemaSql = new PgDialect().sqlToQuery(fingerprintCheck.value).sql;
+    const accountAddressSql = new PgDialect().sqlToQuery(accountAddressCheck.value).sql;
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0045_mail_calendar_commitment_intake.sql",
+      ),
+      "utf8",
+    );
+    expect(schemaSql).toContain(`"idempotency_key" ~ '^[0-9a-f]{64}$'`);
+    expect(accountAddressSql).toContain(`"authenticated_account_address_hash" IS NULL`);
+    expect(migrationSql).toContain('"provider_mailbox_ids" jsonb');
+    expect(migrationSql).toContain('"provider_revision" text');
+    expect(migrationSql).toContain('"source_message_mailbox_ids" jsonb');
+    expect(migrationSql).toContain('"source_message_revision" text');
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "mail_calendar_commitment_intake_identity_idx"',
+    );
+    expect(migrationSql).toContain('"account_id",\n\t\t"remote_message_id",\n\t\t"remote_part_id"');
+    expect(migrationSql).toContain(
+      "\"authority\" IN ('provider_projected_unverified', 'server_verified')",
+    );
+    expect(migrationSql).toContain(
+      "\"status\" IN ('preview_only', 'pending', 'claimed', 'reconcile', 'succeeded', 'failed')",
+    );
   });
 });

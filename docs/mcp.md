@@ -60,8 +60,10 @@ language. Mail uses exact deterministic matching, so its confidence threshold is
 Mail is the first executable implementation:
 
 - `get_mail_setup_context` maps stable account IDs to user-facing inbox identity, mailbox roles and
-  counts, sync freshness/error state, automatic-rule support, and deferred safety boundaries. It
-  returns no provider credentials.
+  counts, sync freshness/error state, automatic-rule support, and deferred safety boundaries. Its
+  commitment-intake summary reports provider-projected calendar attachment metadata as preview-only,
+  with zero server-verified items and automatic creation disabled. It returns no provider
+  credentials.
 - `create_mail_attention_item` derives source attribution from an owned conversation and
   serializes same-thread/kind updates so important mail uses the shared attention envelope without
   duplicate open records.
@@ -95,6 +97,8 @@ Mail is the first executable implementation:
 
 New rules remain disabled and preview-only by default. Active rules must be paused before their
 matching behavior changes, and connector sync executes only enabled `approved_rule` rules.
+MCP annotations remain untrusted UX hints. The API and durable scheduler remain authoritative;
+Mail-to-Calendar intake does not use experimental MCP task execution.
 
 Finance tools are a read/proposal adapter over the same Finance API used by the web app.
 `get_finance_guided_setup` is the entry point for a short Finance interview: it

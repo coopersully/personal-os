@@ -186,6 +186,8 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
                     bodyText,
                     cc: parsedAddresses(parsed.cc),
                     from: mailAddress(parsed.from?.value[0]),
+                    mailboxIds: [mailbox.path],
+                    providerRevision: String(message.uid),
                     receivedAt: parsed.date ?? new Date(message.internalDate ?? 0),
                     remoteMessageId: parsed.messageId ?? `${mailbox.path}:${String(message.uid)}`,
                     to: parsedAddresses(parsed.to),

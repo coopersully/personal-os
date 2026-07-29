@@ -117,6 +117,7 @@ const gmailPartSchema = z.object({
   parts: z.array(z.unknown()).default([]),
 });
 const gmailMessageSchema = z.object({
+  historyId: z.string().optional(),
   id: z.string(),
   internalDate: z.string().optional(),
   labelIds: z.array(z.string()).default([]),
@@ -591,6 +592,8 @@ function normalizeMailThread(
       bodyText: gmailBody(message.payload).trim(),
       cc: splitAddresses(gmailHeader(message, "cc")),
       from: parseMailAddress(gmailHeader(message, "from")),
+      mailboxIds: message.labelIds,
+      providerRevision: message.historyId ?? message.internalDate ?? null,
       receivedAt: normalizedGmailDate(message.internalDate),
       remoteMessageId: message.id,
       to: splitAddresses(gmailHeader(message, "to")),

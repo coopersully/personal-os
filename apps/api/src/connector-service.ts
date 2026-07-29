@@ -51,6 +51,7 @@ import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { recordMailCalendarCommitmentIntakes } from "./mail-calendar-intake.js";
 import {
   applyMailRuleActionToState,
   classifyMailRuleProviderFailure,
@@ -1406,17 +1407,19 @@ export function createConnectorService({
           },
           target: [mailThreads.accountId, mailThreads.remoteThreadId],
         })
-        .returning({ id: mailThreads.id });
+        .returning();
       if (!storedThread)
         throw new AppError("internal_error", "The mail conversation could not be saved.");
       for (const message of thread.messages ?? []) {
-        await db
+        const [storedMessage] = await db
           .insert(mailMessages)
           .values({
             attachments: message.attachments,
             bodyText: message.bodyText,
             cc: message.cc,
             from: message.from,
+            providerMailboxIds: message.mailboxIds ?? [],
+            providerRevision: message.providerRevision ?? null,
             receivedAt: message.receivedAt,
             remoteMessageId: message.remoteMessageId,
             threadId: storedThread.id,
@@ -1428,12 +1431,28 @@ export function createConnectorService({
               bodyText: message.bodyText,
               cc: message.cc,
               from: message.from,
+              providerMailboxIds: message.mailboxIds ?? [],
+              providerRevision: message.providerRevision ?? null,
               receivedAt: message.receivedAt,
               to: message.to,
               updatedAt: now(),
             },
             target: [mailMessages.threadId, mailMessages.remoteMessageId],
-          });
+          })
+          .returning();
+        if (!storedMessage)
+          throw new AppError("internal_error", "The mail message could not be saved.");
+        await db.transaction((transaction) =>
+          recordMailCalendarCommitmentIntakes(transaction, {
+            accountId: account.id,
+            authenticatedAccountAddress: account.email,
+            message: storedMessage,
+            principal,
+            recordedAt: now(),
+            requestId,
+            thread: storedThread,
+          }),
+        );
       }
     }
     const rules = await executableMailRules(account, principal, requestId);

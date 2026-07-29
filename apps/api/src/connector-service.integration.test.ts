@@ -16,6 +16,7 @@ import {
   type DatabaseClient,
   domainProfiles,
   mailboxes,
+  mailCalendarCommitmentIntakes,
   mailDrafts,
   mailMessages,
   mailRules,
@@ -30,6 +31,7 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createConnectorService, MailProviderRejectedError } from "./connector-service.js";
+import { recordMailCalendarCommitmentIntakes } from "./mail-calendar-intake.js";
 import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
 import { decryptJson, encryptJson } from "./security.js";
@@ -1102,10 +1104,18 @@ describe.sequential("connector service", () => {
                     id: "attachment-1",
                     size: 42,
                   },
+                  {
+                    contentType: "text/calendar; method=REQUEST",
+                    filename: "invite.ics",
+                    id: "calendar-part-1",
+                    size: 84,
+                  },
                 ],
                 bodyText: "Body",
                 cc: [],
                 from: { address: "sender@example.com", name: "Sender" },
+                mailboxIds: ["INBOX", "SENT"],
+                providerRevision: "history-1",
                 receivedAt: timestamp,
                 remoteMessageId: "ruled-message",
                 to: [],
@@ -1160,6 +1170,125 @@ describe.sequential("connector service", () => {
     );
     await expect(database.db.select().from(mailMessages)).resolves.toEqual([
       expect.objectContaining({ remoteMessageId: "ruled-message" }),
+    ]);
+    await expect(database.db.select().from(mailCalendarCommitmentIntakes)).resolves.toEqual([
+      expect.objectContaining({
+        authority: "provider_projected_unverified",
+        evidenceKind: "calendar_attachment_metadata",
+        remoteMessageId: "ruled-message",
+        remotePartId: "calendar-part-1",
+        sourceMessageMailboxIds: ["INBOX", "SENT"],
+        sourceMessageRevision: "history-1",
+        status: "preview_only",
+      }),
+    ]);
+    const intakeAudit = (
+      await database.db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.entityType, "mail_calendar_commitment_intake"))
+    ).at(-1);
+    expect(intakeAudit).toMatchObject({
+      action: "mail_calendar_intake.recorded",
+      actorType: "connector",
+      after: {
+        authority: "provider_projected_unverified",
+        evidenceKind: "calendar_attachment_metadata",
+        status: "preview_only",
+      },
+    });
+    expect(JSON.stringify(intakeAudit)).not.toContain("invite.ics");
+
+    const [intake] = await database.db.select().from(mailCalendarCommitmentIntakes);
+    const [message] = await database.db
+      .select()
+      .from(mailMessages)
+      .where(eq(mailMessages.remoteMessageId, "ruled-message"));
+    if (!intake || !message || !thread) throw new Error("Commitment intake fixture is missing.");
+    expect(JSON.stringify(intakeAudit)).not.toContain(intake.sourceFingerprint);
+    await expect(
+      database.db.transaction((transaction) =>
+        recordMailCalendarCommitmentIntakes(transaction, {
+          accountId: account.id,
+          authenticatedAccountAddress: account.email,
+          message,
+          principal: {
+            actorId: "11111111-1111-4111-8111-111111111111",
+            actorType: "connector",
+            userId: "11111111-1111-4111-8111-111111111111",
+          },
+          recordedAt: timestamp,
+          requestId: "cross-user-intake",
+          thread,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await database.db
+      .update(mailCalendarCommitmentIntakes)
+      .set({
+        authority: "server_verified",
+        evidenceKind: "test_verified_invitation",
+        status: "succeeded",
+      })
+      .where(eq(mailCalendarCommitmentIntakes.id, intake.id));
+    const connectorPrincipal = {
+      actorId: account.id,
+      actorType: "connector" as const,
+      userId,
+    };
+    await database.db.transaction((transaction) =>
+      recordMailCalendarCommitmentIntakes(transaction, {
+        accountId: account.id,
+        authenticatedAccountAddress: account.email,
+        message,
+        principal: connectorPrincipal,
+        recordedAt: new Date(timestamp.getTime() + 1_000),
+        requestId: "same-intake-source",
+        thread,
+      }),
+    );
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.id, intake.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        authority: "server_verified",
+        evidenceKind: "test_verified_invitation",
+        status: "succeeded",
+      }),
+    ]);
+    const [changedMessage] = await database.db
+      .update(mailMessages)
+      .set({ providerMailboxIds: ["SENT"], providerRevision: "history-2" })
+      .where(eq(mailMessages.id, message.id))
+      .returning();
+    if (!changedMessage) throw new Error("Changed commitment message fixture is missing.");
+    await database.db.transaction((transaction) =>
+      recordMailCalendarCommitmentIntakes(transaction, {
+        accountId: account.id,
+        authenticatedAccountAddress: account.email,
+        message: changedMessage,
+        principal: connectorPrincipal,
+        recordedAt: new Date(timestamp.getTime() + 2_000),
+        requestId: "changed-intake-source",
+        thread,
+      }),
+    );
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.id, intake.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        authority: "provider_projected_unverified",
+        evidenceKind: "calendar_attachment_metadata",
+        sourceMessageMailboxIds: ["SENT"],
+        sourceMessageRevision: "history-2",
+        status: "preview_only",
+      }),
     ]);
   });
 
@@ -4816,6 +4945,10 @@ describe.sequential("connector service", () => {
         oldestDueAt: null,
         pendingCount: 0,
         reconciliationCount: 0,
+      },
+      commitmentIntake: {
+        automaticCreationEnabled: false,
+        serverVerifiedCount: 0,
       },
     });
     await expect(

@@ -68,6 +68,11 @@ export const mailSetupContextSchema = z.object({
     pendingCount: z.int().nonnegative(),
     reconciliationCount: z.int().nonnegative(),
   }),
+  commitmentIntake: z.object({
+    automaticCreationEnabled: z.literal(false),
+    previewOnlyCount: z.int().nonnegative(),
+    serverVerifiedCount: z.literal(0),
+  }),
   safety: z.object({
     delayedRetentionAutomation: z.literal(true),
     permanentDeletion: z.literal(false),
@@ -143,6 +148,31 @@ export const mailMessageSchema = z.object({
   to: z.array(mailAddressSchema),
 });
 export type MailMessage = z.infer<typeof mailMessageSchema>;
+
+export const mailCalendarCommitmentIntakeSchema = z.object({
+  accountId: idSchema,
+  attachment: mailAttachmentSchema,
+  authenticatedAccountAddressHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable(),
+  authority: z.enum(["provider_projected_unverified", "server_verified"]),
+  createdAt: isoDateTimeSchema,
+  evidenceKind: z.string().trim().min(1).max(100),
+  id: idSchema,
+  idempotencyKey: z.string().regex(/^[a-f0-9]{64}$/),
+  remoteMessageId: z.string().min(1),
+  remotePartId: z.string().min(1),
+  remoteThreadId: z.string().min(1),
+  sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  sourceMessageId: idSchema.nullable(),
+  sourceMessageMailboxIds: z.array(z.string()),
+  sourceMessageRevision: z.string().nullable(),
+  sourceThreadId: idSchema.nullable(),
+  sourceThreadRevision: isoDateTimeSchema,
+  status: z.enum(["preview_only", "pending", "claimed", "reconcile", "succeeded", "failed"]),
+});
+export type MailCalendarCommitmentIntake = z.infer<typeof mailCalendarCommitmentIntakeSchema>;
 
 export const mailListQuerySchema = z.object({
   accountIds: z

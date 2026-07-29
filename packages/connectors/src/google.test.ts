@@ -305,6 +305,7 @@ describe("Google Calendar connector", () => {
             payload: { headers: [], mimeType: "multipart/alternative", parts: [] },
           },
           {
+            historyId: "history-2",
             id: "m2",
             internalDate: "1783958460000",
             labelIds: ["INBOX"],
@@ -406,6 +407,10 @@ describe("Google Calendar connector", () => {
         size: 42,
       },
     ]);
+    expect(result.value.threads[0]?.messages?.[1]).toMatchObject({
+      mailboxIds: ["INBOX"],
+      providerRevision: "history-2",
+    });
     expect(result.value.threads[1]).toMatchObject({
       bodyText: "Fallback body",
       receivedAt: new Date(0),

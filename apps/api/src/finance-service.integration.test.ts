@@ -324,6 +324,7 @@ describe.sequential("finance service", () => {
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
       "0044_durable_mail_rule_work",
+      "0045_mail_calendar_commitment_intake",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

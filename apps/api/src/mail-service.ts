@@ -1,4 +1,6 @@
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import {
+  attentionItems,
   auditEvents,
   calendarAccounts,
   type Database,
@@ -11,38 +13,99 @@ import {
   mailThreads,
 } from "@personal-os/database";
 import type {
+  ActivateMailRuleInput,
+  AttentionItem,
+  BulkUpdateMailInput,
+  BulkUpdateMailResult,
   CreateMailRuleInput,
   Mailbox,
+  MailDraft,
   MailDraftInput,
   MailListQuery,
   MailMessage,
   MailRule,
+  MailRulePreview,
+  MailSetupContext,
   MailThread,
   PreviewMailRuleInput,
   SendMailInput,
   UpdateMailRuleInput,
   UpdateMailThreadInput,
+  UpsertMailAttentionItemInput,
 } from "@personal-os/domain";
-import { mailRuleActionIsDue, matchesMailRule, resolveStoredMailRule } from "@personal-os/domain";
-import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
+import {
+  mailProfilePreferencesSchema,
+  mailRuleActionIsDue,
+  matchesMailRule,
+  resolveStoredMailRule,
+} from "@personal-os/domain";
+import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
-import type { ConnectedMailGateway } from "./connector-service.js";
+import {
+  type ConnectedMailGateway,
+  MailProviderRejectedError,
+  mailProviderPartialEffectError,
+} from "./connector-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
-import { auditSnapshot, serializeMailbox, serializeMailThread } from "./serialization.js";
+import {
+  auditAttentionItemMetadata,
+  auditMailRuleMetadata,
+  mailRuleChangedFields,
+  serializeMailbox,
+  serializeMailThread,
+} from "./serialization.js";
 import type { Principal } from "./types.js";
 
 type MutationContext = { principal: Principal; requestId: string };
+type MailSourceExecutor = Pick<Database, "select">;
+type MailRuleUpdateRequest = Omit<UpdateMailRuleInput, "enabled" | "policy"> & {
+  enabled?: boolean | undefined;
+  policy?: MailRule["policy"] | undefined;
+};
+const MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS = 2 * 60 * 1_000;
 
 export function createMailService({
   db,
   gateway,
   now,
+  reviewSigningKey,
 }: {
   db: Database;
   gateway: ConnectedMailGateway;
   now: () => Date;
+  reviewSigningKey: string;
 }) {
+  function previewFingerprint(
+    preview: Omit<MailRulePreview, "fingerprint">,
+    reviewedAt = preview.previewedAt,
+  ): string {
+    return createHmac("sha256", reviewSigningKey)
+      .update(
+        JSON.stringify({
+          candidates: preview.candidates.map((candidate) => ({
+            accountId: candidate.accountId,
+            actions: candidate.actions,
+            from: candidate.from,
+            id: candidate.id,
+            receivedAt: candidate.receivedAt,
+            subject: candidate.subject,
+            updatedAt: candidate.updatedAt,
+          })),
+          reviewedAt,
+          ruleId: preview.ruleId,
+          ruleVersion: preview.ruleVersion,
+          window: preview.window,
+        }),
+      )
+      .digest("hex");
+  }
+
+  function fingerprintsMatch(left: string, right: string): boolean {
+    const leftBuffer = Buffer.from(left, "hex");
+    const rightBuffer = Buffer.from(right, "hex");
+    return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+  }
   async function mailboxMap(userId: string): Promise<Map<string, string>> {
     const records = await db
       .select()
@@ -54,46 +117,33 @@ export function createMailService({
   }
 
   async function validateRuleReferences(
+    executor: MailSourceExecutor,
     userId: string,
     input: Pick<CreateMailRuleInput, "actions" | "profileId" | "sourceIds">,
+    lockReferences = false,
   ): Promise<void> {
+    await validateMailSourceIds(userId, input.sourceIds, executor, lockReferences);
     if (input.profileId) {
-      const profile = (
-        await db
-          .select({ id: domainProfiles.id })
-          .from(domainProfiles)
-          .where(
-            and(
-              eq(domainProfiles.id, input.profileId),
-              eq(domainProfiles.userId, userId),
-              eq(domainProfiles.domain, "mail"),
-            ),
-          )
-          .limit(1)
-      )[0];
-      if (!profile) throw new AppError("not_found", "The mail profile was not found.");
-    }
-    if (input.sourceIds.length > 0) {
-      const sources = await db
-        .select({ id: calendarAccounts.id })
-        .from(calendarAccounts)
+      const profileQuery = executor
+        .select({ id: domainProfiles.id })
+        .from(domainProfiles)
         .where(
           and(
-            eq(calendarAccounts.userId, userId),
-            eq(calendarAccounts.mailEnabled, true),
-            inArray(calendarAccounts.id, input.sourceIds),
+            eq(domainProfiles.id, input.profileId),
+            eq(domainProfiles.userId, userId),
+            eq(domainProfiles.domain, "mail"),
           ),
-        );
-      if (sources.length !== new Set(input.sourceIds).size) {
-        throw new AppError("invalid_request", "A selected mail account is unavailable.");
-      }
+        )
+        .limit(1);
+      const [profile] = lockReferences ? await profileQuery.for("share") : await profileQuery;
+      if (!profile) throw new AppError("not_found", "The mail profile was not found.");
     }
     const mailboxIds = input.actions.flatMap((action) =>
       action.type === "add_label" && action.mailboxId ? [action.mailboxId] : [],
     );
     if (mailboxIds.length === 0) return;
-    const destinations = await db
-      .select({ accountId: mailboxes.accountId, id: mailboxes.id })
+    const destinationQuery = executor
+      .select({ accountId: mailboxes.accountId, id: mailboxes.id, role: mailboxes.role })
       .from(mailboxes)
       .where(
         and(
@@ -101,15 +151,25 @@ export function createMailService({
           isNull(mailboxes.deletedAt),
           inArray(mailboxes.id, mailboxIds),
         ),
+      )
+      .orderBy(asc(mailboxes.id));
+    const destinations = lockReferences
+      ? await destinationQuery.for("share")
+      : await destinationQuery;
+    if (
+      destinations.length !== new Set(mailboxIds).size ||
+      destinations.some((destination) => destination.role !== "custom")
+    ) {
+      throw new AppError(
+        "invalid_request",
+        "add_label requires an available ordinary user label, not a system mailbox.",
       );
-    if (destinations.length !== new Set(mailboxIds).size) {
-      throw new AppError("invalid_request", "A selected mail label is unavailable.");
     }
     const destinationAccountIds = new Set(destinations.map((destination) => destination.accountId));
     if (
       input.sourceIds.length !== 1 ||
       destinationAccountIds.size !== 1 ||
-      !destinationAccountIds.has(input.sourceIds[0] ?? "")
+      !input.sourceIds.every((sourceId) => destinationAccountIds.has(sourceId))
     ) {
       throw new AppError(
         "invalid_request",
@@ -118,56 +178,673 @@ export function createMailService({
     }
   }
 
+  async function validateMailSourceIds(
+    userId: string,
+    sourceIds: string[],
+    executor: MailSourceExecutor = db,
+    lockSources = false,
+  ): Promise<void> {
+    if (sourceIds.length === 0) return;
+    const uniqueSourceIds = [...new Set(sourceIds)];
+    const sourceQuery = executor
+      .select({ id: calendarAccounts.id })
+      .from(calendarAccounts)
+      .where(
+        and(
+          eq(calendarAccounts.userId, userId),
+          eq(calendarAccounts.mailEnabled, true),
+          inArray(calendarAccounts.id, uniqueSourceIds),
+        ),
+      )
+      .orderBy(asc(calendarAccounts.id));
+    const sources = lockSources ? await sourceQuery.for("share") : await sourceQuery;
+    if (sources.length !== uniqueSourceIds.length) {
+      throw new AppError("invalid_request", "A selected Mail account is unavailable.");
+    }
+  }
+
+  async function buildRulePreview(
+    userId: string,
+    input: PreviewMailRuleInput,
+    rule: { id: string; version: number } | null = null,
+    executor: MailSourceExecutor = db,
+    lockThreads = false,
+  ): Promise<MailRulePreview> {
+    await validateRuleReferences(executor, userId, { ...input, profileId: null }, lockThreads);
+    const conditions = [
+      eq(mailThreads.userId, userId),
+      isNull(mailThreads.deletedAt),
+      ...(input.sourceIds.length > 0 ? [inArray(mailThreads.accountId, input.sourceIds)] : []),
+    ];
+    const scannedQuery = executor
+      .select()
+      .from(mailThreads)
+      .where(and(...conditions))
+      .orderBy(desc(mailThreads.receivedAt), desc(mailThreads.id))
+      .limit(201);
+    const scannedWindow = lockThreads ? await scannedQuery.for("update") : await scannedQuery;
+    const scanned = scannedWindow.slice(0, 200);
+    const candidates = scanned
+      .filter((thread) =>
+        matchesMailRule(input.condition, {
+          from: thread.from,
+          snippet: thread.snippet,
+          subject: thread.subject,
+        }),
+      )
+      .map((thread) => ({
+        actions: input.actions.map((action) => ({
+          ...action,
+          due: mailRuleActionIsDue(action, thread.receivedAt, now()),
+        })),
+        accountId: thread.accountId,
+        from: thread.from,
+        id: thread.id,
+        receivedAt: thread.receivedAt.toISOString(),
+        subject: thread.subject,
+        updatedAt: thread.updatedAt.toISOString(),
+      }));
+    const preview = {
+      candidates,
+      matchedCount: candidates.length,
+      previewedAt: now().toISOString(),
+      ruleId: rule?.id ?? null,
+      ruleVersion: rule?.version ?? null,
+      scannedCount: scanned.length,
+      window: {
+        limit: 200 as const,
+        newestReceivedAt: scanned[0]?.receivedAt.toISOString() ?? null,
+        oldestReceivedAt: scanned.at(-1)?.receivedAt.toISOString() ?? null,
+        truncated: scannedWindow.length > 200,
+      },
+    };
+    return {
+      ...preview,
+      fingerprint: previewFingerprint(preview),
+    };
+  }
+
+  async function findRule(userId: string, id: string) {
+    return (
+      await db
+        .select()
+        .from(mailRules)
+        .where(and(eq(mailRules.id, id), eq(mailRules.userId, userId)))
+        .limit(1)
+    )[0];
+  }
+
+  function storedRulePreviewInput(rule: typeof mailRules.$inferSelect): PreviewMailRuleInput {
+    const resolved = resolveStoredMailRule({
+      action: rule.legacyAction,
+      actions: rule.actions,
+      condition: rule.condition,
+      enabled: rule.enabled,
+      policy: rule.policy,
+      query: rule.legacyQuery,
+    });
+    return {
+      actions: resolved.actions,
+      condition: resolved.condition,
+      confidenceThreshold: null,
+      description: rule.description,
+      sourceIds: rule.sourceAccountIds,
+    };
+  }
+
+  async function applyThreadUpdate(
+    userId: string,
+    id: string,
+    input: UpdateMailThreadInput,
+    principal: { actorId: string; actorType: "agent" | "user" },
+    requestId: string,
+  ): Promise<MailThread> {
+    const [before] = await db
+      .select()
+      .from(mailThreads)
+      .where(
+        and(eq(mailThreads.id, id), eq(mailThreads.userId, userId), isNull(mailThreads.deletedAt)),
+      )
+      .limit(1);
+    if (!before) throw new AppError("not_found", "The mail conversation was not found.");
+    if (
+      input.expectedUpdatedAt !== undefined &&
+      input.expectedUpdatedAt !== before.updatedAt.toISOString()
+    ) {
+      throw new AppError(
+        "conflict",
+        "The mail conversation changed since it was read. Read it again before retrying.",
+        { currentUpdatedAt: before.updatedAt.toISOString() },
+      );
+    }
+    const currentMailboxIds = await mailboxMap(userId);
+    if (input.mailboxIds && new Set(input.mailboxIds).size !== input.mailboxIds.length) {
+      throw new AppError("invalid_request", "Mail conversation mailbox IDs must be unique.");
+    }
+    const accountMailboxes = await db
+      .select({ id: mailboxes.id, remoteMailboxId: mailboxes.remoteMailboxId })
+      .from(mailboxes)
+      .where(
+        and(
+          eq(mailboxes.userId, userId),
+          eq(mailboxes.accountId, before.accountId),
+          isNull(mailboxes.deletedAt),
+        ),
+      );
+    const remoteMailboxIds = new Map(
+      accountMailboxes.map((mailbox) => [mailbox.id, mailbox.remoteMailboxId]),
+    );
+    const requestedMailboxIds = input.mailboxIds?.map((mailboxId) =>
+      remoteMailboxIds.get(mailboxId),
+    );
+    if (requestedMailboxIds?.some((mailboxId) => mailboxId === undefined)) {
+      throw new AppError(
+        "invalid_request",
+        "One or more mailboxes do not belong to this Mail conversation's account.",
+      );
+    }
+    const knownRemoteMailboxIds = new Set(
+      accountMailboxes.map((mailbox) => mailbox.remoteMailboxId),
+    );
+    const desiredMailboxIds = requestedMailboxIds
+      ? [
+          ...(requestedMailboxIds as string[]),
+          ...before.remoteMailboxIds.filter((mailboxId) => !knownRemoteMailboxIds.has(mailboxId)),
+        ]
+      : undefined;
+    const addMailboxIds = input.starred === undefined ? [] : input.starred ? ["STARRED"] : [];
+    const removeMailboxIds = input.starred === false ? ["STARRED"] : [];
+    if (input.unread !== undefined)
+      (input.unread ? addMailboxIds : removeMailboxIds).push("UNREAD");
+    if (desiredMailboxIds) {
+      const requested = desiredMailboxIds;
+      addMailboxIds.push(
+        ...requested.filter((mailboxId) => !before.remoteMailboxIds.includes(mailboxId)),
+      );
+      removeMailboxIds.push(
+        ...before.remoteMailboxIds.filter((mailboxId) => !requested.includes(mailboxId)),
+      );
+    }
+    await gateway.update(userId, before.accountId, before.remoteThreadId, {
+      addMailboxIds,
+      removeMailboxIds,
+    });
+    try {
+      const updatedAt = new Date(Math.max(now().getTime(), before.updatedAt.getTime() + 1));
+      const after = await db.transaction(async (transaction) => {
+        const [updated] = await transaction
+          .update(mailThreads)
+          .set({
+            ...(desiredMailboxIds === undefined ? {} : { remoteMailboxIds: desiredMailboxIds }),
+            ...(input.starred === undefined ? {} : { starred: input.starred }),
+            ...(input.unread === undefined ? {} : { unread: input.unread }),
+            updatedAt,
+          })
+          .where(
+            and(
+              eq(mailThreads.id, id),
+              sql`date_trunc('milliseconds', ${mailThreads.updatedAt}) = ${before.updatedAt}`,
+            ),
+          )
+          .returning();
+        if (!updated) {
+          throw new AppError(
+            "conflict",
+            "The mail conversation changed while the provider update was in progress.",
+          );
+        }
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "mail.thread.updated",
+            after: {
+              mailboxIds: updated.remoteMailboxIds,
+              starred: updated.starred,
+              unread: updated.unread,
+            },
+            before: {
+              mailboxIds: before.remoteMailboxIds,
+              starred: before.starred,
+              unread: before.unread,
+            },
+            entityId: updated.id,
+            entityType: "mail_thread",
+            principal: { ...principal, userId },
+            requestId,
+          }),
+        );
+        return updated;
+      });
+      return serializeMailThread(after, currentMailboxIds);
+    } catch (error) {
+      throw mailProviderPartialEffectError({
+        accountId: before.accountId,
+        cause: error,
+        credentialsPersisted: true,
+        operation: "thread_update",
+        remoteThreadId: before.remoteThreadId,
+        threadId: before.id,
+      });
+    }
+  }
+
   return {
-    async createDraft(userId: string, input: MailDraftInput) {
-      const [draft] = await db
-        .insert(mailDrafts)
-        .values({ ...input, userId })
-        .returning();
-      return draft;
+    async validateProfileSources(
+      transaction: MailSourceExecutor,
+      userId: string,
+      sourceIds: string[],
+    ): Promise<void> {
+      await validateMailSourceIds(userId, sourceIds, transaction, true);
     },
 
-    async send(userId: string, input: SendMailInput) {
+    async createDraft(userId: string, input: MailDraftInput) {
+      return db.transaction(async (transaction) => {
+        const [account] = await transaction
+          .select({ id: calendarAccounts.id })
+          .from(calendarAccounts)
+          .where(
+            and(
+              eq(calendarAccounts.id, input.accountId),
+              eq(calendarAccounts.userId, userId),
+              eq(calendarAccounts.mailEnabled, true),
+            ),
+          )
+          .for("share")
+          .limit(1);
+        if (!account) {
+          throw new AppError(
+            "invalid_request",
+            "Select an owned connected account with Mail enabled.",
+          );
+        }
+        if (input.threadId) {
+          const [thread] = await transaction
+            .select({ id: mailThreads.id })
+            .from(mailThreads)
+            .where(
+              and(
+                eq(mailThreads.id, input.threadId),
+                eq(mailThreads.userId, userId),
+                eq(mailThreads.accountId, input.accountId),
+                isNull(mailThreads.deletedAt),
+              ),
+            )
+            .for("share")
+            .limit(1);
+          if (!thread) {
+            throw new AppError(
+              "invalid_request",
+              "The draft thread must belong to the selected Mail account.",
+            );
+          }
+        }
+        return requireDatabaseRecord(
+          (
+            await transaction
+              .insert(mailDrafts)
+              .values({ ...input, userId })
+              .returning()
+          )[0],
+          "The Mail draft could not be created.",
+        );
+      });
+    },
+
+    async send(userId: string, input: SendMailInput, context: MutationContext) {
+      const recipientsMatch = (
+        left: Array<{ address: string; name: string | null }>,
+        right: Array<{ address: string; name: string | null }>,
+      ) =>
+        left.length === right.length &&
+        left.every(
+          (recipient, index) =>
+            recipient.address === right[index]?.address && recipient.name === right[index]?.name,
+        );
+      let draft: typeof mailDrafts.$inferSelect | undefined;
       if (input.draftId) {
-        const [draft] = await db
+        [draft] = await db
           .select()
           .from(mailDrafts)
           .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
           .limit(1);
         if (!draft) throw new AppError("not_found", "The mail draft was not found.");
+        if (draft.sentAt) {
+          throw new AppError(
+            "conflict",
+            "This Mail draft was already sent. Do not retry it as a new send.",
+          );
+        }
+        if (
+          draft.accountId !== input.accountId ||
+          draft.threadId !== (input.threadId ?? null) ||
+          draft.subject !== input.subject ||
+          draft.body !== input.body ||
+          !recipientsMatch(draft.to, input.to) ||
+          !recipientsMatch(draft.cc, input.cc)
+        ) {
+          throw new AppError(
+            "invalid_request",
+            "Send the draft with its exact saved account, thread, recipients, subject, and body.",
+          );
+        }
       }
       const remoteThreadId = input.threadId
         ? (
             await db
               .select({ remoteThreadId: mailThreads.remoteThreadId })
               .from(mailThreads)
-              .where(and(eq(mailThreads.id, input.threadId), eq(mailThreads.userId, userId)))
+              .where(
+                and(
+                  eq(mailThreads.id, input.threadId),
+                  eq(mailThreads.userId, userId),
+                  eq(mailThreads.accountId, input.accountId),
+                  isNull(mailThreads.deletedAt),
+                ),
+              )
               .limit(1)
           )[0]?.remoteThreadId
         : undefined;
       if (input.threadId && !remoteThreadId) {
         throw new AppError("not_found", "The mail conversation was not found.");
       }
-      await gateway.send(userId, input.accountId, {
-        body: input.body,
-        cc: input.cc,
-        subject: input.subject,
-        to: input.to,
-        ...(remoteThreadId === undefined ? {} : { threadId: remoteThreadId }),
-      });
-      if (input.draftId)
-        await db
+      const draftErrorDetails = input.draftId ? { draftId: input.draftId } : {};
+      const threadErrorDetails = input.threadId
+        ? { remoteThreadId: remoteThreadId as string, threadId: input.threadId }
+        : {};
+      const claimTime = now();
+      const claimId = randomUUID();
+      if (input.draftId) {
+        const staleBefore = new Date(claimTime.getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS);
+        const [staleClaim] = await db
           .update(mailDrafts)
-          .set({ sentAt: now(), updatedAt: now() })
-          .where(eq(mailDrafts.id, input.draftId));
+          .set({ sendStatus: "reconcile", updatedAt: claimTime })
+          .where(
+            and(
+              eq(mailDrafts.id, input.draftId),
+              eq(mailDrafts.userId, userId),
+              eq(mailDrafts.sendStatus, "sending"),
+              lt(mailDrafts.sendClaimedAt, staleBefore),
+              isNull(mailDrafts.sentAt),
+            ),
+          )
+          .returning({ id: mailDrafts.id });
+        if (staleClaim) {
+          throw draftNeedsSentMailReconciliation(input.accountId, input.draftId, "stale_claim");
+        }
+        const [claimed] = await db
+          .update(mailDrafts)
+          .set({
+            sendClaimedAt: claimTime,
+            sendClaimId: claimId,
+            sendStatus: "sending",
+            updatedAt: claimTime,
+          })
+          .where(
+            and(
+              eq(mailDrafts.id, input.draftId),
+              eq(mailDrafts.userId, userId),
+              eq(mailDrafts.sendStatus, "draft"),
+              isNull(mailDrafts.sentAt),
+            ),
+          )
+          .returning({ id: mailDrafts.id });
+        if (!claimed) {
+          const [currentDraft] = await db
+            .select({
+              sendClaimedAt: mailDrafts.sendClaimedAt,
+              sendStatus: mailDrafts.sendStatus,
+              sentAt: mailDrafts.sentAt,
+            })
+            .from(mailDrafts)
+            .where(and(eq(mailDrafts.id, input.draftId), eq(mailDrafts.userId, userId)))
+            .limit(1);
+          if (!currentDraft) throw new AppError("not_found", "The mail draft was not found.");
+          if (currentDraft.sentAt || currentDraft.sendStatus === "sent") {
+            throw new AppError(
+              "conflict",
+              "This Mail draft was already sent. Do not retry it as a new send.",
+            );
+          }
+          if (currentDraft.sendStatus === "reconcile") {
+            throw draftNeedsSentMailReconciliation(
+              input.accountId,
+              input.draftId,
+              "ambiguous_send",
+            );
+          }
+          throw new AppError(
+            "conflict",
+            "This Mail draft already has a send in progress. Wait for it to finish; if it remains in progress, inspect Sent Mail and reconcile the draft before retrying.",
+            {
+              draftId: input.draftId,
+              sendClaimedAt: currentDraft.sendClaimedAt?.toISOString() ?? null,
+              sendStatus: currentDraft.sendStatus,
+            },
+          );
+        }
+      }
+      try {
+        await gateway.send(userId, input.accountId, {
+          body: input.body,
+          cc: input.cc,
+          subject: input.subject,
+          to: input.to,
+          ...(remoteThreadId === undefined ? {} : { threadId: remoteThreadId }),
+        });
+      } catch (error) {
+        const structuredProviderEffect =
+          error instanceof AppError &&
+          typeof error.details === "object" &&
+          error.details !== null &&
+          "partialEffect" in error.details &&
+          error.details.partialEffect === true;
+        const credentialPersistenceMayHaveFailed =
+          structuredProviderEffect &&
+          (error.details as Record<string, unknown>).credentialPersistenceMayHaveFailed === true;
+        const knownPreAcceptanceFailure =
+          error instanceof MailProviderRejectedError ||
+          (error instanceof AppError && !structuredProviderEffect);
+        if (input.draftId && knownPreAcceptanceFailure) {
+          const release = await transitionOwnedDraftClaim(
+            db,
+            input.draftId,
+            userId,
+            claimId,
+            now(),
+            "draft",
+          );
+          if (release === "failed") {
+            throw draftClaimReleaseFailed(input.accountId, input.draftId);
+          }
+          if (release === "lost") {
+            throw draftSendClaimOwnershipLost(input.accountId, input.draftId, false);
+          }
+        }
+        if (error instanceof MailProviderRejectedError) {
+          throw new AppError(
+            "service_unavailable",
+            "The Mail provider rejected the message before accepting it. The draft remains safe to retry.",
+            {
+              ...draftErrorDetails,
+              partialEffect: false,
+              providerAcceptance: "rejected",
+              retrySafe: true,
+            },
+          );
+        }
+        if (error instanceof AppError && !structuredProviderEffect) throw error;
+        if (input.draftId) {
+          const reconciliation = await transitionOwnedDraftClaim(
+            db,
+            input.draftId,
+            userId,
+            claimId,
+            now(),
+            "reconcile",
+          );
+          if (reconciliation === "lost") {
+            throw draftSendClaimOwnershipLost(input.accountId, input.draftId, true);
+          }
+          throw draftProviderPartialEffectError({
+            accountId: input.accountId,
+            cause: error,
+            credentialsPersisted: !credentialPersistenceMayHaveFailed,
+            draftId: input.draftId,
+            draftReconciliationStatePersisted: reconciliation === "updated",
+            ...threadErrorDetails,
+          });
+        }
+        throw mailProviderPartialEffectError({
+          accountId: input.accountId,
+          cause: error,
+          credentialsPersisted: !credentialPersistenceMayHaveFailed,
+          operation: "send",
+          ...threadErrorDetails,
+        });
+      }
+      try {
+        await db.transaction(async (transaction) => {
+          if (input.draftId) {
+            const [sentDraft] = await transaction
+              .update(mailDrafts)
+              .set({
+                sendClaimedAt: null,
+                sendClaimId: null,
+                sendStatus: "sent",
+                sentAt: now(),
+                updatedAt: now(),
+              })
+              .where(
+                and(
+                  eq(mailDrafts.id, input.draftId),
+                  eq(mailDrafts.userId, userId),
+                  eq(mailDrafts.sendClaimId, claimId),
+                  eq(mailDrafts.sendStatus, "sending"),
+                  isNull(mailDrafts.sentAt),
+                ),
+              )
+              .returning({ id: mailDrafts.id });
+            if (!sentDraft) {
+              throw new AppError("not_found", "The mail draft was not found after provider send.");
+            }
+          }
+
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "mail.sent",
+              after: {
+                accountId: input.accountId,
+                ccCount: input.cc.length,
+                draftId: input.draftId ?? null,
+                hasDraft: input.draftId !== undefined,
+                hasThread: input.threadId !== undefined,
+                recipientCount: input.to.length,
+                threadId: input.threadId ?? null,
+              },
+              before: null,
+              entityId: input.draftId ?? input.threadId ?? input.accountId,
+              entityType: "mail_send",
+              principal: { ...context.principal, userId },
+              requestId: context.requestId,
+            }),
+          );
+        });
+      } catch (error) {
+        if (input.draftId) {
+          const reconciliation = await transitionOwnedDraftClaim(
+            db,
+            input.draftId,
+            userId,
+            claimId,
+            now(),
+            "reconcile",
+          );
+          if (reconciliation === "lost") {
+            throw draftSendClaimOwnershipLost(input.accountId, input.draftId, true);
+          }
+          throw draftProviderPartialEffectError({
+            accountId: input.accountId,
+            cause: error,
+            credentialsPersisted: true,
+            draftId: input.draftId,
+            draftReconciliationStatePersisted: reconciliation === "updated",
+            ...threadErrorDetails,
+          });
+        }
+        throw mailProviderPartialEffectError({
+          accountId: input.accountId,
+          cause: error,
+          credentialsPersisted: true,
+          operation: "send",
+          ...threadErrorDetails,
+        });
+      }
     },
 
-    async listDrafts(userId: string) {
-      return db
+    async reconcileDraft(
+      userId: string,
+      id: string,
+      outcome: "not_sent" | "sent",
+      context: MutationContext,
+    ) {
+      return db.transaction(async (transaction) => {
+        const [draft] = await transaction
+          .select()
+          .from(mailDrafts)
+          .where(and(eq(mailDrafts.id, id), eq(mailDrafts.userId, userId)))
+          .for("update")
+          .limit(1);
+        if (!draft) throw new AppError("not_found", "The mail draft was not found.");
+        if (draft.sentAt || draft.sendStatus === "sent") {
+          throw new AppError("conflict", "This Mail draft is already finalized as sent.");
+        }
+        if (
+          draft.sendStatus === "sending" &&
+          draft.sendClaimedAt &&
+          draft.sendClaimedAt.getTime() > now().getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS
+        ) {
+          throw new AppError(
+            "conflict",
+            "This Mail draft still has a recent send in progress. Wait before reconciling it.",
+          );
+        }
+        if (draft.sendStatus === "draft") {
+          throw new AppError("conflict", "This Mail draft has no ambiguous send to reconcile.");
+        }
+        const reconciledAt = now();
+        const [reconciled] = await transaction
+          .update(mailDrafts)
+          .set({
+            sendClaimedAt: null,
+            sendClaimId: null,
+            sendStatus: outcome === "sent" ? "sent" : "draft",
+            sentAt: outcome === "sent" ? reconciledAt : null,
+            updatedAt: reconciledAt,
+          })
+          .where(eq(mailDrafts.id, id))
+          .returning();
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "mail.draft.reconciled",
+            after: { accountId: draft.accountId, outcome },
+            before: { sendStatus: draft.sendStatus },
+            entityId: id,
+            entityType: "mail_draft",
+            principal: { ...context.principal, userId },
+            requestId: context.requestId,
+          }),
+        );
+        return requireDatabaseRecord(reconciled, "The Mail draft could not be reconciled.");
+      });
+    },
+
+    async listDrafts(userId: string): Promise<MailDraft[]> {
+      const drafts = await db
         .select()
         .from(mailDrafts)
         .where(and(eq(mailDrafts.userId, userId), isNull(mailDrafts.sentAt)))
         .orderBy(desc(mailDrafts.updatedAt));
+      const listedAt = now();
+      return drafts.map((draft) => serializeMailDraft(draft, listedAt));
     },
 
     async snoozeThread(userId: string, threadId: string, until: Date) {
@@ -198,9 +875,133 @@ export function createMailService({
       return rules.map(serializeMailRule);
     },
 
+    async upsertAttentionItem(
+      threadId: string,
+      input: UpsertMailAttentionItemInput,
+      context: MutationContext,
+    ): Promise<AttentionItem> {
+      const updatedAt = now();
+      const saved = await db.transaction(async (transaction) => {
+        const thread = (
+          await transaction
+            .select()
+            .from(mailThreads)
+            .where(
+              and(
+                eq(mailThreads.id, threadId),
+                eq(mailThreads.userId, context.principal.userId),
+                isNull(mailThreads.deletedAt),
+              ),
+            )
+            .for("update")
+            .limit(1)
+        )[0];
+        if (!thread) throw new AppError("not_found", "The mail conversation was not found.");
+        const existing = (
+          await transaction
+            .select()
+            .from(attentionItems)
+            .where(
+              and(
+                eq(attentionItems.userId, context.principal.userId),
+                eq(attentionItems.domain, "mail"),
+                eq(attentionItems.relatedEntityId, thread.id),
+                eq(attentionItems.relatedEntityType, "mail_thread"),
+                eq(attentionItems.kind, input.kind),
+                eq(attentionItems.status, "open"),
+              ),
+            )
+            .limit(1)
+        )[0];
+        const values = {
+          domain: "mail" as const,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          importance: input.importance,
+          kind: input.kind,
+          occursAt: input.occursAt ? new Date(input.occursAt) : null,
+          relatedEntityId: thread.id,
+          relatedEntityType: "mail_thread",
+          source: {
+            accountId: thread.accountId,
+            provider: thread.provider,
+            remoteId: thread.remoteThreadId,
+            revision: thread.updatedAt.toISOString(),
+            sourceType: "mail_thread" as const,
+          },
+          status: "open" as const,
+          summary: input.summary,
+          title: input.title,
+          userId: context.principal.userId,
+        };
+        const item = requireDatabaseRecord(
+          (existing
+            ? await transaction
+                .update(attentionItems)
+                .set({ ...values, updatedAt })
+                .where(eq(attentionItems.id, existing.id))
+                .returning()
+            : await transaction.insert(attentionItems).values(values).returning())[0],
+          "The Mail attention item could not be saved.",
+        );
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: existing ? "assistant.attention.updated" : "assistant.attention.created",
+            after: auditAttentionItemMetadata(item),
+            before: auditAttentionItemMetadata(existing ?? null),
+            entityId: item.id,
+            entityType: "attention_item",
+            ...context,
+          }),
+        );
+        return item;
+      });
+      return serializeMailAttentionItem(saved);
+    },
+
+    async listSetupContext(userId: string): Promise<MailSetupContext> {
+      const [accounts, mailboxRecords] = await Promise.all([
+        db
+          .select()
+          .from(calendarAccounts)
+          .where(and(eq(calendarAccounts.userId, userId), eq(calendarAccounts.mailEnabled, true)))
+          .orderBy(asc(calendarAccounts.createdAt)),
+        db
+          .select()
+          .from(mailboxes)
+          .where(and(eq(mailboxes.userId, userId), isNull(mailboxes.deletedAt)))
+          .orderBy(asc(mailboxes.accountId), asc(mailboxes.role), asc(mailboxes.name)),
+      ]);
+      const mailboxesByAccount = new Map<string, Mailbox[]>();
+      for (const mailbox of mailboxRecords) {
+        const group = mailboxesByAccount.get(mailbox.accountId) ?? [];
+        group.push(serializeMailbox(mailbox));
+        mailboxesByAccount.set(mailbox.accountId, group);
+      }
+      return {
+        accounts: accounts.map((account) => ({
+          accountId: account.id,
+          automaticRuleExecution: account.provider === "google",
+          email: account.email,
+          label: account.label,
+          lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null,
+          mailboxes: mailboxesByAccount.get(account.id) ?? [],
+          provider: account.provider as "google" | "icloud",
+          syncError: account.syncError,
+          syncStatus: account.syncStatus,
+        })),
+        safety: {
+          delayedRetentionAutomation: false,
+          permanentDeletion: false,
+          providerFilterCreation: false,
+          spamClassification: false,
+          unsubscribeAutomation: false,
+        },
+      };
+    },
+
     async createRule(input: CreateMailRuleInput, context: MutationContext): Promise<MailRule> {
-      await validateRuleReferences(context.principal.userId, input);
       const created = await db.transaction(async (transaction) => {
+        await validateRuleReferences(transaction, context.principal.userId, input, true);
         const rule = requireDatabaseRecord(
           (
             await transaction
@@ -208,10 +1009,7 @@ export function createMailService({
               .values({
                 actions: input.actions,
                 condition: input.condition,
-                confidenceThreshold:
-                  input.confidenceThreshold === null
-                    ? null
-                    : Math.round(input.confidenceThreshold * 10_000),
+                confidenceThreshold: null,
                 description: input.description,
                 enabled: input.enabled,
                 name: input.name,
@@ -227,7 +1025,7 @@ export function createMailService({
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "mail.rule.created",
-            after: auditSnapshot(rule),
+            after: auditMailRuleMetadata(rule, mailRuleChangedFields(null, rule)),
             before: null,
             entityId: rule.id,
             entityType: "mail_rule",
@@ -239,44 +1037,304 @@ export function createMailService({
       return serializeMailRule(created);
     },
 
-    async previewRule(userId: string, input: PreviewMailRuleInput) {
-      await validateRuleReferences(userId, { ...input, profileId: null });
-      const conditions = [
-        eq(mailThreads.userId, userId),
-        isNull(mailThreads.deletedAt),
-        ...(input.sourceIds.length > 0 ? [inArray(mailThreads.accountId, input.sourceIds)] : []),
-      ];
-      const scanned = await db
-        .select()
-        .from(mailThreads)
-        .where(and(...conditions))
-        .orderBy(desc(mailThreads.receivedAt))
-        .limit(200);
-      const candidates = scanned
-        .filter((thread) =>
-          matchesMailRule(input.condition, {
-            from: thread.from,
-            snippet: thread.snippet,
-            subject: thread.subject,
-          }),
+    async previewRule(userId: string, input: PreviewMailRuleInput): Promise<MailRulePreview> {
+      return buildRulePreview(userId, input);
+    },
+
+    async previewSavedRule(userId: string, id: string): Promise<MailRulePreview> {
+      const rule = await findRule(userId, id);
+      if (!rule) throw new AppError("not_found", "The mail rule was not found.");
+      return buildRulePreview(userId, storedRulePreviewInput(rule), rule);
+    },
+
+    async activateRule(
+      id: string,
+      input: ActivateMailRuleInput,
+      context: MutationContext,
+    ): Promise<{ preview: MailRulePreview; rule: MailRule }> {
+      if (context.principal.actorType !== "user") {
+        throw new AppError(
+          "forbidden",
+          "Mail rule activation requires an interactive user session.",
+        );
+      }
+      const existing = await findRule(context.principal.userId, id);
+      if (!existing) throw new AppError("not_found", "The mail rule was not found.");
+      if (existing.version !== input.expectedVersion) {
+        throw new AppError("conflict", "The mail rule changed since it was reviewed.", {
+          currentVersion: existing.version,
+        });
+      }
+      const previewAgeMs = now().getTime() - new Date(input.expectedPreviewedAt).getTime();
+      if (previewAgeMs < -60_000 || previewAgeMs > 15 * 60_000) {
+        throw new AppError(
+          "conflict",
+          "The Mail rule review expired. Review the current bounded sample before activation.",
+          { currentVersion: existing.version },
+        );
+      }
+      const resolved = resolveStoredMailRule({
+        action: existing.legacyAction,
+        actions: existing.actions,
+        condition: existing.condition,
+        enabled: existing.enabled,
+        policy: existing.policy,
+        query: existing.legacyQuery,
+      });
+      if (existing.enabled && resolved.policy === "approved_rule") {
+        throw new AppError("invalid_request", "The Mail rule is already active.");
+      }
+      if (!existing.profileId) {
+        throw new AppError(
+          "invalid_request",
+          "Link an active Mail profile before activating this rule.",
+        );
+      }
+      if (
+        existing.sourceAccountIds.length === 0 ||
+        new Set(existing.sourceAccountIds).size !== existing.sourceAccountIds.length
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Select one or more explicit Mail account sources before activation.",
+        );
+      }
+      const profile = (
+        await db
+          .select()
+          .from(domainProfiles)
+          .where(
+            and(
+              eq(domainProfiles.id, existing.profileId),
+              eq(domainProfiles.userId, context.principal.userId),
+              eq(domainProfiles.domain, "mail"),
+            ),
+          )
+          .limit(1)
+      )[0];
+      if (!profile) throw new AppError("not_found", "The mail profile was not found.");
+      if (profile.status !== "active") {
+        throw new AppError(
+          "invalid_request",
+          "Activate the linked Mail profile before activating this rule.",
+        );
+      }
+      const profileSourceIds = new Set(profile.sourceContexts.map((source) => source.sourceId));
+      if (existing.sourceAccountIds.some((sourceId) => !profileSourceIds.has(sourceId))) {
+        throw new AppError(
+          "invalid_request",
+          "Every rule source must have an explicit meaning in the linked Mail profile.",
+        );
+      }
+      const executableSources = await db
+        .select({ id: calendarAccounts.id, provider: calendarAccounts.provider })
+        .from(calendarAccounts)
+        .where(
+          and(
+            eq(calendarAccounts.userId, context.principal.userId),
+            eq(calendarAccounts.mailEnabled, true),
+            inArray(calendarAccounts.id, existing.sourceAccountIds),
+          ),
+        );
+      if (
+        executableSources.length !== existing.sourceAccountIds.length ||
+        executableSources.some((source) => source.provider !== "google")
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Automatic Mail rules currently require explicit Google Mail sources.",
+        );
+      }
+      const parsedPreferences = mailProfilePreferencesSchema.safeParse(profile.preferences);
+      if (!parsedPreferences.success) {
+        throw new AppError(
+          "invalid_request",
+          "Review and save valid Mail retention preferences before activating this rule.",
+        );
+      }
+      if (
+        resolved.actions.some(
+          (action) => action.afterDays > 0 || action.type === "archive" || action.type === "trash",
         )
-        .map((thread) => ({
-          actions: input.actions.map((action) => ({
-            ...action,
-            due: mailRuleActionIsDue(action, thread.receivedAt, now()),
-          })),
-          accountId: thread.accountId,
-          from: thread.from,
-          id: thread.id,
-          receivedAt: thread.receivedAt.toISOString(),
-          subject: thread.subject,
-        }));
-      return { candidates, matchedCount: candidates.length, scannedCount: scanned.length };
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Delayed archive and recoverable Trash automation remains preview-only until Mail has a durable due-work backlog. Keep this rule disabled and review matches manually.",
+        );
+      }
+      const updated = await db.transaction(async (transaction) => {
+        const lockedSources = await transaction
+          .select({
+            id: calendarAccounts.id,
+            mailEnabled: calendarAccounts.mailEnabled,
+            provider: calendarAccounts.provider,
+          })
+          .from(calendarAccounts)
+          .where(
+            and(
+              eq(calendarAccounts.userId, context.principal.userId),
+              inArray(calendarAccounts.id, existing.sourceAccountIds),
+            ),
+          )
+          .orderBy(asc(calendarAccounts.id))
+          .for("share");
+        if (
+          lockedSources.length !== existing.sourceAccountIds.length ||
+          lockedSources.some((source) => !source.mailEnabled || source.provider !== "google")
+        ) {
+          throw new AppError(
+            "conflict",
+            "A Mail source changed while the rule was being activated. Review the current setup before retrying.",
+          );
+        }
+        const [lockedProfile] = await transaction
+          .select()
+          .from(domainProfiles)
+          .where(
+            and(
+              eq(domainProfiles.id, profile.id),
+              eq(domainProfiles.userId, context.principal.userId),
+              eq(domainProfiles.domain, "mail"),
+            ),
+          )
+          .for("share")
+          .limit(1);
+        if (lockedProfile?.status !== "active" || lockedProfile.version !== profile.version) {
+          throw new AppError(
+            "conflict",
+            "The Mail profile changed while the rule was being activated. Review the current setup before retrying.",
+          );
+        }
+        if (
+          existing.sourceAccountIds.some(
+            (sourceId) =>
+              !lockedProfile.sourceContexts.some(
+                (sourceContext) => sourceContext.sourceId === sourceId,
+              ),
+          )
+        ) {
+          throw new AppError(
+            "conflict",
+            "A rule source no longer has an explicit meaning in the Mail profile.",
+          );
+        }
+        if (!mailProfilePreferencesSchema.safeParse(lockedProfile.preferences).success) {
+          throw new AppError(
+            "conflict",
+            "The Mail profile retention preferences changed and require review.",
+          );
+        }
+        const [lockedRule] = await transaction
+          .select()
+          .from(mailRules)
+          .where(
+            and(
+              eq(mailRules.id, id),
+              eq(mailRules.userId, context.principal.userId),
+              eq(mailRules.version, existing.version),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!lockedRule) {
+          throw new AppError("conflict", "The mail rule changed while it was being activated.");
+        }
+        const lockedResolved = resolveStoredMailRule({
+          action: lockedRule.legacyAction,
+          actions: lockedRule.actions,
+          condition: lockedRule.condition,
+          enabled: lockedRule.enabled,
+          policy: lockedRule.policy,
+          query: lockedRule.legacyQuery,
+        });
+        if (lockedRule.enabled) {
+          throw new AppError("conflict", "The mail rule changed while it was being activated.");
+        }
+        const labelIds = lockedResolved.actions.flatMap((action) =>
+          action.type === "add_label" && action.mailboxId ? [action.mailboxId] : [],
+        );
+        if (labelIds.length > 0) {
+          const destinations = await transaction
+            .select({ accountId: mailboxes.accountId, id: mailboxes.id, role: mailboxes.role })
+            .from(mailboxes)
+            .where(
+              and(
+                eq(mailboxes.userId, context.principal.userId),
+                isNull(mailboxes.deletedAt),
+                inArray(mailboxes.id, labelIds),
+              ),
+            )
+            .orderBy(asc(mailboxes.id))
+            .for("share");
+          if (
+            destinations.length !== new Set(labelIds).size ||
+            destinations.some((destination) => destination.role !== "custom") ||
+            existing.sourceAccountIds.length !== 1 ||
+            destinations.some(
+              (destination) => destination.accountId !== existing.sourceAccountIds[0],
+            )
+          ) {
+            throw new AppError(
+              "conflict",
+              "A Mail label destination changed while the rule was being activated. Review the current rule before retrying.",
+            );
+          }
+        }
+        const preview = await buildRulePreview(
+          context.principal.userId,
+          storedRulePreviewInput(lockedRule),
+          lockedRule,
+          transaction,
+          true,
+        );
+        const expectedIds = [...new Set(input.expectedCandidateIds)].sort();
+        const currentIds = preview.candidates.map((candidate) => candidate.id).sort();
+        if (
+          !fingerprintsMatch(
+            previewFingerprint(preview, input.expectedPreviewedAt),
+            input.expectedPreviewFingerprint,
+          ) ||
+          expectedIds.length !== input.expectedCandidateIds.length ||
+          expectedIds.length !== currentIds.length ||
+          expectedIds.some((candidateId, index) => candidateId !== currentIds[index])
+        ) {
+          throw new AppError(
+            "conflict",
+            "The exact Mail rule preview changed. Review the current candidates before activation.",
+            { currentPreviewFingerprint: preview.fingerprint, currentVersion: existing.version },
+          );
+        }
+        const [rule] = await transaction
+          .update(mailRules)
+          .set({
+            enabled: true,
+            policy: "approved_rule",
+            updatedAt: now(),
+            version: existing.version + 1,
+          })
+          .where(and(eq(mailRules.id, id), eq(mailRules.version, existing.version)))
+          .returning();
+        if (!rule) {
+          throw new AppError("conflict", "The mail rule changed while it was being activated.");
+        }
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "mail.rule.activated",
+            after: auditMailRuleMetadata(rule, mailRuleChangedFields(lockedRule, rule)),
+            before: auditMailRuleMetadata(lockedRule, mailRuleChangedFields(lockedRule, rule)),
+            entityId: rule.id,
+            entityType: "mail_rule",
+            ...context,
+          }),
+        );
+        return { preview, rule };
+      });
+      return { preview: updated.preview, rule: serializeMailRule(updated.rule) };
     },
 
     async updateRule(
       id: string,
-      input: UpdateMailRuleInput,
+      input: MailRuleUpdateRequest,
       context: MutationContext,
     ): Promise<MailRule> {
       const [existing] = await db
@@ -298,12 +1356,42 @@ export function createMailService({
         policy: existing.policy,
         query: existing.legacyQuery,
       });
+      if (input.policy !== undefined && input.policy !== "preview") {
+        throw new AppError(
+          "invalid_request",
+          "Mail rules remain in preview policy until a fresh signed-in review promotes them to approved_rule.",
+        );
+      }
+      if (input.enabled === true) {
+        throw new AppError(
+          "invalid_request",
+          "Only a fresh signed-in review can activate a Mail rule.",
+        );
+      }
+      const changesMatchingBehavior =
+        input.actions !== undefined ||
+        input.condition !== undefined ||
+        input.confidenceThreshold !== undefined ||
+        input.profileId !== undefined ||
+        input.sourceIds !== undefined;
+      if (
+        existing.enabled &&
+        resolvedExisting.policy === "approved_rule" &&
+        changesMatchingBehavior
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Pause the active mail rule before changing its matching behavior.",
+        );
+      }
+      const demoteApproval =
+        resolvedExisting.policy === "approved_rule" &&
+        (input.enabled === false || changesMatchingBehavior);
       const nextReferences = {
         actions: input.actions ?? resolvedExisting.actions,
         profileId: input.profileId === undefined ? existing.profileId : input.profileId,
         sourceIds: input.sourceIds ?? existing.sourceAccountIds,
       };
-      await validateRuleReferences(context.principal.userId, nextReferences);
       const {
         confidenceThreshold,
         expectedVersion: _expectedVersion,
@@ -312,15 +1400,31 @@ export function createMailService({
       } = input;
       const updatedAt = now();
       const updated = await db.transaction(async (transaction) => {
+        await validateRuleReferences(transaction, context.principal.userId, nextReferences, true);
+        const [lockedExisting] = await transaction
+          .select()
+          .from(mailRules)
+          .where(
+            and(
+              eq(mailRules.id, id),
+              eq(mailRules.userId, context.principal.userId),
+              eq(mailRules.version, existing.version),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!lockedExisting) {
+          throw new AppError("conflict", "The mail rule changed while it was being saved.");
+        }
         const [rule] = await transaction
           .update(mailRules)
           .set({
             ...changes,
+            ...(demoteApproval ? { policy: "preview" as const } : {}),
             ...(confidenceThreshold === undefined
               ? {}
               : {
-                  confidenceThreshold:
-                    confidenceThreshold === null ? null : Math.round(confidenceThreshold * 10_000),
+                  confidenceThreshold: null,
                 }),
             ...(sourceIds === undefined ? {} : { sourceAccountIds: sourceIds }),
             updatedAt,
@@ -334,8 +1438,11 @@ export function createMailService({
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "mail.rule.updated",
-            after: auditSnapshot(rule),
-            before: auditSnapshot(existing),
+            after: auditMailRuleMetadata(rule, mailRuleChangedFields(lockedExisting, rule)),
+            before: auditMailRuleMetadata(
+              lockedExisting,
+              mailRuleChangedFields(lockedExisting, rule),
+            ),
             entityId: rule.id,
             entityType: "mail_rule",
             ...context,
@@ -457,7 +1564,72 @@ export function createMailService({
       return records.map((record) => serializeMailThread(record, ids));
     },
 
-    /* v8 ignore start -- persistence response permutations are covered by service integration tests */
+    async bulkUpdateThreads(
+      input: BulkUpdateMailInput,
+      context: MutationContext,
+    ): Promise<BulkUpdateMailResult> {
+      const settled: PromiseSettledResult<MailThread>[] = new Array(input.items.length);
+      let nextIndex = 0;
+      const worker = async () => {
+        while (nextIndex < input.items.length) {
+          const index = nextIndex++;
+          const item = input.items[index] as (typeof input.items)[number];
+          try {
+            settled[index] = {
+              status: "fulfilled",
+              value: await applyThreadUpdate(
+                context.principal.userId,
+                item.id,
+                {
+                  expectedUpdatedAt: item.expectedUpdatedAt,
+                  starred: input.starred,
+                  unread: input.unread,
+                },
+                context.principal,
+                context.requestId,
+              ),
+            };
+          } catch (error) {
+            settled[index] = { reason: error, status: "rejected" };
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(2, input.items.length) }, () => worker()));
+      const updatedIds = input.items.flatMap((item, index) =>
+        settled[index]?.status === "fulfilled" ? [item.id] : [],
+      );
+      const failures = input.items.flatMap((item, index) => {
+        const outcome = settled[index];
+        if (outcome?.status !== "rejected") return [];
+        const error = outcome.reason;
+        return [
+          {
+            error:
+              error instanceof AppError
+                ? {
+                    code: error.code,
+                    details: error.details ?? null,
+                    message: error.message,
+                    status: error.status,
+                  }
+                : {
+                    code: "service_unavailable",
+                    details: null,
+                    message: "The provider Mail update failed.",
+                    status: 503,
+                  },
+            id: item.id,
+          },
+        ];
+      });
+      return {
+        failedCount: failures.length,
+        failures,
+        updatedCount: updatedIds.length,
+        updatedIds,
+      };
+    },
+
     async updateThread(
       userId: string,
       id: string,
@@ -465,92 +1637,150 @@ export function createMailService({
       principal: { actorId: string; actorType: "agent" | "user" },
       requestId: string,
     ): Promise<MailThread> {
-      const [before] = await db
-        .select()
-        .from(mailThreads)
-        .where(
-          and(
-            eq(mailThreads.id, id),
-            eq(mailThreads.userId, userId),
-            isNull(mailThreads.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (!before) throw new AppError("not_found", "The mail conversation was not found.");
-      const currentMailboxIds = await mailboxMap(userId);
-      const remoteMailboxIds = new Map(
-        [...currentMailboxIds.entries()].map(([key, value]) => [
-          value,
-          key.split(":").slice(1).join(":"),
-        ]),
-      );
-      const requestedMailboxIds = input.mailboxIds?.map((mailboxId) =>
-        remoteMailboxIds.get(mailboxId),
-      );
-      if (requestedMailboxIds?.some((mailboxId) => !mailboxId)) {
-        throw new AppError(
-          "invalid_request",
-          "One or more mailboxes are unavailable for this account.",
-        );
-      }
-      const knownRemoteMailboxIds = new Set(remoteMailboxIds.values());
-      const desiredMailboxIds = requestedMailboxIds
-        ? [
-            ...(requestedMailboxIds as string[]),
-            ...before.remoteMailboxIds.filter((mailboxId) => !knownRemoteMailboxIds.has(mailboxId)),
-          ]
-        : undefined;
-      const addMailboxIds = input.starred === undefined ? [] : input.starred ? ["STARRED"] : [];
-      const removeMailboxIds = input.starred === false ? ["STARRED"] : [];
-      if (input.unread !== undefined)
-        (input.unread ? addMailboxIds : removeMailboxIds).push("UNREAD");
-      if (desiredMailboxIds) {
-        const requested = desiredMailboxIds;
-        addMailboxIds.push(
-          ...requested.filter((mailboxId) => !before.remoteMailboxIds.includes(mailboxId)),
-        );
-        removeMailboxIds.push(
-          ...before.remoteMailboxIds.filter((mailboxId) => !requested.includes(mailboxId)),
-        );
-      }
-      await gateway.update(userId, before.accountId, before.remoteThreadId, {
-        addMailboxIds,
-        removeMailboxIds,
-      });
-      const [after] = await db
-        .update(mailThreads)
-        .set({
-          ...(desiredMailboxIds === undefined ? {} : { remoteMailboxIds: desiredMailboxIds }),
-          ...(input.starred === undefined ? {} : { starred: input.starred }),
-          ...(input.unread === undefined ? {} : { unread: input.unread }),
-          updatedAt: now(),
-        })
-        .where(eq(mailThreads.id, id))
-        .returning();
-      /* v8 ignore next -- the selected row is updated atomically in this transaction */
-      if (!after) throw new AppError("not_found", "The mail conversation was not found.");
-      await db.insert(auditEvents).values(
-        auditValues({
-          action: "mail.thread.updated",
-          after: {
-            mailboxIds: after.remoteMailboxIds,
-            starred: after.starred,
-            unread: after.unread,
-          },
-          before: {
-            mailboxIds: before.remoteMailboxIds,
-            starred: before.starred,
-            unread: before.unread,
-          },
-          entityId: after.id,
-          entityType: "mail_thread",
-          principal: { ...principal, userId },
-          requestId,
-        }),
-      );
-      return serializeMailThread(after, await mailboxMap(userId));
+      return applyThreadUpdate(userId, id, input, principal, requestId);
     },
   };
+}
+
+function draftNeedsSentMailReconciliation(
+  accountId: string,
+  draftId: string,
+  reason: "ambiguous_send" | "stale_claim",
+): AppError {
+  return new AppError(
+    "conflict",
+    "Ilo cannot prove whether this draft was accepted by the provider. Inspect the provider's Sent Mail before any retry, then reconcile the draft in Ilo.",
+    {
+      accountId,
+      draftId,
+      partialEffect: true,
+      reason,
+      repairAction: "verify_sent_mail_then_reconcile_draft",
+      userAction:
+        "Inspect the provider's Sent Mail before any retry. Then mark the draft as sent or not sent in Ilo Mail.",
+      userActionDestination: "Provider Sent Mail; then Ilo Mail",
+      userActionRequired: true,
+    },
+  );
+}
+
+function draftSendClaimOwnershipLost(
+  accountId: string,
+  draftId: string,
+  providerEffectPossible: boolean,
+): AppError {
+  return new AppError(
+    "conflict",
+    providerEffectPossible
+      ? "This send no longer owns the draft claim, and the provider may have accepted the message. Inspect Sent Mail and the draft's current Ilo state before any retry."
+      : "This send no longer owns the draft claim. Do not retry while another draft send or reconciliation is current.",
+    {
+      accountId,
+      claimOwnershipLost: true,
+      draftReconciliationStatePersisted: false,
+      draftId,
+      partialEffect: providerEffectPossible,
+      repairAction: providerEffectPossible
+        ? "verify_sent_mail_then_reconcile_draft"
+        : "review_current_draft_state",
+      userAction: providerEffectPossible
+        ? "Inspect the provider's Sent Mail and the draft's current Ilo state before any retry."
+        : "Review the draft's current state in Ilo Mail before taking another action.",
+      userActionDestination: providerEffectPossible
+        ? "Provider Sent Mail; then Ilo Mail"
+        : "Ilo Mail",
+      userActionRequired: true,
+    },
+  );
+}
+
+function draftClaimReleaseFailed(accountId: string, draftId: string): AppError {
+  return new AppError(
+    "service_unavailable",
+    "The provider rejected the message before accepting it, but Ilo could not safely release the draft claim. The message was not sent; review the current draft state before retrying.",
+    {
+      accountId,
+      draftClaimReleasePersisted: false,
+      draftId,
+      partialEffect: false,
+      providerAcceptance: "rejected",
+      repairAction: "review_current_draft_state",
+      retrySafe: false,
+      userAction: "Review the draft's current state in Ilo Mail before retrying.",
+      userActionDestination: "Ilo Mail",
+      userActionRequired: true,
+    },
+  );
+}
+
+function draftProviderPartialEffectError({
+  accountId,
+  cause,
+  credentialsPersisted,
+  draftId,
+  draftReconciliationStatePersisted,
+  remoteThreadId,
+  threadId,
+}: {
+  accountId: string;
+  cause: unknown;
+  credentialsPersisted: boolean;
+  draftId: string;
+  draftReconciliationStatePersisted: boolean;
+  remoteThreadId?: string;
+  threadId?: string;
+}): AppError {
+  const base = mailProviderPartialEffectError({
+    accountId,
+    cause,
+    credentialsPersisted,
+    draftId,
+    operation: "send",
+    ...(remoteThreadId ? { remoteThreadId } : {}),
+    ...(threadId ? { threadId } : {}),
+  });
+  return new AppError(base.code, base.message, {
+    ...(base.details as Record<string, unknown>),
+    draftId,
+    draftReconciliationStatePersisted,
+    repairAction: "verify_sent_mail_then_reconcile_draft",
+    userAction:
+      "Inspect the provider's Sent Mail before any retry. Then use the recovery panel in Ilo Mail to mark the draft as sent or not sent.",
+    userActionDestination: "Provider Sent Mail; then Ilo Mail",
+    userActionRequired: true,
+  });
+}
+
+async function transitionOwnedDraftClaim(
+  db: Database,
+  draftId: string,
+  userId: string,
+  claimId: string,
+  updatedAt: Date,
+  status: "draft" | "reconcile",
+): Promise<"failed" | "lost" | "updated"> {
+  try {
+    const [transitioned] = await db
+      .update(mailDrafts)
+      .set({
+        ...(status === "draft" ? { sendClaimedAt: null, sendClaimId: null } : {}),
+        sendStatus: status,
+        updatedAt,
+      })
+      .where(
+        and(
+          eq(mailDrafts.id, draftId),
+          eq(mailDrafts.userId, userId),
+          eq(mailDrafts.sendClaimId, claimId),
+          eq(mailDrafts.sendStatus, "sending"),
+          isNull(mailDrafts.sentAt),
+        ),
+      )
+      .returning({ id: mailDrafts.id });
+    return transitioned ? "updated" : "lost";
+  } catch {
+    return "failed";
+  }
 }
 
 function serializeMailRule(row: typeof mailRules.$inferSelect): MailRule {
@@ -565,7 +1795,7 @@ function serializeMailRule(row: typeof mailRules.$inferSelect): MailRule {
   return {
     actions: resolved.actions,
     condition: resolved.condition,
-    confidenceThreshold: row.confidenceThreshold === null ? null : row.confidenceThreshold / 10_000,
+    confidenceThreshold: null,
     createdAt: row.createdAt.toISOString(),
     description: row.description,
     domain: "mail",
@@ -577,5 +1807,51 @@ function serializeMailRule(row: typeof mailRules.$inferSelect): MailRule {
     sourceIds: row.sourceAccountIds,
     updatedAt: row.updatedAt.toISOString(),
     version: row.version,
+  };
+}
+
+function serializeMailDraft(row: typeof mailDrafts.$inferSelect, listedAt: Date): MailDraft {
+  const staleSending =
+    row.sendStatus === "sending" &&
+    row.sendClaimedAt !== null &&
+    row.sendClaimedAt.getTime() <= listedAt.getTime() - MAIL_DRAFT_SEND_CLAIM_TIMEOUT_MS;
+  return {
+    accountId: row.accountId,
+    body: row.body,
+    cc: row.cc,
+    createdAt: row.createdAt.toISOString(),
+    id: row.id,
+    reconciliationState:
+      row.sendStatus === "reconcile" || staleSending
+        ? "sent_mail_review_required"
+        : row.sendStatus === "sending"
+          ? "in_progress"
+          : "none",
+    sendClaimedAt: row.sendClaimedAt?.toISOString() ?? null,
+    sendStatus: row.sendStatus,
+    sentAt: row.sentAt?.toISOString() ?? null,
+    subject: row.subject,
+    threadId: row.threadId,
+    to: row.to,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function serializeMailAttentionItem(row: typeof attentionItems.$inferSelect): AttentionItem {
+  return {
+    createdAt: row.createdAt.toISOString(),
+    domain: row.domain,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    id: row.id,
+    importance: row.importance,
+    kind: row.kind,
+    occursAt: row.occursAt?.toISOString() ?? null,
+    relatedEntityId: row.relatedEntityId,
+    relatedEntityType: row.relatedEntityType,
+    source: row.source,
+    status: row.status,
+    summary: row.summary,
+    title: row.title,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }

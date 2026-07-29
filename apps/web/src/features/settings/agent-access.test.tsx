@@ -10,14 +10,16 @@ const id = "11111111-1111-4111-8111-111111111111";
 const now = "2026-07-28T12:00:00.000Z";
 
 const mocks = vi.hoisted(() => ({
+  activateMailRule: vi.fn(),
   createAccessToken: vi.fn(),
   deleteAccessToken: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
+  getMailSetupContext: vi.fn(),
   listAccessTokens: vi.fn(),
-  listConnectors: vi.fn(),
   listMailRules: vi.fn(),
   listOAuthClients: vi.fn(),
+  previewSavedMailRule: vi.fn(),
   revokeOAuthClient: vi.fn(),
 }));
 
@@ -110,19 +112,50 @@ describe("agent access settings", () => {
         },
       ],
     });
-    mocks.listConnectors.mockResolvedValue([
-      {
-        calendarEnabled: true,
-        email: "person@example.com",
-        id,
-        label: "Personal",
-        lastSyncedAt: now,
-        mailEnabled: true,
-        provider: "google",
-        syncError: null,
-        syncStatus: "idle",
+    mocks.getMailSetupContext.mockResolvedValue({
+      accounts: [
+        {
+          accountId: id,
+          automaticRuleExecution: true,
+          email: "person@example.com",
+          label: "Personal",
+          lastSyncedAt: now,
+          mailboxes: [],
+          provider: "google",
+          syncError: null,
+          syncStatus: "idle",
+        },
+        {
+          accountId: "55555555-5555-4555-8555-555555555555",
+          automaticRuleExecution: false,
+          email: null,
+          label: "iCloud",
+          lastSyncedAt: null,
+          mailboxes: [],
+          provider: "icloud",
+          syncError: "App-specific password expired",
+          syncStatus: "error",
+        },
+        {
+          accountId: "66666666-6666-4666-8666-666666666666",
+          automaticRuleExecution: true,
+          email: "work@example.com",
+          label: "Work",
+          lastSyncedAt: null,
+          mailboxes: [],
+          provider: "google",
+          syncError: null,
+          syncStatus: "idle",
+        },
+      ],
+      safety: {
+        delayedRetentionAutomation: false,
+        permanentDeletion: false,
+        providerFilterCreation: false,
+        spamClassification: false,
+        unsubscribeAutomation: false,
       },
-    ]);
+    });
     mocks.listMailRules.mockResolvedValue([
       {
         actions: [{ afterDays: 1, mailboxId: null, type: "trash" }],
@@ -140,7 +173,67 @@ describe("agent access settings", () => {
         updatedAt: now,
         version: 1,
       },
+      {
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "sender", operator: "ends_with", value: "@news.example" },
+        confidenceThreshold: null,
+        createdAt: now,
+        description: "",
+        domain: "mail",
+        enabled: false,
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "Old newsletters",
+        policy: "preview",
+        profileId: id,
+        sourceIds: [id],
+        updatedAt: now,
+        version: 1,
+      },
     ]);
+    const preview = {
+      candidates: [
+        {
+          accountId: id,
+          actions: [{ afterDays: 0, due: true, mailboxId: null, type: "mark_read" }],
+          from: { address: "news@news.example", name: "News" },
+          id: "44444444-4444-4444-8444-444444444444",
+          receivedAt: now,
+          subject: "Weekly news",
+        },
+      ],
+      fingerprint: "a".repeat(64),
+      matchedCount: 1,
+      previewedAt: now,
+      ruleId: "33333333-3333-4333-8333-333333333333",
+      ruleVersion: 1,
+      scannedCount: 10,
+      window: {
+        limit: 200,
+        newestReceivedAt: now,
+        oldestReceivedAt: now,
+        truncated: false,
+      },
+    };
+    mocks.previewSavedMailRule.mockResolvedValue(preview);
+    mocks.activateMailRule.mockResolvedValue({
+      preview,
+      rule: {
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "sender", operator: "ends_with", value: "@news.example" },
+        confidenceThreshold: null,
+        createdAt: now,
+        description: "",
+        domain: "mail",
+        enabled: true,
+        id: "33333333-3333-4333-8333-333333333333",
+        name: "Old newsletters",
+        policy: "approved_rule",
+        profileId: id,
+        sourceIds: [id],
+        updatedAt: now,
+        version: 2,
+      },
+    });
     mocks.listAccessTokens.mockResolvedValue([
       {
         createdAt: now,
@@ -169,6 +262,13 @@ describe("agent access settings", () => {
         redirectUris: ["https://claude.example.com/callback"],
         scopes: ["mail:read", "mail:write"],
       },
+      {
+        id: "77777777-7777-4777-8777-777777777777",
+        lastUsedAt: null,
+        name: "Codex",
+        redirectUris: ["https://codex.example.com/callback"],
+        scopes: ["mail:read"],
+      },
     ]);
     mocks.createAccessToken.mockResolvedValue({
       createdAt: now,
@@ -189,11 +289,32 @@ describe("agent access settings", () => {
     renderSettings();
 
     expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
-    expect(await screen.findByText("2 connected")).toBeInTheDocument();
+    expect(await screen.findByText("3 connected")).toBeInTheDocument();
     expect(await screen.findByText("1 active approved Mail rule")).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        /3 Mail accounts · person@example.com, iCloud \+1 · 1 needs reconnect/,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText(/Not used yet/)).toHaveLength(2);
+    await browser.click(screen.getByRole("button", { name: "Review" }));
+    expect(await screen.findByText("Weekly news")).toBeInTheDocument();
+    expect(screen.getByText(/Rule scope: person@example.com/)).toBeInTheDocument();
+    expect(screen.getByText(/mark read — due now/)).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Activate reviewed rule" }));
+    await waitFor(() =>
+      expect(mocks.activateMailRule).toHaveBeenCalledWith("33333333-3333-4333-8333-333333333333", {
+        expectedCandidateIds: ["44444444-4444-4444-8444-444444444444"],
+        expectedPreviewFingerprint: "a".repeat(64),
+        expectedPreviewedAt: now,
+        expectedVersion: 1,
+      }),
+    );
 
     await browser.click(screen.getByRole("button", { name: "Copy Ilo MCP URL" }));
     await expect(navigator.clipboard.readText()).resolves.toBe("https://mcp.example.com/mcp");
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Clipboard denied"));
+    await browser.click(screen.getByRole("button", { name: "Copy skill install request" }));
 
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
     expect(screen.getByText("Preferences and attention items")).toBeInTheDocument();
@@ -206,6 +327,9 @@ describe("agent access settings", () => {
 
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.click(screen.getByRole("radio", { name: /Full Ilo/ }));
+    await browser.click(screen.getByText(/Fine-tune permissions/));
+    await browser.click(screen.getByLabelText("Read X bookmarks"));
+    await browser.click(screen.getByLabelText("Read X bookmarks"));
     await browser.click(screen.getByRole("button", { name: "Create local token" }));
     await waitFor(() =>
       expect(mocks.createAccessToken).toHaveBeenCalledWith(
@@ -222,10 +346,96 @@ describe("agent access settings", () => {
     expect(screen.getByText("Old agent")).toBeInTheDocument();
   });
 
+  it("keeps one-day recoverable Trash rules preview-only", async () => {
+    const browser = userEvent.setup();
+    const ruleId = "33333333-3333-4333-8333-333333333333";
+    mocks.listMailRules.mockResolvedValue([
+      {
+        actions: [{ afterDays: 1, mailboxId: null, type: "trash" }],
+        condition: { field: "sender", operator: "ends_with", value: "@orders.example" },
+        confidenceThreshold: null,
+        createdAt: now,
+        description: "Keep routine orders for one day.",
+        domain: "mail",
+        enabled: false,
+        id: ruleId,
+        name: "One-day order retention",
+        policy: "preview",
+        profileId: id,
+        sourceIds: [],
+        updatedAt: now,
+        version: 1,
+      },
+    ]);
+    mocks.previewSavedMailRule.mockResolvedValue({
+      candidates: [
+        {
+          accountId: "88888888-8888-4888-8888-888888888888",
+          actions: [{ afterDays: 1, due: false, mailboxId: null, type: "trash" }],
+          from: { address: "orders@orders.example", name: "Orders" },
+          id: "44444444-4444-4444-8444-444444444444",
+          receivedAt: now,
+          subject: "",
+        },
+        {
+          accountId: id,
+          actions: [{ afterDays: 1, due: true, mailboxId: null, type: "trash" }],
+          from: { address: "second@orders.example", name: null },
+          id: "99999999-9999-4999-8999-999999999999",
+          receivedAt: now,
+          subject: "Second order",
+        },
+      ],
+      fingerprint: "b".repeat(64),
+      matchedCount: 2,
+      previewedAt: now,
+      ruleId,
+      ruleVersion: 1,
+      scannedCount: 10,
+      window: {
+        limit: 200,
+        newestReceivedAt: now,
+        oldestReceivedAt: now,
+        truncated: true,
+      },
+    });
+    renderSettings();
+    await browser.click(await screen.findByRole("button", { name: "Review" }));
+    expect(
+      await screen.findByText("Delayed Mail automation remains preview-only"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("(No subject)")).toBeInTheDocument();
+    expect(screen.getByText(/Unknown account/)).toBeInTheDocument();
+    expect(screen.getByText(/Rule scope: no explicit account selected/)).toBeInTheDocument();
+    expect(screen.getByText(/more than 200 exist/)).toBeInTheDocument();
+    expect(screen.getByText(/recoverable Trash after 1d — retained until due/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Activate reviewed rule" })).toBeDisabled();
+    expect(mocks.activateMailRule).not.toHaveBeenCalled();
+  });
+
   it("keeps missing sources and connection-guide failures actionable", async () => {
     mocks.getAgentConnectionGuide.mockRejectedValue(new Error("Connection guide unavailable"));
-    mocks.getAssistantSetupStatus.mockResolvedValue({ domains: [] });
-    mocks.listConnectors.mockResolvedValue([]);
+    mocks.getAssistantSetupStatus.mockResolvedValue({
+      domains: [
+        {
+          canRead: true,
+          canWrite: true,
+          domain: "mail",
+          profileStatus: "draft",
+          profileVersion: 1,
+        },
+      ],
+    });
+    mocks.getMailSetupContext.mockResolvedValue({
+      accounts: [],
+      safety: {
+        delayedRetentionAutomation: false,
+        permanentDeletion: false,
+        providerFilterCreation: false,
+        spamClassification: false,
+        unsubscribeAutomation: false,
+      },
+    });
     mocks.listMailRules.mockResolvedValue([]);
     mocks.listAccessTokens.mockResolvedValue([]);
     mocks.listOAuthClients.mockResolvedValue([]);
@@ -237,5 +447,64 @@ describe("agent access settings", () => {
       "/settings?section=connections",
     );
     expect(screen.getByText("Not connected")).toBeInTheDocument();
+    expect(
+      screen.getByText("Your Mail profile is drafted and waiting for review."),
+    ).toBeInTheDocument();
+  });
+
+  it("explains an empty rule sample while an inactive profile blocks activation", async () => {
+    const browser = userEvent.setup();
+    const ruleId = "33333333-3333-4333-8333-333333333333";
+    mocks.getAssistantSetupStatus.mockResolvedValue({
+      domains: [
+        {
+          canRead: true,
+          canWrite: true,
+          domain: "mail",
+          profileStatus: "draft",
+          profileVersion: 2,
+        },
+      ],
+    });
+    mocks.listMailRules.mockResolvedValue([
+      {
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "subject", operator: "contains", value: "receipts" },
+        confidenceThreshold: null,
+        createdAt: now,
+        description: "Mark routine receipts read.",
+        domain: "mail",
+        enabled: false,
+        id: ruleId,
+        name: "Routine receipts",
+        policy: "preview",
+        profileId: id,
+        sourceIds: ["88888888-8888-4888-8888-888888888888"],
+        updatedAt: now,
+        version: 2,
+      },
+    ]);
+    mocks.previewSavedMailRule.mockResolvedValue({
+      candidates: [],
+      fingerprint: "c".repeat(64),
+      matchedCount: 0,
+      previewedAt: now,
+      ruleId,
+      ruleVersion: null,
+      scannedCount: 0,
+      window: {
+        limit: 200,
+        newestReceivedAt: null,
+        oldestReceivedAt: null,
+        truncated: false,
+      },
+    });
+    renderSettings();
+
+    await browser.click(await screen.findByRole("button", { name: "Review" }));
+    expect(await screen.findByText(/Reviewed 0 of 200 recent conversations/)).toBeInTheDocument();
+    expect(screen.getByText(/Rule scope: Unknown account/)).toBeInTheDocument();
+    expect(screen.getByText("Activate your Mail profile first")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Activate reviewed rule" })).toBeDisabled();
   });
 });

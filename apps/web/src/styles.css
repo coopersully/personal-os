@@ -2948,6 +2948,63 @@ p {
 .mail-page {
   min-width: 0;
 }
+.mail-send-recovery {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius);
+  display: grid;
+  gap: 16px;
+  margin-bottom: 12px;
+  padding: 18px;
+}
+.mail-send-recovery h2 {
+  font-size: 18px;
+  margin: 2px 0 6px;
+}
+.mail-send-recovery p {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.mail-send-recovery__loading {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0 0 10px;
+}
+.mail-send-recovery__items {
+  display: grid;
+  gap: 10px;
+}
+.mail-send-recovery__item {
+  align-items: center;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  display: flex;
+  gap: 14px;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 12px;
+}
+.mail-send-recovery__item > div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.mail-send-recovery__item strong,
+.mail-send-recovery__item span {
+  overflow-wrap: anywhere;
+}
+.mail-send-recovery__item span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.mail-send-recovery__actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 .settings-actions {
   align-items: center;
   display: flex;
@@ -3715,6 +3772,22 @@ p {
 .agent-access__domains {
   flex-wrap: wrap;
 }
+.agent-access__rule-review,
+.agent-access__rule-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.agent-access__rule-review > div:first-child h3 {
+  font-size: 15px;
+  margin: 0;
+}
+.agent-access__rule-review > div:first-child p {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 4px 0 0;
+}
 .agent-access__token-content {
   display: flex;
   flex-direction: column;
@@ -4277,6 +4350,17 @@ p {
     height: 4.5rem;
   }
   .mail-topbar__search { width: min(10rem, 32vw); }
+  .mail-send-recovery {
+    border-radius: 12px;
+    padding: 14px;
+  }
+  .mail-send-recovery__item {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .mail-send-recovery__actions {
+    display: grid;
+  }
   .mail-workspace {
     display: block;
     height: calc(100dvh - var(--chrome-height) - 1rem);

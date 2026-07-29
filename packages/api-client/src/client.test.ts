@@ -127,6 +127,7 @@ const mailThread: MailThread = {
   subject: "Test mail",
   to: [],
   unread: true,
+  updatedAt: now,
 };
 const mailRule: MailRule = {
   actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
@@ -731,19 +732,97 @@ function apiFetch() {
     if (url.pathname === "/v1/assistant/attention") return json({ items: [attentionItem] });
     if (url.pathname === "/v1/mail/drafts" && method === "POST")
       return json({ draft: { id } }, 201);
+    if (url.pathname === `/v1/mail/drafts/${id}/reconcile`)
+      return json({ draft: { id, sendStatus: "draft" } });
     if (url.pathname === "/v1/mail/drafts")
-      return json({ drafts: [{ body: "Draft", id, subject: "Subject" }] });
+      return json({
+        drafts: [
+          {
+            accountId,
+            body: "Draft",
+            cc: [],
+            createdAt: now,
+            id,
+            reconciliationState: "none",
+            sendClaimedAt: null,
+            sendStatus: "draft",
+            sentAt: null,
+            subject: "Subject",
+            threadId: null,
+            to: [{ address: "to@example.com", name: null }],
+            updatedAt: now,
+          },
+        ],
+      });
+    if (url.pathname === "/v1/mail/setup-context")
+      return json({
+        setup: {
+          accounts: [],
+          safety: {
+            delayedRetentionAutomation: false,
+            permanentDeletion: false,
+            providerFilterCreation: false,
+            spamClassification: false,
+            unsubscribeAutomation: false,
+          },
+        },
+      });
+    if (url.pathname === `/v1/mail/rules/${id}/activate`)
+      return json({
+        preview: {
+          candidates: [],
+          matchedCount: 0,
+          previewedAt: now,
+          ruleId: id,
+          ruleVersion: 1,
+          scannedCount: 1,
+          window: {
+            limit: 200,
+            newestReceivedAt: now,
+            oldestReceivedAt: now,
+            truncated: false,
+          },
+        },
+        rule: { ...mailRule, enabled: true, policy: "approved_rule", version: 2 },
+      });
+    if (url.pathname === `/v1/mail/rules/${id}/preview`)
+      return json({
+        preview: {
+          candidates: [],
+          matchedCount: 0,
+          previewedAt: now,
+          ruleId: id,
+          ruleVersion: 1,
+          scannedCount: 1,
+          window: {
+            limit: 200,
+            newestReceivedAt: now,
+            oldestReceivedAt: now,
+            truncated: false,
+          },
+        },
+      });
     if (url.pathname === "/v1/mail/rules/preview")
       return json({
         preview: { candidates: [], matchedCount: 0, scannedCount: 1 },
       });
     if (url.pathname === `/v1/mail/rules/${id}` && method === "PATCH")
-      return json({ rule: { ...mailRule, enabled: true, version: 2 } });
+      return json({ rule: { ...mailRule, enabled: false, version: 2 } });
     if (url.pathname === "/v1/mail/rules" && method === "POST")
       return json({ rule: mailRule }, 201);
     if (url.pathname === "/v1/mail/rules") return json({ rules: [mailRule] });
     if (url.pathname === "/v1/mail/send" || url.pathname.endsWith("/snooze"))
       return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/mail/threads/bulk")
+      return json({
+        result: {
+          failedCount: 0,
+          failures: [],
+          updatedCount: 1,
+          updatedIds: [id],
+        },
+      });
+    if (url.pathname === `/v1/mail/threads/${id}/attention`) return json({ item: attentionItem });
     if (url.pathname === `/v1/mail/threads/${id}/messages`)
       return json({
         messages: [
@@ -1049,6 +1128,7 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ accountId, email: "test@icloud.com" });
     await expect(api.listMailboxes()).resolves.toEqual([mailbox]);
+    await expect(api.getMailSetupContext()).resolves.toMatchObject({ accounts: [] });
     await expect(api.getAssistantSetupStatus()).resolves.toMatchObject({
       domains: [expect.objectContaining({ domain: "mail" })],
     });
@@ -1120,8 +1200,12 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ id });
     await expect(api.listMailDrafts()).resolves.toEqual([
-      { body: "Draft", id, subject: "Subject" },
+      expect.objectContaining({ body: "Draft", id, reconciliationState: "none" }),
     ]);
+    await expect(api.reconcileMailDraft(id, { outcome: "not_sent" })).resolves.toEqual({
+      id,
+      sendStatus: "draft",
+    });
     await expect(
       api.createMailRule({
         actions: mailRule.actions,
@@ -1145,10 +1229,47 @@ describe("ilo API client", () => {
         sourceIds: [accountId],
       }),
     ).resolves.toMatchObject({ matchedCount: 0 });
+    await expect(api.previewSavedMailRule(id)).resolves.toMatchObject({
+      ruleId: id,
+      ruleVersion: 1,
+    });
     await expect(
-      api.updateMailRule(id, { enabled: true, expectedVersion: 1 }),
-    ).resolves.toMatchObject({ enabled: true, version: 2 });
-    await expect(api.updateMailThread(id, { unread: false })).resolves.toEqual(mailThread);
+      api.activateMailRule(id, {
+        expectedCandidateIds: [],
+        expectedPreviewFingerprint: "a".repeat(64),
+        expectedPreviewedAt: now,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({
+      rule: { enabled: true, policy: "approved_rule", version: 2 },
+    });
+    await expect(
+      api.updateMailRule(id, { enabled: false, expectedVersion: 1 }),
+    ).resolves.toMatchObject({ enabled: false, version: 2 });
+    await expect(
+      api.updateMailThread(id, { expectedUpdatedAt: now, unread: false }),
+    ).resolves.toEqual(mailThread);
+    await expect(
+      api.bulkUpdateMail({
+        items: [{ expectedUpdatedAt: now, id }],
+        unread: false,
+      }),
+    ).resolves.toEqual({
+      failedCount: 0,
+      failures: [],
+      updatedCount: 1,
+      updatedIds: [id],
+    });
+    await expect(
+      api.upsertMailAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "important",
+        occursAt: null,
+        summary: attentionItem.summary,
+        title: attentionItem.title,
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
     await api.sendMail({
       accountId,
@@ -1196,6 +1317,21 @@ describe("ilo API client", () => {
       "Bearer pos_token",
     );
     expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get("x-ilo-client")).toBe("web");
+    const updateMailCall = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/mail/threads/${id}` && init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(updateMailCall?.[1]?.body))).toEqual({
+      expectedUpdatedAt: now,
+      unread: false,
+    });
+    const bulkUpdateMailCall = fetch.mock.calls.find(
+      ([url]) => new URL(String(url)).pathname === "/v1/mail/threads/bulk",
+    );
+    expect(JSON.parse(String(bulkUpdateMailCall?.[1]?.body))).toEqual({
+      items: [{ expectedUpdatedAt: now, id }],
+      unread: false,
+    });
   });
 
   it("adopts, persists, uses, and clears a desktop session token", async () => {

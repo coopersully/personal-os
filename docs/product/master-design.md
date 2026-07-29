@@ -154,7 +154,9 @@ Now
 4. Batch mode exposes the same actions, confirms destructive change count, supports undo where the provider permits it, and writes one auditable material action per affected item.
 5. A triage session shows one category or bounded batch, with shortcuts and a visible “done for now” exit. Nothing is auto-archived just because it was read.
 6. The agent can propose classifications, labels, archives, task/event drafts, unsubscribe candidates, or reply drafts. The person can approve one, approve a category/rule, edit, reject, or allow safe recurring application.
-7. Mail rules use deterministic conditions plus optional agent classification. Each rule has scope, dry-run results, confidence threshold, effective date, undo/review behavior, and a kill switch.
+7. MVP Mail rules use exact deterministic conditions, explicit scope, dry-run results, effective
+   date, undo/review behavior, and a kill switch; their shared-envelope confidence threshold stays
+   null. Optional server-owned agent classification and scored confidence remain future scope.
 8. Briefs cite source threads and distinguish “needs reply,” “FYI,” “deadline,” “event/invite,” “financial,” and “newsletter.”
 
 Mail policy tiers:

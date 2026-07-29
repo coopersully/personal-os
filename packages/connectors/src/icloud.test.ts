@@ -287,11 +287,11 @@ describe("iCloud connector", () => {
       to: [{ address: "to@example.com", name: "To" }],
     });
     expect(transport.sendMail).toHaveBeenCalledWith({
-      cc: "CC <cc@example.com>",
+      cc: [{ address: "cc@example.com", name: "CC" }],
       from: credentials.email,
       subject: "Subject",
       text: "Hello",
-      to: "To <to@example.com>",
+      to: [{ address: "to@example.com", name: "To" }],
     });
     expect(transport.close).toHaveBeenCalledOnce();
 

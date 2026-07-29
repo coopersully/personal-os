@@ -183,7 +183,21 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const audit = createAuditService(dependencies.db);
-  const assistant = createAssistantService({ db: dependencies.db, now });
+  const mail = createMailService({
+    db: dependencies.db,
+    gateway: connectors.mailGateway,
+    now,
+    reviewSigningKey: dependencies.config.encryptionKey,
+  });
+  const assistant = createAssistantService({
+    db: dependencies.db,
+    now,
+    validateProfileSources: async (transaction, domain, userId, sourceIds) => {
+      if (domain === "mail") {
+        await mail.validateProfileSources(transaction, userId, sourceIds);
+      }
+    },
+  });
   const agentSkillSourceUrl = dependencies.config.agentSkillSourceUrl ?? defaultAgentSkillSourceUrl;
   const agentConnectionGuide: AgentConnectionGuide = {
     domains: assistantDomains.map((domain) => ({
@@ -204,7 +218,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       version: "0.1.0",
     },
   };
-  const mail = createMailService({ db: dependencies.db, gateway: connectors.mailGateway, now });
   const weather = createWeatherService({
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
     now,
@@ -642,7 +655,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     }),
   );
   app.delete("/v1/connectors/:id", async (context) => {
-    await connectors.disconnect(context.get("principal").userId, context.req.param("id"));
+    await connectors.disconnect(
+      context.get("principal").userId,
+      context.req.param("id"),
+      context.get("requestId"),
+    );
     return context.body(null, 204);
   });
 

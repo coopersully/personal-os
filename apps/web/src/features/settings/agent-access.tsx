@@ -89,8 +89,8 @@ const scopeLabels: Record<AccessScope, string> = {
   "bookmarks:read": "Read X bookmarks",
   "calendar:read": "Read calendar",
   "calendar:write": "Manage calendar",
-  "finances:read": "Read finances",
-  "finances:write": "Manage finances",
+  "finances:read": "Read sensitive financial accounts and activity",
+  "finances:write": "Save Finance guidance drafts",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
   "mail:read": "Read mail",
@@ -339,9 +339,13 @@ export function AgentAccessSettings() {
                   {selectedGuide?.support === "executable_rules"
                     ? "Mail setup maps every inbox before sampling it, records important conversations as source-linked attention, and captures user-chosen delayed archive or recoverable Trash preferences. Delayed retention rules remain preview-only until Ilo has a durable due-work queue. Exact read, star, and label rules use a dated preview and signed-in activation."
                     : `${selectedLabel} uses the same durable profile and attention structure. Executable domain rules are not available yet.`}
-                  {selectedProfile?.profileStatus
-                    ? ` Your current profile is ${selectedProfile.profileStatus}.`
-                    : ""}
+                  {selectedProfile?.approvedProfileStatus === "active"
+                    ? selectedProfile.pendingDraftVersion
+                      ? ` Active approved guidance is version ${selectedProfile.approvedProfileVersion}, with draft version ${selectedProfile.pendingDraftVersion} waiting for review.`
+                      : ` Your approved profile is active at version ${selectedProfile.approvedProfileVersion}.`
+                    : selectedProfile?.profileStatus
+                      ? ` Your current profile is ${selectedProfile.profileStatus}.`
+                      : ""}
                 </AlertDescription>
               </Alert>
               <CopyPrompt copyLabel={`Copy ${selectedLabel} setup prompt`} value={setupPrompt} />

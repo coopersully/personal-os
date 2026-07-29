@@ -6,6 +6,7 @@ import {
   agentConnectionGuideSchema,
   agentMutationPolicies,
   apiErrorSchema,
+  applyFinanceCategorizationsInputSchema,
   automationRoutineSchema,
   automationRunSchema,
   bulkUpdateMailInputSchema,
@@ -29,6 +30,9 @@ import {
   eventListQuerySchema,
   featureAccessPolicies,
   featureIds,
+  financeGuidedPreferencesSchema,
+  financeReviewDecisionInputSchema,
+  financeTransactionQuerySchema,
   formatDateOnly,
   formatDateWithOrdinal,
   formatMonth,
@@ -557,6 +561,29 @@ describe("domain schemas", () => {
     expect(updateFinanceTransactionInputSchema.parse({ notes: "Receipt saved" })).toEqual({
       notes: "Receipt saved",
     });
+    expect(
+      financeReviewDecisionInputSchema.parse({
+        action: "recategorize",
+        categoryId: "00000000-0000-4000-8000-000000000000",
+        confidence: 0.965,
+        expectedTransactionUpdatedAt: start,
+      }),
+    ).toMatchObject({
+      confidence: 0.965,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: "suggest",
+    });
+    expect(
+      financeReviewDecisionInputSchema.safeParse({
+        action: "approve",
+      }).success,
+    ).toBe(false);
+    expect(
+      financeReviewDecisionInputSchema.safeParse({
+        action: "recategorize",
+        expectedTransactionUpdatedAt: start,
+      }).success,
+    ).toBe(false);
     expect(() => updateFinanceTransactionInputSchema.parse({ learnMerchant: false })).toThrow();
     expect(
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
@@ -840,6 +867,67 @@ describe("domain schemas", () => {
         mail: false,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("finance agent contracts", () => {
+  it("uses percentage points for recurring-change preferences", () => {
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        recurringAmountChangePercent: 20,
+      }).recurringAmountChangePercent,
+    ).toBe(20);
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        recurringAmountChangePercent: 101,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        futurePreference: "x".repeat(501),
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        futureNullablePreference: null,
+      }),
+    ).toMatchObject({ futureNullablePreference: null });
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        largeExpenseAlertAmount: 500,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        largeExpenseAlertAmount: 500,
+        lowBalanceAlertAmount: 100,
+        planningCurrency: "USD",
+      }),
+    ).toMatchObject({ planningCurrency: "USD" });
+  });
+
+  it("requires one revision-guarded decision per transaction", () => {
+    const decision = {
+      categoryId: accountId,
+      confidence: 0.95,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: "suggest" as const,
+      rationale: "The user accepted this proposal.",
+      transactionId: id,
+    };
+    expect(
+      applyFinanceCategorizationsInputSchema.safeParse({ decisions: [decision] }).success,
+    ).toBe(true);
+    expect(
+      applyFinanceCategorizationsInputSchema.safeParse({
+        decisions: [decision, decision],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("parses explicit Finance pending query booleans without truthy string coercion", () => {
+    expect(financeTransactionQuerySchema.parse({ pending: "false" }).pending).toBe(false);
+    expect(financeTransactionQuerySchema.parse({ pending: "true" }).pending).toBe(true);
   });
 });
 

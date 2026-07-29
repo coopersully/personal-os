@@ -65,6 +65,12 @@ Access management
   Archive and recoverable Trash rules remain preview-only until a durable due-work
   queue is implemented. Permanent deletion, provider filter creation, spam
   classification, and unsubscribe automation remain unavailable.
+- Finance adds a domain-owned readiness and reviewed-workflow surface in
+  Finances → Profile. Richer shared handoff presentation remains outside this
+  Settings-owned page. Finance consent names account, balance, and activity
+  reads as sensitive and describes the write scope narrowly as saving setup
+  guidance drafts; transaction edits, category application, and review-state
+  changes require a signed-in Ilo session.
 - Other domains honestly state that they currently support profiles and
   attention items but not domain-owned executable rules.
 

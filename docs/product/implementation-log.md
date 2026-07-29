@@ -2,6 +2,26 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-07-28 — Finance agent-guided setup and safe review workflows
+
+- Added a Finance-owned guided context that combines owned account sources, ledger and review
+  readiness, cash-flow context, human-only boundaries, and trustworthy suggested workflows with
+  the shared durable Finance profile.
+- Added a short Finance interview reference with explicit preference units, user terminology,
+  source meanings, review cadence, thresholds, and safety constraints.
+- Made categorization preview read-scoped and revision-guarded. Each accepted decision now commits
+  its ledger change, evidence, review resolution, optional human merchant rule, and audit record
+  atomically; below-threshold reviews are audited, proposal pages are cursor-paginated, and
+  four-worker batches retain structured per-decision partial-result reporting without exhausting
+  the database pool.
+- Kept account/provider/import/profile/budget administration, permanent merchant rules, and
+  ambiguous transfers behind interactive human review. The MCP surface is now proposal/read-only
+  for ledger decisions, while the API retains actor attribution and defensive stale/policy checks.
+- Agents can save Finance guidance drafts; only the signed-in Finance profile surface can activate
+  one, with an owned source and exact profile version.
+- Added Finance-owned readiness and activation presentation without expanding the shared Settings
+  handoff.
+
 ## 2026-07-28 — Mail guided-setup expansion
 
 - Added a credential-free Mail setup context that preserves account identity, mailbox roles and

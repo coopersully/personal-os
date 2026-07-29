@@ -220,6 +220,7 @@ const mocks = vi.hoisted(() => ({
   getDailyBrief: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
+  getDomainProfile: vi.fn(),
   getWeather: vi.fn(),
   searchWeatherLocations: vi.fn(),
   getGoogleAuthorizationUrl: vi.fn(),
@@ -256,6 +257,7 @@ const mocks = vi.hoisted(() => ({
   getFinanceOverviewForMonth: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceLedgerHealth: vi.fn(),
+  getFinanceGuidedSetup: vi.fn(),
   getFinanceProfile: vi.fn(),
   listFinanceIncomeStreams: vi.fn(),
   listFinanceRecurringObligations: vi.fn(),
@@ -310,6 +312,7 @@ const mocks = vi.hoisted(() => ({
   updateAccountSetup: vi.fn(),
   updateReminder: vi.fn(),
   updateTask: vi.fn(),
+  upsertDomainProfile: vi.fn(),
   updateUser: vi.fn(),
   validateInvitation: vi.fn(),
 }));
@@ -486,6 +489,70 @@ function defaults() {
     staleAccounts: 0,
     unresolvedReviews: 0,
   });
+  mocks.getFinanceGuidedSetup.mockResolvedValue({
+    accountSources: [],
+    alertSummary: { open: 0, warnings: 0 },
+    asOf: now,
+    budgetSummary: { count: 0, month: "2026-07", planned: 0 },
+    cashflowSummary: {
+      financialProfileConfigured: false,
+      incomeStreams: 0,
+      recurringNeedsReview: 0,
+      recurringObligations: 0,
+    },
+    guidance: {
+      approvedProfile: null,
+      draftNotice: null,
+      draftProposal: null,
+    },
+    humanOnlyActions: [
+      "connect_or_disconnect_source",
+      "import_transactions",
+      "manage_accounts",
+      "manage_budgets",
+      "manage_financial_profile",
+      "refresh_provider_data",
+      "confirm_ambiguous_transfer",
+      "create_merchant_rule",
+      "apply_categorization",
+      "review_recurring_obligation",
+      "resolve_alert",
+      "manage_merchants",
+      "add_manual_transaction",
+    ],
+    ledgerHealth: {
+      asOf: now,
+      balanceOnlyAccounts: 0,
+      candidateTransfers: 0,
+      missingProvenance: 0,
+      pendingTransactions: 0,
+      possibleDuplicates: 0,
+      staleAccounts: 0,
+      unresolvedReviews: 0,
+    },
+    reviewSummary: {
+      count: 0,
+      reasons: {
+        ambiguous_merchant: 0,
+        low_confidence: 0,
+        one_time: 0,
+        possible_duplicate: 0,
+        possible_transfer: 0,
+        refund_or_reversal: 0,
+        unknown_merchant: 0,
+      },
+    },
+    suggestedWorkflows: [
+      {
+        available: true,
+        key: "capture_preferences",
+        policy: "preview",
+        summary: "Capture durable preferences.",
+        unavailableReason: null,
+      },
+    ],
+  });
+  mocks.getDomainProfile.mockResolvedValue(null);
   mocks.getFinanceProfile.mockResolvedValue(null);
   mocks.listFinanceIncomeStreams.mockResolvedValue([]);
   mocks.listFinanceRecurringObligations.mockResolvedValue([]);
@@ -626,9 +693,12 @@ function defaults() {
   mocks.getAssistantSetupStatus.mockResolvedValue({
     domains: [
       {
+        approvedProfileStatus: null,
+        approvedProfileVersion: null,
         canRead: true,
         canWrite: true,
         domain: "mail",
+        pendingDraftVersion: null,
         profileStatus: null,
         profileVersion: null,
       },
@@ -2485,8 +2555,130 @@ describe("ilo web app", () => {
     ] as const) {
       const view = setup(path);
       expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
+      if (path === "/finances/profile") {
+        expect(await screen.findByText("Agent guidance")).toBeInTheDocument();
+        expect(await screen.findByText("1 available now.", { exact: false })).toBeInTheDocument();
+        expect(screen.getByText("Human-only boundaries")).toBeInTheDocument();
+        expect(
+          screen.getByText("connect or disconnect sources", { exact: false }),
+        ).toBeInTheDocument();
+      }
       view.unmount();
     }
+  });
+
+  it("activates a Finance guidance draft only through the signed-in Finance surface", async () => {
+    configureFinanceWorkspace();
+    const draft = {
+      categories: [],
+      createdAt: now,
+      domain: "finances" as const,
+      id,
+      instructions: ["Never infer permanent merchant rules."],
+      objective: "Keep financial review trustworthy.",
+      preferences: { reviewCadence: "weekly" },
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Bills and daily spending",
+          sourceId: id,
+          sourceLabel: "Checking",
+        },
+      ],
+      status: "draft" as const,
+      summary: "Review weekly and keep uncertain transfers visible.",
+      updatedAt: now,
+      version: 1,
+    };
+    mocks.getDomainProfile.mockResolvedValue(draft);
+    mocks.upsertDomainProfile.mockResolvedValue({ ...draft, status: "active", version: 2 });
+    mocks.getFinanceGuidedSetup.mockResolvedValue({
+      ...(await mocks.getFinanceGuidedSetup()),
+      guidance: {
+        approvedProfile: null,
+        draftNotice:
+          "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+        draftProposal: draft,
+      },
+    });
+
+    const view = setup("/finances/profile");
+    const invalidateQueries = vi.spyOn(view.queryClient, "invalidateQueries");
+    expect(await screen.findByText(draft.objective)).toBeVisible();
+    expect(screen.getByText(draft.summary)).toBeVisible();
+    expect(screen.getByText(draft.instructions[0] ?? "")).toBeVisible();
+    expect(screen.getByText("Checking — Bills and daily spending")).toBeVisible();
+    expect(screen.getByText("reviewCadence: weekly")).toBeVisible();
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Activate guidance" }));
+    await waitFor(() =>
+      expect(mocks.upsertDomainProfile).toHaveBeenCalledWith({
+        categories: draft.categories,
+        domain: "finances",
+        expectedVersion: 1,
+        instructions: draft.instructions,
+        objective: draft.objective,
+        preferences: draft.preferences,
+        sourceContexts: draft.sourceContexts,
+        status: "active",
+        summary: draft.summary,
+      }),
+    );
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["assistant-setup-status"] });
+    view.unmount();
+  });
+
+  it("shows approved Finance guidance separately from a pending draft", async () => {
+    configureFinanceWorkspace();
+    const approved = {
+      categories: [],
+      createdAt: now,
+      domain: "finances" as const,
+      id,
+      instructions: ["Keep approved transfer safeguards active."],
+      objective: "Operate from approved financial context.",
+      preferences: { reviewCadence: "monthly" },
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Approved household spending",
+          sourceId: id,
+          sourceLabel: "Approved checking",
+        },
+      ],
+      status: "active" as const,
+      summary: "This remains the operative guidance.",
+      updatedAt: now,
+      version: 2,
+    };
+    const draft = {
+      ...approved,
+      instructions: ["Proposed weekly review."],
+      objective: "Propose revised financial context.",
+      preferences: { reviewCadence: "weekly" },
+      status: "draft" as const,
+      summary: "This proposal is not operative yet.",
+      version: 3,
+    };
+    mocks.getDomainProfile.mockResolvedValue(draft);
+    mocks.getFinanceGuidedSetup.mockResolvedValue({
+      ...(await mocks.getFinanceGuidedSetup()),
+      guidance: {
+        approvedProfile: approved,
+        draftNotice:
+          "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+        draftProposal: draft,
+      },
+    });
+
+    const view = setup("/finances/profile");
+    expect(await screen.findByText("Active + draft")).toBeVisible();
+    expect(screen.getByText("Active approved guidance")).toBeVisible();
+    expect(screen.getByText(approved.objective)).toBeVisible();
+    expect(screen.getByText(approved.summary)).toBeVisible();
+    expect(screen.getByText("Draft activation")).toBeVisible();
+    expect(screen.getByText(draft.objective)).toBeVisible();
+    expect(screen.getByText(draft.summary)).toBeVisible();
+    view.unmount();
   });
 
   it("keeps finance empty and error states explicit", async () => {
@@ -2558,6 +2750,7 @@ describe("ilo web app", () => {
       expect(mocks.resolveFinanceReview).toHaveBeenCalledWith(secondId, {
         action: "defer",
         categoryId: undefined,
+        expectedTransactionUpdatedAt: undefined,
         learnMerchant: "suggest",
         rationale: null,
       }),
@@ -2572,11 +2765,100 @@ describe("ilo web app", () => {
       expect(mocks.resolveFinanceReview).toHaveBeenLastCalledWith(secondId, {
         action: "recategorize",
         categoryId: id,
+        expectedTransactionUpdatedAt: now,
         learnMerchant: "always",
         rationale: "Reviewed and recategorized by the user.",
       }),
     );
     review.unmount();
+  });
+
+  it("submits the displayed transaction revision when approving a Finance review", async () => {
+    mocks.getFinanceReviewQueue.mockResolvedValue([
+      {
+        createdAt: now,
+        id: secondId,
+        rationale: "Provider category needs confirmation.",
+        reason: "low_confidence",
+        status: "open",
+        suggestedCategory: null,
+        transaction: {
+          accountId: id,
+          amount: 27.5,
+          category: "Dining",
+          categoryConfidence: 0.95,
+          categoryId: id,
+          createdAt: now,
+          date: "2026-07-13",
+          direction: "expense",
+          id: thirdId,
+          merchant: "Cafe",
+          needsReview: true,
+          notes: null,
+          pending: false,
+          updatedAt: now,
+        },
+      },
+    ]);
+    mocks.resolveFinanceReview.mockResolvedValue({ applied: true });
+    const view = setup("/finances/review");
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() =>
+      expect(mocks.resolveFinanceReview).toHaveBeenCalledWith(secondId, {
+        action: "approve",
+        categoryId: undefined,
+        expectedTransactionUpdatedAt: now,
+        learnMerchant: "suggest",
+        rationale: null,
+      }),
+    );
+    view.unmount();
+  });
+
+  it("requires an explicit transfer confirmation for possible-transfer reviews", async () => {
+    mocks.getFinanceReviewQueue.mockResolvedValue([
+      {
+        createdAt: now,
+        id: secondId,
+        rationale: "This may be movement between owned accounts.",
+        reason: "possible_transfer",
+        status: "open",
+        suggestedCategory: "Transfers",
+        transaction: {
+          accountId: id,
+          amount: 250,
+          category: "Transfers",
+          categoryConfidence: 0.95,
+          categoryId: id,
+          createdAt: now,
+          date: "2026-07-13",
+          direction: "expense",
+          id: thirdId,
+          merchant: "Account movement",
+          needsReview: true,
+          notes: null,
+          pending: false,
+          updatedAt: now,
+        },
+      },
+    ]);
+    mocks.resolveFinanceReview.mockResolvedValue({ applied: true });
+    const view = setup("/finances/review");
+
+    expect(await screen.findByRole("button", { name: "Confirm transfer" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Confirm transfer" }));
+    await waitFor(() =>
+      expect(mocks.resolveFinanceReview).toHaveBeenCalledWith(secondId, {
+        action: "confirm_transfer",
+        categoryId: undefined,
+        expectedTransactionUpdatedAt: now,
+        learnMerchant: "suggest",
+        rationale: null,
+      }),
+    );
+    view.unmount();
   });
 
   it("keeps global badges and calendar date navigation deterministic", async () => {

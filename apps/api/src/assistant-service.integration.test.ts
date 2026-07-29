@@ -4,17 +4,21 @@ import {
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfileApprovals,
   domainProfiles,
+  financeAccounts,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
+import { createFinanceService } from "./finance-service.js";
 
 describe.sequential("assistant setup service", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+  let finances: ReturnType<typeof createFinanceService>;
   let service: ReturnType<typeof createAssistantService>;
   let userId: string;
 
@@ -37,10 +41,32 @@ describe.sequential("assistant setup service", () => {
       .returning();
     if (!user) throw new Error("Fixture user was not created.");
     userId = user.id;
+    finances = createFinanceService({
+      db: database.db,
+      now: () => new Date("2026-07-28T16:00:00.000Z"),
+    });
     service = createAssistantService({
       db: database.db,
       now: () => new Date("2026-07-28T15:00:00.000Z"),
-      validateProfileSources: async () => undefined,
+      profileRequiresApproval: (domain) => domain === "finances",
+      validateProfileSources: async (
+        transaction,
+        domain,
+        profileUserId,
+        sourceIds,
+        status,
+        actorType,
+      ) => {
+        if (domain === "finances") {
+          await finances.validateProfileSources(
+            transaction,
+            profileUserId,
+            sourceIds,
+            status,
+            actorType,
+          );
+        }
+      },
     });
   }, 120_000);
 
@@ -143,6 +169,62 @@ describe.sequential("assistant setup service", () => {
         context(),
       ),
     ).resolves.toMatchObject({ status: "active", version: 2 });
+    const humanApproved = await service.upsertProfile(
+      {
+        categories: profile.categories,
+        domain: profile.domain,
+        expectedVersion: 2,
+        instructions: profile.instructions,
+        objective: profile.objective,
+        preferences: profile.preferences,
+        sourceContexts: profile.sourceContexts,
+        status: "active",
+        summary: "Human-approved Mail guidance.",
+      },
+      {
+        principal: {
+          ...context().principal,
+          actorId: userId,
+          actorType: "user",
+        },
+        requestId: "human-mail-approval",
+      },
+    );
+    expect(humanApproved).toMatchObject({ status: "active", version: 3 });
+    await database.db.insert(domainProfileApprovals).values({
+      approvedAt: new Date("2026-07-28T15:00:00.000Z"),
+      approvedByUserId: userId,
+      domain: "mail",
+      profile: humanApproved,
+      profileId: humanApproved.id,
+      profileVersion: humanApproved.version,
+      userId,
+    });
+    await expect(
+      service.upsertProfile(
+        {
+          categories: profile.categories,
+          domain: profile.domain,
+          expectedVersion: 3,
+          instructions: profile.instructions,
+          objective: profile.objective,
+          preferences: profile.preferences,
+          sourceContexts: profile.sourceContexts,
+          status: "active",
+          summary: "Later agent-active Mail revision.",
+        },
+        context(),
+      ),
+    ).resolves.toMatchObject({ status: "active", version: 4 });
+    const [preservedApproval] = await database.db
+      .select()
+      .from(domainProfileApprovals)
+      .where(eq(domainProfileApprovals.userId, userId));
+    expect(preservedApproval).toMatchObject({
+      approvedByUserId: userId,
+      profile: expect.objectContaining({ summary: "Human-approved Mail guidance.", version: 3 }),
+      profileVersion: 3,
+    });
     await expect(
       service.upsertProfile(
         {
@@ -190,29 +272,434 @@ describe.sequential("assistant setup service", () => {
     await expect(service.getSetupStatus(context().principal)).resolves.toMatchObject({
       domains: expect.arrayContaining([
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
           domain: "mail",
+          pendingDraftVersion: null,
           profileStatus: "active",
-          profileVersion: 2,
+          profileVersion: 4,
         },
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: false,
           domain: "calendar",
+          pendingDraftVersion: null,
           profileStatus: null,
           profileVersion: null,
         },
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: false,
           canWrite: false,
           domain: "finances",
+          pendingDraftVersion: null,
           profileStatus: null,
           profileVersion: null,
         },
       ]),
     });
     await expect(database.db.select().from(domainProfiles)).resolves.toHaveLength(2);
+  });
+
+  it("treats legacy active Finance guidance without signed approval as a draft", async () => {
+    const [legacyUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Legacy Finance",
+        email: "legacy-finance@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!legacyUser) throw new Error("Legacy Finance user was not created.");
+    const [legacyAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Legacy Bank",
+        name: "Checking",
+        provider: "manual",
+        status: "manual",
+        userId: legacyUser.id,
+      })
+      .returning();
+    if (!legacyAccount) throw new Error("Legacy Finance account was not created.");
+    await database.db.insert(domainProfiles).values({
+      categories: [],
+      domain: "finances",
+      instructions: ["Unapproved legacy instruction."],
+      objective: "Legacy objective",
+      preferences: {},
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Legacy spending",
+          sourceId: legacyAccount.id,
+          sourceLabel: legacyAccount.name,
+        },
+      ],
+      status: "active",
+      summary: "Legacy summary",
+      userId: legacyUser.id,
+    });
+    await expect(service.getProfile(legacyUser.id, "finances")).resolves.toMatchObject({
+      status: "draft",
+      version: 1,
+    });
+    await expect(
+      service.getSetupStatus({
+        actorId: crypto.randomUUID(),
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId: legacyUser.id,
+      }),
+    ).resolves.toMatchObject({
+      domains: expect.arrayContaining([
+        expect.objectContaining({
+          approvedProfileStatus: null,
+          domain: "finances",
+          profileStatus: "draft",
+          profileVersion: 1,
+        }),
+      ]),
+    });
+  });
+
+  it("allows source-empty Finance drafts but requires a distinct owned account to activate", async () => {
+    const [financeUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance Setup",
+        email: "finance-setup@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!financeUser) throw new Error("Finance setup fixture user was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Example Bank",
+        name: "Checking",
+        provider: "manual",
+        status: "manual",
+        userId: financeUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Finance setup fixture account was not created.");
+    const financeContext = {
+      principal: {
+        actorId: financeUser.id,
+        actorType: "agent" as const,
+        scopes: new Set(["finances:read" as const, "finances:write" as const]),
+        userId: financeUser.id,
+      },
+      requestId: "finance-profile",
+    };
+    const financeUserContext = {
+      principal: {
+        actorId: financeUser.id,
+        actorType: "user" as const,
+        scopes: new Set(["finances:read" as const, "finances:write" as const]),
+        userId: financeUser.id,
+      },
+      requestId: "finance-profile-activation",
+    };
+    const sourceContext = {
+      notes: null,
+      purpose: "Bills and daily spending",
+      sourceId: account.id,
+      sourceLabel: "Checking",
+    };
+    const input = {
+      categories: [],
+      domain: "finances" as const,
+      instructions: ["Never infer a permanent merchant rule."],
+      objective: "Keep financial review trustworthy.",
+      preferences: { reviewCadence: "weekly" },
+      sourceContexts: [sourceContext],
+      status: "draft" as const,
+      summary: "Review weekly and keep uncertain transfers visible.",
+    };
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          sourceContexts: [{ ...sourceContext, sourceId: "checking" }],
+        },
+        financeContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          sourceContexts: [{ ...sourceContext, sourceId: userId }],
+        },
+        financeContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile(
+        { ...input, sourceContexts: [sourceContext, sourceContext] },
+        financeContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile({ ...input, sourceContexts: [] }, financeContext),
+    ).resolves.toMatchObject({
+      domain: "finances",
+      sourceContexts: [],
+      status: "draft",
+      version: 1,
+    });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          sourceContexts: [],
+          status: "active",
+        },
+        financeUserContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          status: "active",
+        },
+        financeContext,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          status: "active",
+        },
+        financeUserContext,
+      ),
+    ).resolves.toMatchObject({
+      domain: "finances",
+      sourceContexts: [expect.objectContaining({ sourceId: account.id })],
+      status: "active",
+      version: 2,
+    });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          status: "active",
+        },
+        financeUserContext,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const [draftOnlyAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Draft Bank",
+        name: "Draft-only account",
+        provider: "manual",
+        status: "manual",
+        userId: financeUser.id,
+      })
+      .returning();
+    if (!draftOnlyAccount) throw new Error("Draft-only Finance account was not created.");
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 2,
+          sourceContexts: [{ ...sourceContext, sourceId: draftOnlyAccount.id }],
+        },
+        financeContext,
+      ),
+    ).resolves.toMatchObject({ status: "draft", version: 3 });
+    await expect(service.getSetupStatus(financeContext.principal)).resolves.toMatchObject({
+      domains: expect.arrayContaining([
+        {
+          approvedProfileStatus: "active",
+          approvedProfileVersion: 2,
+          canRead: true,
+          canWrite: true,
+          domain: "finances",
+          pendingDraftVersion: 3,
+          profileStatus: "draft",
+          profileVersion: 3,
+        },
+      ]),
+    });
+    await expect(finances.deleteAccount(account.id, financeUserContext)).rejects.toThrow(
+      "active approved Finance guidance",
+    );
+    await expect(finances.deleteAccount(draftOnlyAccount.id, financeUserContext)).resolves.toBe(
+      undefined,
+    );
+    const [profileAfterDraftAccountDelete] = await database.db
+      .select()
+      .from(domainProfiles)
+      .where(and(eq(domainProfiles.userId, financeUser.id), eq(domainProfiles.domain, "finances")));
+    expect(profileAfterDraftAccountDelete).toMatchObject({
+      sourceContexts: [],
+      status: "draft",
+      version: 4,
+    });
+    const [financeApproval] = await database.db
+      .select()
+      .from(domainProfileApprovals)
+      .where(
+        and(
+          eq(domainProfileApprovals.userId, financeUser.id),
+          eq(domainProfileApprovals.domain, "finances"),
+        ),
+      );
+    expect(financeApproval).toMatchObject({
+      approvedByUserId: financeUser.id,
+      profile: expect.objectContaining({
+        sourceContexts: [expect.objectContaining({ sourceId: account.id })],
+        status: "active",
+        version: 2,
+      }),
+      profileVersion: 2,
+    });
+    if (!financeApproval) throw new Error("Finance approval snapshot was not saved.");
+    await expect(
+      database.db
+        .update(domainProfileApprovals)
+        .set({
+          profile: {
+            ...financeApproval.profile,
+            id: crypto.randomUUID(),
+          },
+        })
+        .where(eq(domainProfileApprovals.id, financeApproval.id)),
+    ).rejects.toThrow();
+    for (const missingField of ["id", "domain", "version", "status"] as const) {
+      const invalidProfile = { ...financeApproval.profile };
+      delete invalidProfile[missingField];
+      await expect(
+        database.db
+          .update(domainProfileApprovals)
+          .set({ profile: invalidProfile })
+          .where(eq(domainProfileApprovals.id, financeApproval.id)),
+      ).rejects.toThrow();
+    }
+    await expect(
+      database.db
+        .update(domainProfileApprovals)
+        .set({
+          profile: {
+            ...financeApproval.profile,
+            status: "draft",
+          },
+        })
+        .where(eq(domainProfileApprovals.id, financeApproval.id)),
+    ).rejects.toThrow();
+    const [raceAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Race Bank",
+        name: "Closing account",
+        provider: "manual",
+        status: "manual",
+        userId: financeUser.id,
+      })
+      .returning();
+    if (!raceAccount) throw new Error("Finance race fixture account was not created.");
+    const raceResults = await Promise.allSettled([
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: profileAfterDraftAccountDelete?.version,
+          sourceContexts: [{ ...sourceContext, sourceId: raceAccount.id }],
+        },
+        financeContext,
+      ),
+      finances.deleteAccount(raceAccount.id, {
+        principal: {
+          actorId: financeUser.id,
+          actorType: "user",
+          scopes: new Set(["finances:read", "finances:write"]),
+          userId: financeUser.id,
+        },
+        requestId: "concurrent-account-delete",
+      }),
+    ]);
+    expect(raceResults.filter((result) => result.status === "rejected").length).toBeLessThanOrEqual(
+      1,
+    );
+    const [savedRaceProfile] = await database.db
+      .select({ sourceContexts: domainProfiles.sourceContexts })
+      .from(domainProfiles)
+      .where(eq(domainProfiles.userId, financeUser.id));
+    const [savedRaceAccount] = await database.db
+      .select({ id: financeAccounts.id })
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, raceAccount.id));
+    expect(
+      savedRaceProfile?.sourceContexts.some((source) => source.sourceId === raceAccount.id),
+    ).toBe(Boolean(savedRaceAccount));
+    const orderedAccounts = await database.db
+      .insert(financeAccounts)
+      .values([
+        {
+          institution: "Ordered Bank",
+          name: "First lock",
+          provider: "manual",
+          status: "manual",
+          userId: financeUser.id,
+        },
+        {
+          institution: "Ordered Bank",
+          name: "Second lock",
+          provider: "manual",
+          status: "manual",
+          userId: financeUser.id,
+        },
+      ])
+      .returning();
+    const currentProfile = await service.getProfile(financeUser.id, "finances");
+    if (!currentProfile || orderedAccounts.length !== 2) {
+      throw new Error("Ordered Finance lock fixtures were not created.");
+    }
+    const contexts = orderedAccounts.map((source) => ({
+      ...sourceContext,
+      sourceId: source.id,
+      sourceLabel: source.name,
+    }));
+    const orderedLockResults = await Promise.allSettled([
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: currentProfile.version,
+          sourceContexts: contexts,
+        },
+        financeContext,
+      ),
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: currentProfile.version,
+          sourceContexts: [...contexts].reverse(),
+        },
+        financeContext,
+      ),
+    ]);
+    expect(orderedLockResults.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(orderedLockResults.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(orderedLockResults.find((result) => result.status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ code: "conflict" }),
+      status: "rejected",
+    });
   });
 
   it("uses one cross-domain attention shape and audits changes", async () => {

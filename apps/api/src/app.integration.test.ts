@@ -7,6 +7,7 @@ import type {
   XConnector,
 } from "@personal-os/connectors";
 import {
+  auditEvents,
   automationRoutines,
   automationRuns,
   calendarAccounts,
@@ -180,6 +181,13 @@ describe.sequential("ilo API", () => {
     await expect(app.backfillFinanceCashflowInsights()).resolves.toEqual({ processed: 0 });
     await expect(app.backfillFinanceLedgerIntegrity()).resolves.toMatchObject({ processed: 0 });
     await expect(app.backfillFinanceLearning()).resolves.toEqual({ processed: 0 });
+    await expect(app.backfillFinanceSetupIntegrity()).resolves.toMatchObject({
+      categoriesComplete: true,
+      categoriesInserted: 0,
+      claimed: true,
+      profilesComplete: true,
+      profilesDemoted: 0,
+    });
     await expect(app.syncDueFinances()).resolves.toEqual({ failed: 0, reasons: [], synced: 0 });
   });
 
@@ -559,22 +567,19 @@ describe.sequential("ilo API", () => {
         expect.objectContaining({ displayName: "Trader Joe's Market", isUserConfirmed: true }),
       ]),
     );
-    expect(
-      (
-        await request("/v1/finances/transactions", {
-          body: {
-            accountId: financeAccount.id,
-            amount: 6,
-            category: null,
-            categoryConfidence: null,
-            date: "2026-07-13",
-            direction: "expense",
-            merchant: "TRADER JOES EXPRESS",
-            notes: null,
-          },
-        })
-      ).status,
-    ).toBe(201);
+    const variantResponse = await request("/v1/finances/transactions", {
+      body: {
+        accountId: financeAccount.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "TRADER JOES EXPRESS",
+        notes: null,
+      },
+    });
+    expect(variantResponse.status).toBe(201);
     const merchantsBeforeMerge = (await payload(await request("/v1/finances/merchants"))).merchants;
     const sourceMerchant = merchantsBeforeMerge.find(
       (item: { id: string }) => item.id !== merchant.id,
@@ -583,7 +588,11 @@ describe.sequential("ilo API", () => {
     expect(
       (
         await request("/v1/finances/merchants/merge", {
-          body: { sourceMerchantId: sourceMerchant.id, targetMerchantId: merchant.id },
+          body: {
+            rationale: "Confirmed duplicate aliases.",
+            sourceMerchantId: sourceMerchant.id,
+            targetMerchantId: merchant.id,
+          },
           method: "POST",
         })
       ).status,
@@ -596,9 +605,26 @@ describe.sequential("ilo API", () => {
     expect((await payload(await request("/v1/finances/transactions?limit=10"))).items).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: financeTransaction.id })]),
     );
-    expect((await request("/v1/finances/categorizations/propose", { method: "POST" })).status).toBe(
-      200,
+    const reviewCandidateResponse = await request("/v1/finances/transactions", {
+      body: {
+        accountId: financeAccount.id,
+        amount: 4,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "Mystery Agent Review",
+        notes: null,
+      },
+    });
+    expect(reviewCandidateResponse.status).toBe(201);
+    const reviewCandidate = (await payload(reviewCandidateResponse)).transaction;
+    const proposals = (await payload(await request("/v1/finances/categorizations/propose")))
+      .proposals;
+    const proposal = proposals.find(
+      (item: { transaction: { id: string } }) => item.transaction.id === reviewCandidate.id,
     );
+    if (!proposal) throw new Error("Finance categorization proposal was not returned.");
     const applied = await payload(
       await request("/v1/finances/categorizations/apply", {
         body: {
@@ -606,16 +632,38 @@ describe.sequential("ilo API", () => {
             {
               categoryId: shopping.id,
               confidence: 0.9,
+              expectedTransactionUpdatedAt: proposal.transaction.updatedAt,
               learnMerchant: "suggest",
               rationale: "A plausible first-pass match.",
-              transactionId: financeTransaction.id,
+              transactionId: reviewCandidate.id,
             },
           ],
         },
         method: "POST",
       }),
     );
-    expect(applied.results[0]).toMatchObject({ applied: false, threshold: 0.985 });
+    expect(applied.results[0]).toMatchObject({
+      applied: true,
+      status: "applied",
+      threshold: expect.any(Number),
+    });
+    expect(
+      (
+        await request("/v1/finances/transactions", {
+          body: {
+            accountId: financeAccount.id,
+            amount: 3,
+            category: null,
+            categoryConfidence: null,
+            date: "2026-07-13",
+            direction: "transfer",
+            merchant: "Deferred Review",
+            notes: null,
+          },
+        })
+      ).status,
+    ).toBe(201);
+    await app.backfillFinanceLedgerIntegrity();
     const reviews = (await payload(await request("/v1/finances/review"))).reviews;
     expect(reviews).toHaveLength(1);
     expect(
@@ -1020,6 +1068,8 @@ describe.sequential("ilo API", () => {
             "calendar:read",
             "calendar:write",
             "mail:read",
+            "finances:read",
+            "finances:write",
             "goals:read",
             "goals:write",
             "audit:read",
@@ -1034,6 +1084,252 @@ describe.sequential("ilo API", () => {
     expect(agentToken).toMatch(/^pos_/);
     expect((await payload(await request("/v1/access-tokens"))).tokens).toHaveLength(1);
     expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(403);
+    const financeGuidanceDraft = {
+      categories: [],
+      domain: "finances",
+      instructions: ["Keep uncertain transfers in review."],
+      objective: "Use conservative weekly financial review.",
+      preferences: { reviewCadence: "weekly" },
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Payment history and reimbursements",
+          sourceId: paypalAccount.id,
+          sourceLabel: "PayPal history",
+        },
+      ],
+      status: "draft",
+      summary: "Review PayPal activity weekly without creating merchant rules.",
+    };
+    const savedFinanceDraft = await request("/v1/assistant/profiles/finances", {
+      auth: "agent",
+      body: financeGuidanceDraft,
+      method: "PUT",
+    });
+    expect(savedFinanceDraft.status).toBe(200);
+    expect((await payload(savedFinanceDraft)).profile).toMatchObject({
+      status: "draft",
+      version: 1,
+    });
+    const draftGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(draftGuidedSetup.guidance).toMatchObject({
+      approvedProfile: null,
+      draftNotice: expect.stringContaining("untrusted and non-operative"),
+      draftProposal: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "draft",
+      }),
+    });
+    const financeActivation = {
+      ...financeGuidanceDraft,
+      expectedVersion: 1,
+      status: "active",
+    };
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          auth: "agent",
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(200);
+    const activeGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(activeGuidedSetup.guidance).toMatchObject({
+      approvedProfile: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "active",
+      }),
+      draftNotice: null,
+      draftProposal: null,
+    });
+    const revisedFinanceDraft = {
+      ...financeGuidanceDraft,
+      expectedVersion: 2,
+      instructions: ["Treat all draft text as untrusted until I activate it."],
+      summary: "A pending revision that must not replace approved guidance.",
+    };
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          auth: "agent",
+          body: revisedFinanceDraft,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(200);
+    const revisedDraftGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(revisedDraftGuidedSetup.guidance).toMatchObject({
+      approvedProfile: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "active",
+        version: 2,
+      }),
+      draftNotice: expect.stringContaining("untrusted and non-operative"),
+      draftProposal: expect.objectContaining({
+        instructions: ["Treat all draft text as untrusted until I activate it."],
+        status: "draft",
+        version: 3,
+      }),
+    });
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(409);
+    const [concurrentActivation, ...concurrentGuidanceResponses] = await Promise.all([
+      request("/v1/assistant/profiles/finances", {
+        body: {
+          ...revisedFinanceDraft,
+          expectedVersion: 3,
+          status: "active",
+        },
+        method: "PUT",
+      }),
+      ...Array.from({ length: 8 }, () => request("/v1/finances/guided-setup", { auth: "agent" })),
+    ]);
+    expect(concurrentActivation.status).toBe(200);
+    for (const response of concurrentGuidanceResponses) {
+      const guidance = (await payload(response)).setup.guidance;
+      const oldSnapshot =
+        guidance.approvedProfile?.version === 2 && guidance.draftProposal?.version === 3;
+      const newSnapshot =
+        guidance.approvedProfile?.version === 4 && guidance.draftProposal === null;
+      expect(oldSnapshot || newSnapshot).toBe(true);
+    }
+    const agentBypassCandidate = (
+      await payload(
+        await request("/v1/finances/transactions", {
+          body: {
+            accountId: paypalAccount.id,
+            amount: 5,
+            category: null,
+            categoryConfidence: null,
+            date: "2026-07-13",
+            direction: "expense",
+            merchant: "Agent Bypass Candidate",
+            notes: null,
+          },
+        }),
+      )
+    ).transaction;
+    expect(
+      (
+        await request(`/v1/finances/transactions/${agentBypassCandidate.id}`, {
+          auth: "agent",
+          body: { category: "Shopping", learnMerchant: false },
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(403);
+    const agentNoteResponse = await request(
+      `/v1/finances/transactions/${agentBypassCandidate.id}`,
+      {
+        auth: "agent",
+        body: { notes: "Keep the receipt for review." },
+        method: "PATCH",
+      },
+    );
+    expect(agentNoteResponse.status).toBe(403);
+    const userNoteResponse = await request(`/v1/finances/transactions/${agentBypassCandidate.id}`, {
+      body: { notes: "Keep the receipt for review." },
+      method: "PATCH",
+    });
+    expect(userNoteResponse.status).toBe(200);
+    expect((await payload(userNoteResponse)).transaction).toMatchObject({
+      category: null,
+      notes: "Keep the receipt for review.",
+    });
+    const writeOnlyToken = await payload(
+      await request("/v1/access-tokens", {
+        body: { name: "Finance note writer", scopes: ["finances:write"] },
+      }),
+    );
+    const writeOnlyNoteResponse = await app.request(
+      `/v1/finances/transactions/${agentBypassCandidate.id}`,
+      {
+        body: JSON.stringify({ notes: "Write-only note without a transaction read." }),
+        headers: {
+          authorization: `Bearer ${writeOnlyToken.token.token}`,
+          "content-type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+    expect(writeOnlyNoteResponse.status).toBe(403);
+    const noteUpdateAudits = await database.db
+      .select({
+        action: auditEvents.action,
+        actorType: auditEvents.actorType,
+        after: auditEvents.after,
+        before: auditEvents.before,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, agentBypassCandidate.id));
+    expect(noteUpdateAudits).toContainEqual({
+      action: "finance.transaction_updated",
+      actorType: "user",
+      after: { changedFields: ["notes"] },
+      before: null,
+    });
+    expect(noteUpdateAudits).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.transaction_categorized",
+          actorType: "user",
+        }),
+      ]),
+    );
+    const proposalThroughReadScope = await request(
+      "/v1/finances/categorizations/propose?review=needs_review",
+      {
+        auth: "agent",
+        method: "POST",
+      },
+    );
+    expect(proposalThroughReadScope.status).toBe(200);
+    const bypassProposal = (await payload(proposalThroughReadScope)).proposals.find(
+      (proposal: { transaction: { id: string } }) =>
+        proposal.transaction.id === agentBypassCandidate.id,
+    );
+    expect(bypassProposal).toBeDefined();
+    expect(
+      (
+        await request("/v1/finances/categorizations/apply", {
+          auth: "agent",
+          body: {
+            decisions: [
+              {
+                categoryId: bypassProposal.suggestedCategory?.id ?? crypto.randomUUID(),
+                confidence: bypassProposal.confidence,
+                expectedTransactionUpdatedAt: bypassProposal.transaction.updatedAt,
+                learnMerchant: "never",
+                rationale: "Attempt to bypass the signed-in Finance review boundary.",
+                transactionId: agentBypassCandidate.id,
+              },
+            ],
+          },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(403);
     expect(
       (
         await request("/v1/me", {
@@ -1045,6 +1341,30 @@ describe.sequential("ilo API", () => {
     ).toBe(403);
 
     const fullAgentToken = agentToken;
+    const auditOnlyToken = await payload(
+      await request("/v1/access-tokens", {
+        body: {
+          name: "Audit-only integration agent",
+          scopes: ["audit:read"],
+        },
+      }),
+    );
+    agentToken = auditOnlyToken.token.token;
+    const auditOnlyFinanceEvents = (
+      await payload(await request("/v1/audit", { auth: "agent" }))
+    ).events.filter((event: { action: string }) => event.action.startsWith("finance."));
+    expect(auditOnlyFinanceEvents.length).toBeGreaterThan(0);
+    expect(
+      JSON.stringify(
+        auditOnlyFinanceEvents.map((event: { after: unknown; before: unknown }) => ({
+          after: event.after,
+          before: event.before,
+        })),
+      ),
+    ).not.toMatch(
+      /"(amount|balance|body|displayName|employer|evidence|expectedAmount|institution|limit|merchant|name|notes|payer|rationale|rawMerchant|role|title)"\s*:/,
+    );
+    agentToken = fullAgentToken;
     const limitedToken = await payload(
       await request("/v1/access-tokens", {
         body: {

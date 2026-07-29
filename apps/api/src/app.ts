@@ -75,6 +75,16 @@ export type PersonalOsApp = Hono<AppEnv> & {
     processed: number;
   }>;
   backfillFinanceLearning: () => Promise<{ processed: number }>;
+  backfillFinanceSetupIntegrity: () => Promise<{
+    categoriesComplete: boolean;
+    categoriesInserted: number;
+    claimed: boolean;
+    processed: number;
+    profileRowsScanned: number;
+    profilesComplete: boolean;
+    profilesDemoted: number;
+    userRowsScanned: number;
+  }>;
   dispatchDueAutomations: () => Promise<void>;
   syncDueFinances: () => Promise<{ failed: number; reasons: string[]; synced: number }>;
 };
@@ -189,12 +199,26 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
     reviewSigningKey: dependencies.config.encryptionKey,
   });
+  const finances = createFinanceService({
+    db: dependencies.db,
+    now,
+    plaid: {
+      clientId: dependencies.config.plaidClientId,
+      encryptionKey: dependencies.config.encryptionKey,
+      environment: dependencies.config.plaidEnvironment,
+      secret: dependencies.config.plaidSecret,
+    },
+  });
   const assistant = createAssistantService({
     db: dependencies.db,
     now,
-    validateProfileSources: async (transaction, domain, userId, sourceIds) => {
+    profileRequiresApproval: (domain) => domain === "finances",
+    validateProfileSources: async (transaction, domain, userId, sourceIds, status, actorType) => {
       if (domain === "mail") {
         await mail.validateProfileSources(transaction, userId, sourceIds);
+      }
+      if (domain === "finances") {
+        await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
       }
     },
   });
@@ -223,16 +247,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const goalService = createGoalsService({ db: dependencies.db, now });
-  const finances = createFinanceService({
-    db: dependencies.db,
-    now,
-    plaid: {
-      clientId: dependencies.config.plaidClientId,
-      encryptionKey: dependencies.config.encryptionKey,
-      environment: dependencies.config.plaidEnvironment,
-      secret: dependencies.config.plaidSecret,
-    },
-  });
   const pinterest = createPinterestService({ db: dependencies.db, now });
 
   app.use("*", async (context, next) => {
@@ -846,6 +860,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     async backfillFinanceLearning() {
       return finances.backfillLearning();
     },
+    async backfillFinanceSetupIntegrity() {
+      return finances.backfillSetupIntegrity();
+    },
     async dispatchDueAutomations() {
       await connectors.syncStaleAccounts();
       await automations.dispatchDue();
@@ -891,8 +908,8 @@ const oauthScopeLabels: Record<string, string> = {
   "bookmarks:read": "Read synchronized bookmarks",
   "calendar:read": "Read calendars and events",
   "calendar:write": "Create and manage events",
-  "finances:read": "Read financial accounts and activity",
-  "finances:write": "Manage supported financial organization",
+  "finances:read": "Read sensitive financial accounts, balances, and activity",
+  "finances:write": "Save Finance setup guidance drafts",
   "goals:read": "Read goals and motives",
   "goals:write": "Manage goals and motives",
   "mail:read": "Read connected mail",

@@ -102,18 +102,34 @@ describe("agent access settings", () => {
     mocks.getAssistantSetupStatus.mockResolvedValue({
       domains: [
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
           domain: "mail",
+          pendingDraftVersion: null,
           profileStatus: "active",
           profileVersion: 1,
         },
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
           domain: "calendar",
+          pendingDraftVersion: null,
           profileStatus: null,
           profileVersion: null,
+        },
+        {
+          approvedProfileStatus: "active",
+          approvedProfileVersion: 2,
+          canRead: true,
+          canWrite: true,
+          domain: "finances",
+          pendingDraftVersion: 3,
+          profileStatus: "draft",
+          profileVersion: 3,
         },
       ],
     });
@@ -329,6 +345,10 @@ describe("agent access settings", () => {
     expect(screen.getByLabelText<HTMLTextAreaElement>("Calendar setup prompt").value).toContain(
       "set up my Calendar",
     );
+    await browser.click(screen.getByRole("radio", { name: "Finances" }));
+    expect(
+      await screen.findByText(/Active approved guidance is version 2, with draft version 3/),
+    ).toBeInTheDocument();
 
     await browser.click(screen.getByRole("button", { name: "Revoke Claude" }));
     await waitFor(() => expect(mocks.revokeOAuthClient.mock.calls[0]?.[0]).toBe(id));
@@ -426,9 +446,12 @@ describe("agent access settings", () => {
     mocks.getAssistantSetupStatus.mockResolvedValue({
       domains: [
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
           domain: "mail",
+          pendingDraftVersion: null,
           profileStatus: "draft",
           profileVersion: 1,
         },
@@ -466,9 +489,12 @@ describe("agent access settings", () => {
     mocks.getAssistantSetupStatus.mockResolvedValue({
       domains: [
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
           domain: "mail",
+          pendingDraftVersion: null,
           profileStatus: "draft",
           profileVersion: 2,
         },

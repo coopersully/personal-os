@@ -1,6 +1,5 @@
-import { cp, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { rm } from "node:fs/promises";
+import { resolve } from "node:path";
 import {
   attentionItems,
   auditEvents,
@@ -25,26 +24,8 @@ import { type ConnectedMailGateway, MailProviderRejectedError } from "./connecto
 import { errorResponse } from "./errors.js";
 import { createMailService } from "./mail-service.js";
 import { registerMailRoutes } from "./routes/mail.js";
+import { migrationsWithout } from "./test-migrations.js";
 import type { AppEnv } from "./types.js";
-
-async function migrationsWithout(
-  migrationsFolder: string,
-  prefix: string,
-  excludedTags: string[],
-): Promise<string> {
-  const folder = await mkdtemp(join(tmpdir(), prefix));
-  await cp(migrationsFolder, folder, { recursive: true });
-  for (const tag of excludedTags) {
-    await unlink(join(folder, `${tag}.sql`));
-  }
-  const journalPath = join(folder, "meta/_journal.json");
-  const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-    entries: Array<{ tag: string }>;
-  };
-  journal.entries = journal.entries.filter((entry) => !excludedTags.includes(entry.tag));
-  await writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
-  return folder;
-}
 
 describe.sequential("mail service", () => {
   let container: StartedPostgreSqlContainer;
@@ -143,6 +124,9 @@ describe.sequential("mail service", () => {
       "0038_agent_setup_foundation",
       "0039_mail_exact_match_policy_normalization",
       "0040_mail_draft_send_claim",
+      "0041_domain_profile_approvals",
+      "0042_finance_provider_direction",
+      "0043_finance_setup_backfill_state",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -168,6 +152,9 @@ describe.sequential("mail service", () => {
     setupMigrationsFolder = await migrationsWithout(migrationsFolder, "ilo-mail-setup-migration-", [
       "0039_mail_exact_match_policy_normalization",
       "0040_mail_draft_send_claim",
+      "0041_domain_profile_approvals",
+      "0042_finance_provider_direction",
+      "0043_finance_setup_backfill_state",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

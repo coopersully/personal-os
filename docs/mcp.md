@@ -8,7 +8,10 @@ mail, finance, provider, or audit rules of its own.
 - `apps/mcp/dist/stdio.js` for local MCP hosts. Configure `PERSONAL_OS_API_URL`, `PERSONAL_OS_TOKEN`, and optionally `PERSONAL_OS_TIMEZONE`.
 - `apps/mcp/dist/http.js` for Streamable HTTP. Send `Authorization: Bearer pos_…`; optionally send `X-Personal-OS-Timezone`.
 
-The HTTP server is stateless: it creates an isolated MCP server and transport for each request and forwards only the caller's agent token to the API.
+The HTTP server is stateless: it creates an isolated MCP server and transport for each request and
+uses the caller's audience-bound Ilo access token against the Ilo API. It never accepts or forwards
+provider credentials. Replacing this same-service bearer handoff with an internal credential
+exchange is a bounded shared-MCP follow-up; Finance does not invent a domain-local token path.
 
 ## Tools
 
@@ -65,16 +68,54 @@ Mail is the first executable implementation:
 New rules remain disabled and preview-only by default. Active rules must be paused before their
 matching behavior changes, and connector sync executes only enabled `approved_rule` rules.
 
-Finance tools are an adapter over the same Finance API used by the web app. They
-include ledger health, transactions, categories, budgets, merchants, review
-work, wealth, cash flow, recurring-payment review, and alerts. Agents should
-read ledger health and the relevant transactions before offering a budget or
-cash-flow recommendation. Categorization is intentionally proposal-first:
-`propose_finance_categorizations` does not mutate anything, while
-`apply_finance_categorizations` remains subject to the API's adaptive confidence
-policy. Merchant merges and recurring-payment, alert, and review decisions are
-bounded mutations; an agent must not infer a permanent merchant rule or mark an
-uncertain transfer as non-spending without the user-visible review path.
+Finance tools are a read/proposal adapter over the same Finance API used by the web app.
+`get_finance_guided_setup` is the entry point for a short Finance interview: it
+returns the shared durable profile together with owned account sources, review
+and ledger readiness, human-only boundaries, and suggested workflows. The
+remaining tools include transactions, categories, budgets, merchants, review
+work, wealth, cash flow, recurring obligations, and alerts. Agents should read
+ledger health and the relevant transactions before offering a budget or
+cash-flow recommendation.
+
+Categorization is intentionally proposal-first:
+`propose_finance_categorizations` uses the Finance read scope on both `GET` and
+the compatibility `POST` and does not mutate anything. Proposal pages return
+an opaque `nextCursor`, and hosts can continue without making read calls mutate
+the ledger. Direct transaction categorization is not an agent tool or
+agent-permitted raw API shortcut. Applying a proposal, resolving any review or
+alert, changing recurring state, adding a transaction, and renaming or merging
+merchants require a signed-in Ilo session. Provider administration,
+account/import/financial-profile/budget changes, permanent merchant rules, and
+ambiguous transfer confirmation are also human-only.
+
+The signed-in categorization batch API predates this guided-setup work and
+commits each decision independently. Its bounded workers and per-item results
+do not provide a durable batch or resume record if the process ends between
+decisions. A follow-up must add an idempotency key, persisted per-item state,
+query or resume support, and abort-aware scheduling. MCP does not expose this
+human-only apply endpoint.
+
+The shared `save_domain_profile` tool may save a Finance guidance draft with
+`finances:write`. It cannot activate that draft: activation is a signed-in
+action in **Finances → Profile**, requires an owned account source, and uses
+the profile version guard. `get_finance_guided_setup` exposes active guidance
+separately from a draft proposal. Draft text is explicitly untrusted and
+non-operative until that signed-in activation; hosts must not inject it as
+operating instructions. `sourceContexts` describe how to interpret accounts;
+they do not limit which accounts a token can read. Scalar alert preferences
+currently use one USD planning currency. Cadence and threshold preferences
+guide later agent conversations; they neither schedule runs nor reconfigure
+Finance alerts.
+
+Tool annotations are host UX hints, not authorization. API scopes, policy,
+revision checks, database invariants, and audit records enforce Finance safety.
+Every Finance read tool declares all four annotation hints explicitly. The
+shared API result helper supplies `structuredContent` and preserves structured
+API failures. Finance does not add domain-local `outputSchema` declarations
+while combined API responses lack a shared MCP schema convention; capability
+negotiation and output schemas are a bounded shared-MCP follow-up. OAuth uses
+the MCP resource indicator, scopes remain least-privilege read/write grants,
+and provider tokens never cross the MCP boundary.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
 

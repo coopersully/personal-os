@@ -2970,6 +2970,7 @@ describe.sequential("connector service", () => {
     const assistant = createAssistantService({
       db: database.db,
       now: () => timestamp,
+      profileRequiresApproval: () => false,
       validateProfileSources: async (transaction, domain, profileUserId, sourceIds) => {
         if (domain !== "mail") return;
         await mail.validateProfileSources(transaction, profileUserId, sourceIds);

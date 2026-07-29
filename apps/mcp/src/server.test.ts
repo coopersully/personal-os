@@ -198,15 +198,63 @@ function mockApi() {
     getAssistantSetupStatus: vi.fn(async () => ({
       domains: [
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
           domain: "mail" as const,
+          pendingDraftVersion: null,
           profileStatus: "draft" as const,
           profileVersion: 1,
         },
       ],
     })),
     getDomainProfile: vi.fn(async () => domainProfile),
+    getFinanceGuidedSetup: vi.fn(async () => ({
+      accountSources: [],
+      alertSummary: { open: 0, warnings: 0 },
+      asOf: now,
+      budgetSummary: { count: 0, month: "2026-07", planned: 0 },
+      cashflowSummary: {
+        financialProfileConfigured: false,
+        incomeStreams: 0,
+        recurringNeedsReview: 0,
+        recurringObligations: 0,
+      },
+      guidance: {
+        approvedProfile: null,
+        draftNotice:
+          "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+        draftProposal: { ...domainProfile, domain: "finances" as const },
+      },
+      humanOnlyActions: [
+        "connect_or_disconnect_source" as const,
+        "confirm_ambiguous_transfer" as const,
+      ],
+      ledgerHealth: {
+        asOf: now,
+        balanceOnlyAccounts: 0,
+        candidateTransfers: 0,
+        missingProvenance: 0,
+        pendingTransactions: 0,
+        possibleDuplicates: 0,
+        staleAccounts: 0,
+        unresolvedReviews: 0,
+      },
+      reviewSummary: {
+        count: 0,
+        reasons: {
+          ambiguous_merchant: 0,
+          low_confidence: 0,
+          one_time: 0,
+          possible_duplicate: 0,
+          possible_transfer: 0,
+          refund_or_reversal: 0,
+          unknown_merchant: 0,
+        },
+      },
+      suggestedWorkflows: [],
+    })),
     upsertDomainProfile: vi.fn(async () => domainProfile),
     listAttentionItems: vi.fn(async () => [attentionItem]),
     createAttentionItem: vi.fn(async () => attentionItem),
@@ -325,7 +373,7 @@ function mockApi() {
     })),
     getFinanceReviewQueue: vi.fn(async () => []),
     listFinanceTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),
-    proposeFinanceCategorizations: vi.fn(async () => []),
+    proposeFinanceCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
     applyFinanceCategorizations: vi.fn(async () => []),
     resolveFinanceReview: vi.fn(async () => ({ deferred: true })),
     updateFinanceMerchant: vi.fn(async () => ({
@@ -478,24 +526,17 @@ describe("ilo MCP server", () => {
       "list_attention_items",
       "create_attention_item",
       "update_attention_item",
+      "get_finance_guided_setup",
       "get_finance_wealth_summary",
       "get_finance_cashflow",
-      "review_finance_recurring_payment",
-      "resolve_finance_alert",
       "get_finance_ledger_health",
       "list_finance_transactions",
       "get_finance_categories",
       "get_finance_budget_status",
       "list_finance_merchants",
-      "rename_finance_merchant",
-      "merge_finance_merchants",
       "get_finance_review_queue",
       "propose_finance_categorizations",
-      "apply_finance_categorizations",
-      "resolve_finance_review",
       "get_finance_overview",
-      "add_finance_transaction",
-      "categorize_finance_transaction",
       "list_x_bookmarks",
       "sync_x_bookmarks",
       "list_reminders",
@@ -544,6 +585,22 @@ describe("ilo MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
+    expect(
+      tools.tools.find((tool) => tool.name === "propose_finance_categorizations")?.annotations,
+    ).toMatchObject({
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    });
+    for (const tool of tools.tools.filter((candidate) => candidate.name.includes("finance"))) {
+      expect(tool.annotations).toEqual({
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      });
+    }
     for (const tool of tools.tools.filter((candidate) =>
       [
         "get_agent_setup_status",
@@ -669,88 +726,36 @@ describe("ilo MCP server", () => {
       arguments: { detail: null, title: "Act with care" },
     });
 
+    const financeSetup = await client.callTool({
+      name: "get_finance_guided_setup",
+      arguments: {},
+    });
+    expect(financeSetup.structuredContent).toMatchObject({
+      result: {
+        context: {
+          guidance: {
+            approvedProfile: null,
+            draftNotice: expect.stringContaining("untrusted and non-operative"),
+            draftProposal: expect.objectContaining({ domain: "finances", status: "draft" }),
+          },
+        },
+      },
+    });
     await client.callTool({ name: "get_finance_overview", arguments: {} });
     await client.callTool({ name: "get_finance_wealth_summary", arguments: {} });
     await client.callTool({ name: "get_finance_cashflow", arguments: {} });
-    await client.callTool({
-      name: "review_finance_recurring_payment",
-      arguments: { id, status: "active" },
-    });
-    await client.callTool({
-      name: "resolve_finance_alert",
-      arguments: { action: "resolve", id, rationale: "Reviewed in the dashboard." },
-    });
     await client.callTool({ name: "get_finance_ledger_health", arguments: {} });
     await client.callTool({ name: "list_finance_transactions", arguments: { limit: 10 } });
     await client.callTool({ name: "get_finance_categories", arguments: {} });
     await client.callTool({ name: "get_finance_budget_status", arguments: { month: "2026-07" } });
     await client.callTool({ name: "list_finance_merchants", arguments: {} });
-    await client.callTool({
-      name: "rename_finance_merchant",
-      arguments: { displayName: "Test", id },
-    });
-    await client.callTool({
-      name: "merge_finance_merchants",
-      arguments: { sourceMerchantId: accountId, targetMerchantId: id },
-    });
     await client.callTool({ name: "get_finance_review_queue", arguments: {} });
-    await client.callTool({ name: "propose_finance_categorizations", arguments: {} });
     await client.callTool({
-      name: "apply_finance_categorizations",
-      arguments: {
-        decisions: [
-          {
-            categoryId: id,
-            confidence: 0.99,
-            rationale: "Known merchant history.",
-            transactionId: accountId,
-          },
-        ],
-      },
-    });
-    await client.callTool({
-      name: "resolve_finance_review",
-      arguments: { action: "defer", id },
+      name: "propose_finance_categorizations",
+      arguments: { cursor: "next-review-page" },
     });
     await client.callTool({ name: "list_x_bookmarks", arguments: {} });
     await client.callTool({ name: "sync_x_bookmarks", arguments: {} });
-    await client.callTool({
-      name: "add_finance_transaction",
-      arguments: {
-        accountId,
-        amount: 1,
-        date: "2026-07-13",
-        direction: "expense",
-        merchant: "Test",
-      },
-    });
-    await client.callTool({
-      name: "add_finance_transaction",
-      arguments: {
-        accountId,
-        amount: 2,
-        category: null,
-        date: "2026-07-13",
-        direction: "expense",
-        merchant: "Uncategorized",
-      },
-    });
-    await client.callTool({
-      name: "add_finance_transaction",
-      arguments: {
-        accountId,
-        amount: 3,
-        category: "Dining",
-        date: "2026-07-13",
-        direction: "expense",
-        merchant: "Categorized",
-      },
-    });
-    await client.callTool({
-      name: "categorize_finance_transaction",
-      arguments: { id, category: "Dining" },
-    });
-
     await client.callTool({
       name: "list_reminders",
       arguments: { completed: false, query: "Test" },
@@ -925,6 +930,11 @@ describe("ilo MCP server", () => {
     expect(api.deleteEventBlock).toHaveBeenCalledWith(id, id);
     expect(api.listActivity).toHaveBeenCalledWith(50);
     expect(api.runAutomation).toHaveBeenCalledWith(id, true);
+    expect(api.proposeFinanceCategorizations).toHaveBeenCalledWith({
+      cursor: "next-review-page",
+      limit: 50,
+      review: "needs_review",
+    });
     expect(api.listMailThreads).toHaveBeenCalledWith({
       accountIds: [accountId],
       limit: 100,
@@ -1140,6 +1150,47 @@ describe("ilo MCP server", () => {
     expect(response.content).toEqual([
       { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
     ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves structured Finance conflicts at the proposal tool boundary", async () => {
+    const api = mockApi();
+    api.proposeFinanceCategorizations.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "conflict",
+        details: { currentCursor: "opaque-current" },
+        message: "The Finance proposal page changed.",
+        requestId: "finance-request-123",
+        status: 409,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      now: () => new Date("2026-07-13T16:00:00.000Z"),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: { cursor: "opaque-stale" },
+      name: "propose_finance_categorizations",
+    });
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: {
+          code: "conflict",
+          details: { currentCursor: "opaque-current" },
+          message: "The Finance proposal page changed.",
+          requestId: "finance-request-123",
+          status: 409,
+        },
+      },
+    });
 
     await client.close();
     await server.close();

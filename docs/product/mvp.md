@@ -63,8 +63,8 @@ provider internals.
   provider-supported thread actions.
 - Versioned domain preference profiles, cross-domain attention items, source-aware multi-inbox Mail
   setup, bounded exact Mail-rule previews with drift-checked activation for supported non-retention
-  actions, preview-only retention preferences, and an installable guided-setup skill for scoped MCP
-  hosts.
+  actions, preview-only retention preferences, Finance readiness and proposal-first review
+  workflows, and an installable guided-setup skill for scoped MCP hosts.
 - A deployment-aware Agent access handoff with remote MCP OAuth, readable
   consent, skill-install and starter prompts, readiness state, revocation, and
   advanced personal-token fallback.
@@ -129,17 +129,22 @@ The MVP is complete only when all of the following are demonstrated:
 7. A person can copy the deployed MCP endpoint and skill install request,
    authorize a remote agent with visible scoped consent, start the Mail setup
    interview, and revoke the host from Settings.
-8. The agenda shows local and connected events together without losing source
+8. A Finance-scoped agent can inspect guided-setup readiness, save only a
+   guidance draft, and prepare read-scoped categorization proposals. A signed-in
+   person activates guidance and applies ledger/review mutations; the agent
+   cannot cross provider-administration, permanent-rule, or
+   ambiguous-transfer boundaries.
+9. The agenda shows local and connected events together without losing source
    identity.
-9. The activity view identifies human, agent, connector, and system changes.
-10. The PWA passes its installability checks and works on narrow mobile viewports.
-11. The desktop shell builds on macOS and Windows CI runners and its pin mode is
+10. The activity view identifies human, agent, connector, and system changes.
+11. The PWA passes its installability checks and works on narrow mobile viewports.
+12. The desktop shell builds on macOS and Windows CI runners and its pin mode is
    functional.
-12. Fresh local setup succeeds from documented commands.
-13. The production container starts, migrates safely, reports readiness, and can
+13. Fresh local setup succeeds from documented commands.
+14. The production container starts, migrates safely, reports readiness, and can
    be deployed with documented environment variables.
-14. Lint, formatting, type checking, unit, integration, end-to-end, migration,
+15. Lint, formatting, type checking, unit, integration, end-to-end, migration,
    build, and repository checks all pass.
-15. Enforced statement/function/line coverage is 95% and branch coverage is 94% for product
+16. Enforced statement/function/line coverage is 95% and branch coverage is 94% for product
     source code. Generated files, declarative configuration, and process entry
     points may be excluded, but not domain or application logic.

@@ -1794,6 +1794,15 @@ describe.sequential("ilo API", () => {
       ).items,
     ).toHaveLength(1);
     expect((await request("/v1/reminders?cursor=bad", { auth: "agent" })).status).toBe(400);
+    const nonUuidReminderCursor = Buffer.from("2026-07-13T12:00:00Z|not-a-uuid", "utf8").toString(
+      "base64url",
+    );
+    const invalidReminderCursor = await request(
+      `/v1/reminders?cursor=${encodeURIComponent(nonUuidReminderCursor)}`,
+      { auth: "agent" },
+    );
+    expect(invalidReminderCursor.status).toBe(400);
+    expect((await payload(invalidReminderCursor)).error.code).toBe("invalid_request");
     expect(
       (
         await request("/v1/reminders", {

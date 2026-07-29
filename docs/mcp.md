@@ -30,6 +30,10 @@ The shared assistant tools give Claude, Codex, and other MCP hosts one consisten
   source meanings, categories, and instructions.
 - `list_attention_items`, `create_attention_item`, and `update_attention_item` use the same shape
   for important items, upcoming commitments, follow-ups, and post-run summaries across domains.
+  Generic creation is an explicitly unlinked note path: it cannot accept source or related-entity
+  provenance. Linked material must use its owning domain tool. Every attention item exposes an
+  integer `version`, and status changes require `expectedVersion`; a stale mutation returns a
+  structured conflict with the current version.
   Linked Calendar event attention must instead use `create_calendar_attention_item`: the API locks
   the owned event, derives its source reference, refreshes the open event/kind item, and writes a
   redacted audit atomically. Generic unlinked Calendar notes remain available, but generic callers
@@ -104,6 +108,11 @@ remaining tools include transactions, categories, budgets, merchants, review
 work, wealth, cash flow, recurring obligations, and alerts. Agents should read
 ledger health and the relevant transactions before offering a budget or
 cash-flow recommendation.
+`create_finance_attention_item` is the bounded exception to the otherwise read/proposal Finance
+surface: it locks one owned transaction, derives provider/account/remote/revision attribution
+server-side, deduplicates the same open transaction/kind item, and writes a redacted audit in the
+same transaction. Categorization proposals carry that same derived transaction source reference.
+Generic attention cannot claim Finance transaction provenance.
 
 Categorization is intentionally proposal-first:
 `propose_finance_categorizations` uses the Finance read scope on both `GET` and

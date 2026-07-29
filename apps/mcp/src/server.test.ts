@@ -162,6 +162,7 @@ const attentionItem = {
   summary: "A reply is due.",
   title: "Reply needed",
   updatedAt: now,
+  version: 1,
 };
 const mailRule = {
   actions: [{ afterDays: 1, mailboxId: null, type: "archive" as const }],
@@ -290,6 +291,7 @@ function mockApi() {
     listAttentionItems: vi.fn(async () => [attentionItem]),
     createAttentionItem: vi.fn(async () => attentionItem),
     updateAttentionItem: vi.fn(async () => attentionItem),
+    upsertFinanceAttentionItem: vi.fn(async () => attentionItem),
     completeReminder: vi.fn(async () => reminder),
     completeTask: vi.fn(async () => task),
     createReminder: vi.fn(async () => reminder),
@@ -612,6 +614,7 @@ describe("ilo MCP server", () => {
       "create_attention_item",
       "update_attention_item",
       "get_finance_guided_setup",
+      "create_finance_attention_item",
       "get_finance_wealth_summary",
       "get_finance_cashflow",
       "get_finance_ledger_health",
@@ -703,7 +706,10 @@ describe("ilo MCP server", () => {
       openWorldHint: false,
       readOnlyHint: true,
     });
-    for (const tool of tools.tools.filter((candidate) => candidate.name.includes("finance"))) {
+    for (const tool of tools.tools.filter(
+      (candidate) =>
+        candidate.name.includes("finance") && candidate.name !== "create_finance_attention_item",
+    )) {
       expect(tool.annotations).toEqual({
         destructiveHint: false,
         idempotentHint: true,
@@ -711,6 +717,14 @@ describe("ilo MCP server", () => {
         readOnlyHint: true,
       });
     }
+    expect(
+      tools.tools.find((tool) => tool.name === "create_finance_attention_item")?.annotations,
+    ).toEqual({
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+      readOnlyHint: false,
+    });
     for (const tool of tools.tools.filter((candidate) =>
       [
         "get_agent_setup_status",
@@ -954,7 +968,17 @@ describe("ilo MCP server", () => {
     });
     await client.callTool({
       name: "update_attention_item",
-      arguments: { domain: "mail", id, status: "resolved" },
+      arguments: { domain: "mail", expectedVersion: 1, id, status: "resolved" },
+    });
+    await client.callTool({
+      name: "create_finance_attention_item",
+      arguments: {
+        importance: "high",
+        kind: "important",
+        summary: "Review this transaction.",
+        title: "Finance review",
+        transactionId: id,
+      },
     });
     await client.callTool({ name: "list_goals", arguments: {} });
     await client.callTool({
@@ -1324,6 +1348,10 @@ describe("ilo MCP server", () => {
       limit: 50,
       review: "needs_review",
     });
+    expect(api.upsertFinanceAttentionItem).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ importance: "high", kind: "important" }),
+    );
     expect(api.listMailThreads).toHaveBeenCalledWith({
       accountIds: [accountId],
       limit: 100,

@@ -59,6 +59,7 @@ describe("auditSnapshot", () => {
     expect(JSON.stringify(metadata)).not.toMatch(
       /private@example\.com|mailbox-secret|account-secret|profile-secret|Private/,
     );
+    expect(auditMailRuleMetadata(null, ["enabled"])).toBeNull();
   });
 
   it("reduces shared profile and attention records to scope-safe accountability metadata", () => {
@@ -104,6 +105,7 @@ describe("auditSnapshot", () => {
         kind: "follow_up",
         relatedEntityType: "mail_thread",
         status: "open",
+        version: 3,
       }),
     ).toEqual({
       domain: "mail",
@@ -111,6 +113,7 @@ describe("auditSnapshot", () => {
       kind: "follow_up",
       relatedEntityType: "mail_thread",
       status: "open",
+      version: 3,
     });
   });
 });

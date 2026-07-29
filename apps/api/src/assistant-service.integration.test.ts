@@ -222,7 +222,7 @@ describe.sequential("assistant setup service", () => {
           },
           context(),
         ),
-      ).rejects.toThrow("reserved for Mail-owned");
+      ).rejects.toThrow("must be unlinked");
     }
     await expect(
       service.upsertProfile(
@@ -929,6 +929,29 @@ describe.sequential("assistant setup service", () => {
     await expect(
       service.createAttentionItem(
         {
+          domain: "finances",
+          expiresAt: null,
+          importance: "high",
+          kind: "important",
+          occursAt: null,
+          relatedEntityId: crypto.randomUUID(),
+          relatedEntityType: "finance_transaction",
+          source: {
+            accountId: crypto.randomUUID(),
+            provider: "plaid",
+            remoteId: "caller-controlled",
+            revision: "caller-revision",
+            sourceType: "finance_transaction",
+          },
+          summary: "Caller-supplied Finance provenance.",
+          title: "Forged Finance attention",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createAttentionItem(
+        {
           domain: "goals",
           expiresAt: null,
           importance: "high",
@@ -985,8 +1008,24 @@ describe.sequential("assistant setup service", () => {
       service.listAttentionItems(userId, { domain: "mail", limit: 50, status: "open" }),
     ).resolves.toEqual([expect.objectContaining({ id: item.id, kind: "follow_up" })]);
     await expect(
-      service.updateAttentionItem("mail", item.id, { status: "resolved" }, context()),
-    ).resolves.toMatchObject({ status: "resolved" });
+      service.updateAttentionItem(
+        "mail",
+        item.id,
+        { expectedVersion: item.version, status: "resolved" },
+        context(),
+      ),
+    ).resolves.toMatchObject({ status: "resolved", version: item.version + 1 });
+    await expect(
+      service.updateAttentionItem(
+        "mail",
+        item.id,
+        { expectedVersion: item.version, status: "dismissed" },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: { currentVersion: item.version + 1 },
+    });
     const expiring = await service.createAttentionItem(
       {
         domain: "reminders",
@@ -1108,7 +1147,12 @@ describe.sequential("assistant setup service", () => {
       context(),
     );
     await expect(
-      service.updateAttentionItem("mail", userId, { status: "dismissed" }, context()),
+      service.updateAttentionItem(
+        "mail",
+        userId,
+        { expectedVersion: 1, status: "dismissed" },
+        context(),
+      ),
     ).rejects.toMatchObject({ code: "not_found" });
     const storedItems = await database.db.select().from(attentionItems);
     expect(storedItems).toHaveLength(3);
@@ -1181,6 +1225,7 @@ describe.sequential("assistant setup service", () => {
       kind: "follow_up",
       relatedEntityType: null,
       status: "resolved",
+      version: 2,
     });
   });
 

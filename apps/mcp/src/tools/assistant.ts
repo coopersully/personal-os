@@ -5,7 +5,6 @@ import {
   domainPreferenceValueSchema,
   idSchema,
   isoDateTimeSchema,
-  materialSourceReferenceSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
@@ -14,7 +13,6 @@ export const assistantDomain = assistantDomainSchema;
 const id = idSchema.describe("ilo object identifier");
 const isoDateTime = isoDateTimeSchema;
 const preferenceValue = domainPreferenceValueSchema;
-const sourceReference = materialSourceReferenceSchema;
 
 /** Shared setup and attention tools; domain APIs remain the authority. */
 export function registerAssistantTools(server: McpServer, api: PersonalOsApiClient) {
@@ -130,22 +128,27 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: false,
       },
       description:
-        "Record a concise important item, upcoming commitment, follow-up, or post-run summary in the same cross-domain structure.",
+        "Record an intentionally unlinked generic note in one domain. For Mail conversations, Calendar events, Reminders, or Finance transactions, use the domain-owned attention tool so Ilo can validate ownership and derive provenance.",
       inputSchema: {
         domain: assistantDomain,
         expiresAt: isoDateTime.nullable().default(null),
         importance: z.enum(["low", "normal", "high", "critical"]).default("normal"),
         kind: z.enum(["important", "upcoming", "follow_up", "run_summary"]),
         occursAt: isoDateTime.nullable().default(null),
-        relatedEntityId: id.nullable().default(null),
-        relatedEntityType: z.string().max(100).nullable().default(null),
-        source: sourceReference.nullable().default(null),
         summary: z.string().min(1).max(4_000),
         title: z.string().min(1).max(240),
       },
       title: "Create ilo attention item",
     },
-    async (input) => apiResult(() => api.createAttentionItem(input)),
+    async (input) =>
+      apiResult(() =>
+        api.createAttentionItem({
+          ...input,
+          relatedEntityId: null,
+          relatedEntityType: null,
+          source: null,
+        }),
+      ),
   );
 
   server.registerTool(
@@ -157,15 +160,17 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         openWorldHint: false,
         readOnlyHint: false,
       },
-      description: "Resolve, dismiss, or reopen one ilo attention item.",
+      description:
+        "Resolve, dismiss, or reopen one ilo attention item using the version returned by list_attention_items. If another workflow refreshed it first, Ilo returns a conflict with the current version.",
       inputSchema: {
         domain: assistantDomain,
         id,
+        expectedVersion: z.number().int().positive(),
         status: z.enum(["open", "resolved", "dismissed"]),
       },
       title: "Update ilo attention item",
     },
-    async ({ domain, id: itemId, status }) =>
-      apiResult(() => api.updateAttentionItem(domain, itemId, { status })),
+    async ({ domain, expectedVersion, id: itemId, status }) =>
+      apiResult(() => api.updateAttentionItem(domain, itemId, { expectedVersion, status })),
   );
 }

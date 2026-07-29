@@ -4718,6 +4718,29 @@ describe.sequential("connector service", () => {
       expect.objectContaining({
         status: "open",
         title: "Mail automation has pending work",
+        version: 2,
+      }),
+    ]);
+    await expect(
+      database.db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, existingRunSummary.id),
+            eq(auditEvents.action, "assistant.attention.updated"),
+          ),
+        ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        actorId: fixture.account.id,
+        actorType: "connector",
+        after: expect.objectContaining({
+          execution: "background_dispatch",
+          policy: "approved_rule",
+          version: 2,
+        }),
+        requestId: expect.stringMatching(/^mail-rule-work-attention:[0-9a-f-]{36}$/),
       }),
     ]);
 
@@ -4759,6 +4782,20 @@ describe.sequential("connector service", () => {
       succeeded: 1,
     });
     expect(updateMailThread).toHaveBeenCalledTimes(2);
+    await expect(
+      database.db.select().from(attentionItems).where(eq(attentionItems.id, existingRunSummary.id)),
+    ).resolves.toEqual([expect.objectContaining({ status: "resolved", version: 4 })]);
+    await expect(
+      database.db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, existingRunSummary.id),
+            eq(auditEvents.action, "assistant.attention.resolved"),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
   });
 
   it("fails provider 404 work terminally without replay", async () => {
@@ -4836,6 +4873,86 @@ describe.sequential("connector service", () => {
         title: "Mail automation needs review",
       }),
     ]);
+    const [createdRunSummary] = await database.db
+      .select()
+      .from(attentionItems)
+      .where(
+        and(
+          eq(attentionItems.relatedEntityId, fixture.account.id),
+          eq(attentionItems.kind, "run_summary"),
+        ),
+      )
+      .limit(1);
+    if (!createdRunSummary) throw new Error("Created Mail run summary was not found.");
+    await expect(
+      database.db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, createdRunSummary.id),
+            eq(auditEvents.action, "assistant.attention.created"),
+          ),
+        ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        actorId: fixture.account.id,
+        actorType: "connector",
+        after: expect.objectContaining({
+          execution: "background_dispatch",
+          policy: "approved_rule",
+          version: 1,
+        }),
+      }),
+    ]);
+  });
+
+  it("rolls back a connector-managed run summary when its audit cannot be written", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Atomic run summary", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockRejectedValueOnce(new ConnectorError("Not found", 404));
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_background_attention_audit_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.request_id LIKE 'mail-rule-work-attention:%' THEN
+          RAISE EXCEPTION 'forced background attention audit failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_background_attention_audit_for_test
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW EXECUTE FUNCTION fail_background_attention_audit_for_test();
+    `);
+    try {
+      await expect(service.dispatchDueMailRuleWork()).rejects.toThrow(
+        'Failed query: insert into "audit_events"',
+      );
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_background_attention_audit_for_test ON audit_events;
+        DROP FUNCTION IF EXISTS fail_background_attention_audit_for_test();
+      `);
+    }
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            eq(attentionItems.relatedEntityId, fixture.account.id),
+            eq(attentionItems.kind, "run_summary"),
+          ),
+        ),
+    ).resolves.toEqual([]);
   });
 
   it("reconciles provider success after rotated credentials fail to persist", async () => {

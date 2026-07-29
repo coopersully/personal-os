@@ -34,6 +34,7 @@ const item = {
   summary: "Important mail.",
   title: "Important",
   updatedAt: now,
+  version: 1,
 };
 
 describe("assistant setup routes", () => {
@@ -129,7 +130,7 @@ describe("assistant setup routes", () => {
       (
         await app.request(`/v1/assistant/attention/mail/${id}`, {
           ...json,
-          body: JSON.stringify({ status: "resolved" }),
+          body: JSON.stringify({ expectedVersion: 1, status: "resolved" }),
           method: "PATCH",
         })
       ).status,

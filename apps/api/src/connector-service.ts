@@ -912,7 +912,7 @@ export function createConnectorService({
     if (existingAttention) {
       await transaction
         .update(attentionItems)
-        .set(attentionValues)
+        .set({ ...attentionValues, version: sql`${attentionItems.version} + 1` })
         .where(eq(attentionItems.id, existingAttention.id));
     } else {
       await transaction.insert(attentionItems).values({
@@ -1022,6 +1022,7 @@ export function createConnectorService({
           relatedEntityType: null,
           source: null,
           updatedAt: now(),
+          version: item.version + 1,
         })
         .where(eq(attentionItems.id, item.id))
         .returning();
@@ -1841,7 +1842,7 @@ export function createConnectorService({
               if (existingRunAttention) {
                 await transaction
                   .update(attentionItems)
-                  .set(attentionValues)
+                  .set({ ...attentionValues, version: sql`${attentionItems.version} + 1` })
                   .where(eq(attentionItems.id, existingRunAttention.id));
               } else {
                 // The per-account sync lease serializes this Mail-owned run-summary upsert.
@@ -2678,6 +2679,7 @@ export function createConnectorService({
         .where(eq(calendarAccounts.id, accountId))
         .limit(1);
       if (!account) continue;
+      const requestId = `mail-rule-work-attention:${randomUUID()}`;
       await db.transaction(async (transaction) => {
         await transaction.execute(
           sql`SELECT pg_advisory_xact_lock(hashtextextended(${`mail-rule-work:${account.id}`}, 0))`,
@@ -2701,7 +2703,7 @@ export function createConnectorService({
         const reconcile = count("reconcile");
         const failed = count("failed");
         const [existing] = await transaction
-          .select({ id: attentionItems.id })
+          .select()
           .from(attentionItems)
           .where(
             and(
@@ -2717,10 +2719,45 @@ export function createConnectorService({
           .limit(1);
         if (pending === 0 && reconcile === 0 && failed === 0) {
           if (existing) {
-            await transaction
+            const [resolved] = await transaction
               .update(attentionItems)
-              .set({ status: "resolved", updatedAt: now() })
-              .where(eq(attentionItems.id, existing.id));
+              .set({
+                status: "resolved",
+                updatedAt: now(),
+                version: existing.version + 1,
+              })
+              .where(
+                and(
+                  eq(attentionItems.id, existing.id),
+                  eq(attentionItems.version, existing.version),
+                ),
+              )
+              .returning();
+            if (!resolved) {
+              throw new AppError(
+                "conflict",
+                "The Mail run summary changed while it was being resolved.",
+              );
+            }
+            await transaction.insert(auditEvents).values(
+              auditValues({
+                action: "assistant.attention.resolved",
+                after: {
+                  ...auditAttentionItemMetadata(resolved),
+                  execution: "background_dispatch",
+                  policy: "approved_rule",
+                },
+                before: auditAttentionItemMetadata(existing),
+                entityId: resolved.id,
+                entityType: "attention_item",
+                principal: {
+                  actorId: account.id,
+                  actorType: "connector",
+                  userId: account.userId,
+                },
+                requestId,
+              }),
+            );
           }
           return;
         }
@@ -2736,20 +2773,73 @@ export function createConnectorService({
           updatedAt: now(),
         };
         if (existing) {
-          await transaction
+          const [updated] = await transaction
             .update(attentionItems)
-            .set(values)
-            .where(eq(attentionItems.id, existing.id));
+            .set({ ...values, version: existing.version + 1 })
+            .where(
+              and(eq(attentionItems.id, existing.id), eq(attentionItems.version, existing.version)),
+            )
+            .returning();
+          if (!updated) {
+            throw new AppError(
+              "conflict",
+              "The Mail run summary changed while it was being saved.",
+            );
+          }
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "assistant.attention.updated",
+              after: {
+                ...auditAttentionItemMetadata(updated),
+                execution: "background_dispatch",
+                policy: "approved_rule",
+              },
+              before: auditAttentionItemMetadata(existing),
+              entityId: updated.id,
+              entityType: "attention_item",
+              principal: {
+                actorId: account.id,
+                actorType: "connector",
+                userId: account.userId,
+              },
+              requestId,
+            }),
+          );
         } else {
-          await transaction.insert(attentionItems).values({
-            ...values,
-            domain: "mail",
-            kind: "run_summary",
-            relatedEntityId: account.id,
-            relatedEntityType: "mail_account",
-            status: "open",
-            userId: account.userId,
-          });
+          const [created] = await transaction
+            .insert(attentionItems)
+            .values({
+              ...values,
+              domain: "mail",
+              kind: "run_summary",
+              relatedEntityId: account.id,
+              relatedEntityType: "mail_account",
+              status: "open",
+              userId: account.userId,
+            })
+            .returning();
+          if (!created) {
+            throw new AppError("internal_error", "The Mail run summary could not be created.");
+          }
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "assistant.attention.created",
+              after: {
+                ...auditAttentionItemMetadata(created),
+                execution: "background_dispatch",
+                policy: "approved_rule",
+              },
+              before: null,
+              entityId: created.id,
+              entityType: "attention_item",
+              principal: {
+                actorId: account.id,
+                actorType: "connector",
+                userId: account.userId,
+              },
+              requestId,
+            }),
+          );
         }
       });
     }

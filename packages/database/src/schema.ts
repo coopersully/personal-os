@@ -380,6 +380,7 @@ export const attentionItems = pgTable(
     kind: text("kind").$type<AttentionItemKind>().notNull(),
     importance: text("importance").$type<AttentionItemImportance>().notNull(),
     status: text("status").$type<AttentionItemStatus>().notNull().default("open"),
+    version: integer("version").notNull().default(1),
     title: text("title").notNull(),
     summary: text("summary").notNull(),
     occursAt: timestamp("occurs_at", { withTimezone: true }),
@@ -397,6 +398,7 @@ export const attentionItems = pgTable(
       table.createdAt,
     ),
     index("attention_items_user_occurs_idx").on(table.userId, table.occursAt),
+    check("attention_items_version_check", sql`${table.version} > 0`),
   ],
 );
 

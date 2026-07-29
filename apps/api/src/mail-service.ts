@@ -943,6 +943,7 @@ export function createMailService({
                 eq(attentionItems.status, "open"),
               ),
             )
+            .for("update")
             .limit(1)
         )[0];
         const values = {
@@ -969,8 +970,13 @@ export function createMailService({
           (existing
             ? await transaction
                 .update(attentionItems)
-                .set({ ...values, updatedAt })
-                .where(eq(attentionItems.id, existing.id))
+                .set({ ...values, updatedAt, version: existing.version + 1 })
+                .where(
+                  and(
+                    eq(attentionItems.id, existing.id),
+                    eq(attentionItems.version, existing.version),
+                  ),
+                )
                 .returning()
             : await transaction.insert(attentionItems).values(values).returning())[0],
           "The Mail attention item could not be saved.",
@@ -2024,5 +2030,6 @@ function serializeMailAttentionItem(row: typeof attentionItems.$inferSelect): At
     summary: row.summary,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),
+    version: row.version,
   };
 }

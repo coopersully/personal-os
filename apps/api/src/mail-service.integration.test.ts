@@ -130,6 +130,7 @@ describe.sequential("mail service", () => {
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
       "0044_durable_mail_rule_work",
+      "0045_attention_item_versions",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -159,6 +160,7 @@ describe.sequential("mail service", () => {
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
       "0044_durable_mail_rule_work",
+      "0045_attention_item_versions",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(
@@ -1978,6 +1980,7 @@ describe.sequential("mail service", () => {
         kind: "important",
         relatedEntityType: "mail_thread",
         status: "open",
+        version: 1,
       },
       {
         domain: "mail",
@@ -1985,6 +1988,7 @@ describe.sequential("mail service", () => {
         kind: "important",
         relatedEntityType: "mail_thread",
         status: "open",
+        version: 2,
       },
       {
         domain: "mail",
@@ -1992,6 +1996,7 @@ describe.sequential("mail service", () => {
         kind: "important",
         relatedEntityType: "mail_thread",
         status: "open",
+        version: 3,
       },
     ]);
     const attentionAuditJson = JSON.stringify(attentionAudits);

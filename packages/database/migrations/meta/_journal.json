@@ -316,6 +316,13 @@
       "when": 1786917600000,
       "tag": "0044_durable_mail_rule_work",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786921200000,
+      "tag": "0045_attention_item_versions",
+      "breakpoints": true
     }
   ]
 }

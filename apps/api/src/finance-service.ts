@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { providerFetch } from "@personal-os/connectors";
 import {
+  attentionItems,
   auditEvents,
   type Database,
   domainProfileApprovals,
@@ -24,6 +25,7 @@ import {
 } from "@personal-os/database";
 import type {
   ApplyFinanceCategorizationsInput,
+  AttentionItem,
   CreateFinanceAccountInput,
   CreateFinanceBudgetInput,
   CreateFinanceTransactionInput,
@@ -52,6 +54,7 @@ import type {
   FinanceTransaction,
   FinanceTransactionQuery,
   FinanceWealthSummary,
+  MaterialSourceReference,
   MergeFinanceMerchantsInput,
   ResolveFinanceAlertInput,
   UpdateFinanceIncomeStreamInput,
@@ -59,6 +62,7 @@ import type {
   UpdateFinanceProfileInput,
   UpdateFinanceRecurringObligationInput,
   UpdateFinanceTransactionInput,
+  UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import { financeDomainProfileSchema, idSchema, localDateAt } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
@@ -73,6 +77,7 @@ import {
 } from "./finance-cashflow.js";
 import { parseFinanceCsv } from "./finance-csv.js";
 import { decryptJson, encryptJson } from "./security.js";
+import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal } from "./types.js";
 
 type MutationContext = { principal: Principal; requestId: string };
@@ -726,6 +731,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
   async function categorizationProposal(
     userId: string,
     item: FinanceTransaction,
+    source?: MaterialSourceReference,
   ): Promise<FinanceCategorizationProposal> {
     const automatic = await automaticCategorization(userId, item.rawMerchant ?? item.merchant);
     const evidence = automatic.category
@@ -749,6 +755,8 @@ export function createFinanceService({ db, now, plaid }: Options) {
         : evidence
           ? `Matched ${item.merchant} to ${evidence.confirmations} user confirmation${evidence.confirmations === 1 ? "" : "s"}.`
           : "No durable merchant or category evidence is available yet.",
+      source:
+        source ?? (await financeTransactionSource(userId, await ownedTransaction(userId, item.id))),
       suggestedCategory,
       threshold,
       transaction: item,
@@ -983,6 +991,31 @@ export function createFinanceService({ db, now, plaid }: Options) {
       .limit(1);
     if (!row) throw new AppError("not_found", "The transaction was not found.");
     return row;
+  }
+  async function financeTransactionSource(
+    userId: string,
+    item: typeof financeTransactions.$inferSelect,
+    executor: Pick<Database, "select"> = db,
+  ): Promise<MaterialSourceReference> {
+    const [account] = await executor
+      .select()
+      .from(financeAccounts)
+      .where(and(eq(financeAccounts.id, item.accountId), eq(financeAccounts.userId, userId)))
+      .limit(1);
+    if (!account) throw new AppError("not_found", "The financial account was not found.");
+    return financeTransactionSourceValue(account, item);
+  }
+  function financeTransactionSourceValue(
+    account: typeof financeAccounts.$inferSelect,
+    item: typeof financeTransactions.$inferSelect,
+  ): MaterialSourceReference {
+    return {
+      accountId: account.id,
+      provider: account.provider === "plaid" ? "plaid" : "local",
+      remoteId: account.provider === "plaid" ? (item.providerTransactionId ?? item.id) : item.id,
+      revision: item.updatedAt.toISOString(),
+      sourceType: "finance_transaction",
+    };
   }
   async function ownedMerchant(userId: string, id: string) {
     const [row] = await db
@@ -1807,6 +1840,93 @@ export function createFinanceService({ db, now, plaid }: Options) {
     }
   }
   return {
+    async upsertAttentionItem(
+      transactionId: string,
+      input: UpsertFinanceAttentionItemInput,
+      context: MutationContext,
+    ): Promise<AttentionItem> {
+      const saved = await db.transaction(async (tx) => {
+        const [financeTransaction] = await tx
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.id, transactionId),
+              eq(financeTransactions.userId, context.principal.userId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!financeTransaction) {
+          throw new AppError("not_found", "The transaction was not found.");
+        }
+        const source = await financeTransactionSource(
+          context.principal.userId,
+          financeTransaction,
+          tx,
+        );
+        const [existing] = await tx
+          .select()
+          .from(attentionItems)
+          .where(
+            and(
+              eq(attentionItems.userId, context.principal.userId),
+              eq(attentionItems.domain, "finances"),
+              eq(attentionItems.relatedEntityId, financeTransaction.id),
+              eq(attentionItems.relatedEntityType, "finance_transaction"),
+              eq(attentionItems.kind, input.kind),
+              eq(attentionItems.status, "open"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        const values = {
+          domain: "finances" as const,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          importance: input.importance,
+          kind: input.kind,
+          occursAt: input.occursAt ? new Date(input.occursAt) : null,
+          relatedEntityId: financeTransaction.id,
+          relatedEntityType: "finance_transaction",
+          source,
+          status: "open" as const,
+          summary: input.summary,
+          title: input.title,
+          userId: context.principal.userId,
+        };
+        const [item] = existing
+          ? await tx
+              .update(attentionItems)
+              .set({ ...values, updatedAt: now(), version: existing.version + 1 })
+              .where(
+                and(
+                  eq(attentionItems.id, existing.id),
+                  eq(attentionItems.version, existing.version),
+                ),
+              )
+              .returning()
+          : await tx.insert(attentionItems).values(values).returning();
+        if (!item) {
+          throw new AppError(
+            "conflict",
+            "The Finance attention item changed while it was being saved.",
+          );
+        }
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: existing ? "assistant.attention.updated" : "assistant.attention.created",
+            after: auditAttentionItemMetadata(item),
+            before: auditAttentionItemMetadata(existing ?? null),
+            entityId: item.id,
+            entityType: "attention_item",
+            ...context,
+          }),
+        );
+        return item;
+      });
+      return serializeAttentionItem(saved);
+    },
+
     plaidAvailable() {
       return Boolean(plaid?.clientId && plaid.secret);
     },
@@ -3252,9 +3372,41 @@ export function createFinanceService({ db, now, plaid }: Options) {
         ...query,
         review: "needs_review",
       });
+      const sourceByTransaction = new Map<string, MaterialSourceReference>();
+      if (transactions.items.length > 0) {
+        const sourceRows = await db
+          .select({ account: financeAccounts, item: financeTransactions })
+          .from(financeTransactions)
+          .innerJoin(financeAccounts, eq(financeAccounts.id, financeTransactions.accountId))
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              eq(financeAccounts.userId, userId),
+              inArray(
+                financeTransactions.id,
+                transactions.items.map((item) => item.id),
+              ),
+            ),
+          );
+        for (const row of sourceRows) {
+          sourceByTransaction.set(
+            row.item.id,
+            financeTransactionSourceValue(row.account, row.item),
+          );
+        }
+      }
       return {
         items: await Promise.all(
-          transactions.items.map((item) => categorizationProposal(userId, item)),
+          transactions.items.map((item) => {
+            const source = sourceByTransaction.get(item.id);
+            if (!source) {
+              throw new AppError(
+                "conflict",
+                "The transaction source changed while proposals were being prepared.",
+              );
+            }
+            return categorizationProposal(userId, item, source);
+          }),
         ),
         nextCursor: transactions.nextCursor,
       };

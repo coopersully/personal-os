@@ -17,6 +17,7 @@ import {
   updateFinanceProfileInputSchema,
   updateFinanceRecurringObligationInputSchema,
   updateFinanceTransactionInputSchema,
+  upsertFinanceAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { createFinanceService } from "../finance-service.js";
@@ -243,6 +244,15 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       },
       201,
     ),
+  );
+  app.put("/v1/finances/transactions/:id/attention", async (context) =>
+    context.json({
+      item: await finances.upsertAttentionItem(
+        context.req.param("id"),
+        await parseBody(context, upsertFinanceAttentionItemInputSchema),
+        mutationContext(context),
+      ),
+    }),
   );
   app.patch("/v1/finances/transactions/:id", requireHuman, async (context) =>
     context.json({

@@ -138,7 +138,7 @@ describe("Mail-to-Calendar intake evidence", () => {
         remoteMessageId: "message-1",
         threadId: "thread-1",
         to: [],
-      } as never,
+      },
       principal: {
         actorId: "connector-1",
         actorType: "connector" as const,
@@ -153,19 +153,24 @@ describe("Mail-to-Calendar intake evidence", () => {
         remoteThreadId: "remote-thread-1",
         updatedAt: new Date("2026-07-29T12:00:00.000Z"),
         userId: "user-1",
-      } as never,
+      },
     };
     await expect(
-      recordMailCalendarCommitmentIntakes(transaction as never, {
-        ...input,
-        message: {
-          ...input.message,
-          attachments: [{ ...calendarAttachment, providerPartId: null }],
-          remoteMessageId: "message-with-id-fallback",
+      recordMailCalendarCommitmentIntakes(
+        transaction as never,
+        {
+          ...input,
+          message: {
+            ...input.message,
+            attachments: [{ ...calendarAttachment, providerPartId: null }],
+            remoteMessageId: "message-with-id-fallback",
+          },
         } as never,
-      }),
+      ),
     ).resolves.toBe(1);
-    await expect(recordMailCalendarCommitmentIntakes(transaction as never, input)).resolves.toBe(1);
+    await expect(
+      recordMailCalendarCommitmentIntakes(transaction as never, input as never),
+    ).resolves.toBe(1);
     expect(intakeWrites).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

@@ -48,8 +48,14 @@ export function createCalendarApiClient(request: ApiRequest) {
       await request<void>(`/v1/calendars/${id}`, { method: "DELETE" });
     },
     async deleteEvent(id: string, input: DeleteEventInput = {}): Promise<void> {
+      if (Object.keys(input).length > 0) {
+        await request<{ revision: CalendarEventMutationRevision }>(`/v1/events/${id}/trash`, {
+          body: JSON.stringify(input),
+          method: "POST",
+        });
+        return;
+      }
       await request<void>(`/v1/events/${id}`, {
-        body: JSON.stringify(input),
         method: "DELETE",
       });
     },
@@ -58,11 +64,12 @@ export function createCalendarApiClient(request: ApiRequest) {
       blockId: string,
       input: DeleteEventBlockInput = {},
     ): Promise<CalendarEvent> {
+      const guarded = Object.keys(input).length > 0;
       const response = await request<{ event: CalendarEvent }>(
-        `/v1/events/${id}/blocks/${blockId}`,
+        `/v1/events/${id}/blocks/${blockId}${guarded ? "/trash" : ""}`,
         {
-          body: JSON.stringify(input),
-          method: "DELETE",
+          ...(guarded ? { body: JSON.stringify(input) } : {}),
+          method: guarded ? "POST" : "DELETE",
         },
       );
       return response.event;

@@ -942,6 +942,8 @@ function apiFetch() {
     if (url.pathname.includes("/calendars/")) return json({ calendar });
     if (url.pathname === "/v1/events" && method === "POST") return json({ event }, 201);
     if (url.pathname === "/v1/events") return json({ events: [event] });
+    if (url.pathname.includes("/blocks/") && url.pathname.endsWith("/trash"))
+      return json({ event });
     if (url.pathname.endsWith("/trash"))
       return json({ revision: { blockUpdatedAtById: {}, eventId: id, updatedAt: now } });
     if (url.pathname.endsWith("/attention") && url.pathname.includes("/events/"))
@@ -1014,6 +1016,12 @@ describe("ilo API client", () => {
     );
     await expect(api.updateEventBlock(id, id, { mode: "details" })).resolves.toEqual(event);
     await expect(api.deleteEventBlock(id, id)).resolves.toEqual(event);
+    await expect(
+      api.deleteEventBlock(id, id, {
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+      }),
+    ).resolves.toEqual(event);
     await expect(api.restoreEvent(id)).resolves.toEqual(event);
     await expect(
       api.trashEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now }),
@@ -1029,6 +1037,7 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await api.deleteEvent(id);
+    await api.deleteEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now });
     await expect(api.listReminders({ completed: false, query: "", limit: 10 })).resolves.toEqual({
       items: [reminder],
       nextCursor: null,
@@ -1465,6 +1474,34 @@ describe("ilo API client", () => {
       items: [{ expectedUpdatedAt: now, id }],
       unread: false,
     });
+    const guardedEventDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/trash` && init?.method === "POST",
+    );
+    expect(JSON.parse(String(guardedEventDelete?.[1]?.body))).toEqual({
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    const legacyEventDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}` && init?.method === "DELETE",
+    );
+    expect(legacyEventDelete?.[1]?.body).toBeUndefined();
+    const guardedBlockDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/blocks/${id}/trash` &&
+        init?.method === "POST",
+    );
+    expect(JSON.parse(String(guardedBlockDelete?.[1]?.body))).toEqual({
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+    });
+    const legacyBlockDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/blocks/${id}` &&
+        init?.method === "DELETE",
+    );
+    expect(legacyBlockDelete?.[1]?.body).toBeUndefined();
   });
 
   it("adopts, persists, uses, and clears a desktop session token", async () => {

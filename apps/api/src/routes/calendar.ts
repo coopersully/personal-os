@@ -132,7 +132,18 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
         context.req.param("id"),
         context.req.param("blockId"),
         mutationContext(context),
-        await parseOptionalBody(context, deleteEventBlockInputSchema),
+        {},
+      ),
+    }),
+  );
+  // Revision-bearing destructive requests use POST so intermediaries cannot drop their CAS body.
+  app.post("/v1/events/:id/blocks/:blockId/trash", async (context) =>
+    context.json({
+      event: await calendar.deleteEventBlock(
+        context.req.param("id"),
+        context.req.param("blockId"),
+        mutationContext(context),
+        await parseBody(context, deleteEventBlockInputSchema),
       ),
     }),
   );
@@ -151,13 +162,10 @@ export function registerCalendarRoutes({ app, calendar, mutationContext }: Calen
     }),
   );
   app.delete("/v1/events/:id", async (context) => {
-    await calendar.deleteEvent(
-      context.req.param("id"),
-      mutationContext(context),
-      await parseOptionalBody(context, deleteEventInputSchema),
-    );
+    await calendar.deleteEvent(context.req.param("id"), mutationContext(context), {});
     return context.body(null, 204);
   });
+  // The legacy DELETE path is bodyless; this is the reliable revision-bearing transport.
   app.post("/v1/events/:id/trash", async (context) =>
     context.json({
       revision: await calendar.deleteEvent(
@@ -192,12 +200,11 @@ const createSelectedInputSchema = z.object({ selected: z.boolean() });
 async function parseOptionalBody<T>(context: Context<AppEnv>, schema: ZodType<T>): Promise<T> {
   const raw = await context.req.text();
   if (!raw.trim()) return schema.parse({});
+  let value: unknown;
   try {
-    return schema.parse(JSON.parse(raw));
-  } catch (error) {
-    if (error instanceof SyntaxError) {
-      throw new AppError("invalid_request", "The request body must be valid JSON.");
-    }
-    throw error;
+    value = JSON.parse(raw);
+  } catch {
+    throw new AppError("invalid_request", "The request body must be valid JSON.");
   }
+  return schema.parse(value);
 }

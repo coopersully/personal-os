@@ -148,7 +148,8 @@ independently. `source.revision` is provider provenance (the provider ETag when 
 the local `updatedAt`) and is not a substitute for the mutation fields. Delete returns the deleted
 source and block revisions needed by restore. The public `updatedAt` contract and local CAS use
 millisecond precision; a purely local event changed twice inside the same millisecond is the
-remaining race. Connected projections also compare the provider ETag.
+remaining race. A future monotonic per-event revision, used instead of or alongside `updatedAt`,
+would eliminate that local race. Connected projections also compare the provider ETag.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
 

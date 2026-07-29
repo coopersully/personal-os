@@ -248,11 +248,8 @@ export const calendarCommitmentEvidenceKindSchema = z.enum([
   "other",
 ]);
 export type CalendarCommitmentEvidenceKind = z.infer<typeof calendarCommitmentEvidenceKindSchema>;
-export const calendarAutomaticEvidenceKindSchema = z.enum([
-  "ticket",
-  "booking",
-  "registration",
-  "explicit_acceptance",
+export const calendarAutomaticEvidenceKindSchema = calendarCommitmentEvidenceKindSchema.exclude([
+  "other",
 ]);
 
 export const calendarCommitmentFlexibilitySchema = z.enum(["hard", "flexible"]);

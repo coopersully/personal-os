@@ -2,9 +2,9 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import {
   calendarBlockRevisionMapSchema,
-  calendarCommitmentCandidateSchema,
   idSchema,
   isoDateTimeSchema,
+  previewCalendarCommitmentInputSchema,
   upsertCalendarAttentionItemInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
@@ -285,14 +285,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Preview one exact Calendar candidate from caller-supplied commitment evidence. The API checks destination capability, projection freshness, exact duplicates, profile alignment, and requested policy without writing an event. Caller-supplied evidence remains unverified and can never authorize approved_rule. This is the Calendar-owned intake shape for a later durable integration; do not scan Mail here.",
-      inputSchema: {
-        candidate: calendarCommitmentCandidateSchema,
-        expectedProfileVersion: z.number().int().positive().nullable().default(null),
-        profileId: id.nullable().default(null),
-        requestedPolicy: z
-          .enum(["read_only", "preview", "approve_each", "approved_rule"])
-          .default("preview"),
-      },
+      inputSchema: previewCalendarCommitmentInputSchema.shape,
       title: "Preview evidence-based Calendar commitment",
     },
     async (input) => apiResult(() => api.previewCalendarCommitment(input)),

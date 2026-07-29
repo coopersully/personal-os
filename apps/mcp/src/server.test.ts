@@ -80,7 +80,7 @@ const commitmentCandidate = {
   allDay: false,
   buffer: { afterMinutes: 15, beforeMinutes: 15 },
   calendarId: id,
-  endsAt: event.endsAt,
+  endsAt: "2026-07-13T13:00:00.000Z",
   evidence: {
     kind: "booking" as const,
     source: {

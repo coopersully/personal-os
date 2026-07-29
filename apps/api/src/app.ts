@@ -36,6 +36,7 @@ import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
+import { calendarProviderReconciliationLog } from "./calendar-provider-log.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createConnectorService } from "./connector-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
@@ -184,7 +185,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
     observeProviderFailure: (entry) =>
       dependencies.log?.({
-        calendarProviderReconciliation: entry,
+        calendarProviderReconciliation: calendarProviderReconciliationLog(entry),
         durationMs: 0,
         event: "calendar_provider_reconciliation",
         method: "CALENDAR",

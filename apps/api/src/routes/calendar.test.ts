@@ -65,7 +65,7 @@ describe("Calendar routes", () => {
   it("keeps commitment intake preview-only and read-scoped", async () => {
     const app = new Hono<AppEnv>();
     let actorType: "agent" | "user" = "agent";
-    let scopes = new Set<AccessScope>(["calendar:read"]);
+    let scopes = new Set<AccessScope>();
     const calendarService = {
       createEvent: vi.fn(async () => ({ id })),
       createEventBlock: vi.fn(async () => ({ id })),
@@ -106,6 +106,14 @@ describe("Calendar routes", () => {
     const request = (path: string, init?: RequestInit) =>
       app.request(path, { headers: { "content-type": "application/json" }, ...init });
 
+    const deniedPreview = await request("/v1/calendars/commitments/preview", {
+      body: JSON.stringify({ candidate }),
+      method: "POST",
+    });
+    expect(deniedPreview.status).toBe(403);
+    expect(calendarService.previewCommitment).not.toHaveBeenCalled();
+
+    scopes = new Set<AccessScope>(["calendar:read"]);
     const previewResponse = await request("/v1/calendars/commitments/preview", {
       body: JSON.stringify({ candidate }),
       method: "POST",
@@ -148,12 +156,12 @@ describe("Calendar routes", () => {
       expect.objectContaining({ requestId: "calendar-route-test" }),
     );
 
-    const unblockResponse = await request(`/v1/events/${id}/blocks/${id}`, {
+    const unblockResponse = await request(`/v1/events/${id}/blocks/${id}/trash`, {
       body: JSON.stringify({
         expectedBlockUpdatedAt: now,
         expectedUpdatedAt: now,
       }),
-      method: "DELETE",
+      method: "POST",
     });
     expect(unblockResponse.status).toBe(200);
     expect(calendarService.deleteEventBlock).toHaveBeenCalledWith(

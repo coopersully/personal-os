@@ -142,6 +142,12 @@ describe("pagination, errors, and OpenAPI", () => {
         responses: { 200: { description: "Event trashed with restorable revisions" } },
       },
     });
+    expect(document.paths["/v1/events/{id}/blocks/{blockId}/trash"]).toEqual({
+      post: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Linked calendar block removed with revision guards" } },
+      },
+    });
     expect(Object.keys(document.paths)).toEqual(
       expect.arrayContaining(["/v1/goals", "/v1/goals/{id}", "/v1/motives", "/v1/motives/{id}"]),
     );

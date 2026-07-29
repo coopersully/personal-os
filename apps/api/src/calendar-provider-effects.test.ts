@@ -40,6 +40,27 @@ describe("Calendar provider effect ledger", () => {
     await expect(repeated.commit(async () => "committed")).resolves.toBe("committed");
   });
 
+  it("rejects a concurrent replay while the planned provider effect is running", async () => {
+    const ledger = createCalendarProviderEffectLedger("concurrent_create", [sourceEffect]);
+    let finishProvider: (() => void) | undefined;
+    const running = ledger.run(
+      sourceEffect,
+      () =>
+        new Promise<string>((resolve) => {
+          finishProvider = () => resolve("accepted");
+        }),
+    );
+    const replay = vi.fn(async () => "replayed");
+
+    await expect(ledger.run(sourceEffect, replay)).rejects.toThrow(
+      "unknown or has already been settled",
+    );
+    expect(replay).not.toHaveBeenCalled();
+    finishProvider?.();
+    await expect(running).resolves.toBe("accepted");
+    await expect(ledger.commit(async () => "committed")).resolves.toBe("committed");
+  });
+
   it("does not replace a provider failure when no effect is known to have completed", async () => {
     const ledger = createCalendarProviderEffectLedger("create_event", [sourceEffect]);
     const error = new Error("Provider rejected the request.");
@@ -175,6 +196,23 @@ describe("Calendar provider effect ledger", () => {
         remoteEventId: "updated-block",
         stage: "audit",
       },
+    });
+  });
+
+  it("preserves a projection conflict after a completed provider effect", async () => {
+    const ledger = createCalendarProviderEffectLedger("update_event_block", [blockEffect]);
+    await ledger.run(blockEffect, async () => ({ remoteEventId: "updated-block" }));
+    await expect(
+      ledger.commit(async () =>
+        Promise.reject(new AppError("conflict", "The Calendar block changed.")),
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: {
+        completedEffects: [expect.objectContaining({ role: "block" })],
+        operation: "update_event_block",
+      },
+      message: "The Calendar block changed.",
     });
   });
 

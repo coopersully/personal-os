@@ -2695,6 +2695,49 @@ describe("ilo web app", () => {
     review.unmount();
   });
 
+  it("submits the displayed transaction revision when approving a Finance review", async () => {
+    mocks.getFinanceReviewQueue.mockResolvedValue([
+      {
+        createdAt: now,
+        id: secondId,
+        rationale: "Provider category needs confirmation.",
+        reason: "low_confidence",
+        status: "open",
+        suggestedCategory: null,
+        transaction: {
+          accountId: id,
+          amount: 27.5,
+          category: "Dining",
+          categoryConfidence: 0.95,
+          categoryId: id,
+          createdAt: now,
+          date: "2026-07-13",
+          direction: "expense",
+          id: thirdId,
+          merchant: "Cafe",
+          needsReview: true,
+          notes: null,
+          pending: false,
+          updatedAt: now,
+        },
+      },
+    ]);
+    mocks.resolveFinanceReview.mockResolvedValue({ applied: true });
+    const view = setup("/finances/review");
+
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() =>
+      expect(mocks.resolveFinanceReview).toHaveBeenCalledWith(secondId, {
+        action: "approve",
+        categoryId: undefined,
+        expectedTransactionUpdatedAt: now,
+        learnMerchant: "suggest",
+        rationale: null,
+      }),
+    );
+    view.unmount();
+  });
+
   it("keeps global badges and calendar date navigation deterministic", async () => {
     mocks.listTasks.mockResolvedValue({
       items: [{ ...task, dueAt: now, status: "cancelled" }],

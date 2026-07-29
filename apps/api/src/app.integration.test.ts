@@ -1615,7 +1615,8 @@ describe.sequential("ilo API", () => {
           await request(`/v1/reminders/${first.id}/attention`, {
             auth: "agent",
             body: {
-              occursAt: first.dueAt,
+              expiresAt: "2026-07-30T12:00:00.000Z",
+              occursAt: null,
               summary: "Use the current Reminder revision.",
               title: "Reminder review refreshed",
             },
@@ -1953,6 +1954,14 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(409);
+    expect(
+      (
+        await request(`/v1/reminders/${crypto.randomUUID()}/restore`, {
+          auth: "session",
+          body: {},
+        })
+      ).status,
+    ).toBe(404);
 
     const updateRaceReminder = (
       await payload(

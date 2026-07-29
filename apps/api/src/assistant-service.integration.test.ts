@@ -378,6 +378,14 @@ describe.sequential("assistant setup service", () => {
   });
 
   it("round-trips legacy Reminder drafts and persists normalized partial answers", async () => {
+    await expect(
+      reminders.validateProfileSources(database.db, userId, [crypto.randomUUID()], "draft", {}),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      reminders.validateProfileSources(database.db, userId, [], "draft", {
+        priorityHighMeaning: 42,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
     const [legacy] = await database.db
       .insert(domainProfiles)
       .values({
@@ -914,6 +922,46 @@ describe.sequential("assistant setup service", () => {
           },
           summary: "Unvalidated Mail source.",
           title: "Unsafe attention item",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createAttentionItem(
+        {
+          domain: "goals",
+          expiresAt: null,
+          importance: "high",
+          kind: "follow_up",
+          occursAt: null,
+          relatedEntityId: userId,
+          relatedEntityType: "reminder",
+          source: null,
+          summary: "Cross-domain Reminder entity provenance.",
+          title: "Forged Reminder entity",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createAttentionItem(
+        {
+          domain: "goals",
+          expiresAt: null,
+          importance: "high",
+          kind: "follow_up",
+          occursAt: null,
+          relatedEntityId: null,
+          relatedEntityType: null,
+          source: {
+            accountId: null,
+            provider: "local",
+            remoteId: userId,
+            revision: "caller-revision",
+            sourceType: "reminder",
+          },
+          summary: "Cross-domain Reminder source provenance.",
+          title: "Forged Reminder source",
         },
         context(),
       ),

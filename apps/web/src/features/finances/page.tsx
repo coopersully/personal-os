@@ -2076,6 +2076,15 @@ function FinanceAgentGuidancePanel({
   );
 }
 
+function withOccurrenceKeys(values: string[]) {
+  const occurrences = new Map<string, number>();
+  return values.map((value) => {
+    const occurrence = (occurrences.get(value) ?? 0) + 1;
+    occurrences.set(value, occurrence);
+    return { key: `${value}:${occurrence}`, value };
+  });
+}
+
 function FinanceGuidanceDetails({
   legend,
   profile,
@@ -2098,8 +2107,8 @@ function FinanceGuidanceDetails({
         <p className="font-medium">Safety and operating instructions</p>
         {profile.instructions.length > 0 ? (
           <ul className="list-disc pl-5 text-muted-foreground">
-            {profile.instructions.map((instruction) => (
-              <li key={instruction}>{instruction}</li>
+            {withOccurrenceKeys(profile.instructions).map(({ key, value }) => (
+              <li key={key}>{value}</li>
             ))}
           </ul>
         ) : (

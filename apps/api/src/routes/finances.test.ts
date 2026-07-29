@@ -130,5 +130,10 @@ describe("finance routes", () => {
       id,
       expect.objectContaining({ pending: false }),
     );
+    expect((await app.request("/v1/finances/categorizations/propose")).status).toBe(200);
+    expect(finances.proposeCategorizations).toHaveBeenLastCalledWith(
+      id,
+      expect.objectContaining({ limit: 50, review: "all" }),
+    );
   });
 });

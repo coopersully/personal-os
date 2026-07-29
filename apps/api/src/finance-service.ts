@@ -179,6 +179,21 @@ function defaultCategoryId(userId: string, slug: string) {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
+function approvedProfileFrom(
+  approval: typeof domainProfileApprovals.$inferSelect | null | undefined,
+): FinanceGuidedSetupContext["guidance"]["approvedProfile"] {
+  if (approval?.domain !== "finances" || approval.approvedByUserId !== approval.userId) {
+    return null;
+  }
+  const parsed = financeDomainProfileSchema.safeParse(approval.profile);
+  return parsed.success &&
+    parsed.data.id === approval.profileId &&
+    parsed.data.version === approval.profileVersion &&
+    parsed.data.status === "active"
+    ? parsed.data
+    : null;
+}
+
 function titleCaseMerchant(value: string) {
   return value
     .toLowerCase()
@@ -558,6 +573,29 @@ export function createFinanceService({ db, now, plaid }: Options) {
     return requireDatabaseRecord(created, "The finance category could not be saved.");
   }
 
+  async function categoryForProposalName(
+    userId: string,
+    name: string,
+  ): Promise<FinanceCategory | null> {
+    const existing = (await existingCategories(userId)).find(
+      (item) => item.name.toLowerCase() === name.toLowerCase(),
+    );
+    if (existing) return categoryValue(existing);
+    const defaultCategory = defaultCategories.find(
+      ([defaultName]) => defaultName.toLowerCase() === name.toLowerCase(),
+    );
+    if (!defaultCategory) return null;
+    const [defaultName, slug] = defaultCategory;
+    return {
+      color: null,
+      group: categoryGroup(defaultName),
+      id: defaultCategoryId(userId, slug),
+      isSystem: true,
+      name: defaultName,
+      slug,
+    };
+  }
+
   async function merchantFor(
     userId: string,
     rawMerchant: string,
@@ -695,15 +733,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
       : await merchantCategoryEvidence(userId, item.merchantId ?? null);
     const categoryName = automatic.category ?? evidence?.category ?? null;
     const suggestedCategory = categoryName
-      ? (
-          await db
-            .select()
-            .from(financeCategories)
-            .where(
-              and(eq(financeCategories.userId, userId), eq(financeCategories.name, categoryName)),
-            )
-            .limit(1)
-        )[0]
+      ? await categoryForProposalName(userId, categoryName)
       : null;
     const threshold = suggestedCategory
       ? await merchantConfidenceThreshold(userId, item.merchantId ?? null, suggestedCategory.id)
@@ -719,7 +749,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         : evidence
           ? `Matched ${item.merchant} to ${evidence.confirmations} user confirmation${evidence.confirmations === 1 ? "" : "s"}.`
           : "No durable merchant or category evidence is available yet.",
-      suggestedCategory: suggestedCategory ? categoryValue(suggestedCategory) : null,
+      suggestedCategory,
       threshold,
       transaction: item,
     };
@@ -739,16 +769,43 @@ export function createFinanceService({ db, now, plaid }: Options) {
         .where(eq(financeAccounts.userId, userId))
         .orderBy(financeAccounts.id)
         .for("update");
-      const transactions = await tx
-        .select()
-        .from(financeTransactions)
-        .where(eq(financeTransactions.userId, userId))
-        .orderBy(financeTransactions.id)
-        .for("update");
-      const accountKinds = new Map(accounts.map((item) => [item.id, item.kind]));
       const hasExplicitDecision = (item: typeof financeTransactions.$inferSelect) =>
         item.categoryDecidedAt !== null &&
         (item.categorySource === "user" || item.categorySource === "agent");
+      // Provider syncs take the same account locks, so merchant/direction fields
+      // are stable while this reconciliation runs. Discover possible rule or
+      // pairing rows without locking the full ledger, then lock only that
+      // semantic subset before making decisions.
+      const candidateRows = await tx
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.userId, userId))
+        .orderBy(financeTransactions.id);
+      const candidateIds = candidateRows
+        .filter((item) => !hasExplicitDecision(item))
+        .filter(
+          (item) =>
+            item.direction === "transfer" ||
+            isRentMerchant(item.merchant) ||
+            isSoFiVaultTransfer(item.merchant) ||
+            isCardPayment(item.merchant),
+        )
+        .map((item) => item.id);
+      const transactions =
+        candidateIds.length === 0
+          ? []
+          : await tx
+              .select()
+              .from(financeTransactions)
+              .where(
+                and(
+                  eq(financeTransactions.userId, userId),
+                  inArray(financeTransactions.id, candidateIds),
+                ),
+              )
+              .orderBy(financeTransactions.id)
+              .for("update");
+      const accountKinds = new Map(accounts.map((item) => [item.id, item.kind]));
       const rentTransactions = transactions
         .filter((item) => isRentMerchant(item.merchant))
         .filter((item) => !hasExplicitDecision(item));
@@ -1861,18 +1918,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
       ]);
       const guidanceProfile = guidance?.guidanceProfile;
       const approvedGuidance = guidance?.approvedGuidance;
-      let approvedProfile: FinanceGuidedSetupContext["guidance"]["approvedProfile"] = null;
-      if (approvedGuidance) {
-        const parsedApproval = financeDomainProfileSchema.safeParse(approvedGuidance.profile);
-        if (
-          parsedApproval.success &&
-          parsedApproval.data.id === approvedGuidance.profileId &&
-          parsedApproval.data.version === approvedGuidance.profileVersion &&
-          parsedApproval.data.status === "active"
-        ) {
-          approvedProfile = parsedApproval.data;
-        }
-      }
+      const approvedProfile = approvedProfileFrom(approvedGuidance);
       const reviewReasons: FinanceGuidedSetupContext["reviewSummary"]["reasons"] = {
         ambiguous_merchant: 0,
         low_confidence: 0,
@@ -2475,6 +2521,9 @@ export function createFinanceService({ db, now, plaid }: Options) {
               const isTransfer =
                 !isRentMerchant(merchant) &&
                 (isSoFiVaultTransfer(merchant) || isProviderTransfer(inferred.category));
+              // These idempotent upserts intentionally happen before the page
+              // transaction. They can remain after a later page rollback or
+              // connection conflict and are reused by the replayed sync.
               const [merchantRecord, categoryRecord] = await Promise.all([
                 merchantFor(context.principal.userId, merchant, "provider"),
                 isTransfer
@@ -2711,19 +2760,19 @@ export function createFinanceService({ db, now, plaid }: Options) {
             const deletableTransactionIds = [...removedTransactionIds].filter(
               (transactionId) => !replacedPendingTransactionIds.has(transactionId),
             );
-            const deleted =
-              deletableTransactionIds.length === 0
-                ? []
-                : await tx
-                    .delete(financeTransactions)
-                    .where(
-                      and(
-                        inArray(financeTransactions.accountId, itemAccountIds),
-                        inArray(financeTransactions.providerTransactionId, deletableTransactionIds),
-                      ),
-                    )
-                    .returning({ id: financeTransactions.id });
-            changed += deleted.length;
+            for (let offset = 0; offset < deletableTransactionIds.length; offset += 1_000) {
+              const transactionIds = deletableTransactionIds.slice(offset, offset + 1_000);
+              const deleted = await tx
+                .delete(financeTransactions)
+                .where(
+                  and(
+                    inArray(financeTransactions.accountId, itemAccountIds),
+                    inArray(financeTransactions.providerTransactionId, transactionIds),
+                  ),
+                )
+                .returning({ id: financeTransactions.id });
+              changed += deleted.length;
+            }
             await tx
               .update(financeAccounts)
               .set({
@@ -2862,8 +2911,10 @@ export function createFinanceService({ db, now, plaid }: Options) {
               .from(domainProfiles)
               .where(state.profileCursor ? gt(domainProfiles.id, state.profileCursor) : undefined)
               .orderBy(domainProfiles.id)
-              .limit(scanLimit)
-              .for("update");
+              .limit(scanLimit);
+        // The claimed checkpoint serializes repair workers. Profile rows stay
+        // unlocked so unrelated domains can save normally; the version guard
+        // below prevents a concurrent profile save from being overwritten.
         let profilesDemoted = 0;
         for (const profile of profileRows) {
           if (profile.domain !== "finances" || profile.status !== "active") continue;
@@ -3333,6 +3384,8 @@ export function createFinanceService({ db, now, plaid }: Options) {
         );
       }
       const current = await ownedTransaction(context.principal.userId, review.transactionId);
+      // Signed provider direction is authoritative when available; the user
+      // choice is only the fallback for legacy/manual rows without provenance.
       const nonTransferDirection =
         review.reason === "possible_transfer" && input.action === "recategorize"
           ? (current.providerDirection ?? input.nonTransferDirection)
@@ -3508,12 +3561,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                   : Math.round(input.categoryConfidence * 10_000),
               needsReview: input.categoryConfidence !== null && input.categoryConfidence < 0.8,
             };
-      const actorSource = "user" as const;
-      const merchantRecord = await merchantFor(
-        context.principal.userId,
-        input.merchant,
-        actorSource,
-      );
+      const merchantRecord = await merchantFor(context.principal.userId, input.merchant, "user");
       const categoryRecord = automatic.category
         ? await categoryForName(context.principal.userId, automatic.category)
         : null;
@@ -3537,7 +3585,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                 categoryId: categoryRecord?.id ?? null,
                 categoryConfidence: automatic.confidence,
                 categorySource:
-                  input.category === null ? (automatic.category ? "rule" : null) : actorSource,
+                  input.category === null ? (automatic.category ? "rule" : null) : "user",
                 categoryDecidedAt: input.category === null ? null : now(),
                 direction: input.direction,
                 merchant: input.merchant,
@@ -3567,12 +3615,9 @@ export function createFinanceService({ db, now, plaid }: Options) {
             categoryName: categoryRecord.name,
             confidence: 10_000,
             merchantId: merchantRecord.id,
-            outcome: actorSource === "user" ? "confirmed" : "applied",
-            rationale:
-              actorSource === "user"
-                ? "Categorized directly by the user."
-                : "Categorized through a scoped agent action.",
-            source: actorSource,
+            outcome: "confirmed",
+            rationale: "Categorized directly by the user.",
+            source: "user",
             transactionId: created.id,
             userId: context.principal.userId,
           });
@@ -3686,18 +3731,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           )
           .for("update")
           .limit(1);
-        let approvedProfile: FinanceGuidedSetupContext["guidance"]["approvedProfile"] = null;
-        if (approval) {
-          const parsedApproval = financeDomainProfileSchema.safeParse(approval.profile);
-          if (
-            parsedApproval.success &&
-            parsedApproval.data.id === approval.profileId &&
-            parsedApproval.data.version === approval.profileVersion &&
-            parsedApproval.data.status === "active"
-          ) {
-            approvedProfile = parsedApproval.data;
-          }
-        }
+        const approvedProfile = approvedProfileFrom(approval);
         if (approval && !approvedProfile) {
           throw new AppError(
             "conflict",
@@ -4061,7 +4095,6 @@ export function createFinanceService({ db, now, plaid }: Options) {
           "Finance transaction edits require an interactive user session.",
         );
       }
-      const actorSource = context.principal.actorType;
       const categoryRecord =
         input.category === undefined || input.category === null
           ? null
@@ -4118,7 +4151,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                     : input.category === null
                       ? null
                       : "Categorized directly by the user.",
-                categorySource: input.category === undefined ? undefined : actorSource,
+                categorySource: input.category === undefined ? undefined : "user",
                 needsReview: input.category === undefined ? undefined : input.category === null,
                 updatedAt: now(),
               })
@@ -4165,7 +4198,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                   ? "corrected"
                   : "confirmed",
               rationale: "Categorized directly by the user.",
-              source: actorSource,
+              source: "user",
               transactionId: current.id,
               userId: context.principal.userId,
             });

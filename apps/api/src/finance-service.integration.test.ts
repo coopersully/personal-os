@@ -1,5 +1,4 @@
-import { cp, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   auditEvents,
@@ -20,27 +19,11 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
+import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
 
 const now = new Date("2026-07-19T12:00:00.000Z");
 const key = Buffer.alloc(32, 3).toString("base64");
-
-async function migrationsWithout(
-  migrationsFolder: string,
-  prefix: string,
-  excludedTags: string[],
-): Promise<string> {
-  const folder = await mkdtemp(`${tmpdir()}/${prefix}`);
-  await cp(migrationsFolder, folder, { recursive: true });
-  for (const tag of excludedTags) await unlink(`${folder}/${tag}.sql`);
-  const journalPath = `${folder}/meta/_journal.json`;
-  const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-    entries: Array<{ tag: string }>;
-  };
-  journal.entries = journal.entries.filter((entry) => !excludedTags.includes(entry.tag));
-  await writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
-  return folder;
-}
 
 function financePrincipal(userId: string): Principal {
   return {
@@ -68,6 +51,7 @@ async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number
       FROM pg_stat_activity
       WHERE datname = current_database()
         AND wait_event_type = 'Lock'
+        AND query LIKE '%finance_%'
         AND query NOT LIKE '%pg_stat_activity%'
     `);
     if (Number(result.rows[0]?.count ?? 0) >= expected) return;
@@ -560,6 +544,38 @@ describe.sequential("finance service", () => {
     await expect(upgradeService.listCategories(upgradeUser.id)).resolves.toEqual(
       syntheticCategories,
     );
+    const [syntheticProposalCandidate] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: upgradeAccount.id,
+        amount: 1_200,
+        direction: "expense",
+        merchant: "Trader Joe's",
+        needsReview: true,
+        transactionDate: "2026-07-03",
+        userId: upgradeUser.id,
+      })
+      .returning();
+    if (!syntheticProposalCandidate) {
+      throw new Error("Synthetic category proposal fixture was not created.");
+    }
+    const syntheticProposal = (
+      await upgradeService.proposeCategorizations(upgradeUser.id, {
+        limit: 50,
+        review: "needs_review",
+        sortBy: "date",
+        sortDirection: "desc",
+      })
+    ).items.find((proposal) => proposal.transaction.id === syntheticProposalCandidate.id);
+    expect(syntheticProposal?.suggestedCategory).toEqual(
+      syntheticCategories.find((category) => category.slug === "groceries"),
+    );
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, upgradeUser.id)),
+    ).resolves.toHaveLength(0);
     await expect(upgradeService.getGuidedSetupContext(upgradeUser.id)).resolves.toMatchObject({
       guidance: {
         approvedProfile: null,
@@ -2066,6 +2082,33 @@ describe.sequential("finance service", () => {
       categorySource: "user",
       direction: "expense",
     });
+    const unrelatedTransactionLock = await database.pool.connect();
+    let reconciliation: ReturnType<typeof service.reconcileTransfers> | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await unrelatedTransactionLock.query("BEGIN");
+      await unrelatedTransactionLock.query(
+        "SELECT id FROM finance_transactions WHERE id = $1 FOR UPDATE",
+        [rent.id],
+      );
+      reconciliation = service.reconcileTransfers(userId);
+      await expect(
+        Promise.race([
+          reconciliation,
+          new Promise((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error("Reconciliation waited on an explicit unrelated decision.")),
+              1_000,
+            );
+          }),
+        ]),
+      ).resolves.toEqual(expect.objectContaining({ paired: 0 }));
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      await unrelatedTransactionLock.query("ROLLBACK");
+      unrelatedTransactionLock.release();
+      if (reconciliation) await Promise.allSettled([reconciliation]);
+    }
   });
 
   it("uses posted net spending, preserves refunds, and exposes complete ledger health and export data", async () => {

@@ -191,8 +191,8 @@ importers:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@19.2.17)(react@19.2.7)
       react-plaid-link:
-        specifier: ^4.1.1
-        version: 4.1.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+        specifier: ^5.0.0
+        version: 5.0.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       react-router-dom:
         specifier: ^7.6.3
         version: 7.18.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -5688,8 +5688,8 @@ packages:
       '@types/react': '>=18'
       react: '>=18'
 
-  react-plaid-link@4.1.1:
-    resolution: {integrity: sha512-xzAYWQIT/gk+u6lwFAMEZ20f9+AUsCwVyfm64/iudMsyuWANta4wm3Jb7N+APSwuKIR9VUlTkYDhPjLamIGcPA==}
+  react-plaid-link@5.0.0:
+    resolution: {integrity: sha512-DZ/6C7hf+xhEIG9ElCqjk1lty/z+y+wQuV/A29EUx4fxiPLPe7CXN811C3MrCzI7grV45LD7NRS0Do0ma8KIBg==}
     peerDependencies:
       react: ^16.8.0 || ^17 || ^18 || ^19
       react-dom: ^16.8.0 || ^17 || ^18 || ^19
@@ -12309,7 +12309,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  react-plaid-link@4.1.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
+  react-plaid-link@5.0.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7):
     dependencies:
       prop-types: 15.8.1
       react: 19.2.7

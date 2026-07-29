@@ -38,6 +38,7 @@ function AvailablePlaidConnectButton({
   onConnected: () => Promise<unknown>;
 }) {
   const [token, setToken] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const linkToken = useMutation({
     mutationFn: api.getPlaidLinkToken,
     onSuccess: setToken,
@@ -47,7 +48,14 @@ function AvailablePlaidConnectButton({
     onSuccess: onConnected,
   });
   const { open, ready } = usePlaidLink({
-    onSuccess: (publicToken) => exchange.mutate(publicToken),
+    onSuccess: (publicToken) => {
+      if (!publicToken) {
+        setLinkError("Plaid completed without a bank connection. Try connecting again.");
+        return;
+      }
+      setLinkError(null);
+      exchange.mutate(publicToken);
+    },
     token,
   });
 
@@ -59,12 +67,19 @@ function AvailablePlaidConnectButton({
     <div className="plaid-connect">
       <Button
         disabled={linkToken.isPending || exchange.isPending}
-        onClick={() => linkToken.mutate()}
+        onClick={() => {
+          setLinkError(null);
+          linkToken.mutate();
+        }}
         size="sm"
       >
         {linkToken.isPending || exchange.isPending ? "Connecting bank" : label}
       </Button>
-      {linkToken.isError || exchange.isError ? (
+      {linkError ? (
+        <p className="form-error" role="alert">
+          {linkError}
+        </p>
+      ) : linkToken.isError || exchange.isError ? (
         <p className="form-error" role="alert">
           {errorMessage(linkToken.error ?? exchange.error)}
         </p>

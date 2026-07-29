@@ -154,10 +154,15 @@ server, and only then closes PostgreSQL. The application bound is 105 seconds
 and covers database closure; a tracked request/background rejection fails the
 drain instead of being treated as idle. The essential ECS API container has a
 120-second stop timeout. Deployment reconciles running, pending, already-stopping,
-and replacement tasks observed across the transition, requires
-desired/running/pending counts all reach zero, waits for the exact reconciled
-task set to stop, and requires every API container report exit code zero with no
-kill/timeout evidence. Count-only drain or a sleep is insufficient.
+and replacement tasks observed across the transition. ECS desired status uses
+only `RUNNING`/`STOPPED`, so the `RUNNING` inventory also contains tasks whose
+last status is still `PENDING`; a mismatch with service counts fails closed.
+The recent STOPPED baseline is capped at 100 before mutation, and post-drain
+STOPPED inventories must converge under bounded backoff before the exact
+at-most-100 task set is accepted. Desired/running/pending service counts must all
+reach zero, every exact task is waited to `STOPPED`, and every API container
+must report exit code zero with no kill/timeout evidence. Count-only drain or a
+fixed sleep is insufficient.
 
 After the old tasks exit successfully, the workflow disables circuit-breaker
 rollback before launching the migration-capable task so ECS cannot restore a
@@ -165,12 +170,14 @@ pre-migration binary. Rollback remains disabled until the new service is stable
 as the sole completed primary deployment on the exact registered task
 definition; only then does the workflow restore and verify the declared
 rollback-enabled configuration and the scalable target's exact pre-drain
-suspension state. Shell errors, runner cancellation signals, and workflow
-timeouts enter the same re-suspend-and-zero cleanup path. A failed graceful
-drain or later rollout step intentionally leaves desired/running/pending at zero
-and scaling suspended for operator recovery. An abrupt runner/host loss that
-cannot deliver cleanup signals remains an external control-plane recovery case;
-operators must verify the service remains zero before retrying. This bounded
+suspension state. Suspension attempt and service-drain attempt are separate
+phases: failure before desired-count zero restores the prior scaling state and
+preserves the healthy old service; once zeroing may have committed, errors
+re-suspend and stop at zero. Delivered cancellation signals use single-attempt,
+tightly bounded re-suspend/zero mutations within the runner grace window.
+An abrupt runner/host loss that cannot deliver cleanup signals remains an
+external control-plane recovery case; operators must verify the service remains
+zero before retrying. This bounded
 downtime is required for migrations that invalidate connector source authority:
 an old process already inside provider I/O cannot honor a fence introduced by
 the new schema. Drizzle records applied versions transactionally. Follow the

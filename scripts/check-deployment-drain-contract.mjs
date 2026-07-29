@@ -5,25 +5,18 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const compute = readFileSync(resolve(root, "infra/compute.tf"), "utf8");
 const config = readFileSync(resolve(root, "apps/api/src/config.ts"), "utf8");
+const iam = readFileSync(resolve(root, "infra/iam.tf"), "utf8");
 const main = readFileSync(resolve(root, "apps/api/src/main.ts"), "utf8");
 const workflowSource = readFileSync(resolve(root, ".github/workflows/deploy.yml"), "utf8");
-const deploymentStepStart = workflowSource.indexOf(
-  "      - name: Deploy migration-capable API serially",
-);
-const deploymentStepEnd = workflowSource.indexOf(
-  "      - name: Deploy MCP after the API is healthy",
-  deploymentStepStart,
-);
-if (deploymentStepStart < 0 || deploymentStepEnd < 0) {
-  throw new Error("Deployment drain contract could not isolate the serial API deployment step.");
+const workflow = readFileSync(resolve(root, ".github/scripts/deploy-api.sh"), "utf8");
+if (
+  !/name: Deploy migration-capable API serially[\s\S]*?run: bash \.github\/scripts\/deploy-api\.sh/.test(
+    workflowSource,
+  )
+) {
+  throw new Error("Production workflow must remain a thin caller of the checked drain script.");
 }
-const workflow = workflowSource.slice(deploymentStepStart, deploymentStepEnd);
-const shellSource = workflow
-  .slice(workflow.indexOf("        run: |\n") + "        run: |\n".length)
-  .split("\n")
-  .map((line) => line.replace(/^ {10}/, ""))
-  .join("\n");
-const shellSyntax = spawnSync("bash", ["-n"], { encoding: "utf8", input: shellSource });
+const shellSyntax = spawnSync("bash", ["-n"], { encoding: "utf8", input: workflow });
 if (shellSyntax.status !== 0) {
   throw new Error(`Deployment drain shell syntax failed: ${shellSyntax.stderr.trim()}`);
 }
@@ -60,6 +53,11 @@ requireMatch(
   "a validated API shutdown timeout below the ECS stop timeout",
 );
 requireMatch(
+  iam,
+  /sid\s*=\s*"ObserveScalingStateForDrainRestore"[\s\S]*?actions\s*=\s*\["application-autoscaling:DescribeScalableTargets"\][\s\S]*?resources\s*=\s*\["\*"\]/,
+  "the isolated scaling-state observation bootstrap required by the workflow",
+);
+requireMatch(
   main,
   /shutdownApiRuntime\(\{[\s\S]*?timeoutMs:\s*config\.apiShutdownTimeoutMs/,
   "bounded shutdown orchestration",
@@ -79,6 +77,11 @@ if (workflow.includes("--desired-status PENDING")) {
     "Deployment drain contract must not use ECS desired-status PENDING; desired RUNNING includes lastStatus PENDING.",
   );
 }
+requireMatch(
+  workflow,
+  /desiredStatus is only RUNNING or STOPPED[\s\S]*?--desired-status RUNNING[\s\S]*?api_suspended_running/,
+  "the documented desired-RUNNING/last-PENDING completeness check",
+);
 requireMatch(
   workflow,
   /--desired-status STOPPED[\s\S]*?--max-items 101[\s\S]*?post-suspension STOPPED task baseline exceeds/,

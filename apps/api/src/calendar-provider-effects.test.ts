@@ -46,8 +46,8 @@ describe("Calendar provider effect ledger", () => {
     const running = ledger.run(
       sourceEffect,
       () =>
-        new Promise<string>((resolve) => {
-          finishProvider = () => resolve("accepted");
+        new Promise<{ remoteEventId: null }>((resolve) => {
+          finishProvider = () => resolve({ remoteEventId: null });
         }),
     );
     const replay = vi.fn(async () => "replayed");
@@ -57,7 +57,7 @@ describe("Calendar provider effect ledger", () => {
     );
     expect(replay).not.toHaveBeenCalled();
     finishProvider?.();
-    await expect(running).resolves.toBe("accepted");
+    await expect(running).resolves.toEqual({ remoteEventId: null });
     await expect(ledger.commit(async () => "committed")).resolves.toBe("committed");
   });
 

@@ -3901,6 +3901,32 @@ describe.sequential("connector service", () => {
       credentials,
       value: [
         {
+          accessRole: "reader",
+          color: null,
+          id: "calendar-capability-primary",
+          name: "Capability primary",
+          primary: true,
+          selected: true,
+          timezone: "UTC",
+          writable: false,
+        },
+      ],
+    });
+    await service.syncAccount(profileUser.id, account.id);
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.id, profile.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        sourceContexts: profile.sourceContexts,
+        status: "draft",
+        version: 2,
+      }),
+    ]);
+
+    vi.mocked(google.listCalendars).mockResolvedValueOnce({
+      credentials,
+      value: [
+        {
           accessRole: "owner",
           color: null,
           id: "calendar-capability-primary",

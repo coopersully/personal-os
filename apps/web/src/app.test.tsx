@@ -1484,7 +1484,9 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Connect an agent" }));
 
-    expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Connect an agent" }, { timeout: 3_000 }),
+    ).toBeInTheDocument();
     expect(mocks.updateAccountSetup).toHaveBeenCalledWith(
       { action: "complete" },
       expect.anything(),

@@ -267,6 +267,12 @@ describe("domain schemas", () => {
       reminderPreferences,
     );
     expect(
+      reminderProfilePreferencesSchema.safeParse({
+        ...reminderPreferences,
+        preferredMutationPolicy: "approved_rule",
+      }).success,
+    ).toBe(false);
+    expect(
       upsertReminderProfileInputSchema.parse({
         categories: [],
         domain: "reminders",
@@ -740,6 +746,12 @@ describe("domain schemas", () => {
     expect(
       reminderDeferralPreviewInputSchema.safeParse({
         overdueBefore: end,
+        proposedDueAt: start,
+      }).success,
+    ).toBe(false);
+    expect(
+      reminderDeferralPreviewInputSchema.safeParse({
+        overdueBefore: start,
         proposedDueAt: start,
       }).success,
     ).toBe(false);

@@ -434,6 +434,7 @@ function mockApi() {
       ],
       matchedCount: 1,
       policy: "preview" as const,
+      previewedAt: now,
     })),
     restoreReminder: vi.fn(async () => reminder),
     trashReminder: vi.fn(async () => reminder),

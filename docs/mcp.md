@@ -42,7 +42,7 @@ Those stored preferences guide agents; they do not grant, revoke, or enforce API
 mutations remain audited API actions. Their audit policy comes from the API's validated interactive
 user or scoped-agent decision, never from profile preferences. Bulk overdue deferral begins with
 `preview_overdue_reminder_deferral`, which returns the complete bounded candidate set, `preview`
-policy, source references, and revisions without mutating. Guarded individual updates and
+policy, `previewedAt`, source references, and revisions without mutating. Guarded individual updates and
 consequential state changes use `expectedUpdatedAt` so concurrent changes surface as conflicts.
 The API service requires that revision for every agent update, complete/reopen, trash, and restore,
 not merely for MCP callers. Guarded trash and restore revisions travel in POST request bodies;

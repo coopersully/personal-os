@@ -16,7 +16,7 @@ Group the interview into at most five initial questions:
 4. When is an item overdue enough to review, which priorities enter review, and should Ilo keep the
    original time, review it, or propose a deferral?
 5. Which bounded actions may an agent perform, and should the default policy be `read_only`,
-   `preview`, `approve_each`, or `approved_rule`?
+   `preview`, or `approve_each`?
 
 Ask a follow-up only when the answer changes a stored preference or action. Never infer urgency
 from age alone.
@@ -34,7 +34,7 @@ categories. Save these exact preference keys:
 - `overdueBehavior`: `keep_due_date`, `review`, or `propose_deferral`
 - `overdueReviewAfterDays`: whole days before review
 - `priorityLowMeaning`, `priorityMediumMeaning`, `priorityHighMeaning`: the user's wording
-- `preferredMutationPolicy`: the shared mutation-policy value the user wants the agent to follow
+- `preferredMutationPolicy`: `read_only`, `preview`, or `approve_each`
 - `reviewPriorityAtOrAbove`: `low`, `medium`, `high`, or `none`
 - `timezoneBehavior`: `profile_default`, `preserve_explicit`, or `ask_when_ambiguous`
 
@@ -55,8 +55,8 @@ preferences are present and the user accepts the summary.
   call. Trash is recoverable; do not describe it as permanent deletion.
 - Before deferring multiple overdue Reminders, call `preview_overdue_reminder_deferral`. A
   successful preview is the exact candidate set and carries `preview` policy plus local source
-  references. The overdue cutoff must be now or earlier. If the safety limit is exceeded, narrow
-  the cutoff or priority.
+  references and a `previewedAt` freshness timestamp. The overdue cutoff must be now or earlier. If
+  the safety limit is exceeded, narrow the cutoff or priority.
 - Show IDs, titles, current due times, proposed due time, and time zone. Apply an accepted set with
   guarded individual updates; stop and report any conflict instead of silently changing the set.
 - Use `create_reminder_attention_item` when an ambiguous or conflicted Reminder needs review. Ilo

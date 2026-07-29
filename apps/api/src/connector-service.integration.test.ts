@@ -3190,6 +3190,7 @@ describe.sequential("connector service", () => {
         await mail.validateProfileSources(transaction, profileUserId, sourceIds);
         sourceLocked?.();
         await validationCanFinish;
+        return undefined;
       },
     });
     const save = assistant.upsertProfile(

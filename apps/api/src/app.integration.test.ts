@@ -1385,6 +1385,7 @@ describe.sequential("ilo API", () => {
       candidates: [],
       matchedCount: 0,
       policy: "preview",
+      previewedAt: "2026-07-13T12:00:00.000Z",
     });
     expect(
       (
@@ -1707,6 +1708,7 @@ describe.sequential("ilo API", () => {
       ],
       matchedCount: 2,
       policy: "preview",
+      previewedAt: "2026-07-13T12:00:00.000Z",
     });
     const oversizedPreview = await request(
       "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T13%3A00%3A00.000Z&priority=high&limit=1",
@@ -1999,6 +2001,16 @@ describe.sequential("ilo API", () => {
       }),
     ]);
     expect(updateRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    const successfulConcurrentUpdate = await payload(
+      updateRace.find((response) => response.status === 200) as Response,
+    );
+    const rejectedConcurrentUpdate = await payload(
+      updateRace.find((response) => response.status === 409) as Response,
+    );
+    expect(rejectedConcurrentUpdate.error).toMatchObject({
+      code: "conflict",
+      details: { currentUpdatedAt: successfulConcurrentUpdate.reminder.updatedAt },
+    });
 
     const stateRaceReminder = (
       await payload(

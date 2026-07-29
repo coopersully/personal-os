@@ -6,7 +6,7 @@ import {
   upsertDomainProfileInputSchema,
 } from "./assistant.js";
 import { idSchema, isoDateTimeSchema, paginationSchema, timeZoneSchema } from "./common.js";
-import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
+import { materialSourceReferenceSchema } from "./feature-contracts.js";
 
 export const reminderPrioritySchema = z.enum(["low", "medium", "high"]);
 export const reminderTimeZoneSchema = timeZoneSchema.refine((value) => {
@@ -50,7 +50,7 @@ export const reminderProfilePreferencesSchema = z
     priorityHighMeaning: z.string().trim().min(1).max(500),
     priorityLowMeaning: z.string().trim().min(1).max(500),
     priorityMediumMeaning: z.string().trim().min(1).max(500),
-    preferredMutationPolicy: z.enum(agentMutationPolicies),
+    preferredMutationPolicy: z.enum(["read_only", "preview", "approve_each"]),
     reviewPriorityAtOrAbove: z.enum(["low", "medium", "high", "none"]),
     timezoneBehavior: z.enum(["profile_default", "preserve_explicit", "ask_when_ambiguous"]),
   })
@@ -150,7 +150,7 @@ export const reminderDeferralCandidateSchema = reminderSchema
   .extend({
     dueAt: isoDateTimeSchema,
     proposedDueAt: isoDateTimeSchema,
-    proposedTimezone: timeZoneSchema.nullable(),
+    proposedTimezone: reminderTimeZoneSchema.nullable(),
   });
 export type ReminderDeferralCandidate = z.infer<typeof reminderDeferralCandidateSchema>;
 
@@ -158,6 +158,7 @@ export const reminderDeferralPreviewSchema = z.object({
   candidates: z.array(reminderDeferralCandidateSchema).max(100),
   matchedCount: z.number().int().min(0).max(100),
   policy: z.literal("preview"),
+  previewedAt: isoDateTimeSchema,
 });
 export type ReminderDeferralPreview = z.infer<typeof reminderDeferralPreviewSchema>;
 

@@ -25,6 +25,7 @@ import {
   auditAttentionItemMetadata,
   auditDomainProfileMetadata,
   domainProfileChangedFields,
+  serializeAttentionItem,
 } from "./serialization.js";
 import type { Principal } from "./types.js";
 
@@ -48,7 +49,7 @@ export function createAssistantService({
     status: UpsertDomainProfileInput["status"],
     actorType: Principal["actorType"],
     preferences: UpsertDomainProfileInput["preferences"],
-  ) => Promise<UpsertDomainProfileInput["preferences"] | undefined> | Promise<void>;
+  ) => Promise<UpsertDomainProfileInput["preferences"] | undefined>;
 }) {
   async function findProfile(userId: string, domain: AssistantDomain) {
     return (
@@ -408,24 +409,5 @@ function serializeProfile(row: typeof domainProfiles.$inferSelect): DomainProfil
     summary: row.summary,
     updatedAt: row.updatedAt.toISOString(),
     version: row.version,
-  };
-}
-
-function serializeAttentionItem(row: typeof attentionItems.$inferSelect): AttentionItem {
-  return {
-    createdAt: row.createdAt.toISOString(),
-    domain: row.domain,
-    expiresAt: row.expiresAt?.toISOString() ?? null,
-    id: row.id,
-    importance: row.importance,
-    kind: row.kind,
-    occursAt: row.occursAt?.toISOString() ?? null,
-    relatedEntityId: row.relatedEntityId,
-    relatedEntityType: row.relatedEntityType,
-    source: row.source,
-    status: row.status,
-    summary: row.summary,
-    title: row.title,
-    updatedAt: row.updatedAt.toISOString(),
   };
 }

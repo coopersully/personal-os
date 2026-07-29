@@ -975,6 +975,7 @@ function apiFetch() {
           ],
           matchedCount: 1,
           policy: "preview",
+          previewedAt: now,
         },
       });
     if (url.pathname === "/v1/reminders" && method === "POST") return json({ reminder }, 201);

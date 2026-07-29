@@ -24,7 +24,7 @@ import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import { decodeCursor, encodeCursor } from "./pagination.js";
-import { auditSnapshot, serializeReminder } from "./serialization.js";
+import { auditSnapshot, serializeAttentionItem, serializeReminder } from "./serialization.js";
 import type { Principal } from "./types.js";
 
 type MutationContext = {
@@ -51,25 +51,6 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       relatedEntityType: row.relatedEntityType,
       source: row.source,
       status: row.status,
-    };
-  }
-
-  function serializeAttentionItem(row: typeof attentionItems.$inferSelect): AttentionItem {
-    return {
-      createdAt: row.createdAt.toISOString(),
-      domain: row.domain,
-      expiresAt: row.expiresAt?.toISOString() ?? null,
-      id: row.id,
-      importance: row.importance,
-      kind: row.kind,
-      occursAt: row.occursAt?.toISOString() ?? null,
-      relatedEntityId: row.relatedEntityId,
-      relatedEntityType: row.relatedEntityType,
-      source: row.source,
-      status: row.status,
-      summary: row.summary,
-      title: row.title,
-      updatedAt: row.updatedAt.toISOString(),
     };
   }
 
@@ -149,6 +130,23 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
     });
   }
 
+  async function throwCurrentRevisionConflict(
+    transaction: Pick<Database, "select">,
+    userId: string,
+    id: string,
+  ): Promise<never> {
+    const current = (
+      await transaction
+        .select({ updatedAt: reminders.updatedAt })
+        .from(reminders)
+        .where(
+          and(eq(reminders.id, id), eq(reminders.userId, userId), eq(reminders.kind, "reminder")),
+        )
+        .limit(1)
+    )[0];
+    throw revisionConflict(current?.updatedAt.toISOString() ?? null);
+  }
+
   function nextUpdatedAt(previous: Date): Date {
     const current = now();
     return current.getTime() > previous.getTime() ? current : new Date(previous.getTime() + 1);
@@ -204,7 +202,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           )
           .returning();
         if (!updated) {
-          throw revisionConflict(null);
+          return throwCurrentRevisionConflict(transaction, before.userId, before.id);
         }
         await transaction.insert(auditEvents).values(
           auditValues({
@@ -278,7 +276,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           )
           .returning();
         if (!after) {
-          throw revisionConflict(null);
+          return throwCurrentRevisionConflict(transaction, before.userId, before.id);
         }
         await transaction.insert(auditEvents).values(
           auditValues({
@@ -408,6 +406,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         }),
         matchedCount: records.length,
         policy: "preview",
+        previewedAt: previewedAt.toISOString(),
       };
     },
 
@@ -454,7 +453,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           )
           .returning();
         if (!restored) {
-          throw revisionConflict(null);
+          return throwCurrentRevisionConflict(transaction, before.userId, before.id);
         }
         await transaction.insert(auditEvents).values(
           auditValues({
@@ -506,7 +505,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           )
           .returning();
         if (!updated) {
-          throw revisionConflict(null);
+          return throwCurrentRevisionConflict(transaction, before.userId, before.id);
         }
         await transaction.insert(auditEvents).values(
           auditValues({
@@ -634,6 +633,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
                   .limit(1)
               )[0]
             : undefined;
+        // Preserve unchanged legacy active profiles that predate the current preference schema.
         if (existing?.status === "active" && isDeepStrictEqual(existing.preferences, preferences)) {
           return preferences;
         }

@@ -10,11 +10,9 @@ import {
   upsertReminderAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
-import type { ZodType } from "zod";
-import { AppError } from "../errors.js";
 import type { createReminderService } from "../reminder-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess } from "./support.js";
+import { parseBody, parseOptionalBody, requireFeatureAccess } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type ReminderMutationContext = MutationContext & { policy: AgentMutationPolicy };
@@ -122,16 +120,4 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
       ),
     }),
   );
-}
-
-async function parseOptionalBody<T>(context: Context<AppEnv>, schema: ZodType<T>): Promise<T> {
-  const raw = await context.req.text();
-  if (!raw.trim()) return schema.parse({});
-  let value: unknown;
-  try {
-    value = JSON.parse(raw);
-  } catch {
-    throw new AppError("invalid_request", "The request body must be valid JSON.");
-  }
-  return schema.parse(value);
 }

@@ -431,7 +431,7 @@ describe.sequential("assistant setup service", () => {
         },
         context(),
       ),
-    ).rejects.toBeTruthy();
+    ).rejects.toMatchObject({ code: "invalid_request" });
 
     const [legacyActiveUser] = await database.db
       .insert(users)

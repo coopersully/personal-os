@@ -12,7 +12,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { App, formatTimelineTimeRange, isNavigator, positionTimelineEvents } from "./app.js";
 import {
   getWorkspaceCalendarEntry,
@@ -355,14 +355,22 @@ function setup(path = "/today") {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false, gcTime: 0 } },
   });
+  const location = { value: path };
   const view = render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
+        <TestLocationObserver current={location} />
         <App />
       </MemoryRouter>
     </QueryClientProvider>,
   );
-  return { ...view, queryClient };
+  return { ...view, location, queryClient };
+}
+
+function TestLocationObserver({ current }: { current: { value: string } }) {
+  const location = useLocation();
+  current.value = `${location.pathname}${location.search}${location.hash}`;
+  return null;
 }
 
 async function findSettingsLink(name: string) {
@@ -3890,7 +3898,7 @@ describe("ilo web app", () => {
   }, 15_000);
 
   it("navigates calendar, reminders, activity, and settings workflows", async () => {
-    setup("/calendar");
+    const view = setup("/calendar");
     const browser = userEvent.setup();
     expect(await screen.findByRole("radio", { name: "Week", checked: true })).toBeInTheDocument();
     expect(
@@ -4057,9 +4065,11 @@ describe("ilo web app", () => {
     expect(screen.getByText(/You ·/)).toBeInTheDocument();
     const activitySearch = screen.getByRole("searchbox", { name: "Search activity" });
     await browser.type(activitySearch, "system");
+    expect(view.location.value).toBe("/activity?q=system");
     expect(await screen.findByText(/System ·/)).toBeInTheDocument();
     expect(screen.queryByText(/Agent ·/)).not.toBeInTheDocument();
     await browser.clear(activitySearch);
+    expect(view.location.value).toBe("/activity");
     expect(await screen.findByText(/Agent ·/)).toBeInTheDocument();
     await browser.type(activitySearch, "no matching audit material");
     expect(await screen.findByText("No matching activity")).toBeInTheDocument();

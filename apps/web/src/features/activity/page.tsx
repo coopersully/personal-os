@@ -93,7 +93,13 @@ export function filterActivityEvents(entries: AuditEvent[], search: string): Aud
 }
 
 function groupActivityEvents(entries: AuditEvent[]): Map<string, AuditEvent[]> {
-  return Map.groupBy(entries, (entry) => `${entry.requestId}:${entry.actorType}:${entry.action}`);
+  return entries.reduce<Map<string, AuditEvent[]>>((groups, entry) => {
+    const key = `${entry.requestId}:${entry.actorType}:${entry.action}`;
+    const group = groups.get(key);
+    if (group) group.push(entry);
+    else groups.set(key, [entry]);
+    return groups;
+  }, new Map());
 }
 
 function ActivityBatch({ entries }: { entries: AuditEvent[] }) {

@@ -2403,16 +2403,49 @@ export function createFinanceService({ db, now, plaid }: Options) {
           cursor,
           count: 500,
         });
-        const classified = await Promise.all(
-          [...page.added, ...page.modified].map(async (remote) => {
-            const merchant = remote.merchant_name ?? remote.name;
-            const learned = await learnedCategory(context.principal.userId, merchant);
-            return {
-              automatic: learned ? categorization(merchant, learned) : null,
-              merchant,
-              remote,
-            };
-          }),
+        const prepared = await Promise.all(
+          [...page.added, ...page.modified]
+            .filter((remote) => accountsByProviderId.has(remote.account_id))
+            .map(async (remote) => {
+              const merchant = remote.merchant_name ?? remote.name;
+              const learned = await learnedCategory(context.principal.userId, merchant);
+              const automatic = learned ? categorization(merchant, learned) : null;
+              const providerCategory = remote.personal_finance_category;
+              const inferred = isRentMerchant(merchant)
+                ? categorization(merchant)
+                : (automatic ??
+                  (providerCategory?.primary
+                    ? {
+                        category: providerCategory.primary,
+                        confidence: (() => {
+                          const confidence = providerConfidence(providerCategory.confidence_level);
+                          return confidence === null ? null : Math.round(confidence * 10_000);
+                        })(),
+                        needsReview: providerNeedsReview(providerCategory.confidence_level),
+                      }
+                    : categorization(merchant)));
+              const isTransfer =
+                !isRentMerchant(merchant) &&
+                (isSoFiVaultTransfer(merchant) || isProviderTransfer(inferred.category));
+              const [merchantRecord, categoryRecord] = await Promise.all([
+                merchantFor(context.principal.userId, merchant, "provider"),
+                isTransfer
+                  ? categoryForName(context.principal.userId, transferCategory)
+                  : inferred.category
+                    ? categoryForName(context.principal.userId, inferred.category)
+                    : null,
+              ]);
+              return {
+                automatic,
+                categoryRecord,
+                inferred,
+                isTransfer,
+                merchant,
+                merchantRecord,
+                providerCategory,
+                remote,
+              };
+            }),
         );
         await db.transaction(async (tx) => {
           // Reconciliation takes account locks before transaction locks. Keep
@@ -2424,7 +2457,16 @@ export function createFinanceService({ db, now, plaid }: Options) {
             .where(inArray(financeAccounts.id, itemAccountIds))
             .orderBy(financeAccounts.id)
             .for("update");
-          for (const { automatic, merchant, remote } of classified) {
+          for (const {
+            automatic,
+            categoryRecord,
+            inferred,
+            isTransfer,
+            merchant,
+            merchantRecord,
+            providerCategory,
+            remote,
+          } of prepared) {
             const localAccount = accountsByProviderId.get(remote.account_id);
             if (!localAccount) continue;
             const providerDirection = remote.amount < 0 ? "income" : "expense";
@@ -2440,43 +2482,22 @@ export function createFinanceService({ db, now, plaid }: Options) {
               .for("update")
               .limit(1);
             const protectedTransaction =
-              existingTransaction?.pending === false &&
+              existingTransaction &&
               existingTransaction.categoryDecidedAt !== null &&
               (existingTransaction.categorySource === "user" ||
                 existingTransaction.categorySource === "agent")
                 ? existingTransaction
                 : null;
+            const previousProviderDirection =
+              protectedTransaction?.providerDirection ??
+              (protectedTransaction?.direction === "expense" ||
+              protectedTransaction?.direction === "income"
+                ? protectedTransaction.direction
+                : null);
             const providerSignChanged =
               protectedTransaction !== null &&
-              protectedTransaction.providerDirection !== null &&
-              protectedTransaction.providerDirection !== providerDirection;
-            const providerCategory = remote.personal_finance_category;
-            const inferred = isRentMerchant(merchant)
-              ? categorization(merchant)
-              : (automatic ??
-                (providerCategory?.primary
-                  ? {
-                      category: providerCategory.primary,
-                      confidence: (() => {
-                        const confidence = providerConfidence(providerCategory.confidence_level);
-                        return confidence === null ? null : Math.round(confidence * 10_000);
-                      })(),
-                      needsReview: providerNeedsReview(providerCategory.confidence_level),
-                    }
-                  : categorization(merchant)));
-            const isTransfer =
-              !isRentMerchant(merchant) &&
-              (isSoFiVaultTransfer(merchant) || isProviderTransfer(inferred.category));
-            const merchantRecord = await merchantFor(
-              context.principal.userId,
-              merchant,
-              "provider",
-            );
-            const categoryRecord = isTransfer
-              ? await categoryForName(context.principal.userId, transferCategory)
-              : inferred.category
-                ? await categoryForName(context.principal.userId, inferred.category)
-                : null;
+              previousProviderDirection !== null &&
+              previousProviderDirection !== providerDirection;
             await tx
               .insert(financeTransactions)
               .values({

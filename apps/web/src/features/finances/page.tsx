@@ -203,6 +203,7 @@ export function FinancesPage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["domain-profile", "finances"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-guided-setup"] }),
+        queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]);
     },
   });

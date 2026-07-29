@@ -444,7 +444,7 @@ describe.sequential("finance service", () => {
         .select({ providerDirection: financeTransactions.providerDirection })
         .from(financeTransactions)
         .where(eq(financeTransactions.id, legacyPostedTransaction.id)),
-    ).resolves.toEqual([{ providerDirection: "expense" }]);
+    ).resolves.toEqual([{ providerDirection: null }]);
     await expect(
       database.db
         .select({ providerDirection: financeTransactions.providerDirection })
@@ -2211,6 +2211,24 @@ describe.sequential("finance service", () => {
       providerCategory: "FOOD_AND_DRINK",
       providerCategoryConfidence: "VERY_HIGH",
     });
+    if (!transaction) throw new Error("The pending Plaid transaction was not found.");
+    const categories = await service.listCategories(plaidOnlyUser.id);
+    const shopping = categories.find((category) => category.name === "Shopping");
+    if (!shopping) throw new Error("The Shopping category was not seeded.");
+    await service.updateTransaction(
+      transaction.id,
+      { category: "Shopping", learnMerchant: false },
+      context,
+    );
+    const [pendingDecision] = await database.db
+      .select({
+        category: financeTransactions.category,
+        categoryDecidedAt: financeTransactions.categoryDecidedAt,
+        categoryRationale: financeTransactions.categoryRationale,
+        categorySource: financeTransactions.categorySource,
+      })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transaction.id));
     await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
       changed: 4,
     });
@@ -2223,14 +2241,22 @@ describe.sequential("finance service", () => {
       })
     ).items.find((item) => item.id === transaction?.id);
     if (!postedTransaction) throw new Error("The posted Plaid transaction was not found.");
-    await service.updateTransaction(
-      postedTransaction.id,
-      { category: "Shopping", learnMerchant: false },
-      context,
-    );
-    const categories = await service.listCategories(plaidOnlyUser.id);
-    const shopping = categories.find((category) => category.name === "Shopping");
-    if (!shopping) throw new Error("The Shopping category was not seeded.");
+    expect(postedTransaction).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      pending: false,
+    });
+    await expect(
+      database.db
+        .select({
+          category: financeTransactions.category,
+          categoryDecidedAt: financeTransactions.categoryDecidedAt,
+          categoryRationale: financeTransactions.categoryRationale,
+          categorySource: financeTransactions.categorySource,
+        })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, postedTransaction.id)),
+    ).resolves.toEqual([pendingDecision]);
     const transferReviews = (await service.listReviewQueue(plaidOnlyUser.id)).filter(
       (review) => review.reason === "possible_transfer",
     );
@@ -2248,6 +2274,13 @@ describe.sequential("finance service", () => {
         context,
       );
     }
+    // Simulate the first sync after the online provider-direction migration:
+    // legacy rows have no stored provider baseline, so their explicit
+    // non-transfer direction is the safe comparison baseline.
+    await database.db
+      .update(financeTransactions)
+      .set({ providerDirection: null })
+      .where(eq(financeTransactions.id, postedTransaction.id));
     await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
       changed: 4,
     });
@@ -2336,12 +2369,9 @@ describe.sequential("finance service", () => {
       .select()
       .from(financeClassificationDecisions)
       .where(eq(financeClassificationDecisions.transactionId, postedTransaction.id));
-    expect(postedDecision).toHaveLength(1);
-    expect(postedDecision[0]).toMatchObject({
-      categoryName: "Shopping",
-      outcome: "corrected",
-      source: "user",
-    });
+    // A pending decision remains protected when the provider posts it, but it
+    // does not become durable learning evidence without a posted user action.
+    expect(postedDecision).toHaveLength(0);
     const blocker = await database.pool.connect();
     let concurrentSync: ReturnType<typeof service.syncPlaidAccount> | undefined;
     let concurrentReconciliation: ReturnType<typeof service.reconcileTransfers> | undefined;
@@ -2397,11 +2427,32 @@ describe.sequential("finance service", () => {
     await expect(service.syncPlaidAccount(manual.id, context)).rejects.toThrow(
       "not a connected Plaid account",
     );
-    const secondExchange = await service.exchangePlaidToken(
-      { institution: null, publicToken: "public-token" },
-      context,
-    );
-    expect(secondExchange).toHaveLength(2);
+    const exchangeBlocker = await database.pool.connect();
+    let reconnectSync: ReturnType<typeof service.syncPlaidAccount> | undefined;
+    let reconnectExchange: ReturnType<typeof service.exchangePlaidToken> | undefined;
+    try {
+      await exchangeBlocker.query("BEGIN");
+      await exchangeBlocker.query("SELECT id FROM finance_accounts WHERE id = $1 FOR UPDATE", [
+        plaidAccount.id,
+      ]);
+      reconnectSync = service.syncPlaidAccount(plaidAccount.id, context);
+      await waitForLockWaiters(database.pool, 1);
+      reconnectExchange = service.exchangePlaidToken(
+        { institution: null, publicToken: "public-token" },
+        context,
+      );
+      await waitForLockWaiters(database.pool, 2);
+      await exchangeBlocker.query("COMMIT");
+      const [, secondExchange] = await Promise.all([reconnectSync, reconnectExchange]);
+      expect(secondExchange).toHaveLength(2);
+    } finally {
+      await exchangeBlocker.query("ROLLBACK");
+      exchangeBlocker.release();
+      const pendingOperations: Promise<unknown>[] = [];
+      if (reconnectSync) pendingOperations.push(reconnectSync);
+      if (reconnectExchange) pendingOperations.push(reconnectExchange);
+      await Promise.allSettled(pendingOperations);
+    }
   });
 
   it("surfaces Plaid API failures without persisting credentials", async () => {

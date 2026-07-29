@@ -2603,6 +2603,7 @@ describe("ilo web app", () => {
     });
 
     const view = setup("/finances/profile");
+    const invalidateQueries = vi.spyOn(view.queryClient, "invalidateQueries");
     expect(await screen.findByText(draft.objective)).toBeVisible();
     expect(screen.getByText(draft.summary)).toBeVisible();
     expect(screen.getByText(draft.instructions[0] ?? "")).toBeVisible();
@@ -2622,6 +2623,7 @@ describe("ilo web app", () => {
         summary: draft.summary,
       }),
     );
+    expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ["assistant-setup-status"] });
     view.unmount();
   });
 

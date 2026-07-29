@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { domainProfileSchema } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import { agentMutationPolicies } from "./feature-contracts.js";
 
@@ -35,7 +36,13 @@ export const financeGuidedPreferencesSchema = z
     termForSpending: z.string().trim().min(1).max(80).optional(),
   })
   .catchall(
-    z.union([z.boolean(), z.number(), z.string().max(500), z.array(z.string().max(500)).max(100)]),
+    z.union([
+      z.boolean(),
+      z.number(),
+      z.string().max(500),
+      z.array(z.string().max(500)).max(100),
+      z.null(),
+    ]),
   )
   .superRefine((value, context) => {
     if (
@@ -344,6 +351,15 @@ export const financeGuidedSetupContextSchema = z.object({
       "add_manual_transaction",
     ]),
   ),
+  guidance: z.object({
+    approvedProfile: domainProfileSchema.nullable(),
+    draftNotice: z
+      .literal(
+        "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+      )
+      .nullable(),
+    draftProposal: domainProfileSchema.nullable(),
+  }),
   ledgerHealth: financeLedgerHealthSchema,
   reviewSummary: z.object({
     count: z.number().int().nonnegative(),
@@ -360,6 +376,13 @@ export const financeGuidedSetupContextSchema = z.object({
   ),
 });
 export type FinanceGuidedSetupContext = z.infer<typeof financeGuidedSetupContextSchema>;
+
+export const financeTransactionUpdateReceiptSchema = z.object({
+  changedFields: z.array(z.literal("notes")).min(1),
+  id: idSchema,
+  updated: z.literal(true),
+});
+export type FinanceTransactionUpdateReceipt = z.infer<typeof financeTransactionUpdateReceiptSchema>;
 
 export const financeTransactionQuerySchema = z.object({
   accountId: idSchema.optional(),

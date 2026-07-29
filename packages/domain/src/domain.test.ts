@@ -887,6 +887,11 @@ describe("finance agent contracts", () => {
       }).success,
     ).toBe(false);
     expect(
+      financeGuidedPreferencesSchema.parse({
+        futureNullablePreference: null,
+      }),
+    ).toMatchObject({ futureNullablePreference: null });
+    expect(
       financeGuidedPreferencesSchema.safeParse({
         largeExpenseAlertAmount: 500,
       }).success,

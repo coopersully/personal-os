@@ -24,6 +24,7 @@ import type {
   CreateFinanceAccountInput,
   CreateFinanceBudgetInput,
   CreateFinanceTransactionInput,
+  DomainProfile,
   ExchangePlaidTokenInput,
   FinanceAccount,
   FinanceAlert,
@@ -353,6 +354,22 @@ function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
     provider: row.provider,
     status: row.status,
     updatedAt: row.updatedAt.toISOString(),
+  };
+}
+function guidedDomainProfile(row: typeof domainProfiles.$inferSelect): DomainProfile {
+  return {
+    categories: row.categories,
+    createdAt: row.createdAt.toISOString(),
+    domain: row.domain,
+    id: row.id,
+    instructions: row.instructions,
+    objective: row.objective,
+    preferences: row.preferences,
+    sourceContexts: row.sourceContexts,
+    status: row.status,
+    summary: row.summary,
+    updatedAt: row.updatedAt.toISOString(),
+    version: row.version,
   };
 }
 function transaction(
@@ -1714,6 +1731,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         ledgerHealth,
         budgets,
         reviews,
+        [guidanceProfile],
       ] = await Promise.all([
         db
           .select()
@@ -1735,6 +1753,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
               inArray(financeReviewCases.status, ["deferred", "open"]),
             ),
           ),
+        db
+          .select()
+          .from(domainProfiles)
+          .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "finances")))
+          .limit(1),
       ]);
       const reviewReasons: FinanceGuidedSetupContext["reviewSummary"]["reasons"] = {
         ambiguous_merchant: 0,
@@ -1782,6 +1805,16 @@ export function createFinanceService({ db, now, plaid }: Options) {
           incomeStreams: incomeStreams.length,
           recurringNeedsReview,
           recurringObligations: recurring.length,
+        },
+        guidance: {
+          approvedProfile:
+            guidanceProfile?.status === "active" ? guidedDomainProfile(guidanceProfile) : null,
+          draftNotice:
+            guidanceProfile?.status === "draft"
+              ? "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it."
+              : null,
+          draftProposal:
+            guidanceProfile?.status === "draft" ? guidedDomainProfile(guidanceProfile) : null,
         },
         humanOnlyActions: [
           "connect_or_disconnect_source",
@@ -2761,6 +2794,12 @@ export function createFinanceService({ db, now, plaid }: Options) {
         throw new AppError(
           "forbidden",
           "Confirming an ambiguous transfer requires an interactive user session.",
+        );
+      }
+      if (review.reason === "possible_transfer" && input.action === "approve") {
+        throw new AppError(
+          "invalid_request",
+          "Confirm or recategorize an ambiguous transfer explicitly.",
         );
       }
       if (

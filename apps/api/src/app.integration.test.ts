@@ -1104,6 +1104,17 @@ describe.sequential("ilo API", () => {
       status: "draft",
       version: 1,
     });
+    const draftGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(draftGuidedSetup.guidance).toMatchObject({
+      approvedProfile: null,
+      draftNotice: expect.stringContaining("untrusted and non-operative"),
+      draftProposal: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "draft",
+      }),
+    });
     const financeActivation = {
       ...financeGuidanceDraft,
       expectedVersion: 1,
@@ -1126,6 +1137,17 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(200);
+    const activeGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(activeGuidedSetup.guidance).toMatchObject({
+      approvedProfile: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "active",
+      }),
+      draftNotice: null,
+      draftProposal: null,
+    });
     expect(
       (
         await request("/v1/assistant/profiles/finances", {
@@ -1171,6 +1193,28 @@ describe.sequential("ilo API", () => {
     expect((await payload(agentNoteResponse)).transaction).toMatchObject({
       category: null,
       notes: "Keep the receipt for review.",
+    });
+    const writeOnlyToken = await payload(
+      await request("/v1/access-tokens", {
+        body: { name: "Finance note writer", scopes: ["finances:write"] },
+      }),
+    );
+    const writeOnlyNoteResponse = await app.request(
+      `/v1/finances/transactions/${agentBypassCandidate.id}`,
+      {
+        body: JSON.stringify({ notes: "Write-only note without a transaction read." }),
+        headers: {
+          authorization: `Bearer ${writeOnlyToken.token.token}`,
+          "content-type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+    expect(writeOnlyNoteResponse.status).toBe(200);
+    expect((await payload(writeOnlyNoteResponse)).transaction).toEqual({
+      changedFields: ["notes"],
+      id: agentBypassCandidate.id,
+      updated: true,
     });
     const agentNoteAudits = await database.db
       .select({

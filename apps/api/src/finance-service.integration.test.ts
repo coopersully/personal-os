@@ -851,6 +851,18 @@ describe.sequential("finance service", () => {
     await expect(
       service.resolveReview(
         transferReview.id,
+        {
+          action: "approve",
+          expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "A generic approval must not resolve an ambiguous transfer.",
+        },
+        context,
+      ),
+    ).rejects.toThrow("Confirm or recategorize an ambiguous transfer explicitly");
+    await expect(
+      service.resolveReview(
+        transferReview.id,
         { action: "defer", learnMerchant: "never", rationale: "Review this in Finance." },
         context,
       ),

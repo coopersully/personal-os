@@ -28,6 +28,7 @@ import type {
   FinanceReviewDecisionInput,
   FinanceTransaction,
   FinanceTransactionQuery,
+  FinanceTransactionUpdateReceipt,
   FinanceWealthSummary,
   MergeFinanceMerchantsInput,
   ResolveFinanceAlertInput,
@@ -292,14 +293,13 @@ export function createFinanceApi(request: FinanceRequest) {
     async updateFinanceTransaction(
       id: string,
       input: UpdateFinanceTransactionInput,
-    ): Promise<FinanceTransaction> {
-      const response = await request<{ transaction: FinanceTransaction }>(
-        `/v1/finances/transactions/${id}`,
-        {
-          body: JSON.stringify(input),
-          method: "PATCH",
-        },
-      );
+    ): Promise<FinanceTransaction | FinanceTransactionUpdateReceipt> {
+      const response = await request<{
+        transaction: FinanceTransaction | FinanceTransactionUpdateReceipt;
+      }>(`/v1/finances/transactions/${id}`, {
+        body: JSON.stringify(input),
+        method: "PATCH",
+      });
       return response.transaction;
     },
     async updateFinanceMerchant(

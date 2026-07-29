@@ -245,15 +245,18 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
     ),
   );
   // Scoped agents may add notes; the service keeps category and merchant-rule edits human-only.
-  app.patch("/v1/finances/transactions/:id", async (context) =>
-    context.json({
-      transaction: await finances.updateTransaction(
-        context.req.param("id"),
-        await parseBody(context, updateFinanceTransactionInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
+  app.patch("/v1/finances/transactions/:id", async (context) => {
+    const transaction = await finances.updateTransaction(
+      context.req.param("id"),
+      await parseBody(context, updateFinanceTransactionInputSchema),
+      mutationContext(context),
+    );
+    return context.json({
+      transaction: context.get("principal").scopes.has("finances:read")
+        ? transaction
+        : { changedFields: ["notes"] as const, id: transaction.id, updated: true as const },
+    });
+  });
   app.post("/v1/finances/budgets", requireHuman, async (context) =>
     context.json(
       {

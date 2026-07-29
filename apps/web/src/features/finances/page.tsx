@@ -443,7 +443,7 @@ export function FinancesPage() {
       learnMerchant,
       rationale,
     }: {
-      action: "approve" | "defer" | "recategorize";
+      action: "approve" | "defer" | "not_purchase" | "recategorize";
       categoryId?: string;
       expectedTransactionUpdatedAt?: string;
       id: string;
@@ -699,6 +699,13 @@ export function FinancesPage() {
                       reviewId: review.id,
                     });
                   }}
+                  onConfirmTransfer={(review) =>
+                    resolveReview.mutate({
+                      action: "not_purchase",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
+                      id: review.id,
+                    })
+                  }
                   onDefer={(id) => resolveReview.mutate({ action: "defer", id })}
                 />
               ) : visibleTransactions.length === 0 ? (
@@ -2863,12 +2870,14 @@ function FinanceReviewItems({
   isPending,
   onApprove,
   onCategorize,
+  onConfirmTransfer,
   onDefer,
 }: {
   cases: FinanceReviewCase[];
   isPending: boolean;
   onApprove: (review: FinanceReviewCase) => void;
   onCategorize: (review: FinanceReviewCase) => void;
+  onConfirmTransfer: (review: FinanceReviewCase) => void;
   onDefer: (id: string) => void;
 }) {
   if (cases.length === 0)
@@ -2881,7 +2890,9 @@ function FinanceReviewItems({
     <ShadcnItemGroup>
       {cases.map((review) => {
         const item = review.transaction;
-        const canApprove = item.categoryId !== null && item.category !== null;
+        const isPossibleTransfer = review.reason === "possible_transfer";
+        const canApprove =
+          !isPossibleTransfer && item.categoryId !== null && item.category !== null;
         return (
           <ShadcnItem key={review.id} variant="outline">
             <ShadcnItemContent>
@@ -2899,6 +2910,15 @@ function FinanceReviewItems({
               {canApprove ? (
                 <ShadcnButton disabled={isPending} onClick={() => onApprove(review)} size="sm">
                   Approve
+                </ShadcnButton>
+              ) : null}
+              {isPossibleTransfer ? (
+                <ShadcnButton
+                  disabled={isPending}
+                  onClick={() => onConfirmTransfer(review)}
+                  size="sm"
+                >
+                  Confirm transfer
                 </ShadcnButton>
               ) : null}
               <ShadcnButton

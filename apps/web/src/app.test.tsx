@@ -2738,6 +2738,51 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
+  it("requires an explicit transfer confirmation for possible-transfer reviews", async () => {
+    mocks.getFinanceReviewQueue.mockResolvedValue([
+      {
+        createdAt: now,
+        id: secondId,
+        rationale: "This may be movement between owned accounts.",
+        reason: "possible_transfer",
+        status: "open",
+        suggestedCategory: "Transfers",
+        transaction: {
+          accountId: id,
+          amount: 250,
+          category: "Transfers",
+          categoryConfidence: 0.95,
+          categoryId: id,
+          createdAt: now,
+          date: "2026-07-13",
+          direction: "expense",
+          id: thirdId,
+          merchant: "Account movement",
+          needsReview: true,
+          notes: null,
+          pending: false,
+          updatedAt: now,
+        },
+      },
+    ]);
+    mocks.resolveFinanceReview.mockResolvedValue({ applied: true });
+    const view = setup("/finances/review");
+
+    expect(await screen.findByRole("button", { name: "Confirm transfer" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Confirm transfer" }));
+    await waitFor(() =>
+      expect(mocks.resolveFinanceReview).toHaveBeenCalledWith(secondId, {
+        action: "not_purchase",
+        categoryId: undefined,
+        expectedTransactionUpdatedAt: now,
+        learnMerchant: "suggest",
+        rationale: null,
+      }),
+    );
+    view.unmount();
+  });
+
   it("keeps global badges and calendar date navigation deterministic", async () => {
     mocks.listTasks.mockResolvedValue({
       items: [{ ...task, dueAt: now, status: "cancelled" }],

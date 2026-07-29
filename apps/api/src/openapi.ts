@@ -208,12 +208,43 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/mailboxes": {
         get: { security, responses: { 200: { description: "Connected mailboxes" } } },
       },
+      "/v1/mail/setup-context": {
+        get: { security, responses: { 200: { description: "Source-aware Mail setup context" } } },
+      },
+      "/v1/mail/drafts": {
+        get: { security, responses: { 200: { description: "Mail drafts" } } },
+        post: { security, responses: { 201: { description: "Mail draft created" } } },
+      },
+      "/v1/mail/drafts/{id}/reconcile": {
+        post: {
+          security,
+          responses: { 200: { description: "Uncertain Mail draft reconciled by its owner" } },
+        },
+      },
+      "/v1/mail/send": {
+        post: { security, responses: { 202: { description: "Mail send accepted" } } },
+      },
       "/v1/mail/threads": {
         get: { security, responses: { 200: { description: "Unified mail conversations" } } },
+      },
+      "/v1/mail/threads/bulk": {
+        post: { security, responses: { 200: { description: "Bounded Mail batch result" } } },
       },
       "/v1/mail/threads/{id}": {
         get: { security, responses: { 200: { description: "Mail conversation" } } },
         patch: { security, responses: { 200: { description: "Mail conversation updated" } } },
+      },
+      "/v1/mail/threads/{id}/attention": {
+        put: {
+          security,
+          responses: { 200: { description: "Source-derived Mail attention item saved" } },
+        },
+      },
+      "/v1/mail/threads/{id}/messages": {
+        get: { security, responses: { 200: { description: "Mail conversation messages" } } },
+      },
+      "/v1/mail/threads/{id}/snooze": {
+        post: { security, responses: { 204: { description: "Mail conversation snoozed" } } },
       },
       "/v1/mail/rules": {
         get: { security, responses: { 200: { description: "Mail rules" } } },
@@ -224,6 +255,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/mail/rules/{id}": {
         patch: { security, responses: { 200: { description: "Mail rule updated" } } },
+      },
+      "/v1/mail/rules/{id}/preview": {
+        get: { security, responses: { 200: { description: "Saved Mail rule reviewed" } } },
+      },
+      "/v1/mail/rules/{id}/activate": {
+        post: { security, responses: { 200: { description: "Reviewed Mail rule activated" } } },
       },
       "/v1/assistant/setup-status": {
         get: { security, responses: { 200: { description: "Agent setup status" } } },

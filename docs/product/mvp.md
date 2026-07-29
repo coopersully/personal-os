@@ -61,8 +61,10 @@ provider internals.
   with each capability independently enabled.
 - Unified mailbox, search, conversation list, plain-text reader, drafts/sending, and
   provider-supported thread actions.
-- Versioned domain preference profiles, cross-domain attention items, exact Mail-rule previews, and
-  an installable guided-setup skill for scoped MCP hosts.
+- Versioned domain preference profiles, cross-domain attention items, source-aware multi-inbox Mail
+  setup, bounded exact Mail-rule previews with drift-checked activation for supported non-retention
+  actions, preview-only retention preferences, and an installable guided-setup skill for scoped MCP
+  hosts.
 - A deployment-aware Agent access handoff with remote MCP OAuth, readable
   consent, skill-install and starter prompts, readiness state, revocation, and
   advanced personal-token fallback.
@@ -120,7 +122,10 @@ The MVP is complete only when all of the following are demonstrated:
 5. An MCP client can list and mutate reminders and events using a scoped token.
 6. A connected Google or iCloud mailbox can synchronize and be searched/read from both the UI and
    a `mail:read` MCP token without exposing credentials; supported mutations require
-   `mail:write`, and automatic Google Mail rules require an enabled `approved_rule`.
+   `mail:write`, important-email attention derives its source from an owned thread, and automatic
+   Google Mail rules require a still-active compatible profile, explicit Google sources, a bounded
+   review, and an enabled `approved_rule`. Archive and recoverable Trash remain preview-only until
+   durable due work exists.
 7. A person can copy the deployed MCP endpoint and skill install request,
    authorize a remote agent with visible scoped consent, start the Mail setup
    interview, and revoke the host from Settings.

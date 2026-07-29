@@ -8,6 +8,7 @@ import {
   apiErrorSchema,
   automationRoutineSchema,
   automationRunSchema,
+  bulkUpdateMailInputSchema,
   calendarEventSchema,
   calendarProviderSchema,
   calendarSchema,
@@ -56,6 +57,7 @@ import {
   reminderPrioritySchema,
   reminderSchema,
   resolveStoredMailRule,
+  sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
   taskSchema,
@@ -69,11 +71,13 @@ import {
   updateGoalInputSchema,
   updateLocalCalendarInputSchema,
   updateMailRuleInputSchema,
+  updateMailThreadInputSchema,
   updateMotiveInputSchema,
   updateReminderInputSchema,
   updateTaskInputSchema,
   updateUserInputSchema,
   upsertDomainProfileInputSchema,
+  upsertMailProfileInputSchema,
   userSchema,
   weatherLocationOptionSchema,
   weatherLocationSearchQuerySchema,
@@ -145,12 +149,94 @@ describe("domain schemas", () => {
         domain: "mail",
         instructions: ["Keep delivery problems visible."],
         objective: "Keep a clean inbox.",
-        preferences: { inboxStyle: "signal_only", retentionDays: 1 },
+        preferences: { inboxStyle: "signal_only", retentionDays: null },
         sourceContexts: [],
         status: "draft",
         summary: "Only high-signal mail stays visible.",
       }),
-    ).toMatchObject({ domain: "mail", status: "draft" });
+    ).toMatchObject({
+      domain: "mail",
+      preferences: { retentionDays: null },
+      status: "draft",
+    });
+    expect(
+      upsertMailProfileInputSchema.parse({
+        categories: [],
+        domain: "mail",
+        instructions: ["Keep delivery problems visible."],
+        objective: "Keep a clean inbox.",
+        preferences: {
+          importantEmailHandling: "inbox_and_attention",
+          inboxStyle: "signal_only",
+          noiseDisposition: "archive_after_days",
+          noiseRetentionDays: 3,
+        },
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Personal decisions",
+            sourceId: accountId,
+            sourceLabel: "Personal",
+          },
+        ],
+        status: "draft",
+        summary: "Only high-signal mail stays visible.",
+      }),
+    ).toMatchObject({
+      preferences: { noiseDisposition: "archive_after_days", noiseRetentionDays: 3 },
+    });
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep a clean inbox.",
+        preferences: {
+          noiseDisposition: "trash_after_days",
+          noiseRetentionDays: 1,
+        },
+        sourceContexts: [],
+        status: "draft",
+        summary: "One-day recoverable Trash.",
+      }).success,
+    ).toBe(true);
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Complete Mail setup.",
+        preferences: {},
+        sourceContexts: [],
+        status: "active",
+        summary: "No inbox was mapped.",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep a clean inbox.",
+        preferences: {},
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Personal",
+            sourceId: accountId,
+            sourceLabel: "Personal",
+          },
+          {
+            notes: null,
+            purpose: "Work",
+            sourceId: accountId,
+            sourceLabel: "Duplicate",
+          },
+        ],
+        status: "draft",
+        summary: "Conflicting source meanings.",
+      }).success,
+    ).toBe(false);
     expect(
       createAttentionItemInputSchema.parse({
         domain: "calendar",
@@ -262,6 +348,51 @@ describe("domain schemas", () => {
         enabled: true,
         name: "Unsafe active rule",
         policy: "approved_rule",
+      }).success,
+    ).toBe(false);
+    expect(
+      sendMailInputSchema.parse({
+        accountId: "00000000-0000-4000-8000-000000000001",
+        body: "No subject",
+        subject: "   ",
+        to: [{ address: "To@Example.COM", name: null }],
+      }),
+    ).toMatchObject({
+      subject: "",
+      to: [{ address: "To@Example.COM", name: null }],
+    });
+    expect(
+      createMailRuleInputSchema.safeParse({
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "sender", operator: "contains", value: "news" },
+        confidenceThreshold: 0.9,
+        name: "Decorative confidence",
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        enabled: true,
+        expectedVersion: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        expectedVersion: 1,
+        policy: "approve_each",
+      }).success,
+    ).toBe(false);
+    expect(
+      createMailRuleInputSchema.safeParse({
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "sender", operator: "contains", value: "news" },
+        name: "Duplicate source draft",
+        sourceIds: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000001"],
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        expectedVersion: 1,
+        sourceIds: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000001"],
       }).success,
     ).toBe(false);
   });
@@ -652,8 +783,34 @@ describe("domain schemas", () => {
         subject: "Subject",
         to: [],
         unread: true,
+        updatedAt: start,
       }).subject,
     ).toBe("Subject");
+    expect(
+      updateMailThreadInputSchema.parse({
+        expectedUpdatedAt: start,
+        unread: false,
+      }),
+    ).toEqual({ expectedUpdatedAt: start, unread: false });
+    expect(updateMailThreadInputSchema.safeParse({ expectedUpdatedAt: start }).success).toBe(false);
+    expect(
+      bulkUpdateMailInputSchema.parse({
+        items: [{ expectedUpdatedAt: start, id }],
+        unread: false,
+      }),
+    ).toEqual({
+      items: [{ expectedUpdatedAt: start, id }],
+      unread: false,
+    });
+    expect(
+      bulkUpdateMailInputSchema.safeParse({
+        items: [
+          { expectedUpdatedAt: start, id },
+          { expectedUpdatedAt: "2026-07-28T12:00:00.000Z", id },
+        ],
+        starred: true,
+      }).success,
+    ).toBe(false);
     expect(
       mailListQuerySchema.parse({
         accountIds: `${accountId},`,

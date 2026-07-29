@@ -29,6 +29,7 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -305,7 +306,7 @@ export const domainProfiles = pgTable(
       .notNull()
       .default([]),
     preferences: jsonb("preferences")
-      .$type<Record<string, boolean | number | string | string[]>>()
+      .$type<Record<string, boolean | null | number | string | string[]>>()
       .notNull()
       .default({}),
     status: text("status").$type<"active" | "draft">().notNull().default("draft"),
@@ -638,9 +639,46 @@ export const mailDrafts = pgTable(
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    sendClaimId: uuid("send_claim_id"),
+    sendClaimedAt: timestamp("send_claimed_at", { withTimezone: true }),
+    sendStatus: text("send_status")
+      .$type<"draft" | "sending" | "sent" | "reconcile">()
+      .notNull()
+      .default("draft"),
     ...timestamps,
   },
-  (table) => [index("mail_drafts_user_updated_idx").on(table.userId, table.updatedAt)],
+  (table) => [
+    index("mail_drafts_user_updated_idx").on(table.userId, table.updatedAt),
+    check(
+      "mail_drafts_send_state_check",
+      sql`
+        (
+          ${table.sendStatus} = 'draft'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NULL
+          AND ${table.sendClaimedAt} IS NULL
+        )
+        OR (
+          ${table.sendStatus} = 'sending'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NOT NULL
+          AND ${table.sendClaimedAt} IS NOT NULL
+        )
+        OR (
+          ${table.sendStatus} = 'reconcile'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NOT NULL
+          AND ${table.sendClaimedAt} IS NOT NULL
+        )
+        OR (
+          ${table.sendStatus} = 'sent'
+          AND ${table.sentAt} IS NOT NULL
+          AND ${table.sendClaimId} IS NULL
+          AND ${table.sendClaimedAt} IS NULL
+        )
+      `,
+    ),
+  ],
 );
 
 export const mailSnoozes = pgTable(
@@ -686,6 +724,20 @@ export const mailRules = pgTable(
   (table) => [
     index("mail_rules_user_idx").on(table.userId),
     index("mail_rules_user_enabled_idx").on(table.userId, table.enabled),
+    check(
+      "mail_rules_activation_state_check",
+      sql`
+        (${table.enabled} = false AND ${table.policy} = 'preview')
+        OR (${table.enabled} = true AND ${table.policy} = 'approved_rule')
+        OR (
+          ${table.enabled} = true
+          AND ${table.policy} = 'preview'
+          AND ${table.condition} IS NULL
+          AND ${table.actions} IS NULL
+        )
+      `,
+    ),
+    check("mail_rules_exact_match_confidence_check", sql`${table.confidenceThreshold} IS NULL`),
   ],
 );
 

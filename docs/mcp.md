@@ -25,11 +25,45 @@ The shared assistant tools give Claude, Codex, and other MCP hosts one consisten
 - `list_attention_items`, `create_attention_item`, and `update_attention_item` use the same shape
   for important items, upcoming commitments, follow-ups, and post-run summaries across domains.
 
-Rules share a versioned envelope—name, description, profile, sources, confidence threshold, policy,
-enabled state, and version—while each feature owns its condition and action language. Mail is the
-first executable implementation: agents can list, preview, create, and update mail rules. New rules
-are disabled and preview-only by default, and connector sync executes only enabled
-`approved_rule` rules.
+Rules share a versioned envelope—name, description, profile, sources, nullable confidence
+threshold, policy, enabled state, and version—while each feature owns its condition and action
+language. Mail uses exact deterministic matching, so its confidence threshold is always `null`.
+Mail is the first executable implementation:
+
+- `get_mail_setup_context` maps stable account IDs to user-facing inbox identity, mailbox roles and
+  counts, sync freshness/error state, automatic-rule support, and deferred safety boundaries. It
+  returns no provider credentials.
+- `create_mail_attention_item` derives source attribution from an owned conversation and
+  serializes same-thread/kind updates so important mail uses the shared attention envelope without
+  duplicate open records.
+- agent sending is draft-first: `create_mail_draft` records a durable local draft, and `send_mail`
+  requires that draft ID plus an exact field match. A database claim permits only one provider
+  attempt at a time. Ambiguous and stale attempts remain blocked until the signed-in person checks
+  provider Sent Mail and resolves the draft in the Mail recovery panel.
+- proposed rules preview against a dated, bounded window of at most 200 recent cached
+  conversations. The response names the window and reports when it may be truncated.
+- previously observed threads are retained when a provider returns its capped recent page; absence
+  from that page is not treated as provider deletion. Archive and recoverable Trash rules,
+  including immediate and one-day preferences, remain disabled and preview-only until a durable
+  due-work queue exists.
+- saved rules are re-reviewed with `review_mail_rule`, then activated only by the signed-in person
+  in **Settings → Agent access → Review Mail rules**. The API rechecks the reviewed version,
+  candidate facts, action due states, and fingerprint inside one locked transaction, rejects
+  preview drift, and atomically records
+  `approved_rule` plus enabled state. Acceptance must state that the candidates are a bounded recent
+  sample and the enabled condition governs future matching sync material. A signed review is valid
+  for 15 minutes.
+- automatic execution coalesces compatible actions into one provider call per thread and processes
+  at most six threads with two workers. Backlog remains pending for later syncs; failures persist a
+  redacted run summary and return a structured aggregate repair contract rather than an all-green
+  sync.
+- disconnecting or disabling Mail removes its cached provider mailbox/thread projection, detaches
+  open thread/account attention provenance while preserving the user-visible signal, downgrades
+  setup for review, and pauses affected rules. Calendar-specific profile invalidation is outside
+  this Mail-only change and remains a follow-up.
+
+New rules remain disabled and preview-only by default. Active rules must be paused before their
+matching behavior changes, and connector sync executes only enabled `approved_rule` rules.
 
 Finance tools are an adapter over the same Finance API used by the web app. They
 include ledger health, transactions, categories, budgets, merchants, review
@@ -43,6 +77,26 @@ bounded mutations; an agent must not infer a permanent merchant rule or mark an
 uncertain transfer as non-spending without the user-visible review path.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
+
+Tool annotations are host hints, not authorization. Read-only cached Mail tools are closed-world;
+provider writes and sending are open-world. Rule activation is intentionally absent from MCP
+because approved rules can mutate provider state; it requires the signed-in Settings review.
+Retention rules and any other delayed Mail rules cannot activate in this release. The API still enforces scopes,
+source ownership, policy, optimistic
+versions, audit, and the distinction between recoverable Trash and permanent deletion. Bulk
+provider updates report both successful IDs and structured per-ID failures when only part of a
+request succeeds. Bulk updates are bounded to six conversations and two concurrent provider calls
+so three 15-second provider waves still leave time beneath the 60-second public edge deadline for
+local commits and a controlled response. If a provider succeeds but the atomic local
+projection-and-audit transaction fails, the item failure reports `partialEffect: true` and directs
+the caller to synchronize that Mail account before retrying.
+
+Repair actions are signed-in user actions, not MCP tools. `sync_mail_account` means **Mail → Sync**;
+`reconnect_then_sync_mail_account` means **Settings → Connections → reconnect**, then **Mail →
+Sync**. `verify_sent_mail_then_reconcile_draft` means inspect provider **Sent Mail** and then use
+the signed-in **Ilo Mail** recovery panel; never resend automatically. First-party/API sends without
+a draft have no durable recovery object: `verify_sent_mail_never_retry` means inspect Sent Mail and
+do not replay the request, not that Ilo can reconcile a missing audit record.
 
 ## Authorization
 

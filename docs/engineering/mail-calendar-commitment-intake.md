@@ -80,9 +80,10 @@ Production deployment therefore scales the API service to zero and waits for the
 before the new migration-capable task starts. ECS dynamic/scheduled scaling is suspended during the
 drain, zero desired/running/pending tasks are required, and scaling resumes only after the new API is
 the sole completed primary deployment on the exact new task definition. A circuit-breaker rollback
-is stopped at zero and left scaling-suspended for recovery. Prerequisite PR #48 / issue #47 must be
-merged, applied, and verified before this PR merges because the application workflow cannot grant
-its own new authority; this release is not safe as a mixed-version rolling deployment.
+is stopped at zero and left scaling-suspended for recovery. The deploy role's narrowly scoped API
+`application-autoscaling:RegisterScalableTarget` authority must already be applied and verified
+before a drain-required rollout begins because the application workflow cannot grant its own new
+authority; this release is not safe as a mixed-version rolling deployment.
 
 All tests can be green while production provider metadata is incomplete, MIME part IDs change, or
 the deployed connector lacks access to attachment bytes and authentication results. Those remain

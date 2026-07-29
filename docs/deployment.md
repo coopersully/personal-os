@@ -109,10 +109,12 @@ the new schema. Drizzle records applied versions transactionally. Follow the
 migrations are append-only, and live-data changes use an expand–migrate–contract
 rollout rather than a long deploy-time backfill.
 
-Before merging PR #43, merge, apply, and verify prerequisite PR #48 / issue #47,
-which grants `aws_iam_role_policy.github_deploy` authority to update only the API
-scalable target. The application workflow cannot grant this prerequisite to its
-own execution role; without it, deployment must fail before drain or migration.
+Before merging any change that requires this stop-and-drain path, the deploy role
+must already have verified `application-autoscaling:RegisterScalableTarget`
+authority scoped to the API scalable target, ECS service namespace, and
+`ecs:service:DesiredCount` dimension. The application workflow cannot grant this
+prerequisite to its own execution role; without it, deployment must fail before
+drain or migration.
 
 ## Health and logs
 

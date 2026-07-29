@@ -7,7 +7,7 @@ import {
 } from "@personal-os/domain";
 
 type CalendarProposalProfile = {
-  preferences: Record<string, boolean | number | string | string[]>;
+  preferences: Record<string, boolean | number | string | string[] | null>;
   status: "active" | "draft";
   version: number;
 };

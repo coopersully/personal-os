@@ -15,11 +15,13 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
+import { createCalendarService } from "./calendar-service.js";
 import { createFinanceService } from "./finance-service.js";
 
 describe.sequential("assistant setup service", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+  let calendar: ReturnType<typeof createCalendarService>;
   let finances: ReturnType<typeof createFinanceService>;
   let service: ReturnType<typeof createAssistantService>;
   let readOnlyCalendarId: string;
@@ -80,6 +82,15 @@ describe.sequential("assistant setup service", () => {
     if (!writable || !readOnly) throw new Error("Calendar fixtures were not created.");
     writableCalendarId = writable.id;
     readOnlyCalendarId = readOnly.id;
+    calendar = createCalendarService({
+      connectedEvents: {
+        create: vi.fn(),
+        delete: vi.fn(),
+        update: vi.fn(),
+      } as never,
+      db: database.db,
+      now: () => new Date("2026-07-28T15:00:00.000Z"),
+    });
     service = createAssistantService({
       db: database.db,
       now: () => new Date("2026-07-28T15:00:00.000Z"),
@@ -91,7 +102,17 @@ describe.sequential("assistant setup service", () => {
         sourceIds,
         status,
         actorType,
+        preferences,
       ) => {
+        if (domain === "calendar") {
+          await calendar.validateProfileSources(
+            transaction,
+            profileUserId,
+            sourceIds,
+            status,
+            preferences,
+          );
+        }
         if (domain === "finances") {
           await finances.validateProfileSources(
             transaction,
@@ -841,6 +862,29 @@ describe.sequential("assistant setup service", () => {
         context(),
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createAttentionItem(
+        {
+          domain: "reminders",
+          expiresAt: null,
+          importance: "high",
+          kind: "upcoming",
+          occursAt: "2026-08-01T15:00:00.000Z",
+          relatedEntityId: crypto.randomUUID(),
+          relatedEntityType: "calendar_event",
+          source: {
+            accountId: null,
+            provider: "local",
+            remoteId: crypto.randomUUID(),
+            revision: "caller-revision",
+            sourceType: "calendar_event",
+          },
+          summary: "Cross-domain caller-supplied Calendar provenance.",
+          title: "Forged Calendar event in Reminders",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
     const unlinkedCalendarNote = await service.createAttentionItem(
       {
         domain: "calendar",
@@ -1086,5 +1130,15 @@ describe.sequential("assistant setup service", () => {
         context(),
       ),
     ).resolves.toMatchObject({ domain: "calendar", status: "active", version: 1 });
+    await calendar.deleteLocalCalendar(writableCalendarId, context());
+    await expect(service.getProfile(userId, "calendar")).resolves.toMatchObject({
+      sourceContexts: [
+        expect.objectContaining({
+          sourceId: readOnlyCalendarId,
+        }),
+      ],
+      status: "draft",
+      version: 2,
+    });
   });
 });

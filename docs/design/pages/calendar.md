@@ -33,6 +33,8 @@ event without losing the shape of the day.
 - The durable profile names calendar/source meanings, one default writable destination,
   hard/flexible semantics, time zone, busy-block privacy, buffers, and accepted strong-evidence
   kinds.
+- Removing a referenced source or losing write access to the default destination returns an active
+  Calendar profile to draft for review.
 - Evidence-based event creation is candidate-first. The exact destination, time, source, provider
   effect, possible exact-match hint, policy reason, and warnings are visible in the proposal
   contract before a person creates the event. Exact matching is not durable source deduplication.

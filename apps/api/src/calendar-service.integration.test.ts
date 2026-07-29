@@ -13,7 +13,10 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq } from "drizzle-orm";
-import { createCalendarService } from "./calendar-service.js";
+import {
+  type CalendarProviderFailureObservation,
+  createCalendarService,
+} from "./calendar-service.js";
 import type { Principal } from "./types.js";
 
 const timestamp = new Date("2026-07-28T15:00:00.000Z");
@@ -28,6 +31,7 @@ describe.sequential("Calendar commitment proposals", () => {
   let secondRemoteCalendarId: string;
   let service: ReturnType<typeof createCalendarService>;
   let userId: string;
+  const providerFailureObservations: CalendarProviderFailureObservation[] = [];
   const gateway = {
     create: vi.fn(async () => ({
       allDay: false,
@@ -69,6 +73,15 @@ describe.sequential("Calendar commitment proposals", () => {
       userId,
     } satisfies Principal,
     requestId: "calendar-proposal-test",
+  });
+  const agentContext = () => ({
+    principal: {
+      actorId: userId,
+      actorType: "agent" as const,
+      scopes: new Set(["calendar:read", "calendar:write"]),
+      userId,
+    } satisfies Principal,
+    requestId: "calendar-agent-revision-test",
   });
 
   beforeAll(async () => {
@@ -221,6 +234,7 @@ describe.sequential("Calendar commitment proposals", () => {
       connectedEvents: gateway,
       db: database.db,
       now: () => timestamp,
+      observeProviderFailure: (entry) => providerFailureObservations.push(entry),
     });
   }, 120_000);
 
@@ -460,6 +474,23 @@ describe.sequential("Calendar commitment proposals", () => {
     expect(audits.filter((event) => event.requestId === "calendar-proposal-test")).toHaveLength(
       auditsBefore,
     );
+    expect(providerFailureObservations.at(-1)).toMatchObject({
+      actorId: userId,
+      code: "service_unavailable",
+      details: {
+        completedEffects: [
+          expect.objectContaining({
+            remoteEventId: "remote-duplicate",
+            role: "source",
+          }),
+        ],
+        operation: "create_event",
+      },
+      operation: "create_event",
+      requestId: "calendar-proposal-test",
+      status: 503,
+      userId,
+    });
   });
 
   it("reports completed and pending provider effects when an event update fails mid-block", async () => {
@@ -579,6 +610,156 @@ describe.sequential("Calendar commitment proposals", () => {
       .where(eq(calendarEvents.id, firstBlock.id));
     expect(currentBlock?.updatedAt).toEqual(concurrentTimestamp);
     expect(currentBlock?.remoteEventId).toBe(firstBlock.remoteEventId);
+  });
+
+  it("requires current source and block revisions for every agent mutation path", async () => {
+    const { blocks, source } = await createCompoundFixture("agent-revisions");
+    const block = blocks[0];
+    if (!block) throw new Error("Agent revision block fixture is missing.");
+    const { source: deletedSource } = await createCompoundFixture("agent-restore", true);
+    const callsBefore = {
+      create: gateway.create.mock.calls.length,
+      delete: gateway.delete.mock.calls.length,
+      update: gateway.update.mock.calls.length,
+    };
+
+    await expect(
+      service.createEventBlock(
+        source.id,
+        { calendarId: secondRemoteCalendarId, mode: "busy" },
+        agentContext(),
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      details: { missingFields: ["expectedUpdatedAt"] },
+    });
+    await expect(
+      service.updateEvent(source.id, { title: "Stale agent update" }, agentContext()),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      details: {
+        missingFields: ["expectedBlockUpdatedAtById", "expectedUpdatedAt"],
+      },
+    });
+    await expect(service.deleteEvent(source.id, agentContext())).rejects.toMatchObject({
+      code: "invalid_request",
+      details: {
+        missingFields: ["expectedBlockUpdatedAtById", "expectedUpdatedAt"],
+      },
+    });
+    await expect(service.restoreEvent(deletedSource.id, agentContext())).rejects.toMatchObject({
+      code: "invalid_request",
+      details: {
+        missingFields: ["expectedBlockUpdatedAtById", "expectedUpdatedAt"],
+      },
+    });
+    await expect(
+      service.updateEventBlock(source.id, block.id, { mode: "details" }, agentContext()),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      details: {
+        missingFields: ["expectedBlockUpdatedAt", "expectedUpdatedAt"],
+      },
+    });
+    await expect(
+      service.deleteEventBlock(source.id, block.id, agentContext()),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      details: {
+        missingFields: ["expectedBlockUpdatedAt", "expectedUpdatedAt"],
+      },
+    });
+    expect({
+      create: gateway.create.mock.calls.length,
+      delete: gateway.delete.mock.calls.length,
+      update: gateway.update.mock.calls.length,
+    }).toEqual(callsBefore);
+  });
+
+  it("rejects a compound update when a linked block is added after its provider snapshot", async () => {
+    const { blocks, source } = await createCompoundFixture("concurrent-block-add");
+    const [sourceCalendar] = await database.db
+      .select()
+      .from(calendars)
+      .where(eq(calendars.id, localCalendarId));
+    if (!sourceCalendar) throw new Error("Source calendar fixture is missing.");
+    const [lateCalendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: sourceCalendar.accountId,
+        isWritable: true,
+        name: "Late local block",
+        provider: "local",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!lateCalendar) throw new Error("Late block calendar fixture was not created.");
+    let lateBlockId: string | undefined;
+    gateway.update.mockImplementationOnce(async () => {
+      const [lateBlock] = await database.db
+        .insert(calendarEvents)
+        .values({
+          allDay: source.allDay,
+          blockMode: "busy",
+          blockSourceEventId: source.id,
+          calendarId: lateCalendar.id,
+          endsAt: source.endsAt,
+          provider: "local",
+          startsAt: source.startsAt,
+          timezone: source.timezone,
+          title: "Busy",
+          userId,
+        })
+        .returning();
+      lateBlockId = lateBlock?.id;
+      return {
+        allDay: false,
+        conferenceUrl: null,
+        endsAt: source.endsAt,
+        etag: "concurrent-add-etag",
+        location: null,
+        notes: null,
+        raw: { id: "concurrent-add-block" },
+        recurrence: [],
+        remoteEventId: "concurrent-add-block",
+        startsAt: source.startsAt,
+        status: "confirmed",
+        timezone: "UTC",
+        title: "Busy",
+      };
+    });
+
+    await expect(
+      service.updateEvent(
+        source.id,
+        {
+          expectedBlockUpdatedAtById: Object.fromEntries(
+            blocks.map((block) => [block.id, block.updatedAt.toISOString()]),
+          ),
+          expectedUpdatedAt: source.updatedAt.toISOString(),
+          title: "Must not commit",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: {
+        completedEffects: expect.arrayContaining([
+          expect.objectContaining({ action: "update", role: "block" }),
+        ]),
+        operation: "update_event",
+      },
+    });
+    const [currentSource] = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(eq(calendarEvents.id, source.id));
+    const [lateBlock] = lateBlockId
+      ? await database.db.select().from(calendarEvents).where(eq(calendarEvents.id, lateBlockId))
+      : [];
+    expect(currentSource?.title).toBe(source.title);
+    expect(lateBlock).toMatchObject({ blockSourceEventId: source.id, deletedAt: null });
   });
 
   it("reports completed and pending provider effects when deletion fails mid-block", async () => {
@@ -780,5 +961,23 @@ describe.sequential("Calendar commitment proposals", () => {
       relatedEntityType: "calendar_event",
       status: "open",
     });
+  });
+
+  it("redacts shared-account provider errors from Calendar source discovery", async () => {
+    const privateProviderError =
+      "Gmail API request failed: private mailbox response body and provider diagnostics";
+    await database.db
+      .update(calendarAccounts)
+      .set({ syncError: privateProviderError, syncStatus: "error" })
+      .where(eq(calendarAccounts.id, remoteAccountId));
+    const listed = await service.list(userId);
+    expect(JSON.stringify(listed)).not.toContain(privateProviderError);
+    expect(listed.find((calendar) => calendar.accountId === remoteAccountId)?.source).toMatchObject(
+      {
+        syncError:
+          "The connected account needs attention. Synchronize Calendar or review Connections.",
+        syncStatus: "error",
+      },
+    );
   });
 });

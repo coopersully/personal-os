@@ -1420,6 +1420,90 @@ describe("ilo MCP server", () => {
     await server.close();
   });
 
+  it("preserves structured Calendar API partial-effect errors at the tool boundary", async () => {
+    const api = mockApi();
+    api.updateEvent.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "provider_partial_effect",
+        details: {
+          completedEffects: [
+            {
+              action: "update",
+              calendarId: id,
+              eventId: id,
+              provider: "google",
+              remoteEventId: "remote-event-1",
+              role: "source",
+            },
+          ],
+          operation: "update_event",
+          partialEffect: true,
+          pendingEffects: [],
+          provider: "google",
+          recovery: "Synchronize Calendar before retrying.",
+          remoteEventId: "remote-event-1",
+        },
+        message:
+          "The provider event changed, but Ilo could not finish its local Calendar projection.",
+        requestId: "calendar-request-123",
+        status: 502,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      now: () => new Date("2026-07-13T16:00:00.000Z"),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: {
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: now,
+        id,
+        title: "Updated focus",
+      },
+      name: "update_event",
+    });
+    const expectedError = {
+      code: "provider_partial_effect",
+      details: {
+        completedEffects: [
+          {
+            action: "update",
+            calendarId: id,
+            eventId: id,
+            provider: "google",
+            remoteEventId: "remote-event-1",
+            role: "source",
+          },
+        ],
+        operation: "update_event",
+        partialEffect: true,
+        pendingEffects: [],
+        provider: "google",
+        recovery: "Synchronize Calendar before retrying.",
+        remoteEventId: "remote-event-1",
+      },
+      message:
+        "The provider event changed, but Ilo could not finish its local Calendar projection.",
+      requestId: "calendar-request-123",
+      status: 502,
+    };
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: { error: expectedError },
+    });
+    expect(response.content).toEqual([
+      { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
+    ]);
+
+    await client.close();
+    await server.close();
+  });
+
   it("preserves structured Finance conflicts at the proposal tool boundary", async () => {
     const api = mockApi();
     api.proposeFinanceCategorizations.mockRejectedValueOnce(

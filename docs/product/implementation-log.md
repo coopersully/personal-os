@@ -49,6 +49,11 @@ This log records delivered vertical slices against the master plan. It does not 
 - Calendar MCP discovery now exposes source capability and sync state, clarifies external provider
   effects for every mutation, and routes ticket, booking, registration, and explicit-acceptance
   evidence through proposal-first tools.
+- Direct mutations require source and independent block revisions, report completed,
+  indeterminate, and pending provider effects through API, MCP, and redacted server observations,
+  and direct the caller to synchronize before retrying.
+- Calendar-owned attention derives and refreshes event provenance without copying notes. Active
+  profiles return to draft when a referenced source disappears or the default loses write access.
 - The bounded proposal path does not apply caller-supplied evidence, scan Mail, send invitations,
   create recurrence or buffer events, or rearrange existing commitments. Durable verified intake,
   idempotent apply/repair, and Mail-to-Calendar ingestion remain integration work.

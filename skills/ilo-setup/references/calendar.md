@@ -65,8 +65,10 @@ Proposal-only agents should use a token without that scope: previewing a candida
 expands write authority.
 
 If a provider mutation returns a partial-effect ledger, do not replay it blindly. Show the
-completed and pending effects, synchronize Calendar first, and reconnect the affected account when
-the recovery guidance reports credential persistence or authorization trouble.
+completed, indeterminate, and pending effects, synchronize Calendar first, and reconnect the
+affected account when the recovery guidance reports credential persistence or authorization
+trouble. An indeterminate effect may or may not have reached the provider and is still unsafe to
+retry before synchronization.
 
 Before any update, block, privacy, unblock, delete, or restore mutation, call `get_event`. Pass its
 source `updatedAt` as `expectedUpdatedAt`. For operations that affect all linked blocks, pass the

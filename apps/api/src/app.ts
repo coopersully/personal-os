@@ -182,6 +182,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     connectedEvents: connectors.eventGateway,
     db: dependencies.db,
     now,
+    observeProviderFailure: (entry) =>
+      dependencies.log?.({
+        calendarProviderReconciliation: entry,
+        durationMs: 0,
+        event: "calendar_provider_reconciliation",
+        method: "CALENDAR",
+        path: `/internal/calendar/provider-effects/${entry.operation}`,
+        requestId: entry.requestId,
+        status: entry.status,
+      }),
   });
   const automations = createAutomationService({
     db: dependencies.db,
@@ -213,9 +223,20 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     now,
     profileRequiresApproval: (domain) => domain === "finances",
-    validateProfileSources: async (transaction, domain, userId, sourceIds, status, actorType) => {
+    validateProfileSources: async (
+      transaction,
+      domain,
+      userId,
+      sourceIds,
+      status,
+      actorType,
+      preferences,
+    ) => {
       if (domain === "mail") {
         await mail.validateProfileSources(transaction, userId, sourceIds);
+      }
+      if (domain === "calendar") {
+        await calendar.validateProfileSources(transaction, userId, sourceIds, status, preferences);
       }
       if (domain === "finances") {
         await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
@@ -262,6 +283,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     } finally {
       dependencies.log?.({
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+        event: "request",
         method: context.req.method,
         path: context.req.path,
         requestId: context.get("requestId"),

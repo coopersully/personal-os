@@ -28,6 +28,7 @@ import type {
   UpdateLocalCalendarInput,
   UpsertCalendarAttentionItemInput,
 } from "@personal-os/domain";
+import { calendarProfilePreferencesSchema, idSchema } from "@personal-os/domain";
 import {
   and,
   asc,
@@ -43,6 +44,7 @@ import {
   sql,
 } from "drizzle-orm";
 import { auditValues } from "./audit.js";
+import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { buildCalendarCommitmentProposal } from "./calendar-proposal.js";
 import {
   type CalendarProviderEffect,
@@ -63,9 +65,23 @@ type CalendarServiceOptions = {
   connectedEvents: ConnectedEventGateway;
   db: Database;
   now: () => Date;
+  observeProviderFailure?: (entry: CalendarProviderFailureObservation) => void;
+};
+
+export type CalendarProviderFailureObservation = {
+  actorId: string;
+  actorType: Principal["actorType"];
+  code: AppError["code"];
+  details: unknown;
+  message: string;
+  operation: string;
+  requestId: string;
+  status: AppError["status"];
+  userId: string;
 };
 
 type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type CalendarProfileSourceExecutor = Pick<Database, "select">;
 type CalendarRecord = typeof calendars.$inferSelect;
 type CalendarAccountRecord = typeof calendarAccounts.$inferSelect;
 type CalendarEventRecord = typeof calendarEvents.$inferSelect;
@@ -210,6 +226,23 @@ function assertExpectedBlockUpdatedAt(
   }
 }
 
+function requireAgentMutationRevisions(
+  context: MutationContext,
+  input: object,
+  fields: string[],
+): void {
+  if (context.principal.actorType !== "agent") return;
+  const values = input as Record<string, unknown>;
+  const missingFields = fields.filter((field) => values[field] === undefined);
+  if (missingFields.length > 0) {
+    throw new AppError(
+      "invalid_request",
+      "Agent Calendar mutations require the current source and block revisions.",
+      { missingFields },
+    );
+  }
+}
+
 function requireRevisionWrite<T>(record: T | undefined, eventId: string): T {
   if (!record) {
     throw new AppError(
@@ -262,8 +295,33 @@ async function requireCurrentRevision(
     .select({ id: calendarEvents.id })
     .from(calendarEvents)
     .where(eventRevisionWhere(record, deleted))
+    .for("update")
     .limit(1);
   requireRevisionWrite(current, record.id);
+}
+
+async function requireCurrentBlockSet(
+  transaction: DatabaseTransaction,
+  source: CalendarEventRecord,
+  expectedBlocks: CalendarEventRecord[],
+  deleted: boolean,
+): Promise<void> {
+  const currentBlocks = await transaction
+    .select()
+    .from(calendarEvents)
+    .where(
+      and(
+        eq(calendarEvents.userId, source.userId),
+        eq(calendarEvents.blockSourceEventId, source.id),
+        deleted ? isNotNull(calendarEvents.deletedAt) : isNull(calendarEvents.deletedAt),
+      ),
+    )
+    .orderBy(asc(calendarEvents.createdAt), asc(calendarEvents.id))
+    .for("update");
+  assertExpectedBlockUpdatedAt(
+    currentBlocks,
+    Object.fromEntries(expectedBlocks.map((block) => [block.id, block.updatedAt.toISOString()])),
+  );
 }
 
 function providerEffect(
@@ -294,13 +352,40 @@ function serializeCalendarSource(
     source: {
       accountLabel: account.label,
       remoteCalendarId: calendar.remoteCalendarId,
-      syncError: account.syncError,
+      syncError: account.syncError
+        ? "The connected account needs attention. Synchronize Calendar or review Connections."
+        : null,
       syncStatus: account.syncStatus,
     },
   };
 }
 
-export function createCalendarService({ connectedEvents, db, now }: CalendarServiceOptions) {
+export function createCalendarService({
+  connectedEvents,
+  db,
+  now,
+  observeProviderFailure,
+}: CalendarServiceOptions) {
+  function providerLedger(
+    operation: string,
+    effects: CalendarProviderEffect[],
+    context: MutationContext,
+  ) {
+    return createCalendarProviderEffectLedger(operation, effects, (error) =>
+      observeProviderFailure?.({
+        actorId: context.principal.actorId,
+        actorType: context.principal.actorType,
+        code: error.code,
+        details: error.details,
+        message: error.message,
+        operation,
+        requestId: context.requestId,
+        status: error.status,
+        userId: context.principal.userId,
+      }),
+    );
+  }
+
   async function findCalendar(userId: string, id: string) {
     const [record] = await db
       .select()
@@ -434,12 +519,104 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
   }
 
   const service = {
+    async validateProfileSources(
+      transaction: CalendarProfileSourceExecutor,
+      userId: string,
+      sourceIds: string[],
+      status: "active" | "draft",
+      preferences: Record<string, boolean | number | string | string[] | null>,
+    ): Promise<void> {
+      const uniqueSourceIds = [...new Set(sourceIds)];
+      if (uniqueSourceIds.length !== sourceIds.length) {
+        throw new AppError("invalid_request", "Calendar source contexts must be unique.");
+      }
+      if (sourceIds.some((sourceId) => !idSchema.safeParse(sourceId).success)) {
+        throw new AppError(
+          "invalid_request",
+          "Calendar source contexts must use canonical Calendar IDs.",
+        );
+      }
+      const parsedPreferences = calendarProfilePreferencesSchema.safeParse(preferences);
+      if (status === "active" && !parsedPreferences.success) {
+        throw new AppError(
+          "invalid_request",
+          "An active Calendar profile requires the complete Calendar preference contract.",
+          { issues: parsedPreferences.error.issues },
+        );
+      }
+      if (status === "active" && sourceIds.length === 0) {
+        throw new AppError(
+          "invalid_request",
+          "An active Calendar profile requires at least one owned Calendar source context.",
+        );
+      }
+      const defaultCalendarId = parsedPreferences.success
+        ? parsedPreferences.data.defaultCalendarId
+        : typeof preferences.defaultCalendarId === "string"
+          ? preferences.defaultCalendarId
+          : null;
+      if (defaultCalendarId && !idSchema.safeParse(defaultCalendarId).success) {
+        throw new AppError(
+          "invalid_request",
+          "The default Calendar destination must use a canonical Calendar ID.",
+        );
+      }
+      const calendarIds = [
+        ...new Set([...uniqueSourceIds, ...(defaultCalendarId ? [defaultCalendarId] : [])]),
+      ];
+      const ownedCalendars =
+        calendarIds.length > 0
+          ? await transaction
+              .select({ id: calendars.id, isWritable: calendars.isWritable })
+              .from(calendars)
+              .where(
+                and(
+                  eq(calendars.userId, userId),
+                  inArray(calendars.id, calendarIds),
+                  isNull(calendars.deletedAt),
+                ),
+              )
+              .orderBy(calendars.id)
+              .for("update")
+          : [];
+      const byId = new Map(ownedCalendars.map((calendar) => [calendar.id, calendar]));
+      const unknownSourceId = uniqueSourceIds.find((sourceId) => !byId.has(sourceId));
+      if (unknownSourceId) {
+        throw new AppError(
+          "invalid_request",
+          "Calendar source contexts must reference calendars owned by this user.",
+          { sourceId: unknownSourceId },
+        );
+      }
+      if (defaultCalendarId) {
+        const destination = byId.get(defaultCalendarId);
+        if (!destination) {
+          throw new AppError(
+            "invalid_request",
+            "The default Calendar destination must belong to this user.",
+          );
+        }
+        if (!destination.isWritable) {
+          throw new AppError(
+            "invalid_request",
+            "The default Calendar destination must be writable.",
+          );
+        }
+        if (status === "active" && !sourceIds.includes(defaultCalendarId)) {
+          throw new AppError(
+            "invalid_request",
+            "The default Calendar destination must have a source context in the active profile.",
+          );
+        }
+      }
+    },
+
     async createEvent(input: CreateEventInput, context: MutationContext): Promise<CalendarEvent> {
       const calendar = await findCalendar(context.principal.userId, input.calendarId);
       requireWritable(calendar);
       const effect =
         calendar.provider === "local" ? null : providerEffect("create", calendar, null, "source");
-      const ledger = createCalendarProviderEffectLedger("create_event", effect ? [effect] : []);
+      const ledger = providerLedger("create_event", effect ? [effect] : [], context);
       const remote =
         effect === null
           ? null
@@ -604,6 +781,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       input: CreateEventBlockInput,
       context: MutationContext,
     ): Promise<CalendarEvent> {
+      requireAgentMutationRevisions(context, input, ["expectedUpdatedAt"]);
       const source = await findActiveEvent(context.principal.userId, sourceEventId);
       requireSourceEvent(source);
       assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
@@ -652,10 +830,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         !adopted && destination.provider !== "local"
           ? providerEffect("create", destination, null, "block")
           : null;
-      const ledger = createCalendarProviderEffectLedger(
-        "create_event_block",
-        effect ? [effect] : [],
-      );
+      const ledger = providerLedger("create_event_block", effect ? [effect] : [], context);
       const remote = adopted
         ? null
         : effect
@@ -789,6 +964,12 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
           .update(calendarEvents)
           .set({ deletedAt, updatedAt: deletedAt })
           .where(and(eq(calendarEvents.calendarId, before.id), isNull(calendarEvents.deletedAt)));
+        await invalidateCalendarProfileSources(transaction, {
+          context,
+          now: deletedAt,
+          unavailableCalendarIds: [before.id],
+          userId: context.principal.userId,
+        });
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "calendar.deleted",
@@ -808,6 +989,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       context: MutationContext,
       input: DeleteEventBlockInput = {},
     ): Promise<CalendarEvent> {
+      requireAgentMutationRevisions(context, input, [
+        "expectedBlockUpdatedAt",
+        "expectedUpdatedAt",
+      ]);
       const source = await findActiveEvent(context.principal.userId, sourceEventId);
       requireSourceEvent(source);
       assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
@@ -822,10 +1007,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         destination.provider === "local"
           ? null
           : providerEffect("delete", destination, block, "block");
-      const ledger = createCalendarProviderEffectLedger(
-        "delete_event_block",
-        effect ? [effect] : [],
-      );
+      const ledger = providerLedger("delete_event_block", effect ? [effect] : [], context);
       if (effect) {
         await ledger.run(effect, () => connectedEvents.delete(destination, block));
       }
@@ -863,6 +1045,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       context: MutationContext,
       input: DeleteEventInput = {},
     ): Promise<CalendarEventMutationRevision> {
+      requireAgentMutationRevisions(context, input, [
+        "expectedBlockUpdatedAtById",
+        "expectedUpdatedAt",
+      ]);
       const before = await findActiveEvent(context.principal.userId, id);
       requireSourceEvent(before);
       assertExpectedUpdatedAt(before, input.expectedUpdatedAt);
@@ -885,10 +1071,14 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       }
       const sourceEffect =
         calendar.provider === "local" ? null : providerEffect("delete", calendar, before, "source");
-      const ledger = createCalendarProviderEffectLedger("delete_event", [
-        ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
-        ...(sourceEffect ? [sourceEffect] : []),
-      ]);
+      const ledger = providerLedger(
+        "delete_event",
+        [
+          ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
+          ...(sourceEffect ? [sourceEffect] : []),
+        ],
+        context,
+      );
       for (const { block, destination, effect } of blockTargets) {
         if (effect) {
           await ledger.run(effect, () => connectedEvents.delete(destination, block));
@@ -899,6 +1089,8 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       }
       return ledger.commit(() =>
         db.transaction(async (transaction) => {
+          await requireCurrentRevision(transaction, before, false);
+          await requireCurrentBlockSet(transaction, before, blocks, false);
           const deletedAt = now();
           const after = requireRevisionWrite(
             (
@@ -952,7 +1144,13 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         .select({ account: calendarAccounts, calendar: calendars })
         .from(calendars)
         .innerJoin(calendarAccounts, eq(calendarAccounts.id, calendars.accountId))
-        .where(and(eq(calendars.userId, userId), isNull(calendars.deletedAt)))
+        .where(
+          and(
+            eq(calendars.userId, userId),
+            eq(calendarAccounts.calendarEnabled, true),
+            isNull(calendars.deletedAt),
+          ),
+        )
         .orderBy(
           desc(calendars.isPrimary),
           desc(calendars.isWritable),
@@ -1094,6 +1292,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       context: MutationContext,
       input: RestoreEventInput = {},
     ): Promise<CalendarEvent> {
+      requireAgentMutationRevisions(context, input, [
+        "expectedBlockUpdatedAtById",
+        "expectedUpdatedAt",
+      ]);
       const [before] = await db
         .select()
         .from(calendarEvents)
@@ -1139,10 +1341,14 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       }
       const sourceEffect =
         calendar.provider === "local" ? null : providerEffect("create", calendar, before, "source");
-      const ledger = createCalendarProviderEffectLedger("restore_event", [
-        ...(sourceEffect ? [sourceEffect] : []),
-        ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
-      ]);
+      const ledger = providerLedger(
+        "restore_event",
+        [
+          ...(sourceEffect ? [sourceEffect] : []),
+          ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
+        ],
+        context,
+      );
       const remote =
         sourceEffect !== null
           ? await ledger.run(sourceEffect, () =>
@@ -1297,6 +1503,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       input: UpdateEventBlockInput,
       context: MutationContext,
     ): Promise<CalendarEvent> {
+      requireAgentMutationRevisions(context, input, [
+        "expectedBlockUpdatedAt",
+        "expectedUpdatedAt",
+      ]);
       const source = await findActiveEvent(context.principal.userId, sourceEventId);
       requireSourceEvent(source);
       assertExpectedUpdatedAt(source, input.expectedUpdatedAt);
@@ -1314,10 +1524,7 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
         destination.provider === "local"
           ? null
           : providerEffect("update", destination, block, "block");
-      const ledger = createCalendarProviderEffectLedger(
-        "update_event_block",
-        effect ? [effect] : [],
-      );
+      const ledger = providerLedger("update_event_block", effect ? [effect] : [], context);
       const remote =
         effect !== null
           ? await ledger.run(effect, () => connectedEvents.update(destination, block, update))
@@ -1370,6 +1577,10 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       input: UpdateEventInput,
       context: MutationContext,
     ): Promise<CalendarEvent> {
+      requireAgentMutationRevisions(context, input, [
+        "expectedBlockUpdatedAtById",
+        "expectedUpdatedAt",
+      ]);
       const before = await findActiveEvent(context.principal.userId, id);
       requireSourceEvent(before);
       const { expectedBlockUpdatedAtById, expectedUpdatedAt, ...changes } = input;
@@ -1398,10 +1609,14 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       }
       const sourceEffect =
         calendar.provider === "local" ? null : providerEffect("update", calendar, before, "source");
-      const ledger = createCalendarProviderEffectLedger("update_event", [
-        ...(sourceEffect ? [sourceEffect] : []),
-        ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
-      ]);
+      const ledger = providerLedger(
+        "update_event",
+        [
+          ...(sourceEffect ? [sourceEffect] : []),
+          ...blockTargets.flatMap(({ effect }) => (effect ? [effect] : [])),
+        ],
+        context,
+      );
       const remote =
         sourceEffect !== null
           ? await ledger.run(sourceEffect, () => connectedEvents.update(calendar, before, changes))
@@ -1449,6 +1664,8 @@ export function createCalendarService({ connectedEvents, db, now }: CalendarServ
       }
       const after = await ledger.commit(() =>
         db.transaction(async (transaction) => {
+          await requireCurrentRevision(transaction, before, false);
+          await requireCurrentBlockSet(transaction, before, blocks, false);
           const updatedAt = now();
           const updated = requireRevisionWrite(
             (

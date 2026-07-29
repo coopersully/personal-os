@@ -20,6 +20,26 @@ const blockEffect: CalendarProviderEffect = {
 };
 
 describe("Calendar provider effect ledger", () => {
+  it("rejects duplicate plans and skipped or repeated provider effects", async () => {
+    expect(() =>
+      createCalendarProviderEffectLedger("duplicate", [sourceEffect, { ...sourceEffect }]),
+    ).toThrow("duplicate effects");
+
+    const skipped = createCalendarProviderEffectLedger("skipped", [sourceEffect]);
+    const commit = vi.fn(async () => "committed");
+    await expect(skipped.commit(commit)).rejects.toThrow("still has pending effects");
+    expect(commit).not.toHaveBeenCalled();
+
+    const repeated = createCalendarProviderEffectLedger("repeated", [sourceEffect]);
+    await repeated.run({ ...sourceEffect }, async () => ({ remoteEventId: "created-source" }));
+    const providerOperation = vi.fn(async () => ({ remoteEventId: "duplicate-source" }));
+    await expect(repeated.run({ ...sourceEffect }, providerOperation)).rejects.toThrow(
+      "unknown or has already been settled",
+    );
+    expect(providerOperation).not.toHaveBeenCalled();
+    await expect(repeated.commit(async () => "committed")).resolves.toBe("committed");
+  });
+
   it("does not replace a provider failure when no effect is known to have completed", async () => {
     const ledger = createCalendarProviderEffectLedger("create_event", [sourceEffect]);
     const error = new Error("Provider rejected the request.");
@@ -55,6 +75,36 @@ describe("Calendar provider effect ledger", () => {
         stage: "credential_persistence",
       },
       message: "Credential persistence failed.",
+    });
+  });
+
+  it("reports an indeterminate first provider effect as unsafe to replay", async () => {
+    const ledger = createCalendarProviderEffectLedger("create_event", [sourceEffect]);
+    await expect(
+      ledger.run(sourceEffect, async () =>
+        Promise.reject(
+          new AppError(
+            "service_unavailable",
+            "The Calendar provider did not confirm whether the event was created.",
+            {
+              effectState: "indeterminate",
+              provider: "google",
+              recovery: "Synchronize Calendar before retrying.",
+            },
+          ),
+        ),
+      ),
+    ).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: {
+        completedEffects: [],
+        indeterminateEffects: [sourceEffect],
+        operation: "create_event",
+        partialEffect: "provider_effect_indeterminate",
+        pendingEffects: [],
+        provider: "google",
+        recovery: "Synchronize Calendar before retrying.",
+      },
     });
   });
 

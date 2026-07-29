@@ -47,6 +47,7 @@ export function createAssistantService({
     sourceIds: string[],
     status: UpsertDomainProfileInput["status"],
     actorType: Principal["actorType"],
+    preferences: UpsertDomainProfileInput["preferences"],
   ) => Promise<void>;
 }) {
   async function findProfile(userId: string, domain: AssistantDomain) {
@@ -154,6 +155,7 @@ export function createAssistantService({
             input.sourceContexts.map((source) => source.sourceId),
             input.status,
             context.principal.actorType,
+            input.preferences,
           );
           const [existing] = await transaction
             .select()
@@ -277,9 +279,8 @@ export function createAssistantService({
         );
       }
       if (
-        input.domain === "calendar" &&
-        (input.relatedEntityType === "calendar_event" ||
-          input.source?.sourceType === "calendar_event")
+        input.relatedEntityType === "calendar_event" ||
+        input.source?.sourceType === "calendar_event"
       ) {
         throw new AppError(
           "invalid_request",

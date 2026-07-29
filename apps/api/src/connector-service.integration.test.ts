@@ -2177,6 +2177,75 @@ describe.sequential("connector service", () => {
       mail: false,
     });
     await service.syncAccount(userId, calendarOnly.accountId);
+    const [calendarOnlyDestination] = await database.db
+      .select()
+      .from(calendars)
+      .where(eq(calendars.accountId, calendarOnly.accountId));
+    if (!calendarOnlyDestination) throw new Error("Calendar-only destination is missing.");
+    const [calendarOnlyProfile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "calendar",
+        instructions: [],
+        objective: "Use the iCloud calendar.",
+        preferences: {
+          afterBufferMinutes: 0,
+          automaticEventCreation: false,
+          automaticEventEvidence: [],
+          beforeBufferMinutes: 0,
+          busyBlockPrivacy: "busy",
+          defaultCalendarId: calendarOnlyDestination.id,
+          defaultTimezone: "UTC",
+        },
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "iCloud commitments",
+            sourceId: calendarOnlyDestination.id,
+            sourceLabel: calendarOnlyDestination.name,
+          },
+        ],
+        status: "active",
+        summary: "Use iCloud.",
+        userId,
+      })
+      .returning();
+    if (!calendarOnlyProfile) throw new Error("Calendar-only profile is missing.");
+    await service.connectICloud(
+      userId,
+      {
+        appSpecificPassword: "calendar-disabled",
+        calendar: false,
+        email: "calendar-only@icloud.com",
+        mail: true,
+      },
+      "disable-icloud-calendar",
+    );
+    await expect(
+      database.db
+        .select()
+        .from(domainProfiles)
+        .where(eq(domainProfiles.id, calendarOnlyProfile.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({ sourceContexts: [], status: "draft", version: 2 }),
+    ]);
+    await expect(
+      database.db.select().from(calendars).where(eq(calendars.id, calendarOnlyDestination.id)),
+    ).resolves.toEqual([expect.objectContaining({ deletedAt: timestamp })]);
+    await expect(
+      service.eventGateway.create(calendarOnlyDestination, {
+        allDay: false,
+        calendarId: calendarOnlyDestination.id,
+        endsAt: "2026-07-13T14:00:00.000Z",
+        location: null,
+        notes: null,
+        startsAt: "2026-07-13T13:00:00.000Z",
+        timezone: "UTC",
+        title: "Disabled Calendar write",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await database.db.delete(domainProfiles).where(eq(domainProfiles.id, calendarOnlyProfile.id));
   });
 
   it("keeps a failed iCloud bootstrap available for retry", async () => {
@@ -2408,6 +2477,20 @@ describe.sequential("connector service", () => {
       .from(calendars)
       .where(eq(calendars.remoteCalendarId, "remote-primary"));
     if (!calendar) throw new Error("Google calendar fixture is missing.");
+    const newlyRefreshedCredentials = {
+      ...rotatedCredentials,
+      accessToken: "access-credential-failure",
+      expiresAt: "2026-07-13T15:00:00.000Z",
+    };
+    vi.mocked(google.createEvent).mockResolvedValueOnce({
+      credentials: newlyRefreshedCredentials,
+      value: remoteEvent("created-remote", "etag-created", "Created remotely"),
+    });
+    vi.mocked(google.updateEvent).mockResolvedValueOnce({
+      credentials: newlyRefreshedCredentials,
+      value: remoteEvent("updated-remote", "etag-updated", "Updated remotely"),
+    });
+    vi.mocked(google.deleteEvent).mockResolvedValueOnce(newlyRefreshedCredentials);
     await database.db.execute(sql`
       CREATE FUNCTION reject_calendar_credential_update() RETURNS trigger AS $$
       BEGIN
@@ -2475,6 +2558,56 @@ describe.sequential("connector service", () => {
       );
       await database.db.execute(sql`DROP FUNCTION reject_calendar_credential_update()`);
     }
+  });
+
+  it("distinguishes indeterminate provider transport failures from definitive rejections", async () => {
+    const [calendar] = await database.db
+      .select()
+      .from(calendars)
+      .where(eq(calendars.remoteCalendarId, "remote-primary"));
+    const [event] = await database.db
+      .select()
+      .from(calendarEvents)
+      .where(eq(calendarEvents.calendarId, calendar?.id ?? crypto.randomUUID()))
+      .limit(1);
+    if (!calendar || !event) throw new Error("Google Calendar mutation fixtures are missing.");
+    vi.mocked(google.createEvent).mockRejectedValueOnce(
+      new DOMException("Provider request timed out.", "AbortError"),
+    );
+    await expect(
+      service.eventGateway.create(calendar, {
+        allDay: false,
+        calendarId: calendar.id,
+        endsAt: "2026-07-13T14:00:00.000Z",
+        location: null,
+        notes: null,
+        startsAt: "2026-07-13T13:00:00.000Z",
+        timezone: "UTC",
+        title: "Unknown provider result",
+      }),
+    ).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: {
+        effectState: "indeterminate",
+        provider: "google",
+        recovery: expect.stringContaining("Synchronize Calendar before retrying"),
+      },
+    });
+
+    vi.mocked(google.updateEvent).mockRejectedValueOnce(
+      new ConnectorError("Provider precondition failed.", 412),
+    );
+    await expect(
+      service.eventGateway.update(calendar, event, { title: "Rejected provider update" }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      details: {
+        effectState: "rejected",
+        provider: "google",
+        providerStatus: 412,
+        remoteEventId: event.remoteEventId,
+      },
+    });
   });
 
   it("reconciles incremental and full sync changes with an audit trail", async () => {
@@ -3661,6 +3794,148 @@ describe.sequential("connector service", () => {
     );
   });
 
+  it("demotes an active Calendar profile when its default destination becomes read-only", async () => {
+    const [profileUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Calendar capability",
+        email: "calendar-capability@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!profileUser) throw new Error("Calendar capability user was not created.");
+    vi.mocked(google.getProfile).mockResolvedValueOnce({
+      credentials,
+      value: {
+        email: "calendar-capability@example.com",
+        id: "calendar-capability-provider",
+        name: "Calendar Capability",
+      },
+    });
+    const url = await service.startGoogleAuthorization(profileUser.id);
+    await service.completeGoogleAuthorization(
+      String(new URL(url).searchParams.get("state")),
+      "calendar-capability-code",
+    );
+    const [account] = await service.listAccounts(profileUser.id);
+    if (!account) throw new Error("Calendar capability account was not created.");
+    vi.mocked(google.listCalendars).mockResolvedValueOnce({
+      credentials,
+      value: [
+        {
+          accessRole: "owner",
+          color: null,
+          id: "calendar-capability-primary",
+          name: "Capability primary",
+          primary: true,
+          selected: true,
+          timezone: "UTC",
+          writable: true,
+        },
+      ],
+    });
+    await service.syncAccount(profileUser.id, account.id);
+    const [defaultCalendar] = await database.db
+      .select()
+      .from(calendars)
+      .where(eq(calendars.accountId, account.id));
+    if (!defaultCalendar) throw new Error("Calendar capability destination was not created.");
+    const [profile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "calendar",
+        instructions: [],
+        objective: "Use the connected destination.",
+        preferences: {
+          afterBufferMinutes: 0,
+          automaticEventCreation: false,
+          automaticEventEvidence: [],
+          beforeBufferMinutes: 0,
+          busyBlockPrivacy: "busy",
+          defaultCalendarId: defaultCalendar.id,
+          defaultTimezone: "UTC",
+        },
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Connected commitments",
+            sourceId: defaultCalendar.id,
+            sourceLabel: defaultCalendar.name,
+          },
+        ],
+        status: "active",
+        summary: "Use the connected destination.",
+        userId: profileUser.id,
+      })
+      .returning();
+    if (!profile) throw new Error("Calendar capability profile was not created.");
+    vi.mocked(google.listCalendars).mockResolvedValueOnce({
+      credentials,
+      value: [
+        {
+          accessRole: "reader",
+          color: null,
+          id: "calendar-capability-primary",
+          name: "Capability primary",
+          primary: true,
+          selected: true,
+          timezone: "UTC",
+          writable: false,
+        },
+      ],
+    });
+    await service.syncAccount(profileUser.id, account.id);
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.id, profile.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        sourceContexts: profile.sourceContexts,
+        status: "draft",
+        version: 2,
+      }),
+    ]);
+
+    vi.mocked(google.listCalendars).mockResolvedValueOnce({
+      credentials,
+      value: [
+        {
+          accessRole: "owner",
+          color: null,
+          id: "calendar-capability-primary",
+          name: "Capability primary",
+          primary: true,
+          selected: true,
+          timezone: "UTC",
+          writable: true,
+        },
+      ],
+    });
+    await service.syncAccount(profileUser.id, account.id);
+    await database.db
+      .update(domainProfiles)
+      .set({ status: "active", version: 3 })
+      .where(eq(domainProfiles.id, profile.id));
+    vi.mocked(google.listCalendars).mockResolvedValueOnce({
+      credentials,
+      value: [],
+    });
+    await service.syncAccount(profileUser.id, account.id);
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.id, profile.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        sourceContexts: [],
+        status: "draft",
+        version: 4,
+      }),
+    ]);
+    await expect(
+      database.db.select().from(calendars).where(eq(calendars.id, defaultCalendar.id)),
+    ).resolves.toEqual([expect.objectContaining({ deletedAt: timestamp })]);
+  });
+
   it("rejects unknown accounts and only disconnects external accounts", async () => {
     await expect(service.syncAccount(userId, crypto.randomUUID())).rejects.toMatchObject({
       code: "not_found",
@@ -3685,10 +3960,56 @@ describe.sequential("connector service", () => {
         ),
       );
     if (!external) throw new Error("External account fixture is missing.");
+    const [defaultCalendar] = await database.db
+      .select()
+      .from(calendars)
+      .where(
+        and(eq(calendars.accountId, external.id), eq(calendars.remoteCalendarId, "remote-primary")),
+      );
+    if (!defaultCalendar) throw new Error("External Calendar profile fixture is missing.");
+    const [calendarProfile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "calendar",
+        instructions: ["Keep connected commitments accurate."],
+        objective: "Use the connected primary calendar.",
+        preferences: {
+          afterBufferMinutes: 0,
+          automaticEventCreation: false,
+          automaticEventEvidence: [],
+          beforeBufferMinutes: 0,
+          busyBlockPrivacy: "busy",
+          defaultCalendarId: defaultCalendar.id,
+          defaultTimezone: "UTC",
+        },
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Connected commitments",
+            sourceId: defaultCalendar.id,
+            sourceLabel: defaultCalendar.name,
+          },
+        ],
+        status: "active",
+        summary: "Connected primary is the default.",
+        userId,
+      })
+      .returning();
+    if (!calendarProfile) throw new Error("Calendar profile fixture was not created.");
     await expect(service.disconnect(userId, external.id)).resolves.toBeUndefined();
     expect((await service.listAccounts(userId)).some((value) => value.id === external.id)).toBe(
       false,
     );
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.id, calendarProfile.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        sourceContexts: [],
+        status: "draft",
+        version: 2,
+      }),
+    ]);
   });
 
   it("does not mask unexpected Google authorization failures", async () => {

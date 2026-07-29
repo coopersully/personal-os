@@ -64,6 +64,7 @@ const proposal = {
 describe("Calendar routes", () => {
   it("keeps commitment intake preview-only and read-scoped", async () => {
     const app = new Hono<AppEnv>();
+    let actorType: "agent" | "user" = "agent";
     let scopes = new Set<AccessScope>(["calendar:read"]);
     const calendarService = {
       createEvent: vi.fn(async () => ({ id })),
@@ -86,7 +87,7 @@ describe("Calendar routes", () => {
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
-        actorType: "agent",
+        actorType,
         scopes,
         userId: id,
       });
@@ -162,6 +163,7 @@ describe("Calendar routes", () => {
       { expectedBlockUpdatedAt: now, expectedUpdatedAt: now },
     );
 
+    actorType = "user";
     const legacyDeleteResponse = await request(`/v1/events/${id}`, { method: "DELETE" });
     expect(legacyDeleteResponse.status).toBe(204);
     expect(calendarService.deleteEvent).toHaveBeenCalledWith(

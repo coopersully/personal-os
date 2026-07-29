@@ -137,9 +137,12 @@ Mail-to-Calendar wiring are not part of this Calendar contract. The `calendar:wr
 independent broad authority for direct event mutations; proposal-only agents should not receive
 that scope. When one or more provider event mutations finish before a later provider or local
 projection/audit failure, the API returns a reconciliation ledger with the Calendar operation,
-completed and pending provider effects, provider/calendar/remote identities, and sync-before-retry
-recovery. These failures are not safe to replay blindly. Agent mutations first read the event and
-then pass its `updatedAt` as the local compare-and-swap revision. Compound mutations also pass the
+completed, indeterminate, and pending provider effects, provider/calendar/remote identities, and
+sync-before-retry recovery. An indeterminate effect means the provider did not confirm whether the
+mutation completed. The API emits a redacted structured reconciliation log keyed by request ID;
+the response and log are recovery evidence, not durable idempotency authority. These failures are
+not safe to replay blindly. Agent mutations first read the event and then pass its `updatedAt` as
+the local compare-and-swap revision. Compound mutations also pass the
 exact event-ID-to-`updatedAt` map for every linked block because those blocks can change
 independently. `source.revision` is provider provenance (the provider ETag when present, otherwise
 the local `updatedAt`) and is not a substitute for the mutation fields. Delete returns the deleted

@@ -8,7 +8,7 @@ import {
   upsertCalendarAttentionItemInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
-import { result } from "../tool-result.js";
+import { apiResult } from "../tool-result.js";
 
 const id = idSchema.describe("ilo object identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
@@ -31,7 +31,7 @@ export function registerCalendarListTools(server: McpServer, api: PersonalOsApiC
       inputSchema: {},
       title: "List calendars",
     },
-    async () => result(await api.listCalendars()),
+    async () => apiResult(() => api.listCalendars()),
   );
 }
 
@@ -56,7 +56,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       title: "List calendar events",
     },
-    async (input) => result(await api.listEvents(input)),
+    async (input) => apiResult(() => api.listEvents(input)),
   );
   server.registerTool(
     "get_event",
@@ -72,7 +72,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       inputSchema: { id },
       title: "Get calendar event",
     },
-    async (input) => result(await api.getEvent(input.id)),
+    async (input) => apiResult(() => api.getEvent(input.id)),
   );
   server.registerTool(
     "create_event",
@@ -100,7 +100,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       title: "Create calendar event",
     },
-    async (input) => result(await api.createEvent(input)),
+    async (input) => apiResult(() => api.createEvent(input)),
   );
   server.registerTool(
     "update_event",
@@ -134,7 +134,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       title: "Update calendar event",
     },
-    async ({ id: eventId, ...input }) => result(await api.updateEvent(eventId, input)),
+    async ({ id: eventId, ...input }) => apiResult(() => api.updateEvent(eventId, input)),
   );
   server.registerTool(
     "block_event",
@@ -157,7 +157,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       title: "Block event on another calendar",
     },
-    async ({ id: eventId, ...input }) => result(await api.createEventBlock(eventId, input)),
+    async ({ id: eventId, ...input }) => apiResult(() => api.createEventBlock(eventId, input)),
   );
   server.registerTool(
     "set_event_block_privacy",
@@ -184,7 +184,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       title: "Change event block privacy",
     },
     async ({ blockId, id: eventId, ...input }) =>
-      result(await api.updateEventBlock(eventId, blockId, input)),
+      apiResult(() => api.updateEventBlock(eventId, blockId, input)),
   );
   server.registerTool(
     "unblock_event",
@@ -209,7 +209,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       title: "Unblock event calendar",
     },
     async ({ blockId, id: eventId, ...input }) =>
-      result(await api.deleteEventBlock(eventId, blockId, input)),
+      apiResult(() => api.deleteEventBlock(eventId, blockId, input)),
   );
   server.registerTool(
     "delete_event",
@@ -231,7 +231,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       title: "Delete calendar event",
     },
-    async ({ id: eventId, ...input }) => result(await api.trashEvent(eventId, input)),
+    async ({ id: eventId, ...input }) => apiResult(() => api.trashEvent(eventId, input)),
   );
   server.registerTool(
     "restore_event",
@@ -251,7 +251,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       title: "Restore calendar event",
     },
-    async ({ id: eventId, ...input }) => result(await api.restoreEvent(eventId, input)),
+    async ({ id: eventId, ...input }) => apiResult(() => api.restoreEvent(eventId, input)),
   );
   server.registerTool(
     "create_calendar_attention_item",
@@ -270,7 +270,8 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       title: "Create Calendar attention item",
     },
-    async ({ eventId, ...input }) => result(await api.upsertCalendarAttentionItem(eventId, input)),
+    async ({ eventId, ...input }) =>
+      apiResult(() => api.upsertCalendarAttentionItem(eventId, input)),
   );
 
   server.registerTool(
@@ -294,6 +295,6 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       title: "Preview evidence-based Calendar commitment",
     },
-    async (input) => result(await api.previewCalendarCommitment(input)),
+    async (input) => apiResult(() => api.previewCalendarCommitment(input)),
   );
 }

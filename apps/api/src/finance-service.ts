@@ -1012,7 +1012,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
     return {
       accountId: account.id,
       provider: account.provider === "plaid" ? "plaid" : "local",
-      remoteId: account.provider === "plaid" ? (item.providerTransactionId ?? item.id) : item.id,
+      remoteId: account.provider === "plaid" ? item.providerTransactionId : item.id,
       revision: item.updatedAt.toISOString(),
       sourceType: "finance_transaction",
     };

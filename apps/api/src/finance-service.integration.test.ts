@@ -812,7 +812,7 @@ describe.sequential("finance service", () => {
       source: {
         accountId: plaidAccount.id,
         provider: "plaid",
-        remoteId: plaidTransaction.id,
+        remoteId: null,
         revision: plaidTransaction.updatedAt.toISOString(),
         sourceType: "finance_transaction",
       },

@@ -23,8 +23,16 @@ export type AppDependencies = {
   x?: XConnector;
 };
 
+export type CalendarProviderReconciliationLog = {
+  actorType: Extract<ActorType, "agent" | "user">;
+  code: string;
+  operation: string;
+};
+
 export type RequestLog = {
+  calendarProviderReconciliation?: CalendarProviderReconciliationLog;
   durationMs: number;
+  event: "calendar_provider_reconciliation" | "request";
   method: string;
   path: string;
   requestId: string;

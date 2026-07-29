@@ -36,6 +36,7 @@ import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
+import { calendarProviderReconciliationLog } from "./calendar-provider-log.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createConnectorService } from "./connector-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
@@ -182,6 +183,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     connectedEvents: connectors.eventGateway,
     db: dependencies.db,
     now,
+    observeProviderFailure: (entry) =>
+      dependencies.log?.({
+        calendarProviderReconciliation: calendarProviderReconciliationLog(entry),
+        durationMs: 0,
+        event: "calendar_provider_reconciliation",
+        method: "CALENDAR",
+        path: `/internal/calendar/provider-effects/${entry.operation}`,
+        requestId: entry.requestId,
+        status: entry.status,
+      }),
   });
   const automations = createAutomationService({
     db: dependencies.db,
@@ -213,9 +224,20 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     now,
     profileRequiresApproval: (domain) => domain === "finances",
-    validateProfileSources: async (transaction, domain, userId, sourceIds, status, actorType) => {
+    validateProfileSources: async (
+      transaction,
+      domain,
+      userId,
+      sourceIds,
+      status,
+      actorType,
+      preferences,
+    ) => {
       if (domain === "mail") {
         await mail.validateProfileSources(transaction, userId, sourceIds);
+      }
+      if (domain === "calendar") {
+        await calendar.validateProfileSources(transaction, userId, sourceIds, status, preferences);
       }
       if (domain === "finances") {
         await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
@@ -262,6 +284,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     } finally {
       dependencies.log?.({
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+        event: "request",
         method: context.req.method,
         path: context.req.path,
         requestId: context.get("requestId"),

@@ -76,6 +76,30 @@ const event: CalendarEvent = {
   createdAt: now,
   updatedAt: now,
 };
+const commitmentCandidate = {
+  allDay: false,
+  buffer: { afterMinutes: 15, beforeMinutes: 15 },
+  calendarId: id,
+  endsAt: "2026-07-13T13:00:00.000Z",
+  evidence: {
+    kind: "booking" as const,
+    source: {
+      accountId,
+      provider: "google" as const,
+      remoteId: "booking-1",
+      revision: "v1",
+      sourceType: "mail_thread" as const,
+    },
+    summary: "Confirmed reservation.",
+  },
+  flexibility: "hard" as const,
+  location: null,
+  notes: null,
+  startsAt: now,
+  timezone: "UTC",
+  title: "Reservation",
+  visibility: "private" as const,
+};
 const mailbox: Mailbox = {
   accountId,
   id,
@@ -478,12 +502,36 @@ function mockApi() {
     snoozeMailThread: vi.fn(async () => undefined),
     sendMail: vi.fn(async () => undefined),
     listEvents: vi.fn(async () => [event]),
+    getEvent: vi.fn(async () => event),
     createEvent: vi.fn(async () => event),
     createEventBlock: vi.fn(async () => event),
+    previewCalendarCommitment: vi.fn(async () => ({
+      authority: "caller_supplied_unverified" as const,
+      candidate: commitmentCandidate,
+      destination: calendar,
+      possibleDuplicateEventId: null,
+      fingerprint: "a".repeat(64),
+      policy: {
+        canApply: false,
+        effectivePolicy: "preview" as const,
+        reasons: ["Caller-supplied evidence is not authority."],
+        requestedPolicy: "approved_rule" as const,
+        requiresInteractiveApproval: true,
+      },
+      providerEffect: "local_write" as const,
+      warnings: [],
+    })),
     updateEvent: vi.fn(async () => event),
     updateEventBlock: vi.fn(async () => event),
     deleteEvent: vi.fn(async () => undefined),
     deleteEventBlock: vi.fn(async () => event),
+    restoreEvent: vi.fn(async () => event),
+    trashEvent: vi.fn(async () => ({
+      blockUpdatedAtById: {},
+      eventId: id,
+      updatedAt: now,
+    })),
+    upsertCalendarAttentionItem: vi.fn(async () => attentionItem),
     listActivity: vi.fn(async () => [
       {
         id,
@@ -566,12 +614,16 @@ describe("ilo MCP server", () => {
       "create_mail_rule",
       "update_mail_rule",
       "list_events",
+      "get_event",
       "create_event",
       "update_event",
       "block_event",
       "set_event_block_privacy",
       "unblock_event",
       "delete_event",
+      "restore_event",
+      "create_calendar_attention_item",
+      "preview_calendar_commitment",
       "list_goals",
       "create_goal",
       "update_goal",
@@ -680,6 +732,138 @@ describe("ilo MCP server", () => {
         false,
       );
     }
+    const calendarAnnotations = new Map(
+      tools.tools
+        .filter((tool) =>
+          [
+            "list_calendars",
+            "list_events",
+            "get_event",
+            "create_event",
+            "update_event",
+            "block_event",
+            "set_event_block_privacy",
+            "unblock_event",
+            "delete_event",
+            "restore_event",
+            "create_calendar_attention_item",
+            "preview_calendar_commitment",
+          ].includes(tool.name),
+        )
+        .map((tool) => [tool.name, tool.annotations]),
+    );
+    expect(calendarAnnotations).toEqual(
+      new Map([
+        [
+          "list_calendars",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "list_events",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "get_event",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "create_event",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "update_event",
+          {
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "block_event",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "set_event_block_privacy",
+          {
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "unblock_event",
+          {
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "delete_event",
+          {
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "restore_event",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "create_calendar_attention_item",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: false,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "preview_calendar_commitment",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+      ]),
+    );
 
     await client.callTool({ name: "get_agent_setup_status", arguments: {} });
     await client.callTool({ name: "get_domain_profile", arguments: { domain: "mail" } });
@@ -871,6 +1055,7 @@ describe("ilo MCP server", () => {
       name: "list_events",
       arguments: { from: now, to: event.endsAt, calendarIds: [id], query: "Focus" },
     });
+    await client.callTool({ name: "get_event", arguments: { id } });
     await client.callTool({
       name: "create_event",
       arguments: {
@@ -883,19 +1068,64 @@ describe("ilo MCP server", () => {
     });
     await client.callTool({
       name: "update_event",
-      arguments: { id, title: "Changed", notes: null, location: null, allDay: true },
+      arguments: {
+        allDay: true,
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: now,
+        id,
+        location: null,
+        notes: null,
+        title: "Changed",
+      },
     });
     await client.callTool({
       name: "block_event",
-      arguments: { calendarId: id, id },
+      arguments: { calendarId: id, expectedUpdatedAt: now, id },
     });
     await client.callTool({
       name: "set_event_block_privacy",
-      arguments: { blockId: id, id, mode: "details" },
+      arguments: {
+        blockId: id,
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+        id,
+        mode: "details",
+      },
     });
-    await client.callTool({ name: "unblock_event", arguments: { blockId: id, id } });
-    const deletedEvent = await client.callTool({ name: "delete_event", arguments: { id } });
-    expect(deletedEvent.content).toEqual([{ type: "text", text: "Event moved to trash." }]);
+    await client.callTool({
+      name: "unblock_event",
+      arguments: {
+        blockId: id,
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+        id,
+      },
+    });
+    const deletedEvent = await client.callTool({
+      name: "delete_event",
+      arguments: { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now, id },
+    });
+    expect(deletedEvent.structuredContent).toEqual({
+      result: { blockUpdatedAtById: {}, eventId: id, updatedAt: now },
+    });
+    await client.callTool({
+      name: "restore_event",
+      arguments: { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now, id },
+    });
+    await client.callTool({
+      name: "create_calendar_attention_item",
+      arguments: {
+        eventId: id,
+        importance: "high",
+        kind: "upcoming",
+        summary: "Prepare the agenda.",
+        title: "Upcoming focus",
+      },
+    });
+    await client.callTool({
+      name: "preview_calendar_commitment",
+      arguments: { candidate: commitmentCandidate, requestedPolicy: "approved_rule" },
+    });
     await client.callTool({ name: "list_activity", arguments: {} });
     await client.callTool({ name: "get_daily_brief", arguments: {} });
     await client.callTool({ name: "list_automations", arguments: {} });
@@ -923,11 +1153,46 @@ describe("ilo MCP server", () => {
     expect(api.completeTask).toHaveBeenCalledWith(id, true);
     expect(api.deleteTask).toHaveBeenCalledWith(id);
     expect(api.createEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ allDay: false, notes: null, location: null }),
+      expect.objectContaining({
+        allDay: false,
+        location: null,
+        notes: null,
+        visibility: "default",
+      }),
     );
-    expect(api.createEventBlock).toHaveBeenCalledWith(id, { calendarId: id, mode: "busy" });
-    expect(api.updateEventBlock).toHaveBeenCalledWith(id, id, { mode: "details" });
-    expect(api.deleteEventBlock).toHaveBeenCalledWith(id, id);
+    expect(api.getEvent).toHaveBeenCalledWith(id);
+    expect(api.createEventBlock).toHaveBeenCalledWith(id, {
+      calendarId: id,
+      expectedUpdatedAt: now,
+      mode: "busy",
+    });
+    expect(api.updateEventBlock).toHaveBeenCalledWith(id, id, {
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+      mode: "details",
+    });
+    expect(api.deleteEventBlock).toHaveBeenCalledWith(id, id, {
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+    });
+    expect(api.trashEvent).toHaveBeenCalledWith(id, {
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    expect(api.restoreEvent).toHaveBeenCalledWith(id, {
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    expect(api.upsertCalendarAttentionItem).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ kind: "upcoming", summary: "Prepare the agenda." }),
+    );
+    expect(api.previewCalendarCommitment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidate: commitmentCandidate,
+        requestedPolicy: "approved_rule",
+      }),
+    );
     expect(api.listActivity).toHaveBeenCalledWith(50);
     expect(api.runAutomation).toHaveBeenCalledWith(id, true);
     expect(api.proposeFinanceCategorizations).toHaveBeenCalledWith({
@@ -1141,6 +1406,90 @@ describe("ilo MCP server", () => {
       message:
         "The provider update may have committed, but Ilo could not persist rotated credentials.",
       requestId: "mail-request-123",
+      status: 502,
+    };
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: { error: expectedError },
+    });
+    expect(response.content).toEqual([
+      { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
+    ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves structured Calendar API partial-effect errors at the tool boundary", async () => {
+    const api = mockApi();
+    api.updateEvent.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "provider_partial_effect",
+        details: {
+          completedEffects: [
+            {
+              action: "update",
+              calendarId: id,
+              eventId: id,
+              provider: "google",
+              remoteEventId: "remote-event-1",
+              role: "source",
+            },
+          ],
+          operation: "update_event",
+          partialEffect: true,
+          pendingEffects: [],
+          provider: "google",
+          recovery: "Synchronize Calendar before retrying.",
+          remoteEventId: "remote-event-1",
+        },
+        message:
+          "The provider event changed, but Ilo could not finish its local Calendar projection.",
+        requestId: "calendar-request-123",
+        status: 502,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      now: () => new Date("2026-07-13T16:00:00.000Z"),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: {
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: now,
+        id,
+        title: "Updated focus",
+      },
+      name: "update_event",
+    });
+    const expectedError = {
+      code: "provider_partial_effect",
+      details: {
+        completedEffects: [
+          {
+            action: "update",
+            calendarId: id,
+            eventId: id,
+            provider: "google",
+            remoteEventId: "remote-event-1",
+            role: "source",
+          },
+        ],
+        operation: "update_event",
+        partialEffect: true,
+        pendingEffects: [],
+        provider: "google",
+        recovery: "Synchronize Calendar before retrying.",
+        remoteEventId: "remote-event-1",
+      },
+      message:
+        "The provider event changed, but Ilo could not finish its local Calendar projection.",
+      requestId: "calendar-request-123",
       status: 502,
     };
     expect(response).toMatchObject({

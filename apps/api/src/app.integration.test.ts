@@ -1999,9 +1999,18 @@ describe.sequential("ilo API", () => {
         )
       ).events,
     ).toHaveLength(1);
+    expect(
+      (
+        await request(`/v1/events/${createdEvent.id}`, {
+          auth: "agent",
+          method: "PATCH",
+          body: { title: "Stale agent update" },
+        })
+      ).status,
+    ).toBe(400);
     const changedEvent = await payload(
       await request(`/v1/events/${createdEvent.id}`, {
-        auth: "agent",
+        auth: "session",
         method: "PATCH",
         body: {
           title: "Updated review",
@@ -2040,7 +2049,7 @@ describe.sequential("ilo API", () => {
     const blockedEvent = (
       await payload(
         await request(`/v1/events/${createdEvent.id}/blocks`, {
-          auth: "agent",
+          auth: "session",
           body: { calendarId: personal.id },
         }),
       )
@@ -2084,7 +2093,7 @@ describe.sequential("ilo API", () => {
       (
         await payload(
           await request(`/v1/events/${createdEvent.id}/blocks/${existingBusy.id}`, {
-            auth: "agent",
+            auth: "session",
             method: "PATCH",
             body: { mode: "details" },
           }),
@@ -2092,7 +2101,7 @@ describe.sequential("ilo API", () => {
       ).event.blocks[0].mode,
     ).toBe("details");
     await request(`/v1/events/${createdEvent.id}`, {
-      auth: "agent",
+      auth: "session",
       method: "PATCH",
       body: { title: "Updated linked review" },
     });
@@ -2102,14 +2111,14 @@ describe.sequential("ilo API", () => {
     expect(
       (
         await request(`/v1/events/${existingBusy.id}`, {
-          auth: "agent",
+          auth: "session",
           method: "PATCH",
           body: { title: "Detached" },
         })
       ).status,
     ).toBe(409);
     await request(`/v1/events/${createdEvent.id}/blocks/${existingBusy.id}`, {
-      auth: "agent",
+      auth: "session",
       method: "PATCH",
       body: { mode: "busy" },
     });
@@ -2120,18 +2129,22 @@ describe.sequential("ilo API", () => {
     expect(
       (
         await request(`/v1/events/${createdEvent.id}`, {
-          auth: "agent",
+          auth: "session",
           method: "PATCH",
           body: { endsAt: "2026-07-13T12:00:00.000Z" },
         })
       ).status,
     ).toBe(400);
     expect(
-      (await request(`/v1/events/${createdEvent.id}`, { auth: "agent", method: "DELETE" })).status,
+      (await request(`/v1/events/${createdEvent.id}`, { auth: "session", method: "DELETE" }))
+        .status,
     ).toBe(204);
     const restoredEvent = (
       await payload(
-        await request(`/v1/events/${createdEvent.id}/restore`, { auth: "agent", method: "POST" }),
+        await request(`/v1/events/${createdEvent.id}/restore`, {
+          auth: "session",
+          method: "POST",
+        }),
       )
     ).event;
     expect(restoredEvent).toMatchObject({
@@ -2142,7 +2155,7 @@ describe.sequential("ilo API", () => {
       (
         await payload(
           await request(`/v1/events/${createdEvent.id}/blocks/${existingBusy.id}`, {
-            auth: "agent",
+            auth: "session",
             method: "DELETE",
           }),
         )
@@ -2151,18 +2164,18 @@ describe.sequential("ilo API", () => {
     const detailedBlock = (
       await payload(
         await request(`/v1/events/${createdEvent.id}/blocks`, {
-          auth: "agent",
+          auth: "session",
           body: { calendarId: personal.id, mode: "details" },
         }),
       )
     ).event.blocks[0];
     expect(detailedBlock).toMatchObject({ calendarId: personal.id, mode: "details" });
     await request(`/v1/events/${createdEvent.id}/blocks/${detailedBlock.eventId}`, {
-      auth: "agent",
+      auth: "session",
       method: "DELETE",
     });
     expect(
-      (await request(`/v1/events/${createdEvent.id}/restore`, { auth: "agent", method: "POST" }))
+      (await request(`/v1/events/${createdEvent.id}/restore`, { auth: "session", method: "POST" }))
         .status,
     ).toBe(404);
 

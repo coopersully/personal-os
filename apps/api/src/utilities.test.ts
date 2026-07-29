@@ -124,6 +124,30 @@ describe("pagination, errors, and OpenAPI", () => {
     expect(document.openapi).toBe("3.1.0");
     expect(document.servers).toEqual([{ url: "https://api.example.com" }]);
     expect(Object.keys(document.paths)).toContain("/v1/connectors/{id}/sync");
+    expect(document.paths["/v1/calendars/commitments/preview"]).toEqual({
+      post: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Calendar commitment proposal preview" } },
+      },
+    });
+    expect(document.paths["/v1/events/{id}/attention"]).toEqual({
+      put: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Calendar event attention item created or refreshed" } },
+      },
+    });
+    expect(document.paths["/v1/events/{id}/trash"]).toEqual({
+      post: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Event trashed with restorable revisions" } },
+      },
+    });
+    expect(document.paths["/v1/events/{id}/blocks/{blockId}/trash"]).toEqual({
+      post: {
+        security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],
+        responses: { 200: { description: "Linked calendar block removed with revision guards" } },
+      },
+    });
     expect(Object.keys(document.paths)).toEqual(
       expect.arrayContaining(["/v1/goals", "/v1/goals/{id}", "/v1/motives", "/v1/motives/{id}"]),
     );

@@ -42,6 +42,7 @@ import {
 } from "@personal-os/domain";
 import { and, asc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
+import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import { decryptJson, encryptJson, generateToken, hashToken } from "./security.js";
@@ -63,9 +64,64 @@ type AccountRow = typeof calendarAccounts.$inferSelect & {
   encryptedCredentials: NonNullable<typeof calendarAccounts.$inferSelect.encryptedCredentials>;
 };
 type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+type CalendarProviderMutationAction = "create" | "delete" | "update";
 type ExecutableMailRuleAction = MailRuleAction & {
   type: "add_label" | "mark_read" | "star";
 };
+
+function calendarProviderMutationError(
+  error: unknown,
+  action: CalendarProviderMutationAction,
+  calendar: CalendarRow,
+  remoteEventId: string | null,
+): AppError {
+  if (error instanceof AppError) return error;
+  const definitiveStatus =
+    error instanceof ConnectorError && error.status < 500 && error.status !== 408;
+  if (definitiveStatus) {
+    const code =
+      error.status === 401 || error.status === 403
+        ? "forbidden"
+        : error.status === 404
+          ? "not_found"
+          : error.status === 409 || error.status === 412
+            ? "conflict"
+            : error.status === 429
+              ? "rate_limited"
+              : "invalid_request";
+    return new AppError(code, `The Calendar provider rejected the event ${action}.`, {
+      effectState: "rejected",
+      provider: calendar.provider,
+      providerStatus: error.status,
+      recovery: "Review current provider state and synchronize Calendar before retrying.",
+      ...(remoteEventId ? { remoteEventId } : {}),
+    });
+  }
+  return new AppError(
+    "service_unavailable",
+    `The Calendar provider did not confirm whether the event ${action} completed.`,
+    {
+      effectState: "indeterminate",
+      provider: calendar.provider,
+      recovery:
+        "Synchronize Calendar before retrying so Ilo can determine whether the provider mutation completed.",
+      ...(remoteEventId ? { remoteEventId } : {}),
+    },
+  );
+}
+
+async function runCalendarProviderMutation<T>(
+  action: CalendarProviderMutationAction,
+  calendar: CalendarRow,
+  remoteEventId: string | null,
+  operation: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    throw calendarProviderMutationError(error, action, calendar, remoteEventId);
+  }
+}
 
 function providerEventInput(input: CreateEventInput | UpdateEventInput) {
   const {
@@ -77,6 +133,15 @@ function providerEventInput(input: CreateEventInput | UpdateEventInput) {
     ...providerInput
   } = input;
   return providerInput;
+}
+
+function requireCalendarCapability(account: AccountRow): void {
+  if (!account.calendarEnabled) {
+    throw new AppError(
+      "forbidden",
+      "Calendar access is disabled for this connected account. Reconnect Calendar before writing.",
+    );
+  }
 }
 
 export type ConnectedEventGateway = {
@@ -287,21 +352,41 @@ export function createConnectorService({
       if (!calendar.remoteCalendarId) {
         throw new AppError("internal_error", "The connected calendar has no provider identifier.");
       }
+      const remoteCalendarId = calendar.remoteCalendarId;
       const account = await getAccount(calendar.userId, calendar.accountId);
+      requireCalendarCapability(account);
       if (calendar.provider === "google") {
-        const result = await google.createEvent(
-          credentials<GoogleCredentials>(account),
-          calendar.remoteCalendarId,
-          providerEventInput(input) as CreateEventInput,
+        const result = await runCalendarProviderMutation("create", calendar, null, () =>
+          google.createEvent(
+            credentials<GoogleCredentials>(account),
+            remoteCalendarId,
+            providerEventInput(input) as CreateEventInput,
+          ),
         );
-        await saveGoogleCredentials(account.id, result.credentials);
+        try {
+          await saveGoogleCredentials(account.id, result.credentials);
+        } catch {
+          throw new AppError(
+            "service_unavailable",
+            "The provider event was created, but Ilo could not persist refreshed provider credentials.",
+            {
+              partialEffect: "provider_event_created",
+              provider: "google",
+              recovery:
+                "Refresh or synchronize Calendar before retrying; reconnect the account if authorization fails.",
+              remoteEventId: result.value.remoteEventId,
+            },
+          );
+        }
         return result.value;
       }
       if (calendar.provider === "icloud") {
-        return icloud.createEvent(
-          credentials<ICloudCredentials>(account),
-          calendar.remoteCalendarId,
-          providerEventInput(input) as CreateEventInput,
+        return runCalendarProviderMutation("create", calendar, null, () =>
+          icloud.createEvent(
+            credentials<ICloudCredentials>(account),
+            remoteCalendarId,
+            providerEventInput(input) as CreateEventInput,
+          ),
         );
       }
       throw new AppError("invalid_request", "Local calendars do not use a connector.");
@@ -311,22 +396,43 @@ export function createConnectorService({
       if (!calendar.remoteCalendarId || !event.remoteEventId) {
         throw new AppError("internal_error", "The connected event has no provider identifier.");
       }
+      const remoteCalendarId = calendar.remoteCalendarId;
+      const remoteEventId = event.remoteEventId;
       const account = await getAccount(calendar.userId, calendar.accountId);
+      requireCalendarCapability(account);
       if (calendar.provider === "google") {
-        const value = await google.deleteEvent(
-          credentials<GoogleCredentials>(account),
-          calendar.remoteCalendarId,
-          event.remoteEventId,
-          event.remoteEtag,
+        const value = await runCalendarProviderMutation("delete", calendar, remoteEventId, () =>
+          google.deleteEvent(
+            credentials<GoogleCredentials>(account),
+            remoteCalendarId,
+            remoteEventId,
+            event.remoteEtag,
+          ),
         );
-        await saveGoogleCredentials(account.id, value);
+        try {
+          await saveGoogleCredentials(account.id, value);
+        } catch {
+          throw new AppError(
+            "service_unavailable",
+            "The provider event was deleted, but Ilo could not persist refreshed provider credentials.",
+            {
+              partialEffect: "provider_event_deleted",
+              provider: "google",
+              recovery:
+                "Synchronize Calendar before retrying; reconnect the account if authorization fails.",
+              remoteEventId,
+            },
+          );
+        }
         return;
       }
       if (calendar.provider === "icloud") {
-        await icloud.deleteEvent(
-          credentials<ICloudCredentials>(account),
-          event.remoteEventId,
-          event.remoteEtag,
+        await runCalendarProviderMutation("delete", calendar, remoteEventId, () =>
+          icloud.deleteEvent(
+            credentials<ICloudCredentials>(account),
+            remoteEventId,
+            event.remoteEtag,
+          ),
         );
         return;
       }
@@ -337,25 +443,46 @@ export function createConnectorService({
       if (!calendar.remoteCalendarId || !event.remoteEventId) {
         throw new AppError("internal_error", "The connected event has no provider identifier.");
       }
+      const remoteCalendarId = calendar.remoteCalendarId;
+      const remoteEventId = event.remoteEventId;
       const account = await getAccount(calendar.userId, calendar.accountId);
+      requireCalendarCapability(account);
       if (calendar.provider === "google") {
-        const result = await google.updateEvent(
-          credentials<GoogleCredentials>(account),
-          calendar.remoteCalendarId,
-          event.remoteEventId,
-          event.remoteEtag,
-          providerEventInput(input) as UpdateEventInput,
+        const result = await runCalendarProviderMutation("update", calendar, remoteEventId, () =>
+          google.updateEvent(
+            credentials<GoogleCredentials>(account),
+            remoteCalendarId,
+            remoteEventId,
+            event.remoteEtag,
+            providerEventInput(input) as UpdateEventInput,
+          ),
         );
-        await saveGoogleCredentials(account.id, result.credentials);
+        try {
+          await saveGoogleCredentials(account.id, result.credentials);
+        } catch {
+          throw new AppError(
+            "service_unavailable",
+            "The provider event was updated, but Ilo could not persist refreshed provider credentials.",
+            {
+              partialEffect: "provider_event_updated",
+              provider: "google",
+              recovery:
+                "Synchronize Calendar before retrying; reconnect the account if authorization fails.",
+              remoteEventId: result.value.remoteEventId,
+            },
+          );
+        }
         return result.value;
       }
       if (calendar.provider === "icloud") {
-        return icloud.updateEvent(
-          credentials<ICloudCredentials>(account),
-          calendar.remoteCalendarId,
-          event.remoteEventId,
-          event.remoteEtag,
-          providerEventInput(input) as UpdateEventInput,
+        return runCalendarProviderMutation("update", calendar, remoteEventId, () =>
+          icloud.updateEvent(
+            credentials<ICloudCredentials>(account),
+            remoteCalendarId,
+            remoteEventId,
+            event.remoteEtag,
+            providerEventInput(input) as UpdateEventInput,
+          ),
         );
       }
       throw new AppError("invalid_request", "Local calendars do not use a connector.");
@@ -508,9 +635,15 @@ export function createConnectorService({
         if (account.provider === "google" && googleCredentials) {
           const remoteCalendars = await google.listCalendars(googleCredentials);
           googleCredentials = remoteCalendars.credentials;
-          await saveCalendars(account, remoteCalendars.value, "google");
+          await saveCalendars(account, remoteCalendars.value, "google", principal, requestId);
         } else if (account.provider === "icloud" && icloudCredentials) {
-          await saveCalendars(account, await icloud.listCalendars(icloudCredentials), "icloud");
+          await saveCalendars(
+            account,
+            await icloud.listCalendars(icloudCredentials),
+            "icloud",
+            principal,
+            requestId,
+          );
         }
         const accountCalendars = await db
           .select()
@@ -948,6 +1081,68 @@ export function createConnectorService({
       await transaction
         .delete(mailboxes)
         .where(and(eq(mailboxes.accountId, account.id), eq(mailboxes.userId, account.userId)));
+    }
+  }
+
+  async function disableCalendarAccount(
+    transaction: DatabaseTransaction,
+    account: typeof calendarAccounts.$inferSelect,
+    requestId: string,
+  ): Promise<void> {
+    const accountCalendars = await transaction
+      .select()
+      .from(calendars)
+      .where(
+        and(
+          eq(calendars.accountId, account.id),
+          eq(calendars.userId, account.userId),
+          isNull(calendars.deletedAt),
+        ),
+      )
+      .orderBy(asc(calendars.id))
+      .for("update");
+    if (accountCalendars.length === 0) return;
+    const disabledAt = now();
+    const calendarIds = accountCalendars.map((calendar) => calendar.id);
+    await transaction
+      .update(calendars)
+      .set({ deletedAt: disabledAt, updatedAt: disabledAt })
+      .where(inArray(calendars.id, calendarIds));
+    await transaction
+      .update(calendarEvents)
+      .set({ deletedAt: disabledAt, updatedAt: disabledAt })
+      .where(
+        and(inArray(calendarEvents.calendarId, calendarIds), isNull(calendarEvents.deletedAt)),
+      );
+    await invalidateCalendarProfileSources(transaction, {
+      context: {
+        principal: {
+          actorId: account.userId,
+          actorType: "user",
+          userId: account.userId,
+        },
+        requestId,
+      },
+      now: disabledAt,
+      unavailableCalendarIds: calendarIds,
+      userId: account.userId,
+    });
+    for (const calendar of accountCalendars) {
+      await transaction.insert(auditEvents).values(
+        auditValues({
+          action: "calendar.source_disabled",
+          after: { calendarId: calendar.id, disabled: true },
+          before: { calendarId: calendar.id, disabled: false },
+          entityId: calendar.id,
+          entityType: "calendar",
+          principal: {
+            actorId: account.userId,
+            actorType: "user",
+            userId: account.userId,
+          },
+          requestId,
+        }),
+      );
     }
   }
 
@@ -1870,6 +2065,9 @@ export function createConnectorService({
             requestId,
           );
         }
+        if (existing.calendarEnabled && !input.calendar) {
+          await disableCalendarAccount(transaction, existing, requestId);
+        }
         return requireDatabaseRecord(
           (
             await transaction
@@ -1917,6 +2115,25 @@ export function createConnectorService({
           "account_disconnected",
           requestId,
         );
+        const accountCalendars = await transaction
+          .select({ id: calendars.id })
+          .from(calendars)
+          .where(and(eq(calendars.accountId, account.id), eq(calendars.userId, account.userId)))
+          .orderBy(asc(calendars.id))
+          .for("update");
+        await invalidateCalendarProfileSources(transaction, {
+          context: {
+            principal: {
+              actorId: account.userId,
+              actorType: "user",
+              userId: account.userId,
+            },
+            requestId,
+          },
+          now: now(),
+          unavailableCalendarIds: accountCalendars.map((calendar) => calendar.id),
+          userId: account.userId,
+        });
         const [record] = await transaction
           .delete(calendarAccounts)
           .where(
@@ -2031,35 +2248,102 @@ export function createConnectorService({
       writable: boolean;
     }>,
     provider: Extract<CalendarProvider, "google" | "icloud">,
+    principal: { actorId: string; actorType: "connector"; userId: string },
+    requestId: string,
   ): Promise<void> {
-    for (const remote of remoteCalendars) {
-      await db
-        .insert(calendars)
-        .values({
-          accountId: account.id,
-          color: remote.color,
-          isPrimary: remote.primary,
-          isSelected: remote.selected,
-          isWritable: remote.writable,
-          name: remote.name,
-          provider,
-          remoteCalendarId: remote.id,
-          timezone: remote.timezone,
-          userId: account.userId,
-        })
-        .onConflictDoUpdate({
-          set: {
+    await db.transaction(async (transaction) => {
+      const existing = await transaction
+        .select()
+        .from(calendars)
+        .where(
+          and(
+            eq(calendars.accountId, account.id),
+            eq(calendars.userId, account.userId),
+            eq(calendars.provider, provider),
+            isNull(calendars.deletedAt),
+          ),
+        )
+        .orderBy(asc(calendars.id))
+        .for("update");
+      const remoteIds = new Set(remoteCalendars.map((remote) => remote.id));
+      const unavailable = existing.filter(
+        (calendar) =>
+          calendar.remoteCalendarId !== null && !remoteIds.has(calendar.remoteCalendarId),
+      );
+      const unwritableCalendarIds: string[] = [];
+      for (const remote of remoteCalendars) {
+        const [saved] = await transaction
+          .insert(calendars)
+          .values({
+            accountId: account.id,
             color: remote.color,
-            deletedAt: null,
             isPrimary: remote.primary,
+            isSelected: remote.selected,
             isWritable: remote.writable,
             name: remote.name,
+            provider,
+            remoteCalendarId: remote.id,
             timezone: remote.timezone,
-            updatedAt: now(),
-          },
-          target: [calendars.accountId, calendars.remoteCalendarId],
-        });
-    }
+            userId: account.userId,
+          })
+          .onConflictDoUpdate({
+            set: {
+              color: remote.color,
+              deletedAt: null,
+              isPrimary: remote.primary,
+              isWritable: remote.writable,
+              name: remote.name,
+              timezone: remote.timezone,
+              updatedAt: now(),
+            },
+            target: [calendars.accountId, calendars.remoteCalendarId],
+          })
+          .returning({ id: calendars.id });
+        if (!saved) {
+          throw new AppError("internal_error", "The connected calendar could not be saved.");
+        }
+        if (!remote.writable) unwritableCalendarIds.push(saved.id);
+      }
+      const unavailableCalendarIds = unavailable.map((calendar) => calendar.id);
+      if (unavailableCalendarIds.length > 0) {
+        const unavailableAt = now();
+        const removed = await transaction
+          .update(calendars)
+          .set({ deletedAt: unavailableAt, updatedAt: unavailableAt })
+          .where(inArray(calendars.id, unavailableCalendarIds))
+          .returning();
+        await transaction
+          .update(calendarEvents)
+          .set({ deletedAt: unavailableAt, updatedAt: unavailableAt })
+          .where(
+            and(
+              inArray(calendarEvents.calendarId, unavailableCalendarIds),
+              isNull(calendarEvents.deletedAt),
+            ),
+          );
+        for (const calendar of removed) {
+          const before = unavailable.find((candidate) => candidate.id === calendar.id) ?? null;
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "calendar.source_unavailable",
+              after: auditSnapshot(calendar),
+              before: auditSnapshot(before),
+              entityId: calendar.id,
+              entityType: "calendar",
+              principal,
+              requestId,
+            }),
+          );
+        }
+      }
+      await invalidateCalendarProfileSources(transaction, {
+        context: { principal, requestId },
+        now: now(),
+        unavailableCalendarIds,
+        unwritableCalendarIds,
+        userId: account.userId,
+      });
+    });
   }
 }
 

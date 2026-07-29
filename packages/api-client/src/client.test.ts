@@ -2,6 +2,7 @@ import type {
   AutomationRoutine,
   AutomationRun,
   Calendar,
+  CalendarCommitmentProposal,
   CalendarEvent,
   DailyBrief,
   FinanceAccount,
@@ -102,6 +103,46 @@ const event: CalendarEvent = {
   recurrence: [],
   createdAt: now,
   updatedAt: now,
+};
+const commitmentCandidate = {
+  allDay: false,
+  buffer: { afterMinutes: 15, beforeMinutes: 15 },
+  calendarId: id,
+  endsAt: event.endsAt,
+  evidence: {
+    kind: "booking" as const,
+    source: {
+      accountId,
+      provider: "google" as const,
+      remoteId: "booking-1",
+      revision: "v1",
+      sourceType: "mail_thread" as const,
+    },
+    summary: "Confirmed reservation.",
+  },
+  flexibility: "hard" as const,
+  location: null,
+  notes: null,
+  startsAt: now,
+  timezone: "UTC",
+  title: "Reservation",
+  visibility: "private" as const,
+};
+const commitmentProposal: CalendarCommitmentProposal = {
+  authority: "caller_supplied_unverified",
+  candidate: commitmentCandidate,
+  destination: calendar,
+  possibleDuplicateEventId: null,
+  fingerprint: "a".repeat(64),
+  policy: {
+    canApply: false,
+    effectivePolicy: "preview",
+    reasons: ["Caller-supplied evidence is not authority."],
+    requestedPolicy: "approved_rule",
+    requiresInteractiveApproval: true,
+  },
+  providerEffect: "local_write",
+  warnings: [],
 };
 const mailbox: Mailbox = {
   accountId,
@@ -896,9 +937,17 @@ function apiFetch() {
     if (url.pathname === "/v1/mailboxes") return json({ mailboxes: [mailbox] });
     if (url.pathname === "/v1/calendars" && method === "POST") return json({ calendar }, 201);
     if (url.pathname === "/v1/calendars") return json({ calendars: [calendar] });
+    if (url.pathname === "/v1/calendars/commitments/preview")
+      return json({ proposal: commitmentProposal });
     if (url.pathname.includes("/calendars/")) return json({ calendar });
     if (url.pathname === "/v1/events" && method === "POST") return json({ event }, 201);
     if (url.pathname === "/v1/events") return json({ events: [event] });
+    if (url.pathname.includes("/blocks/") && url.pathname.endsWith("/trash"))
+      return json({ event });
+    if (url.pathname.endsWith("/trash"))
+      return json({ revision: { blockUpdatedAtById: {}, eventId: id, updatedAt: now } });
+    if (url.pathname.endsWith("/attention") && url.pathname.includes("/events/"))
+      return json({ item: attentionItem });
     if (url.pathname.includes("/events/")) return json({ event });
     if (url.pathname === "/v1/reminders" && method === "POST") return json({ reminder }, 201);
     if (url.pathname === "/v1/reminders") return json({ items: [reminder], nextCursor: null });
@@ -940,6 +989,12 @@ describe("ilo API client", () => {
     await expect(api.setCalendarSelected(id, false)).resolves.toEqual(calendar);
     await api.deleteCalendar(id);
     await expect(
+      api.previewCalendarCommitment({
+        candidate: commitmentCandidate,
+        requestedPolicy: "approved_rule",
+      }),
+    ).resolves.toEqual(commitmentProposal);
+    await expect(
       api.listEvents({ from: now, to: event.endsAt, calendarIds: [id], query: "" }),
     ).resolves.toEqual([event]);
     await expect(
@@ -954,14 +1009,35 @@ describe("ilo API client", () => {
         location: null,
       }),
     ).resolves.toEqual(event);
+    await expect(api.getEvent(id)).resolves.toEqual(event);
     await expect(api.updateEvent(id, { title: "Deep focus" })).resolves.toEqual(event);
     await expect(api.createEventBlock(id, { calendarId: id, mode: "busy" })).resolves.toEqual(
       event,
     );
     await expect(api.updateEventBlock(id, id, { mode: "details" })).resolves.toEqual(event);
     await expect(api.deleteEventBlock(id, id)).resolves.toEqual(event);
+    await expect(
+      api.deleteEventBlock(id, id, {
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+      }),
+    ).resolves.toEqual(event);
     await expect(api.restoreEvent(id)).resolves.toEqual(event);
+    await expect(
+      api.trashEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now }),
+    ).resolves.toEqual({ blockUpdatedAtById: {}, eventId: id, updatedAt: now });
+    await expect(
+      api.upsertCalendarAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "upcoming",
+        occursAt: now,
+        summary: "Prepare.",
+        title: "Upcoming event",
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.deleteEvent(id);
+    await api.deleteEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now });
     await expect(api.listReminders({ completed: false, query: "", limit: 10 })).resolves.toEqual({
       items: [reminder],
       nextCursor: null,
@@ -1398,6 +1474,34 @@ describe("ilo API client", () => {
       items: [{ expectedUpdatedAt: now, id }],
       unread: false,
     });
+    const guardedEventDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/trash` && init?.method === "POST",
+    );
+    expect(JSON.parse(String(guardedEventDelete?.[1]?.body))).toEqual({
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    const legacyEventDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}` && init?.method === "DELETE",
+    );
+    expect(legacyEventDelete?.[1]?.body).toBeUndefined();
+    const guardedBlockDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/blocks/${id}/trash` &&
+        init?.method === "POST",
+    );
+    expect(JSON.parse(String(guardedBlockDelete?.[1]?.body))).toEqual({
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+    });
+    const legacyBlockDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/blocks/${id}` &&
+        init?.method === "DELETE",
+    );
+    expect(legacyBlockDelete?.[1]?.body).toBeUndefined();
   });
 
   it("adopts, persists, uses, and clears a desktop session token", async () => {

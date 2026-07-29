@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 import {
   attentionItems,
   auditEvents,
+  calendarAccounts,
+  calendars,
   createDatabaseClient,
   type DatabaseClient,
   domainProfileApprovals,
@@ -13,14 +15,18 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
+import { createCalendarService } from "./calendar-service.js";
 import { createFinanceService } from "./finance-service.js";
 
 describe.sequential("assistant setup service", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+  let calendar: ReturnType<typeof createCalendarService>;
   let finances: ReturnType<typeof createFinanceService>;
   let service: ReturnType<typeof createAssistantService>;
+  let readOnlyCalendarId: string;
   let userId: string;
+  let writableCalendarId: string;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
@@ -45,6 +51,46 @@ describe.sequential("assistant setup service", () => {
       db: database.db,
       now: () => new Date("2026-07-28T16:00:00.000Z"),
     });
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({ label: "Local", provider: "local", userId })
+      .returning();
+    if (!account) throw new Error("Calendar account fixture was not created.");
+    const createdCalendars = await database.db
+      .insert(calendars)
+      .values([
+        {
+          accountId: account.id,
+          isWritable: true,
+          name: "Personal",
+          provider: "local",
+          timezone: "UTC",
+          userId,
+        },
+        {
+          accountId: account.id,
+          isWritable: false,
+          name: "Subscribed",
+          provider: "local",
+          timezone: "UTC",
+          userId,
+        },
+      ])
+      .returning();
+    const writable = createdCalendars.find((calendar) => calendar.isWritable);
+    const readOnly = createdCalendars.find((calendar) => !calendar.isWritable);
+    if (!writable || !readOnly) throw new Error("Calendar fixtures were not created.");
+    writableCalendarId = writable.id;
+    readOnlyCalendarId = readOnly.id;
+    calendar = createCalendarService({
+      connectedEvents: {
+        create: vi.fn(),
+        delete: vi.fn(),
+        update: vi.fn(),
+      } as never,
+      db: database.db,
+      now: () => new Date("2026-07-28T15:00:00.000Z"),
+    });
     service = createAssistantService({
       db: database.db,
       now: () => new Date("2026-07-28T15:00:00.000Z"),
@@ -56,7 +102,17 @@ describe.sequential("assistant setup service", () => {
         sourceIds,
         status,
         actorType,
+        preferences,
       ) => {
+        if (domain === "calendar") {
+          await calendar.validateProfileSources(
+            transaction,
+            profileUserId,
+            sourceIds,
+            status,
+            preferences,
+          );
+        }
         if (domain === "finances") {
           await finances.validateProfileSources(
             transaction,
@@ -767,14 +823,98 @@ describe.sequential("assistant setup service", () => {
       occursAt: null,
     });
     await expect(
+      service.createAttentionItem(
+        {
+          domain: "calendar",
+          expiresAt: null,
+          importance: "high",
+          kind: "upcoming",
+          occursAt: "2026-08-01T15:00:00.000Z",
+          relatedEntityId: crypto.randomUUID(),
+          relatedEntityType: "calendar_event",
+          source: null,
+          summary: "Caller-supplied Calendar provenance.",
+          title: "Forged Calendar event",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createAttentionItem(
+        {
+          domain: "calendar",
+          expiresAt: null,
+          importance: "high",
+          kind: "important",
+          occursAt: null,
+          relatedEntityId: null,
+          relatedEntityType: null,
+          source: {
+            accountId: null,
+            provider: "local",
+            remoteId: crypto.randomUUID(),
+            revision: "caller-revision",
+            sourceType: "calendar_event",
+          },
+          summary: "Caller-supplied Calendar source.",
+          title: "Forged Calendar source",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.createAttentionItem(
+        {
+          domain: "reminders",
+          expiresAt: null,
+          importance: "high",
+          kind: "upcoming",
+          occursAt: "2026-08-01T15:00:00.000Z",
+          relatedEntityId: crypto.randomUUID(),
+          relatedEntityType: "calendar_event",
+          source: {
+            accountId: null,
+            provider: "local",
+            remoteId: crypto.randomUUID(),
+            revision: "caller-revision",
+            sourceType: "calendar_event",
+          },
+          summary: "Cross-domain caller-supplied Calendar provenance.",
+          title: "Forged Calendar event in Reminders",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const unlinkedCalendarNote = await service.createAttentionItem(
+      {
+        domain: "calendar",
+        expiresAt: null,
+        importance: "normal",
+        kind: "important",
+        occursAt: null,
+        relatedEntityId: null,
+        relatedEntityType: null,
+        source: null,
+        summary: "An intentional unlinked Calendar note.",
+        title: "Review scheduling preferences",
+      },
+      context(),
+    );
+    await expect(
       service.updateAttentionItem("mail", userId, { status: "dismissed" }, context()),
     ).rejects.toMatchObject({ code: "not_found" });
     const storedItems = await database.db.select().from(attentionItems);
-    expect(storedItems).toHaveLength(2);
+    expect(storedItems).toHaveLength(3);
     expect(storedItems).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: item.id, status: "resolved" }),
         expect.objectContaining({ id: expiring.id, status: "open" }),
+        expect.objectContaining({
+          id: unlinkedCalendarNote.id,
+          relatedEntityId: null,
+          source: null,
+          status: "open",
+        }),
       ]),
     );
     const events = await database.db
@@ -834,6 +974,178 @@ describe.sequential("assistant setup service", () => {
       kind: "follow_up",
       relatedEntityType: null,
       status: "resolved",
+    });
+  });
+
+  it("validates Calendar profile sources and the default writable destination", async () => {
+    const base = {
+      categories: [],
+      domain: "calendar" as const,
+      instructions: ["Never move a hard commitment automatically."],
+      objective: "Keep confirmed commitments accurate.",
+      status: "active" as const,
+      summary: "Personal is the default destination.",
+    };
+    const preferences = {
+      afterBufferMinutes: 15,
+      automaticEventCreation: true,
+      automaticEventEvidence: ["booking"] as ["booking"],
+      beforeBufferMinutes: 15,
+      busyBlockPrivacy: "busy" as const,
+      defaultCalendarId: writableCalendarId,
+      defaultTimezone: "UTC",
+    };
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences: {},
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Unknown",
+              sourceId: crypto.randomUUID(),
+              sourceLabel: "Unknown",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences: {},
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Personal commitments",
+              sourceId: writableCalendarId,
+              sourceLabel: "Personal",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("complete Calendar preference contract");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences,
+          sourceContexts: [],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("at least one owned Calendar source context");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences,
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Personal commitments",
+              sourceId: writableCalendarId,
+              sourceLabel: "Personal",
+            },
+            {
+              notes: null,
+              purpose: "Duplicate",
+              sourceId: writableCalendarId,
+              sourceLabel: "Personal again",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("must be unique");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences,
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Reference only",
+              sourceId: readOnlyCalendarId,
+              sourceLabel: "Subscribed",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("must have a source context");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences: {
+            afterBufferMinutes: 15,
+            automaticEventCreation: true,
+            automaticEventEvidence: ["booking"],
+            beforeBufferMinutes: 15,
+            busyBlockPrivacy: "busy",
+            defaultCalendarId: readOnlyCalendarId,
+            defaultTimezone: "UTC",
+          },
+          sourceContexts: [
+            {
+              notes: null,
+              purpose: "Reference only",
+              sourceId: readOnlyCalendarId,
+              sourceLabel: "Subscribed",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).rejects.toThrow("must be writable");
+    await expect(
+      service.upsertProfile(
+        {
+          ...base,
+          preferences: {
+            ...preferences,
+            automaticEventEvidence: ["ticket", "booking", "registration"],
+          },
+          sourceContexts: [
+            {
+              notes: "Default destination",
+              purpose: "Personal commitments",
+              sourceId: writableCalendarId,
+              sourceLabel: "Personal",
+            },
+            {
+              notes: null,
+              purpose: "Reference only",
+              sourceId: readOnlyCalendarId,
+              sourceLabel: "Subscribed",
+            },
+          ],
+        },
+        context(),
+      ),
+    ).resolves.toMatchObject({ domain: "calendar", status: "active", version: 1 });
+    await database.db
+      .update(domainProfiles)
+      .set({
+        preferences: { defaultCalendarId: writableCalendarId },
+        status: "draft",
+      })
+      .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "calendar")));
+    await calendar.deleteLocalCalendar(writableCalendarId, context());
+    await expect(service.getProfile(userId, "calendar")).resolves.toMatchObject({
+      sourceContexts: [
+        expect.objectContaining({
+          sourceId: readOnlyCalendarId,
+        }),
+      ],
+      status: "draft",
+      version: 2,
     });
   });
 });

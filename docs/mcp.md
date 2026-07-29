@@ -16,9 +16,11 @@ exchange is a bounded shared-MCP follow-up; Finance does not invent a domain-loc
 ## Tools
 
 The server exposes read/create/update/complete/delete reminder tools; read/create/update/delete event
-tools; calendar discovery; mailbox, mail search, conversation, and mail rule tools; actor-aware
-activity history; and Finance tools. Destructive and read-only annotations are included for
-compatible MCP hosts.
+tools; calendar discovery and an evidence-based commitment preview tool; mailbox, mail search,
+conversation, and mail rule tools; actor-aware activity history; and Finance tools. Destructive,
+read-only, idempotent, and open-world annotations are compatible-host UX hints only. Authorization,
+policy, source evidence, provider capability, conflict handling, and partial-effect reporting remain
+deterministic API behavior.
 
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
 
@@ -27,6 +29,10 @@ The shared assistant tools give Claude, Codex, and other MCP hosts one consisten
   source meanings, categories, and instructions.
 - `list_attention_items`, `create_attention_item`, and `update_attention_item` use the same shape
   for important items, upcoming commitments, follow-ups, and post-run summaries across domains.
+  Linked Calendar event attention must instead use `create_calendar_attention_item`: the API locks
+  the owned event, derives its source reference, refreshes the open event/kind item, and writes a
+  redacted audit atomically. Generic unlinked Calendar notes remain available, but generic callers
+  cannot claim `calendar_event` provenance.
 
 Rules share a versioned envelope—name, description, profile, sources, nullable confidence
 threshold, policy, enabled state, and version—while each feature owns its condition and action
@@ -116,6 +122,34 @@ while combined API responses lack a shared MCP schema convention; capability
 negotiation and output schemas are a bounded shared-MCP follow-up. OAuth uses
 the MCP resource indicator, scopes remain least-privilege read/write grants,
 and provider tokens never cross the MCP boundary.
+
+Calendar setup records source meanings, default writable destination, hard/flexible semantics,
+time zone, busy-block privacy, buffers, and the evidence kinds that would be eligible for automatic
+creation after verified intake exists. `preview_calendar_commitment` accepts one exact,
+caller-supplied ticket, booking, registration, or explicit-acceptance candidate and returns
+destination/provider effects, a possible exact-match hint, policy reasons, warnings, and a payload
+fingerprint without mutation. Exact matching is not durable deduplication, and the fingerprint is
+not evidence authority. Caller-supplied evidence never permits
+`approved_rule`; event creation remains an interactive action until a later integration persists a
+server-verified source ownership/revision and idempotency identity. The bounded candidate cannot
+add attendees, recurrence, or buffer events and never moves another event. Mail ingestion and
+Mail-to-Calendar wiring are not part of this Calendar contract. The `calendar:write` scope remains
+independent broad authority for direct event mutations; proposal-only agents should not receive
+that scope. When one or more provider event mutations finish before a later provider or local
+projection/audit failure, the API returns a reconciliation ledger with the Calendar operation,
+completed, indeterminate, and pending provider effects, provider/calendar/remote identities, and
+sync-before-retry recovery. An indeterminate effect means the provider did not confirm whether the
+mutation completed. The API emits a redacted structured reconciliation log keyed by request ID;
+the response and log are recovery evidence, not durable idempotency authority. These failures are
+not safe to replay blindly. Agent mutations first read the event and then pass its `updatedAt` as
+the local compare-and-swap revision. Compound mutations also pass the
+exact event-ID-to-`updatedAt` map for every linked block because those blocks can change
+independently. `source.revision` is provider provenance (the provider ETag when present, otherwise
+the local `updatedAt`) and is not a substitute for the mutation fields. Delete returns the deleted
+source and block revisions needed by restore. The public `updatedAt` contract and local CAS use
+millisecond precision; a purely local event changed twice inside the same millisecond is the
+remaining race. A future monotonic per-event revision, used instead of or alongside `updatedAt`,
+would eliminate that local race. Connected projections also compare the provider ETag.
 
 The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
 

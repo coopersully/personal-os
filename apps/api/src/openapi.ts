@@ -136,6 +136,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: { security, responses: { 200: { description: "Calendars" } } },
         post: { security, responses: { 201: { description: "Local calendar created" } } },
       },
+      "/v1/calendars/commitments/preview": {
+        post: {
+          security,
+          responses: { 200: { description: "Calendar commitment proposal preview" } },
+        },
+      },
       "/v1/calendars/{id}": {
         delete: { security, responses: { 204: { description: "Local calendar deleted" } } },
         patch: { security, responses: { 200: { description: "Local calendar updated" } } },
@@ -162,8 +168,26 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           responses: { 200: { description: "Linked calendar block privacy changed" } },
         },
       },
+      "/v1/events/{id}/blocks/{blockId}/trash": {
+        post: {
+          security,
+          responses: { 200: { description: "Linked calendar block removed with revision guards" } },
+        },
+      },
+      "/v1/events/{id}/attention": {
+        put: {
+          security,
+          responses: { 200: { description: "Calendar event attention item created or refreshed" } },
+        },
+      },
       "/v1/events/{id}/restore": {
         post: { security, responses: { 200: { description: "Event restored" } } },
+      },
+      "/v1/events/{id}/trash": {
+        post: {
+          security,
+          responses: { 200: { description: "Event trashed with restorable revisions" } },
+        },
       },
       "/v1/connectors": {
         get: { security, responses: { 200: { description: "Calendar connections" } } },

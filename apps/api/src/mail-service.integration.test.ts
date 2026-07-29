@@ -143,6 +143,9 @@ describe.sequential("mail service", () => {
       "0038_agent_setup_foundation",
       "0039_mail_exact_match_policy_normalization",
       "0040_mail_draft_send_claim",
+      "0041_domain_profile_approvals",
+      "0042_finance_provider_direction",
+      "0043_finance_default_category_backfill",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -168,6 +171,9 @@ describe.sequential("mail service", () => {
     setupMigrationsFolder = await migrationsWithout(migrationsFolder, "ilo-mail-setup-migration-", [
       "0039_mail_exact_match_policy_normalization",
       "0040_mail_draft_send_claim",
+      "0041_domain_profile_approvals",
+      "0042_finance_provider_direction",
+      "0043_finance_default_category_backfill",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

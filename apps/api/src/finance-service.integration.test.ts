@@ -1028,6 +1028,16 @@ describe.sequential("finance service", () => {
       })
       .returning();
     if (!financeTransaction) throw new Error("Finance delete transaction was not created.");
+    await database.db.insert(financeTransactions).values(
+      Array.from({ length: 1_000 }, (_, index) => ({
+        accountId: account.id,
+        amount: index + 1,
+        direction: "expense" as const,
+        merchant: `Delete filler ${index}`,
+        transactionDate: "2026-07-20",
+        userId: owner.id,
+      })),
+    );
     const input = {
       expiresAt: null,
       importance: "high" as const,
@@ -2543,6 +2553,19 @@ describe.sequential("finance service", () => {
       },
       context,
     );
+    await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 1,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-12",
+        direction: "transfer",
+        merchant: "12345",
+        notes: null,
+      },
+      context,
+    );
     await service.createBudget({ category: "Shopping", limit: 90, month: "2026-07" }, context);
 
     await expect(service.getBudgetStatus(integrityId, "2026-07")).resolves.toEqual([
@@ -2560,6 +2583,7 @@ describe.sequential("finance service", () => {
     await expect(service.exportData(integrityId)).resolves.toMatchObject({
       accounts: [expect.objectContaining({ id: account.id })],
       transactions: expect.arrayContaining([
+        expect.objectContaining({ merchant: "12345" }),
         expect.objectContaining({ merchant: "Store" }),
         expect.objectContaining({ merchant: "Store Refund" }),
       ]),

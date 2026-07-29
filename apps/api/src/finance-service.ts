@@ -1053,6 +1053,33 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
     );
   }
 
+  async function enrichTransactions(
+    rows: Array<typeof financeTransactions.$inferSelect>,
+    executor: FinanceReadExecutor = db,
+  ): Promise<FinanceTransaction[]> {
+    const merchantIds = [
+      ...new Set(rows.map((item) => item.merchantId).filter(Boolean)),
+    ] as string[];
+    const merchants: Array<typeof financeMerchants.$inferSelect> = [];
+    for (let offset = 0; offset < merchantIds.length; offset += 1_000) {
+      merchants.push(
+        ...(await executor
+          .select()
+          .from(financeMerchants)
+          .where(inArray(financeMerchants.id, merchantIds.slice(offset, offset + 1_000)))),
+      );
+    }
+    const merchantNames = new Map(merchants.map((item) => [item.id, item.displayName]));
+    return rows.map((item) => {
+      const normalizedDisplayName = normalizedMerchant(item.merchant).replaceAll("-", " ");
+      return transaction(
+        item,
+        (item.merchantId ? merchantNames.get(item.merchantId) : null) ??
+          titleCaseMerchant(normalizedDisplayName || item.merchant),
+      );
+    });
+  }
+
   async function listTransactionsPage(
     userId: string,
     query: TransactionListQuery,
@@ -1103,25 +1130,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
       .limit(query.limit + 1);
     const page = rows.slice(0, query.limit);
     const last = page.at(-1);
-    const merchantIds = [
-      ...new Set(page.map((item) => item.merchantId).filter(Boolean)),
-    ] as string[];
-    const merchants =
-      merchantIds.length === 0
-        ? []
-        : await executor
-            .select()
-            .from(financeMerchants)
-            .where(inArray(financeMerchants.id, merchantIds));
-    const merchantNames = new Map(merchants.map((item) => [item.id, item.displayName]));
-    const items = page.map((item) => {
-      const normalizedDisplayName = normalizedMerchant(item.merchant).replaceAll("-", " ");
-      return transaction(
-        item,
-        (item.merchantId ? merchantNames.get(item.merchantId) : null) ??
-          titleCaseMerchant(normalizedDisplayName || item.merchant),
-      );
-    });
+    const items = await enrichTransactions(page, executor);
     return {
       items,
       nextCursor:
@@ -3994,7 +4003,10 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
           )
           .orderBy(financeTransactions.id)
           .for("update");
-        if (ownedTransactions.length > 0) {
+        for (let offset = 0; offset < ownedTransactions.length; offset += 1_000) {
+          const transactionIds = ownedTransactions
+            .slice(offset, offset + 1_000)
+            .map((item) => item.id);
           const linkedAttention = await tx
             .select()
             .from(attentionItems)
@@ -4003,10 +4015,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
                 eq(attentionItems.userId, context.principal.userId),
                 eq(attentionItems.domain, "finances"),
                 eq(attentionItems.relatedEntityType, "finance_transaction"),
-                inArray(
-                  attentionItems.relatedEntityId,
-                  ownedTransactions.map((item) => item.id),
-                ),
+                inArray(attentionItems.relatedEntityId, transactionIds),
               ),
             )
             .orderBy(attentionItems.id)
@@ -4199,7 +4208,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
         pendingSpendThisMonth: pendingSpend / 100,
         refundCreditsThisMonth: refunds / 100,
         spendingThisMonth: spending / 100,
-        transactions: await Promise.all(transactions.map((item) => enrichTransaction(item))),
+        transactions: await enrichTransactions(transactions),
       };
     },
     async getWealthSummary(userId: string): Promise<FinanceWealthSummary> {
@@ -4346,7 +4355,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
         incomeStreams,
         profile,
         recurringObligations,
-        transactions: await Promise.all(transactions.map((item) => enrichTransaction(item))),
+        transactions: await enrichTransactions(transactions),
       };
     },
     async updateTransaction(

@@ -306,6 +306,69 @@ describe.sequential("assistant setup service", () => {
     await expect(database.db.select().from(domainProfiles)).resolves.toHaveLength(2);
   });
 
+  it("treats legacy active Finance guidance without signed approval as a draft", async () => {
+    const [legacyUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Legacy Finance",
+        email: "legacy-finance@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!legacyUser) throw new Error("Legacy Finance user was not created.");
+    const [legacyAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Legacy Bank",
+        name: "Checking",
+        provider: "manual",
+        status: "manual",
+        userId: legacyUser.id,
+      })
+      .returning();
+    if (!legacyAccount) throw new Error("Legacy Finance account was not created.");
+    await database.db.insert(domainProfiles).values({
+      categories: [],
+      domain: "finances",
+      instructions: ["Unapproved legacy instruction."],
+      objective: "Legacy objective",
+      preferences: {},
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Legacy spending",
+          sourceId: legacyAccount.id,
+          sourceLabel: legacyAccount.name,
+        },
+      ],
+      status: "active",
+      summary: "Legacy summary",
+      userId: legacyUser.id,
+    });
+    await expect(service.getProfile(legacyUser.id, "finances")).resolves.toMatchObject({
+      status: "draft",
+      version: 1,
+    });
+    await expect(
+      service.getSetupStatus({
+        actorId: crypto.randomUUID(),
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId: legacyUser.id,
+      }),
+    ).resolves.toMatchObject({
+      domains: expect.arrayContaining([
+        expect.objectContaining({
+          approvedProfileStatus: null,
+          domain: "finances",
+          profileStatus: "draft",
+          profileVersion: 1,
+        }),
+      ]),
+    });
+  });
+
   it("allows source-empty Finance drafts but requires a distinct owned account to activate", async () => {
     const [financeUser] = await database.db
       .insert(users)

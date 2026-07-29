@@ -76,6 +76,7 @@ async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number
 }
 
 function plaidFetch(): typeof globalThis.fetch {
+  let exchangeCall = 0;
   let syncCall = 0;
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const requestUrl =
@@ -88,7 +89,12 @@ function plaidFetch(): typeof globalThis.fetch {
     }
     if (path === "/item/public_token/exchange") {
       expect(body.public_token).toBe("public-token");
-      return Response.json({ access_token: "access-token", item_id: "item-1" });
+      exchangeCall += 1;
+      return Response.json(
+        exchangeCall === 1
+          ? { access_token: "access-token", item_id: "item-1" }
+          : { access_token: "replacement-access-token", item_id: "item-2" },
+      );
     }
     if (path === "/accounts/get") {
       return Response.json({
@@ -122,12 +128,13 @@ function plaidFetch(): typeof globalThis.fetch {
                   date: "2026-07-19",
                   merchant_name: "Acme Bookstore",
                   name: "ACME BOOKSTORE",
+                  pending: true,
                   personal_finance_category: {
                     confidence_level: "HIGH",
                     detailed: "FOOD_AND_DRINK_GROCERIES",
                     primary: "FOOD_AND_DRINK",
                   },
-                  transaction_id: "txn-1",
+                  transaction_id: "pending-txn-1",
                 },
                 {
                   account_id: "plaid-account-1",
@@ -156,13 +163,12 @@ function plaidFetch(): typeof globalThis.fetch {
                     merchant_name: "Trader Joe's",
                     name: "TRADER JOE'S",
                     pending: true,
-                    pending_transaction_id: "pending-txn-1",
                     personal_finance_category: {
                       confidence_level: "VERY_HIGH",
                       detailed: "FOOD_AND_DRINK_GROCERIES",
                       primary: "FOOD_AND_DRINK",
                     },
-                    transaction_id: "txn-1",
+                    transaction_id: "pending-txn-1",
                   },
                 ],
                 next_cursor: "cursor-2",
@@ -211,91 +217,99 @@ function plaidFetch(): typeof globalThis.fetch {
                       transaction_id: "txn-late-transfer",
                     },
                   ],
-                  has_more: false,
-                  modified: [
-                    {
-                      account_id: "plaid-account-1",
-                      amount: 22,
-                      date: "2026-07-19",
-                      merchant_name: "Trader Joe's",
-                      name: "TRADER JOE'S",
-                      pending: false,
-                      pending_transaction_id: "pending-txn-1",
-                      personal_finance_category: {
-                        confidence_level: "VERY_HIGH",
-                        detailed: "FOOD_AND_DRINK_GROCERIES",
-                        primary: "FOOD_AND_DRINK",
-                      },
-                      transaction_id: "txn-1",
-                    },
-                  ],
-                  next_cursor: "cursor-3",
-                  removed: [],
+                  has_more: true,
+                  modified: [],
+                  next_cursor: "cursor-2-removed",
+                  removed: [{ transaction_id: "pending-txn-1" }],
                 }
-              : {
-                  added: [
-                    {
-                      account_id: "plaid-account-2",
-                      amount: -60,
-                      date: "2026-07-21",
-                      merchant_name: "Payment thank you",
-                      name: "PAYMENT THANK YOU",
-                      personal_finance_category: {
-                        confidence_level: "VERY_HIGH",
-                        detailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
-                        primary: "GENERAL_MERCHANDISE",
+              : syncCall === 4
+                ? {
+                    added: [
+                      {
+                        account_id: "plaid-account-1",
+                        amount: 22,
+                        date: "2026-07-19",
+                        merchant_name: "Trader Joe's",
+                        name: "TRADER JOE'S",
+                        pending: false,
+                        pending_transaction_id: "pending-txn-1",
+                        personal_finance_category: {
+                          confidence_level: "VERY_HIGH",
+                          detailed: "FOOD_AND_DRINK_GROCERIES",
+                          primary: "FOOD_AND_DRINK",
+                        },
+                        transaction_id: "txn-1",
                       },
-                      transaction_id: "txn-late-counterpart",
-                    },
-                  ],
-                  has_more: false,
-                  modified: [
-                    {
-                      account_id: "plaid-account-1",
-                      amount: -30,
-                      date: "2026-07-21",
-                      merchant_name: "Trader Joe's",
-                      name: "TRADER JOE'S",
-                      pending: false,
-                      personal_finance_category: {
-                        confidence_level: "LOW",
-                        detailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
-                        primary: "GENERAL_MERCHANDISE",
+                    ],
+                    has_more: false,
+                    modified: [],
+                    next_cursor: "cursor-3",
+                    removed: [],
+                  }
+                : {
+                    added: [
+                      {
+                        account_id: "plaid-account-2",
+                        amount: -60,
+                        date: "2026-07-21",
+                        merchant_name: "Payment thank you",
+                        name: "PAYMENT THANK YOU",
+                        personal_finance_category: {
+                          confidence_level: "VERY_HIGH",
+                          detailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
+                          primary: "GENERAL_MERCHANDISE",
+                        },
+                        transaction_id: "txn-late-counterpart",
                       },
-                      transaction_id: "txn-1",
-                    },
-                    {
-                      account_id: "plaid-account-1",
-                      amount: -40,
-                      date: "2026-07-21",
-                      merchant_name: "Incoming transfer renamed",
-                      name: "INCOMING TRANSFER RENAMED",
-                      pending: false,
-                      personal_finance_category: {
-                        confidence_level: "VERY_HIGH",
-                        detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
-                        primary: "TRANSFER_IN",
+                    ],
+                    has_more: false,
+                    modified: [
+                      {
+                        account_id: "plaid-account-1",
+                        amount: -30,
+                        date: "2026-07-21",
+                        merchant_name: "Trader Joe's",
+                        name: "TRADER JOE'S",
+                        pending: false,
+                        personal_finance_category: {
+                          confidence_level: "LOW",
+                          detailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
+                          primary: "GENERAL_MERCHANDISE",
+                        },
+                        transaction_id: "txn-1",
                       },
-                      transaction_id: "txn-transfer-in",
-                    },
-                    {
-                      account_id: "plaid-account-1",
-                      amount: 35,
-                      date: "2026-07-21",
-                      merchant_name: "Outgoing transfer renamed",
-                      name: "OUTGOING TRANSFER RENAMED",
-                      pending: false,
-                      personal_finance_category: {
-                        confidence_level: "VERY_HIGH",
-                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
-                        primary: "TRANSFER_OUT",
+                      {
+                        account_id: "plaid-account-1",
+                        amount: -40,
+                        date: "2026-07-21",
+                        merchant_name: "Incoming transfer renamed",
+                        name: "INCOMING TRANSFER RENAMED",
+                        pending: false,
+                        personal_finance_category: {
+                          confidence_level: "VERY_HIGH",
+                          detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+                          primary: "TRANSFER_IN",
+                        },
+                        transaction_id: "txn-transfer-in",
                       },
-                      transaction_id: "txn-transfer-out",
-                    },
-                  ],
-                  next_cursor: "cursor-4",
-                  removed: [],
-                },
+                      {
+                        account_id: "plaid-account-1",
+                        amount: 35,
+                        date: "2026-07-21",
+                        merchant_name: "Outgoing transfer renamed",
+                        name: "OUTGOING TRANSFER RENAMED",
+                        pending: false,
+                        personal_finance_category: {
+                          confidence_level: "VERY_HIGH",
+                          detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                          primary: "TRANSFER_OUT",
+                        },
+                        transaction_id: "txn-transfer-out",
+                      },
+                    ],
+                    next_cursor: "cursor-4",
+                    removed: [],
+                  },
       );
     }
     return Response.json({ error_message: "Unexpected Plaid path" }, { status: 400 });
@@ -323,7 +337,6 @@ describe.sequential("finance service", () => {
     const legacyMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-legacy-", [
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
-      "0043_finance_default_category_backfill",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     const [upgradeUser] = await database.db
@@ -364,6 +377,45 @@ describe.sequential("finance service", () => {
       status: "active",
       summary: "Legacy active Finance profile",
       userId: upgradeUser.id,
+    });
+    const [secondUpgradeUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Second Finance Upgrade",
+        email: "finance-upgrade-2@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!secondUpgradeUser) throw new Error("Second Finance upgrade fixture was not created.");
+    const [secondUpgradeAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Second Legacy Bank",
+        name: "Second legacy checking",
+        provider: "manual",
+        status: "manual",
+        userId: secondUpgradeUser.id,
+      })
+      .returning();
+    if (!secondUpgradeAccount) throw new Error("Second Finance upgrade account was not created.");
+    await database.db.insert(domainProfiles).values({
+      categories: [],
+      domain: "finances",
+      instructions: ["Second legacy active guidance."],
+      objective: "Second legacy objective",
+      preferences: {},
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Second legacy spending",
+          sourceId: secondUpgradeAccount.id,
+          sourceLabel: secondUpgradeAccount.name,
+        },
+      ],
+      status: "active",
+      summary: "Second legacy active Finance profile",
+      userId: secondUpgradeUser.id,
     });
     const [legacyPostedTransaction] = (
       await database.pool.query<{ id: string }>(
@@ -418,15 +470,13 @@ describe.sequential("finance service", () => {
     if (!legacyManualTransaction) {
       throw new Error("Legacy manual transaction fixture was not created.");
     }
-    const approvalMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-approval-", [
-      "0043_finance_default_category_backfill",
+    await migrateDatabase(database.db, migrationsFolder);
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.domain, "finances")),
+    ).resolves.toEqual([
+      expect.objectContaining({ status: "active", version: 1 }),
+      expect.objectContaining({ status: "active", version: 1 }),
     ]);
-    await migrateDatabase(database.db, approvalMigrations);
-    const [migratedProfile] = await database.db
-      .select()
-      .from(domainProfiles)
-      .where(eq(domainProfiles.userId, upgradeUser.id));
-    expect(migratedProfile).toMatchObject({ status: "draft", version: 2 });
     await expect(
       database.db
         .select()
@@ -451,17 +501,45 @@ describe.sequential("finance service", () => {
         .from(financeTransactions)
         .where(eq(financeTransactions.id, legacyManualTransaction.id)),
     ).resolves.toEqual([{ providerDirection: null }]);
-    await migrateDatabase(database.db, migrationsFolder);
+    const upgradeService = createFinanceService({ db: database.db, now: () => now });
+    await expect(upgradeService.listCategories(upgradeUser.id)).resolves.toHaveLength(20);
+    await expect(upgradeService.getGuidedSetupContext(upgradeUser.id)).resolves.toMatchObject({
+      guidance: {
+        approvedProfile: null,
+        draftProposal: { status: "draft", version: 1 },
+      },
+    });
+    await expect(upgradeService.backfillSetupIntegrity(1)).resolves.toEqual({
+      categoriesSeeded: 1,
+      processed: 2,
+      profilesDemoted: 1,
+    });
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.status, "active")),
+    ).resolves.toHaveLength(1);
+    await expect(upgradeService.backfillSetupIntegrity(1)).resolves.toEqual({
+      categoriesSeeded: 1,
+      processed: 2,
+      profilesDemoted: 1,
+    });
+    await expect(upgradeService.backfillSetupIntegrity(1)).resolves.toEqual({
+      categoriesSeeded: 0,
+      processed: 0,
+      profilesDemoted: 0,
+    });
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.domain, "finances")),
+    ).resolves.toEqual([
+      expect.objectContaining({ status: "draft", version: 2 }),
+      expect.objectContaining({ status: "draft", version: 2 }),
+    ]);
     await expect(
       database.db
         .select()
         .from(financeCategories)
-        .where(eq(financeCategories.userId, upgradeUser.id)),
-    ).resolves.toHaveLength(20);
-    await Promise.all([
-      rm(legacyMigrations, { force: true, recursive: true }),
-      rm(approvalMigrations, { force: true, recursive: true }),
-    ]);
+        .where(inArray(financeCategories.userId, [upgradeUser.id, secondUpgradeUser.id])),
+    ).resolves.toHaveLength(40);
+    await rm(legacyMigrations, { force: true, recursive: true });
     const [user] = await database.db
       .insert(users)
       .values({
@@ -2197,7 +2275,7 @@ describe.sequential("finance service", () => {
       .from(financeTransactions)
       .where(
         and(
-          eq(financeTransactions.providerTransactionId, "txn-1"),
+          eq(financeTransactions.providerTransactionId, "pending-txn-1"),
           eq(financeTransactions.userId, plaidOnlyUser.id),
         ),
       );
@@ -2207,7 +2285,7 @@ describe.sequential("finance service", () => {
       direction: "expense",
       needsReview: false,
       pending: true,
-      pendingTransactionId: "pending-txn-1",
+      pendingTransactionId: null,
       providerCategory: "FOOD_AND_DRINK",
       providerCategoryConfidence: "VERY_HIGH",
     });
@@ -2435,16 +2513,31 @@ describe.sequential("finance service", () => {
       await exchangeBlocker.query("SELECT id FROM finance_accounts WHERE id = $1 FOR UPDATE", [
         plaidAccount.id,
       ]);
-      reconnectSync = service.syncPlaidAccount(plaidAccount.id, context);
-      await waitForLockWaiters(database.pool, 1);
       reconnectExchange = service.exchangePlaidToken(
         { institution: null, publicToken: "public-token" },
         context,
       );
+      await waitForLockWaiters(database.pool, 1);
+      reconnectSync = service.syncPlaidAccount(plaidAccount.id, context);
+      void reconnectSync.catch(() => undefined);
       await waitForLockWaiters(database.pool, 2);
       await exchangeBlocker.query("COMMIT");
-      const [, secondExchange] = await Promise.all([reconnectSync, reconnectExchange]);
-      expect(secondExchange).toHaveLength(2);
+      await expect(reconnectExchange).resolves.toHaveLength(2);
+      await expect(reconnectSync).rejects.toThrow(
+        "connection changed while this sync was in progress",
+      );
+      await expect(
+        database.db
+          .select({
+            providerItemId: financeAccounts.providerItemId,
+            syncCursor: financeAccounts.syncCursor,
+          })
+          .from(financeAccounts)
+          .where(inArray(financeAccounts.id, [plaidAccount.id, debtAccount.id])),
+      ).resolves.toEqual([
+        { providerItemId: "item-2", syncCursor: null },
+        { providerItemId: "item-2", syncCursor: null },
+      ]);
     } finally {
       await exchangeBlocker.query("ROLLBACK");
       exchangeBlocker.release();

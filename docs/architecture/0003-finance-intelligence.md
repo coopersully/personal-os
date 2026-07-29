@@ -179,7 +179,9 @@ their own.
 
 Every account-onboarding path, including Plaid exchange, provisions the stable
 default category taxonomy inside the account transaction. Category reads remain
-side-effect free for a new Plaid-only user.
+side-effect free for a new Plaid-only user. During an upgrade, missing defaults
+are exposed with stable per-user IDs, and the first mutation that uses one
+materializes it before persistence.
 
 MCP annotations describe expected host UX only. All Finance read tools declare
 the four risk hints, while the API's scopes, human-session guards, adaptive
@@ -199,6 +201,12 @@ schema transition. It replaced the private branch-only 0016–0020 chain before
 this PR was published and retains the required confidence and transfer-review
 backfills. It is now immutable; every Finance schema correction is append-only
 and follows the repository-wide [database migration policy](../engineering/database-migrations.md).
+The approval and provider-direction migrations are expand-only. A bounded,
+idempotent startup repair demotes legacy active Finance domain profiles that
+lack signed approval and seeds missing per-owner categories, reporting counts
+and retrying on the scheduler. Until repair completes, shared and Finance
+readers treat an unapproved active row as an untrusted draft and category reads
+serve the stable taxonomy without writing.
 
 ## Consequences
 

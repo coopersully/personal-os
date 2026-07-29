@@ -1,13 +1,3 @@
--- Before approval snapshots existed, an agent could persist an active Finance
--- profile. There is no durable signed-in-user provenance to backfill, so keep
--- the content as a reviewable draft instead of treating it as operative.
-UPDATE "domain_profiles"
-SET
-	"status" = 'draft',
-	"version" = "version" + 1,
-	"updated_at" = now()
-WHERE "domain" = 'finances' AND "status" = 'active';
---> statement-breakpoint
 CREATE UNIQUE INDEX "domain_profiles_id_user_domain_idx"
 	ON "domain_profiles" USING btree ("id","user_id","domain");
 --> statement-breakpoint

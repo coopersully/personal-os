@@ -25,12 +25,14 @@ const scheduler = setInterval(() => {
   });
   void dispatchFinanceSync();
   void dispatchFinanceBackfill();
+  void dispatchFinanceSetupIntegrity();
 }, 60_000);
 void app.dispatchDueAutomations().catch((error: unknown) => {
   process.stderr.write(`[personal-os] scheduled automation dispatch failed: ${String(error)}\n`);
 });
 void dispatchFinanceSync();
 void dispatchFinanceBackfill();
+void dispatchFinanceSetupIntegrity();
 void dispatchFinanceLedgerIntegrity();
 void dispatchFinanceCashflowInsights();
 
@@ -51,6 +53,20 @@ async function dispatchFinanceBackfill(): Promise<void> {
     await app.backfillFinanceLearning();
   } catch (error) {
     process.stderr.write(`[personal-os] finance learning backfill failed: ${String(error)}\n`);
+  }
+}
+
+async function dispatchFinanceSetupIntegrity(): Promise<void> {
+  try {
+    const result = await app.backfillFinanceSetupIntegrity();
+    if (result.processed)
+      process.stdout.write(
+        `[personal-os] repaired Finance setup for ${result.processed} records: ${result.profilesDemoted} unapproved profiles demoted, ${result.categoriesSeeded} category owners seeded.\n`,
+      );
+  } catch (error) {
+    process.stderr.write(
+      `[personal-os] Finance setup integrity backfill failed: ${String(error)}\n`,
+    );
   }
 }
 

@@ -60,7 +60,7 @@ import type {
   UpdateFinanceTransactionInput,
 } from "@personal-os/domain";
 import { financeDomainProfileSchema, idSchema, localDateAt } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -169,6 +169,11 @@ function categorySlug(name: string) {
     .replace(/&/g, "and")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+}
+
+function defaultCategoryId(userId: string, slug: string) {
+  const hex = createHash("sha256").update(`finance-category:${userId}:${slug}`).digest("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function titleCaseMerchant(value: string) {
@@ -360,6 +365,7 @@ function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
 }
 function guidedDomainProfile(
   row: typeof domainProfiles.$inferSelect,
+  status: "active" | "draft" = row.status,
 ): NonNullable<FinanceGuidedSetupContext["guidance"]["draftProposal"]> {
   return {
     categories: row.categories,
@@ -370,7 +376,7 @@ function guidedDomainProfile(
     objective: row.objective,
     preferences: row.preferences,
     sourceContexts: row.sourceContexts,
-    status: row.status,
+    status,
     summary: row.summary,
     updatedAt: row.updatedAt.toISOString(),
     version: row.version,
@@ -471,6 +477,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
       .values(
         defaultCategories.map(([name, slug]) => ({
           group: categoryGroup(name),
+          id: defaultCategoryId(userId, slug),
           isSystem: true,
           name,
           slug,
@@ -504,11 +511,22 @@ export function createFinanceService({ db, now, plaid }: Options) {
   }
 
   async function categoryForId(userId: string, categoryId: string) {
-    const [row] = await db
+    let [row] = await db
       .select()
       .from(financeCategories)
       .where(and(eq(financeCategories.id, categoryId), eq(financeCategories.userId, userId)))
       .limit(1);
+    if (
+      !row &&
+      defaultCategories.some(([, slug]) => defaultCategoryId(userId, slug) === categoryId)
+    ) {
+      await ensureCategories(userId);
+      [row] = await db
+        .select()
+        .from(financeCategories)
+        .where(and(eq(financeCategories.id, categoryId), eq(financeCategories.userId, userId)))
+        .limit(1);
+    }
     if (!row) throw new AppError("not_found", "The finance category was not found.");
     return row;
   }
@@ -1860,6 +1878,12 @@ export function createFinanceService({ db, now, plaid }: Options) {
       const categorizableReviews = reviews.filter(
         (review) => review.reason !== "possible_transfer",
       ).length;
+      const draftProposal =
+        guidanceProfile && !approvedProfile
+          ? guidedDomainProfile(guidanceProfile, "draft")
+          : guidanceProfile?.status === "draft"
+            ? guidedDomainProfile(guidanceProfile)
+            : null;
       const workflow = (
         key: FinanceGuidedSetupContext["suggestedWorkflows"][number]["key"],
         policy: FinanceGuidedSetupContext["suggestedWorkflows"][number]["policy"],
@@ -1893,12 +1917,10 @@ export function createFinanceService({ db, now, plaid }: Options) {
         },
         guidance: {
           approvedProfile,
-          draftNotice:
-            guidanceProfile?.status === "draft"
-              ? "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it."
-              : null,
-          draftProposal:
-            guidanceProfile?.status === "draft" ? guidedDomainProfile(guidanceProfile) : null,
+          draftNotice: draftProposal
+            ? "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it."
+            : null,
+          draftProposal,
         },
         humanOnlyActions: [
           "connect_or_disconnect_source",
@@ -2273,18 +2295,22 @@ export function createFinanceService({ db, now, plaid }: Options) {
       });
       const config = getPlaid();
       const rows = await db.transaction(async (tx) => {
+        await ensureCategories(context.principal.userId, tx);
         await tx
-          .insert(financeCategories)
-          .values(
-            defaultCategories.map(([name, slug]) => ({
-              group: categoryGroup(name),
-              isSystem: true,
-              name,
-              slug,
-              userId: context.principal.userId,
-            })),
+          .select({ id: financeAccounts.id })
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, context.principal.userId),
+              eq(financeAccounts.provider, "plaid"),
+              inArray(
+                financeAccounts.providerAccountId,
+                accountsResponse.accounts.map((remote) => remote.account_id),
+              ),
+            ),
           )
-          .onConflictDoNothing({ target: [financeCategories.userId, financeCategories.slug] });
+          .orderBy(financeAccounts.id)
+          .for("update");
         const created: Array<typeof financeAccounts.$inferSelect> = [];
         for (const remote of accountsResponse.accounts) {
           const record = requireDatabaseRecord(
@@ -2387,6 +2413,8 @@ export function createFinanceService({ db, now, plaid }: Options) {
       let cursor = syncAccount.syncCursor;
       let hasMore = true;
       let changed = 0;
+      const removedTransactionIds = new Set<string>();
+      const replacedPendingTransactionIds = new Set<string>();
       while (hasMore) {
         const page = await plaidRequest<{
           added: PlaidTransaction[];
@@ -2403,6 +2431,14 @@ export function createFinanceService({ db, now, plaid }: Options) {
           cursor,
           count: 500,
         });
+        for (const removed of page.removed) {
+          removedTransactionIds.add(removed.transaction_id);
+        }
+        for (const remote of [...page.added, ...page.modified]) {
+          if (remote.pending_transaction_id) {
+            replacedPendingTransactionIds.add(remote.pending_transaction_id);
+          }
+        }
         const prepared = await Promise.all(
           [...page.added, ...page.modified]
             .filter((remote) => accountsByProviderId.has(remote.account_id))
@@ -2451,12 +2487,27 @@ export function createFinanceService({ db, now, plaid }: Options) {
           // Reconciliation takes account locks before transaction locks. Keep
           // provider sync in the same deterministic order so the two paths
           // cannot deadlock while touching the same item.
-          await tx
-            .select({ id: financeAccounts.id })
+          const lockedItemAccounts = await tx
+            .select()
             .from(financeAccounts)
             .where(inArray(financeAccounts.id, itemAccountIds))
             .orderBy(financeAccounts.id)
             .for("update");
+          const currentSyncAccount = lockedItemAccounts.find(
+            (accountRow) => accountRow.id === syncAccount.id,
+          );
+          if (
+            !currentSyncAccount ||
+            currentSyncAccount.providerItemId !== syncAccount.providerItemId ||
+            currentSyncAccount.syncCursor !== cursor ||
+            JSON.stringify(currentSyncAccount.encryptedCredentials) !==
+              JSON.stringify(syncAccount.encryptedCredentials)
+          ) {
+            throw new AppError(
+              "conflict",
+              "The Plaid connection changed while this sync was in progress. Retry against the current connection.",
+            );
+          }
           for (const {
             automatic,
             categoryRecord,
@@ -2470,7 +2521,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
             const localAccount = accountsByProviderId.get(remote.account_id);
             if (!localAccount) continue;
             const providerDirection = remote.amount < 0 ? "income" : "expense";
-            const [existingTransaction] = await tx
+            let [existingTransaction] = await tx
               .select()
               .from(financeTransactions)
               .where(
@@ -2481,6 +2532,25 @@ export function createFinanceService({ db, now, plaid }: Options) {
               )
               .for("update")
               .limit(1);
+            if (!existingTransaction && remote.pending_transaction_id) {
+              [existingTransaction] = await tx
+                .select()
+                .from(financeTransactions)
+                .where(
+                  and(
+                    eq(financeTransactions.accountId, localAccount.id),
+                    eq(financeTransactions.providerTransactionId, remote.pending_transaction_id),
+                  ),
+                )
+                .for("update")
+                .limit(1);
+              if (existingTransaction) {
+                await tx
+                  .update(financeTransactions)
+                  .set({ providerTransactionId: remote.transaction_id })
+                  .where(eq(financeTransactions.id, existingTransaction.id));
+              }
+            }
             const protectedTransaction =
               existingTransaction &&
               existingTransaction.categoryDecidedAt !== null &&
@@ -2625,16 +2695,23 @@ export function createFinanceService({ db, now, plaid }: Options) {
             }
             changed += 1;
           }
-          for (const removed of page.removed) {
-            await tx
-              .delete(financeTransactions)
-              .where(
-                and(
-                  inArray(financeTransactions.accountId, itemAccountIds),
-                  eq(financeTransactions.providerTransactionId, removed.transaction_id),
-                ),
-              );
-            changed += 1;
+          if (!page.has_more) {
+            const deletableTransactionIds = [...removedTransactionIds].filter(
+              (transactionId) => !replacedPendingTransactionIds.has(transactionId),
+            );
+            const deleted =
+              deletableTransactionIds.length === 0
+                ? []
+                : await tx
+                    .delete(financeTransactions)
+                    .where(
+                      and(
+                        inArray(financeTransactions.accountId, itemAccountIds),
+                        inArray(financeTransactions.providerTransactionId, deletableTransactionIds),
+                      ),
+                    )
+                    .returning({ id: financeTransactions.id });
+            changed += deleted.length;
           }
           await tx
             .update(financeAccounts)
@@ -2720,8 +2797,121 @@ export function createFinanceService({ db, now, plaid }: Options) {
       }
       return { confirmedMovements, paired, processed: userIds.length };
     },
+    async backfillSetupIntegrity(limit = 100) {
+      const legacyProfiles = await db
+        .select({ id: domainProfiles.id, userId: domainProfiles.userId })
+        .from(domainProfiles)
+        .leftJoin(
+          domainProfileApprovals,
+          and(
+            eq(domainProfileApprovals.profileId, domainProfiles.id),
+            eq(domainProfileApprovals.userId, domainProfiles.userId),
+            eq(domainProfileApprovals.domain, domainProfiles.domain),
+          ),
+        )
+        .where(
+          and(
+            eq(domainProfiles.domain, "finances"),
+            eq(domainProfiles.status, "active"),
+            isNull(domainProfileApprovals.id),
+          ),
+        )
+        .orderBy(domainProfiles.id)
+        .limit(limit);
+      let profilesDemoted = 0;
+      for (const candidate of legacyProfiles) {
+        profilesDemoted += await db.transaction(async (tx) => {
+          const [profile] = await tx
+            .select()
+            .from(domainProfiles)
+            .where(eq(domainProfiles.id, candidate.id))
+            .for("update")
+            .limit(1);
+          if (profile?.status !== "active") return 0;
+          const [approval] = await tx
+            .select({ id: domainProfileApprovals.id })
+            .from(domainProfileApprovals)
+            .where(
+              and(
+                eq(domainProfileApprovals.profileId, profile.id),
+                eq(domainProfileApprovals.userId, profile.userId),
+                eq(domainProfileApprovals.domain, "finances"),
+              ),
+            )
+            .limit(1);
+          if (approval) return 0;
+          const [demoted] = await tx
+            .update(domainProfiles)
+            .set({ status: "draft", updatedAt: now(), version: profile.version + 1 })
+            .where(
+              and(eq(domainProfiles.id, profile.id), eq(domainProfiles.version, profile.version)),
+            )
+            .returning({ version: domainProfiles.version });
+          if (!demoted) return 0;
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "assistant.profile.demoted_unapproved",
+              after: { domain: "finances", profileVersion: demoted.version },
+              before: { domain: "finances", profileVersion: profile.version },
+              entityId: profile.id,
+              entityType: "domain_profile",
+              principal: {
+                actorId: profile.userId,
+                actorType: "system",
+                userId: profile.userId,
+              },
+              requestId: "finance-setup-integrity-backfill",
+            }),
+          );
+          return 1;
+        });
+      }
+      const defaultSlugs = defaultCategories.map(([, slug]) => slug);
+      const categoryOwners = await db
+        .select({ userId: financeAccounts.userId })
+        .from(financeAccounts)
+        .leftJoin(
+          financeCategories,
+          and(
+            eq(financeCategories.userId, financeAccounts.userId),
+            inArray(financeCategories.slug, defaultSlugs),
+          ),
+        )
+        .groupBy(financeAccounts.userId)
+        .having(sql`count(distinct ${financeCategories.slug}) < ${defaultCategories.length}`)
+        .orderBy(financeAccounts.userId)
+        .limit(limit);
+      for (const owner of categoryOwners) await ensureCategories(owner.userId);
+      return {
+        categoriesSeeded: categoryOwners.length,
+        processed: profilesDemoted + categoryOwners.length,
+        profilesDemoted,
+      };
+    },
     async listCategories(userId: string) {
-      return (await existingCategories(userId)).map(categoryValue);
+      const existing = await existingCategories(userId);
+      const bySlug = new Map(existing.map((item) => [item.slug, item]));
+      const defaults = defaultCategories.map(([name, slug]) => {
+        const persisted = bySlug.get(slug);
+        return persisted
+          ? categoryValue(persisted)
+          : {
+              color: null,
+              group: categoryGroup(name),
+              id: defaultCategoryId(userId, slug),
+              isSystem: true,
+              name,
+              slug,
+            };
+      });
+      const defaultSlugs = new Set<string>(defaultCategories.map(([, slug]) => slug));
+      return [
+        ...defaults,
+        ...existing.filter((item) => !defaultSlugs.has(item.slug)).map(categoryValue),
+      ].sort(
+        (left, right) =>
+          left.group.localeCompare(right.group) || left.name.localeCompare(right.name),
+      );
     },
     async listMerchants(userId: string, limit = 50) {
       const merchants = await db
@@ -3777,7 +3967,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           .from(financeBudgets)
           .where(eq(financeBudgets.userId, userId))
           .orderBy(desc(financeBudgets.month), financeBudgets.category),
-        existingCategories(userId),
+        this.listCategories(userId),
         db
           .select()
           .from(financeTransactions)
@@ -3793,7 +3983,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         alerts,
         asOf: now().toISOString(),
         budgets: budgets.map(budget),
-        categories: categories.map(categoryValue),
+        categories,
         incomeStreams,
         profile,
         recurringObligations,

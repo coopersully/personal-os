@@ -62,7 +62,22 @@ export function createAssistantService({
   return {
     async getProfile(userId: string, domain: AssistantDomain): Promise<DomainProfile | null> {
       const profile = await findProfile(userId, domain);
-      return profile ? serializeProfile(profile) : null;
+      if (!profile) return null;
+      const serialized = serializeProfile(profile);
+      if (!profileRequiresApproval(domain) || profile.status !== "active") return serialized;
+      const [approval] = await db
+        .select({ id: domainProfileApprovals.id })
+        .from(domainProfileApprovals)
+        .where(
+          and(
+            eq(domainProfileApprovals.profileId, profile.id),
+            eq(domainProfileApprovals.userId, userId),
+            eq(domainProfileApprovals.domain, domain),
+            eq(domainProfileApprovals.profileVersion, profile.version),
+          ),
+        )
+        .limit(1);
+      return approval ? serialized : { ...serialized, status: "draft" };
     },
 
     async getSetupStatus(principal: Principal): Promise<AssistantSetupStatus> {
@@ -91,6 +106,12 @@ export function createAssistantService({
           const canRead = principal.scopes.has(access.readScope);
           const approvedVersion =
             canRead && profileRequiresApproval(domain) ? (profile?.approvedVersion ?? null) : null;
+          const profileStatus =
+            profileRequiresApproval(domain) &&
+            profile?.status === "active" &&
+            approvedVersion === null
+              ? "draft"
+              : (profile?.status ?? null);
           return {
             approvedProfileStatus: approvedVersion === null ? null : ("active" as const),
             approvedProfileVersion: approvedVersion,
@@ -98,8 +119,10 @@ export function createAssistantService({
             canWrite: principal.scopes.has(access.writeScope),
             domain,
             pendingDraftVersion:
-              approvedVersion !== null && profile?.status === "draft" ? profile.version : null,
-            profileStatus: canRead ? (profile?.status ?? null) : null,
+              approvedVersion !== null && profileStatus === "draft"
+                ? (profile?.version ?? null)
+                : null,
+            profileStatus: canRead ? profileStatus : null,
             profileVersion: canRead ? (profile?.version ?? null) : null,
           };
         }),

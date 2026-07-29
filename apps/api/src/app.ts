@@ -75,6 +75,11 @@ export type PersonalOsApp = Hono<AppEnv> & {
     processed: number;
   }>;
   backfillFinanceLearning: () => Promise<{ processed: number }>;
+  backfillFinanceSetupIntegrity: () => Promise<{
+    categoriesSeeded: number;
+    processed: number;
+    profilesDemoted: number;
+  }>;
   dispatchDueAutomations: () => Promise<void>;
   syncDueFinances: () => Promise<{ failed: number; reasons: string[]; synced: number }>;
 };
@@ -849,6 +854,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     },
     async backfillFinanceLearning() {
       return finances.backfillLearning();
+    },
+    async backfillFinanceSetupIntegrity() {
+      return finances.backfillSetupIntegrity();
     },
     async dispatchDueAutomations() {
       await connectors.syncStaleAccounts();

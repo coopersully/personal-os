@@ -124,48 +124,68 @@ describe("Mail-to-Calendar intake evidence", () => {
       filename: `attacker-${String(index)}.ics`,
       id: `part-${String(index)}`,
     }));
+    const input = {
+      accountId: "account-1",
+      message: {
+        attachments,
+        bodyText: "Calendar attachments",
+        cc: [],
+        from: { address: "organizer@example.com", name: null },
+        id: "message-row-1",
+        providerMailboxIds: ["INBOX"],
+        providerRevision: "history-1",
+        receivedAt: new Date("2026-07-29T12:00:00.000Z"),
+        remoteMessageId: "message-1",
+        threadId: "thread-1",
+        to: [],
+      } as never,
+      principal: {
+        actorId: "connector-1",
+        actorType: "connector" as const,
+        userId: "user-1",
+      },
+      providerAccountAddressHint: null,
+      recordedAt: new Date("2026-07-29T12:00:00.000Z"),
+      requestId: "request-1",
+      thread: {
+        accountId: "account-1",
+        id: "thread-1",
+        remoteThreadId: "remote-thread-1",
+        updatedAt: new Date("2026-07-29T12:00:00.000Z"),
+        userId: "user-1",
+      } as never,
+    };
     await expect(
       recordMailCalendarCommitmentIntakes(transaction as never, {
-        accountId: "account-1",
+        ...input,
         message: {
-          attachments,
-          bodyText: "Calendar attachments",
-          cc: [],
-          from: { address: "organizer@example.com", name: null },
-          id: "message-row-1",
-          providerMailboxIds: ["INBOX"],
-          providerRevision: "history-1",
-          receivedAt: new Date("2026-07-29T12:00:00.000Z"),
-          remoteMessageId: "message-1",
-          threadId: "thread-1",
-          to: [],
-        } as never,
-        principal: { actorId: "connector-1", actorType: "connector", userId: "user-1" },
-        providerAccountAddressHint: null,
-        recordedAt: new Date("2026-07-29T12:00:00.000Z"),
-        requestId: "request-1",
-        thread: {
-          accountId: "account-1",
-          id: "thread-1",
-          remoteThreadId: "remote-thread-1",
-          updatedAt: new Date("2026-07-29T12:00:00.000Z"),
-          userId: "user-1",
+          ...input.message,
+          attachments: [{ ...calendarAttachment, providerPartId: null }],
+          remoteMessageId: "message-with-id-fallback",
         } as never,
       }),
     ).resolves.toBe(1);
-    expect(intakeWrites).toEqual([
-      expect.objectContaining({
-        attachment: expect.objectContaining({
-          filename: "",
-          projectionIssue: "calendar_attachment_projection_overflow",
+    await expect(recordMailCalendarCommitmentIntakes(transaction as never, input)).resolves.toBe(1);
+    expect(intakeWrites).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          evidenceKind: "calendar_attachment_metadata",
+          remoteMessageId: "message-with-id-fallback",
+          remotePartId: "part-1",
         }),
-        authority: "provider_projected_unverified",
-        evidenceKind: "calendar_attachment_projection_overflow",
-        remotePartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
-        status: "preview_only",
-      }),
-    ]);
-    expect(auditWrites).toHaveLength(1);
+        expect.objectContaining({
+          attachment: expect.objectContaining({
+            filename: "",
+            projectionIssue: "calendar_attachment_projection_overflow",
+          }),
+          authority: "provider_projected_unverified",
+          evidenceKind: "calendar_attachment_projection_overflow",
+          remotePartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+          status: "preview_only",
+        }),
+      ]),
+    );
+    expect(auditWrites).toHaveLength(2);
     expect(JSON.stringify({ auditWrites, intakeWrites })).not.toContain("attacker-");
   });
 

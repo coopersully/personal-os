@@ -791,20 +791,21 @@ export function createFinanceService({ db, now, plaid }: Options) {
             isCardPayment(item.merchant),
         )
         .map((item) => item.id);
-      const transactions =
-        candidateIds.length === 0
-          ? []
-          : await tx
-              .select()
-              .from(financeTransactions)
-              .where(
-                and(
-                  eq(financeTransactions.userId, userId),
-                  inArray(financeTransactions.id, candidateIds),
-                ),
-              )
-              .orderBy(financeTransactions.id)
-              .for("update");
+      const transactions: Array<typeof financeTransactions.$inferSelect> = [];
+      for (let offset = 0; offset < candidateIds.length; offset += 1_000) {
+        const locked = await tx
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              inArray(financeTransactions.id, candidateIds.slice(offset, offset + 1_000)),
+            ),
+          )
+          .orderBy(financeTransactions.id)
+          .for("update");
+        transactions.push(...locked);
+      }
       const accountKinds = new Map(accounts.map((item) => [item.id, item.kind]));
       const rentTransactions = transactions
         .filter((item) => isRentMerchant(item.merchant))

@@ -2,7 +2,15 @@
 import "@testing-library/jest-dom/vitest";
 import type { UpdateAccountSetupInput, User } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { App, formatTimelineTimeRange, isNavigator, positionTimelineEvents } from "./app.js";
@@ -283,7 +291,7 @@ const mocks = vi.hoisted(() => ({
   logout: vi.fn(),
   openUrl: vi.fn(),
   plaidLink: {
-    onSuccess: null as ((publicToken: string) => void) | null,
+    onSuccess: null as ((publicToken: string | null) => void) | null,
     open: vi.fn(),
     ready: false,
   },
@@ -331,7 +339,7 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 }));
 
 vi.mock("react-plaid-link", () => ({
-  usePlaidLink: ({ onSuccess }: { onSuccess: (publicToken: string) => void }) => {
+  usePlaidLink: ({ onSuccess }: { onSuccess: (publicToken: string | null) => void }) => {
     mocks.plaidLink.onSuccess = onSuccess;
     return { open: mocks.plaidLink.open, ready: mocks.plaidLink.ready };
   },
@@ -2398,7 +2406,11 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "Connect bank" }));
     await waitFor(() => expect(mocks.getPlaidLinkToken).toHaveBeenCalled());
     await waitFor(() => expect(mocks.plaidLink.open).toHaveBeenCalled());
-    mocks.plaidLink.onSuccess?.("public-token");
+    act(() => mocks.plaidLink.onSuccess?.(null));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Plaid completed without a bank connection",
+    );
+    act(() => mocks.plaidLink.onSuccess?.("public-token"));
     await waitFor(() =>
       expect(mocks.exchangePlaidToken).toHaveBeenCalledWith({
         institution: null,

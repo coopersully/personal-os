@@ -157,6 +157,12 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 
   statement {
+    sid       = "ObserveScalingStateForDrainRestore"
+    actions   = ["application-autoscaling:DescribeScalableTargets"]
+    resources = ["*"]
+  }
+
+  statement {
     sid       = "PassOnlyPersonalOsTaskRoles"
     actions   = ["iam:PassRole"]
     resources = [aws_iam_role.task_execution.arn, aws_iam_role.api_task.arn, aws_iam_role.mcp_task.arn]

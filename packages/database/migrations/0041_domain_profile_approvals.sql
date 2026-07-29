@@ -33,10 +33,12 @@ CREATE TABLE "domain_profile_approvals" (
 		CHECK ("approved_by_user_id" = "user_id"),
 	CONSTRAINT "domain_profile_approvals_snapshot_check"
 		CHECK (
-			"profile"->>'id' = "profile_id"::text
+			(
+				"profile"->>'id' = "profile_id"::text
 			AND "profile"->>'domain' = "domain"
 			AND ("profile"->>'version')::integer = "profile_version"
 			AND "profile"->>'status' = 'active'
+			) IS TRUE
 		)
 );
 --> statement-breakpoint

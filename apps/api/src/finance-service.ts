@@ -2383,7 +2383,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           row.providerAccountId ? [[row.providerAccountId, row]] : [],
         ),
       );
-      const itemAccountIds = itemAccounts.map((row) => row.id);
+      const itemAccountIds = itemAccounts.map((row) => row.id).sort();
       let cursor = syncAccount.syncCursor;
       let hasMore = true;
       let changed = 0;
@@ -2415,6 +2415,15 @@ export function createFinanceService({ db, now, plaid }: Options) {
           }),
         );
         await db.transaction(async (tx) => {
+          // Reconciliation takes account locks before transaction locks. Keep
+          // provider sync in the same deterministic order so the two paths
+          // cannot deadlock while touching the same item.
+          await tx
+            .select({ id: financeAccounts.id })
+            .from(financeAccounts)
+            .where(inArray(financeAccounts.id, itemAccountIds))
+            .orderBy(financeAccounts.id)
+            .for("update");
           for (const { automatic, merchant, remote } of classified) {
             const localAccount = accountsByProviderId.get(remote.account_id);
             if (!localAccount) continue;

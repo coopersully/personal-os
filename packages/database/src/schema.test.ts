@@ -15,7 +15,9 @@ describe("database schema contracts", () => {
       "utf8",
     );
 
-    expect(schemaSql).toContain(`"domain_profile_approvals"."profile"->>'status' = 'active'`);
-    expect(migrationSql).toContain(`"profile"->>'status' = 'active'`);
+    expect(schemaSql).toContain(
+      `AND "domain_profile_approvals"."profile"->>'status' = 'active') IS TRUE`,
+    );
+    expect(migrationSql).toContain(`AND "profile"->>'status' = 'active'\n\t\t\t) IS TRUE`);
   });
 });

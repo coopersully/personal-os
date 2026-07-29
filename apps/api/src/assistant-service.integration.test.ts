@@ -520,6 +520,16 @@ describe.sequential("assistant setup service", () => {
         })
         .where(eq(domainProfileApprovals.id, financeApproval.id)),
     ).rejects.toThrow();
+    for (const missingField of ["id", "domain", "version", "status"] as const) {
+      const invalidProfile = { ...financeApproval.profile };
+      delete invalidProfile[missingField];
+      await expect(
+        database.db
+          .update(domainProfileApprovals)
+          .set({ profile: invalidProfile })
+          .where(eq(domainProfileApprovals.id, financeApproval.id)),
+      ).rejects.toThrow();
+    }
     await expect(
       database.db
         .update(domainProfileApprovals)

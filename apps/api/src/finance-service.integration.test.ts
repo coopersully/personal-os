@@ -59,6 +59,22 @@ function financeAgentPrincipal(userId: string): Principal {
   };
 }
 
+async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(`
+      SELECT count(*)::text AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND wait_event_type = 'Lock'
+        AND query NOT LIKE '%pg_stat_activity%'
+    `);
+    if (Number(result.rows[0]?.count ?? 0) >= expected) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error(`Expected at least ${expected} database lock waiter(s).`);
+}
+
 function plaidFetch(): typeof globalThis.fetch {
   let syncCall = 0;
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -2326,6 +2342,29 @@ describe.sequential("finance service", () => {
       outcome: "corrected",
       source: "user",
     });
+    const blocker = await database.pool.connect();
+    let concurrentSync: ReturnType<typeof service.syncPlaidAccount> | undefined;
+    let concurrentReconciliation: ReturnType<typeof service.reconcileTransfers> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM finance_transactions WHERE id = $1 FOR UPDATE", [
+        postedTransaction.id,
+      ]);
+      concurrentSync = service.syncPlaidAccount(plaidAccount.id, context);
+      await waitForLockWaiters(database.pool, 1);
+      concurrentReconciliation = service.reconcileTransfers(plaidOnlyUser.id);
+      await waitForLockWaiters(database.pool, 2);
+      await blocker.query("COMMIT");
+      const [syncResult] = await Promise.all([concurrentSync, concurrentReconciliation]);
+      expect(syncResult).toEqual({ changed: 4 });
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+      const pendingOperations: Promise<unknown>[] = [];
+      if (concurrentSync) pendingOperations.push(concurrentSync);
+      if (concurrentReconciliation) pendingOperations.push(concurrentReconciliation);
+      await Promise.allSettled(pendingOperations);
+    }
     const amountPage = await service.listTransactions(userId, {
       limit: 1,
       review: "all",

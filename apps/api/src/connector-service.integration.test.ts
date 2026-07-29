@@ -551,25 +551,31 @@ describe.sequential("connector service", () => {
     const providerStarted = new Promise<void>((resolve) => {
       markProviderStarted = resolve;
     });
-    vi.mocked(cancellableGoogle.listCalendars).mockImplementationOnce(
+    const cancellableSyncMail = cancellableGoogle.syncMail;
+    if (!cancellableSyncMail) throw new Error("Google Mail sync fixture is unavailable.");
+    vi.mocked(cancellableSyncMail).mockImplementationOnce(
       async (_currentCredentials, operation) => {
         markProviderStarted();
-        return new Promise((_resolve, reject) => {
-          operation?.signal?.addEventListener("abort", () => reject(operation.signal?.reason), {
+        await new Promise<void>((resolve) => {
+          operation?.signal?.addEventListener("abort", () => resolve(), {
             once: true,
           });
         });
+        return {
+          credentials: rotatedCredentials,
+          value: { mailboxes: [], threads: [] },
+        };
       },
     );
     const [account] = await database.db
       .insert(calendarAccounts)
       .values({
-        calendarEnabled: true,
+        calendarEnabled: false,
         email: "quiesce-retry@example.com",
         encryptedCredentials: encryptJson(credentials, encryptionKey),
         label: "Quiesce retry",
         lastSyncedAt: timestamp,
-        mailEnabled: false,
+        mailEnabled: true,
         provider: "google",
         providerAccountId: "quiesce-retry",
         userId,
@@ -615,23 +621,20 @@ describe.sequential("connector service", () => {
     const [lateAccount] = await database.db
       .insert(calendarAccounts)
       .values({
-        calendarEnabled: true,
+        calendarEnabled: false,
         email: "late-quiesce-claim@example.com",
         encryptedCredentials: encryptJson(credentials, encryptionKey),
         label: "Late quiesce claim",
-        mailEnabled: false,
+        mailEnabled: true,
         provider: "google",
         providerAccountId: "late-quiesce-claim",
         userId,
       })
       .returning();
     if (!lateAccount) throw new Error("Late quiesce account fixture was not created.");
-    const providerCallsBeforeLateClaim = vi.mocked(cancellableGoogle.listCalendars).mock.calls
-      .length;
+    const providerCallsBeforeLateClaim = vi.mocked(cancellableSyncMail).mock.calls.length;
     await expect(cancellableService.syncAccount(userId, lateAccount.id)).rejects.toBe(interrupted);
-    expect(vi.mocked(cancellableGoogle.listCalendars)).toHaveBeenCalledTimes(
-      providerCallsBeforeLateClaim,
-    );
+    expect(vi.mocked(cancellableSyncMail)).toHaveBeenCalledTimes(providerCallsBeforeLateClaim);
     await expect(
       database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, lateAccount.id)),
     ).resolves.toEqual([expect.objectContaining({ syncError: null, syncStatus: "idle" })]);

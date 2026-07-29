@@ -748,7 +748,7 @@ export function createConnectorService({
     } catch (error) {
       const interrupted = shutdown?.signal.aborted === true;
       try {
-        const [settled] = await db
+        await db
           .update(calendarAccounts)
           .set({
             ...(interrupted ? { lastSyncedAt: null } : {}),
@@ -765,27 +765,9 @@ export function createConnectorService({
               ? and(
                   eq(calendarAccounts.id, claimedAccount.id),
                   eq(calendarAccounts.syncStatus, "syncing"),
-                  eq(calendarAccounts.updatedAt, claimedAccount.updatedAt),
                 )
               : eq(calendarAccounts.id, claimedAccount.id),
-          )
-          .returning({ id: calendarAccounts.id });
-        if (interrupted && !settled) {
-          const [current] = await db
-            .select({
-              syncStatus: calendarAccounts.syncStatus,
-              updatedAt: calendarAccounts.updatedAt,
-            })
-            .from(calendarAccounts)
-            .where(eq(calendarAccounts.id, claimedAccount.id))
-            .limit(1);
-          if (
-            current?.syncStatus === "syncing" &&
-            current.updatedAt.getTime() === claimedAccount.updatedAt.getTime()
-          ) {
-            throw new Error("The interrupted connector sync claim did not settle.");
-          }
-        }
+          );
       } catch {
         if (interrupted) {
           throw new AppError(

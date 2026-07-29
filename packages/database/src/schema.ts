@@ -664,10 +664,7 @@ export const mailMessages = pgTable(
     from: jsonb("from_address").$type<MailAddress>().notNull(),
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
-    attachments: jsonb("attachments")
-      .$type<Array<{ contentType: string; filename: string; id: string; size: number }>>()
-      .notNull()
-      .default([]),
+    attachments: jsonb("attachments").$type<MailAttachment[]>().notNull().default([]),
     providerMailboxIds: jsonb("provider_mailbox_ids").$type<string[]>().notNull().default([]),
     providerRevision: text("provider_revision"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
@@ -702,7 +699,7 @@ export const mailCalendarCommitmentIntakes = pgTable(
       .notNull()
       .default([]),
     sourceMessageRevision: text("source_message_revision"),
-    authenticatedAccountAddressHash: text("authenticated_account_address_hash"),
+    providerAccountAddressHintHash: text("provider_account_address_hint_hash"),
     attachmentFingerprint: text("attachment_fingerprint").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
     attachment: jsonb("attachment").$type<MailAttachment>().notNull(),
@@ -730,8 +727,8 @@ export const mailCalendarCommitmentIntakes = pgTable(
       sql`${table.sourceFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.attachmentFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.idempotencyKey} ~ '^[0-9a-f]{64}$'`,
     ),
     check(
-      "mail_calendar_commitment_intake_account_address_hash_check",
-      sql`${table.authenticatedAccountAddressHash} IS NULL OR ${table.authenticatedAccountAddressHash} ~ '^[0-9a-f]{64}$'`,
+      "mail_calendar_commitment_intake_account_address_hint_hash_check",
+      sql`${table.providerAccountAddressHintHash} IS NULL OR ${table.providerAccountAddressHintHash} ~ '^[0-9a-f]{64}$'`,
     ),
     check(
       "mail_calendar_commitment_intake_authority_check",
@@ -740,6 +737,10 @@ export const mailCalendarCommitmentIntakes = pgTable(
     check(
       "mail_calendar_commitment_intake_status_check",
       sql`${table.status} IN ('preview_only', 'pending', 'claimed', 'reconcile', 'succeeded', 'failed')`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_authority_status_check",
+      sql`${table.authority} <> 'provider_projected_unverified' OR ${table.status} = 'preview_only'`,
     ),
   ],
 );

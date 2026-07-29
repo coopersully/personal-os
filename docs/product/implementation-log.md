@@ -85,9 +85,11 @@ This log records delivered vertical slices against the master plan. It does not 
   attachment metadata, caller classification, and setup preferences cannot authorize Calendar
   creation. Mail setup explicitly reports automatic creation disabled.
 - Reserved server-owned evidence kinds and durable lifecycle states for a follow-up authenticated
-  paired-iTIP verifier and Calendar executor. Per-message provider labels/revision and an
-  authenticated-account-address hash preserve the Google SENT-reply verification seam. No event
-  creation, provider write, rule preset activation, or MCP task machinery is included.
+  paired-iTIP verifier and Calendar executor. Per-message provider labels/revision, explicit MIME
+  part versus attachment-body identity, and a deliberately non-authoritative OAuth account-address
+  hint preserve the Google SENT-reply verification seam; the verifier must fetch Gmail profile
+  identity. No event creation, provider write, rule preset activation, or MCP task machinery is
+  included.
 
 ## 2026-07-28 — Agent-guided setup and shared assistant contracts
 

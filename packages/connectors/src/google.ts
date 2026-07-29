@@ -114,6 +114,7 @@ const gmailPartSchema = z.object({
   filename: z.string().default(""),
   headers: z.array(gmailHeaderSchema).default([]),
   mimeType: z.string().default(""),
+  partId: z.string().optional(),
   parts: z.array(z.unknown()).default([]),
 });
 const gmailMessageSchema = z.object({
@@ -617,12 +618,21 @@ function normalizedGmailDate(value: string | undefined): Date {
 
 /* v8 ignore start -- attachment metadata is projected verbatim; download bytes stay provider-owned */
 function gmailAttachments(part: z.infer<typeof gmailPartSchema>) {
-  const attachments = part.filename
+  const contentType = part.mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
+  const providerPartId = part.partId || "root";
+  const includePart =
+    part.filename.length > 0 ||
+    contentType === "application/ics" ||
+    contentType === "text/calendar" ||
+    contentType === "text/x-vcalendar";
+  const attachments = includePart
     ? [
         {
           contentType: part.mimeType || "application/octet-stream",
           filename: part.filename,
-          id: part.body.attachmentId ?? part.filename,
+          id: part.body.attachmentId ?? `part:${providerPartId}`,
+          providerAttachmentId: part.body.attachmentId ?? null,
+          providerPartId,
           size: part.body.size ?? 0,
         },
       ]

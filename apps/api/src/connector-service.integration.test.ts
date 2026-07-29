@@ -31,7 +31,10 @@ import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createConnectorService, MailProviderRejectedError } from "./connector-service.js";
-import { recordMailCalendarCommitmentIntakes } from "./mail-calendar-intake.js";
+import {
+  mailCommitmentMessageLockKey,
+  recordMailCalendarCommitmentIntakes,
+} from "./mail-calendar-intake.js";
 import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
 import { decryptJson, encryptJson } from "./security.js";
@@ -1107,8 +1110,18 @@ describe.sequential("connector service", () => {
                   {
                     contentType: "text/calendar; method=REQUEST",
                     filename: "invite.ics",
-                    id: "calendar-part-1",
+                    id: "calendar-attachment-1",
+                    providerAttachmentId: "calendar-attachment-1",
+                    providerPartId: "2",
                     size: 84,
+                  },
+                  {
+                    contentType: "text/calendar; method=REQUEST",
+                    filename: "",
+                    id: "part:3",
+                    providerAttachmentId: null,
+                    providerPartId: "3",
+                    size: 64,
                   },
                 ],
                 bodyText: "Body",
@@ -1171,17 +1184,33 @@ describe.sequential("connector service", () => {
     await expect(database.db.select().from(mailMessages)).resolves.toEqual([
       expect.objectContaining({ remoteMessageId: "ruled-message" }),
     ]);
-    await expect(database.db.select().from(mailCalendarCommitmentIntakes)).resolves.toEqual([
-      expect.objectContaining({
-        authority: "provider_projected_unverified",
-        evidenceKind: "calendar_attachment_metadata",
-        remoteMessageId: "ruled-message",
-        remotePartId: "calendar-part-1",
-        sourceMessageMailboxIds: ["INBOX", "SENT"],
-        sourceMessageRevision: "history-1",
-        status: "preview_only",
-      }),
-    ]);
+    await expect(database.db.select().from(mailCalendarCommitmentIntakes)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          attachment: expect.objectContaining({
+            providerAttachmentId: "calendar-attachment-1",
+            providerPartId: "2",
+          }),
+          authority: "provider_projected_unverified",
+          evidenceKind: "calendar_attachment_metadata",
+          remoteMessageId: "ruled-message",
+          remotePartId: "2",
+          sourceMessageMailboxIds: ["INBOX", "SENT"],
+          sourceMessageRevision: "history-1",
+          status: "preview_only",
+        }),
+        expect.objectContaining({
+          attachment: expect.objectContaining({
+            filename: "",
+            providerAttachmentId: null,
+            providerPartId: "3",
+          }),
+          remoteMessageId: "ruled-message",
+          remotePartId: "3",
+          status: "preview_only",
+        }),
+      ]),
+    );
     const intakeAudit = (
       await database.db
         .select()
@@ -1210,43 +1239,70 @@ describe.sequential("connector service", () => {
       database.db.transaction((transaction) =>
         recordMailCalendarCommitmentIntakes(transaction, {
           accountId: account.id,
-          authenticatedAccountAddress: account.email,
           message,
           principal: {
             actorId: "11111111-1111-4111-8111-111111111111",
             actorType: "connector",
             userId: "11111111-1111-4111-8111-111111111111",
           },
+          providerAccountAddressHint: account.email,
           recordedAt: timestamp,
           requestId: "cross-user-intake",
           thread,
         }),
       ),
     ).rejects.toMatchObject({ code: "forbidden" });
-    await database.db
-      .update(mailCalendarCommitmentIntakes)
-      .set({
-        authority: "server_verified",
-        evidenceKind: "test_verified_invitation",
-        status: "succeeded",
-      })
-      .where(eq(mailCalendarCommitmentIntakes.id, intake.id));
     const connectorPrincipal = {
       actorId: account.id,
       actorType: "connector" as const,
       userId,
     };
-    await database.db.transaction((transaction) =>
+    let verifierLocked: (() => void) | undefined;
+    const verifierHasLock = new Promise<void>((resolve) => {
+      verifierLocked = resolve;
+    });
+    let releaseVerifier: (() => void) | undefined;
+    const verifierCanCommit = new Promise<void>((resolve) => {
+      releaseVerifier = resolve;
+    });
+    const verifier = database.db.transaction(async (transaction) => {
+      const lockKey = mailCommitmentMessageLockKey(account.id, message.remoteMessageId);
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+      await transaction
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.id, intake.id))
+        .for("update");
+      verifierLocked?.();
+      await verifierCanCommit;
+      await transaction
+        .update(mailCalendarCommitmentIntakes)
+        .set({
+          authority: "server_verified",
+          evidenceKind: "test_verified_invitation",
+          status: "succeeded",
+        })
+        .where(
+          and(
+            eq(mailCalendarCommitmentIntakes.id, intake.id),
+            eq(mailCalendarCommitmentIntakes.sourceFingerprint, intake.sourceFingerprint),
+          ),
+        );
+    });
+    await verifierHasLock;
+    const overlappingSync = database.db.transaction((transaction) =>
       recordMailCalendarCommitmentIntakes(transaction, {
         accountId: account.id,
-        authenticatedAccountAddress: account.email,
         message,
         principal: connectorPrincipal,
+        providerAccountAddressHint: account.email,
         recordedAt: new Date(timestamp.getTime() + 1_000),
         requestId: "same-intake-source",
         thread,
       }),
     );
+    releaseVerifier?.();
+    await Promise.all([verifier, overlappingSync]);
     await expect(
       database.db
         .select()
@@ -1259,6 +1315,40 @@ describe.sequential("connector service", () => {
         status: "succeeded",
       }),
     ]);
+    await database.db.transaction((transaction) =>
+      recordMailCalendarCommitmentIntakes(transaction, {
+        accountId: account.id,
+        message,
+        principal: connectorPrincipal,
+        providerAccountAddressHint: "changed-account-hint@example.com",
+        recordedAt: new Date(timestamp.getTime() + 1_500),
+        requestId: "changed-intake-address-hint",
+        thread,
+      }),
+    );
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.id, intake.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        authority: "provider_projected_unverified",
+        evidenceKind: "calendar_attachment_metadata",
+        status: "preview_only",
+      }),
+    ]);
+    const [addressHintAudit] = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, "changed-intake-address-hint"));
+    expect(addressHintAudit).toMatchObject({
+      action: "mail_calendar_intake.source_changed",
+      after: {
+        changedFields: expect.arrayContaining(["providerAccountAddressHint"]),
+      },
+    });
+    expect(JSON.stringify(addressHintAudit)).not.toContain("changed-account-hint@example.com");
     const [changedMessage] = await database.db
       .update(mailMessages)
       .set({ providerMailboxIds: ["SENT"], providerRevision: "history-2" })
@@ -1268,9 +1358,9 @@ describe.sequential("connector service", () => {
     await database.db.transaction((transaction) =>
       recordMailCalendarCommitmentIntakes(transaction, {
         accountId: account.id,
-        authenticatedAccountAddress: account.email,
         message: changedMessage,
         principal: connectorPrincipal,
+        providerAccountAddressHint: account.email,
         recordedAt: new Date(timestamp.getTime() + 2_000),
         requestId: "changed-intake-source",
         thread,
@@ -1290,6 +1380,185 @@ describe.sequential("connector service", () => {
         status: "preview_only",
       }),
     ]);
+    await database.db
+      .update(mailCalendarCommitmentIntakes)
+      .set({
+        authority: "server_verified",
+        evidenceKind: "test_verified_invitation",
+        status: "succeeded",
+      })
+      .where(eq(mailCalendarCommitmentIntakes.id, intake.id));
+    const [ineligibleMessage] = await database.db
+      .update(mailMessages)
+      .set({
+        attachments: changedMessage.attachments.map((attachment) =>
+          (attachment.providerPartId ?? attachment.id) === intake.remotePartId
+            ? { ...attachment, contentType: "text/plain" }
+            : attachment,
+        ),
+        providerRevision: "history-3",
+      })
+      .where(eq(mailMessages.id, message.id))
+      .returning();
+    if (!ineligibleMessage) throw new Error("Ineligible commitment message fixture is missing.");
+    await database.db.transaction((transaction) =>
+      recordMailCalendarCommitmentIntakes(transaction, {
+        accountId: account.id,
+        message: ineligibleMessage,
+        principal: connectorPrincipal,
+        providerAccountAddressHint: account.email,
+        recordedAt: new Date(timestamp.getTime() + 2_500),
+        requestId: "ineligible-intake-source",
+        thread,
+      }),
+    );
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.id, intake.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        authority: "provider_projected_unverified",
+        evidenceKind: "calendar_attachment_missing",
+        sourceMessageRevision: "history-3",
+        status: "preview_only",
+      }),
+    ]);
+    await database.db.transaction((transaction) =>
+      recordMailCalendarCommitmentIntakes(transaction, {
+        accountId: account.id,
+        message: ineligibleMessage,
+        principal: connectorPrincipal,
+        providerAccountAddressHint: account.email,
+        recordedAt: new Date(timestamp.getTime() + 2_750),
+        requestId: "unchanged-ineligible-intake-source",
+        thread,
+      }),
+    );
+    await expect(
+      database.db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, "unchanged-ineligible-intake-source")),
+    ).resolves.toHaveLength(0);
+
+    const [concurrentMessage] = await database.db
+      .insert(mailMessages)
+      .values({
+        attachments: [
+          {
+            contentType: "text/calendar",
+            filename: "",
+            id: "part:9",
+            providerAttachmentId: null,
+            providerPartId: "9",
+            size: 64,
+          },
+        ],
+        bodyText: "BEGIN:VCALENDAR",
+        cc: [],
+        from: { address: "organizer@example.com", name: null },
+        providerMailboxIds: ["INBOX"],
+        providerRevision: "history-9",
+        receivedAt: timestamp,
+        remoteMessageId: "concurrent-message",
+        threadId: thread.id,
+        to: [],
+      })
+      .returning();
+    if (!concurrentMessage) throw new Error("Concurrent commitment message fixture is missing.");
+    await Promise.all(
+      ["concurrent-intake-a", "concurrent-intake-b"].map((requestId) =>
+        database.db.transaction((transaction) =>
+          recordMailCalendarCommitmentIntakes(transaction, {
+            accountId: account.id,
+            message: concurrentMessage,
+            principal: connectorPrincipal,
+            providerAccountAddressHint: account.email,
+            recordedAt: new Date(timestamp.getTime() + 3_000),
+            requestId,
+            thread,
+          }),
+        ),
+      ),
+    );
+    const concurrentIntakes = await database.db
+      .select()
+      .from(mailCalendarCommitmentIntakes)
+      .where(eq(mailCalendarCommitmentIntakes.remoteMessageId, "concurrent-message"));
+    expect(concurrentIntakes).toHaveLength(1);
+    const [concurrentIntake] = concurrentIntakes;
+    if (!concurrentIntake) throw new Error("Concurrent commitment intake was not recorded.");
+    await expect(
+      database.db.select().from(auditEvents).where(eq(auditEvents.entityId, concurrentIntake.id)),
+    ).resolves.toHaveLength(1);
+
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_atomic_commitment_intake_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.remote_message_id = 'atomic-message' THEN
+          RAISE EXCEPTION 'forced intake failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_atomic_commitment_intake_for_test
+      BEFORE INSERT ON mail_calendar_commitment_intakes
+      FOR EACH ROW EXECUTE FUNCTION fail_atomic_commitment_intake_for_test();
+    `);
+    try {
+      await expect(
+        database.db.transaction(async (transaction) => {
+          const [atomicMessage] = await transaction
+            .insert(mailMessages)
+            .values({
+              attachments: [
+                {
+                  contentType: "text/calendar",
+                  filename: "",
+                  id: "part:10",
+                  providerAttachmentId: null,
+                  providerPartId: "10",
+                  size: 64,
+                },
+              ],
+              bodyText: "BEGIN:VCALENDAR",
+              cc: [],
+              from: { address: "organizer@example.com", name: null },
+              providerMailboxIds: ["INBOX"],
+              providerRevision: "history-10",
+              receivedAt: timestamp,
+              remoteMessageId: "atomic-message",
+              threadId: thread.id,
+              to: [],
+            })
+            .returning();
+          if (!atomicMessage) throw new Error("Atomic commitment message fixture is missing.");
+          await recordMailCalendarCommitmentIntakes(transaction, {
+            accountId: account.id,
+            message: atomicMessage,
+            principal: connectorPrincipal,
+            providerAccountAddressHint: account.email,
+            recordedAt: new Date(timestamp.getTime() + 4_000),
+            requestId: "atomic-intake",
+            thread,
+          });
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_atomic_commitment_intake_for_test
+        ON mail_calendar_commitment_intakes;
+        DROP FUNCTION IF EXISTS fail_atomic_commitment_intake_for_test();
+      `);
+    }
+    await expect(
+      database.db
+        .select()
+        .from(mailMessages)
+        .where(eq(mailMessages.remoteMessageId, "atomic-message")),
+    ).resolves.toEqual([]);
   });
 
   it("bounds automatic Mail runs, preserves rules, and drains backlog on a later sync", async () => {
@@ -3949,6 +4218,54 @@ describe.sequential("connector service", () => {
       })
       .returning();
     if (!cachedThread) throw new Error("Capability thread fixture was not created.");
+    const [cachedMessage] = await database.db
+      .insert(mailMessages)
+      .values({
+        attachments: [
+          {
+            contentType: "text/calendar",
+            filename: "",
+            id: "capability-part",
+            providerAttachmentId: null,
+            providerPartId: "capability-part",
+            size: 64,
+          },
+        ],
+        bodyText: "BEGIN:VCALENDAR",
+        cc: [],
+        from: { address: "organizer@example.com", name: null },
+        providerMailboxIds: ["INBOX"],
+        providerRevision: "capability-revision",
+        receivedAt: timestamp,
+        remoteMessageId: "capability-message",
+        threadId: cachedThread.id,
+        to: [],
+      })
+      .returning();
+    if (!cachedMessage) throw new Error("Capability message fixture was not created.");
+    await database.db.transaction((transaction) =>
+      recordMailCalendarCommitmentIntakes(transaction, {
+        accountId: connected.accountId,
+        message: cachedMessage,
+        principal: {
+          actorId: capabilityUser.id,
+          actorType: "user",
+          userId: capabilityUser.id,
+        },
+        providerAccountAddressHint: "capability@icloud.example",
+        recordedAt: timestamp,
+        requestId: "capability-intake",
+        thread: cachedThread,
+      }),
+    );
+    await database.db
+      .update(mailCalendarCommitmentIntakes)
+      .set({
+        authority: "server_verified",
+        evidenceKind: "test_verified_invitation",
+        status: "succeeded",
+      })
+      .where(eq(mailCalendarCommitmentIntakes.accountId, connected.accountId));
     const [importantAttention, runAttention] = await database.db
       .insert(attentionItems)
       .values([
@@ -4021,6 +4338,29 @@ describe.sequential("connector service", () => {
     await expect(
       database.db.select().from(mailThreads).where(eq(mailThreads.accountId, connected.accountId)),
     ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.accountId, connected.accountId)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        authority: "provider_projected_unverified",
+        evidenceKind: "source_mail_capability_disabled",
+        sourceMessageId: null,
+        sourceThreadId: null,
+        status: "preview_only",
+      }),
+    ]);
+    const disabledMail = createMailService({
+      db: database.db,
+      gateway: service.mailGateway,
+      now: () => timestamp,
+      reviewSigningKey: encryptionKey,
+    });
+    await expect(disabledMail.listSetupContext(capabilityUser.id)).resolves.toMatchObject({
+      commitmentIntake: { previewOnlyCount: 0 },
+    });
     const detachedAttention = await database.db
       .select()
       .from(attentionItems)
@@ -4050,6 +4390,17 @@ describe.sequential("connector service", () => {
     expect(lifecycleAudits).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
+          action: "mail_calendar_intake.source_unavailable",
+          after: expect.objectContaining({
+            accountIdHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+          }),
+          requestId: "disable-mail-capability",
+        }),
+      ]),
+    );
+    expect(lifecycleAudits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
           action: "assistant.profile.updated",
           requestId: "disable-mail-capability",
         }),
@@ -4059,6 +4410,107 @@ describe.sequential("connector service", () => {
         }),
       ]),
     );
+
+    const restoredMail = {
+      mailboxes: [
+        { id: "INBOX", name: "Inbox", role: "inbox" as const, totalCount: 1, unreadCount: 0 },
+      ],
+      threads: [
+        {
+          bodyText: "BEGIN:VCALENDAR",
+          from: { address: "organizer@example.com", name: null },
+          mailboxIds: ["INBOX"],
+          messageCount: 1,
+          messages: [
+            {
+              attachments: [
+                {
+                  contentType: "text/calendar",
+                  filename: "",
+                  id: "capability-part",
+                  providerAttachmentId: null,
+                  providerPartId: "capability-part",
+                  size: 64,
+                },
+              ],
+              bodyText: "BEGIN:VCALENDAR",
+              cc: [],
+              from: { address: "organizer@example.com", name: null },
+              mailboxIds: ["INBOX"],
+              providerRevision: "capability-revision",
+              receivedAt: timestamp,
+              remoteMessageId: "capability-message",
+              to: [],
+            },
+          ],
+          receivedAt: timestamp,
+          remoteThreadId: "capability-thread",
+          snippet: "Calendar request",
+          starred: false,
+          subject: "Calendar request",
+          to: [],
+          unread: false,
+        },
+      ],
+    };
+    await service.connectICloud(capabilityUser.id, {
+      appSpecificPassword: "replacement-password",
+      calendar: true,
+      email: "capability@icloud.example",
+      mail: true,
+    });
+    vi.mocked(icloud.syncMail).mockResolvedValueOnce(restoredMail);
+    await service.syncAccount(capabilityUser.id, connected.accountId);
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.accountId, connected.accountId)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        authority: "provider_projected_unverified",
+        evidenceKind: "calendar_attachment_metadata",
+        sourceMessageId: expect.any(String),
+        sourceThreadId: expect.any(String),
+        status: "preview_only",
+      }),
+    ]);
+
+    let releaseInFlightMail: ((mail: typeof restoredMail) => void) | undefined;
+    const inFlightMail = new Promise<typeof restoredMail>((resolveMail) => {
+      releaseInFlightMail = resolveMail;
+    });
+    const priorICloudSyncCount = vi.mocked(icloud.syncMail).mock.calls.length;
+    vi.mocked(icloud.syncMail).mockImplementationOnce(() => inFlightMail);
+    const inFlightSync = service.syncAccount(capabilityUser.id, connected.accountId);
+    await vi.waitFor(() => expect(icloud.syncMail).toHaveBeenCalledTimes(priorICloudSyncCount + 1));
+    await service.connectICloud(
+      capabilityUser.id,
+      {
+        appSpecificPassword: "replacement-password",
+        calendar: true,
+        email: "capability@icloud.example",
+        mail: false,
+      },
+      "disable-mail-during-sync",
+    );
+    releaseInFlightMail?.(restoredMail);
+    await inFlightSync;
+    await expect(
+      database.db.select().from(mailThreads).where(eq(mailThreads.accountId, connected.accountId)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.accountId, connected.accountId)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        evidenceKind: "source_mail_capability_disabled",
+        sourceMessageId: null,
+        sourceThreadId: null,
+      }),
+    ]);
   });
 
   it("demotes an active Calendar profile when its default destination becomes read-only", async () => {

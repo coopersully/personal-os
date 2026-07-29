@@ -133,6 +133,8 @@ export const mailAttachmentSchema = z.object({
   contentType: z.string(),
   filename: z.string(),
   id: z.string(),
+  providerAttachmentId: z.string().nullable().optional(),
+  providerPartId: z.string().nullable().optional(),
   size: z.number().int().nonnegative(),
 });
 export type MailAttachment = z.infer<typeof mailAttachmentSchema>;
@@ -149,29 +151,38 @@ export const mailMessageSchema = z.object({
 });
 export type MailMessage = z.infer<typeof mailMessageSchema>;
 
-export const mailCalendarCommitmentIntakeSchema = z.object({
-  accountId: idSchema,
-  attachment: mailAttachmentSchema,
-  authenticatedAccountAddressHash: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .nullable(),
-  authority: z.enum(["provider_projected_unverified", "server_verified"]),
-  createdAt: isoDateTimeSchema,
-  evidenceKind: z.string().trim().min(1).max(100),
-  id: idSchema,
-  idempotencyKey: z.string().regex(/^[a-f0-9]{64}$/),
-  remoteMessageId: z.string().min(1),
-  remotePartId: z.string().min(1),
-  remoteThreadId: z.string().min(1),
-  sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
-  sourceMessageId: idSchema.nullable(),
-  sourceMessageMailboxIds: z.array(z.string()),
-  sourceMessageRevision: z.string().nullable(),
-  sourceThreadId: idSchema.nullable(),
-  sourceThreadRevision: isoDateTimeSchema,
-  status: z.enum(["preview_only", "pending", "claimed", "reconcile", "succeeded", "failed"]),
-});
+export const mailCalendarCommitmentIntakeSchema = z
+  .object({
+    accountId: idSchema,
+    attachment: mailAttachmentSchema,
+    providerAccountAddressHintHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable(),
+    authority: z.enum(["provider_projected_unverified", "server_verified"]),
+    createdAt: isoDateTimeSchema,
+    evidenceKind: z.string().trim().min(1).max(100),
+    id: idSchema,
+    idempotencyKey: z.string().regex(/^[a-f0-9]{64}$/),
+    remoteMessageId: z.string().min(1),
+    remotePartId: z.string().min(1),
+    remoteThreadId: z.string().min(1),
+    sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    sourceMessageId: idSchema.nullable(),
+    sourceMessageMailboxIds: z.array(z.string()),
+    sourceMessageRevision: z.string().nullable(),
+    sourceThreadId: idSchema.nullable(),
+    sourceThreadRevision: isoDateTimeSchema,
+    status: z.enum(["preview_only", "pending", "claimed", "reconcile", "succeeded", "failed"]),
+  })
+  .refine(
+    (intake) =>
+      intake.authority !== "provider_projected_unverified" || intake.status === "preview_only",
+    {
+      message: "Unverified Mail commitment intake must remain preview-only.",
+      path: ["status"],
+    },
+  );
 export type MailCalendarCommitmentIntake = z.infer<typeof mailCalendarCommitmentIntakeSchema>;
 
 export const mailListQuerySchema = z.object({

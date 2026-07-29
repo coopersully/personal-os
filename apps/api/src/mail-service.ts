@@ -1032,6 +1032,14 @@ export function createMailService({
           db
             .select({ previewOnlyCount: sql<number>`count(*)::int` })
             .from(mailCalendarCommitmentIntakes)
+            .innerJoin(
+              calendarAccounts,
+              and(
+                eq(calendarAccounts.id, mailCalendarCommitmentIntakes.accountId),
+                eq(calendarAccounts.userId, userId),
+                eq(calendarAccounts.mailEnabled, true),
+              ),
+            )
             .where(
               and(
                 eq(mailCalendarCommitmentIntakes.userId, userId),

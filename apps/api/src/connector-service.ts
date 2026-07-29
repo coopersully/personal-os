@@ -51,7 +51,10 @@ import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
-import { recordMailCalendarCommitmentIntakes } from "./mail-calendar-intake.js";
+import {
+  invalidateMailCalendarCommitmentIntakes,
+  recordMailCalendarCommitmentIntakes,
+} from "./mail-calendar-intake.js";
 import {
   applyMailRuleActionToState,
   classifyMailRuleProviderFailure,
@@ -973,6 +976,13 @@ export function createConnectorService({
       actorType: "user" as const,
       userId: account.userId,
     };
+    await invalidateMailCalendarCommitmentIntakes(transaction, {
+      accountId: account.id,
+      invalidatedAt: now(),
+      principal,
+      reasonCode,
+      requestId,
+    });
     const accountThreads = await transaction
       .select({ id: mailThreads.id })
       .from(mailThreads)
@@ -1330,103 +1340,106 @@ export function createConnectorService({
     let updatedGoogleCredentials: GoogleCredentials | null = null;
     let successfulRuleMutationCount = 0;
     const mailboxIds = value.mailboxes.map((mailbox) => mailbox.id);
-    for (const mailbox of value.mailboxes) {
-      await db
-        .insert(mailboxes)
-        .values({
-          accountId: account.id,
-          deletedAt: null,
-          lastSyncedAt: now(),
-          name: mailbox.name,
-          provider,
-          remoteMailboxId: mailbox.id,
-          role: mailbox.role,
-          totalCount: mailbox.totalCount,
-          unreadCount: mailbox.unreadCount,
-          userId: account.userId,
-        })
-        .onConflictDoUpdate({
-          set: {
+    const sourceProjectionApplied = await db.transaction(async (transaction) => {
+      const activeAccount = (
+        await transaction
+          .select({ id: calendarAccounts.id })
+          .from(calendarAccounts)
+          .where(
+            and(
+              eq(calendarAccounts.id, account.id),
+              eq(calendarAccounts.userId, account.userId),
+              eq(calendarAccounts.mailEnabled, true),
+            ),
+          )
+          .for("update")
+          .limit(1)
+      )[0];
+      if (!activeAccount) return false;
+      for (const mailbox of value.mailboxes) {
+        await transaction
+          .insert(mailboxes)
+          .values({
+            accountId: account.id,
             deletedAt: null,
             lastSyncedAt: now(),
             name: mailbox.name,
+            provider,
+            remoteMailboxId: mailbox.id,
             role: mailbox.role,
             totalCount: mailbox.totalCount,
             unreadCount: mailbox.unreadCount,
-            updatedAt: now(),
-          },
-          target: [mailboxes.accountId, mailboxes.remoteMailboxId],
-        });
-    }
-    const staleMailboxConditions = [
-      eq(mailboxes.accountId, account.id),
-      isNull(mailboxes.deletedAt),
-    ];
-    if (mailboxIds.length > 0) {
-      staleMailboxConditions.push(notInArray(mailboxes.remoteMailboxId, mailboxIds));
-    }
-    await db
-      .update(mailboxes)
-      .set({ deletedAt: now(), updatedAt: now() })
-      .where(and(...staleMailboxConditions));
+            userId: account.userId,
+          })
+          .onConflictDoUpdate({
+            set: {
+              deletedAt: null,
+              lastSyncedAt: now(),
+              name: mailbox.name,
+              role: mailbox.role,
+              totalCount: mailbox.totalCount,
+              unreadCount: mailbox.unreadCount,
+              updatedAt: now(),
+            },
+            target: [mailboxes.accountId, mailboxes.remoteMailboxId],
+          });
+      }
+      const staleMailboxConditions = [
+        eq(mailboxes.accountId, account.id),
+        isNull(mailboxes.deletedAt),
+      ];
+      if (mailboxIds.length > 0) {
+        staleMailboxConditions.push(notInArray(mailboxes.remoteMailboxId, mailboxIds));
+      }
+      await transaction
+        .update(mailboxes)
+        .set({ deletedAt: now(), updatedAt: now() })
+        .where(and(...staleMailboxConditions));
 
-    for (const thread of value.threads) {
-      const [storedThread] = await db
-        .insert(mailThreads)
-        .values({
-          accountId: account.id,
-          bodyText: thread.bodyText,
-          deletedAt: null,
-          from: thread.from,
-          messageCount: thread.messageCount,
-          provider,
-          receivedAt: thread.receivedAt,
-          remoteMailboxIds: thread.mailboxIds,
-          remoteThreadId: thread.remoteThreadId,
-          snippet: thread.snippet,
-          starred: thread.starred,
-          subject: thread.subject,
-          to: thread.to,
-          unread: thread.unread,
-          userId: account.userId,
-        })
-        .onConflictDoUpdate({
-          set: {
+      for (const thread of value.threads) {
+        const [storedThread] = await transaction
+          .insert(mailThreads)
+          .values({
+            accountId: account.id,
             bodyText: thread.bodyText,
             deletedAt: null,
             from: thread.from,
             messageCount: thread.messageCount,
+            provider,
             receivedAt: thread.receivedAt,
             remoteMailboxIds: thread.mailboxIds,
+            remoteThreadId: thread.remoteThreadId,
             snippet: thread.snippet,
             starred: thread.starred,
             subject: thread.subject,
             to: thread.to,
             unread: thread.unread,
-            updatedAt: now(),
-          },
-          target: [mailThreads.accountId, mailThreads.remoteThreadId],
-        })
-        .returning();
-      if (!storedThread)
-        throw new AppError("internal_error", "The mail conversation could not be saved.");
-      for (const message of thread.messages ?? []) {
-        const [storedMessage] = await db
-          .insert(mailMessages)
-          .values({
-            attachments: message.attachments,
-            bodyText: message.bodyText,
-            cc: message.cc,
-            from: message.from,
-            providerMailboxIds: message.mailboxIds ?? [],
-            providerRevision: message.providerRevision ?? null,
-            receivedAt: message.receivedAt,
-            remoteMessageId: message.remoteMessageId,
-            threadId: storedThread.id,
-            to: message.to,
+            userId: account.userId,
           })
           .onConflictDoUpdate({
             set: {
+              bodyText: thread.bodyText,
+              deletedAt: null,
+              from: thread.from,
+              messageCount: thread.messageCount,
+              receivedAt: thread.receivedAt,
+              remoteMailboxIds: thread.mailboxIds,
+              snippet: thread.snippet,
+              starred: thread.starred,
+              subject: thread.subject,
+              to: thread.to,
+              unread: thread.unread,
+              updatedAt: now(),
+            },
+            target: [mailThreads.accountId, mailThreads.remoteThreadId],
+          })
+          .returning();
+        if (!storedThread)
+          throw new AppError("internal_error", "The mail conversation could not be saved.");
+        for (const message of thread.messages ?? []) {
+          const [storedMessage] = await transaction
+            .insert(mailMessages)
+            .values({
               attachments: message.attachments,
               bodyText: message.bodyText,
               cc: message.cc,
@@ -1434,27 +1447,41 @@ export function createConnectorService({
               providerMailboxIds: message.mailboxIds ?? [],
               providerRevision: message.providerRevision ?? null,
               receivedAt: message.receivedAt,
+              remoteMessageId: message.remoteMessageId,
+              threadId: storedThread.id,
               to: message.to,
-              updatedAt: now(),
-            },
-            target: [mailMessages.threadId, mailMessages.remoteMessageId],
-          })
-          .returning();
-        if (!storedMessage)
-          throw new AppError("internal_error", "The mail message could not be saved.");
-        await db.transaction((transaction) =>
-          recordMailCalendarCommitmentIntakes(transaction, {
+            })
+            .onConflictDoUpdate({
+              set: {
+                attachments: message.attachments,
+                bodyText: message.bodyText,
+                cc: message.cc,
+                from: message.from,
+                providerMailboxIds: message.mailboxIds ?? [],
+                providerRevision: message.providerRevision ?? null,
+                receivedAt: message.receivedAt,
+                to: message.to,
+                updatedAt: now(),
+              },
+              target: [mailMessages.threadId, mailMessages.remoteMessageId],
+            })
+            .returning();
+          if (!storedMessage)
+            throw new AppError("internal_error", "The mail message could not be saved.");
+          await recordMailCalendarCommitmentIntakes(transaction, {
             accountId: account.id,
-            authenticatedAccountAddress: account.email,
             message: storedMessage,
             principal,
+            providerAccountAddressHint: account.email,
             recordedAt: now(),
             requestId,
             thread: storedThread,
-          }),
-        );
+          });
+        }
       }
-    }
+      return true;
+    });
+    if (!sourceProjectionApplied) return { changed: 0, credentials: null };
     const rules = await executableMailRules(account, principal, requestId);
     if (rules.length > 0) {
       await db.transaction(async (transaction) => {

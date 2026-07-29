@@ -85,12 +85,18 @@ describe("database schema contracts", () => {
     if (!fingerprintCheck) throw new Error("Commitment intake fingerprint check is missing.");
     const accountAddressCheck = table.checks.find(
       (candidate) =>
-        candidate.name === "mail_calendar_commitment_intake_account_address_hash_check",
+        candidate.name === "mail_calendar_commitment_intake_account_address_hint_hash_check",
     );
     if (!accountAddressCheck)
       throw new Error("Commitment intake account-address check is missing.");
+    const authorityStatusCheck = table.checks.find(
+      (candidate) => candidate.name === "mail_calendar_commitment_intake_authority_status_check",
+    );
+    if (!authorityStatusCheck)
+      throw new Error("Commitment intake authority/status check is missing.");
     const schemaSql = new PgDialect().sqlToQuery(fingerprintCheck.value).sql;
     const accountAddressSql = new PgDialect().sqlToQuery(accountAddressCheck.value).sql;
+    const authorityStatusSql = new PgDialect().sqlToQuery(authorityStatusCheck.value).sql;
     const migrationSql = await readFile(
       resolve(
         process.cwd(),
@@ -98,8 +104,22 @@ describe("database schema contracts", () => {
       ),
       "utf8",
     );
+    const renameMigrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0046_mail_calendar_account_hint.sql"),
+      "utf8",
+    );
     expect(schemaSql).toContain(`"idempotency_key" ~ '^[0-9a-f]{64}$'`);
-    expect(accountAddressSql).toContain(`"authenticated_account_address_hash" IS NULL`);
+    expect(accountAddressSql).toContain(`"provider_account_address_hint_hash" IS NULL`);
+    expect(renameMigrationSql).toContain(
+      'RENAME COLUMN "authenticated_account_address_hash" TO "provider_account_address_hint_hash"',
+    );
+    expect(renameMigrationSql).toContain(
+      'DELETE FROM "mail_calendar_commitment_intakes" AS "intake"',
+    );
+    expect(renameMigrationSql).toContain('DELETE FROM "mail_messages" AS "message"');
+    expect(renameMigrationSql).toContain(`"account"."provider" = 'icloud'`);
+    expect(authorityStatusSql).toContain(`"authority" <> 'provider_projected_unverified'`);
+    expect(renameMigrationSql).toContain("\"authority\" <> 'provider_projected_unverified'");
     expect(migrationSql).toContain('"provider_mailbox_ids" jsonb');
     expect(migrationSql).toContain('"provider_revision" text');
     expect(migrationSql).toContain('"source_message_mailbox_ids" jsonb');

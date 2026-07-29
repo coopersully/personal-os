@@ -267,6 +267,10 @@ describe("iCloud connector", () => {
       to: [{ address: "user@example.com", name: "Example User" }],
       unread: true,
     });
+    expect(result.threads[0]?.messages?.[0]).toMatchObject({
+      providerRevision: "2",
+      remoteMessageId: "INBOX:2",
+    });
     expect(result.threads[1]).toMatchObject({
       from: { address: "", name: null },
       remoteThreadId: "INBOX:3",
@@ -426,6 +430,15 @@ describe("iCloud connector", () => {
       "first@example.com",
       "second@example.com",
     ]);
+    expect(mail.threads[0]?.messages?.[0]).toMatchObject({
+      attachments: [
+        expect.objectContaining({
+          id: "INBOX:9:0",
+          providerPartId: "INBOX:9:0",
+        }),
+      ],
+      remoteMessageId: "INBOX:9",
+    });
     expect(release).toHaveBeenCalledOnce();
   });
 

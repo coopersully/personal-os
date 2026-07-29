@@ -38,6 +38,7 @@ import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
 import { calendarProviderReconciliationLog } from "./calendar-provider-log.js";
 import { createCalendarService } from "./calendar-service.js";
+import { officialAgentSkill } from "./config.js";
 import { createConnectorService } from "./connector-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
@@ -119,9 +120,17 @@ const xFolderInputSchema = z.object({ folderId: z.string().min(1).max(100) });
 const pinterestPinsQuerySchema = z.object({
   limit: z.coerce.number().int().min(4).max(20).default(12),
 });
-const defaultAgentSkillSourceUrl =
-  "https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup";
-
+const agentDomainSupport = {
+  calendar: "profile_and_attention",
+  finances: "profile_and_attention",
+  goals: "profile_and_attention",
+  mail: "executable_rules",
+  reminders: "profile_and_attention",
+  tasks: "profile_and_attention",
+} as const satisfies Record<
+  (typeof assistantDomains)[number],
+  AgentConnectionGuide["domains"][number]["support"]
+>;
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
@@ -253,24 +262,28 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
   });
-  const agentSkillSourceUrl = dependencies.config.agentSkillSourceUrl ?? defaultAgentSkillSourceUrl;
+  const agentSkillRevision = dependencies.config.agentSkillRevision ?? officialAgentSkill.revision;
+  const agentSkillSourceUrl =
+    dependencies.config.agentSkillSourceUrl ?? officialAgentSkill.sourceUrl;
+  const agentSkillVersion = dependencies.config.agentSkillVersion ?? officialAgentSkill.version;
   const agentConnectionGuide: AgentConnectionGuide = {
     domains: assistantDomains.map((domain) => ({
       domain,
       readScope: featureAccessPolicies[domain].readScope,
-      support: domain === "mail" ? "executable_rules" : "profile_and_attention",
+      support: agentDomainSupport[domain],
       writeScope: featureAccessPolicies[domain].writeScope,
     })),
     mcpUrl: dependencies.config.mcpResourceUrl ?? `${dependencies.config.apiBaseUrl}/mcp`,
     skill: {
       displayName: "Ilo Guided Setup",
-      installPrompt: `Install the Ilo Guided Setup skill from ${agentSkillSourceUrl}. Make it available as $ilo-setup, then tell me when it is ready.`,
+      installPrompt: `Install Ilo Guided Setup v${agentSkillVersion} from ${agentSkillSourceUrl}. The published source revision is ${agentSkillRevision}. Make it available as $ilo-setup, then tell me when it is ready.`,
       invocation: "$ilo-setup",
       name: "ilo-setup",
+      revision: agentSkillRevision,
       setupPrompt:
         "Use $ilo-setup to inspect my connected Ilo domains and run the shortest useful setup interview.",
       sourceUrl: agentSkillSourceUrl,
-      version: "0.1.0",
+      version: agentSkillVersion,
     },
   };
   const weather = createWeatherService({

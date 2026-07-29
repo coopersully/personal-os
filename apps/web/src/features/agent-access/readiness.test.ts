@@ -120,6 +120,15 @@ describe("agent access readiness adapters", () => {
     expect(
       hostPermissionReadiness({
         ...hostInput,
+        hosts: ready([
+          { name: "Reader one", scopes: ["mail:read"] },
+          { name: "Reader two", scopes: ["mail:read"] },
+        ]),
+      }).description,
+    ).toBe("2 connected hosts can read Mail; none has Mail write permission.");
+    expect(
+      hostPermissionReadiness({
+        ...hostInput,
         hosts: ready([{ name: "Writer", scopes: ["mail:read", "mail:write"] }]),
       }).description,
     ).toBe("1 connected host can read Mail; 1 can manage Mail.");

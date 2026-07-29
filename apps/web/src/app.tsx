@@ -1,9 +1,4 @@
-import type {
-  AuditEvent,
-  CalendarAccount,
-  Session,
-  XBookmarkAccount,
-} from "@personal-os/api-client";
+import type { CalendarAccount, Session, XBookmarkAccount } from "@personal-os/api-client";
 import type {
   AutomationRoutine,
   Calendar,
@@ -76,7 +71,6 @@ import {
   Cloud,
   CloudRain,
   Columns3,
-  Command,
   Compass,
   Copy,
   CopyPlus,
@@ -293,6 +287,7 @@ import {
   workspaceIntentStaleTime,
   workspaceTodaySummary,
 } from "./components/workspace-switching.js";
+import { ActivityPage, ActivityTopbarControls } from "./features/activity/page.js";
 import { calendarNavigationItem } from "./features/calendar/manifest.js";
 import {
   type CalendarView,
@@ -1166,6 +1161,8 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <TodayWeatherTopbar user={user} weather={weather.data} />
               ) : location.pathname === "/mail" ? (
                 <MailTopbarControls />
+              ) : location.pathname === "/activity" ? (
+                <ActivityTopbarControls />
               ) : null
             }
             leading={
@@ -4797,90 +4794,6 @@ function MailComposeButton() {
   );
 }
 
-function ActivityPage() {
-  const activity = useQuery({ queryFn: () => api.listActivity(100), queryKey: ["activity"] });
-  return (
-    <div className="narrow-page">
-      {activity.isPending ? (
-        <PageLoading />
-      ) : activity.isError ? (
-        <InlineError error={activity.error} />
-      ) : (
-        <div className="activity-list">
-          {[
-            ...Map.groupBy(
-              activity.data,
-              (entry) => `${entry.requestId}:${entry.actorType}:${entry.action}`,
-            ).entries(),
-          ].map(([key, entries]) =>
-            entries.length === 1 ? (
-              <ActivityRow entry={entries[0] as AuditEvent} key={key} />
-            ) : (
-              <ActivityBatch entries={entries} key={key} />
-            ),
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ActivityBatch({ entries }: { entries: AuditEvent[] }) {
-  const first = entries[0] as AuditEvent;
-  const actor = actorLabel(first.actorType);
-  return (
-    <details className="activity-batch">
-      <summary>
-        <div className={`activity-row__actor actor--${first.actorType}`}>
-          <ActivityActorIcon actorType={first.actorType} />
-        </div>
-        <div className="activity-batch__summary">
-          <strong>{humanizeAction(first.action)}</strong>
-          <span>
-            {actor} · {entries.length} changes · {formatRelative(first.createdAt)}
-          </span>
-        </div>
-        <ChevronDown aria-hidden="true" size={17} />
-      </summary>
-      <div className="activity-batch__entries">
-        {entries.map((entry) => (
-          <ActivityRow entry={entry} key={entry.id} />
-        ))}
-      </div>
-    </details>
-  );
-}
-
-function actorLabel(actorType: string): string {
-  if (actorType === "agent") return "Agent";
-  if (actorType === "connector") return "Connector";
-  if (actorType === "system") return "System";
-  return "You";
-}
-
-function ActivityActorIcon({ actorType }: { actorType: string }) {
-  if (actorType === "agent") return <Command size={17} />;
-  if (actorType === "connector") return <Cloud size={17} />;
-  return <UserRound size={17} />;
-}
-
-function ActivityRow({ entry }: { entry: AuditEvent }) {
-  const actor = actorLabel(entry.actorType);
-  return (
-    <article className="activity-row">
-      <div className={`activity-row__actor actor--${entry.actorType}`}>
-        <ActivityActorIcon actorType={entry.actorType} />
-      </div>
-      <div>
-        <strong>{humanizeAction(entry.action)}</strong>
-        <span>
-          {actor} · {formatRelative(entry.createdAt)}
-        </span>
-      </div>
-    </article>
-  );
-}
-
 type SettingsSectionId =
   | "agents"
   | "automations"
@@ -8177,14 +8090,6 @@ function conferenceProviderLabel(url: string): string {
 function minuteToTime(value: number) {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
-function humanizeAction(action: string) {
-  return action
-    .split(".")
-    .map((part) => part.replaceAll("_", " "))
-    .join(" · ")
-    .replace(/^./, (letter) => letter.toUpperCase());
-}
-
 const calendarWeekdayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function formatLocalDate(date: LocalDate, options: Intl.DateTimeFormatOptions): string {

@@ -4043,6 +4043,16 @@ describe("ilo web app", () => {
     expect(screen.getByText(/Connector ·/)).toBeInTheDocument();
     expect(screen.getByText(/System ·/)).toBeInTheDocument();
     expect(screen.getByText(/You ·/)).toBeInTheDocument();
+    const activitySearch = screen.getByRole("searchbox", { name: "Search activity" });
+    await browser.type(activitySearch, "system{Enter}");
+    expect(await screen.findByText(/System ·/)).toBeInTheDocument();
+    expect(screen.queryByText(/Agent ·/)).not.toBeInTheDocument();
+    await browser.clear(activitySearch);
+    await browser.keyboard("{Enter}");
+    expect(await screen.findByText(/Agent ·/)).toBeInTheDocument();
+    await browser.type(activitySearch, "no matching audit material{Enter}");
+    expect(await screen.findByText("No matching activity")).toBeInTheDocument();
+    await browser.clear(activitySearch);
 
     await browser.click(screen.getByRole("button", { name: "Account menu" }));
     await browser.click(screen.getByRole("menuitem", { name: "Settings" }));
@@ -4982,6 +4992,11 @@ describe("ilo web app", () => {
     const activityView = setup("/activity");
     expect(await screen.findByRole("alert")).toHaveTextContent("activity unavailable");
     activityView.unmount();
+
+    mocks.listActivity.mockResolvedValue([]);
+    const emptyActivityView = setup("/activity");
+    expect(await screen.findByText("No activity yet")).toBeInTheDocument();
+    emptyActivityView.unmount();
 
     mocks.listEvents.mockResolvedValue([event]);
     mocks.listReminders.mockResolvedValue({ items: [reminder], nextCursor: null });

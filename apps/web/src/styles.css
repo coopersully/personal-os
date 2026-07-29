@@ -3018,6 +3018,7 @@ p {
   min-width: 0;
 }
 .mail-topbar-controls form { min-width: 0; }
+.activity-topbar__search,
 .mail-topbar__search { width: min(15rem, 24vw); }
 .mail-reader__back {
   display: none;
@@ -4349,6 +4350,7 @@ p {
   .workspace-skeleton__metric {
     height: 4.5rem;
   }
+  .activity-topbar__search,
   .mail-topbar__search { width: min(10rem, 32vw); }
   .mail-send-recovery {
     border-radius: 12px;

@@ -1,10 +1,4 @@
-import type {
-  AccessScope,
-  AssistantDomain,
-  MailRulePreview,
-  MailSetupAccount,
-  MailSetupContext,
-} from "@personal-os/domain";
+import type { AccessScope, MailRulePreview, MailSetupAccount } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -66,22 +60,30 @@ import {
 } from "../../components/ui/item.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group.js";
-
-const domainOptions: Array<{
-  domain: AssistantDomain;
-  label: string;
-  shortLabel: string;
-}> = [
-  { domain: "mail", label: "Mail", shortLabel: "Mail" },
-  { domain: "calendar", label: "Calendar", shortLabel: "Calendar" },
-  { domain: "reminders", label: "Reminders", shortLabel: "Reminders" },
-  { domain: "tasks", label: "Tasks", shortLabel: "Tasks" },
-  { domain: "finances", label: "Finances", shortLabel: "Finances" },
-  { domain: "goals", label: "Goals", shortLabel: "Goals" },
-];
-const domainLabels: Record<AssistantDomain, string> = Object.fromEntries(
-  domainOptions.map((option) => [option.domain, option.label]),
-) as Record<AssistantDomain, string>;
+import {
+  type ConnectedHostAuthority,
+  type DomainCapability,
+  type DomainReadinessItem,
+  type DomainSupport,
+  type Loadable,
+  mapLoadable,
+  type SetupDomain,
+  setupDomainLabels,
+  setupDomainOptions,
+} from "../agent-access/readiness.js";
+import {
+  calendarAgentAccessCapability,
+  calendarAgentAccessReadiness,
+} from "../calendar/agent-access.js";
+import {
+  financeAgentAccessCapability,
+  financeAgentAccessReadiness,
+} from "../finances/agent-access.js";
+import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
+import {
+  reminderAgentAccessCapability,
+  reminderAgentAccessReadiness,
+} from "../reminders/agent-access.js";
 
 const scopeLabels: Record<AccessScope, string> = {
   "audit:read": "Read activity",
@@ -153,20 +155,48 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
 
 export function AgentAccessSettings() {
   const queryClient = useQueryClient();
-  const [selectedDomain, setSelectedDomain] = useState<AssistantDomain>("mail");
+  const [selectedDomain, setSelectedDomain] = useState<SetupDomain>("mail");
   const guide = useQuery({
     queryFn: api.getAgentConnectionGuide,
     queryKey: ["agent-connection-guide"],
   });
+  const selectedGuide = guide.data?.domains.find((item) => item.domain === selectedDomain);
+  const selectedDomainEnabled =
+    guide.isSuccess && selectedGuide !== undefined && selectedGuide.support !== "unsupported";
   const setup = useQuery({
     queryFn: api.getAssistantSetupStatus,
     queryKey: ["assistant-setup-status"],
   });
   const mailSetup = useQuery({
+    enabled: selectedDomain === "mail" && selectedDomainEnabled,
     queryFn: api.getMailSetupContext,
     queryKey: ["mail-setup-context"],
   });
-  const rules = useQuery({ queryFn: api.listMailRules, queryKey: ["mail-rules"] });
+  const rules = useQuery({
+    enabled: selectedDomain === "mail" && selectedDomainEnabled,
+    queryFn: api.listMailRules,
+    queryKey: ["mail-rules"],
+  });
+  const calendars = useQuery({
+    enabled: selectedDomain === "calendar" && selectedDomainEnabled,
+    queryFn: api.listCalendars,
+    queryKey: ["calendars"],
+  });
+  const reminders = useQuery({
+    enabled: selectedDomain === "reminders" && selectedDomainEnabled,
+    queryFn: () => api.listReminders({ completed: false, limit: 100 }),
+    queryKey: ["reminders", "agent-access", "open"],
+  });
+  const financeSetup = useQuery({
+    enabled: selectedDomain === "finances" && selectedDomainEnabled,
+    queryFn: api.getFinanceGuidedSetup,
+    queryKey: ["finances", "guided-setup"],
+  });
+  const attention = useQuery({
+    enabled: selectedDomainEnabled,
+    queryFn: () => api.listAttentionItems({ domain: selectedDomain, limit: 100, status: "open" }),
+    queryKey: ["assistant-attention", selectedDomain, "open"],
+  });
   const tokens = useQuery({ queryFn: api.listAccessTokens, queryKey: ["tokens"] });
   const oauthClients = useQuery({ queryFn: api.listOAuthClients, queryKey: ["oauth-clients"] });
   const revokeOAuthClient = useMutation({
@@ -178,29 +208,60 @@ export function AgentAccessSettings() {
     },
   });
 
-  const activeTokens = (tokens.data ?? []).filter((token) => token.revokedAt === null);
-  const connectedAgentCount = activeTokens.length + (oauthClients.data?.length ?? 0);
-  const mailSources = mailSetup.data?.accounts ?? [];
-  const mailAutomation = mailSetup.data?.automation;
-  const mailProfile = setup.data?.domains.find((item) => item.domain === "mail");
-  const activeRules = (rules.data ?? []).filter(
-    (rule) => rule.enabled && rule.policy === "approved_rule",
+  const currentTime = Date.now();
+  const activeTokens = (tokens.data ?? []).filter(
+    (token) =>
+      token.revokedAt === null &&
+      (token.expiresAt === null || new Date(token.expiresAt).getTime() > currentTime),
   );
-  const selectedGuide = guide.data?.domains.find((item) => item.domain === selectedDomain);
-  const selectedProfile = setup.data?.domains.find((item) => item.domain === selectedDomain);
-  const selectedLabel = domainLabels[selectedDomain];
-  const setupPrompt = domainSetupPrompt(
+  const connectedAgentCount = activeTokens.length + (oauthClients.data?.length ?? 0);
+  const connectionCountUnavailable = tokens.isError || oauthClients.isError;
+  const connectionCountLoading = tokens.isPending || oauthClients.isPending;
+  const mailSources = mailSetup.data?.accounts ?? [];
+  const setupResource = queryLoadable(setup);
+  const selectedProfile = mapLoadable(setupResource, (value) =>
+    value.domains.find((item) => item.domain === selectedDomain),
+  );
+  const mailProfile = mapLoadable(setupResource, (value) =>
+    value.domains.find((item) => item.domain === "mail"),
+  );
+  const hostAuthorities = connectedHostAuthorities(tokens, oauthClients, currentTime);
+  const attentionResource = queryLoadable(attention);
+  const selectedLabel = setupDomainLabels[selectedDomain];
+  const selectedSupport: DomainSupport = selectedGuide?.support ?? "unsupported";
+  const capability = domainCapability(
     selectedDomain,
-    selectedLabel,
+    selectedSupport,
     guide.data?.skill.invocation ?? "$ilo-setup",
   );
-  const blockingError =
-    guide.error ??
+  const readiness = selectedDomainEnabled
+    ? domainReadiness({
+        attention: attentionResource,
+        calendars: queryLoadable(calendars),
+        domain: selectedDomain,
+        financeSetup: queryLoadable(financeSetup),
+        hosts: hostAuthorities,
+        mailRules: queryLoadable(rules),
+        mailSetup: queryLoadable(mailSetup),
+        profile: selectedProfile,
+        reminders: queryLoadable(reminders),
+      })
+    : [];
+  const blockingError = guide.error;
+  const selectedDomainError =
     setup.error ??
-    mailSetup.error ??
-    rules.error ??
+    attention.error ??
     tokens.error ??
-    oauthClients.error;
+    oauthClients.error ??
+    (selectedDomain === "mail"
+      ? (mailSetup.error ?? rules.error)
+      : selectedDomain === "calendar"
+        ? calendars.error
+        : selectedDomain === "reminders"
+          ? reminders.error
+          : selectedDomain === "finances"
+            ? financeSetup.error
+            : null);
 
   return (
     <div className="agent-access">
@@ -210,12 +271,24 @@ export function AgentAccessSettings() {
             <h2>Connect an agent</h2>
           </CardTitle>
           <CardDescription>
-            Give any MCP-compatible agent scoped Ilo access, then teach it how you want each part of
-            your life handled.
+            Use the same three-step handoff in Claude, Codex, or another MCP-compatible host, then
+            teach Ilo how you want each core domain handled.
           </CardDescription>
           <CardAction>
-            <Badge variant={connectedAgentCount > 0 ? "default" : "secondary"}>
-              {connectedAgentCount > 0 ? `${connectedAgentCount} connected` : "Not connected"}
+            <Badge
+              variant={
+                !connectionCountLoading && !connectionCountUnavailable && connectedAgentCount > 0
+                  ? "default"
+                  : "secondary"
+              }
+            >
+              {connectionCountLoading
+                ? "Checking connections"
+                : connectionCountUnavailable
+                  ? "Connections unavailable"
+                  : connectedAgentCount > 0
+                    ? `${connectedAgentCount} connected`
+                    : "Not connected"}
             </Badge>
           </CardAction>
         </CardHeader>
@@ -223,74 +296,91 @@ export function AgentAccessSettings() {
           {blockingError ? (
             <Alert variant="destructive">
               <X />
-              <AlertTitle>Agent setup could not be loaded</AlertTitle>
+              <AlertTitle>Agent connection details could not be loaded</AlertTitle>
               <AlertDescription>{errorMessage(blockingError)}</AlertDescription>
             </Alert>
           ) : null}
 
-          <ItemGroup className="agent-access__readiness">
-            <ReadinessItem
-              complete={mailSources.length > 0}
-              description={
-                mailSources.length > 0
-                  ? mailSourceSummary(mailSources)
-                  : "Connect a Mail account before asking an agent to learn your inbox."
-              }
-              title="Connected material"
+          <FieldSet>
+            <FieldLegend variant="label">Readiness for</FieldLegend>
+            <ToggleGroup
+              aria-label="Domain to set up"
+              className="agent-access__domains"
+              onValueChange={(value) => {
+                if (value) setSelectedDomain(value as SetupDomain);
+              }}
+              type="single"
+              value={selectedDomain}
+              variant="outline"
             >
-              {mailSources.length === 0 ? (
-                <Button asChild size="sm" variant="outline">
-                  <Link to="/settings?section=connections">Connect Mail</Link>
-                </Button>
-              ) : null}
-            </ReadinessItem>
-            <ReadinessItem
-              complete={connectedAgentCount > 0}
-              description={
-                connectedAgentCount > 0
-                  ? "At least one host can access Ilo."
-                  : "Add the MCP URL to your agent host and authorize access."
-              }
-              title="Agent connection"
-            />
-            <ReadinessItem
-              complete={mailProfile?.profileStatus === "active"}
-              description={
-                mailProfile?.profileStatus === "active"
-                  ? `${activeRules.length} active approved Mail rule${activeRules.length === 1 ? "" : "s"}`
-                  : mailProfile?.profileStatus === "draft"
-                    ? "Your Mail profile is drafted and waiting for review."
-                    : "Run the guided interview to teach Ilo what signal means to you."
-              }
-              title="Mail preferences"
-            />
-            <ReadinessItem
-              complete={
-                mailAutomation !== undefined &&
-                mailAutomation.reconciliationCount === 0 &&
-                mailAutomation.failedCount === 0
-              }
-              description={
-                mailAutomation
-                  ? formatMailAutomationStatus(mailAutomation)
-                  : "Delayed Mail automation status is loading."
-              }
-              title="Mail automation"
-            />
+              {setupDomainOptions.map((option) => {
+                const domainGuide = guide.data?.domains.find(
+                  (item) => item.domain === option.domain,
+                );
+                return (
+                  <ToggleGroupItem
+                    disabled={!domainGuide || domainGuide.support === "unsupported"}
+                    key={option.domain}
+                    value={option.domain}
+                  >
+                    {option.shortLabel}
+                  </ToggleGroupItem>
+                );
+              })}
+            </ToggleGroup>
+          </FieldSet>
+
+          {selectedDomainError ? (
+            <Alert variant="destructive">
+              <X />
+              <AlertTitle>{selectedLabel} readiness could not be loaded</AlertTitle>
+              <AlertDescription>{errorMessage(selectedDomainError)}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          <ItemGroup className="agent-access__readiness">
+            {readiness.map((item) => (
+              <ReadinessItem
+                complete={item.complete}
+                description={item.description}
+                key={item.title}
+                title={item.title}
+              >
+                {item.action ? (
+                  <Button asChild size="sm" variant="outline">
+                    <Link to={item.action.to}>{item.action.label}</Link>
+                  </Button>
+                ) : null}
+              </ReadinessItem>
+            ))}
+            {!guide.isPending && !selectedDomainEnabled ? (
+              <ReadinessItem
+                complete={false}
+                description={`${selectedLabel} guided setup is not published by this deployment.`}
+                title={`${selectedLabel} readiness unavailable`}
+              />
+            ) : null}
           </ItemGroup>
 
-          <MailRuleReview
-            accounts={mailSources}
-            loading={rules.isPending}
-            profileActive={mailProfile?.profileStatus === "active"}
-            rules={rules.data ?? []}
-          />
+          {selectedDomain === "mail" && selectedDomainEnabled ? (
+            <MailRuleReview
+              accounts={mailSources}
+              loading={rules.isPending}
+              profileActive={
+                mailProfile.state === "ready" && mailProfile.data?.profileStatus === "active"
+              }
+              profileLoading={mailProfile.state === "loading"}
+              profileUnavailable={mailProfile.state === "unavailable"}
+              rules={rules.data ?? []}
+              unavailable={rules.isError}
+            />
+          ) : null}
 
           <div className="agent-access__steps">
             <ConnectionStep
-              description="Paste this URL into any host that supports remote MCP. Ilo will handle sign-in and consent through OAuth when the host supports it."
+              description="Open your agent host, add this remote MCP URL, and authorize Ilo when the host supports OAuth. Provider credentials stay in Ilo."
               number="1"
-              title="Add Ilo as an MCP connector"
+              title="Open your agent host and connect Ilo"
             >
               <CopyInput
                 label="Ilo MCP URL"
@@ -300,70 +390,76 @@ export function AgentAccessSettings() {
             </ConnectionStep>
 
             <ConnectionStep
-              description="The skill gives the agent the interview, profile, preview, approval, and recovery workflow. Personal preferences stay in Ilo."
+              description="Copy this request into the host. Installation varies by host; the request identifies one immutable skill version and personal preferences stay in Ilo."
               number="2"
-              title="Install the guided setup skill"
+              title="Ask the host to install guided setup"
             >
               <CopyPrompt
                 copyLabel="Copy skill install request"
+                label="Skill install request"
                 loading={guide.isPending}
                 value={guide.data?.skill.installPrompt ?? ""}
               />
               {guide.data ? (
-                <Button asChild size="sm" variant="ghost">
-                  <a href={guide.data.skill.sourceUrl} rel="noreferrer" target="_blank">
-                    View skill source
-                    <ExternalLink data-icon="inline-end" />
-                  </a>
-                </Button>
+                <Item size="xs" variant="muted">
+                  <ItemMedia variant="icon">
+                    <ShieldCheck />
+                  </ItemMedia>
+                  <ItemContent>
+                    <ItemTitle>
+                      {guide.data.skill.displayName} v{guide.data.skill.version}
+                    </ItemTitle>
+                    <ItemDescription>Source revision {guide.data.skill.revision}</ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button asChild size="sm" variant="ghost">
+                      <a href={guide.data.skill.sourceUrl} rel="noreferrer" target="_blank">
+                        View skill source
+                        <ExternalLink data-icon="inline-end" />
+                      </a>
+                    </Button>
+                  </ItemActions>
+                </Item>
               ) : null}
             </ConnectionStep>
 
             <ConnectionStep
-              description="Choose a domain, copy the prompt, and paste it into the same agent conversation. Mail includes exact rule previews and approved automatic actions."
+              description={
+                selectedDomainEnabled
+                  ? `After the host confirms $ilo-setup is available, copy this ${selectedLabel} prompt into the same conversation.`
+                  : `${selectedLabel} setup is not published by this deployment, so there is no starter prompt to copy.`
+              }
               number="3"
               title="Start the shortest useful setup"
             >
-              <FieldSet>
-                <FieldLegend variant="label">Set up first</FieldLegend>
-                <ToggleGroup
-                  aria-label="Domain to set up"
-                  className="agent-access__domains"
-                  onValueChange={(value) => {
-                    if (value) setSelectedDomain(value as AssistantDomain);
-                  }}
-                  type="single"
-                  value={selectedDomain}
-                  variant="outline"
-                >
-                  {domainOptions.map((option) => (
-                    <ToggleGroupItem key={option.domain} value={option.domain}>
-                      {option.shortLabel}
-                    </ToggleGroupItem>
-                  ))}
-                </ToggleGroup>
-              </FieldSet>
               <Alert role="status" variant="info">
                 <ShieldCheck />
                 <AlertTitle>
-                  {selectedGuide?.support === "executable_rules"
-                    ? "Profiles, previews, and approved rules"
-                    : "Preferences and attention items"}
+                  {guide.isPending ? `Loading ${selectedLabel} capabilities` : capability.title}
                 </AlertTitle>
                 <AlertDescription>
-                  {selectedGuide?.support === "executable_rules"
-                    ? "Mail setup maps every inbox before sampling it, records important conversations as source-linked attention, and captures user-chosen delayed archive or recoverable Trash preferences. Approved delayed work is durable, bounded, recoverable after process loss, and visible here; permanent deletion remains unavailable. Every rule uses a dated preview and signed-in activation."
-                    : `${selectedLabel} uses the same durable profile and attention structure. Executable domain rules are not available yet.`}
-                  {selectedProfile?.approvedProfileStatus === "active"
-                    ? selectedProfile.pendingDraftVersion
-                      ? ` Active approved guidance is version ${selectedProfile.approvedProfileVersion}, with draft version ${selectedProfile.pendingDraftVersion} waiting for review.`
-                      : ` Your approved profile is active at version ${selectedProfile.approvedProfileVersion}.`
-                    : selectedProfile?.profileStatus
-                      ? ` Your current profile is ${selectedProfile.profileStatus}.`
+                  {guide.isPending
+                    ? "Ilo is checking the configured agent handoff and domain support."
+                    : capability.description}
+                  {!guide.isPending &&
+                  selectedProfile.state === "ready" &&
+                  selectedProfile.data?.approvedProfileStatus === "active"
+                    ? selectedProfile.data.pendingDraftVersion
+                      ? ` Active approved guidance is version ${selectedProfile.data.approvedProfileVersion}, with draft version ${selectedProfile.data.pendingDraftVersion} waiting for review.`
+                      : ` Your approved profile is active at version ${selectedProfile.data.approvedProfileVersion}.`
+                    : !guide.isPending &&
+                        selectedProfile.state === "ready" &&
+                        selectedProfile.data?.profileStatus
+                      ? ` Your current profile is ${selectedProfile.data.profileStatus}.`
                       : ""}
                 </AlertDescription>
               </Alert>
-              <CopyPrompt copyLabel={`Copy ${selectedLabel} setup prompt`} value={setupPrompt} />
+              <CopyPrompt
+                copyLabel={`Copy ${selectedLabel} setup prompt`}
+                label={`${selectedLabel} setup prompt`}
+                loading={guide.isPending}
+                value={capability.setupPrompt ?? ""}
+              />
             </ConnectionStep>
           </div>
         </CardContent>
@@ -425,12 +521,18 @@ function MailRuleReview({
   accounts,
   loading,
   profileActive,
+  profileLoading,
+  profileUnavailable,
   rules,
+  unavailable,
 }: {
   accounts: MailSetupAccount[];
   loading: boolean;
   profileActive: boolean;
+  profileLoading: boolean;
+  profileUnavailable: boolean;
   rules: Awaited<ReturnType<typeof api.listMailRules>>;
+  unavailable: boolean;
 }) {
   const queryClient = useQueryClient();
   const [reviewed, setReviewed] = useState<{ id: string; preview: MailRulePreview } | null>(null);
@@ -458,7 +560,19 @@ function MailRuleReview({
       ]);
     },
   });
-  if (loading || rules.length === 0) return null;
+  if (loading) return null;
+  if (unavailable) {
+    return (
+      <Alert variant="destructive">
+        <X />
+        <AlertTitle>Mail rules are unavailable</AlertTitle>
+        <AlertDescription>
+          Ilo cannot report an approved-rule count or open rule review until Mail rules load.
+        </AlertDescription>
+      </Alert>
+    );
+  }
+  if (rules.length === 0) return null;
   const accountNames = new Map(
     accounts.map((account) => [account.accountId, account.email ?? account.label]),
   );
@@ -531,10 +645,19 @@ function MailRuleReview({
           {!profileActive ? (
             <Alert variant="warning">
               <ShieldCheck />
-              <AlertTitle>Activate your Mail profile first</AlertTitle>
+              <AlertTitle>
+                {profileLoading
+                  ? "Mail profile status is loading"
+                  : profileUnavailable
+                    ? "Mail profile status is unavailable"
+                    : "Activate your Mail profile first"}
+              </AlertTitle>
               <AlertDescription>
-                Review and accept the profile summary in your agent conversation before activating a
-                rule.
+                {profileLoading
+                  ? "Wait for setup status before deciding whether this rule can be activated."
+                  : profileUnavailable
+                    ? "Reload setup status before deciding whether this rule can be activated."
+                    : "Review and accept the profile summary in your agent conversation before activating a rule."}
               </AlertDescription>
             </Alert>
           ) : null}
@@ -570,16 +693,6 @@ function formatPreviewWindow(preview: MailRulePreview): string {
   return `${preview.scannedCount} conversations from ${oldest} to ${newest}${
     preview.window.truncated ? ` (more than ${preview.window.limit} exist)` : ""
   }`;
-}
-
-function formatMailAutomationStatus(automation: MailSetupContext["automation"]): string {
-  const oldestDue = automation.oldestDueAt
-    ? ` Oldest due: ${new Date(automation.oldestDueAt).toLocaleString()}.`
-    : "";
-  const lastCompleted = automation.lastCompletedAt
-    ? ` Last completed: ${new Date(automation.lastCompletedAt).toLocaleString()}.`
-    : "";
-  return `${automation.pendingCount} delayed action${automation.pendingCount === 1 ? "" : "s"} pending; ${automation.inProgressCount} in progress; ${automation.reconciliationCount} need provider reconciliation; ${automation.failedCount} stopped safely. Ilo processes at most ${automation.executionLimitPerRun} conversations per scheduled run.${oldestDue}${lastCompleted}`;
 }
 
 function formatRuleSources(sourceIds: string[], accountNames: Map<string, string>): string {
@@ -686,18 +799,22 @@ function CopyInput({
 
 function CopyPrompt({
   copyLabel,
+  label,
   loading = false,
   value,
 }: {
   copyLabel: string;
+  label: string;
   loading?: boolean;
   value: string;
 }) {
+  const id = `copy-${label.replaceAll(" ", "-").toLowerCase()}`;
   return (
     <Field>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <Textarea
-        aria-label={copyLabel.replace("Copy ", "")}
         className="agent-access__prompt"
+        id={id}
         readOnly
         rows={4}
         value={loading ? "Loading…" : value}
@@ -936,23 +1053,100 @@ function TokenAccess({
   );
 }
 
-function domainSetupPrompt(domain: AssistantDomain, label: string, invocation: string): string {
-  if (domain === "mail") {
-    return `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Explain any pending, reconciliation, or failed automation shown in setup context. After I explicitly accept a rule summary, use review_mail_rule, then tell me to activate it myself in Ilo Settings → Agent access → Review Mail rules. Reviewed Google rules use bounded durable execution; Trash is recoverable and permanent deletion is unavailable.`;
-  }
-  return `Use ${invocation} to set up my ${label} in Ilo. Inspect the available sources and any existing profile, ask the shortest useful interview, save my preferences as a draft, and clearly separate what Ilo can do now from behavior that is not yet automated.`;
+function domainCapability(
+  domain: SetupDomain,
+  support: DomainSupport,
+  invocation: string,
+): DomainCapability {
+  if (domain === "mail") return mailAgentAccessCapability(support, invocation);
+  if (domain === "calendar") return calendarAgentAccessCapability(support, invocation);
+  if (domain === "reminders") return reminderAgentAccessCapability(support, invocation);
+  return financeAgentAccessCapability(support, invocation);
 }
 
-function mailSourceSummary(
-  accounts: Awaited<ReturnType<typeof api.getMailSetupContext>>["accounts"],
-): string {
-  const identities = accounts.map((account) => account.email ?? account.label);
-  const failing = accounts.filter((account) => account.syncStatus === "error").length;
-  const sourceSummary =
-    identities.length <= 2
-      ? identities.join(" and ")
-      : `${identities.slice(0, 2).join(", ")} +${identities.length - 2}`;
-  return `${accounts.length} Mail account${accounts.length === 1 ? "" : "s"} · ${sourceSummary}${failing > 0 ? ` · ${failing} needs reconnect` : ""}`;
+function domainReadiness({
+  attention,
+  calendars,
+  domain,
+  financeSetup,
+  hosts,
+  mailRules,
+  mailSetup,
+  profile,
+  reminders,
+}: {
+  attention: Parameters<typeof mailAgentAccessReadiness>[0]["attention"];
+  calendars: Parameters<typeof calendarAgentAccessReadiness>[0]["calendars"];
+  domain: SetupDomain;
+  financeSetup: Parameters<typeof financeAgentAccessReadiness>[0]["setup"];
+  hosts: Loadable<ConnectedHostAuthority[]>;
+  mailRules: Parameters<typeof mailAgentAccessReadiness>[0]["rules"];
+  mailSetup: Parameters<typeof mailAgentAccessReadiness>[0]["setup"];
+  profile: Parameters<typeof mailAgentAccessReadiness>[0]["profile"];
+  reminders: Parameters<typeof reminderAgentAccessReadiness>[0]["reminders"];
+}): DomainReadinessItem[] {
+  if (domain === "mail") {
+    return mailAgentAccessReadiness({
+      attention,
+      hosts,
+      profile,
+      rules: mailRules,
+      setup: mailSetup,
+    });
+  }
+  if (domain === "calendar") {
+    return calendarAgentAccessReadiness({ attention, calendars, hosts, profile });
+  }
+  if (domain === "reminders") {
+    return reminderAgentAccessReadiness({ attention, hosts, profile, reminders });
+  }
+  return financeAgentAccessReadiness({ attention, hosts, profile, setup: financeSetup });
+}
+
+function queryLoadable<T>({
+  data,
+  isError,
+  isPending,
+}: {
+  data: T | undefined;
+  isError: boolean;
+  isPending: boolean;
+}): Loadable<T> {
+  if (isPending) return { state: "loading" };
+  if (isError || data === undefined) return { state: "unavailable" };
+  return { data, state: "ready" };
+}
+
+function connectedHostAuthorities(
+  tokens: {
+    data: Awaited<ReturnType<typeof api.listAccessTokens>> | undefined;
+    isError: boolean;
+    isPending: boolean;
+  },
+  oauthClients: {
+    data: Awaited<ReturnType<typeof api.listOAuthClients>> | undefined;
+    isError: boolean;
+    isPending: boolean;
+  },
+  currentTime: number,
+): Loadable<ConnectedHostAuthority[]> {
+  if (tokens.isPending || oauthClients.isPending) return { state: "loading" };
+  if (tokens.isError || oauthClients.isError || !tokens.data || !oauthClients.data) {
+    return { state: "unavailable" };
+  }
+  return {
+    data: [
+      ...tokens.data
+        .filter(
+          (token) =>
+            token.revokedAt === null &&
+            (token.expiresAt === null || new Date(token.expiresAt).getTime() > currentTime),
+        )
+        .map((token) => ({ name: token.name, scopes: token.scopes })),
+      ...oauthClients.data.map((client) => ({ name: client.name, scopes: client.scopes })),
+    ],
+    state: "ready",
+  };
 }
 
 async function copyToClipboard(value: string, label: string): Promise<void> {

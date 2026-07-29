@@ -2,6 +2,25 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-07-29 — Reproducible agent handoff and core-domain readiness
+
+- Pinned the official `ilo-setup` v0.1.0 source to one Git commit and added a
+  checked release manifest plus version/revision/source contract for
+  configurable self-hosted releases. The exact former official `main` URL
+  migrates idempotently; custom mutable sources still fail validation.
+- Made Agent Access readiness follow the selected Mail, Finance, Calendar, or
+  Reminder domain through domain-owned adapters using existing APIs for
+  material, profile, workflow, and bounded open attention state.
+- Kept Mail first-class with rule review and durable-work detail while making
+  Calendar preview-only, Reminder notification limits, and Finance signed-in
+  review boundaries explicit.
+- Separated successful empty state from loading and unavailable reads, disabled
+  missing/unsupported guide domains, and derived agent authority from active
+  connected-host scopes rather than the signed-in browser session.
+- Reframed the recommended sequence as a host-agnostic copy handoff for Claude,
+  Codex, and other compatible MCP hosts; Ilo does not claim one-click host
+  installation.
+
 ## 2026-07-29 — Durable and recoverable Mail retention rules
 
 - Added a durable work ledger keyed by account, provider thread, accepted rule revision, and action

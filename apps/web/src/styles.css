@@ -4480,6 +4480,20 @@ p {
   .agent-access__readiness {
     grid-template-columns: 1fr;
   }
+  .agent-access__hero > [data-slot="card-header"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+  .agent-access__hero > [data-slot="card-header"] > [data-slot="card-description"] {
+    grid-column: 1;
+    grid-row: 2;
+  }
+  .agent-access__hero > [data-slot="card-header"] > [data-slot="card-action"] {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: start;
+    margin-top: 8px;
+  }
   .agent-access__step {
     grid-template-columns: 24px minmax(0, 1fr);
   }

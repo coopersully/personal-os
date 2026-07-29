@@ -66,8 +66,8 @@ provider internals.
   retention work with exact provider reconciliation, Finance readiness and proposal-first review
   workflows, and an installable guided-setup skill for scoped MCP hosts.
 - A deployment-aware Agent access handoff with remote MCP OAuth, readable
-  consent, skill-install and starter prompts, readiness state, revocation, and
-  advanced personal-token fallback.
+  consent, an immutable versioned skill-install request, core-domain readiness,
+  starter prompts, revocation, and advanced personal-token fallback.
 - Unified agenda and calendar views.
 - Current conditions in Today, preferring transient device location after the
   browser grants permission and falling back to an account-saved place selected

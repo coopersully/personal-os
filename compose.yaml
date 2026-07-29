@@ -28,6 +28,9 @@ services:
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8081,tauri://localhost,http://tauri.localhost}
       API_BASE_URL: ${API_BASE_URL:-http://localhost:8788}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8081}
+      AGENT_SKILL_REVISION: ${AGENT_SKILL_REVISION:-d8c27c725d18827829a3f99534d5d6dfbe715360}
+      AGENT_SKILL_SOURCE_URL: ${AGENT_SKILL_SOURCE_URL:-https://github.com/coopersully/personal-os/tree/d8c27c725d18827829a3f99534d5d6dfbe715360/skills/ilo-setup}
+      AGENT_SKILL_VERSION: ${AGENT_SKILL_VERSION:-0.1.0}
       AUTH_RATE_LIMIT_MAX_REQUESTS: ${AUTH_RATE_LIMIT_MAX_REQUESTS:-20}
       AUTH_RATE_LIMIT_WINDOW_SECONDS: ${AUTH_RATE_LIMIT_WINDOW_SECONDS:-300}
       APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:?Set APP_ENCRYPTION_KEY to a base64-encoded 32-byte key}

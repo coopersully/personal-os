@@ -67,6 +67,7 @@ import {
   reminderSchema,
   reminderTimeZoneSchema,
   resolveStoredMailRule,
+  semanticVersionSchema,
   sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
@@ -149,12 +150,15 @@ describe("domain schemas", () => {
           installPrompt: "Install the Ilo skill.",
           invocation: "$ilo-setup",
           name: "ilo-setup",
+          revision: "release-0.1.0",
           setupPrompt: "Set up Ilo.",
           sourceUrl: "https://example.com/ilo-setup",
           version: "0.1.0",
         },
       }),
     ).toMatchObject({ domains: [{ domain: "mail", support: "executable_rules" }] });
+    expect(semanticVersionSchema.parse("1.2.3-rc.1+build.7")).toBe("1.2.3-rc.1+build.7");
+    expect(() => semanticVersionSchema.parse("1.2.3-01")).toThrow();
     expect(
       upsertDomainProfileInputSchema.parse({
         categories: [],

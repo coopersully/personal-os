@@ -89,7 +89,7 @@ jobs:
         with:
           ref: ${{ needs.announce.outputs.release_sha }}
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 11.1.2
 

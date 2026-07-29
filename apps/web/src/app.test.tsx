@@ -2672,6 +2672,7 @@ describe("ilo web app", () => {
       expect(mocks.resolveFinanceReview).toHaveBeenCalledWith(secondId, {
         action: "defer",
         categoryId: undefined,
+        expectedTransactionUpdatedAt: undefined,
         learnMerchant: "suggest",
         rationale: null,
       }),
@@ -2686,6 +2687,7 @@ describe("ilo web app", () => {
       expect(mocks.resolveFinanceReview).toHaveBeenLastCalledWith(secondId, {
         action: "recategorize",
         categoryId: id,
+        expectedTransactionUpdatedAt: now,
         learnMerchant: "always",
         rationale: "Reviewed and recategorized by the user.",
       }),

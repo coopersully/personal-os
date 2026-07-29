@@ -572,6 +572,17 @@ describe("domain schemas", () => {
       expectedTransactionUpdatedAt: start,
       learnMerchant: "suggest",
     });
+    expect(
+      financeReviewDecisionInputSchema.safeParse({
+        action: "approve",
+      }).success,
+    ).toBe(false);
+    expect(
+      financeReviewDecisionInputSchema.safeParse({
+        action: "recategorize",
+        expectedTransactionUpdatedAt: start,
+      }).success,
+    ).toBe(false);
     expect(() => updateFinanceTransactionInputSchema.parse({ learnMerchant: false })).toThrow();
     expect(
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })

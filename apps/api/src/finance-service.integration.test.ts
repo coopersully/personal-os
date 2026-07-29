@@ -506,6 +506,7 @@ describe.sequential("finance service", () => {
       {
         action: "recategorize",
         categoryId: shopping.id,
+        expectedTransactionUpdatedAt: lowConfidenceReview.transaction.updatedAt,
         learnMerchant: "never",
         rationale: "The user accepted the individual category.",
       },
@@ -794,6 +795,7 @@ describe.sequential("finance service", () => {
       {
         action: "recategorize",
         categoryId: shopping.id,
+        expectedTransactionUpdatedAt: "2026-07-19T12:02:00.000Z",
         learnMerchant: "never",
         rationale: "The user resolved the stale review in Finance.",
       },
@@ -839,6 +841,7 @@ describe.sequential("finance service", () => {
         transferReview.id,
         {
           action: "not_purchase",
+          expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
           learnMerchant: "never",
           rationale: "An agent may not confirm this transfer.",
         },
@@ -869,23 +872,46 @@ describe.sequential("finance service", () => {
         ),
       );
     expect(deferAudits).toHaveLength(1);
-    await expect(
+    const concurrentTransferDecisions = await Promise.allSettled([
       service.resolveReview(
         transferReview.id,
         {
           action: "not_purchase",
+          expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
           learnMerchant: "never",
           rationale: "The user confirmed this is movement between owned accounts.",
         },
         context,
       ),
-    ).resolves.toMatchObject({
-      applied: true,
-      transaction: expect.objectContaining({
-        category: "Transfers",
-        direction: "transfer",
-        needsReview: false,
-      }),
+      service.resolveReview(
+        transferReview.id,
+        {
+          action: "not_purchase",
+          expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "A concurrent duplicate decision must not overwrite the first.",
+        },
+        context,
+      ),
+    ]);
+    expect(
+      concurrentTransferDecisions.filter((decision) => decision.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      concurrentTransferDecisions.filter((decision) => decision.status === "rejected"),
+    ).toHaveLength(1);
+    expect(
+      concurrentTransferDecisions.find((decision) => decision.status === "fulfilled"),
+    ).toMatchObject({
+      status: "fulfilled",
+      value: {
+        applied: true,
+        transaction: expect.objectContaining({
+          category: "Transfers",
+          direction: "transfer",
+          needsReview: false,
+        }),
+      },
     });
     expect(
       (await service.listReviewQueue(userId)).some(
@@ -1526,6 +1552,16 @@ describe.sequential("finance service", () => {
   });
 
   it("creates Plaid Link sessions, exchanges tokens, and synchronizes incremental changes", async () => {
+    const [plaidOnlyUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Plaid Only",
+        email: "plaid-only@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!plaidOnlyUser) throw new Error("Plaid-only fixture user was not created.");
     const fetch = plaidFetch();
     const service = createFinanceService({
       db: database.db,
@@ -1538,14 +1574,18 @@ describe.sequential("finance service", () => {
         secret: "secret",
       },
     });
-    const context = { principal: financePrincipal(userId), requestId: "plaid-finance" };
+    const context = {
+      principal: financePrincipal(plaidOnlyUser.id),
+      requestId: "plaid-finance",
+    };
     expect(service.plaidAvailable()).toBe(true);
-    await expect(service.createPlaidLinkToken(userId)).resolves.toBe("link-token");
+    await expect(service.createPlaidLinkToken(plaidOnlyUser.id)).resolves.toBe("link-token");
     const accounts = await service.exchangePlaidToken(
       { institution: "Plaid Bank", publicToken: "public-token" },
       context,
     );
     expect(accounts).toHaveLength(2);
+    await expect(service.listCategories(plaidOnlyUser.id)).resolves.not.toHaveLength(0);
     const plaidAccount = accounts[0];
     if (!plaidAccount) throw new Error("Plaid checking account was not saved.");
     await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
@@ -1559,7 +1599,12 @@ describe.sequential("finance service", () => {
     const [transaction] = await database.db
       .select()
       .from(financeTransactions)
-      .where(eq(financeTransactions.providerTransactionId, "txn-1"));
+      .where(
+        and(
+          eq(financeTransactions.providerTransactionId, "txn-1"),
+          eq(financeTransactions.userId, plaidOnlyUser.id),
+        ),
+      );
     expect(transaction).toMatchObject({
       amount: 2200,
       categoryConfidence: 9850,

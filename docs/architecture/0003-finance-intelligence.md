@@ -89,7 +89,9 @@ The defensive service path for an agent-attributed category review requires the
 accepted proposal confidence and transaction `updatedAt`, then applies the same
 proposal, policy, and stale-revision checks as batch categorization. Public
 agent routes do not expose review resolution. Interactive users may resolve a
-current review directly; ambiguous transfer confirmation remains human-only.
+current review directly, but must submit its displayed transaction revision;
+the apply transaction locks the open review so concurrent signed-in decisions
+cannot both commit. Ambiguous transfer confirmation remains human-only.
 
 An exact retry of an unchanged below-threshold decision reuses the existing
 open review and deferred evidence. The result reports `replayed: true` and does
@@ -158,6 +160,10 @@ changes, review decisions, recurring state, alerts, and manual transactions are
 absent from MCP and guarded as human-only API routes. Agents must not turn an
 ambiguous result into a category, transfer, subscription, or permanent rule on
 their own.
+
+Every account-onboarding path, including Plaid exchange, provisions the stable
+default category taxonomy inside the account transaction. Category reads remain
+side-effect free for a new Plaid-only user.
 
 MCP annotations describe expected host UX only. All Finance read tools declare
 the four risk hints, while the API's scopes, human-session guards, adaptive

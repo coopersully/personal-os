@@ -948,6 +948,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
     options: {
       auditAction?: "finance.transaction_categorized" | "finance.transfer_confirmed";
       direction?: "transfer";
+      requiredReviewId?: string;
     } = {},
   ) {
     const before = await ownedTransaction(context.principal.userId, decision.transactionId);
@@ -994,6 +995,25 @@ export function createFinanceService({ db, now, plaid }: Options) {
           .limit(1);
         if (!current || current.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) {
           throw new AppError("conflict", "The transaction changed while it was being reviewed.");
+        }
+        if (options.requiredReviewId) {
+          const [requiredReview] = await tx
+            .select({ status: financeReviewCases.status })
+            .from(financeReviewCases)
+            .where(
+              and(
+                eq(financeReviewCases.id, options.requiredReviewId),
+                eq(financeReviewCases.userId, context.principal.userId),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (!requiredReview || !["deferred", "open"].includes(requiredReview.status)) {
+            throw new AppError(
+              "conflict",
+              "The finance review case changed before the decision was applied.",
+            );
+          }
         }
         await tx
           .select({ id: financeCategories.id })
@@ -1162,6 +1182,25 @@ export function createFinanceService({ db, now, plaid }: Options) {
         .limit(1);
       if (!current || current.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) {
         throw new AppError("conflict", "The transaction changed while it was being categorized.");
+      }
+      if (options.requiredReviewId) {
+        const [requiredReview] = await tx
+          .select({ status: financeReviewCases.status })
+          .from(financeReviewCases)
+          .where(
+            and(
+              eq(financeReviewCases.id, options.requiredReviewId),
+              eq(financeReviewCases.userId, context.principal.userId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!requiredReview || !["deferred", "open"].includes(requiredReview.status)) {
+          throw new AppError(
+            "conflict",
+            "The finance review case changed before the decision was applied.",
+          );
+        }
       }
       await tx
         .select({ id: financeCategories.id })
@@ -2113,6 +2152,18 @@ export function createFinanceService({ db, now, plaid }: Options) {
       });
       const config = getPlaid();
       const rows = await db.transaction(async (tx) => {
+        await tx
+          .insert(financeCategories)
+          .values(
+            defaultCategories.map(([name, slug]) => ({
+              group: categoryGroup(name),
+              isSystem: true,
+              name,
+              slug,
+              userId: context.principal.userId,
+            })),
+          )
+          .onConflictDoNothing({ target: [financeCategories.userId, financeCategories.slug] });
         const created: Array<typeof financeAccounts.$inferSelect> = [];
         for (const remote of accountsResponse.accounts) {
           const record = requireDatabaseRecord(
@@ -2755,6 +2806,12 @@ export function createFinanceService({ db, now, plaid }: Options) {
         });
         return { deferred: true };
       }
+      if (input.expectedTransactionUpdatedAt === undefined) {
+        throw new AppError(
+          "invalid_request",
+          "Resolving a Finance review requires the displayed transaction revision.",
+        );
+      }
       const current = await ownedTransaction(context.principal.userId, review.transactionId);
       const categoryId =
         input.action === "approve"
@@ -2768,10 +2825,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         {
           categoryId,
           confidence: context.principal.actorType === "agent" ? (input.confidence ?? 0) : 1,
-          expectedTransactionUpdatedAt:
-            context.principal.actorType === "agent"
-              ? (input.expectedTransactionUpdatedAt ?? "")
-              : current.updatedAt.toISOString(),
+          expectedTransactionUpdatedAt: input.expectedTransactionUpdatedAt,
           learnMerchant: input.learnMerchant,
           rationale:
             input.rationale ??
@@ -2786,8 +2840,12 @@ export function createFinanceService({ db, now, plaid }: Options) {
           ? "corrected"
           : "confirmed",
         input.action === "not_purchase"
-          ? { auditAction: "finance.transfer_confirmed", direction: "transfer" }
-          : {},
+          ? {
+              auditAction: "finance.transfer_confirmed",
+              direction: "transfer",
+              requiredReviewId: review.id,
+            }
+          : { requiredReviewId: review.id },
       );
       return result;
     },

@@ -1134,6 +1134,7 @@ describe("ilo API client", () => {
     await expect(
       api.resolveFinanceReview(id, {
         action: "approve",
+        expectedTransactionUpdatedAt: now,
         learnMerchant: "never",
         rationale: null,
       }),

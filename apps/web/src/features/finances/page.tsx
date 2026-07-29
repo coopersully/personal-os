@@ -274,6 +274,7 @@ export function FinancesPage() {
   const [learnMerchant, setLearnMerchant] = useState(false);
   const [categorizing, setCategorizing] = useState<{
     category: string;
+    expectedTransactionUpdatedAt: string;
     id: string;
     merchant: string;
     reviewId?: string;
@@ -437,12 +438,14 @@ export function FinancesPage() {
     mutationFn: ({
       action,
       categoryId,
+      expectedTransactionUpdatedAt,
       id,
       learnMerchant,
       rationale,
     }: {
       action: "approve" | "defer" | "recategorize";
       categoryId?: string;
+      expectedTransactionUpdatedAt?: string;
       id: string;
       learnMerchant?: "always" | "never" | "suggest";
       rationale?: string;
@@ -450,6 +453,7 @@ export function FinancesPage() {
       api.resolveFinanceReview(id, {
         action,
         categoryId,
+        expectedTransactionUpdatedAt,
         learnMerchant: learnMerchant ?? "suggest",
         rationale: rationale ?? null,
       }),
@@ -459,6 +463,7 @@ export function FinancesPage() {
     setLearnMerchant(false);
     setCategorizing({
       category: item.category ?? "",
+      expectedTransactionUpdatedAt: item.updatedAt,
       id: item.id,
       merchant: item.merchant,
     });
@@ -677,11 +682,18 @@ export function FinancesPage() {
                 <FinanceReviewItems
                   cases={reviewQueue.data}
                   isPending={resolveReview.isPending}
-                  onApprove={(id) => resolveReview.mutate({ action: "approve", id })}
+                  onApprove={(review) =>
+                    resolveReview.mutate({
+                      action: "approve",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
+                      id: review.id,
+                    })
+                  }
                   onCategorize={(review) => {
                     setLearnMerchant(false);
                     setCategorizing({
                       category: review.transaction.category ?? "",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
                       id: review.transaction.id,
                       merchant: review.transaction.merchant,
                       reviewId: review.id,
@@ -1141,6 +1153,7 @@ export function FinancesPage() {
                     {
                       action: "recategorize",
                       categoryId,
+                      expectedTransactionUpdatedAt: categorizing.expectedTransactionUpdatedAt,
                       id: categorizing.reviewId,
                       learnMerchant: learnMerchant ? "always" : "suggest",
                       rationale: "Reviewed and recategorized by the user.",
@@ -2854,7 +2867,7 @@ function FinanceReviewItems({
 }: {
   cases: FinanceReviewCase[];
   isPending: boolean;
-  onApprove: (id: string) => void;
+  onApprove: (review: FinanceReviewCase) => void;
   onCategorize: (review: FinanceReviewCase) => void;
   onDefer: (id: string) => void;
 }) {
@@ -2884,7 +2897,7 @@ function FinanceReviewItems({
             <ShadcnItemActions>
               <span className="text-sm font-medium">{formatMoney(item.amount)}</span>
               {canApprove ? (
-                <ShadcnButton disabled={isPending} onClick={() => onApprove(review.id)} size="sm">
+                <ShadcnButton disabled={isPending} onClick={() => onApprove(review)} size="sm">
                   Approve
                 </ShadcnButton>
               ) : null}

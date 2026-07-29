@@ -443,14 +443,31 @@ export type FinanceCategorizationApplyResult = z.infer<
   typeof financeCategorizationApplyResultSchema
 >;
 
-export const financeReviewDecisionInputSchema = z.object({
-  action: z.enum(["approve", "defer", "not_purchase", "recategorize"]),
-  categoryId: idSchema.optional(),
-  confidence: z.number().min(0).max(1).optional(),
-  expectedTransactionUpdatedAt: isoDateTimeSchema.optional(),
-  learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
-  rationale: z.string().trim().max(1_000).nullable().default(null),
-});
+export const financeReviewDecisionInputSchema = z
+  .object({
+    action: z.enum(["approve", "defer", "not_purchase", "recategorize"]),
+    categoryId: idSchema.optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    expectedTransactionUpdatedAt: isoDateTimeSchema.optional(),
+    learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
+    rationale: z.string().trim().max(1_000).nullable().default(null),
+  })
+  .superRefine((value, context) => {
+    if (value.action !== "defer" && value.expectedTransactionUpdatedAt === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Resolving a Finance review requires the displayed transaction revision.",
+        path: ["expectedTransactionUpdatedAt"],
+      });
+    }
+    if (value.action === "recategorize" && value.categoryId === undefined) {
+      context.addIssue({
+        code: "custom",
+        message: "Recategorizing a Finance review requires a category.",
+        path: ["categoryId"],
+      });
+    }
+  });
 export type FinanceReviewDecisionInput = z.infer<typeof financeReviewDecisionInputSchema>;
 
 export const financeBudgetSchema = z.object({

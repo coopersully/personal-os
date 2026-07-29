@@ -214,6 +214,25 @@ describe.sequential("connector service", () => {
     return false;
   }
 
+  async function waitForMailRuleWorkLock(): Promise<boolean> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const result = await database.pool.query<{ blocked: boolean }>(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND query LIKE '%mail_rule_work_items%'
+        ) AS blocked
+      `);
+      if (result.rows[0]?.blocked) return true;
+      await new Promise<void>((resolveAttempt) => {
+        setTimeout(resolveAttempt, 25);
+      });
+    }
+    return false;
+  }
+
   async function createDurableMailWorkFixture(name: string, action: MailRuleAction) {
     const slug = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-");
     const [workUser] = await database.db
@@ -4340,6 +4359,59 @@ describe.sequential("connector service", () => {
         .from(attentionItems)
         .where(eq(attentionItems.id, existingRunSummary.id)),
     ).resolves.toEqual([{ status: "resolved" }]);
+  });
+
+  it("releases Mail work claimed while quiescing before any provider effect", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Quiesce claim", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockClear();
+    const controller = new AbortController();
+    const quiescingService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google,
+      icloud,
+      now: () => timestamp,
+      shutdown: {
+        deadlineMs: () => timestamp.getTime() + 105_000,
+        signal: controller.signal,
+      },
+    });
+    const lockClient = await database.pool.connect();
+    const interruption = new Error("API runtime is quiescing.");
+    let dispatch: Promise<unknown> | undefined;
+    try {
+      await lockClient.query("BEGIN");
+      await lockClient.query("LOCK TABLE mail_rule_work_items IN ACCESS EXCLUSIVE MODE");
+      dispatch = quiescingService.dispatchDueMailRuleWork();
+      await expect(waitForMailRuleWorkLock()).resolves.toBe(true);
+      controller.abort(interruption);
+      await lockClient.query("COMMIT");
+      await expect(dispatch).rejects.toBe(interruption);
+    } finally {
+      await lockClient.query("ROLLBACK");
+      lockClient.release();
+      if (dispatch) await dispatch.catch(() => undefined);
+    }
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        attemptCount: 0,
+        claimId: null,
+        claimedAt: null,
+        claimMode: null,
+        status: "pending",
+      }),
+    ]);
   });
 
   it("claims at most six due conversations per scheduled Mail run", async () => {

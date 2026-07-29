@@ -2002,6 +2002,42 @@ export function createConnectorService({
     return new Date(now().getTime() + delay * 60_000);
   }
 
+  async function releaseMailRuleClaimForQuiesce(claimId: string): Promise<void> {
+    if (!shutdown?.signal.aborted) return;
+    try {
+      await db
+        .update(mailRuleWorkItems)
+        .set({
+          attemptCount: sql`greatest(${mailRuleWorkItems.attemptCount} - 1, 0)`,
+          claimId: null,
+          claimedAt: null,
+          claimMode: null,
+          status: sql`
+            CASE
+              WHEN ${mailRuleWorkItems.claimMode} = 'reconcile' THEN 'reconcile'
+              ELSE 'pending'
+            END
+          `,
+          updatedAt: now(),
+        })
+        .where(
+          and(eq(mailRuleWorkItems.claimId, claimId), eq(mailRuleWorkItems.status, "claimed")),
+        );
+    } catch (error) {
+      throw new AppError(
+        "service_unavailable",
+        "Mail work claimed during shutdown could not be released for a safe retry.",
+        {
+          cause: error instanceof Error ? error.message : "unknown",
+          claimId,
+          operation: "release_mail_rule_claim",
+          retryable: true,
+        },
+      );
+    }
+    shutdown.signal.throwIfAborted();
+  }
+
   async function claimDueMailRuleWork(): Promise<{
     claimed: MailRuleWorkRow[];
     maintenanceFailed: number;
@@ -2159,11 +2195,13 @@ export function createConnectorService({
           AND work.attempt_count < ${MAIL_RULE_WORK_MAX_ATTEMPTS}
       `);
     });
+    await releaseMailRuleClaimForQuiesce(claimId);
     const claimed = await db
       .select()
       .from(mailRuleWorkItems)
       .where(and(eq(mailRuleWorkItems.claimId, claimId), eq(mailRuleWorkItems.status, "claimed")))
       .orderBy(asc(mailRuleWorkItems.accountId), asc(mailRuleWorkItems.remoteThreadId));
+    await releaseMailRuleClaimForQuiesce(claimId);
     for (const item of claimed) touchedAccountIds.add(item.accountId);
     return { claimed, maintenanceFailed, touchedAccountIds: [...touchedAccountIds] };
   }

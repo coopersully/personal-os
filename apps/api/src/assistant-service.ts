@@ -68,11 +68,20 @@ export function createAssistantService({
     async getSetupStatus(principal: Principal): Promise<AssistantSetupStatus> {
       const profiles = await db
         .select({
+          approvedVersion: domainProfileApprovals.profileVersion,
           domain: domainProfiles.domain,
           status: domainProfiles.status,
           version: domainProfiles.version,
         })
         .from(domainProfiles)
+        .leftJoin(
+          domainProfileApprovals,
+          and(
+            eq(domainProfileApprovals.profileId, domainProfiles.id),
+            eq(domainProfileApprovals.userId, domainProfiles.userId),
+            eq(domainProfileApprovals.domain, domainProfiles.domain),
+          ),
+        )
         .where(eq(domainProfiles.userId, principal.userId));
       const byDomain = new Map(profiles.map((profile) => [profile.domain, profile]));
       return {
@@ -80,10 +89,16 @@ export function createAssistantService({
           const access = featureAccessPolicies[domain];
           const profile = byDomain.get(domain);
           const canRead = principal.scopes.has(access.readScope);
+          const approvedVersion =
+            canRead && profileRequiresApproval(domain) ? (profile?.approvedVersion ?? null) : null;
           return {
+            approvedProfileStatus: approvedVersion === null ? null : ("active" as const),
+            approvedProfileVersion: approvedVersion,
             canRead,
             canWrite: principal.scopes.has(access.writeScope),
             domain,
+            pendingDraftVersion:
+              approvedVersion !== null && profile?.status === "draft" ? profile.version : null,
             profileStatus: canRead ? (profile?.status ?? null) : null,
             profileVersion: canRead ? (profile?.version ?? null) : null,
           };

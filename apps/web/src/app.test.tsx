@@ -693,9 +693,12 @@ function defaults() {
   mocks.getAssistantSetupStatus.mockResolvedValue({
     domains: [
       {
+        approvedProfileStatus: null,
+        approvedProfileVersion: null,
         canRead: true,
         canWrite: true,
         domain: "mail",
+        pendingDraftVersion: null,
         profileStatus: null,
         profileVersion: null,
       },

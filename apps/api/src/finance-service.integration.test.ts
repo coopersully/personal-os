@@ -349,6 +349,59 @@ describe.sequential("finance service", () => {
       summary: "Legacy active Finance profile",
       userId: upgradeUser.id,
     });
+    const [legacyPostedTransaction] = (
+      await database.pool.query<{ id: string }>(
+        `INSERT INTO finance_transactions (
+          user_id, account_id, provider_transaction_id, merchant, amount_cents,
+          direction, transaction_date, category, category_source,
+          category_decided_at, needs_review, pending
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id`,
+        [
+          upgradeUser.id,
+          upgradeAccount.id,
+          "legacy-provider-transaction",
+          "Legacy provider purchase",
+          4200,
+          "expense",
+          "2026-07-01",
+          "Shopping",
+          "user",
+          new Date("2026-07-01T12:00:00.000Z"),
+          false,
+          false,
+        ],
+      )
+    ).rows;
+    if (!legacyPostedTransaction) {
+      throw new Error("Legacy posted transaction fixture was not created.");
+    }
+    const [legacyManualTransaction] = (
+      await database.pool.query<{ id: string }>(
+        `INSERT INTO finance_transactions (
+          user_id, account_id, merchant, amount_cents, direction,
+          transaction_date, category, category_source, category_decided_at,
+          needs_review, pending
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id`,
+        [
+          upgradeUser.id,
+          upgradeAccount.id,
+          "Legacy manual purchase",
+          1800,
+          "expense",
+          "2026-07-02",
+          "Dining",
+          "user",
+          new Date("2026-07-02T12:00:00.000Z"),
+          false,
+          false,
+        ],
+      )
+    ).rows;
+    if (!legacyManualTransaction) {
+      throw new Error("Legacy manual transaction fixture was not created.");
+    }
     const approvalMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-approval-", [
       "0043_finance_default_category_backfill",
     ]);
@@ -370,6 +423,18 @@ describe.sequential("finance service", () => {
         .from(financeCategories)
         .where(eq(financeCategories.userId, upgradeUser.id)),
     ).resolves.toHaveLength(0);
+    await expect(
+      database.db
+        .select({ providerDirection: financeTransactions.providerDirection })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, legacyPostedTransaction.id)),
+    ).resolves.toEqual([{ providerDirection: "expense" }]);
+    await expect(
+      database.db
+        .select({ providerDirection: financeTransactions.providerDirection })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, legacyManualTransaction.id)),
+    ).resolves.toEqual([{ providerDirection: null }]);
     await migrateDatabase(database.db, migrationsFolder);
     await expect(
       database.db
@@ -1698,6 +1763,65 @@ describe.sequential("finance service", () => {
     });
     expect(transactions.items.find((item) => item.id === rent.id)).toMatchObject({
       category: "RENT_AND_UTILITIES",
+      direction: "expense",
+    });
+    const secondPayment = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 325,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "expense",
+        merchant: "AMEX EPAYMENT",
+        notes: null,
+      },
+      context,
+    );
+    const secondCardPayment = await service.createTransaction(
+      {
+        accountId: card.id,
+        amount: 325,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "income",
+        merchant: "AUTOPAY PAYMENT - THANK YOU",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ categoryDecidedAt: null, categorySource: "provider" })
+      .where(inArray(financeTransactions.id, [secondPayment.id, secondCardPayment.id]));
+    const concurrentReconciliations = await Promise.all([
+      service.reconcileTransfers(userId),
+      service.reconcileTransfers(userId),
+    ]);
+    expect(concurrentReconciliations.reduce((sum, result) => sum + result.paired, 0)).toBe(1);
+    const concurrentlyMatched = await database.db
+      .select({
+        reconciliationStatus: financeTransactions.reconciliationStatus,
+        transferGroupId: financeTransactions.transferGroupId,
+      })
+      .from(financeTransactions)
+      .where(inArray(financeTransactions.id, [secondPayment.id, secondCardPayment.id]));
+    expect(concurrentlyMatched).toHaveLength(2);
+    expect(concurrentlyMatched[0]?.transferGroupId).toBeTruthy();
+    expect(concurrentlyMatched[1]?.transferGroupId).toBe(concurrentlyMatched[0]?.transferGroupId);
+    expect(concurrentlyMatched.every((item) => item.reconciliationStatus === "matched")).toBe(true);
+    await Promise.all([
+      service.reconcileTransfers(userId),
+      service.updateTransaction(rent.id, { category: "Shopping", learnMerchant: false }, context),
+    ]);
+    expect(
+      (await service.listTransactions(userId, { limit: 200, review: "all" })).items.find(
+        (item) => item.id === rent.id,
+      ),
+    ).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
       direction: "expense",
     });
   });

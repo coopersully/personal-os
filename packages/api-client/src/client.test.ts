@@ -742,9 +742,12 @@ function apiFetch() {
         setup: {
           domains: [
             {
+              approvedProfileStatus: null,
+              approvedProfileVersion: null,
               canRead: true,
               canWrite: true,
               domain: "mail",
+              pendingDraftVersion: null,
               profileStatus: "draft",
               profileVersion: 1,
             },

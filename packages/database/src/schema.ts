@@ -352,7 +352,8 @@ export const domainProfileApprovals = pgTable(
       "domain_profile_approvals_snapshot_check",
       sql`${table.profile}->>'id' = ${table.profileId}::text
         AND ${table.profile}->>'domain' = ${table.domain}
-        AND (${table.profile}->>'version')::integer = ${table.profileVersion}`,
+        AND (${table.profile}->>'version')::integer = ${table.profileVersion}
+        AND ${table.profile}->>'status' = 'active'`,
     ),
   ],
 );

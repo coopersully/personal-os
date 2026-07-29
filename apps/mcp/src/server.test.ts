@@ -198,9 +198,12 @@ function mockApi() {
     getAssistantSetupStatus: vi.fn(async () => ({
       domains: [
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
           domain: "mail" as const,
+          pendingDraftVersion: null,
           profileStatus: "draft" as const,
           profileVersion: 1,
         },

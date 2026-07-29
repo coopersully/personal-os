@@ -1187,6 +1187,26 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(409);
+    const [concurrentActivation, ...concurrentGuidanceResponses] = await Promise.all([
+      request("/v1/assistant/profiles/finances", {
+        body: {
+          ...revisedFinanceDraft,
+          expectedVersion: 3,
+          status: "active",
+        },
+        method: "PUT",
+      }),
+      ...Array.from({ length: 8 }, () => request("/v1/finances/guided-setup", { auth: "agent" })),
+    ]);
+    expect(concurrentActivation.status).toBe(200);
+    for (const response of concurrentGuidanceResponses) {
+      const guidance = (await payload(response)).setup.guidance;
+      const oldSnapshot =
+        guidance.approvedProfile?.version === 2 && guidance.draftProposal?.version === 3;
+      const newSnapshot =
+        guidance.approvedProfile?.version === 4 && guidance.draftProposal === null;
+      expect(oldSnapshot || newSnapshot).toBe(true);
+    }
     const agentBypassCandidate = (
       await payload(
         await request("/v1/finances/transactions", {

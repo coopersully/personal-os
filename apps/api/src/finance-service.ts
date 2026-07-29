@@ -84,6 +84,7 @@ type PlaidOptions = {
 };
 type Options = { db: Database; now: () => Date; plaid?: PlaidOptions };
 type FinanceProfileSourceExecutor = Pick<Database, "select">;
+type FinanceReviewExecutor = Pick<Database, "insert" | "select" | "update">;
 type PlaidCredentials = { accessToken: string };
 type PlaidAccount = {
   account_id: string;
@@ -695,53 +696,64 @@ export function createFinanceService({ db, now, plaid }: Options) {
     };
   }
   async function reconcileBudgetTransfers(userId: string) {
-    const [accounts, transactions, transfers] = await Promise.all([
-      db.select().from(financeAccounts).where(eq(financeAccounts.userId, userId)),
-      db
+    const [transfers, rent] = await Promise.all([
+      categoryForName(userId, transferCategory),
+      categoryForName(userId, rentCategory),
+    ]);
+    return db.transaction(async (tx) => {
+      // Account locks serialize reconciliation runs for one user. Transaction
+      // locks then ensure decisions are evaluated from current rows and cannot
+      // be overwritten between matching and persistence.
+      const accounts = await tx
+        .select()
+        .from(financeAccounts)
+        .where(eq(financeAccounts.userId, userId))
+        .orderBy(financeAccounts.id)
+        .for("update");
+      const transactions = await tx
         .select()
         .from(financeTransactions)
         .where(eq(financeTransactions.userId, userId))
-        .orderBy(desc(financeTransactions.transactionDate), desc(financeTransactions.createdAt)),
-      categoryForName(userId, transferCategory),
-    ]);
-    const accountKinds = new Map(accounts.map((item) => [item.id, item.kind]));
-    const rent = await categoryForName(userId, rentCategory);
-    const hasExplicitDecision = (item: typeof financeTransactions.$inferSelect) =>
-      item.categoryDecidedAt !== null &&
-      (item.categorySource === "user" || item.categorySource === "agent");
-    const rentTransactions = transactions.filter((item) => isRentMerchant(item.merchant));
-    const vaultTransfers = transactions
-      .filter((item) => !isRentMerchant(item.merchant) && isSoFiVaultTransfer(item.merchant))
-      .filter((item) => !hasExplicitDecision(item));
-    const vaultIds = new Set(vaultTransfers.map((item) => item.id));
-    const unmatched = transactions.filter(
-      (item) => !item.pending && !vaultIds.has(item.id) && !hasExplicitDecision(item),
-    );
-    const pairedIds = new Set<string>();
-    for (const debit of unmatched) {
-      if (debit.direction !== "expense" || pairedIds.has(debit.id)) continue;
-      const credit = unmatched.find(
-        (candidate) =>
-          candidate.direction === "income" &&
-          !pairedIds.has(candidate.id) &&
-          candidate.accountId !== debit.accountId &&
-          candidate.amount === debit.amount &&
-          isCardPayment(debit.merchant) &&
-          isCardPayment(candidate.merchant) &&
-          Math.abs(
-            Date.parse(`${candidate.transactionDate}T12:00:00Z`) -
-              Date.parse(`${debit.transactionDate}T12:00:00Z`),
-          ) <=
-            14 * 24 * 60 * 60 * 1000 &&
-          (accountKinds.get(debit.accountId) === "debt" ||
-            accountKinds.get(candidate.accountId) === "debt"),
+        .orderBy(financeTransactions.id)
+        .for("update");
+      const accountKinds = new Map(accounts.map((item) => [item.id, item.kind]));
+      const hasExplicitDecision = (item: typeof financeTransactions.$inferSelect) =>
+        item.categoryDecidedAt !== null &&
+        (item.categorySource === "user" || item.categorySource === "agent");
+      const rentTransactions = transactions
+        .filter((item) => isRentMerchant(item.merchant))
+        .filter((item) => !hasExplicitDecision(item));
+      const vaultTransfers = transactions
+        .filter((item) => !isRentMerchant(item.merchant) && isSoFiVaultTransfer(item.merchant))
+        .filter((item) => !hasExplicitDecision(item));
+      const vaultIds = new Set(vaultTransfers.map((item) => item.id));
+      const unmatched = transactions.filter(
+        (item) => !item.pending && !vaultIds.has(item.id) && !hasExplicitDecision(item),
       );
-      if (!credit) continue;
-      pairedIds.add(debit.id);
-      pairedIds.add(credit.id);
-      const transferGroupId = randomUUID();
-      for (const item of [debit, credit]) {
-        await db
+      const pairedIds = new Set<string>();
+      for (const debit of unmatched) {
+        if (debit.direction !== "expense" || pairedIds.has(debit.id)) continue;
+        const credit = unmatched.find(
+          (candidate) =>
+            candidate.direction === "income" &&
+            !pairedIds.has(candidate.id) &&
+            candidate.accountId !== debit.accountId &&
+            candidate.amount === debit.amount &&
+            isCardPayment(debit.merchant) &&
+            isCardPayment(candidate.merchant) &&
+            Math.abs(
+              Date.parse(`${candidate.transactionDate}T12:00:00Z`) -
+                Date.parse(`${debit.transactionDate}T12:00:00Z`),
+            ) <=
+              14 * 24 * 60 * 60 * 1000 &&
+            (accountKinds.get(debit.accountId) === "debt" ||
+              accountKinds.get(candidate.accountId) === "debt"),
+        );
+        if (!credit) continue;
+        pairedIds.add(debit.id);
+        pairedIds.add(credit.id);
+        const transferGroupId = randomUUID();
+        await tx
           .update(financeTransactions)
           .set({
             category: transferCategory,
@@ -755,66 +767,86 @@ export function createFinanceService({ db, now, plaid }: Options) {
             transferGroupId,
             updatedAt: now(),
           })
-          .where(eq(financeTransactions.id, item.id));
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              inArray(financeTransactions.id, [debit.id, credit.id]),
+            ),
+          );
       }
-    }
-    for (const id of vaultIds) {
-      await db
-        .update(financeTransactions)
-        .set({
-          category: transferCategory,
-          categoryConfidence: 10_000,
-          categoryId: transfers.id,
-          categoryRationale: "Matched as movement between accounts, not new spending.",
-          categorySource: "rule",
-          direction: "transfer",
-          needsReview: false,
-          reconciliationStatus: "confirmed",
-          updatedAt: now(),
-        })
-        .where(eq(financeTransactions.id, id));
-    }
-    const transferCandidates = transactions.filter(
-      (item) =>
-        item.direction === "transfer" &&
-        !vaultIds.has(item.id) &&
-        !pairedIds.has(item.id) &&
-        item.reconciliationStatus !== "matched" &&
-        item.reconciliationStatus !== "confirmed",
-    );
-    for (const item of transferCandidates) {
-      await db
-        .update(financeTransactions)
-        .set({
-          needsReview: true,
-          reconciliationStatus: "candidate",
-          updatedAt: now(),
-        })
-        .where(eq(financeTransactions.id, item.id));
-      await putInReview(
-        item.id,
-        userId,
-        "possible_transfer",
-        null,
-        "Provider marked this movement as a transfer, but no internal counterpart is confirmed.",
+      if (vaultIds.size > 0) {
+        await tx
+          .update(financeTransactions)
+          .set({
+            category: transferCategory,
+            categoryConfidence: 10_000,
+            categoryId: transfers.id,
+            categoryRationale: "Matched as movement between accounts, not new spending.",
+            categorySource: "rule",
+            direction: "transfer",
+            needsReview: false,
+            reconciliationStatus: "confirmed",
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              inArray(financeTransactions.id, [...vaultIds]),
+            ),
+          );
+      }
+      const transferCandidates = transactions.filter(
+        (item) =>
+          item.direction === "transfer" &&
+          !hasExplicitDecision(item) &&
+          !vaultIds.has(item.id) &&
+          !pairedIds.has(item.id) &&
+          item.reconciliationStatus !== "matched" &&
+          item.reconciliationStatus !== "confirmed",
       );
-    }
-    for (const item of rentTransactions) {
-      await db
-        .update(financeTransactions)
-        .set({
-          category: rentCategory,
-          categoryConfidence: 10_000,
-          categoryId: rent.id,
-          categoryRationale: "User rule: Lee Tachman/Tackman is rent.",
-          categorySource: "rule",
-          direction: "expense",
-          needsReview: false,
-          updatedAt: now(),
-        })
-        .where(eq(financeTransactions.id, item.id));
-    }
-    return { paired: pairedIds.size / 2, transfers: vaultIds.size + pairedIds.size };
+      for (const item of transferCandidates) {
+        await tx
+          .update(financeTransactions)
+          .set({
+            needsReview: true,
+            reconciliationStatus: "candidate",
+            updatedAt: now(),
+          })
+          .where(and(eq(financeTransactions.id, item.id), eq(financeTransactions.userId, userId)));
+        await putInReview(
+          item.id,
+          userId,
+          "possible_transfer",
+          null,
+          "Provider marked this movement as a transfer, but no internal counterpart is confirmed.",
+          tx,
+        );
+      }
+      if (rentTransactions.length > 0) {
+        await tx
+          .update(financeTransactions)
+          .set({
+            category: rentCategory,
+            categoryConfidence: 10_000,
+            categoryId: rent.id,
+            categoryRationale: "User rule: Lee Tachman/Tackman is rent.",
+            categorySource: "rule",
+            direction: "expense",
+            needsReview: false,
+            updatedAt: now(),
+          })
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              inArray(
+                financeTransactions.id,
+                rentTransactions.map((item) => item.id),
+              ),
+            ),
+          );
+      }
+      return { paired: pairedIds.size / 2, transfers: vaultIds.size + pairedIds.size };
+    });
   }
   function getPlaid() {
     if (!plaid?.clientId || !plaid.secret) {
@@ -936,8 +968,9 @@ export function createFinanceService({ db, now, plaid }: Options) {
       | "unknown_merchant",
     suggestedCategoryId: string | null,
     rationale: string | null,
+    executor: FinanceReviewExecutor = db,
   ) {
-    const [existing] = await db
+    const [existing] = await executor
       .select()
       .from(financeReviewCases)
       .where(
@@ -950,14 +983,14 @@ export function createFinanceService({ db, now, plaid }: Options) {
       .orderBy(desc(financeReviewCases.updatedAt))
       .limit(1);
     if (existing) {
-      const [updated] = await db
+      const [updated] = await executor
         .update(financeReviewCases)
         .set({ rationale, reason, suggestedCategoryId, updatedAt: now() })
         .where(eq(financeReviewCases.id, existing.id))
         .returning();
       return requireDatabaseRecord(updated, "The finance review case could not be saved.");
     }
-    const [review] = await db
+    const [review] = await executor
       .insert(financeReviewCases)
       .values({
         rationale,
@@ -1757,8 +1790,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         ledgerHealth,
         budgets,
         reviews,
-        [guidanceProfile],
-        [approvedGuidance],
+        [guidance],
       ] = await Promise.all([
         db
           .select()
@@ -1781,29 +1813,33 @@ export function createFinanceService({ db, now, plaid }: Options) {
             ),
           ),
         db
-          .select()
+          .select({
+            approvedGuidance: domainProfileApprovals,
+            guidanceProfile: domainProfiles,
+          })
           .from(domainProfiles)
-          .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "finances")))
-          .limit(1),
-        db
-          .select()
-          .from(domainProfileApprovals)
-          .where(
+          .leftJoin(
+            domainProfileApprovals,
             and(
-              eq(domainProfileApprovals.userId, userId),
-              eq(domainProfileApprovals.domain, "finances"),
+              eq(domainProfileApprovals.profileId, domainProfiles.id),
+              eq(domainProfileApprovals.userId, domainProfiles.userId),
+              eq(domainProfileApprovals.domain, domainProfiles.domain),
               eq(domainProfileApprovals.approvedByUserId, userId),
             ),
           )
+          .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "finances")))
           .limit(1),
       ]);
+      const guidanceProfile = guidance?.guidanceProfile;
+      const approvedGuidance = guidance?.approvedGuidance;
       let approvedProfile: FinanceGuidedSetupContext["guidance"]["approvedProfile"] = null;
       if (approvedGuidance) {
         const parsedApproval = financeDomainProfileSchema.safeParse(approvedGuidance.profile);
         if (
           parsedApproval.success &&
           parsedApproval.data.id === approvedGuidance.profileId &&
-          parsedApproval.data.version === approvedGuidance.profileVersion
+          parsedApproval.data.version === approvedGuidance.profileVersion &&
+          parsedApproval.data.status === "active"
         ) {
           approvedProfile = parsedApproval.data;
         }
@@ -3377,7 +3413,8 @@ export function createFinanceService({ db, now, plaid }: Options) {
           if (
             parsedApproval.success &&
             parsedApproval.data.id === approval.profileId &&
-            parsedApproval.data.version === approval.profileVersion
+            parsedApproval.data.version === approval.profileVersion &&
+            parsedApproval.data.status === "active"
           ) {
             approvedProfile = parsedApproval.data;
           }

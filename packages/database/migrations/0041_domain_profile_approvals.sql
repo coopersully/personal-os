@@ -36,6 +36,7 @@ CREATE TABLE "domain_profile_approvals" (
 			"profile"->>'id' = "profile_id"::text
 			AND "profile"->>'domain' = "domain"
 			AND ("profile"->>'version')::integer = "profile_version"
+			AND "profile"->>'status' = 'active'
 		)
 );
 --> statement-breakpoint

@@ -272,23 +272,32 @@ describe.sequential("assistant setup service", () => {
     await expect(service.getSetupStatus(context().principal)).resolves.toMatchObject({
       domains: expect.arrayContaining([
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
           domain: "mail",
+          pendingDraftVersion: null,
           profileStatus: "active",
           profileVersion: 4,
         },
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: true,
           canWrite: false,
           domain: "calendar",
+          pendingDraftVersion: null,
           profileStatus: null,
           profileVersion: null,
         },
         {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
           canRead: false,
           canWrite: false,
           domain: "finances",
+          pendingDraftVersion: null,
           profileStatus: null,
           profileVersion: null,
         },
@@ -452,6 +461,20 @@ describe.sequential("assistant setup service", () => {
         financeContext,
       ),
     ).resolves.toMatchObject({ status: "draft", version: 3 });
+    await expect(service.getSetupStatus(financeContext.principal)).resolves.toMatchObject({
+      domains: expect.arrayContaining([
+        {
+          approvedProfileStatus: "active",
+          approvedProfileVersion: 2,
+          canRead: true,
+          canWrite: true,
+          domain: "finances",
+          pendingDraftVersion: 3,
+          profileStatus: "draft",
+          profileVersion: 3,
+        },
+      ]),
+    });
     await expect(finances.deleteAccount(account.id, financeUserContext)).rejects.toThrow(
       "active approved Finance guidance",
     );
@@ -493,6 +516,17 @@ describe.sequential("assistant setup service", () => {
           profile: {
             ...financeApproval.profile,
             id: crypto.randomUUID(),
+          },
+        })
+        .where(eq(domainProfileApprovals.id, financeApproval.id)),
+    ).rejects.toThrow();
+    await expect(
+      database.db
+        .update(domainProfileApprovals)
+        .set({
+          profile: {
+            ...financeApproval.profile,
+            status: "draft",
           },
         })
         .where(eq(domainProfileApprovals.id, financeApproval.id)),

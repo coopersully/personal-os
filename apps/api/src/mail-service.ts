@@ -35,6 +35,7 @@ import type {
   UpsertMailAttentionItemInput,
 } from "@personal-os/domain";
 import {
+  MAIL_RULE_EXECUTION_LIMIT_PER_RUN,
   mailProfilePreferencesSchema,
   mailRuleActionIsDue,
   mailRuleActionsMatchRetentionPreferences,
@@ -1016,6 +1017,14 @@ export function createMailService({
             status: mailRuleWorkItems.status,
           })
           .from(mailRuleWorkItems)
+          .innerJoin(
+            calendarAccounts,
+            and(
+              eq(calendarAccounts.id, mailRuleWorkItems.accountId),
+              eq(calendarAccounts.userId, userId),
+              eq(calendarAccounts.mailEnabled, true),
+            ),
+          )
           .where(eq(mailRuleWorkItems.userId, userId))
           .groupBy(mailRuleWorkItems.accountId, mailRuleWorkItems.status),
       ]);
@@ -1035,19 +1044,11 @@ export function createMailService({
       let inProgressCount = 0;
       let pendingCount = 0;
       let reconciliationCount = 0;
+      const toDate = (value: Date | string | null): Date | null =>
+        value instanceof Date ? value : value ? new Date(value) : null;
       for (const summary of workSummaries) {
-        const summaryCompletedAt =
-          summary.lastCompletedAt instanceof Date
-            ? summary.lastCompletedAt
-            : summary.lastCompletedAt
-              ? new Date(summary.lastCompletedAt)
-              : null;
-        const summaryOldestDueAt =
-          summary.oldestDueAt instanceof Date
-            ? summary.oldestDueAt
-            : summary.oldestDueAt
-              ? new Date(summary.oldestDueAt)
-              : null;
+        const summaryCompletedAt = toDate(summary.lastCompletedAt);
+        const summaryOldestDueAt = toDate(summary.oldestDueAt);
         const current = automationByAccount.get(summary.accountId) ?? {
           failedCount: 0,
           inProgressCount: 0,
@@ -1112,7 +1113,7 @@ export function createMailService({
           syncStatus: account.syncStatus,
         })),
         automation: {
-          executionLimitPerRun: 6,
+          executionLimitPerRun: MAIL_RULE_EXECUTION_LIMIT_PER_RUN,
           failedCount,
           inProgressCount,
           lastCompletedAt: lastCompletedAt?.toISOString() ?? null,
@@ -1295,7 +1296,7 @@ export function createMailService({
       if (!mailRuleActionsMatchRetentionPreferences(resolved.actions, parsedPreferences.data)) {
         throw new AppError(
           "invalid_request",
-          "The active Mail profile does not authorize this delayed retention action and number of days.",
+          "The active Mail profile does not authorize this retention action and timing.",
         );
       }
       const updated = await db.transaction(async (transaction) => {

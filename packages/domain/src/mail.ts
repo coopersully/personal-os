@@ -10,6 +10,8 @@ import {
 import { idSchema, isoDateTimeSchema } from "./common.js";
 import type { AgentMutationPolicy } from "./feature-contracts.js";
 
+export const MAIL_RULE_EXECUTION_LIMIT_PER_RUN = 6;
+
 export const mailProviderSchema = z.enum(["google", "icloud"]);
 export type MailProvider = z.infer<typeof mailProviderSchema>;
 
@@ -58,7 +60,7 @@ export type MailSetupAccount = z.infer<typeof mailSetupAccountSchema>;
 export const mailSetupContextSchema = z.object({
   accounts: z.array(mailSetupAccountSchema),
   automation: z.object({
-    executionLimitPerRun: z.literal(6),
+    executionLimitPerRun: z.literal(MAIL_RULE_EXECUTION_LIMIT_PER_RUN),
     failedCount: z.int().nonnegative(),
     inProgressCount: z.int().nonnegative(),
     lastCompletedAt: isoDateTimeSchema.nullable(),
@@ -380,8 +382,9 @@ export function mailRuleActionsMatchRetentionPreferences(
   preferences: MailProfilePreferences,
 ): boolean {
   return actions.every((action) => {
-    if (action.afterDays === 0 || (action.type !== "archive" && action.type !== "trash"))
-      return true;
+    if (action.type !== "archive" && action.type !== "trash") return true;
+    if (action.type === "archive" && action.afterDays === 0) return true;
+    if (action.afterDays === 0) return false;
     const expectedDisposition =
       action.type === "archive" ? "archive_after_days" : "trash_after_days";
     return (

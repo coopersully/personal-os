@@ -99,3 +99,9 @@ CREATE INDEX "mail_rule_work_due_idx"
 --> statement-breakpoint
 CREATE INDEX "mail_rule_work_account_idx"
 	ON "mail_rule_work_items" USING btree ("account_id", "status");
+--> statement-breakpoint
+CREATE INDEX "mail_rule_work_thread_status_idx"
+	ON "mail_rule_work_items" USING btree ("thread_id", "status");
+--> statement-breakpoint
+CREATE INDEX "mail_rule_work_user_status_idx"
+	ON "mail_rule_work_items" USING btree ("user_id", "account_id", "status");

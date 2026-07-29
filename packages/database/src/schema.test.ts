@@ -67,6 +67,8 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE UNIQUE INDEX "mail_rule_work_identity_idx"');
     expect(migrationSql).toContain('"rule_version",\n\t\t"profile_version"');
     expect(migrationSql).toContain('CREATE INDEX "mail_rule_work_due_idx"');
+    expect(migrationSql).toContain('CREATE INDEX "mail_rule_work_thread_status_idx"');
+    expect(migrationSql).toContain('CREATE INDEX "mail_rule_work_user_status_idx"');
     expect(migrationSql).toContain('"attempt_count" >= 0 AND "attempt_count" <= 5');
     expect(migrationSql).toContain("\"status\" IN ('succeeded', 'failed')");
   });

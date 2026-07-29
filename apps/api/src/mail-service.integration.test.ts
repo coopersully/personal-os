@@ -18,11 +18,12 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { createAuditService } from "./audit.js";
 import { type ConnectedMailGateway, MailProviderRejectedError } from "./connector-service.js";
 import { errorResponse } from "./errors.js";
+import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { migrationsWithout } from "./test-migrations.js";
@@ -313,6 +314,10 @@ describe.sequential("mail service", () => {
     if (temporaryMigrationsFolder)
       await rm(temporaryMigrationsFolder, { force: true, recursive: true });
     if (setupMigrationsFolder) await rm(setupMigrationsFolder, { force: true, recursive: true });
+  });
+
+  afterEach(async () => {
+    await database.db.delete(mailRuleWorkItems);
   });
 
   it("preserves and normalizes legacy rules through the setup migration", async () => {
@@ -655,7 +660,7 @@ describe.sequential("mail service", () => {
         },
         requestId: "request-rule-review-only",
       }),
-    ).rejects.toThrow("does not authorize this delayed retention action");
+    ).rejects.toThrow("does not authorize this retention action and timing");
     await database.db
       .update(domainProfiles)
       .set({
@@ -713,9 +718,33 @@ describe.sequential("mail service", () => {
       { enabled: false, expectedVersion: 2 },
       mutationContext("request-one-day-trash-pause"),
     );
-    await database.db
-      .delete(mailRuleWorkItems)
-      .where(eq(mailRuleWorkItems.ruleId, oneDayTrashRule.id));
+    const immediateTrashRule = await service.createRule(
+      {
+        actions: [{ afterDays: 0, mailboxId: null, type: "trash" }],
+        condition: rule.condition,
+        confidenceThreshold: null,
+        description: rule.description,
+        enabled: false,
+        name: "Immediate Trash is never inferred from retention preferences",
+        policy: "preview",
+        profileId,
+        sourceIds: [enabledAccountId],
+      },
+      mutationContext("request-immediate-trash-rule"),
+    );
+    const immediateTrashPreview = await service.previewSavedRule(userId, immediateTrashRule.id);
+    await expect(
+      service.activateRule(
+        immediateTrashRule.id,
+        {
+          expectedCandidateIds: immediateTrashPreview.candidates.map((candidate) => candidate.id),
+          expectedPreviewFingerprint: immediateTrashPreview.fingerprint,
+          expectedPreviewedAt: immediateTrashPreview.previewedAt,
+          expectedVersion: immediateTrashRule.version,
+        },
+        mutationContext("request-immediate-trash-activation"),
+      ),
+    ).rejects.toThrow("does not authorize this retention action and timing");
     const nonRetentionRule = await service.updateRule(
       rule.id,
       {
@@ -1689,101 +1718,125 @@ describe.sequential("mail service", () => {
       .returning();
     if (!sparseICloudAccount) throw new Error("Sparse Mail account fixture was not created.");
     const statusSourceUpdatedAt = new Date("2026-07-16T10:30:00.000Z");
-    const statusRows = await database.db
-      .insert(mailRuleWorkItems)
-      .values([
-        {
-          accountId: enabledAccountId,
-          action: { afterDays: 1, mailboxId: null, type: "archive" },
-          actionFingerprint: "a".repeat(64),
-          dueAt: new Date("2026-07-16T11:00:00.000Z"),
-          nextAttemptAt: new Date("2026-07-16T11:00:00.000Z"),
-          profileId,
-          profileVersion: 1,
-          remoteThreadId: "setup-status-pending",
-          ruleId: legacyRuleId,
-          ruleVersion: 1,
-          sourceUpdatedAt: statusSourceUpdatedAt,
-          threadId,
-          userId,
-        },
-        {
-          accountId: enabledAccountId,
-          action: { afterDays: 1, mailboxId: null, type: "archive" },
-          actionFingerprint: "b".repeat(64),
-          attemptCount: 1,
-          claimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-          claimedAt: new Date("2026-07-16T11:30:00.000Z"),
-          claimMode: "execute",
-          dueAt: new Date("2026-07-16T11:15:00.000Z"),
-          nextAttemptAt: new Date("2026-07-16T11:15:00.000Z"),
-          profileId,
-          profileVersion: 1,
-          remoteThreadId: "setup-status-claimed",
-          ruleId: legacyRuleId,
-          ruleVersion: 1,
-          sourceUpdatedAt: statusSourceUpdatedAt,
-          status: "claimed",
-          threadId,
-          userId,
-        },
-        {
-          accountId: enabledAccountId,
-          action: { afterDays: 1, mailboxId: null, type: "archive" },
-          actionFingerprint: "c".repeat(64),
-          dueAt: new Date("2026-07-16T11:20:00.000Z"),
-          nextAttemptAt: new Date("2026-07-16T11:20:00.000Z"),
-          profileId,
-          profileVersion: 1,
-          providerEffect: "indeterminate",
-          remoteThreadId: "setup-status-reconcile",
-          ruleId: legacyRuleId,
-          ruleVersion: 1,
-          sourceUpdatedAt: statusSourceUpdatedAt,
-          status: "reconcile",
-          threadId,
-          userId,
-        },
-        {
-          accountId: enabledAccountId,
-          action: { afterDays: 1, mailboxId: null, type: "archive" },
-          actionFingerprint: "d".repeat(64),
-          completedAt: new Date("2026-07-16T12:00:00.000Z"),
-          dueAt: new Date("2026-07-16T11:25:00.000Z"),
-          nextAttemptAt: new Date("2026-07-16T12:00:00.000Z"),
-          profileId,
-          profileVersion: 1,
-          providerEffect: "applied",
-          remoteThreadId: "setup-status-succeeded",
-          ruleId: legacyRuleId,
-          ruleVersion: 1,
-          sourceUpdatedAt: statusSourceUpdatedAt,
-          status: "succeeded",
-          threadId,
-          userId,
-        },
-        {
-          accountId: enabledAccountId,
-          action: { afterDays: 1, mailboxId: null, type: "archive" },
-          actionFingerprint: "e".repeat(64),
-          completedAt: new Date("2026-07-16T12:05:00.000Z"),
-          dueAt: new Date("2026-07-16T11:30:00.000Z"),
-          lastErrorCode: "provider_rejected",
-          lastErrorMessage: "The provider rejected this operation.",
-          nextAttemptAt: new Date("2026-07-16T12:05:00.000Z"),
-          profileId,
-          profileVersion: 1,
-          providerEffect: "rejected",
-          remoteThreadId: "setup-status-failed",
-          ruleId: legacyRuleId,
-          ruleVersion: 1,
-          sourceUpdatedAt: statusSourceUpdatedAt,
-          status: "failed",
-          threadId,
-          userId,
-        },
-      ])
-      .returning({ id: mailRuleWorkItems.id });
+    const statusActions = {
+      claimed: { afterDays: 1, mailboxId: null, type: "trash" as const },
+      failed: { afterDays: 1, mailboxId: customLabelId, type: "add_label" as const },
+      pending: { afterDays: 1, mailboxId: null, type: "archive" as const },
+      reconcile: { afterDays: 1, mailboxId: null, type: "mark_read" as const },
+      succeeded: { afterDays: 1, mailboxId: null, type: "star" as const },
+    };
+    await database.db.insert(mailRuleWorkItems).values([
+      {
+        accountId: enabledAccountId,
+        action: statusActions.pending,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.pending),
+        dueAt: new Date("2026-07-16T11:00:00.000Z"),
+        nextAttemptAt: new Date("2026-07-16T11:00:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        threadId,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        action: statusActions.claimed,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.claimed),
+        attemptCount: 1,
+        claimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        claimedAt: new Date("2026-07-16T11:30:00.000Z"),
+        claimMode: "execute",
+        dueAt: new Date("2026-07-16T11:15:00.000Z"),
+        nextAttemptAt: new Date("2026-07-16T11:15:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "claimed",
+        threadId,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        action: statusActions.reconcile,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.reconcile),
+        dueAt: new Date("2026-07-16T11:20:00.000Z"),
+        nextAttemptAt: new Date("2026-07-16T11:20:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        providerEffect: "indeterminate",
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "reconcile",
+        threadId,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        action: statusActions.succeeded,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.succeeded),
+        completedAt: new Date("2026-07-16T12:00:00.000Z"),
+        dueAt: new Date("2026-07-16T11:25:00.000Z"),
+        nextAttemptAt: new Date("2026-07-16T12:00:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        providerEffect: "applied",
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "succeeded",
+        threadId,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        action: statusActions.failed,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.failed),
+        completedAt: new Date("2026-07-16T12:05:00.000Z"),
+        dueAt: new Date("2026-07-16T11:30:00.000Z"),
+        lastErrorCode: "provider_rejected",
+        lastErrorMessage: "The provider rejected this operation.",
+        nextAttemptAt: new Date("2026-07-16T12:05:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        providerEffect: "rejected",
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "failed",
+        threadId,
+        userId,
+      },
+      {
+        accountId: disabledAccountId,
+        action: statusActions.pending,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.pending),
+        completedAt: new Date("2026-07-16T12:10:00.000Z"),
+        dueAt: new Date("2026-07-16T11:35:00.000Z"),
+        lastErrorCode: "source_unavailable",
+        lastErrorMessage: "The connected Mail source is no longer available.",
+        nextAttemptAt: new Date("2026-07-16T12:10:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        providerEffect: "none",
+        remoteThreadId: "disabled-thread",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "failed",
+        threadId: null,
+        userId,
+      },
+    ]);
     await expect(service.listSetupContext(userId)).resolves.toMatchObject({
       accounts: [
         {
@@ -1835,12 +1888,6 @@ describe.sequential("mail service", () => {
         unsubscribeAutomation: false,
       },
     });
-    await database.db.delete(mailRuleWorkItems).where(
-      inArray(
-        mailRuleWorkItems.id,
-        statusRows.map((row) => row.id),
-      ),
-    );
     await expect(
       service.validateProfileSources(database.db, userId, [enabledAccountId]),
     ).resolves.toBeUndefined();

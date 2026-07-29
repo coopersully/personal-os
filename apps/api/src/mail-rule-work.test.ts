@@ -94,14 +94,20 @@ describe("durable Mail rule work helpers", () => {
       { afterDays: 1, mailboxId: null, type: "trash" as const },
       { afterDays: 1, mailboxId: null, type: "mark_read" as const },
       { afterDays: 1, mailboxId: null, type: "star" as const },
-      {
-        afterDays: 1,
-        mailboxId: "11111111-1111-4111-8111-111111111111",
-        type: "add_label" as const,
-      },
     ]) {
       expect(mailRuleActionIsApplied(action, initial, null)).toBe(false);
     }
+    expect(
+      mailRuleActionIsApplied(
+        {
+          afterDays: 1,
+          mailboxId: "11111111-1111-4111-8111-111111111111",
+          type: "add_label" as const,
+        },
+        initial,
+        "Label_Orders",
+      ),
+    ).toBe(false);
   });
 
   it("classifies every provider failure without exposing provider messages", () => {
@@ -113,7 +119,7 @@ describe("durable Mail rule work helpers", () => {
     for (const status of [401, 403]) {
       expect(classifyMailRuleProviderFailure(new ConnectorError("secret", status))).toMatchObject({
         code: "provider_authorization_failed",
-        disposition: "retry",
+        disposition: "failed",
         effect: "rejected",
       });
     }
@@ -179,6 +185,12 @@ describe("durable Mail rule work helpers", () => {
         { ...base, noiseDisposition: "review_only" },
       ),
     ).toBe(true);
+    expect(
+      mailRuleActionsMatchRetentionPreferences([{ afterDays: 0, mailboxId: null, type: "trash" }], {
+        ...base,
+        noiseDisposition: "review_only",
+      }),
+    ).toBe(false);
     expect(
       mailRuleActionsMatchRetentionPreferences(
         [{ afterDays: 2, mailboxId: null, type: "archive" }],

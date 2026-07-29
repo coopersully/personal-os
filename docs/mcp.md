@@ -178,9 +178,10 @@ The fixed `personal-os://agenda/today` resource merges open reminders due throug
 Tool annotations are host hints, not authorization. Read-only cached Mail tools are closed-world;
 provider writes and sending are open-world. Rule activation is intentionally absent from MCP
 because approved rules can mutate provider state; it requires the signed-in Settings review.
-Retention rules and any other delayed Mail rules cannot activate in this release. The API still enforces scopes,
-source ownership, policy, optimistic
-versions, audit, and the distinction between recoverable Trash and permanent deletion. Bulk
+Reviewed Google archive and recoverable Trash rules may activate after signed-in review; automatic
+execution for unsupported providers remains unavailable. The API still enforces scopes, source
+ownership, policy, optimistic versions, audit, and the distinction between recoverable Trash and
+permanent deletion. Bulk
 provider updates report both successful IDs and structured per-ID failures when only part of a
 request succeeds. Bulk updates are bounded to six conversations and two concurrent provider calls
 so three 15-second provider waves still leave time beneath the 60-second public edge deadline for

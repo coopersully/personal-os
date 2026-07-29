@@ -60,8 +60,8 @@ This record specializes
 
 - HTTP 429 is a confirmed rejection and backs off without claiming a provider effect.
 - HTTP 404 is a confirmed missing provider source and fails terminally.
-- HTTP 401/403 is a confirmed rejection and backs off so the signed-in person can reconnect;
-  exhaustion fails closed.
+- HTTP 401/403 after connector refresh is a confirmed authorization rejection and fails closed so
+  the signed-in person sees review attention, reconnects, and accepts a new rule revision.
 - HTTP 408, 5xx, transport ambiguity, process loss, credential-persistence failure after a write,
   and provider-success/local-commit failure reconcile exact provider state before replay.
 - A changed or paused rule, changed profile or retention preference, disconnected source, changed

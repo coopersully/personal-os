@@ -38,6 +38,7 @@ import type {
   UpdateEventInput,
 } from "@personal-os/domain";
 import {
+  MAIL_RULE_EXECUTION_LIMIT_PER_RUN,
   mailProfilePreferencesSchema,
   mailRuleActionNeedsDurableExecution,
   mailRuleActionSchema,
@@ -68,7 +69,6 @@ import {
 
 const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
-const MAIL_RULE_EXECUTION_BUDGET = 6;
 const MAIL_RULE_WRITE_CONCURRENCY = 2;
 const MAIL_RULE_WORK_CLAIM_LEASE_MS = 10 * 60_000;
 const MAIL_RULE_WORK_MAX_ATTEMPTS = 5;
@@ -1610,7 +1610,7 @@ export function createConnectorService({
           });
         }
       }
-      const executionBudget = plannedMutations.slice(0, MAIL_RULE_EXECUTION_BUDGET);
+      const executionBudget = plannedMutations.slice(0, MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
       const backlogCount = Math.max(0, plannedMutations.length - executionBudget.length);
       const outcomes: Array<{
         authorizationChanged?: boolean;
@@ -2041,29 +2041,39 @@ export function createConnectorService({
       maintenanceFailed += missingSources.length;
       for (const item of missingSources) touchedAccountIds.add(item.accountId);
       await transaction.execute(sql`
-        WITH candidate_threads AS (
+        WITH due_rule_groups AS MATERIALIZED (
+          SELECT
+            work.thread_id,
+            work.rule_id,
+            work.rule_version,
+            work.profile_version,
+            min(work.due_at) AS next_due
+          FROM mail_rule_work_items work
+          WHERE work.thread_id IS NOT NULL
+            AND work.status IN ('pending', 'reconcile')
+            AND work.due_at <= ${current}
+            AND work.next_attempt_at <= ${current}
+            AND work.attempt_count < ${MAIL_RULE_WORK_MAX_ATTEMPTS}
+          GROUP BY work.thread_id, work.rule_id, work.rule_version, work.profile_version
+        ),
+        next_thread_rule AS MATERIALIZED (
+          SELECT DISTINCT ON (due.thread_id)
+            due.thread_id,
+            due.rule_id,
+            due.rule_version,
+            due.profile_version,
+            due.next_due
+          FROM due_rule_groups due
+          ORDER BY due.thread_id, due.next_due, due.rule_id
+        ),
+        candidate_threads AS (
           SELECT
             threads.id,
             due.rule_id,
             due.rule_version,
             due.profile_version
-          FROM mail_threads threads
-          JOIN LATERAL (
-            SELECT
-              work.rule_id,
-              work.rule_version,
-              work.profile_version,
-              min(work.due_at) AS next_due
-            FROM mail_rule_work_items work
-            WHERE work.thread_id = threads.id
-              AND work.status IN ('pending', 'reconcile')
-              AND work.due_at <= ${current}
-              AND work.next_attempt_at <= ${current}
-              AND work.attempt_count < ${MAIL_RULE_WORK_MAX_ATTEMPTS}
-            GROUP BY work.rule_id, work.rule_version, work.profile_version
-            ORDER BY min(work.due_at), work.rule_id
-            LIMIT 1
-          ) due ON true
+          FROM next_thread_rule due
+          INNER JOIN mail_threads threads ON threads.id = due.thread_id
           WHERE NOT EXISTS (
             SELECT 1
             FROM mail_rule_work_items active
@@ -2072,7 +2082,7 @@ export function createConnectorService({
           )
           ORDER BY due.next_due, threads.id
           FOR UPDATE OF threads SKIP LOCKED
-          LIMIT ${MAIL_RULE_EXECUTION_BUDGET}
+          LIMIT ${MAIL_RULE_EXECUTION_LIMIT_PER_RUN}
         )
         UPDATE mail_rule_work_items work
         SET
@@ -2292,12 +2302,18 @@ export function createConnectorService({
     }
     let remoteMailboxId: string | null = null;
     if (parsedAction.data.type === "add_label") {
+      if (!parsedAction.data.mailboxId) {
+        return {
+          code: "destination_changed",
+          message: "The accepted destination label is no longer available.",
+        };
+      }
       const [mailbox] = await executor
         .select({ remoteMailboxId: mailboxes.remoteMailboxId })
         .from(mailboxes)
         .where(
           and(
-            eq(mailboxes.id, parsedAction.data.mailboxId ?? ""),
+            eq(mailboxes.id, parsedAction.data.mailboxId),
             eq(mailboxes.userId, work.userId),
             eq(mailboxes.accountId, work.accountId),
             eq(mailboxes.role, "custom"),

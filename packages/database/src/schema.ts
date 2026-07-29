@@ -839,6 +839,8 @@ export const mailRuleWorkItems = pgTable(
     ),
     index("mail_rule_work_due_idx").on(table.status, table.nextAttemptAt, table.dueAt),
     index("mail_rule_work_account_idx").on(table.accountId, table.status),
+    index("mail_rule_work_thread_status_idx").on(table.threadId, table.status),
+    index("mail_rule_work_user_status_idx").on(table.userId, table.accountId, table.status),
     check(
       "mail_rule_work_revision_check",
       sql`${table.ruleVersion} > 0 AND ${table.profileVersion} > 0`,

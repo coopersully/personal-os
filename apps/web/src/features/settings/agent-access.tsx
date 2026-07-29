@@ -3,6 +3,7 @@ import type {
   AssistantDomain,
   MailRulePreview,
   MailSetupAccount,
+  MailSetupContext,
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -271,7 +272,7 @@ export function AgentAccessSettings() {
               }
               description={
                 mailAutomation
-                  ? `${mailAutomation.pendingCount} delayed action${mailAutomation.pendingCount === 1 ? "" : "s"} pending; ${mailAutomation.inProgressCount} in progress; ${mailAutomation.reconciliationCount} need provider reconciliation; ${mailAutomation.failedCount} stopped safely. Ilo processes at most ${mailAutomation.executionLimitPerRun} conversations per scheduled run.`
+                  ? formatMailAutomationStatus(mailAutomation)
                   : "Delayed Mail automation status is loading."
               }
               title="Mail automation"
@@ -452,6 +453,7 @@ function MailRuleReview({
       toast.success("Mail rule activated.");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["mail-rules"] }),
+        queryClient.invalidateQueries({ queryKey: ["mail-setup-context"] }),
         queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]);
     },
@@ -568,6 +570,16 @@ function formatPreviewWindow(preview: MailRulePreview): string {
   return `${preview.scannedCount} conversations from ${oldest} to ${newest}${
     preview.window.truncated ? ` (more than ${preview.window.limit} exist)` : ""
   }`;
+}
+
+function formatMailAutomationStatus(automation: MailSetupContext["automation"]): string {
+  const oldestDue = automation.oldestDueAt
+    ? ` Oldest due: ${new Date(automation.oldestDueAt).toLocaleString()}.`
+    : "";
+  const lastCompleted = automation.lastCompletedAt
+    ? ` Last completed: ${new Date(automation.lastCompletedAt).toLocaleString()}.`
+    : "";
+  return `${automation.pendingCount} delayed action${automation.pendingCount === 1 ? "" : "s"} pending; ${automation.inProgressCount} in progress; ${automation.reconciliationCount} need provider reconciliation; ${automation.failedCount} stopped safely. Ilo processes at most ${automation.executionLimitPerRun} conversations per scheduled run.${oldestDue}${lastCompleted}`;
 }
 
 function formatRuleSources(sourceIds: string[], accountNames: Map<string, string>): string {

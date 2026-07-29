@@ -140,8 +140,8 @@ describe("agent access settings", () => {
           automation: {
             failedCount: 0,
             inProgressCount: 0,
-            lastCompletedAt: null,
-            pendingCount: 0,
+            lastCompletedAt: now,
+            pendingCount: 1,
             reconciliationCount: 0,
           },
           automaticRuleExecution: true,
@@ -194,9 +194,9 @@ describe("agent access settings", () => {
         executionLimitPerRun: 6,
         failedCount: 0,
         inProgressCount: 0,
-        lastCompletedAt: null,
-        oldestDueAt: null,
-        pendingCount: 0,
+        lastCompletedAt: now,
+        oldestDueAt: now,
+        pendingCount: 1,
         reconciliationCount: 0,
       },
       safety: {
@@ -342,6 +342,8 @@ describe("agent access settings", () => {
     expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
     expect(await screen.findByText("3 connected")).toBeInTheDocument();
     expect(await screen.findByText("1 active approved Mail rule")).toBeInTheDocument();
+    expect(await screen.findByText(/Oldest due:/)).toBeInTheDocument();
+    expect(await screen.findByText(/Last completed:/)).toBeInTheDocument();
     expect(
       await screen.findByText(
         /3 Mail accounts · person@example.com, iCloud \+1 · 1 needs reconnect/,
@@ -361,6 +363,7 @@ describe("agent access settings", () => {
         expectedVersion: 1,
       }),
     );
+    await waitFor(() => expect(mocks.getMailSetupContext).toHaveBeenCalledTimes(2));
 
     await browser.click(screen.getByRole("button", { name: "Copy Ilo MCP URL" }));
     await expect(navigator.clipboard.readText()).resolves.toBe("https://mcp.example.com/mcp");

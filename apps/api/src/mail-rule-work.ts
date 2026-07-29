@@ -45,10 +45,10 @@ export function classifyMailRuleProviderFailure(error: unknown): {
     if (error.status === 401 || error.status === 403) {
       return {
         code: "provider_authorization_failed",
-        disposition: "retry",
+        disposition: "failed",
         effect: "rejected",
         message:
-          "The Mail provider no longer authorizes this operation; reconnect the account before the next retry.",
+          "The Mail provider no longer authorizes this operation; reconnect the account before accepting a new rule revision.",
       };
     }
     if (error.status < 500 && error.status !== 408) {

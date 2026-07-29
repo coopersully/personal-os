@@ -897,6 +897,17 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     },
     async dispatchDueAutomations() {
       await connectors.syncStaleAccounts();
+      const mailDispatchStartedAt = Date.now();
+      await connectors.dispatchDueMailRuleWork().catch(() => {
+        dependencies.log?.({
+          durationMs: Date.now() - mailDispatchStartedAt,
+          event: "mail_rule_work_dispatch_failed",
+          method: "SCHEDULER",
+          path: "/internal/mail/rule-work/dispatch",
+          requestId: randomUUID(),
+          status: 500,
+        });
+      });
       await automations.dispatchDue();
     },
     async syncDueFinances() {

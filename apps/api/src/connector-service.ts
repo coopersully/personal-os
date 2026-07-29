@@ -6,6 +6,7 @@ import type {
   ICloudCredentials,
   MailSyncResult,
   NormalizedRemoteEvent,
+  RemoteMailThreadState,
   SyncResult,
 } from "@personal-os/connectors";
 import {
@@ -24,6 +25,7 @@ import {
   mailboxes,
   mailMessages,
   mailRules,
+  mailRuleWorkItems,
   mailThreads,
   oauthStates,
 } from "@personal-os/database";
@@ -36,7 +38,11 @@ import type {
   UpdateEventInput,
 } from "@personal-os/domain";
 import {
+  MAIL_RULE_EXECUTION_LIMIT_PER_RUN,
   mailProfilePreferencesSchema,
+  mailRuleActionNeedsDurableExecution,
+  mailRuleActionSchema,
+  mailRuleActionsMatchRetentionPreferences,
   matchesMailRule,
   resolveStoredMailRule,
 } from "@personal-os/domain";
@@ -45,6 +51,14 @@ import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import {
+  applyMailRuleActionToState,
+  classifyMailRuleProviderFailure,
+  durableMailRuleActionFingerprint,
+  enqueueDurableMailRuleWork,
+  mailRuleActionIsApplied,
+  strongestMailRuleProviderEffect,
+} from "./mail-rule-work.js";
 import { decryptJson, encryptJson, generateToken, hashToken } from "./security.js";
 import {
   auditAttentionItemMetadata,
@@ -55,8 +69,9 @@ import {
 
 const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
-const MAIL_RULE_EXECUTION_BUDGET = 6;
 const MAIL_RULE_WRITE_CONCURRENCY = 2;
+const MAIL_RULE_WORK_CLAIM_LEASE_MS = 10 * 60_000;
+const MAIL_RULE_WORK_MAX_ATTEMPTS = 5;
 
 type CalendarRow = typeof calendars.$inferSelect;
 type EventRow = typeof calendarEvents.$inferSelect;
@@ -65,9 +80,7 @@ type AccountRow = typeof calendarAccounts.$inferSelect & {
 };
 type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type CalendarProviderMutationAction = "create" | "delete" | "update";
-type ExecutableMailRuleAction = MailRuleAction & {
-  type: "add_label" | "mark_read" | "star";
-};
+type MailRuleWorkRow = typeof mailRuleWorkItems.$inferSelect;
 
 function calendarProviderMutationError(
   error: unknown,
@@ -1264,12 +1277,11 @@ export function createConnectorService({
       }
       if (
         !invalidReason &&
-        resolved.actions.some(
-          (action) => action.afterDays > 0 || action.type === "archive" || action.type === "trash",
-        )
+        preferences?.success &&
+        !mailRuleActionsMatchRetentionPreferences(resolved.actions, preferences.data)
       ) {
         invalidReason =
-          "Delayed archive and recoverable Trash automation is paused until Mail has a durable due-work backlog.";
+          "The linked Mail profile no longer authorizes this rule's delayed retention.";
       }
       if (invalidReason) {
         await pauseInvalidMailRule(rule, invalidReason, principal, requestId);
@@ -1278,10 +1290,7 @@ export function createConnectorService({
       const executableProfile = profile as NonNullable<typeof profile>;
       executable.push({
         profileVersion: executableProfile.version,
-        resolved: {
-          ...resolved,
-          actions: resolved.actions as ExecutableMailRuleAction[],
-        },
+        resolved,
         rule,
       });
     }
@@ -1428,6 +1437,45 @@ export function createConnectorService({
       }
     }
     const rules = await executableMailRules(account, principal, requestId);
+    if (rules.length > 0) {
+      await db.transaction(async (transaction) => {
+        for (const { profileVersion, resolved, rule } of rules) {
+          const matchingRemoteThreadIds = value.threads
+            .filter((thread) =>
+              matchesMailRule(resolved.condition, {
+                from: thread.from,
+                snippet: thread.snippet,
+                subject: thread.subject,
+              }),
+            )
+            .map((thread) => thread.remoteThreadId);
+          if (matchingRemoteThreadIds.length === 0) continue;
+          const matchingThreads = await transaction
+            .select()
+            .from(mailThreads)
+            .where(
+              and(
+                eq(mailThreads.userId, account.userId),
+                eq(mailThreads.accountId, account.id),
+                isNull(mailThreads.deletedAt),
+                inArray(mailThreads.remoteThreadId, matchingRemoteThreadIds),
+              ),
+            )
+            .orderBy(asc(mailThreads.id))
+            .for("share");
+          if (!rule.profileId) continue;
+          await enqueueDurableMailRuleWork(transaction, {
+            actions: resolved.actions,
+            profileId: rule.profileId,
+            profileVersion,
+            ruleId: rule.id,
+            ruleVersion: rule.version,
+            threads: matchingThreads,
+            userId: account.userId,
+          });
+        }
+      });
+    }
     let runSummaryPersisted = true;
     if (account.provider === "google" && google.updateMailThread && rules.length > 0) {
       const updateMailThread = google.updateMailThread;
@@ -1508,7 +1556,9 @@ export function createConnectorService({
             continue;
           const addMailboxIds: string[] = [];
           const removeMailboxIds: string[] = [];
-          for (const action of resolvedRule.actions) {
+          for (const action of resolvedRule.actions.filter(
+            (candidate) => !mailRuleActionNeedsDurableExecution(candidate),
+          )) {
             if (action.type === "mark_read" && projectedUnread) removeMailboxIds.push("UNREAD");
             if (action.type === "star" && !projectedStarred) addMailboxIds.push("STARRED");
             if (action.type === "add_label" && action.mailboxId) {
@@ -1560,7 +1610,7 @@ export function createConnectorService({
           });
         }
       }
-      const executionBudget = plannedMutations.slice(0, MAIL_RULE_EXECUTION_BUDGET);
+      const executionBudget = plannedMutations.slice(0, MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
       const backlogCount = Math.max(0, plannedMutations.length - executionBudget.length);
       const outcomes: Array<{
         authorizationChanged?: boolean;
@@ -1892,6 +1942,876 @@ export function createConnectorService({
     };
   }
 
+  function retryAt(attemptCount: number): Date {
+    const delaysMinutes = [1, 5, 15, 60, 360] as const;
+    const delay = delaysMinutes[
+      Math.min(Math.max(attemptCount - 1, 0), delaysMinutes.length - 1)
+    ] as number;
+    return new Date(now().getTime() + delay * 60_000);
+  }
+
+  async function claimDueMailRuleWork(): Promise<{
+    claimed: MailRuleWorkRow[];
+    maintenanceFailed: number;
+    touchedAccountIds: string[];
+  }> {
+    const claimId = randomUUID();
+    const current = now();
+    const staleBefore = new Date(current.getTime() - MAIL_RULE_WORK_CLAIM_LEASE_MS);
+    const touchedAccountIds = new Set<string>();
+    let maintenanceFailed = 0;
+    await db.transaction(async (transaction) => {
+      const exhaustedStaleClaims = await transaction
+        .update(mailRuleWorkItems)
+        .set({
+          claimId: null,
+          claimedAt: null,
+          claimMode: null,
+          completedAt: current,
+          lastErrorCode: "stale_claim_exhausted",
+          lastErrorMessage:
+            "A prior worker stopped before confirming the provider effect, and the bounded retry budget is exhausted.",
+          nextAttemptAt: current,
+          providerEffect: sql`
+            CASE
+              WHEN ${mailRuleWorkItems.providerEffect} = 'applied' THEN 'applied'
+              ELSE 'indeterminate'
+            END
+          `,
+          status: "failed",
+          updatedAt: current,
+        })
+        .where(
+          and(
+            eq(mailRuleWorkItems.status, "claimed"),
+            lt(mailRuleWorkItems.claimedAt, staleBefore),
+            sql`${mailRuleWorkItems.attemptCount} >= ${MAIL_RULE_WORK_MAX_ATTEMPTS}`,
+          ),
+        )
+        .returning({ accountId: mailRuleWorkItems.accountId });
+      maintenanceFailed += exhaustedStaleClaims.length;
+      for (const item of exhaustedStaleClaims) touchedAccountIds.add(item.accountId);
+      const staleClaims = await transaction
+        .update(mailRuleWorkItems)
+        .set({
+          claimId: null,
+          claimedAt: null,
+          claimMode: null,
+          lastErrorCode: "stale_claim",
+          lastErrorMessage:
+            "A prior worker stopped before confirming the provider effect; exact provider reconciliation is required.",
+          nextAttemptAt: current,
+          providerEffect: sql`
+            CASE
+              WHEN ${mailRuleWorkItems.providerEffect} = 'applied' THEN 'applied'
+              ELSE 'indeterminate'
+            END
+          `,
+          status: "reconcile",
+          updatedAt: current,
+        })
+        .where(
+          and(
+            eq(mailRuleWorkItems.status, "claimed"),
+            lt(mailRuleWorkItems.claimedAt, staleBefore),
+            lt(mailRuleWorkItems.attemptCount, MAIL_RULE_WORK_MAX_ATTEMPTS),
+          ),
+        )
+        .returning({ accountId: mailRuleWorkItems.accountId });
+      for (const item of staleClaims) touchedAccountIds.add(item.accountId);
+      const missingSources = await transaction
+        .update(mailRuleWorkItems)
+        .set({
+          claimId: null,
+          claimedAt: null,
+          claimMode: null,
+          completedAt: current,
+          lastErrorCode: "source_missing",
+          lastErrorMessage: "The projected Mail conversation is no longer available.",
+          status: "failed",
+          updatedAt: current,
+        })
+        .where(
+          and(
+            inArray(mailRuleWorkItems.status, ["pending", "reconcile"]),
+            isNull(mailRuleWorkItems.threadId),
+          ),
+        )
+        .returning({ accountId: mailRuleWorkItems.accountId });
+      maintenanceFailed += missingSources.length;
+      for (const item of missingSources) touchedAccountIds.add(item.accountId);
+      await transaction.execute(sql`
+        WITH due_rule_groups AS MATERIALIZED (
+          SELECT
+            work.thread_id,
+            work.rule_id,
+            work.rule_version,
+            work.profile_version,
+            min(work.due_at) AS next_due
+          FROM mail_rule_work_items work
+          WHERE work.thread_id IS NOT NULL
+            AND work.status IN ('pending', 'reconcile')
+            AND work.due_at <= ${current}
+            AND work.next_attempt_at <= ${current}
+            AND work.attempt_count < ${MAIL_RULE_WORK_MAX_ATTEMPTS}
+          GROUP BY work.thread_id, work.rule_id, work.rule_version, work.profile_version
+        ),
+        next_thread_rule AS MATERIALIZED (
+          SELECT DISTINCT ON (due.thread_id)
+            due.thread_id,
+            due.rule_id,
+            due.rule_version,
+            due.profile_version,
+            due.next_due
+          FROM due_rule_groups due
+          ORDER BY due.thread_id, due.next_due, due.rule_id
+        ),
+        candidate_threads AS (
+          SELECT
+            threads.id,
+            due.rule_id,
+            due.rule_version,
+            due.profile_version
+          FROM next_thread_rule due
+          INNER JOIN mail_threads threads ON threads.id = due.thread_id
+          WHERE NOT EXISTS (
+            SELECT 1
+            FROM mail_rule_work_items active
+            WHERE active.thread_id = threads.id
+              AND active.status = 'claimed'
+          )
+          ORDER BY due.next_due, threads.id
+          FOR UPDATE OF threads SKIP LOCKED
+          LIMIT ${MAIL_RULE_EXECUTION_LIMIT_PER_RUN}
+        )
+        UPDATE mail_rule_work_items work
+        SET
+          attempt_count = work.attempt_count + 1,
+          claim_id = ${claimId},
+          claimed_at = ${current},
+          claim_mode = CASE
+            WHEN work.status = 'reconcile' THEN 'reconcile'
+            ELSE 'execute'
+          END,
+          status = 'claimed',
+          updated_at = ${current}
+        FROM candidate_threads
+        WHERE work.thread_id = candidate_threads.id
+          AND work.rule_id = candidate_threads.rule_id
+          AND work.rule_version = candidate_threads.rule_version
+          AND work.profile_version = candidate_threads.profile_version
+          AND work.status IN ('pending', 'reconcile')
+          AND work.due_at <= ${current}
+          AND work.next_attempt_at <= ${current}
+          AND work.attempt_count < ${MAIL_RULE_WORK_MAX_ATTEMPTS}
+      `);
+    });
+    const claimed = await db
+      .select()
+      .from(mailRuleWorkItems)
+      .where(and(eq(mailRuleWorkItems.claimId, claimId), eq(mailRuleWorkItems.status, "claimed")))
+      .orderBy(asc(mailRuleWorkItems.accountId), asc(mailRuleWorkItems.remoteThreadId));
+    for (const item of claimed) touchedAccountIds.add(item.accountId);
+    return { claimed, maintenanceFailed, touchedAccountIds: [...touchedAccountIds] };
+  }
+
+  async function transitionMailRuleWork(
+    work: MailRuleWorkRow[],
+    input: {
+      code: string | null;
+      effect: MailRuleWorkRow["providerEffect"];
+      message: string | null;
+      status: "failed" | "pending" | "reconcile" | "succeeded";
+    },
+  ): Promise<void> {
+    if (work.length === 0) return;
+    const workIds = work.map((item) => item.id);
+    const claimIds = [...new Set(work.map((item) => item.claimId).filter(Boolean))] as string[];
+    const exhausted =
+      (input.status === "pending" || input.status === "reconcile") &&
+      work.some((item) => item.attemptCount >= MAIL_RULE_WORK_MAX_ATTEMPTS);
+    const effectiveStatus = exhausted ? "failed" : input.status;
+    const terminal = effectiveStatus === "failed" || effectiveStatus === "succeeded";
+    await db.transaction(async (transaction) => {
+      const transitioned = await transaction
+        .update(mailRuleWorkItems)
+        .set({
+          claimId: null,
+          claimedAt: null,
+          claimMode: null,
+          completedAt: terminal ? now() : null,
+          lastErrorCode: input.code,
+          lastErrorMessage: input.message,
+          nextAttemptAt:
+            effectiveStatus === "pending" || effectiveStatus === "reconcile"
+              ? retryAt(Math.max(...work.map((item) => item.attemptCount)))
+              : now(),
+          providerEffect: input.effect,
+          status: effectiveStatus,
+          updatedAt: now(),
+        })
+        .where(
+          and(
+            inArray(mailRuleWorkItems.id, workIds),
+            inArray(mailRuleWorkItems.claimId, claimIds),
+            eq(mailRuleWorkItems.status, "claimed"),
+          ),
+        )
+        .returning({ id: mailRuleWorkItems.id });
+      if (transitioned.length === 0) return;
+      const first = work[0];
+      if (!first) return;
+      await transaction.insert(auditEvents).values(
+        auditValues({
+          action: "mail.rule.delayed_state_changed",
+          after: {
+            affectedCount: transitioned.length,
+            errorCode: input.code,
+            providerEffect: input.effect,
+            status: effectiveStatus,
+          },
+          before: { status: "claimed" },
+          entityId: first.accountId,
+          entityType: "mail_account",
+          principal: {
+            actorId: first.accountId,
+            actorType: "connector",
+            userId: first.userId,
+          },
+          requestId: `scheduler:mail-rule:${claimIds[0] as string}`,
+        }),
+      );
+    });
+  }
+
+  async function validateClaimedMailRuleWork(
+    work: MailRuleWorkRow,
+    thread: typeof mailThreads.$inferSelect,
+    executor: Database | DatabaseTransaction = db,
+  ): Promise<
+    { action: MailRuleAction; remoteMailboxId: string | null } | { code: string; message: string }
+  > {
+    const parsedAction = mailRuleActionSchema.safeParse(work.action);
+    if (
+      !parsedAction.success ||
+      !mailRuleActionNeedsDurableExecution(parsedAction.data) ||
+      durableMailRuleActionFingerprint(parsedAction.data) !== work.actionFingerprint
+    ) {
+      return {
+        code: "invalid_action",
+        message: "The durable Mail action no longer matches its accepted snapshot.",
+      };
+    }
+    const [rule] = await executor
+      .select()
+      .from(mailRules)
+      .where(
+        and(
+          eq(mailRules.id, work.ruleId),
+          eq(mailRules.userId, work.userId),
+          eq(mailRules.enabled, true),
+          eq(mailRules.version, work.ruleVersion),
+        ),
+      )
+      .limit(1);
+    if (rule?.policy !== "approved_rule" || rule.profileId !== work.profileId) {
+      return {
+        code: "authorization_changed",
+        message: "The accepted Mail rule is no longer active at the recorded revision.",
+      };
+    }
+    if (
+      !rule.sourceAccountIds.includes(work.accountId) ||
+      new Set(rule.sourceAccountIds).size !== rule.sourceAccountIds.length
+    ) {
+      return {
+        code: "source_changed",
+        message: "The accepted Mail rule no longer includes this source account.",
+      };
+    }
+    const resolved = resolveStoredMailRule({
+      action: rule.legacyAction,
+      actions: rule.actions,
+      condition: rule.condition,
+      enabled: rule.enabled,
+      policy: rule.policy,
+      query: rule.legacyQuery,
+    });
+    if (
+      !resolved.actions.some(
+        (action) => durableMailRuleActionFingerprint(action) === work.actionFingerprint,
+      )
+    ) {
+      return {
+        code: "action_changed",
+        message: "The accepted action is no longer present in the current Mail rule.",
+      };
+    }
+    if (resolved.actions.some((action) => action.type === "trash") && resolved.actions.length > 1) {
+      return {
+        code: "ambiguous_trash_rule",
+        message: "Recoverable Trash must remain the rule's only provider action.",
+      };
+    }
+    if (!work.profileId) {
+      return {
+        code: "profile_changed",
+        message: "The active Mail profile or its retention preferences changed.",
+      };
+    }
+    const [profile] = await executor
+      .select()
+      .from(domainProfiles)
+      .where(
+        and(
+          eq(domainProfiles.id, work.profileId),
+          eq(domainProfiles.userId, work.userId),
+          eq(domainProfiles.domain, "mail"),
+          eq(domainProfiles.status, "active"),
+          eq(domainProfiles.version, work.profileVersion),
+        ),
+      )
+      .limit(1);
+    const preferences = mailProfilePreferencesSchema.safeParse(profile?.preferences ?? {});
+    if (
+      !profile?.sourceContexts.some((source) => source.sourceId === work.accountId) ||
+      !preferences.success ||
+      !mailRuleActionsMatchRetentionPreferences(resolved.actions, preferences.data)
+    ) {
+      return {
+        code: "profile_changed",
+        message: "The active Mail profile or its retention preferences changed.",
+      };
+    }
+    if (
+      thread.id !== work.threadId ||
+      thread.accountId !== work.accountId ||
+      thread.userId !== work.userId ||
+      thread.remoteThreadId !== work.remoteThreadId ||
+      thread.deletedAt !== null ||
+      !matchesMailRule(resolved.condition, {
+        from: thread.from,
+        snippet: thread.snippet,
+        subject: thread.subject,
+      })
+    ) {
+      return {
+        code: "source_changed",
+        message: "The Mail conversation no longer matches the accepted rule and source identity.",
+      };
+    }
+    let remoteMailboxId: string | null = null;
+    if (parsedAction.data.type === "add_label") {
+      if (!parsedAction.data.mailboxId) {
+        return {
+          code: "destination_changed",
+          message: "The accepted destination label is no longer available.",
+        };
+      }
+      const [mailbox] = await executor
+        .select({ remoteMailboxId: mailboxes.remoteMailboxId })
+        .from(mailboxes)
+        .where(
+          and(
+            eq(mailboxes.id, parsedAction.data.mailboxId),
+            eq(mailboxes.userId, work.userId),
+            eq(mailboxes.accountId, work.accountId),
+            eq(mailboxes.role, "custom"),
+            isNull(mailboxes.deletedAt),
+          ),
+        )
+        .limit(1);
+      if (!mailbox) {
+        return {
+          code: "destination_changed",
+          message: "The accepted destination label is no longer available.",
+        };
+      }
+      remoteMailboxId = mailbox.remoteMailboxId;
+    }
+    return { action: parsedAction.data, remoteMailboxId };
+  }
+
+  async function persistMailRuleWorkProjection(
+    work: MailRuleWorkRow[],
+    thread: typeof mailThreads.$inferSelect,
+    state: RemoteMailThreadState,
+    providerMutated: boolean,
+    principal: { actorId: string; actorType: "connector"; userId: string },
+  ): Promise<void> {
+    await db.transaction(async (transaction) => {
+      const [lockedThread] = await transaction
+        .select()
+        .from(mailThreads)
+        .where(eq(mailThreads.id, thread.id))
+        .for("update")
+        .limit(1);
+      if (!lockedThread) {
+        throw new AppError("not_found", "The projected Mail conversation was removed.");
+      }
+      const successful: MailRuleWorkRow[] = [];
+      const changedAuthorization: MailRuleWorkRow[] = [];
+      for (const item of work) {
+        const authorization = await validateClaimedMailRuleWork(item, lockedThread, transaction);
+        if ("code" in authorization) changedAuthorization.push(item);
+        else successful.push(item);
+      }
+      const completedAt = now();
+      if (successful.length > 0) {
+        await transaction
+          .update(mailRuleWorkItems)
+          .set({
+            claimId: null,
+            claimedAt: null,
+            claimMode: null,
+            completedAt,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            nextAttemptAt: completedAt,
+            providerEffect: providerMutated ? "applied" : "none",
+            status: "succeeded",
+            updatedAt: completedAt,
+          })
+          .where(
+            and(
+              inArray(
+                mailRuleWorkItems.id,
+                successful.map((item) => item.id),
+              ),
+              inArray(
+                mailRuleWorkItems.claimId,
+                successful.map((item) => item.claimId).filter(Boolean) as string[],
+              ),
+              eq(mailRuleWorkItems.status, "claimed"),
+            ),
+          );
+      }
+      if (changedAuthorization.length > 0) {
+        await transaction
+          .update(mailRuleWorkItems)
+          .set({
+            claimId: null,
+            claimedAt: null,
+            claimMode: null,
+            completedAt: providerMutated ? null : completedAt,
+            lastErrorCode: "authorization_changed",
+            lastErrorMessage:
+              "The rule authorization changed during execution; review current provider state before retrying.",
+            nextAttemptAt: completedAt,
+            providerEffect: providerMutated ? "applied" : "none",
+            status: providerMutated ? "reconcile" : "failed",
+            updatedAt: completedAt,
+          })
+          .where(
+            and(
+              inArray(
+                mailRuleWorkItems.id,
+                changedAuthorization.map((item) => item.id),
+              ),
+              eq(mailRuleWorkItems.status, "claimed"),
+            ),
+          );
+      }
+      await transaction
+        .update(mailThreads)
+        .set({
+          remoteMailboxIds: state.mailboxIds,
+          starred: state.starred,
+          unread: state.unread,
+          updatedAt: completedAt,
+        })
+        .where(eq(mailThreads.id, lockedThread.id));
+      if (successful.length > 0) {
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "mail.rule.delayed_applied",
+            after: {
+              actionCount: successful.length,
+              delayed: true,
+              providerMutation: providerMutated,
+              ruleCount: new Set(successful.map((item) => item.ruleId)).size,
+            },
+            before: null,
+            entityId: lockedThread.id,
+            entityType: "mail_thread",
+            principal,
+            requestId: `scheduler:mail-rule:${(successful[0] as MailRuleWorkRow).claimId as string}`,
+          }),
+        );
+      }
+    });
+  }
+
+  async function executeClaimedMailRuleWorkGroup(work: MailRuleWorkRow[]): Promise<void> {
+    const first = work[0];
+    if (!first?.threadId) {
+      await transitionMailRuleWork(work, {
+        code: "source_missing",
+        effect: strongestMailRuleProviderEffect(
+          work.map((item) => item.providerEffect),
+          "none",
+        ),
+        message: "The projected Mail conversation is no longer available.",
+        status: "failed",
+      });
+      return;
+    }
+    const [[account], [thread]] = await Promise.all([
+      db
+        .select()
+        .from(calendarAccounts)
+        .where(
+          and(
+            eq(calendarAccounts.id, first.accountId),
+            eq(calendarAccounts.userId, first.userId),
+            eq(calendarAccounts.mailEnabled, true),
+            eq(calendarAccounts.provider, "google"),
+          ),
+        )
+        .limit(1),
+      db
+        .select()
+        .from(mailThreads)
+        .where(
+          and(
+            eq(mailThreads.id, first.threadId),
+            eq(mailThreads.userId, first.userId),
+            eq(mailThreads.accountId, first.accountId),
+            isNull(mailThreads.deletedAt),
+          ),
+        )
+        .limit(1),
+    ]);
+    if (!account?.encryptedCredentials || !thread) {
+      await transitionMailRuleWork(work, {
+        code: "source_unavailable",
+        effect: strongestMailRuleProviderEffect(
+          work.map((item) => item.providerEffect),
+          "none",
+        ),
+        message: "The connected Google Mail source is no longer available.",
+        status: "failed",
+      });
+      return;
+    }
+    const valid: Array<{
+      action: MailRuleAction;
+      remoteMailboxId: string | null;
+      work: MailRuleWorkRow;
+    }> = [];
+    for (const item of work) {
+      const authorization = await validateClaimedMailRuleWork(item, thread);
+      if ("code" in authorization) {
+        await transitionMailRuleWork([item], {
+          code: authorization.code,
+          effect: item.providerEffect,
+          message: authorization.message,
+          status: "failed",
+        });
+      } else {
+        valid.push({ ...authorization, work: item });
+      }
+    }
+    if (valid.length === 0) return;
+    let state: RemoteMailThreadState = {
+      mailboxIds: thread.remoteMailboxIds,
+      remoteThreadId: thread.remoteThreadId,
+      starred: thread.starred,
+      unread: thread.unread,
+    };
+    let currentCredentials = credentials<GoogleCredentials>({
+      ...account,
+      encryptedCredentials: account.encryptedCredentials,
+    });
+    const needsReconciliation = valid.some(({ work: item }) => item.claimMode === "reconcile");
+    if (needsReconciliation) {
+      if (!google.getMailThreadState) {
+        await transitionMailRuleWork(
+          valid.map(({ work: item }) => item),
+          {
+            code: "reconciliation_unavailable",
+            effect: strongestMailRuleProviderEffect(
+              valid.map(({ work: item }) => item.providerEffect),
+              "indeterminate",
+            ),
+            message: "This connector cannot read exact provider state for reconciliation.",
+            status: "reconcile",
+          },
+        );
+        return;
+      }
+      try {
+        const observed = await google.getMailThreadState(currentCredentials, thread.remoteThreadId);
+        currentCredentials = await saveGoogleCredentials(account.id, observed.credentials, true);
+        state = observed.value;
+      } catch (error) {
+        const failure = classifyMailRuleProviderFailure(error);
+        const retryable = valid.every(
+          ({ work: item }) => item.attemptCount < MAIL_RULE_WORK_MAX_ATTEMPTS,
+        );
+        await transitionMailRuleWork(
+          valid.map(({ work: item }) => item),
+          {
+            code: failure.code,
+            effect: strongestMailRuleProviderEffect(
+              valid.map(({ work: item }) => item.providerEffect),
+              failure.effect,
+            ),
+            message: failure.message,
+            status:
+              failure.disposition === "failed" ? "failed" : retryable ? "reconcile" : "failed",
+          },
+        );
+        return;
+      }
+    }
+    const notApplied = valid.filter(
+      ({ action, remoteMailboxId }) => !mailRuleActionIsApplied(action, state, remoteMailboxId),
+    );
+    let providerMutated = false;
+    if (notApplied.length > 0) {
+      try {
+        const trash = notApplied.find(({ action }) => action.type === "trash");
+        if (trash) {
+          if (!google.trashMailThread || notApplied.length !== 1) {
+            throw new ConnectorError(
+              "Recoverable Trash must be the only provider action in this work item.",
+              400,
+            );
+          }
+          currentCredentials = await google.trashMailThread(
+            currentCredentials,
+            thread.remoteThreadId,
+          );
+        } else {
+          if (!google.updateMailThread) {
+            throw new ConnectorError("Google Mail write-through is unavailable.", 501);
+          }
+          const addMailboxIds = new Set<string>();
+          const removeMailboxIds = new Set<string>();
+          for (const { action, remoteMailboxId } of notApplied) {
+            if (action.type === "archive") removeMailboxIds.add("INBOX");
+            if (action.type === "mark_read") removeMailboxIds.add("UNREAD");
+            if (action.type === "star") addMailboxIds.add("STARRED");
+            if (action.type === "add_label" && remoteMailboxId) addMailboxIds.add(remoteMailboxId);
+          }
+          currentCredentials = await google.updateMailThread(
+            currentCredentials,
+            thread.remoteThreadId,
+            {
+              addMailboxIds: [...addMailboxIds],
+              removeMailboxIds: [...removeMailboxIds],
+            },
+          );
+        }
+        providerMutated = true;
+      } catch (error) {
+        const failure = classifyMailRuleProviderFailure(error);
+        const retryable =
+          failure.disposition === "retry" &&
+          valid.every(({ work: item }) => item.attemptCount < MAIL_RULE_WORK_MAX_ATTEMPTS);
+        await transitionMailRuleWork(
+          valid.map(({ work: item }) => item),
+          {
+            code: failure.code,
+            effect: failure.effect,
+            message: failure.message,
+            status:
+              failure.disposition === "reconcile" ? "reconcile" : retryable ? "pending" : "failed",
+          },
+        );
+        return;
+      }
+      try {
+        currentCredentials = await saveGoogleCredentials(account.id, currentCredentials, true);
+      } catch {
+        await transitionMailRuleWork(
+          valid.map(({ work: item }) => item),
+          {
+            code: "credential_persistence_failed",
+            effect: "applied",
+            message:
+              "The provider change completed, but refreshed Mail credentials were not persisted.",
+            status: "reconcile",
+          },
+        );
+        return;
+      }
+      for (const { action, remoteMailboxId } of notApplied) {
+        state = {
+          remoteThreadId: state.remoteThreadId,
+          ...applyMailRuleActionToState(action, state, remoteMailboxId),
+        };
+      }
+    }
+    try {
+      await persistMailRuleWorkProjection(
+        valid.map(({ work: item }) => item),
+        thread,
+        state,
+        providerMutated,
+        { actorId: account.id, actorType: "connector", userId: account.userId },
+      );
+    } catch {
+      await transitionMailRuleWork(
+        valid.map(({ work: item }) => item),
+        {
+          code: "projection_commit_failed",
+          effect: strongestMailRuleProviderEffect(
+            valid.map(({ work: item }) => item.providerEffect),
+            providerMutated ? "applied" : "none",
+          ),
+          message: providerMutated
+            ? "The provider change completed, but Ilo could not commit its projection."
+            : "Ilo could not commit the reconciled Mail projection.",
+          status: providerMutated ? "reconcile" : "pending",
+        },
+      ).catch(() => {});
+    }
+  }
+
+  async function refreshMailRuleWorkAttention(accountIds: string[]): Promise<void> {
+    for (const accountId of [...new Set(accountIds)]) {
+      const [account] = await db
+        .select({ id: calendarAccounts.id, userId: calendarAccounts.userId })
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, accountId))
+        .limit(1);
+      if (!account) continue;
+      await db.transaction(async (transaction) => {
+        await transaction.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtextextended(${`mail-rule-work:${account.id}`}, 0))`,
+        );
+        const summaries = await transaction
+          .select({
+            count: sql<number>`count(*)::int`,
+            status: mailRuleWorkItems.status,
+          })
+          .from(mailRuleWorkItems)
+          .where(
+            and(
+              eq(mailRuleWorkItems.accountId, accountId),
+              inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
+            ),
+          )
+          .groupBy(mailRuleWorkItems.status);
+        const count = (status: MailRuleWorkRow["status"]) =>
+          summaries.find((summary) => summary.status === status)?.count ?? 0;
+        const pending = count("pending") + count("claimed");
+        const reconcile = count("reconcile");
+        const failed = count("failed");
+        const [existing] = await transaction
+          .select({ id: attentionItems.id })
+          .from(attentionItems)
+          .where(
+            and(
+              eq(attentionItems.userId, account.userId),
+              eq(attentionItems.domain, "mail"),
+              eq(attentionItems.kind, "run_summary"),
+              eq(attentionItems.status, "open"),
+              eq(attentionItems.relatedEntityType, "mail_account"),
+              eq(attentionItems.relatedEntityId, account.id),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (pending === 0 && reconcile === 0 && failed === 0) {
+          if (existing) {
+            await transaction
+              .update(attentionItems)
+              .set({ status: "resolved", updatedAt: now() })
+              .where(eq(attentionItems.id, existing.id));
+          }
+          return;
+        }
+        const values = {
+          importance: reconcile > 0 || failed > 0 ? ("high" as const) : ("normal" as const),
+          summary: `${pending} delayed Mail actions are pending; ${reconcile} require exact provider reconciliation; ${failed} stopped safely and need rule, source, or connection review.`,
+          title:
+            reconcile > 0
+              ? "Mail automation needs reconciliation"
+              : failed > 0
+                ? "Mail automation needs review"
+                : "Mail automation has pending work",
+          updatedAt: now(),
+        };
+        if (existing) {
+          await transaction
+            .update(attentionItems)
+            .set(values)
+            .where(eq(attentionItems.id, existing.id));
+        } else {
+          await transaction.insert(attentionItems).values({
+            ...values,
+            domain: "mail",
+            kind: "run_summary",
+            relatedEntityId: account.id,
+            relatedEntityType: "mail_account",
+            status: "open",
+            userId: account.userId,
+          });
+        }
+      });
+    }
+  }
+
+  async function dispatchDueMailRuleWork(): Promise<{
+    claimed: number;
+    failed: number;
+    pending: number;
+    reconciliation: number;
+    succeeded: number;
+  }> {
+    const claim = await claimDueMailRuleWork();
+    const { claimed } = claim;
+    const groups = new Map<string, MailRuleWorkRow[]>();
+    for (const work of claimed) {
+      const key = `${work.accountId}:${work.remoteThreadId}`;
+      const group = groups.get(key) ?? [];
+      group.push(work);
+      groups.set(key, group);
+    }
+    const entries = [...groups.values()];
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < entries.length) {
+        const group = entries[nextIndex++];
+        if (group) await executeClaimedMailRuleWorkGroup(group);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(MAIL_RULE_WRITE_CONCURRENCY, entries.length) }, () => worker()),
+    );
+    await refreshMailRuleWorkAttention(claim.touchedAccountIds);
+    if (claimed.length === 0) {
+      return {
+        claimed: 0,
+        failed: claim.maintenanceFailed,
+        pending: 0,
+        reconciliation: 0,
+        succeeded: 0,
+      };
+    }
+    const final = await db
+      .select({ status: mailRuleWorkItems.status })
+      .from(mailRuleWorkItems)
+      .where(
+        inArray(
+          mailRuleWorkItems.id,
+          claimed.map((work) => work.id),
+        ),
+      );
+    const count = (status: MailRuleWorkRow["status"]) =>
+      final.filter((item) => item.status === status).length;
+    return {
+      claimed: claimed.length,
+      failed: count("failed") + claim.maintenanceFailed,
+      pending: count("pending"),
+      reconciliation: count("reconcile"),
+      succeeded: count("succeeded"),
+    };
+  }
+
   return {
     async completeGoogleAuthorization(state: string, code: string) {
       const [oauthState] = await db
@@ -2144,6 +3064,7 @@ export function createConnectorService({
       });
     },
 
+    dispatchDueMailRuleWork,
     eventGateway,
     mailGateway,
 

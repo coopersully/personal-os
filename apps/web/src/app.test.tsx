@@ -710,6 +710,13 @@ function defaults() {
     accounts: [
       {
         accountId: secondId,
+        automation: {
+          failedCount: 0,
+          inProgressCount: 0,
+          lastCompletedAt: null,
+          pendingCount: 0,
+          reconciliationCount: 0,
+        },
         automaticRuleExecution: true,
         email: "test@example.com",
         label: "Google",
@@ -720,8 +727,17 @@ function defaults() {
         syncStatus: "idle",
       },
     ],
+    automation: {
+      executionLimitPerRun: 6,
+      failedCount: 0,
+      inProgressCount: 0,
+      lastCompletedAt: null,
+      oldestDueAt: null,
+      pendingCount: 0,
+      reconciliationCount: 0,
+    },
     safety: {
-      delayedRetentionAutomation: false,
+      delayedRetentionAutomation: true,
       permanentDeletion: false,
       providerFilterCreation: false,
       spamClassification: false,

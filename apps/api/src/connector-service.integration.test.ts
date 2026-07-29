@@ -19,17 +19,20 @@ import {
   mailDrafts,
   mailMessages,
   mailRules,
+  mailRuleWorkItems,
   mailThreads,
   migrateDatabase,
   users,
 } from "@personal-os/database";
+import type { MailRuleAction } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createConnectorService, MailProviderRejectedError } from "./connector-service.js";
+import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
-import { decryptJson } from "./security.js";
+import { decryptJson, encryptJson } from "./security.js";
 
 const timestamp = new Date("2026-07-13T12:00:00.000Z");
 const encryptionKey = Buffer.alloc(32, 7).toString("base64");
@@ -82,6 +85,15 @@ function mockGoogle(): GoogleConnector {
       credentials: value,
       value: { email: "person@example.com", id: "google-person", name: null },
     })),
+    getMailThreadState: vi.fn(async (value, remoteThreadId) => ({
+      credentials: value,
+      value: {
+        mailboxIds: ["INBOX", "UNREAD"],
+        remoteThreadId,
+        starred: false,
+        unread: true,
+      },
+    })),
     listCalendars: vi.fn(async (value) => ({
       credentials: value,
       value: [
@@ -116,6 +128,7 @@ function mockGoogle(): GoogleConnector {
       value: { mailboxes: [], threads: [] },
     })),
     sendMail: vi.fn(async () => rotatedCredentials),
+    trashMailThread: vi.fn(async () => rotatedCredentials),
     updateMailThread: vi.fn(async () => rotatedCredentials),
     updateEvent: vi.fn(async () => ({
       credentials: rotatedCredentials,
@@ -199,6 +212,121 @@ describe.sequential("connector service", () => {
       });
     }
     return false;
+  }
+
+  async function createDurableMailWorkFixture(name: string, action: MailRuleAction) {
+    const slug = name.toLowerCase().replaceAll(/[^a-z0-9]+/g, "-");
+    const [workUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: name,
+        email: `${slug}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!workUser) throw new Error("Durable Mail work user was not created.");
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        email: `${slug}@example.com`,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        label: name,
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: `provider-${slug}`,
+        userId: workUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Durable Mail work account was not created.");
+    const delayedRetention =
+      action.afterDays > 0 && (action.type === "archive" || action.type === "trash");
+    const [profile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep routine Mail noise out of the inbox.",
+        preferences: {
+          importantEmailHandling: "inbox_only",
+          inboxStyle: "signal_only",
+          noiseDisposition: delayedRetention
+            ? action.type === "archive"
+              ? "archive_after_days"
+              : "trash_after_days"
+            : "review_only",
+          noiseRetentionDays: delayedRetention ? action.afterDays : null,
+        },
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Routine inbox",
+            sourceId: account.id,
+            sourceLabel: account.label,
+          },
+        ],
+        status: "active",
+        summary: "Routine Mail cleanup is approved.",
+        userId: workUser.id,
+      })
+      .returning();
+    if (!profile) throw new Error("Durable Mail work profile was not created.");
+    const [rule] = await database.db
+      .insert(mailRules)
+      .values({
+        actions: [action],
+        condition: { field: "subject", operator: "contains", value: "routine" },
+        enabled: true,
+        name,
+        policy: "approved_rule",
+        profileId: profile.id,
+        sourceAccountIds: [account.id],
+        userId: workUser.id,
+      })
+      .returning();
+    if (!rule) throw new Error("Durable Mail work rule was not created.");
+    const [thread] = await database.db
+      .insert(mailThreads)
+      .values({
+        accountId: account.id,
+        bodyText: "Routine receipt",
+        from: { address: "orders@example.com", name: "Orders" },
+        provider: "google",
+        receivedAt: new Date(timestamp.getTime() - 2 * 86_400_000),
+        remoteMailboxIds: ["INBOX", "UNREAD"],
+        remoteThreadId: `thread-${slug}`,
+        snippet: "Routine receipt",
+        starred: false,
+        subject: `Routine ${name}`,
+        to: [],
+        unread: true,
+        userId: workUser.id,
+      })
+      .returning();
+    if (!thread) throw new Error("Durable Mail work thread was not created.");
+    const dueAt = new Date(thread.receivedAt.getTime() + action.afterDays * 86_400_000);
+    const [work] = await database.db
+      .insert(mailRuleWorkItems)
+      .values({
+        accountId: account.id,
+        action,
+        actionFingerprint: durableMailRuleActionFingerprint(action),
+        dueAt,
+        nextAttemptAt: dueAt,
+        profileId: profile.id,
+        profileVersion: profile.version,
+        remoteThreadId: thread.remoteThreadId,
+        ruleId: rule.id,
+        ruleVersion: rule.version,
+        sourceUpdatedAt: thread.updatedAt,
+        threadId: thread.id,
+        userId: workUser.id,
+      })
+      .returning();
+    if (!work) throw new Error("Durable Mail work item was not created.");
+    return { account, profile, rule, thread, user: workUser, work };
   }
 
   beforeAll(async () => {
@@ -1014,21 +1142,19 @@ describe.sequential("connector service", () => {
     await expect(database.db.select().from(mailRules)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          enabled: false,
+          enabled: true,
           name: "Trash project mail after one day",
-          policy: "preview",
-          version: 2,
+          policy: "approved_rule",
+          version: 1,
         }),
       ]),
     );
-    await expect(database.db.select().from(attentionItems)).resolves.toEqual(
+    await expect(database.db.select().from(mailRuleWorkItems)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          domain: "mail",
-          relatedEntityType: "mail_rule",
-          status: "open",
-          summary: expect.stringContaining("durable due-work backlog"),
-          title: "Mail rule paused: Trash project mail after one day",
+          action: { afterDays: 1, mailboxId: null, type: "trash" },
+          remoteThreadId: "ruled-thread",
+          status: "pending",
         }),
       ]),
     );
@@ -2048,6 +2174,7 @@ describe.sequential("connector service", () => {
         expect.objectContaining({ enabled: true, name: "Current project label" }),
         expect.objectContaining({ enabled: true, name: "Different account" }),
         expect.objectContaining({ enabled: true, name: "Read labeled mail" }),
+        expect.objectContaining({ enabled: true, name: "Retention requires durable work" }),
         expect.objectContaining({ enabled: true, name: "Star labeled mail" }),
         ...insertedRules
           .filter(
@@ -2056,12 +2183,22 @@ describe.sequential("connector service", () => {
                 "Current project label",
                 "Different account",
                 "Read labeled mail",
+                "Retention requires durable work",
                 "Star labeled mail",
               ].includes(rule.name),
           )
           .map((rule) =>
             expect.objectContaining({ enabled: false, name: rule.name, policy: "preview" }),
           ),
+      ]),
+    );
+    await expect(database.db.select().from(mailRuleWorkItems)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: { afterDays: 0, mailboxId: null, type: "archive" },
+          remoteThreadId: "safety-matrix-thread",
+          status: "pending",
+        }),
       ]),
     );
     const [storedThread] = await database.db
@@ -4035,6 +4172,1303 @@ describe.sequential("connector service", () => {
         sourceContexts: [],
         status: "draft",
         version: 2,
+      }),
+    ]);
+  });
+
+  it("executes due Mail work once after the conversation leaves the bounded sync page", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Durable archive", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockClear();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+    const [existingRunSummary] = await database.db
+      .insert(attentionItems)
+      .values({
+        domain: "mail",
+        importance: "normal",
+        kind: "run_summary",
+        relatedEntityId: fixture.account.id,
+        relatedEntityType: "mail_account",
+        status: "open",
+        summary: "Prior durable Mail status.",
+        title: "Prior Mail automation status",
+        userId: fixture.user.id,
+      })
+      .returning();
+    if (!existingRunSummary) throw new Error("Existing run summary was not created.");
+
+    const overlappingRuns = await Promise.all([
+      service.dispatchDueMailRuleWork(),
+      service.dispatchDueMailRuleWork(),
+    ]);
+    expect(overlappingRuns.reduce((total, result) => total + result.claimed, 0)).toBe(1);
+    expect(overlappingRuns.reduce((total, result) => total + result.succeeded, 0)).toBe(1);
+    expect(updateMailThread).toHaveBeenCalledTimes(1);
+    expect(updateMailThread).toHaveBeenCalledWith(
+      expect.any(Object),
+      fixture.thread.remoteThreadId,
+      { addMailboxIds: [], removeMailboxIds: ["INBOX"] },
+    );
+    await expect(service.dispatchDueMailRuleWork()).resolves.toEqual({
+      claimed: 0,
+      failed: 0,
+      pending: 0,
+      reconciliation: 0,
+      succeeded: 0,
+    });
+    expect(updateMailThread).toHaveBeenCalledTimes(1);
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        attemptCount: 1,
+        completedAt: timestamp,
+        providerEffect: "applied",
+        status: "succeeded",
+      }),
+    ]);
+    await expect(
+      database.db.select().from(mailThreads).where(eq(mailThreads.id, fixture.thread.id)),
+    ).resolves.toEqual([expect.objectContaining({ remoteMailboxIds: ["UNREAD"] })]);
+    await expect(
+      database.db
+        .select({ status: attentionItems.status })
+        .from(attentionItems)
+        .where(eq(attentionItems.id, existingRunSummary.id)),
+    ).resolves.toEqual([{ status: "resolved" }]);
+  });
+
+  it("claims at most six due conversations per scheduled Mail run", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Bounded archive", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const additionalThreads = await database.db
+      .insert(mailThreads)
+      .values(
+        Array.from({ length: 6 }, (_, index) => ({
+          accountId: fixture.account.id,
+          bodyText: "Routine receipt",
+          from: { address: "orders@example.com", name: "Orders" },
+          provider: "google" as const,
+          receivedAt: new Date(timestamp.getTime() - 2 * 86_400_000),
+          remoteMailboxIds: ["INBOX", "UNREAD"],
+          remoteThreadId: `thread-bounded-archive-${index}`,
+          snippet: "Routine receipt",
+          starred: false,
+          subject: `Routine bounded archive ${index}`,
+          to: [],
+          unread: true,
+          userId: fixture.user.id,
+        })),
+      )
+      .returning();
+    await database.db.insert(mailRuleWorkItems).values(
+      additionalThreads.map((thread) => ({
+        accountId: fixture.account.id,
+        action: fixture.work.action,
+        actionFingerprint: fixture.work.actionFingerprint,
+        dueAt: fixture.work.dueAt,
+        nextAttemptAt: fixture.work.nextAttemptAt,
+        profileId: fixture.profile.id,
+        profileVersion: fixture.profile.version,
+        remoteThreadId: thread.remoteThreadId,
+        ruleId: fixture.rule.id,
+        ruleVersion: fixture.rule.version,
+        sourceUpdatedAt: thread.updatedAt,
+        threadId: thread.id,
+        userId: fixture.user.id,
+      })),
+    );
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 6,
+      succeeded: 6,
+    });
+    expect(updateMailThread).toHaveBeenCalledTimes(6);
+    await expect(
+      database.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.status, "pending")),
+    ).resolves.toEqual([{ count: 1 }]);
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+    });
+    expect(updateMailThread).toHaveBeenCalledTimes(7);
+  });
+
+  it("moves one-day cleanup work to recoverable Trash without permanent deletion", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("One day Trash", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "trash",
+    });
+    const trashMailThread = vi.mocked(
+      google.trashMailThread as NonNullable<GoogleConnector["trashMailThread"]>,
+    );
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    trashMailThread.mockReset();
+    trashMailThread.mockResolvedValue(rotatedCredentials);
+    updateMailThread.mockClear();
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+    });
+    expect(trashMailThread).toHaveBeenCalledOnce();
+    expect(trashMailThread).toHaveBeenCalledWith(expect.any(Object), fixture.thread.remoteThreadId);
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db.select().from(mailThreads).where(eq(mailThreads.id, fixture.thread.id)),
+    ).resolves.toEqual([expect.objectContaining({ remoteMailboxIds: ["UNREAD", "TRASH"] })]);
+  });
+
+  it("isolates due work from different rules on the same conversation", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Isolated Trash rule", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "trash",
+    });
+    const delayedRead = { afterDays: 1, mailboxId: null, type: "mark_read" as const };
+    const [readRule] = await database.db
+      .insert(mailRules)
+      .values({
+        actions: [delayedRead],
+        condition: { field: "subject", operator: "contains", value: "routine" },
+        enabled: true,
+        name: "Isolated delayed read rule",
+        policy: "approved_rule",
+        profileId: fixture.profile.id,
+        sourceAccountIds: [fixture.account.id],
+        userId: fixture.user.id,
+      })
+      .returning();
+    if (!readRule) throw new Error("Second isolated Mail rule was not created.");
+    await database.db.insert(mailRuleWorkItems).values({
+      accountId: fixture.account.id,
+      action: delayedRead,
+      actionFingerprint: durableMailRuleActionFingerprint(delayedRead),
+      dueAt: fixture.work.dueAt,
+      nextAttemptAt: fixture.work.nextAttemptAt,
+      profileId: fixture.profile.id,
+      profileVersion: fixture.profile.version,
+      remoteThreadId: fixture.thread.remoteThreadId,
+      ruleId: readRule.id,
+      ruleVersion: readRule.version,
+      sourceUpdatedAt: fixture.thread.updatedAt,
+      threadId: fixture.thread.id,
+      userId: fixture.user.id,
+    });
+    const trashMailThread = vi.mocked(
+      google.trashMailThread as NonNullable<GoogleConnector["trashMailThread"]>,
+    );
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    trashMailThread.mockReset();
+    trashMailThread.mockResolvedValue(rotatedCredentials);
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+
+    const firstRun = await service.dispatchDueMailRuleWork();
+    const secondRun = await service.dispatchDueMailRuleWork();
+    expect(firstRun).toMatchObject({ claimed: 1, succeeded: 1 });
+    expect(secondRun).toMatchObject({ claimed: 1, succeeded: 1 });
+    expect(trashMailThread).toHaveBeenCalledOnce();
+    expect(updateMailThread).toHaveBeenCalledOnce();
+    await expect(
+      database.db
+        .select({ status: mailRuleWorkItems.status })
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.accountId, fixture.account.id)),
+    ).resolves.toEqual([{ status: "succeeded" }, { status: "succeeded" }]);
+  });
+
+  it("coalesces delayed star and owned custom-label work for one rule", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const starAction = { afterDays: 1, mailboxId: null, type: "star" as const };
+    const fixture = await createDurableMailWorkFixture("Delayed signal markers", starAction);
+    const [label] = await database.db
+      .insert(mailboxes)
+      .values({
+        accountId: fixture.account.id,
+        name: "Orders",
+        provider: "google",
+        remoteMailboxId: "Label_Orders",
+        role: "custom",
+        userId: fixture.user.id,
+      })
+      .returning();
+    if (!label) throw new Error("Custom Mail label was not created.");
+    const labelAction = { afterDays: 1, mailboxId: label.id, type: "add_label" as const };
+    await database.db
+      .update(mailRules)
+      .set({ actions: [starAction, labelAction] })
+      .where(eq(mailRules.id, fixture.rule.id));
+    await database.db.insert(mailRuleWorkItems).values({
+      accountId: fixture.account.id,
+      action: labelAction,
+      actionFingerprint: durableMailRuleActionFingerprint(labelAction),
+      dueAt: fixture.work.dueAt,
+      nextAttemptAt: fixture.work.nextAttemptAt,
+      profileId: fixture.profile.id,
+      profileVersion: fixture.profile.version,
+      remoteThreadId: fixture.thread.remoteThreadId,
+      ruleId: fixture.rule.id,
+      ruleVersion: fixture.rule.version,
+      sourceUpdatedAt: fixture.thread.updatedAt,
+      threadId: fixture.thread.id,
+      userId: fixture.user.id,
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 2,
+      succeeded: 2,
+    });
+    expect(updateMailThread).toHaveBeenCalledOnce();
+    expect(updateMailThread).toHaveBeenCalledWith(
+      expect.any(Object),
+      fixture.thread.remoteThreadId,
+      {
+        addMailboxIds: expect.arrayContaining(["STARRED", "Label_Orders"]),
+        removeMailboxIds: [],
+      },
+    );
+    await expect(
+      database.db.select().from(mailThreads).where(eq(mailThreads.id, fixture.thread.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        remoteMailboxIds: expect.arrayContaining(["INBOX", "UNREAD", "Label_Orders"]),
+        starred: true,
+      }),
+    ]);
+  });
+
+  it("reconciles stale claims by exact provider state without replaying Trash", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Stale Trash claim", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "trash",
+    });
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({
+        claimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        claimedAt: new Date(timestamp.getTime() - 20 * 60_000),
+        claimMode: "execute",
+        status: "claimed",
+      })
+      .where(eq(mailRuleWorkItems.id, fixture.work.id));
+    const getMailThreadState = vi.mocked(
+      google.getMailThreadState as NonNullable<GoogleConnector["getMailThreadState"]>,
+    );
+    const trashMailThread = vi.mocked(
+      google.trashMailThread as NonNullable<GoogleConnector["trashMailThread"]>,
+    );
+    getMailThreadState.mockClear();
+    trashMailThread.mockClear();
+    getMailThreadState.mockResolvedValue({
+      credentials: rotatedCredentials,
+      value: {
+        mailboxIds: ["TRASH"],
+        remoteThreadId: fixture.thread.remoteThreadId,
+        starred: false,
+        unread: false,
+      },
+    });
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+    });
+    expect(getMailThreadState).toHaveBeenCalledTimes(1);
+    expect(trashMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        attemptCount: 1,
+        lastErrorCode: null,
+        providerEffect: "none",
+        status: "succeeded",
+      }),
+    ]);
+  });
+
+  it("fails an exhausted stale claim terminally instead of stranding reconciliation", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Exhausted stale claim", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({
+        attemptCount: 5,
+        claimId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        claimedAt: new Date(timestamp.getTime() - 20 * 60_000),
+        claimMode: "execute",
+        status: "claimed",
+      })
+      .where(eq(mailRuleWorkItems.id, fixture.work.id));
+    const getMailThreadState = vi.mocked(
+      google.getMailThreadState as NonNullable<GoogleConnector["getMailThreadState"]>,
+    );
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    getMailThreadState.mockClear();
+    updateMailThread.mockClear();
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toEqual({
+      claimed: 0,
+      failed: 1,
+      pending: 0,
+      reconciliation: 0,
+      succeeded: 0,
+    });
+    expect(getMailThreadState).not.toHaveBeenCalled();
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        attemptCount: 5,
+        completedAt: timestamp,
+        lastErrorCode: "stale_claim_exhausted",
+        providerEffect: "indeterminate",
+        status: "failed",
+      }),
+    ]);
+  });
+
+  it("handles exact-read rejection and authorization drift during reconciliation", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const missingProviderSource = await createDurableMailWorkFixture(
+      "Exact read missing provider source",
+      {
+        afterDays: 1,
+        mailboxId: null,
+        type: "archive",
+      },
+    );
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({
+        claimId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+        claimedAt: new Date(timestamp.getTime() - 20 * 60_000),
+        claimMode: "execute",
+        status: "claimed",
+      })
+      .where(eq(mailRuleWorkItems.id, missingProviderSource.work.id));
+    const getMailThreadState = vi.mocked(
+      google.getMailThreadState as NonNullable<GoogleConnector["getMailThreadState"]>,
+    );
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    getMailThreadState.mockReset();
+    getMailThreadState.mockRejectedValueOnce(new ConnectorError("Not found", 404));
+    updateMailThread.mockClear();
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      failed: 1,
+    });
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.id, missingProviderSource.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "provider_source_missing",
+        providerEffect: "indeterminate",
+        status: "failed",
+      }),
+    ]);
+
+    await database.db.delete(mailRuleWorkItems);
+    const changedAuthorization = await createDurableMailWorkFixture(
+      "Reconciliation authorization drift",
+      {
+        afterDays: 1,
+        mailboxId: null,
+        type: "archive",
+      },
+    );
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ providerEffect: "indeterminate", status: "reconcile" })
+      .where(eq(mailRuleWorkItems.id, changedAuthorization.work.id));
+    getMailThreadState.mockReset();
+    getMailThreadState.mockImplementationOnce(async (_credentials, remoteThreadId) => {
+      await database.db
+        .update(mailRules)
+        .set({
+          enabled: false,
+          policy: "preview",
+          version: changedAuthorization.rule.version + 1,
+        })
+        .where(eq(mailRules.id, changedAuthorization.rule.id));
+      return {
+        credentials: rotatedCredentials,
+        value: {
+          mailboxIds: ["UNREAD"],
+          remoteThreadId,
+          starred: false,
+          unread: true,
+        },
+      };
+    });
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      failed: 1,
+    });
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.id, changedAuthorization.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "authorization_changed",
+        providerEffect: "none",
+        status: "failed",
+      }),
+    ]);
+  });
+
+  it("backs off rejected work and reconciles an indeterminate provider timeout", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Retry archive", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    const getMailThreadState = vi.mocked(
+      google.getMailThreadState as NonNullable<GoogleConnector["getMailThreadState"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockRejectedValueOnce(new ConnectorError("Rate limited", 429));
+    const [existingRunSummary] = await database.db
+      .insert(attentionItems)
+      .values({
+        domain: "mail",
+        importance: "normal",
+        kind: "run_summary",
+        relatedEntityId: fixture.account.id,
+        relatedEntityType: "mail_account",
+        status: "open",
+        summary: "Prior durable Mail status.",
+        title: "Prior Mail automation status",
+        userId: fixture.user.id,
+      })
+      .returning();
+    if (!existingRunSummary) throw new Error("Existing run summary was not created.");
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      pending: 1,
+    });
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        attemptCount: 1,
+        lastErrorCode: "provider_rate_limited",
+        providerEffect: "rejected",
+        status: "pending",
+      }),
+    ]);
+    await expect(
+      database.db.select().from(attentionItems).where(eq(attentionItems.id, existingRunSummary.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        status: "open",
+        title: "Mail automation has pending work",
+      }),
+    ]);
+
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(mailRuleWorkItems.id, fixture.work.id));
+    updateMailThread.mockRejectedValueOnce(new ConnectorError("Timed out", 408));
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      reconciliation: 1,
+    });
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        attemptCount: 2,
+        lastErrorCode: "provider_effect_indeterminate",
+        providerEffect: "indeterminate",
+        status: "reconcile",
+      }),
+    ]);
+
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(mailRuleWorkItems.id, fixture.work.id));
+    getMailThreadState.mockResolvedValueOnce({
+      credentials: rotatedCredentials,
+      value: {
+        mailboxIds: ["UNREAD"],
+        remoteThreadId: fixture.thread.remoteThreadId,
+        starred: false,
+        unread: true,
+      },
+    });
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+    });
+    expect(updateMailThread).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails provider 404 work terminally without replay", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Missing provider thread", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockRejectedValueOnce(new ConnectorError("Not found", 404));
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      failed: 1,
+    });
+    await expect(service.dispatchDueMailRuleWork()).resolves.toEqual({
+      claimed: 0,
+      failed: 0,
+      pending: 0,
+      reconciliation: 0,
+      succeeded: 0,
+    });
+    expect(updateMailThread).toHaveBeenCalledTimes(1);
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "provider_source_missing",
+        providerEffect: "rejected",
+        status: "failed",
+      }),
+    ]);
+    const mail = createMailService({
+      db: database.db,
+      gateway: service.mailGateway,
+      now: () => timestamp,
+      reviewSigningKey: "durable-mail-status-review-key",
+    });
+    await expect(mail.listSetupContext(fixture.user.id)).resolves.toMatchObject({
+      accounts: [
+        expect.objectContaining({
+          accountId: fixture.account.id,
+          automation: expect.objectContaining({ failedCount: 1 }),
+        }),
+      ],
+      automation: {
+        executionLimitPerRun: 6,
+        failedCount: 1,
+        inProgressCount: 0,
+        lastCompletedAt: timestamp.toISOString(),
+        oldestDueAt: null,
+        pendingCount: 0,
+        reconciliationCount: 0,
+      },
+    });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            eq(attentionItems.relatedEntityId, fixture.account.id),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        summary:
+          "0 delayed Mail actions are pending; 0 require exact provider reconciliation; 1 stopped safely and need rule, source, or connection review.",
+        title: "Mail automation needs review",
+      }),
+    ]);
+  });
+
+  it("reconciles provider success after rotated credentials fail to persist", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Credential rotation archive", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    const getMailThreadState = vi.mocked(
+      google.getMailThreadState as NonNullable<GoogleConnector["getMailThreadState"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValueOnce({
+      ...rotatedCredentials,
+      accessToken: "durable-rotation-fault",
+      expiresAt: "2034-07-13T13:00:00.000Z",
+    });
+    await database.pool.query(`
+      CREATE FUNCTION reject_durable_mail_credentials_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.encrypted_credentials IS DISTINCT FROM OLD.encrypted_credentials THEN
+          RAISE EXCEPTION 'forced durable Mail credential persistence failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_durable_mail_credentials_for_test
+      BEFORE UPDATE OF encrypted_credentials ON calendar_accounts
+      FOR EACH ROW EXECUTE FUNCTION reject_durable_mail_credentials_for_test();
+    `);
+    try {
+      await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+        claimed: 1,
+        reconciliation: 1,
+      });
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER reject_durable_mail_credentials_for_test ON calendar_accounts;
+        DROP FUNCTION reject_durable_mail_credentials_for_test();
+      `);
+    }
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "credential_persistence_failed",
+        providerEffect: "applied",
+        status: "reconcile",
+      }),
+    ]);
+
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(mailRuleWorkItems.id, fixture.work.id));
+    getMailThreadState.mockResolvedValueOnce({
+      credentials: rotatedCredentials,
+      value: {
+        mailboxIds: ["UNREAD"],
+        remoteThreadId: fixture.thread.remoteThreadId,
+        starred: false,
+        unread: true,
+      },
+    });
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+    });
+    expect(updateMailThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("records provider success as reconciliation work when the local commit fails", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Partial archive", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    const getMailThreadState = vi.mocked(
+      google.getMailThreadState as NonNullable<GoogleConnector["getMailThreadState"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockResolvedValue(rotatedCredentials);
+    await database.pool.query(`
+      CREATE FUNCTION reject_mail_work_success_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'succeeded' THEN
+          RAISE EXCEPTION 'forced durable Mail projection failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_mail_work_success_for_test
+      BEFORE UPDATE ON mail_rule_work_items
+      FOR EACH ROW EXECUTE FUNCTION reject_mail_work_success_for_test();
+    `);
+    try {
+      await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+        claimed: 1,
+        reconciliation: 1,
+      });
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER reject_mail_work_success_for_test ON mail_rule_work_items;
+        DROP FUNCTION reject_mail_work_success_for_test();
+      `);
+    }
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "projection_commit_failed",
+        providerEffect: "applied",
+        status: "reconcile",
+      }),
+    ]);
+
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(mailRuleWorkItems.id, fixture.work.id));
+    getMailThreadState.mockResolvedValueOnce({
+      credentials: rotatedCredentials,
+      value: {
+        mailboxIds: ["UNREAD"],
+        remoteThreadId: fixture.thread.remoteThreadId,
+        starred: false,
+        unread: true,
+      },
+    });
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      succeeded: 1,
+    });
+    expect(updateMailThread).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a provider effect when its local source disappears before projection", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Removed during projection", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockImplementationOnce(async () => {
+      await database.db.delete(mailThreads).where(eq(mailThreads.id, fixture.thread.id));
+      return rotatedCredentials;
+    });
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      reconciliation: 1,
+    });
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "projection_commit_failed",
+        providerEffect: "applied",
+        status: "reconcile",
+        threadId: null,
+      }),
+    ]);
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(mailRuleWorkItems.id, fixture.work.id));
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 0,
+      failed: 1,
+    });
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "source_missing",
+        providerEffect: "applied",
+        status: "failed",
+      }),
+    ]);
+  });
+
+  it("fails closed when an approved delayed action loses its label destination", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const missingMailboxId = "99999999-9999-4999-8999-999999999999";
+    const fixture = await createDurableMailWorkFixture("Removed label destination", {
+      afterDays: 1,
+      mailboxId: missingMailboxId,
+      type: "add_label",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockClear();
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      failed: 1,
+    });
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "destination_changed",
+        providerEffect: "none",
+        status: "failed",
+      }),
+    ]);
+  });
+
+  it("retries a failed local reconciliation projection without claiming a provider effect", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Failed reconciliation projection", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ providerEffect: "indeterminate", status: "reconcile" })
+      .where(eq(mailRuleWorkItems.id, fixture.work.id));
+    const getMailThreadState = vi.mocked(
+      google.getMailThreadState as NonNullable<GoogleConnector["getMailThreadState"]>,
+    );
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    getMailThreadState.mockReset();
+    getMailThreadState.mockResolvedValueOnce({
+      credentials: rotatedCredentials,
+      value: {
+        mailboxIds: ["UNREAD"],
+        remoteThreadId: fixture.thread.remoteThreadId,
+        starred: false,
+        unread: true,
+      },
+    });
+    updateMailThread.mockClear();
+    await database.pool.query(`
+      CREATE FUNCTION reject_mail_reconciliation_success_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'succeeded' THEN
+          RAISE EXCEPTION 'forced reconciled projection failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER reject_mail_reconciliation_success_for_test
+      BEFORE UPDATE ON mail_rule_work_items
+      FOR EACH ROW EXECUTE FUNCTION reject_mail_reconciliation_success_for_test();
+    `);
+    try {
+      await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+        claimed: 1,
+        pending: 1,
+      });
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER reject_mail_reconciliation_success_for_test ON mail_rule_work_items;
+        DROP FUNCTION reject_mail_reconciliation_success_for_test();
+      `);
+    }
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "projection_commit_failed",
+        providerEffect: "indeterminate",
+        status: "pending",
+      }),
+    ]);
+  });
+
+  it("fails delayed Mail work closed when the approved profile revision changes", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Changed profile archive", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    await database.db
+      .update(domainProfiles)
+      .set({ version: fixture.profile.version + 1 })
+      .where(eq(domainProfiles.id, fixture.profile.id));
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockClear();
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      failed: 1,
+    });
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "profile_changed",
+        providerEffect: "none",
+        status: "failed",
+      }),
+    ]);
+  });
+
+  it("fails durable Mail snapshots closed across rule, source, action, and profile drift", async () => {
+    const cases: Array<{
+      code: string;
+      mutate: (fixture: Awaited<ReturnType<typeof createDurableMailWorkFixture>>) => Promise<void>;
+      name: string;
+    }> = [
+      {
+        code: "invalid_action",
+        mutate: async (fixture) => {
+          await database.db
+            .update(mailRuleWorkItems)
+            .set({ action: { afterDays: 1, mailboxId: null, type: "star" } })
+            .where(eq(mailRuleWorkItems.id, fixture.work.id));
+        },
+        name: "Changed work action",
+      },
+      {
+        code: "source_changed",
+        mutate: async (fixture) => {
+          await database.db
+            .update(mailRules)
+            .set({ sourceAccountIds: [] })
+            .where(eq(mailRules.id, fixture.rule.id));
+        },
+        name: "Changed rule source",
+      },
+      {
+        code: "action_changed",
+        mutate: async (fixture) => {
+          await database.db
+            .update(mailRules)
+            .set({ actions: [{ afterDays: 1, mailboxId: null, type: "star" }] })
+            .where(eq(mailRules.id, fixture.rule.id));
+        },
+        name: "Removed accepted action",
+      },
+      {
+        code: "profile_changed",
+        mutate: async (fixture) => {
+          await database.db
+            .update(domainProfiles)
+            .set({ preferences: {} })
+            .where(eq(domainProfiles.id, fixture.profile.id));
+        },
+        name: "Invalid profile preferences",
+      },
+      {
+        code: "source_changed",
+        mutate: async (fixture) => {
+          await database.db
+            .update(mailThreads)
+            .set({ subject: "No longer matches" })
+            .where(eq(mailThreads.id, fixture.thread.id));
+        },
+        name: "Changed source facts",
+      },
+      {
+        code: "ambiguous_trash_rule",
+        mutate: async (fixture) => {
+          await database.db
+            .update(mailRules)
+            .set({
+              actions: [
+                { afterDays: 1, mailboxId: null, type: "archive" },
+                { afterDays: 1, mailboxId: null, type: "trash" },
+              ],
+            })
+            .where(eq(mailRules.id, fixture.rule.id));
+        },
+        name: "Ambiguous Trash actions",
+      },
+      {
+        code: "profile_changed",
+        mutate: async (fixture) => {
+          await database.db.delete(domainProfiles).where(eq(domainProfiles.id, fixture.profile.id));
+        },
+        name: "Removed profile",
+      },
+    ];
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    for (const testCase of cases) {
+      await database.db.delete(mailRuleWorkItems);
+      const fixture = await createDurableMailWorkFixture(testCase.name, {
+        afterDays: 1,
+        mailboxId: null,
+        type: "archive",
+      });
+      await testCase.mutate(fixture);
+      updateMailThread.mockClear();
+
+      await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+        claimed: 1,
+        failed: 1,
+      });
+      expect(updateMailThread).not.toHaveBeenCalled();
+      await expect(
+        database.db
+          .select()
+          .from(mailRuleWorkItems)
+          .where(eq(mailRuleWorkItems.id, fixture.work.id)),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          lastErrorCode: testCase.code,
+          providerEffect: "none",
+          status: "failed",
+        }),
+      ]);
+    }
+  });
+
+  it("handles missing durable sources, credentials, and connector recovery capabilities", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const missingThread = await createDurableMailWorkFixture("Removed local source", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    await database.db.delete(mailThreads).where(eq(mailThreads.id, missingThread.thread.id));
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 0,
+      failed: 1,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.id, missingThread.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({ lastErrorCode: "source_missing", status: "failed" }),
+    ]);
+
+    await database.db.delete(mailRuleWorkItems);
+    const missingCredentials = await createDurableMailWorkFixture("Removed credentials", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    await database.db
+      .update(calendarAccounts)
+      .set({ encryptedCredentials: null })
+      .where(eq(calendarAccounts.id, missingCredentials.account.id));
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      failed: 1,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.id, missingCredentials.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({ lastErrorCode: "source_unavailable", status: "failed" }),
+    ]);
+
+    await database.db.delete(mailRuleWorkItems);
+    const noExactRead = await createDurableMailWorkFixture("Missing exact read", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({
+        claimId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        claimedAt: new Date(timestamp.getTime() - 20 * 60_000),
+        claimMode: "execute",
+        status: "claimed",
+      })
+      .where(eq(mailRuleWorkItems.id, noExactRead.work.id));
+    const { getMailThreadState: _getMailThreadState, ...googleWithoutExactRead } = google;
+    const serviceWithoutExactRead = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: googleWithoutExactRead,
+      icloud,
+      now: () => timestamp,
+    });
+    await expect(serviceWithoutExactRead.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      reconciliation: 1,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.id, noExactRead.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "reconciliation_unavailable",
+        providerEffect: "indeterminate",
+        status: "reconcile",
+      }),
+    ]);
+
+    await database.db.delete(mailRuleWorkItems);
+    const noModify = await createDurableMailWorkFixture("Missing modify capability", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const { updateMailThread: _updateMailThread, ...googleWithoutModify } = google;
+    const serviceWithoutModify = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: googleWithoutModify,
+      icloud,
+      now: () => timestamp,
+    });
+    await expect(serviceWithoutModify.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      reconciliation: 1,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.id, noModify.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "provider_effect_indeterminate",
+        status: "reconcile",
+      }),
+    ]);
+
+    await database.db.delete(mailRuleWorkItems);
+    const noTrash = await createDurableMailWorkFixture("Missing Trash capability", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "trash",
+    });
+    const { trashMailThread: _trashMailThread, ...googleWithoutTrash } = google;
+    const serviceWithoutTrash = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: googleWithoutTrash,
+      icloud,
+      now: () => timestamp,
+    });
+    await expect(serviceWithoutTrash.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      failed: 1,
+    });
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, noTrash.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({ lastErrorCode: "provider_rejected", status: "failed" }),
+    ]);
+  });
+
+  it("makes retry exhaustion terminal and preserves post-provider authorization drift", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const exhausted = await createDurableMailWorkFixture("Exhausted rate limit", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ attemptCount: 4 })
+      .where(eq(mailRuleWorkItems.id, exhausted.work.id));
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockRejectedValueOnce(new ConnectorError("Rate limited", 429));
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      failed: 1,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.id, exhausted.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        attemptCount: 5,
+        lastErrorCode: "provider_rate_limited",
+        status: "failed",
+      }),
+    ]);
+
+    await database.db.delete(mailRuleWorkItems);
+    const changedAfterProvider = await createDurableMailWorkFixture(
+      "Authorization changed after provider",
+      {
+        afterDays: 1,
+        mailboxId: null,
+        type: "archive",
+      },
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockImplementationOnce(async () => {
+      await database.db
+        .update(mailRules)
+        .set({ enabled: false, policy: "preview", version: changedAfterProvider.rule.version + 1 })
+        .where(eq(mailRules.id, changedAfterProvider.rule.id));
+      return rotatedCredentials;
+    });
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({
+      claimed: 1,
+      reconciliation: 1,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.id, changedAfterProvider.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastErrorCode: "authorization_changed",
+        providerEffect: "applied",
+        status: "reconcile",
       }),
     ]);
   });

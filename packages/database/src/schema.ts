@@ -22,6 +22,8 @@ import type {
   MailProvider,
   MailRuleAction,
   MailRuleCondition,
+  MailRuleProviderEffect,
+  MailRuleWorkStatus,
   MaterialSourceReference,
   Theme,
   TransactionDirection,
@@ -786,6 +788,105 @@ export const mailRules = pgTable(
       `,
     ),
     check("mail_rules_exact_match_confidence_check", sql`${table.confidenceThreshold} IS NULL`),
+  ],
+);
+
+export const mailRuleWorkItems = pgTable(
+  "mail_rule_work_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => mailRules.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").references(() => domainProfiles.id, { onDelete: "set null" }),
+    threadId: uuid("thread_id").references(() => mailThreads.id, { onDelete: "set null" }),
+    remoteThreadId: text("remote_thread_id").notNull(),
+    ruleVersion: integer("rule_version").notNull(),
+    profileVersion: integer("profile_version").notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }).notNull(),
+    action: jsonb("action").$type<MailRuleAction>().notNull(),
+    actionFingerprint: text("action_fingerprint").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull(),
+    status: text("status").$type<MailRuleWorkStatus>().notNull().default("pending"),
+    claimId: uuid("claim_id"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimMode: text("claim_mode").$type<"execute" | "reconcile">(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    providerEffect: text("provider_effect")
+      .$type<MailRuleProviderEffect>()
+      .notNull()
+      .default("none"),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_rule_work_identity_idx").on(
+      table.accountId,
+      table.remoteThreadId,
+      table.ruleId,
+      table.ruleVersion,
+      table.profileVersion,
+      table.actionFingerprint,
+    ),
+    index("mail_rule_work_due_idx").on(table.status, table.nextAttemptAt, table.dueAt),
+    index("mail_rule_work_account_idx").on(table.accountId, table.status),
+    index("mail_rule_work_thread_status_idx").on(table.threadId, table.status),
+    index("mail_rule_work_user_status_idx").on(table.userId, table.accountId, table.status),
+    check(
+      "mail_rule_work_revision_check",
+      sql`${table.ruleVersion} > 0 AND ${table.profileVersion} > 0`,
+    ),
+    check(
+      "mail_rule_work_action_fingerprint_check",
+      sql`${table.actionFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_rule_work_attempt_count_check",
+      sql`${table.attemptCount} >= 0 AND ${table.attemptCount} <= 5`,
+    ),
+    check(
+      "mail_rule_work_provider_effect_check",
+      sql`${table.providerEffect} IN ('none', 'rejected', 'indeterminate', 'applied')`,
+    ),
+    check(
+      "mail_rule_work_claim_mode_check",
+      sql`${table.claimMode} IS NULL OR ${table.claimMode} IN ('execute', 'reconcile')`,
+    ),
+    check(
+      "mail_rule_work_claim_state_check",
+      sql`
+        (
+          ${table.status} = 'claimed'
+          AND ${table.claimId} IS NOT NULL
+          AND ${table.claimedAt} IS NOT NULL
+          AND ${table.claimMode} IS NOT NULL
+          AND ${table.completedAt} IS NULL
+        )
+        OR (
+          ${table.status} IN ('pending', 'reconcile')
+          AND ${table.claimId} IS NULL
+          AND ${table.claimedAt} IS NULL
+          AND ${table.claimMode} IS NULL
+          AND ${table.completedAt} IS NULL
+        )
+        OR (
+          ${table.status} IN ('succeeded', 'failed')
+          AND ${table.claimId} IS NULL
+          AND ${table.claimedAt} IS NULL
+          AND ${table.claimMode} IS NULL
+          AND ${table.completedAt} IS NOT NULL
+        )
+      `,
+    ),
   ],
 );
 

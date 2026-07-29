@@ -72,9 +72,9 @@ Mail is the first executable implementation:
 - proposed rules preview against a dated, bounded window of at most 200 recent cached
   conversations. The response names the window and reports when it may be truncated.
 - previously observed threads are retained when a provider returns its capped recent page; absence
-  from that page is not treated as provider deletion. Archive and recoverable Trash rules,
-  including immediate and one-day preferences, remain disabled and preview-only until a durable
-  due-work queue exists.
+  from that page is not treated as provider deletion. Reviewed Google archive and recoverable
+  Trash rules, including one-day preferences, create durable work for matching observed and future
+  synchronized conversations. Permanent deletion remains unavailable.
 - saved rules are re-reviewed with `review_mail_rule`, then activated only by the signed-in person
   in **Settings → Agent access → Review Mail rules**. The API rechecks the reviewed version,
   candidate facts, action due states, and fingerprint inside one locked transaction, rejects
@@ -83,9 +83,11 @@ Mail is the first executable implementation:
   sample and the enabled condition governs future matching sync material. A signed review is valid
   for 15 minutes.
 - automatic execution coalesces compatible actions into one provider call per thread and processes
-  at most six threads with two workers. Backlog remains pending for later syncs; failures persist a
-  redacted run summary and return a structured aggregate repair contract rather than an all-green
-  sync.
+  at most six threads with two workers. Immediate and delayed retention both use a durable
+  rule/action/thread identity. Leased claims recover through exact provider reconciliation after
+  process loss or an uncertain external effect. Backlog remains pending for later scheduled runs;
+  setup context exposes per-account pending, in-progress, reconciliation, failed, and
+  last-completed state plus global oldest-due status, without message bodies or credentials.
 - disconnecting or disabling Mail removes its cached provider mailbox/thread projection, detaches
   open thread/account attention provenance while preserving the user-visible signal, downgrades
   setup for review, and pauses affected rules. Calendar-specific profile invalidation is outside
@@ -176,9 +178,10 @@ The fixed `personal-os://agenda/today` resource merges open reminders due throug
 Tool annotations are host hints, not authorization. Read-only cached Mail tools are closed-world;
 provider writes and sending are open-world. Rule activation is intentionally absent from MCP
 because approved rules can mutate provider state; it requires the signed-in Settings review.
-Retention rules and any other delayed Mail rules cannot activate in this release. The API still enforces scopes,
-source ownership, policy, optimistic
-versions, audit, and the distinction between recoverable Trash and permanent deletion. Bulk
+Reviewed Google archive and recoverable Trash rules may activate after signed-in review; automatic
+execution for unsupported providers remains unavailable. The API still enforces scopes, source
+ownership, policy, optimistic versions, audit, and the distinction between recoverable Trash and
+permanent deletion. Bulk
 provider updates report both successful IDs and structured per-ID failures when only part of a
 request succeeds. Bulk updates are bounded to six conversations and two concurrent provider calls
 so three 15-second provider waves still leave time beneath the 60-second public edge deadline for

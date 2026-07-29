@@ -3,6 +3,7 @@ import type {
   AssistantDomain,
   MailRulePreview,
   MailSetupAccount,
+  MailSetupContext,
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -180,6 +181,7 @@ export function AgentAccessSettings() {
   const activeTokens = (tokens.data ?? []).filter((token) => token.revokedAt === null);
   const connectedAgentCount = activeTokens.length + (oauthClients.data?.length ?? 0);
   const mailSources = mailSetup.data?.accounts ?? [];
+  const mailAutomation = mailSetup.data?.automation;
   const mailProfile = setup.data?.domains.find((item) => item.domain === "mail");
   const activeRules = (rules.data ?? []).filter(
     (rule) => rule.enabled && rule.policy === "approved_rule",
@@ -262,6 +264,19 @@ export function AgentAccessSettings() {
               }
               title="Mail preferences"
             />
+            <ReadinessItem
+              complete={
+                mailAutomation !== undefined &&
+                mailAutomation.reconciliationCount === 0 &&
+                mailAutomation.failedCount === 0
+              }
+              description={
+                mailAutomation
+                  ? formatMailAutomationStatus(mailAutomation)
+                  : "Delayed Mail automation status is loading."
+              }
+              title="Mail automation"
+            />
           </ItemGroup>
 
           <MailRuleReview
@@ -337,7 +352,7 @@ export function AgentAccessSettings() {
                 </AlertTitle>
                 <AlertDescription>
                   {selectedGuide?.support === "executable_rules"
-                    ? "Mail setup maps every inbox before sampling it, records important conversations as source-linked attention, and captures user-chosen delayed archive or recoverable Trash preferences. Delayed retention rules remain preview-only until Ilo has a durable due-work queue. Exact read, star, and label rules use a dated preview and signed-in activation."
+                    ? "Mail setup maps every inbox before sampling it, records important conversations as source-linked attention, and captures user-chosen delayed archive or recoverable Trash preferences. Approved delayed work is durable, bounded, recoverable after process loss, and visible here; permanent deletion remains unavailable. Every rule uses a dated preview and signed-in activation."
                     : `${selectedLabel} uses the same durable profile and attention structure. Executable domain rules are not available yet.`}
                   {selectedProfile?.approvedProfileStatus === "active"
                     ? selectedProfile.pendingDraftVersion
@@ -438,6 +453,7 @@ function MailRuleReview({
       toast.success("Mail rule activated.");
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["mail-rules"] }),
+        queryClient.invalidateQueries({ queryKey: ["mail-setup-context"] }),
         queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]);
     },
@@ -447,9 +463,6 @@ function MailRuleReview({
     accounts.map((account) => [account.accountId, account.email ?? account.label]),
   );
   const reviewedRule = reviewed ? rules.find((rule) => rule.id === reviewed.id) : null;
-  const retentionActivationDeferred = reviewedRule?.actions.some(
-    (action) => action.afterDays > 0 || action.type === "archive" || action.type === "trash",
-  );
   return (
     <section aria-labelledby="mail-rule-review-heading" className="agent-access__rule-review">
       <div>
@@ -525,24 +538,8 @@ function MailRuleReview({
               </AlertDescription>
             </Alert>
           ) : null}
-          {retentionActivationDeferred ? (
-            <Alert variant="warning">
-              <ShieldCheck />
-              <AlertTitle>Delayed Mail automation remains preview-only</AlertTitle>
-              <AlertDescription>
-                Ilo can save this archive or recoverable Trash preference and show exact candidates,
-                but cannot activate retention rules until due work has a durable queue. Permanent
-                deletion is never used.
-              </AlertDescription>
-            </Alert>
-          ) : null}
           <Button
-            disabled={
-              activate.isPending ||
-              !profileActive ||
-              reviewed.preview.ruleVersion === null ||
-              retentionActivationDeferred
-            }
+            disabled={activate.isPending || !profileActive || reviewed.preview.ruleVersion === null}
             onClick={() => activate.mutate(reviewed)}
             type="button"
           >
@@ -573,6 +570,16 @@ function formatPreviewWindow(preview: MailRulePreview): string {
   return `${preview.scannedCount} conversations from ${oldest} to ${newest}${
     preview.window.truncated ? ` (more than ${preview.window.limit} exist)` : ""
   }`;
+}
+
+function formatMailAutomationStatus(automation: MailSetupContext["automation"]): string {
+  const oldestDue = automation.oldestDueAt
+    ? ` Oldest due: ${new Date(automation.oldestDueAt).toLocaleString()}.`
+    : "";
+  const lastCompleted = automation.lastCompletedAt
+    ? ` Last completed: ${new Date(automation.lastCompletedAt).toLocaleString()}.`
+    : "";
+  return `${automation.pendingCount} delayed action${automation.pendingCount === 1 ? "" : "s"} pending; ${automation.inProgressCount} in progress; ${automation.reconciliationCount} need provider reconciliation; ${automation.failedCount} stopped safely. Ilo processes at most ${automation.executionLimitPerRun} conversations per scheduled run.${oldestDue}${lastCompleted}`;
 }
 
 function formatRuleSources(sourceIds: string[], accountNames: Map<string, string>): string {
@@ -931,7 +938,7 @@ function TokenAccess({
 
 function domainSetupPrompt(domain: AssistantDomain, label: string, invocation: string): string {
   if (domain === "mail") {
-    return `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Delayed archive and Trash rules remain preview-only until Ilo has a durable due-work queue. For exact read, star, or label rules, use review_mail_rule after I explicitly accept the summary, then tell me to activate it myself in Ilo Settings → Agent access → Review Mail rules.`;
+    return `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Explain any pending, reconciliation, or failed automation shown in setup context. After I explicitly accept a rule summary, use review_mail_rule, then tell me to activate it myself in Ilo Settings → Agent access → Review Mail rules. Reviewed Google rules use bounded durable execution; Trash is recoverable and permanent deletion is unavailable.`;
   }
   return `Use ${invocation} to set up my ${label} in Ilo. Inspect the available sources and any existing profile, ask the shortest useful interview, save my preferences as a draft, and clearly separate what Ilo can do now from behavior that is not yet automated.`;
 }

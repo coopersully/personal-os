@@ -127,6 +127,10 @@ const gmailThreadSchema = z.object({
   id: z.string(),
   messages: z.array(gmailMessageSchema).min(1),
 });
+const gmailMinimalThreadSchema = z.object({
+  id: z.string(),
+  messages: z.array(z.object({ id: z.string(), labelIds: z.array(z.string()).default([]) })).min(1),
+});
 
 type GoogleEvent = z.infer<typeof eventSchema>;
 
@@ -397,6 +401,24 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
 
     listCalendars,
 
+    async getMailThreadState(credentials, remoteThreadId) {
+      const result = await authenticatedRequest(
+        credentials,
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(remoteThreadId)}?format=minimal`,
+      );
+      const thread = gmailMinimalThreadSchema.parse(await parseResponse(result.response));
+      const mailboxIds = [...new Set(thread.messages.flatMap((message) => message.labelIds))];
+      return {
+        credentials: result.credentials,
+        value: {
+          mailboxIds,
+          remoteThreadId: thread.id,
+          starred: mailboxIds.includes("STARRED"),
+          unread: mailboxIds.includes("UNREAD"),
+        },
+      };
+    },
+
     async syncMail(credentials) {
       const labelResult = await authenticatedRequest(
         credentials,
@@ -450,6 +472,16 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           }),
           method: "POST",
         },
+      );
+      await parseResponse(result.response);
+      return result.credentials;
+    },
+
+    async trashMailThread(credentials, remoteThreadId) {
+      const result = await authenticatedRequest(
+        credentials,
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(remoteThreadId)}/trash`,
+        { method: "POST" },
       );
       await parseResponse(result.response);
       return result.credentials;

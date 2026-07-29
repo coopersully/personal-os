@@ -9,6 +9,7 @@ import {
   mailDrafts,
   mailMessages,
   mailRules,
+  mailRuleWorkItems,
   mailSnoozes,
   mailThreads,
 } from "@personal-os/database";
@@ -34,8 +35,10 @@ import type {
   UpsertMailAttentionItemInput,
 } from "@personal-os/domain";
 import {
+  MAIL_RULE_EXECUTION_LIMIT_PER_RUN,
   mailProfilePreferencesSchema,
   mailRuleActionIsDue,
+  mailRuleActionsMatchRetentionPreferences,
   matchesMailRule,
   resolveStoredMailRule,
 } from "@personal-os/domain";
@@ -48,6 +51,7 @@ import {
 } from "./connector-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { enqueueDurableMailRuleWork } from "./mail-rule-work.js";
 import {
   auditAttentionItemMetadata,
   auditMailRuleMetadata,
@@ -987,7 +991,7 @@ export function createMailService({
     },
 
     async listSetupContext(userId: string): Promise<MailSetupContext> {
-      const [accounts, mailboxRecords] = await Promise.all([
+      const [accounts, mailboxRecords, workSummaries] = await Promise.all([
         db
           .select()
           .from(calendarAccounts)
@@ -998,6 +1002,31 @@ export function createMailService({
           .from(mailboxes)
           .where(and(eq(mailboxes.userId, userId), isNull(mailboxes.deletedAt)))
           .orderBy(asc(mailboxes.accountId), asc(mailboxes.role), asc(mailboxes.name)),
+        db
+          .select({
+            accountId: mailRuleWorkItems.accountId,
+            count: sql<number>`count(*)::int`,
+            lastCompletedAt: sql<Date | string | null>`max(${mailRuleWorkItems.completedAt})`,
+            oldestDueAt: sql<Date | string | null>`min(
+              case
+                when ${mailRuleWorkItems.status} in ('pending', 'claimed', 'reconcile')
+                then ${mailRuleWorkItems.dueAt}
+                else null
+              end
+            )`,
+            status: mailRuleWorkItems.status,
+          })
+          .from(mailRuleWorkItems)
+          .innerJoin(
+            calendarAccounts,
+            and(
+              eq(calendarAccounts.id, mailRuleWorkItems.accountId),
+              eq(calendarAccounts.userId, userId),
+              eq(calendarAccounts.mailEnabled, true),
+            ),
+          )
+          .where(eq(mailRuleWorkItems.userId, userId))
+          .groupBy(mailRuleWorkItems.accountId, mailRuleWorkItems.status),
       ]);
       const mailboxesByAccount = new Map<string, Mailbox[]>();
       for (const mailbox of mailboxRecords) {
@@ -1005,9 +1034,75 @@ export function createMailService({
         group.push(serializeMailbox(mailbox));
         mailboxesByAccount.set(mailbox.accountId, group);
       }
+      const automationByAccount = new Map<
+        string,
+        MailSetupContext["accounts"][number]["automation"]
+      >();
+      let oldestDueAt: Date | null = null;
+      let lastCompletedAt: Date | null = null;
+      let failedCount = 0;
+      let inProgressCount = 0;
+      let pendingCount = 0;
+      let reconciliationCount = 0;
+      const toDate = (value: Date | string | null): Date | null =>
+        value instanceof Date ? value : value ? new Date(value) : null;
+      for (const summary of workSummaries) {
+        const summaryCompletedAt = toDate(summary.lastCompletedAt);
+        const summaryOldestDueAt = toDate(summary.oldestDueAt);
+        const current = automationByAccount.get(summary.accountId) ?? {
+          failedCount: 0,
+          inProgressCount: 0,
+          lastCompletedAt: null,
+          pendingCount: 0,
+          reconciliationCount: 0,
+        };
+        if (summary.status === "failed") {
+          current.failedCount += summary.count;
+          failedCount += summary.count;
+        }
+        if (summary.status === "claimed") {
+          current.inProgressCount += summary.count;
+          inProgressCount += summary.count;
+        }
+        if (summary.status === "pending") {
+          current.pendingCount += summary.count;
+          pendingCount += summary.count;
+        }
+        if (summary.status === "reconcile") {
+          current.reconciliationCount += summary.count;
+          reconciliationCount += summary.count;
+        }
+        if (
+          summaryCompletedAt &&
+          (!current.lastCompletedAt ||
+            summaryCompletedAt.getTime() > new Date(current.lastCompletedAt).getTime())
+        ) {
+          current.lastCompletedAt = summaryCompletedAt.toISOString();
+        }
+        if (
+          summaryCompletedAt &&
+          (!lastCompletedAt || summaryCompletedAt.getTime() > lastCompletedAt.getTime())
+        ) {
+          lastCompletedAt = summaryCompletedAt;
+        }
+        if (
+          summaryOldestDueAt &&
+          (!oldestDueAt || summaryOldestDueAt.getTime() < oldestDueAt.getTime())
+        ) {
+          oldestDueAt = summaryOldestDueAt;
+        }
+        automationByAccount.set(summary.accountId, current);
+      }
       return {
         accounts: accounts.map((account) => ({
           accountId: account.id,
+          automation: automationByAccount.get(account.id) ?? {
+            failedCount: 0,
+            inProgressCount: 0,
+            lastCompletedAt: null,
+            pendingCount: 0,
+            reconciliationCount: 0,
+          },
           automaticRuleExecution: account.provider === "google",
           email: account.email,
           label: account.label,
@@ -1017,8 +1112,17 @@ export function createMailService({
           syncError: account.syncError,
           syncStatus: account.syncStatus,
         })),
+        automation: {
+          executionLimitPerRun: MAIL_RULE_EXECUTION_LIMIT_PER_RUN,
+          failedCount,
+          inProgressCount,
+          lastCompletedAt: lastCompletedAt?.toISOString() ?? null,
+          oldestDueAt: oldestDueAt?.toISOString() ?? null,
+          pendingCount,
+          reconciliationCount,
+        },
         safety: {
-          delayedRetentionAutomation: false,
+          delayedRetentionAutomation: true,
           permanentDeletion: false,
           providerFilterCreation: false,
           spamClassification: false,
@@ -1109,6 +1213,15 @@ export function createMailService({
         policy: existing.policy,
         query: existing.legacyQuery,
       });
+      if (
+        resolved.actions.some((action) => action.type === "trash") &&
+        resolved.actions.length > 1
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "A recoverable Trash rule must use Trash as its only action so the provider effect has one unambiguous recovery path.",
+        );
+      }
       if (existing.enabled && resolved.policy === "approved_rule") {
         throw new AppError("invalid_request", "The Mail rule is already active.");
       }
@@ -1180,14 +1293,10 @@ export function createMailService({
           "Review and save valid Mail retention preferences before activating this rule.",
         );
       }
-      if (
-        resolved.actions.some(
-          (action) => action.afterDays > 0 || action.type === "archive" || action.type === "trash",
-        )
-      ) {
+      if (!mailRuleActionsMatchRetentionPreferences(resolved.actions, parsedPreferences.data)) {
         throw new AppError(
           "invalid_request",
-          "Delayed archive and recoverable Trash automation remains preview-only until Mail has a durable due-work backlog. Keep this rule disabled and review matches manually.",
+          "The active Mail profile does not authorize this retention action and timing.",
         );
       }
       const updated = await db.transaction(async (transaction) => {
@@ -1246,7 +1355,8 @@ export function createMailService({
             "A rule source no longer has an explicit meaning in the Mail profile.",
           );
         }
-        if (!mailProfilePreferencesSchema.safeParse(lockedProfile.preferences).success) {
+        const lockedPreferences = mailProfilePreferencesSchema.safeParse(lockedProfile.preferences);
+        if (!lockedPreferences.success) {
           throw new AppError(
             "conflict",
             "The Mail profile retention preferences changed and require review.",
@@ -1275,6 +1385,14 @@ export function createMailService({
           policy: lockedRule.policy,
           query: lockedRule.legacyQuery,
         });
+        if (
+          !mailRuleActionsMatchRetentionPreferences(lockedResolved.actions, lockedPreferences.data)
+        ) {
+          throw new AppError(
+            "conflict",
+            "The Mail profile no longer authorizes this delayed retention action and number of days.",
+          );
+        }
         if (lockedRule.enabled) {
           throw new AppError("conflict", "The mail rule changed while it was being activated.");
         }
@@ -1344,6 +1462,29 @@ export function createMailService({
           .returning();
         if (!rule) {
           throw new AppError("conflict", "The mail rule changed while it was being activated.");
+        }
+        if (currentIds.length > 0) {
+          const candidateThreads = await transaction
+            .select()
+            .from(mailThreads)
+            .where(
+              and(
+                eq(mailThreads.userId, context.principal.userId),
+                isNull(mailThreads.deletedAt),
+                inArray(mailThreads.id, currentIds),
+              ),
+            )
+            .orderBy(asc(mailThreads.id))
+            .for("share");
+          await enqueueDurableMailRuleWork(transaction, {
+            actions: lockedResolved.actions,
+            profileId: lockedProfile.id,
+            profileVersion: lockedProfile.version,
+            ruleId: rule.id,
+            ruleVersion: rule.version,
+            threads: candidateThreads,
+            userId: context.principal.userId,
+          });
         }
         await transaction.insert(auditEvents).values(
           auditValues({

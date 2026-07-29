@@ -11,6 +11,7 @@ import {
   mailDrafts,
   mailMessages,
   mailRules,
+  mailRuleWorkItems,
   mailSnoozes,
   mailThreads,
   migrateDatabase,
@@ -22,6 +23,7 @@ import { Hono } from "hono";
 import { createAuditService } from "./audit.js";
 import { type ConnectedMailGateway, MailProviderRejectedError } from "./connector-service.js";
 import { errorResponse } from "./errors.js";
+import { durableMailRuleActionFingerprint } from "./mail-rule-work.js";
 import { createMailService } from "./mail-service.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import { migrationsWithout } from "./test-migrations.js";
@@ -127,6 +129,7 @@ describe.sequential("mail service", () => {
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
+      "0044_durable_mail_rule_work",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -155,6 +158,7 @@ describe.sequential("mail service", () => {
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
+      "0044_durable_mail_rule_work",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(
@@ -310,6 +314,10 @@ describe.sequential("mail service", () => {
     if (temporaryMigrationsFolder)
       await rm(temporaryMigrationsFolder, { force: true, recursive: true });
     if (setupMigrationsFolder) await rm(setupMigrationsFolder, { force: true, recursive: true });
+  });
+
+  afterEach(async () => {
+    await database.db.delete(mailRuleWorkItems);
   });
 
   it("preserves and normalizes legacy rules through the setup migration", async () => {
@@ -652,7 +660,7 @@ describe.sequential("mail service", () => {
         },
         requestId: "request-rule-review-only",
       }),
-    ).rejects.toThrow("Delayed archive and recoverable Trash automation remains preview-only");
+    ).rejects.toThrow("does not authorize this retention action and timing");
     await database.db
       .update(domainProfiles)
       .set({
@@ -664,17 +672,79 @@ describe.sequential("mail service", () => {
         },
       })
       .where(eq(domainProfiles.id, profileId));
+    const oneDayTrashRule = await service.createRule(
+      {
+        actions: rule.actions,
+        condition: rule.condition,
+        confidenceThreshold: null,
+        description: rule.description,
+        enabled: false,
+        name: "Discard routine project notices after one day",
+        policy: "preview",
+        profileId,
+        sourceIds: [enabledAccountId],
+      },
+      mutationContext("request-one-day-trash-rule"),
+    );
+    const oneDayTrashPreview = await service.previewSavedRule(userId, oneDayTrashRule.id);
     await expect(
-      service.activateRule(rule.id, activationInput, {
-        principal: {
-          actorId: userId,
-          actorType: "user",
-          scopes: new Set(["mail:read", "mail:write"]),
-          userId,
+      service.activateRule(
+        oneDayTrashRule.id,
+        {
+          expectedCandidateIds: oneDayTrashPreview.candidates.map((candidate) => candidate.id),
+          expectedPreviewFingerprint: oneDayTrashPreview.fingerprint,
+          expectedPreviewedAt: oneDayTrashPreview.previewedAt,
+          expectedVersion: oneDayTrashRule.version,
         },
-        requestId: "request-rule-update",
+        mutationContext("request-one-day-trash-activation"),
+      ),
+    ).resolves.toMatchObject({
+      rule: { enabled: true, policy: "approved_rule", version: 2 },
+    });
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.ruleId, oneDayTrashRule.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        action: { afterDays: 1, mailboxId: null, type: "trash" },
+        dueAt: new Date("2026-07-16T13:00:00.000Z"),
+        status: "pending",
       }),
-    ).rejects.toThrow("remains preview-only");
+    ]);
+    await service.updateRule(
+      oneDayTrashRule.id,
+      { enabled: false, expectedVersion: 2 },
+      mutationContext("request-one-day-trash-pause"),
+    );
+    const immediateTrashRule = await service.createRule(
+      {
+        actions: [{ afterDays: 0, mailboxId: null, type: "trash" }],
+        condition: rule.condition,
+        confidenceThreshold: null,
+        description: rule.description,
+        enabled: false,
+        name: "Immediate Trash is never inferred from retention preferences",
+        policy: "preview",
+        profileId,
+        sourceIds: [enabledAccountId],
+      },
+      mutationContext("request-immediate-trash-rule"),
+    );
+    const immediateTrashPreview = await service.previewSavedRule(userId, immediateTrashRule.id);
+    await expect(
+      service.activateRule(
+        immediateTrashRule.id,
+        {
+          expectedCandidateIds: immediateTrashPreview.candidates.map((candidate) => candidate.id),
+          expectedPreviewFingerprint: immediateTrashPreview.fingerprint,
+          expectedPreviewedAt: immediateTrashPreview.previewedAt,
+          expectedVersion: immediateTrashRule.version,
+        },
+        mutationContext("request-immediate-trash-activation"),
+      ),
+    ).rejects.toThrow("does not authorize this retention action and timing");
     const nonRetentionRule = await service.updateRule(
       rule.id,
       {
@@ -1647,10 +1717,137 @@ describe.sequential("mail service", () => {
       })
       .returning();
     if (!sparseICloudAccount) throw new Error("Sparse Mail account fixture was not created.");
+    const statusSourceUpdatedAt = new Date("2026-07-16T10:30:00.000Z");
+    const statusActions = {
+      claimed: { afterDays: 1, mailboxId: null, type: "trash" as const },
+      failed: { afterDays: 1, mailboxId: customLabelId, type: "add_label" as const },
+      pending: { afterDays: 1, mailboxId: null, type: "archive" as const },
+      reconcile: { afterDays: 1, mailboxId: null, type: "mark_read" as const },
+      succeeded: { afterDays: 1, mailboxId: null, type: "star" as const },
+    };
+    await database.db.insert(mailRuleWorkItems).values([
+      {
+        accountId: enabledAccountId,
+        action: statusActions.pending,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.pending),
+        dueAt: new Date("2026-07-16T11:00:00.000Z"),
+        nextAttemptAt: new Date("2026-07-16T11:00:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        threadId,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        action: statusActions.claimed,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.claimed),
+        attemptCount: 1,
+        claimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        claimedAt: new Date("2026-07-16T11:30:00.000Z"),
+        claimMode: "execute",
+        dueAt: new Date("2026-07-16T11:15:00.000Z"),
+        nextAttemptAt: new Date("2026-07-16T11:15:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "claimed",
+        threadId,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        action: statusActions.reconcile,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.reconcile),
+        dueAt: new Date("2026-07-16T11:20:00.000Z"),
+        nextAttemptAt: new Date("2026-07-16T11:20:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        providerEffect: "indeterminate",
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "reconcile",
+        threadId,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        action: statusActions.succeeded,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.succeeded),
+        completedAt: new Date("2026-07-16T12:00:00.000Z"),
+        dueAt: new Date("2026-07-16T11:25:00.000Z"),
+        nextAttemptAt: new Date("2026-07-16T12:00:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        providerEffect: "applied",
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "succeeded",
+        threadId,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        action: statusActions.failed,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.failed),
+        completedAt: new Date("2026-07-16T12:05:00.000Z"),
+        dueAt: new Date("2026-07-16T11:30:00.000Z"),
+        lastErrorCode: "provider_rejected",
+        lastErrorMessage: "The provider rejected this operation.",
+        nextAttemptAt: new Date("2026-07-16T12:05:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        providerEffect: "rejected",
+        remoteThreadId: "thread-1",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "failed",
+        threadId,
+        userId,
+      },
+      {
+        accountId: disabledAccountId,
+        action: statusActions.pending,
+        actionFingerprint: durableMailRuleActionFingerprint(statusActions.pending),
+        completedAt: new Date("2026-07-16T12:10:00.000Z"),
+        dueAt: new Date("2026-07-16T11:35:00.000Z"),
+        lastErrorCode: "source_unavailable",
+        lastErrorMessage: "The connected Mail source is no longer available.",
+        nextAttemptAt: new Date("2026-07-16T12:10:00.000Z"),
+        profileId,
+        profileVersion: 1,
+        providerEffect: "none",
+        remoteThreadId: "disabled-thread",
+        ruleId: legacyRuleId,
+        ruleVersion: 1,
+        sourceUpdatedAt: statusSourceUpdatedAt,
+        status: "failed",
+        threadId: null,
+        userId,
+      },
+    ]);
     await expect(service.listSetupContext(userId)).resolves.toMatchObject({
       accounts: [
         {
           accountId: enabledAccountId,
+          automation: {
+            failedCount: 1,
+            inProgressCount: 1,
+            lastCompletedAt: "2026-07-16T12:05:00.000Z",
+            pendingCount: 1,
+            reconciliationCount: 1,
+          },
           automaticRuleExecution: true,
           email: "enabled@example.com",
           label: "Enabled",
@@ -1662,14 +1859,29 @@ describe.sequential("mail service", () => {
         },
         {
           accountId: sparseICloudAccount.id,
+          automation: {
+            failedCount: 0,
+            inProgressCount: 0,
+            pendingCount: 0,
+            reconciliationCount: 0,
+          },
           automaticRuleExecution: false,
           lastSyncedAt: "2026-07-16T10:00:00.000Z",
           mailboxes: [],
           provider: "icloud",
         },
       ],
+      automation: {
+        executionLimitPerRun: 6,
+        failedCount: 1,
+        inProgressCount: 1,
+        lastCompletedAt: "2026-07-16T12:05:00.000Z",
+        oldestDueAt: "2026-07-16T11:00:00.000Z",
+        pendingCount: 1,
+        reconciliationCount: 1,
+      },
       safety: {
-        delayedRetentionAutomation: false,
+        delayedRetentionAutomation: true,
         permanentDeletion: false,
         providerFilterCreation: false,
         spamClassification: false,
@@ -2469,7 +2681,7 @@ describe.sequential("mail service", () => {
       {
         ...baseRule,
         actions: [{ afterDays: 0, mailboxId: null, type: "archive" }],
-        name: "Immediate archive remains a preview",
+        name: "Immediate archive uses durable work",
         profileId,
         sourceIds: [enabledAccountId],
       },
@@ -2477,7 +2689,26 @@ describe.sequential("mail service", () => {
     );
     await expect(
       service.activateRule(retentionRule.id, await activationInputFor(retentionRule), context),
-    ).rejects.toThrow("remains preview-only");
+    ).resolves.toMatchObject({
+      rule: { enabled: true, policy: "approved_rule", version: 2 },
+    });
+    await expect(
+      database.db
+        .select()
+        .from(mailRuleWorkItems)
+        .where(eq(mailRuleWorkItems.ruleId, retentionRule.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: { afterDays: 0, mailboxId: null, type: "archive" },
+          profileId,
+          profileVersion: expect.any(Number),
+          ruleVersion: 2,
+          status: "pending",
+          threadId,
+        }),
+      ]),
+    );
 
     const labelRule = await service.createRule(
       {

@@ -474,8 +474,17 @@ function mockApi() {
     listMailboxes: vi.fn(async () => [mailbox]),
     getMailSetupContext: vi.fn(async () => ({
       accounts: [],
+      automation: {
+        executionLimitPerRun: 6 as const,
+        failedCount: 0,
+        inProgressCount: 0,
+        lastCompletedAt: null,
+        oldestDueAt: null,
+        pendingCount: 0,
+        reconciliationCount: 0,
+      },
       safety: {
-        delayedRetentionAutomation: false as const,
+        delayedRetentionAutomation: true as const,
         permanentDeletion: false as const,
         providerFilterCreation: false as const,
         spamClassification: false as const,

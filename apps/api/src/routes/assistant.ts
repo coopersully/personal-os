@@ -8,6 +8,7 @@ import {
   financeGuidedPreferencesSchema,
   updateAttentionItemInputSchema,
   upsertDomainProfileInputSchema,
+  upsertMailProfileInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createAssistantService } from "../assistant-service.js";
@@ -44,7 +45,10 @@ export function registerAssistantRoutes({
   app.put("/v1/assistant/profiles/:domain", async (context) => {
     const domain = assistantDomainSchema.parse(context.req.param("domain"));
     assertDomainAccess(context.get("principal"), domain, true);
-    const input = await parseBody(context, upsertDomainProfileInputSchema);
+    const input =
+      domain === "mail"
+        ? await parseBody(context, upsertMailProfileInputSchema)
+        : await parseBody(context, upsertDomainProfileInputSchema);
     if (input.domain !== domain) {
       throw new AppError("invalid_request", "The profile domain must match the request path.");
     }

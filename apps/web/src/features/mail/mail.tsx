@@ -1,5 +1,5 @@
 import type { CalendarAccount } from "@personal-os/api-client";
-import type { Mailbox, MailMessage, MailThread, User } from "@personal-os/domain";
+import type { Mailbox, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -135,6 +135,82 @@ function mailDate(value: string, timeZone: string) {
     timeZone,
   }).format(new Date(value));
 }
+
+function MailSendRecovery({
+  drafts,
+  error,
+  isPending,
+  mutationError,
+  mutationPending,
+  reconcile,
+}: {
+  drafts: MailDraft[];
+  error: Error | null;
+  isPending: boolean;
+  mutationError: Error | null;
+  mutationPending: boolean;
+  reconcile: (id: string, outcome: "not_sent" | "sent") => void;
+}) {
+  if (isPending)
+    return (
+      <p aria-live="polite" className="mail-send-recovery__loading">
+        Checking uncertain sends…
+      </p>
+    );
+  if (error) return <InlineError error={error} />;
+  if (drafts.length === 0) return null;
+  return (
+    <section aria-labelledby="mail-send-recovery-title" className="mail-send-recovery">
+      <div>
+        <p className="eyebrow">Send safety</p>
+        <h2 id="mail-send-recovery-title">Resolve an uncertain send</h2>
+        <p>
+          First inspect this account’s provider Sent Mail. Never resend until you confirm whether
+          the message is there.
+        </p>
+      </div>
+      <div className="mail-send-recovery__items">
+        {drafts.map((draft) => (
+          <article className="mail-send-recovery__item" key={draft.id}>
+            <div>
+              <strong>{draft.subject || "(No subject)"}</strong>
+              <span>
+                {draft.reconciliationState === "in_progress"
+                  ? "This send is still in progress. Ilo will refresh its state automatically."
+                  : "Ilo could not confirm the provider result."}
+              </span>
+            </div>
+            {draft.reconciliationState === "sent_mail_review_required" ? (
+              <div className="mail-send-recovery__actions">
+                <Button
+                  aria-label={`I found it in Sent Mail: ${draft.subject || "this message"}`}
+                  disabled={mutationPending}
+                  onClick={() => reconcile(draft.id, "sent")}
+                  type="button"
+                >
+                  I found it in Sent Mail
+                </Button>
+                <Button
+                  aria-label={`It was not sent: ${draft.subject || "this message"}`}
+                  disabled={mutationPending}
+                  onClick={() => reconcile(draft.id, "not_sent")}
+                  tone="ghost"
+                  type="button"
+                >
+                  It was not sent
+                </Button>
+              </div>
+            ) : (
+              <span aria-live="polite">Waiting for the provider result…</span>
+            )}
+          </article>
+        ))}
+      </div>
+      {mutationError ? <InlineError error={mutationError} /> : null}
+    </section>
+  );
+}
+
 export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   const [params, setParams] = useSearchParams();
   const accounts = useQuery({
@@ -272,6 +348,13 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-threads", accountId, mailboxId, search, unreadOnly],
     refetchInterval: 60_000,
   });
+  const drafts = useQuery({
+    queryFn: api.listMailDrafts,
+    queryKey: ["mail-drafts"],
+    refetchInterval: 15_000,
+  });
+  const uncertainDrafts =
+    drafts.data?.filter((draft) => draft.reconciliationState !== "none") ?? [];
   const listed = threads.data?.find((thread) => thread.id === selectedId);
   const loaded = useQuery({
     enabled: Boolean(selectedId && threads.data && !listed),
@@ -345,22 +428,41 @@ export function MailPage({ user }: { user: User }) {
       return client.invalidateQueries({ queryKey: ["mail-drafts"] });
     },
   });
+  const reconcileDraft = useMutation({
+    mutationFn: ({ id, outcome }: { id: string; outcome: "not_sent" | "sent" }) =>
+      api.reconcileMailDraft(id, { outcome }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
+  });
+  const sendRecovery = (
+    <MailSendRecovery
+      drafts={uncertainDrafts}
+      error={drafts.error}
+      isPending={drafts.isPending}
+      mutationError={reconcileDraft.error}
+      mutationPending={reconcileDraft.isPending}
+      reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
+    />
+  );
   if (accounts.isPending || mailboxes.isPending) return <WorkspaceSkeleton kind="mail" />;
   if (accounts.isError) return <InlineError error={accounts.error} />;
   if (mailboxes.isError) return <InlineError error={mailboxes.error} />;
   if (!enabled.length)
     return (
-      <div className="narrow-page">
-        <p className="eyebrow">Mail for people and agents</p>
-        <h1>Inbox</h1>
-        <EmptyState icon={<Inbox />} title="Connect a mailbox">
-          Enable Mail on a connected Google account or add iCloud from Settings.
-        </EmptyState>
+      <div className="mail-page">
+        {sendRecovery}
+        <div className="narrow-page">
+          <p className="eyebrow">Mail for people and agents</p>
+          <h1>Inbox</h1>
+          <EmptyState icon={<Inbox />} title="Connect a mailbox">
+            Enable Mail on a connected Google account or add iCloud from Settings.
+          </EmptyState>
+        </div>
       </div>
     );
   if (threads.isPending) return <WorkspaceSkeleton kind="mail" />;
   return (
     <div className="mail-page">
+      {sendRecovery}
       {composing ? (
         <form
           className="mail-compose"
@@ -467,7 +569,7 @@ export function MailPage({ user }: { user: User }) {
               }
               back={() => update({ thread: null })}
               pending={updateThread.isPending}
-              messages={messages.data}
+              messages={messages.data ?? []}
               reply={() => {
                 setComposeThread(selected);
                 update({ compose: "1" });
@@ -671,7 +773,7 @@ function Reader({
   archive: () => void;
   back: () => void;
   pending: boolean;
-  messages: MailMessage[] | undefined;
+  messages: MailMessage[];
   reply: () => void;
   snooze: () => void;
   thread: MailThread;
@@ -690,7 +792,7 @@ function Reader({
     threadId: thread.id,
     to: thread.to,
   };
-  const displayedMessages = messages?.length
+  const displayedMessages = messages.length
     ? messages.some((message) => message.bodyText === thread.bodyText)
       ? messages
       : [fallbackMessage, ...messages]

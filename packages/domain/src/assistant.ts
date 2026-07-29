@@ -14,6 +14,7 @@ export const assistantDomainSchema = z.enum(assistantDomains);
 export type AssistantDomain = z.infer<typeof assistantDomainSchema>;
 
 export const domainPreferenceValueSchema = z.union([
+  z.null(),
   z.boolean(),
   z.number(),
   z.string(),

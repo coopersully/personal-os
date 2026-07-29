@@ -1077,6 +1077,63 @@ describe.sequential("ilo API", () => {
     expect(agentToken).toMatch(/^pos_/);
     expect((await payload(await request("/v1/access-tokens"))).tokens).toHaveLength(1);
     expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(403);
+    const financeGuidanceDraft = {
+      categories: [],
+      domain: "finances",
+      instructions: ["Keep uncertain transfers in review."],
+      objective: "Use conservative weekly financial review.",
+      preferences: { reviewCadence: "weekly" },
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Payment history and reimbursements",
+          sourceId: paypalAccount.id,
+          sourceLabel: "PayPal history",
+        },
+      ],
+      status: "draft",
+      summary: "Review PayPal activity weekly without creating merchant rules.",
+    };
+    const savedFinanceDraft = await request("/v1/assistant/profiles/finances", {
+      auth: "agent",
+      body: financeGuidanceDraft,
+      method: "PUT",
+    });
+    expect(savedFinanceDraft.status).toBe(200);
+    expect((await payload(savedFinanceDraft)).profile).toMatchObject({
+      status: "draft",
+      version: 1,
+    });
+    const financeActivation = {
+      ...financeGuidanceDraft,
+      expectedVersion: 1,
+      status: "active",
+    };
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          auth: "agent",
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(409);
     const agentBypassCandidate = (
       await payload(
         await request("/v1/finances/transactions", {
@@ -1138,6 +1195,39 @@ describe.sequential("ilo API", () => {
         }),
       ]),
     );
+    const proposalThroughReadScope = await request(
+      "/v1/finances/categorizations/propose?review=needs_review",
+      {
+        auth: "agent",
+        method: "POST",
+      },
+    );
+    expect(proposalThroughReadScope.status).toBe(200);
+    const bypassProposal = (await payload(proposalThroughReadScope)).proposals.find(
+      (proposal: { transaction: { id: string } }) =>
+        proposal.transaction.id === agentBypassCandidate.id,
+    );
+    expect(bypassProposal).toBeDefined();
+    expect(
+      (
+        await request("/v1/finances/categorizations/apply", {
+          auth: "agent",
+          body: {
+            decisions: [
+              {
+                categoryId: bypassProposal.suggestedCategory?.id ?? crypto.randomUUID(),
+                confidence: bypassProposal.confidence,
+                expectedTransactionUpdatedAt: bypassProposal.transaction.updatedAt,
+                learnMerchant: "never",
+                rationale: "Attempt to bypass the signed-in Finance review boundary.",
+                transactionId: agentBypassCandidate.id,
+              },
+            ],
+          },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(403);
     expect(
       (
         await request("/v1/me", {

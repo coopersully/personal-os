@@ -95,6 +95,8 @@ import { financeSectionFromPath } from "./navigation.js";
 import { PlaidConnectButton } from "./plaid-connect.js";
 
 const financeHumanOnlyActionLabels = {
+  add_manual_transaction: "add manual transactions",
+  apply_categorization: "apply category decisions",
   confirm_ambiguous_transfer: "confirm ambiguous transfers",
   connect_or_disconnect_source: "connect or disconnect sources",
   create_merchant_rule: "create permanent merchant rules",
@@ -102,7 +104,10 @@ const financeHumanOnlyActionLabels = {
   manage_accounts: "manage accounts",
   manage_budgets: "manage budgets",
   manage_financial_profile: "manage the financial profile",
+  manage_merchants: "rename or merge merchants",
   refresh_provider_data: "refresh provider data",
+  resolve_alert: "resolve or dismiss alerts",
+  review_recurring_obligation: "change recurring-obligation review state",
 } satisfies Record<FinanceGuidedSetupContext["humanOnlyActions"][number], string>;
 
 export function FinancesPage() {
@@ -177,6 +182,29 @@ export function FinancesPage() {
     enabled: section === "profile",
     queryFn: () => api.getDomainProfile("finances"),
     queryKey: ["domain-profile", "finances"],
+  });
+  const activateAgentProfile = useMutation({
+    mutationFn: async () => {
+      const current = agentProfile.data;
+      if (!current) throw new Error("No Finance guidance draft is available to activate.");
+      return api.upsertDomainProfile({
+        categories: current.categories,
+        domain: "finances",
+        expectedVersion: current.version,
+        instructions: current.instructions,
+        objective: current.objective,
+        preferences: current.preferences,
+        sourceContexts: current.sourceContexts,
+        status: "active",
+        summary: current.summary,
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["domain-profile", "finances"] }),
+        queryClient.invalidateQueries({ queryKey: ["finance-guided-setup"] }),
+      ]);
+    },
   });
   const incomeStreams = useQuery({
     enabled: section === "cashflow" || section === "profile" || section === "overview",
@@ -511,8 +539,13 @@ export function FinancesPage() {
       {section === "profile" ? (
         <>
           <FinanceAgentGuidancePanel
-            error={agentSetup.error ?? agentProfile.error}
+            activating={activateAgentProfile.isPending}
+            activationEligible={
+              agentProfile.data?.status === "draft" && agentProfile.data.sourceContexts.length > 0
+            }
+            error={agentSetup.error ?? agentProfile.error ?? activateAgentProfile.error}
             loading={agentSetup.isPending || agentProfile.isPending}
+            onActivate={() => activateAgentProfile.mutate()}
             profileStatus={agentProfile.data?.status ?? null}
             setup={agentSetup.data}
           />
@@ -1852,13 +1885,19 @@ function FinanceBudgetDetailDialog({
 }
 
 function FinanceAgentGuidancePanel({
+  activating,
+  activationEligible,
   error,
   loading,
+  onActivate,
   profileStatus,
   setup,
 }: {
+  activating: boolean;
+  activationEligible: boolean;
   error: Error | null;
   loading: boolean;
+  onActivate: () => void;
   profileStatus: "active" | "draft" | null;
   setup: FinanceGuidedSetupContext | undefined;
 }) {
@@ -1897,7 +1936,8 @@ function FinanceAgentGuidancePanel({
                 <ShadcnItemDescription>
                   {setup.accountSources.length} account
                   {setup.accountSources.length === 1 ? "" : "s"} available for a short,
-                  example-based interview.
+                  example-based interview. Profile source meanings guide interpretation; they do not
+                  restrict the accounts an authorized token can read.
                 </ShadcnItemDescription>
               </ShadcnItemContent>
             </ShadcnItem>
@@ -1925,6 +1965,27 @@ function FinanceAgentGuidancePanel({
                 </ShadcnButton>
               </ShadcnItemActions>
             </ShadcnItem>
+            {profileStatus === "draft" ? (
+              <ShadcnItem size="sm" variant="muted">
+                <ShadcnItemContent>
+                  <ShadcnItemTitle>Draft activation</ShadcnItemTitle>
+                  <ShadcnItemDescription>
+                    {activationEligible
+                      ? "Review the recorded source meanings, thresholds, terminology, and safety constraints before activating this guidance."
+                      : "Add at least one owned account source to the draft before activation."}
+                  </ShadcnItemDescription>
+                </ShadcnItemContent>
+                <ShadcnItemActions>
+                  <ShadcnButton
+                    disabled={!activationEligible || activating}
+                    onClick={onActivate}
+                    size="sm"
+                  >
+                    {activating ? "Activating…" : "Activate guidance"}
+                  </ShadcnButton>
+                </ShadcnItemActions>
+              </ShadcnItem>
+            ) : null}
           </ShadcnItemGroup>
         ) : null}
       </ShadcnCardContent>

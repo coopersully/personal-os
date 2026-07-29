@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import { z } from "zod";
-import { result } from "../tool-result.js";
+import { apiResult } from "../tool-result.js";
 
 const id = z.string().uuid().describe("ilo object identifier");
 const readAnnotations = {
@@ -9,24 +9,6 @@ const readAnnotations = {
   idempotentHint: true,
   openWorldHint: false,
   readOnlyHint: true,
-} as const;
-const reviewedMutationAnnotations = {
-  destructiveHint: false,
-  idempotentHint: false,
-  openWorldHint: false,
-  readOnlyHint: false,
-} as const;
-const consequentialMutationAnnotations = {
-  destructiveHint: true,
-  idempotentHint: false,
-  openWorldHint: false,
-  readOnlyHint: false,
-} as const;
-const retrySafeMutationAnnotations = {
-  destructiveHint: true,
-  idempotentHint: true,
-  openWorldHint: false,
-  readOnlyHint: false,
 } as const;
 
 /** Finance-owned MCP surface. Domain policy remains enforced by the API. */
@@ -40,13 +22,14 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "Get Finance guided setup",
     },
-    async () => {
-      const [context, profile] = await Promise.all([
-        api.getFinanceGuidedSetup(),
-        api.getDomainProfile("finances"),
-      ]);
-      return result({ context, profile });
-    },
+    async () =>
+      apiResult(async () => {
+        const [context, profile] = await Promise.all([
+          api.getFinanceGuidedSetup(),
+          api.getDomainProfile("finances"),
+        ]);
+        return { context, profile };
+      }),
   );
 
   server.registerTool(
@@ -58,7 +41,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "Get finance wealth summary",
     },
-    async () => result(await api.getFinanceWealthSummary()),
+    async () => apiResult(() => api.getFinanceWealthSummary()),
   );
 
   server.registerTool(
@@ -70,49 +53,17 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "Get finance cash flow",
     },
-    async () => {
-      const [alerts, forecast, incomeStreams, profile, recurringObligations] = await Promise.all([
-        api.listFinanceAlerts(),
-        api.getFinanceForecast(),
-        api.listFinanceIncomeStreams(),
-        api.getFinanceProfile(),
-        api.listFinanceRecurringObligations(),
-      ]);
-      return result({ alerts, forecast, incomeStreams, profile, recurringObligations });
-    },
-  );
-
-  server.registerTool(
-    "review_finance_recurring_payment",
-    {
-      annotations: reviewedMutationAnnotations,
-      description:
-        "Change Ilo's review state for a detected recurring bill or subscription only after explicit user confirmation. This changes forecast context; it does not cancel or modify a provider payment.",
-      inputSchema: {
-        id,
-        status: z.enum(["active", "cancelled", "paused"]),
-      },
-      title: "Review finance recurring payment",
-    },
-    async ({ id: recurringId, status }) =>
-      result(await api.updateFinanceRecurringObligation(recurringId, { status })),
-  );
-
-  server.registerTool(
-    "resolve_finance_alert",
-    {
-      annotations: consequentialMutationAnnotations,
-      description:
-        "Dismiss or resolve an Ilo financial alert only after checking its evidence and confirming the user no longer needs it. This does not change a paycheck, bill, category, or subscription.",
-      inputSchema: {
-        action: z.enum(["dismiss", "resolve"]),
-        id,
-        rationale: z.string().max(1_000).nullable().optional(),
-      },
-      title: "Resolve finance alert",
-    },
-    async ({ id: alertId, action, rationale }) =>
-      result(await api.resolveFinanceAlert(alertId, { action, rationale: rationale ?? null })),
+    async () =>
+      apiResult(async () => {
+        const [alerts, forecast, incomeStreams, profile, recurringObligations] = await Promise.all([
+          api.listFinanceAlerts(),
+          api.getFinanceForecast(),
+          api.listFinanceIncomeStreams(),
+          api.getFinanceProfile(),
+          api.listFinanceRecurringObligations(),
+        ]);
+        return { alerts, forecast, incomeStreams, profile, recurringObligations };
+      }),
   );
 
   server.registerTool(
@@ -124,7 +75,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "Get finance ledger health",
     },
-    async () => result(await api.getFinanceLedgerHealth()),
+    async () => apiResult(() => api.getFinanceLedgerHealth()),
   );
 
   server.registerTool(
@@ -145,7 +96,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "List finance transactions",
     },
-    async (input) => result(await api.listFinanceTransactions(input)),
+    async (input) => apiResult(() => api.listFinanceTransactions(input)),
   );
 
   server.registerTool(
@@ -153,11 +104,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: readAnnotations,
       description:
-        "List the user's stable finance categories before proposing or applying a category.",
+        "List the user's stable finance categories before preparing a proposal. Applying a category requires the signed-in Finance surface.",
       inputSchema: {},
       title: "Get finance categories",
     },
-    async () => result(await api.getFinanceCategories()),
+    async () => apiResult(() => api.getFinanceCategories()),
   );
 
   server.registerTool(
@@ -174,7 +125,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       },
       title: "Get finance budget status",
     },
-    async ({ month }) => result(await api.getFinanceBudgetStatus(month)),
+    async ({ month }) => apiResult(() => api.getFinanceBudgetStatus(month)),
   );
 
   server.registerTool(
@@ -182,40 +133,11 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: readAnnotations,
       description:
-        "List canonical merchant display names and their raw provider aliases. Inspect this before renaming or merging merchant records.",
+        "List canonical merchant display names and their raw provider aliases. Merchant renames and merges require the signed-in Finance surface.",
       inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
       title: "List finance merchants",
     },
-    async ({ limit }) => result(await api.listFinanceMerchants(limit)),
-  );
-
-  server.registerTool(
-    "rename_finance_merchant",
-    {
-      annotations: reviewedMutationAnnotations,
-      description:
-        "Set a clear display name for one canonical merchant after the user confirms the identity. This never changes historical amounts or categories and is audited as an agent action.",
-      inputSchema: { displayName: z.string().min(1).max(240), id },
-      title: "Rename finance merchant",
-    },
-    async ({ id: merchantId, displayName }) =>
-      result(await api.updateFinanceMerchant(merchantId, { displayName })),
-  );
-
-  server.registerTool(
-    "merge_finance_merchants",
-    {
-      annotations: consequentialMutationAnnotations,
-      description:
-        "Merge duplicate merchant records only after explicit user confirmation that their aliases represent the same real place. This removes the source record, moves its aliases and transactions, and cannot be replayed.",
-      inputSchema: {
-        rationale: z.string().min(1).max(1_000),
-        sourceMerchantId: id,
-        targetMerchantId: id,
-      },
-      title: "Merge finance merchants",
-    },
-    async (input) => result(await api.mergeFinanceMerchants(input)),
+    async ({ limit }) => apiResult(() => api.listFinanceMerchants(limit)),
   );
 
   server.registerTool(
@@ -227,7 +149,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: { limit: z.number().int().min(1).max(200).default(50) },
       title: "Get finance review queue",
     },
-    async ({ limit }) => result(await api.getFinanceReviewQueue(limit)),
+    async ({ limit }) => apiResult(() => api.getFinanceReviewQueue(limit)),
   );
 
   server.registerTool(
@@ -246,63 +168,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Propose finance categorizations",
     },
     async (input) =>
-      result(await api.proposeFinanceCategorizations({ ...input, review: "needs_review" })),
-  );
-
-  server.registerTool(
-    "apply_finance_categorizations",
-    {
-      annotations: retrySafeMutationAnnotations,
-      description:
-        "Apply accepted category proposals. The API enforces its adaptive threshold; lower-confidence items remain in review. Exact lost-response retries return replayed=true without duplicating evidence. Agents cannot create permanent merchant rules. Inspect every returned status because a batch reports any partial failures per transaction.",
-      inputSchema: {
-        decisions: z
-          .array(
-            z.object({
-              categoryId: id,
-              confidence: z.number().min(0).max(1),
-              expectedTransactionUpdatedAt: z.iso
-                .datetime({ offset: true })
-                .describe("updatedAt returned by the accepted categorization proposal"),
-              learnMerchant: z.enum(["never", "suggest"]).default("suggest"),
-              rationale: z.string().min(1).max(1_000),
-              transactionId: id,
-            }),
-          )
-          .min(1)
-          .max(100),
-      },
-      title: "Apply finance categorizations",
-    },
-    async (input) => result(await api.applyFinanceCategorizations(input)),
-  );
-
-  server.registerTool(
-    "resolve_finance_review",
-    {
-      annotations: consequentialMutationAnnotations,
-      description:
-        "Record an accepted current category proposal or defer a review case. For approve or recategorize, pass the proposal confidence and transaction updatedAt exactly; stale or substituted decisions conflict. Agents cannot confirm ambiguous transfers or create merchant rules; direct the user to Finance for those human-only decisions.",
-      inputSchema: {
-        action: z.enum(["approve", "defer", "recategorize"]),
-        categoryId: id.optional(),
-        confidence: z
-          .number()
-          .min(0)
-          .max(1)
-          .optional()
-          .describe("Required for approve or recategorize; use the accepted proposal confidence"),
-        expectedTransactionUpdatedAt: z.iso
-          .datetime({ offset: true })
-          .optional()
-          .describe("Required for approve or recategorize; use the proposal transaction updatedAt"),
-        id,
-        learnMerchant: z.enum(["never", "suggest"]).default("suggest"),
-        rationale: z.string().max(1_000).nullable().default(null),
-      },
-      title: "Resolve finance review",
-    },
-    async ({ id: reviewId, ...input }) => result(await api.resolveFinanceReview(reviewId, input)),
+      apiResult(() => api.proposeFinanceCategorizations({ ...input, review: "needs_review" })),
   );
 
   server.registerTool(
@@ -314,32 +180,6 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       inputSchema: {},
       title: "Get finance overview",
     },
-    async () => result(await api.getFinanceOverview()),
-  );
-
-  server.registerTool(
-    "add_finance_transaction",
-    {
-      annotations: reviewedMutationAnnotations,
-      description:
-        "Add a manual Ilo transaction only after the user confirms the account, amount, date, direction, and merchant. This is not provider import. Omit category when uncertain so it enters review.",
-      inputSchema: {
-        accountId: id,
-        amount: z.number().positive(),
-        category: z.string().min(1).max(80).nullable().default(null),
-        date: z.iso.date(),
-        direction: z.enum(["income", "expense", "transfer"]),
-        merchant: z.string().min(1).max(240),
-        notes: z.string().max(4_000).nullable().default(null),
-      },
-      title: "Add finance transaction",
-    },
-    async (input) =>
-      result(
-        await api.createFinanceTransaction({
-          ...input,
-          categoryConfidence: input.category === null ? null : 1,
-        }),
-      ),
+    async () => apiResult(() => api.getFinanceOverview()),
   );
 }

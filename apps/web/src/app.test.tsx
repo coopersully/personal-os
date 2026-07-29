@@ -227,6 +227,7 @@ const mocks = vi.hoisted(() => ({
   getXBookmarkAccount: vi.fn(),
   getXBookmarkAuthorizationUrl: vi.fn(),
   getPinterestWallpaperSettings: vi.fn(),
+  getMailSetupContext: vi.fn(),
   getMailThread: vi.fn(),
   getMe: vi.fn(),
   isTauri: vi.fn(),
@@ -240,11 +241,13 @@ const mocks = vi.hoisted(() => ({
   listXBookmarks: vi.fn(),
   listEvents: vi.fn(),
   listMailboxes: vi.fn(),
+  listMailDrafts: vi.fn(),
   listMailMessages: vi.fn(),
   listMailRules: vi.fn(),
   listMailThreads: vi.fn(),
   listInvitations: vi.fn(),
   listOAuthClients: vi.fn(),
+  reconcileMailDraft: vi.fn(),
   sendMail: vi.fn(),
   snoozeMailThread: vi.fn(),
   listGoals: vi.fn(),
@@ -309,6 +312,7 @@ const mocks = vi.hoisted(() => ({
   updateAccountSetup: vi.fn(),
   updateReminder: vi.fn(),
   updateTask: vi.fn(),
+  upsertDomainProfile: vi.fn(),
   updateUser: vi.fn(),
   validateInvitation: vi.fn(),
 }));
@@ -505,6 +509,11 @@ function defaults() {
       "refresh_provider_data",
       "confirm_ambiguous_transfer",
       "create_merchant_rule",
+      "apply_categorization",
+      "review_recurring_obligation",
+      "resolve_alert",
+      "manage_merchants",
+      "add_manual_transaction",
     ],
     ledgerHealth: {
       asOf: now,
@@ -532,7 +541,7 @@ function defaults() {
       {
         available: true,
         key: "capture_preferences",
-        policy: "approve_each",
+        policy: "preview",
         summary: "Capture durable preferences.",
         unavailableReason: null,
       },
@@ -689,12 +698,36 @@ function defaults() {
   });
   mocks.listXBookmarkFolders.mockResolvedValue([]);
   mocks.listMailboxes.mockResolvedValue([mailbox]);
+  mocks.getMailSetupContext.mockResolvedValue({
+    accounts: [
+      {
+        accountId: secondId,
+        automaticRuleExecution: true,
+        email: "test@example.com",
+        label: "Google",
+        lastSyncedAt: now,
+        mailboxes: [mailbox],
+        provider: "google",
+        syncError: null,
+        syncStatus: "idle",
+      },
+    ],
+    safety: {
+      delayedRetentionAutomation: false,
+      permanentDeletion: false,
+      providerFilterCreation: false,
+      spamClassification: false,
+      unsubscribeAutomation: false,
+    },
+  });
+  mocks.listMailDrafts.mockResolvedValue([]);
   mocks.listMailThreads.mockResolvedValue([mailThread, secondMailThread]);
   mocks.listMailMessages.mockResolvedValue([]);
   mocks.listMailRules.mockResolvedValue([]);
   mocks.getMailThread.mockResolvedValue(mailThread);
   mocks.sendMail.mockResolvedValue(undefined);
   mocks.createMailDraft.mockResolvedValue({ id });
+  mocks.reconcileMailDraft.mockResolvedValue({ id, sendStatus: "draft" });
   mocks.snoozeMailThread.mockResolvedValue(undefined);
   mocks.updateMailThread.mockResolvedValue(mailThread);
   mocks.listAccessTokens.mockResolvedValue([
@@ -2526,6 +2559,50 @@ describe("ilo web app", () => {
     }
   });
 
+  it("activates a Finance guidance draft only through the signed-in Finance surface", async () => {
+    configureFinanceWorkspace();
+    const draft = {
+      categories: [],
+      createdAt: now,
+      domain: "finances" as const,
+      id,
+      instructions: ["Never infer permanent merchant rules."],
+      objective: "Keep financial review trustworthy.",
+      preferences: { reviewCadence: "weekly" },
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Bills and daily spending",
+          sourceId: id,
+          sourceLabel: "Checking",
+        },
+      ],
+      status: "draft" as const,
+      summary: "Review weekly and keep uncertain transfers visible.",
+      updatedAt: now,
+      version: 1,
+    };
+    mocks.getDomainProfile.mockResolvedValue(draft);
+    mocks.upsertDomainProfile.mockResolvedValue({ ...draft, status: "active", version: 2 });
+
+    const view = setup("/finances/profile");
+    await userEvent.setup().click(await screen.findByRole("button", { name: "Activate guidance" }));
+    await waitFor(() =>
+      expect(mocks.upsertDomainProfile).toHaveBeenCalledWith({
+        categories: draft.categories,
+        domain: "finances",
+        expectedVersion: 1,
+        instructions: draft.instructions,
+        objective: draft.objective,
+        preferences: draft.preferences,
+        sourceContexts: draft.sourceContexts,
+        status: "active",
+        summary: draft.summary,
+      }),
+    );
+    view.unmount();
+  });
+
   it("keeps finance empty and error states explicit", async () => {
     mocks.getFinanceOverview.mockResolvedValueOnce({
       accounts: [],
@@ -4116,6 +4193,160 @@ describe("ilo web app", () => {
     view.unmount();
   }, 10_000);
 
+  it("keeps uncertain draft recovery human-readable and keyboard-accessible", async () => {
+    const recentAndReconcileDrafts = [
+      {
+        accountId: secondId,
+        body: "Private body",
+        cc: [],
+        createdAt: now,
+        id,
+        reconciliationState: "sent_mail_review_required" as const,
+        sendClaimedAt: now,
+        sendStatus: "reconcile",
+        sentAt: null,
+        subject: "Quarterly reply",
+        threadId: null,
+        to: [{ address: "to@example.com", name: null }],
+        updatedAt: now,
+      },
+      {
+        accountId: secondId,
+        body: "Another body",
+        cc: [],
+        createdAt: now,
+        id: secondId,
+        reconciliationState: "in_progress" as const,
+        sendClaimedAt: now,
+        sendStatus: "sending",
+        sentAt: null,
+        subject: "Travel details",
+        threadId: null,
+        to: [{ address: "to@example.com", name: null }],
+        updatedAt: now,
+      },
+    ];
+    mocks.listMailDrafts.mockResolvedValueOnce(recentAndReconcileDrafts).mockResolvedValue([
+      {
+        ...recentAndReconcileDrafts[1],
+        reconciliationState: "sent_mail_review_required",
+      },
+    ]);
+    mocks.reconcileMailDraft.mockResolvedValue({ id, sendStatus: "sent" });
+    setup("/mail");
+    const browser = userEvent.setup();
+    const recovery = await screen.findByRole("region", { name: "Resolve an uncertain send" });
+    expect(recovery).toHaveTextContent("First inspect this account’s provider Sent Mail");
+    expect(
+      within(recovery).queryByRole("button", {
+        name: "It was not sent: Travel details",
+      }),
+    ).not.toBeInTheDocument();
+    expect(within(recovery).getByText("Waiting for the provider result…")).toBeInTheDocument();
+    await browser.click(
+      within(recovery).getByRole("button", {
+        name: "I found it in Sent Mail: Quarterly reply",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.reconcileMailDraft).toHaveBeenCalledWith(id, { outcome: "sent" }),
+    );
+    await browser.click(
+      await within(recovery).findByRole("button", {
+        name: "It was not sent: Travel details",
+      }),
+    );
+    await waitFor(() =>
+      expect(mocks.reconcileMailDraft).toHaveBeenCalledWith(secondId, {
+        outcome: "not_sent",
+      }),
+    );
+    expect(mocks.reconcileMailDraft).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps uncertain send recovery errors visible without hiding the draft", async () => {
+    mocks.listMailDrafts.mockResolvedValue([
+      {
+        accountId: secondId,
+        body: "Untitled body",
+        cc: [],
+        createdAt: now,
+        id,
+        reconciliationState: "sent_mail_review_required",
+        sendClaimedAt: now,
+        sendStatus: "reconcile",
+        sentAt: null,
+        subject: "",
+        threadId: null,
+        to: [{ address: "to@example.com", name: null }],
+        updatedAt: now,
+      },
+    ]);
+    mocks.reconcileMailDraft.mockRejectedValueOnce(new Error("Recovery unavailable"));
+    setup("/mail");
+    const browser = userEvent.setup();
+
+    const recovery = await screen.findByRole("region", { name: "Resolve an uncertain send" });
+    expect(within(recovery).getByText("(No subject)")).toBeInTheDocument();
+    await browser.click(
+      within(recovery).getByRole("button", {
+        name: "I found it in Sent Mail: this message",
+      }),
+    );
+    expect(await within(recovery).findByRole("alert")).toHaveTextContent("Recovery unavailable");
+    expect(
+      within(recovery).getByRole("button", {
+        name: "It was not sent: this message",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows progress and query failures while checking uncertain sends", async () => {
+    let rejectDrafts: ((error: Error) => void) | undefined;
+    mocks.listMailDrafts.mockImplementationOnce(
+      () =>
+        new Promise((_, reject) => {
+          rejectDrafts = reject;
+        }),
+    );
+    setup("/mail");
+
+    expect(await screen.findByText("Checking uncertain sends…")).toBeInTheDocument();
+    rejectDrafts?.(new Error("Draft recovery unavailable"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Draft recovery unavailable");
+  });
+
+  it("keeps uncertain send recovery visible without an enabled Mail connector", async () => {
+    mocks.listConnectors.mockResolvedValue([]);
+    mocks.listMailDrafts.mockResolvedValue([
+      {
+        accountId: secondId,
+        body: "Disconnected body",
+        cc: [],
+        createdAt: now,
+        id,
+        reconciliationState: "sent_mail_review_required",
+        sendClaimedAt: now,
+        sendStatus: "reconcile",
+        sentAt: null,
+        subject: "Disconnected send",
+        threadId: null,
+        to: [{ address: "to@example.com", name: null }],
+        updatedAt: now,
+      },
+    ]);
+    setup("/mail");
+    expect(
+      await screen.findByRole("region", { name: "Resolve an uncertain send" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Connect a mailbox")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "I found it in Sent Mail: Disconnected send",
+      }),
+    ).toBeInTheDocument();
+  });
+
   it("moves a conversation to the account trash", async () => {
     const trash = {
       ...mailbox,
@@ -4146,13 +4377,25 @@ describe("ilo web app", () => {
 
   it("presents provider mailboxes as friendly, collapsible account groups", async () => {
     const iCloudAccountId = "88888888-8888-4888-8888-888888888880";
+    const unnamedAccountId = "88888888-8888-4888-8888-888888888890";
     mocks.listConnectors.mockResolvedValue([
       ...(await mocks.listConnectors()),
       {
         calendarEnabled: false,
-        email: null,
+        email: "icloud@example.com",
         id: iCloudAccountId,
-        label: "Fallback iCloud",
+        label: "",
+        lastSyncedAt: null,
+        mailEnabled: true,
+        provider: "icloud",
+        syncError: null,
+        syncStatus: "idle",
+      },
+      {
+        calendarEnabled: false,
+        email: null,
+        id: unnamedAccountId,
+        label: "",
         lastSyncedAt: null,
         mailEnabled: true,
         provider: "icloud",
@@ -4294,22 +4537,66 @@ describe("ilo web app", () => {
     expect(screen.getByText("You")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Inbox" }));
 
-    const iCloudToggle = screen.getByRole("button", { name: /Fallback iCloud iCloud Mail/ });
+    const iCloudToggle = screen.getByRole("button", { name: /icloud@example.com iCloud Mail/ });
     await browser.click(iCloudToggle);
     await browser.click(screen.getAllByRole("button", { name: "All mail" })[1] as HTMLElement);
     expect(
       within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("heading"),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Connected account iCloud Mail/ }),
+    ).toBeInTheDocument();
   });
 
   it("loads a mail conversation addressed directly by URL", async () => {
     const deepLinkedId = "99999999-9999-4999-8999-999999999999";
     mocks.getMailThread.mockResolvedValue({ ...mailThread, id: deepLinkedId });
+    mocks.listMailMessages.mockResolvedValue([
+      {
+        attachments: [],
+        bodyText: mailThread.bodyText,
+        cc: [],
+        from: mailThread.from,
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        receivedAt: now,
+        threadId: deepLinkedId,
+        to: mailThread.to,
+      },
+    ]);
     setup(`/mail?thread=${deepLinkedId}`);
     expect(
       await screen.findByText("Hello Example User. This is the full message."),
     ).toBeInTheDocument();
     expect(mocks.getMailThread).toHaveBeenCalledWith(deepLinkedId);
+  });
+
+  it("deduplicates the thread summary while retaining distinct provider messages", async () => {
+    mocks.listMailMessages.mockResolvedValue([
+      {
+        attachments: [],
+        bodyText: mailThread.bodyText,
+        cc: [],
+        from: mailThread.from,
+        id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        receivedAt: now,
+        threadId: mailThread.id,
+        to: mailThread.to,
+      },
+      {
+        attachments: [],
+        bodyText: "A distinct provider message.",
+        cc: [],
+        from: mailThread.from,
+        id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        receivedAt: now,
+        threadId: mailThread.id,
+        to: mailThread.to,
+      },
+    ]);
+    setup(`/mail?thread=${mailThread.id}`);
+
+    expect(await screen.findByText("A distinct provider message.")).toBeInTheDocument();
+    expect(screen.getByText(mailThread.bodyText)).toBeInTheDocument();
   });
 
   it("sets up iCloud services and upgrades Google Mail permissions", async () => {

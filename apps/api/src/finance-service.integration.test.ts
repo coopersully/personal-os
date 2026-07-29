@@ -217,6 +217,49 @@ describe.sequential("finance service", () => {
       (item) => item.slug === "shopping",
     );
     if (!shopping) throw new Error("Shopping category was not seeded.");
+    const [pendingCandidate] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 800,
+        category: null,
+        direction: "expense",
+        merchant: "Pending Card Hold",
+        needsReview: true,
+        pending: true,
+        transactionDate: "2026-07-19",
+        userId,
+      })
+      .returning();
+    if (!pendingCandidate) throw new Error("Pending categorization fixture was not created.");
+    await expect(
+      service.applyCategorizations(
+        {
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 1,
+              expectedTransactionUpdatedAt: pendingCandidate.updatedAt.toISOString(),
+              learnMerchant: "never",
+              rationale: "Organize the provisional card hold without learning from it.",
+              transactionId: pendingCandidate.id,
+            },
+          ],
+        },
+        context,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        applied: true,
+        transaction: expect.objectContaining({ category: "Shopping", pending: true }),
+      }),
+    ]);
+    await expect(
+      database.db
+        .select()
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.transactionId, pendingCandidate.id)),
+    ).resolves.toHaveLength(0);
     const agentContext = {
       principal: financeAgentPrincipal(userId),
       requestId: "agent-finance",

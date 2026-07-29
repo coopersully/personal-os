@@ -183,7 +183,34 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const audit = createAuditService(dependencies.db);
-  const assistant = createAssistantService({ db: dependencies.db, now });
+  const mail = createMailService({
+    db: dependencies.db,
+    gateway: connectors.mailGateway,
+    now,
+    reviewSigningKey: dependencies.config.encryptionKey,
+  });
+  const finances = createFinanceService({
+    db: dependencies.db,
+    now,
+    plaid: {
+      clientId: dependencies.config.plaidClientId,
+      encryptionKey: dependencies.config.encryptionKey,
+      environment: dependencies.config.plaidEnvironment,
+      secret: dependencies.config.plaidSecret,
+    },
+  });
+  const assistant = createAssistantService({
+    db: dependencies.db,
+    now,
+    validateProfileSources: async (transaction, domain, userId, sourceIds, status, actorType) => {
+      if (domain === "mail") {
+        await mail.validateProfileSources(transaction, userId, sourceIds);
+      }
+      if (domain === "finances") {
+        await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
+      }
+    },
+  });
   const agentSkillSourceUrl = dependencies.config.agentSkillSourceUrl ?? defaultAgentSkillSourceUrl;
   const agentConnectionGuide: AgentConnectionGuide = {
     domains: assistantDomains.map((domain) => ({
@@ -204,22 +231,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       version: "0.1.0",
     },
   };
-  const mail = createMailService({ db: dependencies.db, gateway: connectors.mailGateway, now });
   const weather = createWeatherService({
     ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
     now,
   });
   const goalService = createGoalsService({ db: dependencies.db, now });
-  const finances = createFinanceService({
-    db: dependencies.db,
-    now,
-    plaid: {
-      clientId: dependencies.config.plaidClientId,
-      encryptionKey: dependencies.config.encryptionKey,
-      environment: dependencies.config.plaidEnvironment,
-      secret: dependencies.config.plaidSecret,
-    },
-  });
   const pinterest = createPinterestService({ db: dependencies.db, now });
 
   app.use("*", async (context, next) => {
@@ -626,6 +642,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     const result = await connectors.connectICloud(
       context.get("principal").userId,
       await parseBody(context, connectICloudInputSchema),
+      context.get("requestId"),
     );
     void connectors.syncAccount(result.userId, result.accountId).catch(() => {
       // The account and credentials are already saved, while syncAccount records
@@ -642,7 +659,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     }),
   );
   app.delete("/v1/connectors/:id", async (context) => {
-    await connectors.disconnect(context.get("principal").userId, context.req.param("id"));
+    await connectors.disconnect(
+      context.get("principal").userId,
+      context.req.param("id"),
+      context.get("requestId"),
+    );
     return context.body(null, 204);
   });
 
@@ -873,8 +894,8 @@ const oauthScopeLabels: Record<string, string> = {
   "bookmarks:read": "Read synchronized bookmarks",
   "calendar:read": "Read calendars and events",
   "calendar:write": "Create and manage events",
-  "finances:read": "Read financial accounts and activity",
-  "finances:write": "Manage supported financial organization",
+  "finances:read": "Read sensitive financial accounts, balances, and activity",
+  "finances:write": "Save Finance setup guidance and transaction notes",
   "goals:read": "Read goals and motives",
   "goals:write": "Manage goals and motives",
   "mail:read": "Read connected mail",

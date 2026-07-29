@@ -1,4 +1,5 @@
 import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
+import nodemailer from "nodemailer";
 import { z } from "zod";
 import { providerFetch } from "./http.js";
 import type {
@@ -22,6 +23,12 @@ const tokenResponseSchema = z.object({
   refresh_token: z.string().optional(),
   scope: z.string().default(""),
   token_type: z.string().default("Bearer"),
+});
+
+const mailComposer = nodemailer.createTransport({
+  buffer: true,
+  newline: "unix",
+  streamTransport: true,
 });
 
 const profileSchema = z.object({
@@ -130,6 +137,17 @@ export class ConnectorError extends Error {
     super(message);
     this.name = "ConnectorError";
     this.status = status;
+  }
+}
+
+/** A local composition or credential-refresh failure before a Mail send request begins. */
+export class MailSendPreAcceptanceError extends Error {
+  public override readonly cause: unknown;
+
+  public constructor(message: string, cause: unknown) {
+    super(message);
+    this.name = "MailSendPreAcceptanceError";
+    this.cause = cause;
   }
 }
 
@@ -438,34 +456,49 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     },
 
     async sendMail(credentials, input) {
-      const recipients = (addresses: typeof input.to) =>
-        addresses
-          .map((address) =>
-            address.name ? `${address.name} <${address.address}>` : address.address,
-          )
-          .join(", ");
-      const raw = [
-        `To: ${recipients(input.to)}`,
-        ...(input.cc.length ? [`Cc: ${recipients(input.cc)}`] : []),
-        `Subject: ${input.subject}`,
-        "MIME-Version: 1.0",
-        'Content-Type: text/plain; charset="UTF-8"',
-        "",
-        input.body,
-      ].join("\r\n");
-      const result = await authenticatedRequest(
-        credentials,
+      let currentCredentials: GoogleCredentials;
+      let raw: Buffer;
+      try {
+        const composed = (await mailComposer.sendMail({
+          cc: input.cc.map((address) => ({
+            address: address.address,
+            ...(address.name ? { name: address.name } : {}),
+          })),
+          from: input.from,
+          subject: input.subject,
+          text: input.body,
+          to: input.to.map((address) => ({
+            address: address.address,
+            ...(address.name ? { name: address.name } : {}),
+          })),
+        })) as { message: Buffer | string };
+        raw = Buffer.isBuffer(composed.message)
+          ? composed.message
+          : Buffer.from(String(composed.message));
+        currentCredentials = await validCredentials(credentials);
+      } catch (error) {
+        throw new MailSendPreAcceptanceError(
+          "Google Mail could not prepare or authorize the send request.",
+          error,
+        );
+      }
+      const headers = new Headers({ authorization: `Bearer ${currentCredentials.accessToken}` });
+      headers.set("content-type", "application/json");
+      const response = await providerFetch(
+        request,
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
         {
           body: JSON.stringify({
-            raw: Buffer.from(raw).toString("base64url"),
+            raw: raw.toString("base64url"),
             ...(input.threadId ? { threadId: input.threadId } : {}),
           }),
+          headers,
           method: "POST",
         },
       );
-      await parseResponse(result.response);
-      return result.credentials;
+      // Once the send request begins, every response/transport failure is ambiguous.
+      await parseResponse(response);
+      return currentCredentials;
     },
 
     /* v8 ignore stop */

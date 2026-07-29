@@ -240,18 +240,16 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
           from: credentials.email,
           text: input.body,
           subject: input.subject,
-          to: input.to
-            .map((address) =>
-              address.name ? `${address.name} <${address.address}>` : address.address,
-            )
-            .join(", "),
+          to: input.to.map((address) => ({
+            address: address.address,
+            ...(address.name ? { name: address.name } : {}),
+          })),
           ...(input.cc.length
             ? {
-                cc: input.cc
-                  .map((address) =>
-                    address.name ? `${address.name} <${address.address}>` : address.address,
-                  )
-                  .join(", "),
+                cc: input.cc.map((address) => ({
+                  address: address.address,
+                  ...(address.name ? { name: address.name } : {}),
+                })),
               }
             : {}),
         });

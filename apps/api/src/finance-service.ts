@@ -57,6 +57,7 @@ import type {
   UpdateFinanceRecurringObligationInput,
   UpdateFinanceTransactionInput,
 } from "@personal-os/domain";
+import { idSchema } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
@@ -80,6 +81,7 @@ type PlaidOptions = {
   secret: string;
 };
 type Options = { db: Database; now: () => Date; plaid?: PlaidOptions };
+type FinanceProfileSourceExecutor = Pick<Database, "select">;
 type PlaidCredentials = { accessToken: string };
 type PlaidAccount = {
   account_id: string;
@@ -1206,6 +1208,12 @@ export function createFinanceService({ db, now, plaid }: Options) {
           "Confirming an ambiguous transfer requires an interactive user session.",
         );
       }
+      if (current.pending && decision.learnMerchant === "always") {
+        throw new AppError(
+          "invalid_request",
+          "Pending transactions cannot create permanent categorization evidence.",
+        );
+      }
       const [updated] = await tx
         .update(financeTransactions)
         .set({
@@ -1229,17 +1237,19 @@ export function createFinanceService({ db, now, plaid }: Options) {
       if (!updated) {
         throw new AppError("conflict", "The transaction changed while it was being categorized.");
       }
-      await tx.insert(financeClassificationDecisions).values({
-        categoryId: category.id,
-        categoryName: category.name,
-        confidence: Math.round(confidence * 10_000),
-        merchantId: before.merchantId,
-        outcome: source === "user" ? userOutcome : "applied",
-        rationale: decision.rationale,
-        source,
-        transactionId: before.id,
-        userId: context.principal.userId,
-      });
+      if (!current.pending) {
+        await tx.insert(financeClassificationDecisions).values({
+          categoryId: category.id,
+          categoryName: category.name,
+          confidence: Math.round(confidence * 10_000),
+          merchantId: before.merchantId,
+          outcome: source === "user" ? userOutcome : "applied",
+          rationale: decision.rationale,
+          source,
+          transactionId: before.id,
+          userId: context.principal.userId,
+        });
+      }
       await tx
         .update(financeReviewCases)
         .set({ resolvedAt: now(), status: "resolved", updatedAt: now() })
@@ -1249,7 +1259,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
             inArray(financeReviewCases.status, ["deferred", "open"]),
           ),
         );
-      if (decision.learnMerchant === "always") {
+      if (!current.pending && decision.learnMerchant === "always") {
         await tx
           .insert(financeCategoryRules)
           .values({
@@ -1607,6 +1617,53 @@ export function createFinanceService({ db, now, plaid }: Options) {
     plaidAvailable() {
       return Boolean(plaid?.clientId && plaid.secret);
     },
+    async validateProfileSources(
+      transaction: FinanceProfileSourceExecutor,
+      userId: string,
+      sourceIds: string[],
+      status: "active" | "draft",
+      actorType: Principal["actorType"],
+    ) {
+      if (status === "active" && actorType !== "user") {
+        throw new AppError(
+          "forbidden",
+          "Activating a Finance profile requires an interactive user session.",
+        );
+      }
+      const uniqueSourceIds = [...new Set(sourceIds)];
+      if (uniqueSourceIds.length !== sourceIds.length) {
+        throw new AppError(
+          "invalid_request",
+          "Include each Finance account once in source contexts.",
+        );
+      }
+      if (sourceIds.some((sourceId) => !idSchema.safeParse(sourceId).success)) {
+        throw new AppError(
+          "invalid_request",
+          "Finance source contexts must use canonical Finance account IDs.",
+        );
+      }
+      if (status === "active" && sourceIds.length === 0) {
+        throw new AppError(
+          "invalid_request",
+          "Active Finance setup requires at least one owned account source.",
+        );
+      }
+      if (sourceIds.length === 0) return;
+      const ownedSources = await transaction
+        .select({ id: financeAccounts.id })
+        .from(financeAccounts)
+        .where(
+          and(eq(financeAccounts.userId, userId), inArray(financeAccounts.id, uniqueSourceIds)),
+        )
+        .for("update");
+      if (ownedSources.length !== uniqueSourceIds.length) {
+        throw new AppError(
+          "invalid_request",
+          "Finance source contexts must reference current accounts owned by this user.",
+        );
+      }
+    },
     async getGuidedSetupContext(userId: string): Promise<FinanceGuidedSetupContext> {
       const month = now().toISOString().slice(0, 7);
       const [
@@ -1696,21 +1753,26 @@ export function createFinanceService({ db, now, plaid }: Options) {
           "refresh_provider_data",
           "confirm_ambiguous_transfer",
           "create_merchant_rule",
+          "apply_categorization",
+          "review_recurring_obligation",
+          "resolve_alert",
+          "manage_merchants",
+          "add_manual_transaction",
         ],
         ledgerHealth,
         reviewSummary: { count: reviews.length, reasons: reviewReasons },
         suggestedWorkflows: [
           workflow(
             "capture_preferences",
-            "approve_each",
-            "Interview for durable source meanings, thresholds, review preferences, terminology, and safety constraints.",
+            "preview",
+            "Interview for durable guidance and save a draft profile; activation requires a signed-in person in Finance.",
             true,
             "",
           ),
           workflow(
             "categorization_review",
-            "approve_each",
-            "Inspect ledger evidence, prepare category proposals, and apply only accepted transaction decisions.",
+            "preview",
+            "Inspect ledger evidence and prepare category proposals for a signed-in person to apply in Finance.",
             categorizableReviews > 0,
             reviews.length > 0
               ? "Only ambiguous transfers currently need review; those require Finance."
@@ -1718,15 +1780,15 @@ export function createFinanceService({ db, now, plaid }: Options) {
           ),
           workflow(
             "recurring_review",
-            "approve_each",
-            "Review inferred bills and subscriptions without implying that Ilo cancelled a provider payment.",
+            "read_only",
+            "Review inferred bills and subscriptions, then direct a signed-in person to Finance for status changes.",
             recurringNeedsReview > 0,
             "No inferred recurring obligations currently need review.",
           ),
           workflow(
             "alert_review",
-            "approve_each",
-            "Inspect alert evidence before resolving or dismissing an Ilo alert.",
+            "read_only",
+            "Inspect alert evidence, then direct a signed-in person to Finance to resolve or dismiss it.",
             alerts.length > 0,
             "No Finance alerts are currently open.",
           ),
@@ -3351,6 +3413,12 @@ export function createFinanceService({ db, now, plaid }: Options) {
           .for("update")
           .limit(1);
         if (!current) throw new AppError("not_found", "The transaction was not found.");
+        if (current.pending && input.category !== undefined && input.learnMerchant === true) {
+          throw new AppError(
+            "invalid_request",
+            "Pending transactions cannot create permanent categorization evidence.",
+          );
+        }
         if (input.category !== undefined) {
           await tx
             .select({ id: financeCategories.id })
@@ -3413,7 +3481,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           }),
         );
         if (input.category !== undefined) {
-          if (input.category === null) {
+          if (input.category === null && !current.pending) {
             await tx
               .delete(financeCategoryRules)
               .where(
@@ -3422,7 +3490,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                   eq(financeCategoryRules.merchantNormalized, normalizedMerchant(current.merchant)),
                 ),
               );
-          } else {
+          } else if (input.category !== null && !current.pending) {
             await tx.insert(financeClassificationDecisions).values({
               categoryId: categoryRecord?.id ?? null,
               categoryName: input.category,
@@ -3452,7 +3520,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                 ),
               );
           }
-          if (input.category !== null && input.learnMerchant === true) {
+          if (!current.pending && input.category !== null && input.learnMerchant === true) {
             await tx
               .insert(financeCategoryRules)
               .values({

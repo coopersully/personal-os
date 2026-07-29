@@ -18,10 +18,10 @@ import {
   updateFinanceRecurringObligationInputSchema,
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
-import type { Context, Hono } from "hono";
+import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { createFinanceService } from "../finance-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess, requireHuman } from "./support.js";
+import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
@@ -34,8 +34,19 @@ type FinanceRouteOptions = {
 /** Register the Finance-owned HTTP surface without constructing shared services. */
 export function registerFinanceRoutes({ app, finances, mutationContext }: FinanceRouteOptions) {
   const requireFinanceScope = requireFeatureAccess("finances");
-  app.use("/v1/finances", requireFinanceScope);
-  app.use("/v1/finances/*", requireFinanceScope);
+  const requireFinanceRead = requireScope("finances:read");
+  const requireFinanceAccess: MiddlewareHandler<AppEnv> = async (context, next) => {
+    if (
+      context.req.method === "POST" &&
+      context.req.path === "/v1/finances/categorizations/propose"
+    ) {
+      await requireFinanceRead(context, next);
+      return;
+    }
+    await requireFinanceScope(context, next);
+  };
+  app.use("/v1/finances", requireFinanceAccess);
+  app.use("/v1/finances/*", requireFinanceAccess);
   app.get("/v1/finances", async (context) => {
     const query = financeBudgetStatusQuerySchema.parse(context.req.query());
     const accountIds = context.req.query("accountIds")?.split(",").filter(Boolean);
@@ -85,8 +96,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       recurring: await finances.listRecurringObligations(context.get("principal").userId),
     }),
   );
-  // A scoped MCP agent may make this bounded status decision; the service audits its actor.
-  app.patch("/v1/finances/recurring/:id", async (context) =>
+  app.patch("/v1/finances/recurring/:id", requireHuman, async (context) =>
     context.json({
       recurring: await finances.updateRecurringObligation(
         context.req.param("id"),
@@ -101,8 +111,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
   app.get("/v1/finances/alerts", async (context) =>
     context.json({ alerts: await finances.listAlerts(context.get("principal").userId) }),
   );
-  // Resolving an alert is likewise a bounded, audited MCP action, not a provider mutation.
-  app.post("/v1/finances/alerts/:id", async (context) =>
+  app.post("/v1/finances/alerts/:id", requireHuman, async (context) =>
     context.json({
       alert: await finances.resolveAlert(
         context.req.param("id"),
@@ -149,7 +158,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       ),
     }),
   );
-  app.patch("/v1/finances/merchants/:id", async (context) =>
+  app.patch("/v1/finances/merchants/:id", requireHuman, async (context) =>
     context.json({
       merchant: await finances.updateMerchant(
         context.req.param("id"),
@@ -158,7 +167,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       ),
     }),
   );
-  app.post("/v1/finances/merchants/merge", async (context) =>
+  app.post("/v1/finances/merchants/merge", requireHuman, async (context) =>
     context.json({
       merchant: await finances.mergeMerchants(
         await parseBody(context, mergeFinanceMerchantsInputSchema),
@@ -192,7 +201,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
   };
   app.post("/v1/finances/categorizations/propose", proposeCategorizations);
   app.get("/v1/finances/categorizations/propose", proposeCategorizations);
-  app.post("/v1/finances/categorizations/apply", async (context) =>
+  app.post("/v1/finances/categorizations/apply", requireHuman, async (context) =>
     context.json({
       results: await finances.applyCategorizations(
         await parseBody(context, applyFinanceCategorizationsInputSchema),
@@ -200,7 +209,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
       ),
     }),
   );
-  app.post("/v1/finances/review/:id", async (context) =>
+  app.post("/v1/finances/review/:id", requireHuman, async (context) =>
     context.json({
       result: await finances.resolveReview(
         context.req.param("id"),
@@ -224,7 +233,7 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
     await finances.deleteAccount(context.req.param("id"), mutationContext(context));
     return context.body(null, 204);
   });
-  app.post("/v1/finances/transactions", async (context) =>
+  app.post("/v1/finances/transactions", requireHuman, async (context) =>
     context.json(
       {
         transaction: await finances.createTransaction(

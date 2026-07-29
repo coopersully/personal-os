@@ -25,6 +25,7 @@ export const financeGuidedPreferencesSchema = z
       .optional(),
     largeExpenseAlertAmount: moneySchema.positive().optional(),
     lowBalanceAlertAmount: moneySchema.optional(),
+    planningCurrency: z.literal("USD").optional(),
     /** Percentage points, not a fraction: 20 means alert at a 20% amount change. */
     recurringAmountChangePercent: z.number().finite().min(0).max(100).optional(),
     reviewCadence: z.enum(["daily", "monthly", "on_change", "weekly"]).optional(),
@@ -35,7 +36,19 @@ export const financeGuidedPreferencesSchema = z
   })
   .catchall(
     z.union([z.boolean(), z.number(), z.string().max(500), z.array(z.string().max(500)).max(100)]),
-  );
+  )
+  .superRefine((value, context) => {
+    if (
+      (value.largeExpenseAlertAmount !== undefined || value.lowBalanceAlertAmount !== undefined) &&
+      value.planningCurrency !== "USD"
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Finance amount thresholds currently require planningCurrency USD.",
+        path: ["planningCurrency"],
+      });
+    }
+  });
 export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSchema>;
 
 export const financeAccountSchema = z.object({
@@ -324,6 +337,11 @@ export const financeGuidedSetupContextSchema = z.object({
       "refresh_provider_data",
       "confirm_ambiguous_transfer",
       "create_merchant_rule",
+      "apply_categorization",
+      "review_recurring_obligation",
+      "resolve_alert",
+      "manage_merchants",
+      "add_manual_transaction",
     ]),
   ),
   ledgerHealth: financeLedgerHealthSchema,

@@ -15,9 +15,28 @@ This log records delivered vertical slices against the master plan. It does not 
   four-worker batches retain structured per-decision partial-result reporting without exhausting
   the database pool.
 - Kept account/provider/import/profile/budget administration, permanent merchant rules, and
-  ambiguous transfers behind interactive human review. Agent attribution remains intact for
-  categorization, recurring-state, and merchant-display changes.
-- Added Finance-owned readiness presentation without expanding the shared Settings handoff.
+  ambiguous transfers behind interactive human review. The MCP surface is now proposal/read-only
+  for ledger decisions, while the API retains actor attribution and defensive stale/policy checks.
+- Agents can save Finance guidance drafts; only the signed-in Finance profile surface can activate
+  one, with an owned source and exact profile version.
+- Added Finance-owned readiness and activation presentation without expanding the shared Settings
+  handoff.
+
+## 2026-07-28 — Mail guided-setup expansion
+
+- Added a credential-free Mail setup context that preserves account identity, mailbox roles and
+  counts, freshness/error state, and Google-versus-iCloud automatic-rule capability.
+- Added typed inbox-style, important-email, and safe noise-retention preferences. Noise defaults to
+  review-only; recoverable Trash may use a user-chosen delay as short as one day.
+- Preserved previously observed threads when provider sync returns a capped recent page. Archive and
+  recoverable Trash rules remain preview-only until Mail has a durable due-work queue.
+- Added source-derived important-email attention items with same-thread serialization and shared
+  profile/attention/audit envelopes.
+- Made the rule lifecycle explicit: proposed previews disclose their dated 200-thread window and
+  truncation state, saved rules re-preview before signed-in Settings activation, fingerprint drift
+  conflicts, and active matching behavior must be paused before editing.
+- Audited Mail MCP annotations and descriptions, preserved structured results, and added
+  per-conversation partial-failure reporting for bulk provider writes.
 
 ## 2026-07-28 — Agent-guided setup and shared assistant contracts
 

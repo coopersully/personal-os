@@ -6,15 +6,21 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
-  it("keeps setup and proposals readable while account, budget, and sync administration stay human-only", async () => {
+  it("keeps setup readable while all consequential Finance mutations stay human-only", async () => {
     const app = new Hono<AppEnv>();
     const finances = {
       createAccount: vi.fn(),
       createBudget: vi.fn(),
+      createTransaction: vi.fn(),
       deleteAccount: vi.fn(),
       getGuidedSetupContext: vi.fn(async () => ({ ready: true })),
+      mergeMerchants: vi.fn(),
       proposeCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
+      resolveAlert: vi.fn(),
+      resolveReview: vi.fn(),
       syncPlaidAccount: vi.fn(),
+      updateMerchant: vi.fn(),
+      updateRecurringObligation: vi.fn(),
     };
     app.use("*", async (context, next) => {
       context.set("principal", {
@@ -50,6 +56,13 @@ describe("finance routes", () => {
       app.request(`/v1/finances/accounts/${id}`, { method: "DELETE" }),
       app.request("/v1/finances/budgets", json),
       app.request(`/v1/finances/accounts/${id}/sync`, json),
+      app.request(`/v1/finances/recurring/${id}`, { ...json, method: "PATCH" }),
+      app.request(`/v1/finances/alerts/${id}`, json),
+      app.request(`/v1/finances/merchants/${id}`, { ...json, method: "PATCH" }),
+      app.request("/v1/finances/merchants/merge", json),
+      app.request("/v1/finances/categorizations/apply", json),
+      app.request(`/v1/finances/review/${id}`, json),
+      app.request("/v1/finances/transactions", json),
     ]);
     for (const response of humanOnlyResponses) {
       expect(response.status).toBe(403);
@@ -66,5 +79,49 @@ describe("finance routes", () => {
     expect(finances.deleteAccount).not.toHaveBeenCalled();
     expect(finances.createBudget).not.toHaveBeenCalled();
     expect(finances.syncPlaidAccount).not.toHaveBeenCalled();
+    expect(finances.updateRecurringObligation).not.toHaveBeenCalled();
+    expect(finances.resolveAlert).not.toHaveBeenCalled();
+    expect(finances.updateMerchant).not.toHaveBeenCalled();
+    expect(finances.mergeMerchants).not.toHaveBeenCalled();
+    expect(finances.resolveReview).not.toHaveBeenCalled();
+    expect(finances.createTransaction).not.toHaveBeenCalled();
+  });
+
+  it("keeps POST proposal compatibility on the Finance read scope", async () => {
+    const app = new Hono<AppEnv>();
+    const finances = {
+      proposeCategorizations: vi.fn(async () => ({ items: [], nextCursor: "opaque-next" })),
+    };
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      context.set("requestId", "request-read-only");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      finances: finances as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const response = await app.request("/v1/finances/categorizations/propose?cursor=opaque", {
+      method: "POST",
+    });
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      nextCursor: "opaque-next",
+      proposals: [],
+    });
+    expect(finances.proposeCategorizations).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ cursor: "opaque" }),
+    );
   });
 });

@@ -17,6 +17,7 @@ import { createFinanceService } from "./finance-service.js";
 describe.sequential("assistant setup service", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
+  let finances: ReturnType<typeof createFinanceService>;
   let service: ReturnType<typeof createAssistantService>;
   let userId: string;
 
@@ -39,9 +40,31 @@ describe.sequential("assistant setup service", () => {
       .returning();
     if (!user) throw new Error("Fixture user was not created.");
     userId = user.id;
+    finances = createFinanceService({
+      db: database.db,
+      now: () => new Date("2026-07-28T16:00:00.000Z"),
+    });
     service = createAssistantService({
       db: database.db,
       now: () => new Date("2026-07-28T15:00:00.000Z"),
+      validateProfileSources: async (
+        transaction,
+        domain,
+        profileUserId,
+        sourceIds,
+        status,
+        actorType,
+      ) => {
+        if (domain === "finances") {
+          await finances.validateProfileSources(
+            transaction,
+            profileUserId,
+            sourceIds,
+            status,
+            actorType,
+          );
+        }
+      },
     });
   }, 120_000);
 
@@ -109,6 +132,25 @@ describe.sequential("assistant setup service", () => {
         context(),
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+    for (const relatedEntityType of ["mail_account", "mail_rule"] as const) {
+      await expect(
+        service.createAttentionItem(
+          {
+            domain: "mail",
+            expiresAt: null,
+            importance: "high",
+            kind: "follow_up",
+            occursAt: null,
+            relatedEntityId: userId,
+            relatedEntityType,
+            source: null,
+            summary: "Forged Mail provenance.",
+            title: "Forged Mail attention",
+          },
+          context(),
+        ),
+      ).rejects.toThrow("reserved for Mail-owned");
+    }
     await expect(
       service.upsertProfile(
         {
@@ -228,6 +270,15 @@ describe.sequential("assistant setup service", () => {
       },
       requestId: "finance-profile",
     };
+    const financeUserContext = {
+      principal: {
+        actorId: financeUser.id,
+        actorType: "user" as const,
+        scopes: new Set(["finances:read" as const, "finances:write" as const]),
+        userId: financeUser.id,
+      },
+      requestId: "finance-profile-activation",
+    };
     const sourceContext = {
       notes: null,
       purpose: "Bills and daily spending",
@@ -284,7 +335,7 @@ describe.sequential("assistant setup service", () => {
           sourceContexts: [],
           status: "active",
         },
-        financeContext,
+        financeUserContext,
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
     await expect(
@@ -296,12 +347,32 @@ describe.sequential("assistant setup service", () => {
         },
         financeContext,
       ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          status: "active",
+        },
+        financeUserContext,
+      ),
     ).resolves.toMatchObject({
       domain: "finances",
       sourceContexts: [expect.objectContaining({ sourceId: account.id })],
       status: "active",
       version: 2,
     });
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 1,
+          status: "active",
+        },
+        financeUserContext,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
     const [raceAccount] = await database.db
       .insert(financeAccounts)
       .values({
@@ -313,10 +384,6 @@ describe.sequential("assistant setup service", () => {
       })
       .returning();
     if (!raceAccount) throw new Error("Finance race fixture account was not created.");
-    const finances = createFinanceService({
-      db: database.db,
-      now: () => new Date("2026-07-28T16:00:00.000Z"),
-    });
     const raceResults = await Promise.allSettled([
       service.upsertProfile(
         {
@@ -351,6 +418,29 @@ describe.sequential("assistant setup service", () => {
   });
 
   it("uses one cross-domain attention shape and audits changes", async () => {
+    await expect(
+      service.createAttentionItem(
+        {
+          domain: "mail",
+          expiresAt: null,
+          importance: "high",
+          kind: "important",
+          occursAt: null,
+          relatedEntityId: userId,
+          relatedEntityType: "mail_thread",
+          source: {
+            accountId: userId,
+            provider: "google",
+            remoteId: "unvalidated-thread",
+            revision: null,
+            sourceType: "mail_thread",
+          },
+          summary: "Unvalidated Mail source.",
+          title: "Unsafe attention item",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
     const item = await service.createAttentionItem(
       {
         domain: "mail",
@@ -414,5 +504,51 @@ describe.sequential("assistant setup service", () => {
         "assistant.attention.updated",
       ]),
     );
+    const sharedAudit = JSON.stringify(
+      events
+        .filter(
+          (event) =>
+            event.action.startsWith("assistant.profile.") ||
+            event.action.startsWith("assistant.attention."),
+        )
+        .map(({ after, before }) => ({ after, before })),
+    );
+    for (const privateValue of [
+      "Keep only high-signal mail in the inbox.",
+      "Keep delivery problems visible.",
+      "Personal orders and communication",
+      "personal-mail",
+      "A clean, high-signal personal inbox.",
+      "Reply to Ada",
+      "A reply is due tomorrow.",
+      "Reminder cleanup complete",
+      "No overdue reminders remain.",
+    ]) {
+      expect(sharedAudit).not.toContain(privateValue);
+    }
+    expect(
+      events.find((event) => event.action === "assistant.profile.created")?.after,
+    ).toMatchObject({
+      changedFields: expect.arrayContaining([
+        "categories",
+        "instructions",
+        "objective",
+        "preferences",
+        "sourceContexts",
+        "status",
+        "summary",
+      ]),
+      domain: "mail",
+      sourceCount: 1,
+      status: "draft",
+      version: 1,
+    });
+    expect(events.find((event) => event.action === "assistant.attention.updated")?.after).toEqual({
+      domain: "mail",
+      importance: "high",
+      kind: "follow_up",
+      relatedEntityType: null,
+      status: "resolved",
+    });
   });
 });

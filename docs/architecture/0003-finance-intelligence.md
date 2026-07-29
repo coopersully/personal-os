@@ -33,20 +33,24 @@ All finance endpoints require `finances:read` for reads and `finances:write`
 for mutations. Provider connection, import, account, budget, financial-profile,
 and income-stream administration remain human-only. Permanent merchant rules
 and ambiguous-transfer confirmation also require an interactive human session.
-The bounded recurring-payment, alert, categorization, and ordinary review
-decisions exposed to MCP are available to a scoped agent and always carry the
-normal audit context.
+Finance MCP is proposal/read-only for ledger and review work: categorization
+application, recurring and alert state, merchant changes, manual transactions,
+and review resolution all require a signed-in Ilo user at the API route.
 
 Finance guided setup reuses the shared versioned domain-profile envelope. The
 agent-editable object is the durable Finance domain profile saved through
 `save_domain_profile("finances")`; it is distinct from the human-managed
 financial profile. Its `sourceContexts` are canonical Finance account IDs, not
 arbitrary labels, and the API rejects duplicates, stale accounts, and accounts
-owned by another user. Source-empty Finance domain profiles may remain drafts,
-but activation requires at least one owned account source. Finance preference
-keys use explicit units: confidence is a 0–1 fraction, currency thresholds are
-account currency amounts, and `recurringAmountChangePercent` is percentage
-points (`20` means 20%).
+owned by another user. They are interpretation guidance, not account-level
+authorization; token scopes determine access. Source-empty Finance domain
+profiles may remain drafts. An agent may save a draft, but activation requires
+a signed-in user, an exact profile version, and at least one owned account
+source. Finance preference keys use explicit units: confidence is a 0–1
+fraction, scalar currency thresholds require the current USD planning
+currency, and `recurringAmountChangePercent` is percentage points (`20` means
+20%). These preferences do not schedule reviews or reconfigure alert
+generation.
 
 ## Ledger and learning model
 
@@ -67,8 +71,9 @@ Apply requires that exact revision and performs the transaction update,
 classification evidence, review resolution, optional human-approved merchant
 rule, and audit insert in one database transaction. A batch can succeed for
 some decisions and fail for others, but a single decision never reports failure
-after committing only part of itself. Agent apply also recomputes the current
-server proposal and rejects substituted categories or confidence. Proposal
+after committing only part of itself. The defensive agent-attributed service
+path also recomputes the current server proposal and rejects substituted
+categories or confidence. Proposal
 revalidation runs after locking the transaction and the user's categorization
 policy rows; every merchant-rule and classification-evidence writer takes the
 same policy lock. A concurrent policy change therefore commits before
@@ -80,24 +85,25 @@ omits transaction amounts, merchants, notes, and rationales so an `audit:read`
 grant does not imply `finances:read`. Transfer confirmation uses the same
 transactional path.
 
-An agent resolving an existing category review must submit the accepted
-proposal confidence and transaction `updatedAt`. The API applies the same
-proposal, policy, and stale-revision checks as batch categorization. Interactive
-users may still resolve a current review directly; ambiguous transfer
-confirmation remains human-only.
+The defensive service path for an agent-attributed category review requires the
+accepted proposal confidence and transaction `updatedAt`, then applies the same
+proposal, policy, and stale-revision checks as batch categorization. Public
+agent routes do not expose review resolution. Interactive users may resolve a
+current review directly; ambiguous transfer confirmation remains human-only.
 
 An exact retry of an unchanged below-threshold decision reuses the existing
 open review and deferred evidence. The result reports `replayed: true` and does
 not update timestamps or append classification/audit rows; a changed revision,
 category, confidence, source, or rationale is not treated as that replay.
-The MCP apply annotation therefore marks the effect as retry-safe. Structured
-per-item errors include the API request ID so unexpected infrastructure
-failures remain correlatable without exposing internal details.
+Structured per-item API errors include the request ID so unexpected
+infrastructure failures remain correlatable without exposing internal details.
 
 Provider transfer labels and matching amounts alone are insufficient to exclude
 a record from spending. A transfer is excluded only after a supported account
 movement is matched or confirmed. Unmatched candidates remain visible and enter
 the review queue. Pending transactions remain distinct from posted spending.
+They may be organized provisionally, but cannot create classification evidence
+or permanent merchant learning before posting.
 
 ## Income, recurring activity, and cash flow
 
@@ -144,19 +150,21 @@ destructive colors, while neutral activity is muted.
 Read tools expose guided-setup readiness, the durable shared profile, overview,
 ledger health, transactions, budgets, merchants, review queue, wealth, and cash
 flow. Agents should inspect guided context, ledger health, and relevant
-transactions before offering financial guidance. Categorization uses a
-proposal/apply pair; applying is still constrained by the service's adaptive
-confidence policy and a transaction revision. Proposal pages use the ledger's
-opaque cursor and read paths never materialize merchant/category enrichment.
-Direct category edits are human-only. Merchant merges, names, review
-decisions, recurring status, and alerts have explicit bounded mutation tools.
-Agents must not turn an ambiguous result into a category, transfer,
-subscription, or permanent rule on their own.
+transactions before offering financial guidance. Categorization exposes only a
+read-scoped proposal tool; a signed-in person applies the current decision in
+Finance. Proposal pages use the ledger's opaque cursor and read paths never
+materialize merchant/category enrichment. Direct category edits, merchant
+changes, review decisions, recurring state, alerts, and manual transactions are
+absent from MCP and guarded as human-only API routes. Agents must not turn an
+ambiguous result into a category, transfer, subscription, or permanent rule on
+their own.
 
-MCP annotations describe expected host UX only. The API's scopes, human-session
-guards, adaptive policy, revision checks, transactions, and audit trail remain
-the security and integrity boundary. Batch apply responses preserve structured
-per-decision errors so hosts can disclose partial effects between decisions.
+MCP annotations describe expected host UX only. All Finance read tools declare
+the four risk hints, while the API's scopes, human-session guards, adaptive
+policy, revision checks, transactions, and audit trail remain the security and
+integrity boundary. The shared result helper preserves structured API errors
+and structured content. Output schemas and an internal access-token exchange
+remain shared MCP transport follow-ups rather than Finance-local contracts.
 An account referenced by the durable Finance profile cannot be deleted until
 the human removes that source context. Profile saves and account deletion lock
 the account before the profile so a concurrent save/delete cannot create a

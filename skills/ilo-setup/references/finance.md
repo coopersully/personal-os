@@ -5,6 +5,11 @@ reviewed organization. It never grants authority to connect providers, import da
 separate human-managed financial profile or budgets, move money, trade, pay bills, create permanent
 merchant rules, or silently confirm ambiguous transfers.
 
+Financial context is sensitive. Before reading it, tell the user which Finance read scope is being
+used; before any durable profile write, distinguish that guidance-only write from human-only ledger
+and review mutations. `sourceContexts` record how the user wants accounts interpreted. They do not
+restrict token access to those accounts; API scopes remain the authorization boundary.
+
 ## Inspect before interviewing
 
 1. Call `get_finance_guided_setup`. It returns the shared Finance domain profile, account-source
@@ -39,12 +44,13 @@ stable preference keys when the user supplies them:
 - `reviewPendingTransactions`: boolean
 - `reviewConfidenceBelow`: 0.5–1
 - `billReviewLeadDays`: 0–90
-- `largeExpenseAlertAmount`, `lowBalanceAlertAmount`: currency amounts
+- `planningCurrency`: currently `USD`; required with either scalar amount threshold
+- `largeExpenseAlertAmount`, `lowBalanceAlertAmount`: USD planning amounts
 - `recurringAmountChangePercent`: percentage points from 0–100 (`20` means a 20% change)
 - `termForSpending`, `termForReviewQueue`: short user language
 
-These preferences guide the agent and attention workflow. They do not replace the API's adaptive
-categorization threshold or silently reconfigure alert generation.
+These preferences guide later agent conversations. They do not schedule a review, create an
+automation, replace the API's adaptive categorization threshold, or reconfigure alert generation.
 
 ## Save and activate safely
 
@@ -53,8 +59,10 @@ categorization threshold or silently reconfigure alert generation.
    `expectedVersion` when revising.
 3. Explain which suggested workflows are currently available and which actions remain human-only.
 4. Keep the Finance domain profile in `draft` when no account source is in scope. Activate only
-   after at least one owned account source is recorded and the user accepts the summary. An active
-   Finance domain profile is durable guidance, not approval for a later financial mutation.
+   after at least one owned account source is recorded and the user accepts the summary. The agent
+   saves only the draft; direct the signed-in person to Finances → Profile → Activate guidance.
+   An active Finance domain profile is durable guidance, not approval for a later financial
+   mutation.
 
 ## Use reviewed workflows
 
@@ -65,14 +73,9 @@ categorization threshold or silently reconfigure alert generation.
 2. Call `propose_finance_categorizations`. `meetsPolicyThreshold` means eligible under current API
    policy; it does not mean the proposal ran automatically. Follow `nextCursor` when more review
    work is needed beyond the current page.
-3. Show the transaction, category, confidence, threshold, and rationale. Apply only decisions the
-   user accepts.
-4. Call `apply_finance_categorizations` with `learnMerchant` set to `never` or `suggest`, passing
-   the exact transaction `updatedAt` from the accepted proposal as
-   `expectedTransactionUpdatedAt`.
-5. Inspect every result. A batch can report `applied`, `review_required`, and `failed` items
-   together; disclose partial effects and leave failed or low-confidence items in review.
-   `replayed: true` means an exact lost-response retry reused the existing durable decision.
+3. Show the transaction, category, confidence, threshold, and rationale. The agent cannot apply the
+   proposal. Direct the signed-in person to Finance, where the current transaction revision and
+   review state are checked before application.
 
 Permanent merchant rules are human-only. Never infer one from a repeated name, a high score, or a
 broad token.
@@ -81,14 +84,9 @@ broad token.
 
 - An agent may not confirm an ambiguous transfer. Preserve the review case and direct the user to
   Finance.
-- Change an inferred recurring obligation only after the user explicitly confirms the item and
-  desired Ilo status. `cancelled` changes Ilo's forecast context; it does not cancel payment with a
-  provider.
-- Rename or merge merchants only after inspecting aliases and receiving explicit confirmation.
-  A merge removes the source merchant and requires a concise rationale.
-- Resolve or dismiss an alert only after inspecting its evidence and confirming the user no longer
-  needs it. Alert resolution does not change the underlying income, bill, subscription, or
-  transaction.
+- An agent may inspect recurring obligations, merchants, and alerts, but changes require a signed-in
+  person in Finance. A recurring status such as `cancelled` changes only Ilo's forecast context; it
+  never cancels a provider payment.
 
 MCP annotations are host hints, not authority. The Finance API's scope checks, human-only guards,
 adaptive thresholds, audit events, and source attribution are the enforcement boundary.

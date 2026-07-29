@@ -1,4 +1,9 @@
-import type { AccessScope, AssistantDomain } from "@personal-os/domain";
+import type {
+  AccessScope,
+  AssistantDomain,
+  MailRulePreview,
+  MailSetupAccount,
+} from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -73,6 +78,9 @@ const domainOptions: Array<{
   { domain: "finances", label: "Finances", shortLabel: "Finances" },
   { domain: "goals", label: "Goals", shortLabel: "Goals" },
 ];
+const domainLabels: Record<AssistantDomain, string> = Object.fromEntries(
+  domainOptions.map((option) => [option.domain, option.label]),
+) as Record<AssistantDomain, string>;
 
 const scopeLabels: Record<AccessScope, string> = {
   "audit:read": "Read activity",
@@ -81,8 +89,8 @@ const scopeLabels: Record<AccessScope, string> = {
   "bookmarks:read": "Read X bookmarks",
   "calendar:read": "Read calendar",
   "calendar:write": "Manage calendar",
-  "finances:read": "Read finances",
-  "finances:write": "Manage finances",
+  "finances:read": "Read sensitive financial accounts and activity",
+  "finances:write": "Save Finance guidance and transaction notes",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
   "mail:read": "Read mail",
@@ -93,11 +101,12 @@ const scopeLabels: Record<AccessScope, string> = {
   "tasks:write": "Manage tasks",
 };
 
+const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
 const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
     description: "Learn your inbox preferences, preview rules, and run approved Mail rules.",
     name: "Mail setup",
-    scopes: ["mail:read", "mail:write"],
+    scopes: defaultTokenScopes,
   },
   {
     description: "Plan, create, and complete your day.",
@@ -152,7 +161,10 @@ export function AgentAccessSettings() {
     queryFn: api.getAssistantSetupStatus,
     queryKey: ["assistant-setup-status"],
   });
-  const connectors = useQuery({ queryFn: api.listConnectors, queryKey: ["connectors"] });
+  const mailSetup = useQuery({
+    queryFn: api.getMailSetupContext,
+    queryKey: ["mail-setup-context"],
+  });
   const rules = useQuery({ queryFn: api.listMailRules, queryKey: ["mail-rules"] });
   const tokens = useQuery({ queryFn: api.listAccessTokens, queryKey: ["tokens"] });
   const oauthClients = useQuery({ queryFn: api.listOAuthClients, queryKey: ["oauth-clients"] });
@@ -167,15 +179,14 @@ export function AgentAccessSettings() {
 
   const activeTokens = (tokens.data ?? []).filter((token) => token.revokedAt === null);
   const connectedAgentCount = activeTokens.length + (oauthClients.data?.length ?? 0);
-  const mailSources = (connectors.data ?? []).filter((account) => account.mailEnabled);
+  const mailSources = mailSetup.data?.accounts ?? [];
   const mailProfile = setup.data?.domains.find((item) => item.domain === "mail");
   const activeRules = (rules.data ?? []).filter(
     (rule) => rule.enabled && rule.policy === "approved_rule",
   );
   const selectedGuide = guide.data?.domains.find((item) => item.domain === selectedDomain);
   const selectedProfile = setup.data?.domains.find((item) => item.domain === selectedDomain);
-  const selectedLabel =
-    domainOptions.find((item) => item.domain === selectedDomain)?.label ?? selectedDomain;
+  const selectedLabel = domainLabels[selectedDomain];
   const setupPrompt = domainSetupPrompt(
     selectedDomain,
     selectedLabel,
@@ -184,7 +195,7 @@ export function AgentAccessSettings() {
   const blockingError =
     guide.error ??
     setup.error ??
-    connectors.error ??
+    mailSetup.error ??
     rules.error ??
     tokens.error ??
     oauthClients.error;
@@ -220,7 +231,7 @@ export function AgentAccessSettings() {
               complete={mailSources.length > 0}
               description={
                 mailSources.length > 0
-                  ? `${mailSources.length} Mail account${mailSources.length === 1 ? "" : "s"} ready for setup`
+                  ? mailSourceSummary(mailSources)
                   : "Connect a Mail account before asking an agent to learn your inbox."
               }
               title="Connected material"
@@ -252,6 +263,13 @@ export function AgentAccessSettings() {
               title="Mail preferences"
             />
           </ItemGroup>
+
+          <MailRuleReview
+            accounts={mailSources}
+            loading={rules.isPending}
+            profileActive={mailProfile?.profileStatus === "active"}
+            rules={rules.data ?? []}
+          />
 
           <div className="agent-access__steps">
             <ConnectionStep
@@ -319,7 +337,7 @@ export function AgentAccessSettings() {
                 </AlertTitle>
                 <AlertDescription>
                   {selectedGuide?.support === "executable_rules"
-                    ? "Mail is the first full automation path. New rules begin as drafts, preview exact recent matches, and should only be activated after you accept the summary."
+                    ? "Mail setup maps every inbox before sampling it, records important conversations as source-linked attention, and captures user-chosen delayed archive or recoverable Trash preferences. Delayed retention rules remain preview-only until Ilo has a durable due-work queue. Exact read, star, and label rules use a dated preview and signed-in activation."
                     : `${selectedLabel} uses the same durable profile and attention structure. Executable domain rules are not available yet.`}
                   {selectedProfile?.profileStatus
                     ? ` Your current profile is ${selectedProfile.profileStatus}.`
@@ -382,6 +400,191 @@ export function AgentAccessSettings() {
       />
     </div>
   );
+}
+
+function MailRuleReview({
+  accounts,
+  loading,
+  profileActive,
+  rules,
+}: {
+  accounts: MailSetupAccount[];
+  loading: boolean;
+  profileActive: boolean;
+  rules: Awaited<ReturnType<typeof api.listMailRules>>;
+}) {
+  const queryClient = useQueryClient();
+  const [reviewed, setReviewed] = useState<{ id: string; preview: MailRulePreview } | null>(null);
+  const review = useMutation({
+    mutationFn: api.previewSavedMailRule,
+    onError: (error) => toast.error(errorMessage(error)),
+    onSuccess: (preview, id) => setReviewed({ id, preview }),
+  });
+  const activate = useMutation({
+    mutationFn: ({ id, preview }: { id: string; preview: MailRulePreview }) =>
+      api.activateMailRule(id, {
+        expectedCandidateIds: preview.candidates.map((candidate) => candidate.id),
+        expectedPreviewFingerprint: preview.fingerprint,
+        expectedPreviewedAt: preview.previewedAt,
+        expectedVersion: preview.ruleVersion as number,
+      }),
+    onError: (error) => toast.error(errorMessage(error)),
+    onSuccess: async () => {
+      setReviewed(null);
+      toast.success("Mail rule activated.");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["mail-rules"] }),
+        queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
+      ]);
+    },
+  });
+  if (loading || rules.length === 0) return null;
+  const accountNames = new Map(
+    accounts.map((account) => [account.accountId, account.email ?? account.label]),
+  );
+  const reviewedRule = reviewed ? rules.find((rule) => rule.id === reviewed.id) : null;
+  const retentionActivationDeferred = reviewedRule?.actions.some(
+    (action) => action.afterDays > 0 || action.type === "archive" || action.type === "trash",
+  );
+  return (
+    <section aria-labelledby="mail-rule-review-heading" className="agent-access__rule-review">
+      <div>
+        <h3 id="mail-rule-review-heading">Review Mail rules</h3>
+        <p>Agents can draft rules. Only you can activate one after reviewing its current sample.</p>
+      </div>
+      <ItemGroup>
+        {rules.map((rule) => (
+          <Item key={rule.id} size="sm" variant="outline">
+            <ItemContent>
+              <ItemTitle>{rule.name}</ItemTitle>
+              <ItemDescription>
+                {describeMailRule(rule)} ·{" "}
+                {rule.enabled && rule.policy === "approved_rule" ? "Active" : "Draft"}
+              </ItemDescription>
+            </ItemContent>
+            {!rule.enabled ? (
+              <ItemActions>
+                <Button
+                  disabled={review.isPending}
+                  onClick={() => review.mutate(rule.id)}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  Review
+                </Button>
+              </ItemActions>
+            ) : null}
+          </Item>
+        ))}
+      </ItemGroup>
+      {reviewed ? (
+        <div className="agent-access__rule-preview">
+          <Alert role="status" variant={reviewed.preview.window.truncated ? "warning" : "info"}>
+            <ShieldCheck />
+            <AlertTitle>
+              {reviewed.preview.matchedCount} current match
+              {reviewed.preview.matchedCount === 1 ? "" : "es"}
+            </AlertTitle>
+            <AlertDescription>
+              Reviewed {formatPreviewWindow(reviewed.preview)}. This is a bounded recent sample; the
+              rule condition will also govern future matching Mail. Activation rechecks this sample,
+              due states, rule version, and fingerprint.
+              {reviewedRule
+                ? ` Rule scope: ${formatRuleSources(reviewedRule.sourceIds, accountNames)}.`
+                : ""}
+            </AlertDescription>
+          </Alert>
+          {reviewed.preview.candidates.length > 0 ? (
+            <ItemGroup aria-label="Exact Mail rule matches">
+              {reviewed.preview.candidates.map((candidate) => (
+                <Item key={candidate.id} size="xs" variant="muted">
+                  <ItemContent>
+                    <ItemTitle>{candidate.subject || "(No subject)"}</ItemTitle>
+                    <ItemDescription>
+                      {candidate.from.address} ·{" "}
+                      {accountNames.get(candidate.accountId) ?? "Unknown account"} ·{" "}
+                      {formatCandidateActions(candidate.actions)}
+                    </ItemDescription>
+                  </ItemContent>
+                </Item>
+              ))}
+            </ItemGroup>
+          ) : null}
+          {!profileActive ? (
+            <Alert variant="warning">
+              <ShieldCheck />
+              <AlertTitle>Activate your Mail profile first</AlertTitle>
+              <AlertDescription>
+                Review and accept the profile summary in your agent conversation before activating a
+                rule.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {retentionActivationDeferred ? (
+            <Alert variant="warning">
+              <ShieldCheck />
+              <AlertTitle>Delayed Mail automation remains preview-only</AlertTitle>
+              <AlertDescription>
+                Ilo can save this archive or recoverable Trash preference and show exact candidates,
+                but cannot activate retention rules until due work has a durable queue. Permanent
+                deletion is never used.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <Button
+            disabled={
+              activate.isPending ||
+              !profileActive ||
+              reviewed.preview.ruleVersion === null ||
+              retentionActivationDeferred
+            }
+            onClick={() => activate.mutate(reviewed)}
+            type="button"
+          >
+            Activate reviewed rule
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function describeMailRule(rule: Awaited<ReturnType<typeof api.listMailRules>>[number]): string {
+  const action = rule.actions
+    .map(
+      (item) =>
+        `${item.type.replaceAll("_", " ")}${item.afterDays ? ` after ${item.afterDays}d` : ""}`,
+    )
+    .join(", ");
+  return `${rule.condition.field} ${rule.condition.operator.replaceAll("_", " ")} “${rule.condition.value}” → ${action}`;
+}
+
+function formatPreviewWindow(preview: MailRulePreview): string {
+  if (!preview.window.newestReceivedAt || !preview.window.oldestReceivedAt) {
+    return `0 of ${preview.window.limit} recent conversations`;
+  }
+  const oldest = new Date(preview.window.oldestReceivedAt).toLocaleDateString();
+  const newest = new Date(preview.window.newestReceivedAt).toLocaleDateString();
+  return `${preview.scannedCount} conversations from ${oldest} to ${newest}${
+    preview.window.truncated ? ` (more than ${preview.window.limit} exist)` : ""
+  }`;
+}
+
+function formatRuleSources(sourceIds: string[], accountNames: Map<string, string>): string {
+  if (sourceIds.length === 0) return "no explicit account selected";
+  return sourceIds.map((sourceId) => accountNames.get(sourceId) ?? "Unknown account").join(", ");
+}
+
+function formatCandidateActions(actions: MailRulePreview["candidates"][number]["actions"]): string {
+  return actions
+    .map((action) => {
+      const label =
+        action.type === "trash" ? "recoverable Trash" : action.type.replaceAll("_", " ");
+      const delay = action.afterDays > 0 ? ` after ${action.afterDays}d` : "";
+      return `${label}${delay} — ${action.due ? "due now" : "retained until due"}`;
+    })
+    .join("; ");
 }
 
 function ReadinessItem({
@@ -516,7 +719,7 @@ function TokenAccess({
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
   const [tokenName, setTokenName] = useState("Local agent");
-  const [scopes, setScopes] = useState<AccessScope[]>(tokenPresets[0]?.scopes ?? []);
+  const [scopes, setScopes] = useState<AccessScope[]>(defaultTokenScopes);
   const create = useMutation({
     mutationFn: () => api.createAccessToken({ name: tokenName.trim(), scopes }),
     onError: (error) => toast.error(errorMessage(error)),
@@ -724,9 +927,21 @@ function TokenAccess({
 
 function domainSetupPrompt(domain: AssistantDomain, label: string, invocation: string): string {
   if (domain === "mail") {
-    return `Use ${invocation} to set up my Mail in Ilo. Inspect my connected mailboxes and a small recent sample, ask the shortest useful interview, save a draft profile, preview exact rule matches, and do not activate anything until I accept the summary.`;
+    return `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Delayed archive and Trash rules remain preview-only until Ilo has a durable due-work queue. For exact read, star, or label rules, use review_mail_rule after I explicitly accept the summary, then tell me to activate it myself in Ilo Settings → Agent access → Review Mail rules.`;
   }
   return `Use ${invocation} to set up my ${label} in Ilo. Inspect the available sources and any existing profile, ask the shortest useful interview, save my preferences as a draft, and clearly separate what Ilo can do now from behavior that is not yet automated.`;
+}
+
+function mailSourceSummary(
+  accounts: Awaited<ReturnType<typeof api.getMailSetupContext>>["accounts"],
+): string {
+  const identities = accounts.map((account) => account.email ?? account.label);
+  const failing = accounts.filter((account) => account.syncStatus === "error").length;
+  const sourceSummary =
+    identities.length <= 2
+      ? identities.join(" and ")
+      : `${identities.slice(0, 2).join(", ")} +${identities.length - 2}`;
+  return `${accounts.length} Mail account${accounts.length === 1 ? "" : "s"} · ${sourceSummary}${failing > 0 ? ` · ${failing} needs reconnect` : ""}`;
 }
 
 async function copyToClipboard(value: string, label: string): Promise<void> {

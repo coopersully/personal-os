@@ -1,10 +1,4 @@
-import {
-  attentionItems,
-  auditEvents,
-  type Database,
-  domainProfiles,
-  financeAccounts,
-} from "@personal-os/database";
+import { attentionItems, auditEvents, type Database, domainProfiles } from "@personal-os/database";
 import {
   type AssistantDomain,
   type AssistantSetupStatus,
@@ -14,20 +8,39 @@ import {
   type CreateAttentionItemInput,
   type DomainProfile,
   featureAccessPolicies,
-  idSchema,
   type UpdateAttentionItemInput,
   type UpsertDomainProfileInput,
 } from "@personal-os/domain";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
-import { auditSnapshot } from "./serialization.js";
+import {
+  auditAttentionItemMetadata,
+  auditDomainProfileMetadata,
+  domainProfileChangedFields,
+} from "./serialization.js";
 import type { Principal } from "./types.js";
 
 type MutationContext = { principal: Principal; requestId: string };
+export type ProfileSourceTransaction = Pick<Database, "select">;
 
-export function createAssistantService({ db, now }: { db: Database; now: () => Date }) {
+export function createAssistantService({
+  db,
+  now,
+  validateProfileSources,
+}: {
+  db: Database;
+  now: () => Date;
+  validateProfileSources: (
+    transaction: ProfileSourceTransaction,
+    domain: AssistantDomain,
+    userId: string,
+    sourceIds: string[],
+    status: UpsertDomainProfileInput["status"],
+    actorType: Principal["actorType"],
+  ) => Promise<void>;
+}) {
   async function findProfile(userId: string, domain: AssistantDomain) {
     return (
       await db
@@ -74,49 +87,6 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       input: UpsertDomainProfileInput,
       context: MutationContext,
     ): Promise<DomainProfile> {
-      const financeSourceIds =
-        input.domain === "finances"
-          ? [...new Set(input.sourceContexts.map((source) => source.sourceId))]
-          : [];
-      if (input.domain === "finances" && input.sourceContexts.length > 0) {
-        if (financeSourceIds.length !== input.sourceContexts.length) {
-          throw new AppError(
-            "invalid_request",
-            "Include each Finance account once in source contexts.",
-          );
-        }
-        if (financeSourceIds.some((sourceId) => !idSchema.safeParse(sourceId).success)) {
-          throw new AppError(
-            "invalid_request",
-            "Finance source contexts must use canonical Finance account IDs.",
-          );
-        }
-      }
-      if (
-        input.domain === "finances" &&
-        input.status === "active" &&
-        financeSourceIds.length === 0
-      ) {
-        throw new AppError(
-          "invalid_request",
-          "Active Finance setup requires at least one owned account source.",
-        );
-      }
-      const existing = await findProfile(context.principal.userId, input.domain);
-      if (existing && input.expectedVersion === undefined) {
-        throw new AppError(
-          "invalid_request",
-          "expectedVersion is required when revising a domain profile.",
-        );
-      }
-      if (
-        input.expectedVersion !== undefined &&
-        input.expectedVersion !== (existing?.version ?? 0)
-      ) {
-        throw new AppError("conflict", "The domain profile changed since it was loaded.", {
-          currentVersion: existing?.version ?? null,
-        });
-      }
       const values = {
         categories: input.categories,
         domain: input.domain,
@@ -131,23 +101,38 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       let saved: typeof domainProfiles.$inferSelect;
       try {
         saved = await db.transaction(async (transaction) => {
-          if (financeSourceIds.length > 0) {
-            const ownedSources = await transaction
-              .select({ id: financeAccounts.id })
-              .from(financeAccounts)
-              .where(
-                and(
-                  eq(financeAccounts.userId, context.principal.userId),
-                  inArray(financeAccounts.id, financeSourceIds),
-                ),
-              )
-              .for("update");
-            if (ownedSources.length !== financeSourceIds.length) {
-              throw new AppError(
-                "invalid_request",
-                "Finance source contexts must reference current accounts owned by this user.",
-              );
-            }
+          await validateProfileSources(
+            transaction,
+            input.domain,
+            context.principal.userId,
+            input.sourceContexts.map((source) => source.sourceId),
+            input.status,
+            context.principal.actorType,
+          );
+          const [existing] = await transaction
+            .select()
+            .from(domainProfiles)
+            .where(
+              and(
+                eq(domainProfiles.userId, context.principal.userId),
+                eq(domainProfiles.domain, input.domain),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (existing && input.expectedVersion === undefined) {
+            throw new AppError(
+              "invalid_request",
+              "expectedVersion is required when revising a domain profile.",
+            );
+          }
+          if (
+            input.expectedVersion !== undefined &&
+            input.expectedVersion !== (existing?.version ?? 0)
+          ) {
+            throw new AppError("conflict", "The domain profile changed since it was loaded.", {
+              currentVersion: existing?.version ?? null,
+            });
           }
           const [profile] = existing
             ? await transaction
@@ -167,11 +152,12 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
           if (!profile) {
             throw new AppError("conflict", "The domain profile changed while it was being saved.");
           }
+          const changedFields = domainProfileChangedFields(existing ?? null, profile);
           await transaction.insert(auditEvents).values(
             auditValues({
               action: existing ? "assistant.profile.updated" : "assistant.profile.created",
-              after: auditSnapshot(profile),
-              before: auditSnapshot(existing ?? null),
+              after: auditDomainProfileMetadata(profile, changedFields),
+              before: auditDomainProfileMetadata(existing ?? null, changedFields),
               entityId: profile.id,
               entityType: "domain_profile",
               ...context,
@@ -180,7 +166,7 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
           return profile;
         });
       } catch (error) {
-        if (!existing && isUniqueViolation(error, "domain_profiles_user_domain_idx")) {
+        if (isUniqueViolation(error, "domain_profiles_user_domain_idx")) {
           throw new AppError("conflict", "The domain profile changed while it was being created.");
         }
         throw error;
@@ -192,6 +178,18 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       input: CreateAttentionItemInput,
       context: MutationContext,
     ): Promise<AttentionItem> {
+      if (
+        input.domain === "mail" &&
+        (input.source !== null ||
+          input.relatedEntityType === "mail_thread" ||
+          input.relatedEntityType === "mail_account" ||
+          input.relatedEntityType === "mail_rule")
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Mail source, account, rule, and conversation provenance is reserved for Mail-owned attention paths.",
+        );
+      }
       const created = await db.transaction(async (transaction) => {
         const item = requireDatabaseRecord(
           (
@@ -210,7 +208,7 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "assistant.attention.created",
-            after: auditSnapshot(item),
+            after: auditAttentionItemMetadata(item),
             before: null,
             entityId: item.id,
             entityType: "attention_item",
@@ -271,8 +269,8 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "assistant.attention.updated",
-            after: auditSnapshot(item),
-            before: auditSnapshot(existing),
+            after: auditAttentionItemMetadata(item),
+            before: auditAttentionItemMetadata(existing),
             entityId: item.id,
             entityType: "attention_item",
             ...context,

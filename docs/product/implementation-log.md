@@ -2,6 +2,62 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-07-28 — Finance agent-guided setup and safe review workflows
+
+- Added a Finance-owned guided context that combines owned account sources, ledger and review
+  readiness, cash-flow context, human-only boundaries, and trustworthy suggested workflows with
+  the shared durable Finance profile.
+- Added a short Finance interview reference with explicit preference units, user terminology,
+  source meanings, review cadence, thresholds, and safety constraints.
+- Made categorization preview read-scoped and revision-guarded. Each accepted decision now commits
+  its ledger change, evidence, review resolution, optional human merchant rule, and audit record
+  atomically; below-threshold reviews are audited, proposal pages are cursor-paginated, and
+  four-worker batches retain structured per-decision partial-result reporting without exhausting
+  the database pool.
+- Kept account/provider/import/profile/budget administration, permanent merchant rules, and
+  ambiguous transfers behind interactive human review. The MCP surface is now proposal/read-only
+  for ledger decisions, while the API retains actor attribution and defensive stale/policy checks.
+- Agents can save Finance guidance drafts; only the signed-in Finance profile surface can activate
+  one, with an owned source and exact profile version.
+- Added Finance-owned readiness and activation presentation without expanding the shared Settings
+  handoff.
+
+## 2026-07-28 — Mail guided-setup expansion
+
+- Added a credential-free Mail setup context that preserves account identity, mailbox roles and
+  counts, freshness/error state, and Google-versus-iCloud automatic-rule capability.
+- Added typed inbox-style, important-email, and safe noise-retention preferences. Noise defaults to
+  review-only; recoverable Trash may use a user-chosen delay as short as one day.
+- Preserved previously observed threads when provider sync returns a capped recent page. Archive and
+  recoverable Trash rules remain preview-only until Mail has a durable due-work queue.
+- Added source-derived important-email attention items with same-thread serialization and shared
+  profile/attention/audit envelopes.
+- Made the rule lifecycle explicit: proposed previews disclose their dated 200-thread window and
+  truncation state, saved rules re-preview before signed-in Settings activation, fingerprint drift
+  conflicts, and active matching behavior must be paused before editing.
+- Audited Mail MCP annotations and descriptions, preserved structured results, and added
+  per-conversation partial-failure reporting for bulk provider writes.
+
+## 2026-07-28 — Calendar agent-guided setup and evidence proposals
+
+- Added a dedicated Calendar setup interview for source meanings, default writable destination,
+  hard/flexible commitments, time zone, busy-block privacy, buffers, and automatic-creation
+  evidence.
+- Added a Calendar-owned strong-evidence candidate and preview contract with payload fingerprints,
+  possible exact-match hints, profile-alignment checks, provider-effect disclosure, and explicit
+  unverified-source status.
+- Calendar MCP discovery now exposes source capability and sync state, clarifies external provider
+  effects for every mutation, and routes ticket, booking, registration, and explicit-acceptance
+  evidence through proposal-first tools.
+- Direct mutations require source and independent block revisions, report completed,
+  indeterminate, and pending provider effects through API, MCP, and redacted server observations,
+  and direct the caller to synchronize before retrying.
+- Calendar-owned attention derives and refreshes event provenance without copying notes. Active
+  profiles return to draft when a referenced source disappears or the default loses write access.
+- The bounded proposal path does not apply caller-supplied evidence, scan Mail, send invitations,
+  create recurrence or buffer events, or rearrange existing commitments. Durable verified intake,
+  idempotent apply/repair, and Mail-to-Calendar ingestion remain integration work.
+
 ## 2026-07-28 — Agent-guided setup and shared assistant contracts
 
 - Added versioned domain profiles for durable preferences, source meanings, user-defined categories,

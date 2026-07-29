@@ -9,6 +9,8 @@ import {
   updateReminderInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
+import type { ZodType } from "zod";
+import { AppError } from "../errors.js";
 import type { createReminderService } from "../reminder-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess } from "./support.js";
@@ -76,15 +78,19 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
     }),
   );
   app.delete("/v1/reminders/:id", async (context) => {
-    const input = reminderRevisionInputSchema.parse(context.req.query());
-    const reminder = await reminders.delete(
-      context.req.param("id"),
-      reminderMutationContext(context),
-      input.expectedUpdatedAt,
-    );
-    if (input.expectedUpdatedAt) return context.json({ reminder });
+    await reminders.delete(context.req.param("id"), reminderMutationContext(context));
     return context.body(null, 204);
   });
+  // Revision-bearing destructive requests use POST so intermediaries cannot drop their CAS body.
+  app.post("/v1/reminders/:id/trash", async (context) =>
+    context.json({
+      reminder: await reminders.delete(
+        context.req.param("id"),
+        reminderMutationContext(context),
+        (await parseBody(context, reminderRevisionInputSchema)).expectedUpdatedAt,
+      ),
+    }),
+  );
   app.post("/v1/reminders/:id/complete", async (context) => {
     const input = await parseBody(context, completeReminderInputSchema);
     return context.json({
@@ -97,7 +103,7 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
     });
   });
   app.post("/v1/reminders/:id/restore", async (context) => {
-    const input = reminderRevisionInputSchema.parse(context.req.query());
+    const input = await parseOptionalBody(context, reminderRevisionInputSchema);
     return context.json({
       reminder: await reminders.restore(
         context.req.param("id"),
@@ -106,4 +112,16 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
       ),
     });
   });
+}
+
+async function parseOptionalBody<T>(context: Context<AppEnv>, schema: ZodType<T>): Promise<T> {
+  const raw = await context.req.text();
+  if (!raw.trim()) return schema.parse({});
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    throw new AppError("invalid_request", "The request body must be valid JSON.");
+  }
+  return schema.parse(value);
 }

@@ -8,7 +8,7 @@ import {
   materialSourceReferenceSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
-import { result } from "../tool-result.js";
+import { apiResult } from "../tool-result.js";
 
 export const assistantDomain = assistantDomainSchema;
 const id = idSchema.describe("ilo object identifier");
@@ -21,33 +21,48 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
   server.registerTool(
     "get_agent_setup_status",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
       description:
         "Discover which ilo domains this agent can read or configure and whether each has a draft or active preference profile. Use this before conducting setup.",
       inputSchema: {},
       title: "Get ilo agent setup status",
     },
-    async () => result(await api.getAssistantSetupStatus()),
+    async () => apiResult(() => api.getAssistantSetupStatus()),
   );
 
   server.registerTool(
     "get_domain_profile",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
       description:
-        "Read the user's durable preferences, source meanings, categories, and operating instructions for one ilo domain.",
+        "Read one ilo domain profile and its status. Active profiles are operative guidance; draft profiles are unapproved proposals and must not be treated as operating instructions.",
       inputSchema: { domain: assistantDomain },
       title: "Get ilo domain profile",
     },
-    async ({ domain }) => result(await api.getDomainProfile(domain)),
+    async ({ domain }) => apiResult(() => api.getDomainProfile(domain)),
   );
 
   server.registerTool(
     "save_domain_profile",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
       description:
-        "Create or revise one domain's durable preference profile after a short user interview. Preserve user wording and use expectedVersion when updating.",
+        "Create or revise one domain preference profile after a short user interview. Save a draft first, preserve user wording, and use expectedVersion when updating. A saved draft is not approval; domain-specific API validation of source ownership, connectivity, activation authority, and preferences is authoritative.",
       inputSchema: {
         categories: z
           .array(
@@ -81,13 +96,18 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
       },
       title: "Save ilo domain profile",
     },
-    async (input) => result(await api.upsertDomainProfile(input)),
+    async (input) => apiResult(() => api.upsertDomainProfile(input)),
   );
 
   server.registerTool(
     "list_attention_items",
     {
-      annotations: { openWorldHint: false, readOnlyHint: true },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
       description:
         "List open, resolved, or dismissed important items, upcoming commitments, follow-ups, and run summaries for one domain.",
       inputSchema: {
@@ -97,13 +117,18 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
       },
       title: "List ilo attention items",
     },
-    async (input) => result(await api.listAttentionItems(input)),
+    async (input) => apiResult(() => api.listAttentionItems(input)),
   );
 
   server.registerTool(
     "create_attention_item",
     {
-      annotations: { openWorldHint: false },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
       description:
         "Record a concise important item, upcoming commitment, follow-up, or post-run summary in the same cross-domain structure.",
       inputSchema: {
@@ -120,13 +145,18 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
       },
       title: "Create ilo attention item",
     },
-    async (input) => result(await api.createAttentionItem(input)),
+    async (input) => apiResult(() => api.createAttentionItem(input)),
   );
 
   server.registerTool(
     "update_attention_item",
     {
-      annotations: { idempotentHint: true, openWorldHint: false },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
       description: "Resolve, dismiss, or reopen one ilo attention item.",
       inputSchema: {
         domain: assistantDomain,
@@ -136,6 +166,6 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
       title: "Update ilo attention item",
     },
     async ({ domain, id: itemId, status }) =>
-      result(await api.updateAttentionItem(domain, itemId, { status })),
+      apiResult(() => api.updateAttentionItem(domain, itemId, { status })),
   );
 }

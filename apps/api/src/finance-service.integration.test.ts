@@ -1,15 +1,25 @@
+import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfileApprovals,
+  domainProfiles,
+  financeAccounts,
   financeAlerts,
+  financeCategories,
+  financeClassificationDecisions,
+  financeReviewCases,
+  financeSetupBackfillState,
   financeTransactions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
+import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
 
 const now = new Date("2026-07-19T12:00:00.000Z");
@@ -24,7 +34,34 @@ function financePrincipal(userId: string): Principal {
   };
 }
 
+function financeAgentPrincipal(userId: string): Principal {
+  return {
+    actorId: crypto.randomUUID(),
+    actorType: "agent",
+    scopes: new Set(["finances:read", "finances:write"]),
+    userId,
+  };
+}
+
+async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(`
+      SELECT count(*)::text AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND wait_event_type = 'Lock'
+        AND query LIKE '%finance_%'
+        AND query NOT LIKE '%pg_stat_activity%'
+    `);
+    if (Number(result.rows[0]?.count ?? 0) >= expected) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error(`Expected at least ${expected} database lock waiter(s).`);
+}
+
 function plaidFetch(): typeof globalThis.fetch {
+  let exchangeCall = 0;
   let syncCall = 0;
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const requestUrl =
@@ -37,7 +74,12 @@ function plaidFetch(): typeof globalThis.fetch {
     }
     if (path === "/item/public_token/exchange") {
       expect(body.public_token).toBe("public-token");
-      return Response.json({ access_token: "access-token", item_id: "item-1" });
+      exchangeCall += 1;
+      return Response.json(
+        exchangeCall === 1
+          ? { access_token: "access-token", item_id: "item-1" }
+          : { access_token: "replacement-access-token", item_id: "item-2" },
+      );
     }
     if (path === "/accounts/get") {
       return Response.json({
@@ -71,12 +113,13 @@ function plaidFetch(): typeof globalThis.fetch {
                   date: "2026-07-19",
                   merchant_name: "Acme Bookstore",
                   name: "ACME BOOKSTORE",
+                  pending: true,
                   personal_finance_category: {
                     confidence_level: "HIGH",
                     detailed: "FOOD_AND_DRINK_GROCERIES",
                     primary: "FOOD_AND_DRINK",
                   },
-                  transaction_id: "txn-1",
+                  transaction_id: "pending-txn-1",
                 },
                 {
                   account_id: "plaid-account-1",
@@ -93,29 +136,165 @@ function plaidFetch(): typeof globalThis.fetch {
               next_cursor: "cursor-1",
               removed: [],
             }
-          : {
-              added: [],
-              has_more: false,
-              modified: [
-                {
-                  account_id: "plaid-account-1",
-                  amount: 22,
-                  date: "2026-07-19",
-                  merchant_name: "Trader Joe's",
-                  name: "TRADER JOE'S",
-                  pending: true,
-                  pending_transaction_id: "pending-txn-1",
-                  personal_finance_category: {
-                    confidence_level: "VERY_HIGH",
-                    detailed: "FOOD_AND_DRINK_GROCERIES",
-                    primary: "FOOD_AND_DRINK",
+          : syncCall === 2
+            ? {
+                added: [],
+                has_more: false,
+                modified: [
+                  {
+                    account_id: "plaid-account-1",
+                    amount: 22,
+                    date: "2026-07-19",
+                    merchant_name: "Trader Joe's",
+                    name: "TRADER JOE'S",
+                    pending: true,
+                    personal_finance_category: {
+                      confidence_level: "VERY_HIGH",
+                      detailed: "FOOD_AND_DRINK_GROCERIES",
+                      primary: "FOOD_AND_DRINK",
+                    },
+                    transaction_id: "pending-txn-1",
                   },
-                  transaction_id: "txn-1",
-                },
-              ],
-              next_cursor: "cursor-2",
-              removed: [{ transaction_id: "txn-2" }],
-            },
+                ],
+                next_cursor: "cursor-2",
+                removed: [{ transaction_id: "txn-2" }],
+              }
+            : syncCall === 3
+              ? {
+                  added: [
+                    {
+                      account_id: "plaid-account-1",
+                      amount: -40,
+                      date: "2026-07-20",
+                      merchant_name: "Incoming transfer",
+                      name: "INCOMING TRANSFER",
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_IN",
+                      },
+                      transaction_id: "txn-transfer-in",
+                    },
+                    {
+                      account_id: "plaid-account-1",
+                      amount: 35,
+                      date: "2026-07-20",
+                      merchant_name: "Outgoing transfer",
+                      name: "OUTGOING TRANSFER",
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_OUT",
+                      },
+                      transaction_id: "txn-transfer-out",
+                    },
+                    {
+                      account_id: "plaid-account-1",
+                      amount: 60,
+                      date: "2026-07-20",
+                      merchant_name: "Credit card payment",
+                      name: "CREDIT CARD PAYMENT",
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_OUT",
+                      },
+                      transaction_id: "txn-late-transfer",
+                    },
+                  ],
+                  has_more: true,
+                  modified: [],
+                  next_cursor: "cursor-2-removed",
+                  removed: [{ transaction_id: "pending-txn-1" }],
+                }
+              : syncCall === 4
+                ? {
+                    added: [
+                      {
+                        account_id: "plaid-account-1",
+                        amount: 22,
+                        date: "2026-07-19",
+                        merchant_name: "Trader Joe's",
+                        name: "TRADER JOE'S",
+                        pending: false,
+                        pending_transaction_id: "pending-txn-1",
+                        personal_finance_category: {
+                          confidence_level: "VERY_HIGH",
+                          detailed: "FOOD_AND_DRINK_GROCERIES",
+                          primary: "FOOD_AND_DRINK",
+                        },
+                        transaction_id: "txn-1",
+                      },
+                    ],
+                    has_more: false,
+                    modified: [],
+                    next_cursor: "cursor-3",
+                    removed: [],
+                  }
+                : {
+                    added: [
+                      {
+                        account_id: "plaid-account-2",
+                        amount: -60,
+                        date: "2026-07-21",
+                        merchant_name: "Payment thank you",
+                        name: "PAYMENT THANK YOU",
+                        personal_finance_category: {
+                          confidence_level: "VERY_HIGH",
+                          detailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
+                          primary: "GENERAL_MERCHANDISE",
+                        },
+                        transaction_id: "txn-late-counterpart",
+                      },
+                    ],
+                    has_more: false,
+                    modified: [
+                      {
+                        account_id: "plaid-account-1",
+                        amount: -30,
+                        date: "2026-07-21",
+                        merchant_name: "Trader Joe's",
+                        name: "TRADER JOE'S",
+                        pending: false,
+                        personal_finance_category: {
+                          confidence_level: "LOW",
+                          detailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
+                          primary: "GENERAL_MERCHANDISE",
+                        },
+                        transaction_id: "txn-1",
+                      },
+                      {
+                        account_id: "plaid-account-1",
+                        amount: -40,
+                        date: "2026-07-21",
+                        merchant_name: "Incoming transfer renamed",
+                        name: "INCOMING TRANSFER RENAMED",
+                        pending: false,
+                        personal_finance_category: {
+                          confidence_level: "VERY_HIGH",
+                          detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+                          primary: "TRANSFER_IN",
+                        },
+                        transaction_id: "txn-transfer-in",
+                      },
+                      {
+                        account_id: "plaid-account-1",
+                        amount: 35,
+                        date: "2026-07-21",
+                        merchant_name: "Outgoing transfer renamed",
+                        name: "OUTGOING TRANSFER RENAMED",
+                        pending: false,
+                        personal_finance_category: {
+                          confidence_level: "VERY_HIGH",
+                          detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                          primary: "TRANSFER_OUT",
+                        },
+                        transaction_id: "txn-transfer-out",
+                      },
+                    ],
+                    next_cursor: "cursor-4",
+                    removed: [],
+                  },
       );
     }
     return Response.json({ error_message: "Unexpected Plaid path" }, { status: 400 });
@@ -139,7 +318,350 @@ describe.sequential("finance service", () => {
       .withPassword("personal_os")
       .start();
     database = createDatabaseClient(container.getConnectionUri());
-    await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
+    const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
+    const legacyMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-legacy-", [
+      "0041_domain_profile_approvals",
+      "0042_finance_provider_direction",
+      "0043_finance_setup_backfill_state",
+    ]);
+    await migrateDatabase(database.db, legacyMigrations);
+    await expect(
+      database.pool.query<{ relation: string | null }>(
+        "SELECT to_regclass('public.finance_setup_backfill_state')::text AS relation",
+      ),
+    ).resolves.toMatchObject({ rows: [{ relation: null }] });
+    const [upgradeUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance Upgrade",
+        email: "finance-upgrade@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!upgradeUser) throw new Error("Finance upgrade fixture user was not created.");
+    const [upgradeAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Legacy Bank",
+        name: "Legacy checking",
+        provider: "manual",
+        status: "manual",
+        userId: upgradeUser.id,
+      })
+      .returning();
+    if (!upgradeAccount) throw new Error("Finance upgrade fixture account was not created.");
+    await database.db.insert(domainProfiles).values({
+      categories: [],
+      domain: "finances",
+      instructions: ["Legacy active guidance without approval provenance."],
+      objective: "Legacy objective",
+      preferences: {},
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Legacy spending",
+          sourceId: upgradeAccount.id,
+          sourceLabel: upgradeAccount.name,
+        },
+      ],
+      status: "active",
+      summary: "Legacy active Finance profile",
+      userId: upgradeUser.id,
+    });
+    const [secondUpgradeUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Second Finance Upgrade",
+        email: "finance-upgrade-2@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!secondUpgradeUser) throw new Error("Second Finance upgrade fixture was not created.");
+    const [secondUpgradeAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Second Legacy Bank",
+        name: "Second legacy checking",
+        provider: "manual",
+        status: "manual",
+        userId: secondUpgradeUser.id,
+      })
+      .returning();
+    if (!secondUpgradeAccount) throw new Error("Second Finance upgrade account was not created.");
+    const [secondUpgradeProfile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "finances",
+        instructions: ["Second legacy active guidance."],
+        objective: "Second legacy objective",
+        preferences: {},
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Second legacy spending",
+            sourceId: secondUpgradeAccount.id,
+            sourceLabel: secondUpgradeAccount.name,
+          },
+        ],
+        status: "active",
+        summary: "Second legacy active Finance profile",
+        userId: secondUpgradeUser.id,
+      })
+      .returning();
+    if (!secondUpgradeProfile) {
+      throw new Error("Second Finance upgrade profile was not created.");
+    }
+    const [legacyPostedTransaction] = (
+      await database.pool.query<{ id: string }>(
+        `INSERT INTO finance_transactions (
+          user_id, account_id, provider_transaction_id, merchant, amount_cents,
+          direction, transaction_date, category, category_source,
+          category_decided_at, needs_review, pending
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        RETURNING id`,
+        [
+          upgradeUser.id,
+          upgradeAccount.id,
+          "legacy-provider-transaction",
+          "Legacy provider purchase",
+          4200,
+          "expense",
+          "2026-07-01",
+          "Shopping",
+          "user",
+          new Date("2026-07-01T12:00:00.000Z"),
+          false,
+          false,
+        ],
+      )
+    ).rows;
+    if (!legacyPostedTransaction) {
+      throw new Error("Legacy posted transaction fixture was not created.");
+    }
+    const [legacyManualTransaction] = (
+      await database.pool.query<{ id: string }>(
+        `INSERT INTO finance_transactions (
+          user_id, account_id, merchant, amount_cents, direction,
+          transaction_date, category, category_source, category_decided_at,
+          needs_review, pending
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id`,
+        [
+          upgradeUser.id,
+          upgradeAccount.id,
+          "Legacy manual purchase",
+          1800,
+          "expense",
+          "2026-07-02",
+          "Dining",
+          "user",
+          new Date("2026-07-02T12:00:00.000Z"),
+          false,
+          false,
+        ],
+      )
+    ).rows;
+    if (!legacyManualTransaction) {
+      throw new Error("Legacy manual transaction fixture was not created.");
+    }
+    await migrateDatabase(database.db, migrationsFolder);
+    await expect(
+      database.pool.query<{ relation: string | null }>(
+        "SELECT to_regclass('public.finance_setup_backfill_state')::text AS relation",
+      ),
+    ).resolves.toMatchObject({ rows: [{ relation: "finance_setup_backfill_state" }] });
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.domain, "finances")),
+    ).resolves.toEqual([
+      expect.objectContaining({ status: "active", version: 1 }),
+      expect.objectContaining({ status: "active", version: 1 }),
+    ]);
+    await database.db.insert(domainProfileApprovals).values({
+      approvedAt: new Date("2026-07-18T12:00:00.000Z"),
+      approvedByUserId: secondUpgradeUser.id,
+      domain: "finances",
+      profile: {
+        categories: secondUpgradeProfile.categories,
+        createdAt: secondUpgradeProfile.createdAt.toISOString(),
+        domain: secondUpgradeProfile.domain,
+        id: secondUpgradeProfile.id,
+        instructions: secondUpgradeProfile.instructions,
+        objective: secondUpgradeProfile.objective,
+        preferences: secondUpgradeProfile.preferences,
+        sourceContexts: secondUpgradeProfile.sourceContexts,
+        status: secondUpgradeProfile.status,
+        summary: secondUpgradeProfile.summary,
+        updatedAt: secondUpgradeProfile.updatedAt.toISOString(),
+        version: secondUpgradeProfile.version,
+      },
+      profileId: secondUpgradeProfile.id,
+      profileVersion: secondUpgradeProfile.version,
+      userId: secondUpgradeUser.id,
+    });
+    await database.db
+      .update(domainProfiles)
+      .set({
+        summary: "A newer active revision without signed approval.",
+        updatedAt: new Date("2026-07-18T13:00:00.000Z"),
+        version: secondUpgradeProfile.version + 1,
+      })
+      .where(eq(domainProfiles.id, secondUpgradeProfile.id));
+    await expect(
+      database.db
+        .select()
+        .from(domainProfileApprovals)
+        .where(eq(domainProfileApprovals.userId, upgradeUser.id)),
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, upgradeUser.id)),
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.db
+        .select({ providerDirection: financeTransactions.providerDirection })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, legacyPostedTransaction.id)),
+    ).resolves.toEqual([{ providerDirection: null }]);
+    await expect(
+      database.db
+        .select({ providerDirection: financeTransactions.providerDirection })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, legacyManualTransaction.id)),
+    ).resolves.toEqual([{ providerDirection: null }]);
+    const upgradeService = createFinanceService({ db: database.db, now: () => now });
+    const syntheticCategories = await upgradeService.listCategories(upgradeUser.id);
+    expect(syntheticCategories).toHaveLength(20);
+    expect(
+      syntheticCategories.every((category) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/.test(category.id),
+      ),
+    ).toBe(true);
+    await expect(upgradeService.listCategories(upgradeUser.id)).resolves.toEqual(
+      syntheticCategories,
+    );
+    const [syntheticProposalCandidate] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: upgradeAccount.id,
+        amount: 1_200,
+        direction: "expense",
+        merchant: "Trader Joe's",
+        needsReview: true,
+        transactionDate: "2026-07-03",
+        userId: upgradeUser.id,
+      })
+      .returning();
+    if (!syntheticProposalCandidate) {
+      throw new Error("Synthetic category proposal fixture was not created.");
+    }
+    const syntheticProposal = (
+      await upgradeService.proposeCategorizations(upgradeUser.id, {
+        limit: 50,
+        review: "needs_review",
+        sortBy: "date",
+        sortDirection: "desc",
+      })
+    ).items.find((proposal) => proposal.transaction.id === syntheticProposalCandidate.id);
+    expect(syntheticProposal?.suggestedCategory).toEqual(
+      syntheticCategories.find((category) => category.slug === "groceries"),
+    );
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, upgradeUser.id)),
+    ).resolves.toHaveLength(0);
+    await expect(upgradeService.getGuidedSetupContext(upgradeUser.id)).resolves.toMatchObject({
+      guidance: {
+        approvedProfile: null,
+        draftProposal: { status: "draft", version: 1 },
+      },
+    });
+    await database.db
+      .insert(financeSetupBackfillState)
+      .values({ key: "finance_setup_integrity_v1" })
+      .onConflictDoNothing();
+    const backfillLock = await database.pool.connect();
+    try {
+      await backfillLock.query("BEGIN");
+      await backfillLock.query(
+        "SELECT key FROM finance_setup_backfill_state WHERE key = $1 FOR UPDATE",
+        ["finance_setup_integrity_v1"],
+      );
+      await expect(upgradeService.backfillSetupIntegrity(1)).resolves.toMatchObject({
+        categoriesInserted: 0,
+        claimed: false,
+        processed: 0,
+        profilesDemoted: 0,
+      });
+    } finally {
+      await backfillLock.query("ROLLBACK");
+      backfillLock.release();
+    }
+    const firstPass = await upgradeService.backfillSetupIntegrity(1);
+    expect(firstPass).toMatchObject({
+      categoriesInserted: 20,
+      claimed: true,
+      processed: 2,
+      profileRowsScanned: 1,
+      profilesDemoted: 1,
+      userRowsScanned: 1,
+    });
+    await expect(
+      database.db.select().from(domainProfiles).where(eq(domainProfiles.status, "active")),
+    ).resolves.toHaveLength(1);
+    const restartedUpgradeService = createFinanceService({ db: database.db, now: () => now });
+    const passes = [firstPass];
+    for (let pass = 0; pass < 5; pass += 1) {
+      const result = await restartedUpgradeService.backfillSetupIntegrity(1);
+      passes.push(result);
+      if (result.profilesComplete && result.categoriesComplete) break;
+    }
+    expect(passes.at(-1)).toMatchObject({
+      categoriesComplete: true,
+      profilesComplete: true,
+    });
+    expect(passes.reduce((sum, result) => sum + result.profilesDemoted, 0)).toBe(2);
+    expect(passes.reduce((sum, result) => sum + result.categoriesInserted, 0)).toBe(40);
+    await expect(restartedUpgradeService.backfillSetupIntegrity(1)).resolves.toEqual({
+      categoriesComplete: true,
+      categoriesInserted: 0,
+      claimed: true,
+      processed: 0,
+      profileRowsScanned: 0,
+      profilesComplete: true,
+      profilesDemoted: 0,
+      userRowsScanned: 0,
+    });
+    const repairedProfiles = await database.db
+      .select()
+      .from(domainProfiles)
+      .where(eq(domainProfiles.domain, "finances"));
+    expect(repairedProfiles).toHaveLength(2);
+    expect(
+      repairedProfiles.find((profile) => profile.id === secondUpgradeProfile.id),
+    ).toMatchObject({
+      status: "draft",
+      version: 3,
+    });
+    expect(
+      repairedProfiles.find((profile) => profile.id !== secondUpgradeProfile.id),
+    ).toMatchObject({
+      status: "draft",
+      version: 2,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(inArray(financeCategories.userId, [upgradeUser.id, secondUpgradeUser.id])),
+    ).resolves.toHaveLength(40);
+    await rm(legacyMigrations, { force: true, recursive: true });
     const [user] = await database.db
       .insert(users)
       .values({
@@ -203,6 +725,403 @@ describe.sequential("finance service", () => {
       (item) => item.slug === "shopping",
     );
     if (!shopping) throw new Error("Shopping category was not seeded.");
+    const [pendingCandidate] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 800,
+        category: null,
+        direction: "expense",
+        merchant: "Pending Card Hold",
+        needsReview: true,
+        pending: true,
+        transactionDate: "2026-07-19",
+        userId,
+      })
+      .returning();
+    if (!pendingCandidate) throw new Error("Pending categorization fixture was not created.");
+    await expect(
+      service.applyCategorizations(
+        {
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 1,
+              expectedTransactionUpdatedAt: pendingCandidate.updatedAt.toISOString(),
+              learnMerchant: "never",
+              rationale: "Organize the provisional card hold without learning from it.",
+              transactionId: pendingCandidate.id,
+            },
+          ],
+        },
+        context,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        applied: true,
+        transaction: expect.objectContaining({ category: "Shopping", pending: true }),
+      }),
+    ]);
+    await expect(
+      database.db
+        .select()
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.transactionId, pendingCandidate.id)),
+    ).resolves.toHaveLength(0);
+    const agentContext = {
+      principal: financeAgentPrincipal(userId),
+      requestId: "agent-finance",
+    };
+    await expect(
+      service.applyCategorizations(
+        {
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 1,
+              expectedTransactionUpdatedAt: review.updatedAt,
+              learnMerchant: "always",
+              rationale: "The agent should not create a permanent rule.",
+              transactionId: review.id,
+            },
+          ],
+        },
+        agentContext,
+      ),
+    ).rejects.toThrow("Permanent merchant rules require review");
+    await expect(
+      service.updateTransaction(
+        review.id,
+        { category: "Shopping", learnMerchant: false },
+        agentContext,
+      ),
+    ).rejects.toThrow("transaction edits require an interactive user session");
+    await expect(
+      service.updateTransaction(review.id, { notes: "Agent overwrite" }, agentContext),
+    ).rejects.toThrow("transaction edits require an interactive user session");
+    const stale = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 7,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Revision Race",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({
+        notes: "Changed after preview",
+        updatedAt: new Date("2026-07-19T12:01:00.000Z"),
+      })
+      .where(eq(financeTransactions.id, stale.id));
+    await expect(
+      service.applyCategorizations(
+        {
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 1,
+              expectedTransactionUpdatedAt: stale.updatedAt,
+              learnMerchant: "never",
+              rationale: "This decision was prepared from a stale preview.",
+              transactionId: stale.id,
+            },
+          ],
+        },
+        context,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        error: expect.objectContaining({ code: "conflict" }),
+        status: "failed",
+        transaction: null,
+      }),
+    ]);
+    const [staleAfter] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, stale.id));
+    expect(staleAfter).toMatchObject({ category: null, notes: "Changed after preview" });
+    const [readOnlyCandidate] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 900,
+        category: null,
+        direction: "expense",
+        merchant: "SQ *READ ONLY 8821",
+        needsReview: true,
+        transactionDate: "2026-07-19",
+        userId,
+      })
+      .returning();
+    if (!readOnlyCandidate) throw new Error("Read-only proposal fixture was not created.");
+    const readOnlyProposals = await service.proposeCategorizations(userId, {
+      limit: 50,
+      review: "needs_review",
+    });
+    expect(
+      readOnlyProposals.items.find((item) => item.transaction.id === readOnlyCandidate.id),
+    ).toMatchObject({
+      transaction: {
+        merchant: "Sq Read Only",
+        rawMerchant: "SQ *READ ONLY 8821",
+      },
+    });
+    const [readOnlyCandidateAfter] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, readOnlyCandidate.id));
+    expect(readOnlyCandidateAfter).toMatchObject({
+      categoryId: null,
+      merchantId: null,
+      updatedAt: readOnlyCandidate.updatedAt,
+    });
+    await database.db
+      .delete(financeTransactions)
+      .where(eq(financeTransactions.id, readOnlyCandidate.id));
+    await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 1,
+        category: "Shopping",
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Single Evidence",
+        notes: null,
+      },
+      context,
+    );
+    const lowConfidenceCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 2,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Single Evidence",
+        notes: null,
+      },
+      context,
+    );
+    await expect(
+      service.proposeCategorizations(userId, { limit: 50, review: "needs_review" }),
+    ).resolves.toMatchObject({
+      items: expect.arrayContaining([
+        expect.objectContaining({
+          confidence: 0.95,
+          threshold: 0.9725,
+          transaction: expect.objectContaining({ id: lowConfidenceCandidate.id }),
+        }),
+      ]),
+    });
+    const lowConfidenceInput = {
+      decisions: [
+        {
+          categoryId: shopping.id,
+          confidence: 0.95,
+          expectedTransactionUpdatedAt: lowConfidenceCandidate.updatedAt,
+          learnMerchant: "suggest" as const,
+          rationale: "One confirmation remains below the adaptive threshold.",
+          transactionId: lowConfidenceCandidate.id,
+        },
+      ],
+    };
+    await expect(service.applyCategorizations(lowConfidenceInput, agentContext)).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        replayed: false,
+        status: "review_required",
+        threshold: 0.9725,
+      }),
+    ]);
+    const lowConfidenceAudits = await database.db
+      .select({ after: auditEvents.after, before: auditEvents.before })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "finance.categorization_deferred"),
+          eq(auditEvents.entityId, lowConfidenceCandidate.id),
+        ),
+      );
+    expect(lowConfidenceAudits).toHaveLength(1);
+    expect(lowConfidenceAudits[0]).toEqual({
+      after: {
+        categoryId: shopping.id,
+        confidence: 0.95,
+        reviewId: expect.any(String),
+        status: "review_required",
+        threshold: 0.9725,
+      },
+      before: {
+        categoryId: null,
+        needsReview: true,
+        updatedAt: lowConfidenceCandidate.updatedAt,
+      },
+    });
+    const lowConfidenceReview = (await service.listReviewQueue(userId)).find(
+      (item) => item.transaction.id === lowConfidenceCandidate.id,
+    );
+    if (!lowConfidenceReview) throw new Error("Low-confidence review was not created.");
+    const [reviewBeforeRetry] = await database.db
+      .select({ updatedAt: financeReviewCases.updatedAt })
+      .from(financeReviewCases)
+      .where(eq(financeReviewCases.id, lowConfidenceReview.id));
+    if (!reviewBeforeRetry) throw new Error("Low-confidence review row was not found.");
+    await expect(service.applyCategorizations(lowConfidenceInput, agentContext)).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        replayed: true,
+        status: "review_required",
+        threshold: 0.9725,
+      }),
+    ]);
+    const replayReviews = await database.db
+      .select()
+      .from(financeReviewCases)
+      .where(eq(financeReviewCases.transactionId, lowConfidenceCandidate.id));
+    const replayDecisions = await database.db
+      .select()
+      .from(financeClassificationDecisions)
+      .where(
+        and(
+          eq(financeClassificationDecisions.transactionId, lowConfidenceCandidate.id),
+          eq(financeClassificationDecisions.outcome, "deferred"),
+        ),
+      );
+    const replayAudits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "finance.categorization_deferred"),
+          eq(auditEvents.entityId, lowConfidenceCandidate.id),
+        ),
+      );
+    expect(replayReviews).toHaveLength(1);
+    expect(replayReviews[0]?.updatedAt.toISOString()).toBe(
+      reviewBeforeRetry.updatedAt.toISOString(),
+    );
+    expect(replayDecisions).toHaveLength(1);
+    expect(replayAudits).toHaveLength(1);
+    await expect(
+      service.resolveReview(
+        lowConfidenceReview.id,
+        {
+          action: "confirm_transfer",
+          expectedTransactionUpdatedAt: lowConfidenceReview.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "A non-transfer review cannot become a transfer.",
+        },
+        context,
+      ),
+    ).rejects.toThrow("Only a possible-transfer review can be confirmed as a transfer");
+    await service.resolveReview(
+      lowConfidenceReview.id,
+      {
+        action: "recategorize",
+        categoryId: shopping.id,
+        expectedTransactionUpdatedAt: lowConfidenceReview.transaction.updatedAt,
+        learnMerchant: "never",
+        rationale: "The user accepted the individual category.",
+      },
+      context,
+    );
+    const policyRaceEvidence = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 2,
+        category: "Shopping",
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Policy Race",
+        notes: null,
+      },
+      context,
+    );
+    const policyRaceCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 3,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Policy Race",
+        notes: null,
+      },
+      context,
+    );
+    const policyRaceProposal = (
+      await service.proposeCategorizations(userId, { limit: 50, review: "needs_review" })
+    ).items.find((item) => item.transaction.id === policyRaceCandidate.id);
+    if (!policyRaceProposal || !policyRaceCandidate.merchantId) {
+      throw new Error("The policy-race proposal fixture was not created.");
+    }
+    let policyLockAcquired = () => {};
+    const policyLocked = new Promise<void>((resolve) => {
+      policyLockAcquired = resolve;
+    });
+    let releasePolicyLock = () => {};
+    const policyLockRelease = new Promise<void>((resolve) => {
+      releasePolicyLock = resolve;
+    });
+    const concurrentPolicyWriter = database.db.transaction(async (tx) => {
+      await tx
+        .select({ id: financeCategories.id })
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, userId))
+        .orderBy(financeCategories.id)
+        .for("update");
+      policyLockAcquired();
+      await policyLockRelease;
+      await tx.insert(financeClassificationDecisions).values({
+        categoryId: shopping.id,
+        categoryName: shopping.name,
+        confidence: 10_000,
+        merchantId: policyRaceCandidate.merchantId,
+        outcome: "confirmed",
+        rationale: "Concurrent user confirmation.",
+        source: "user",
+        transactionId: policyRaceEvidence.id,
+        userId,
+      });
+    });
+    await policyLocked;
+    const concurrentApply = service.applyCategorizations(
+      {
+        decisions: [
+          {
+            categoryId: shopping.id,
+            confidence: policyRaceProposal.confidence,
+            expectedTransactionUpdatedAt: policyRaceProposal.transaction.updatedAt,
+            learnMerchant: "never",
+            rationale: "Apply only if the proposal evidence is still current.",
+            transactionId: policyRaceCandidate.id,
+          },
+        ],
+      },
+      agentContext,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    releasePolicyLock();
+    await concurrentPolicyWriter;
+    await expect(concurrentApply).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        error: expect.objectContaining({ code: "conflict" }),
+        status: "failed",
+      }),
+    ]);
     for (const amount of [3, 4]) {
       await service.createTransaction(
         {
@@ -233,46 +1152,361 @@ describe.sequential("finance service", () => {
     );
     await expect(
       service.proposeCategorizations(userId, { limit: 50, review: "needs_review" }),
-    ).resolves.toEqual(
-      expect.arrayContaining([
+    ).resolves.toMatchObject({
+      items: expect.arrayContaining([
         expect.objectContaining({
-          appliesAutomatically: true,
+          meetsPolicyThreshold: true,
+          policy: "preview",
           confidence: 0.965,
           threshold: 0.96,
           transaction: expect.objectContaining({ id: evidenceCandidate.id }),
         }),
       ]),
-    );
+    });
     await expect(
       service.applyCategorizations(
         {
           decisions: [
             {
               categoryId: shopping.id,
-              confidence: 0.9,
+              confidence: 1,
+              expectedTransactionUpdatedAt: review.updatedAt,
               learnMerchant: "suggest",
-              rationale: "A plausible first-pass merchant match.",
+              rationale: "An agent cannot substitute its own confidence and category.",
               transactionId: review.id,
             },
           ],
         },
-        context,
+        agentContext,
       ),
-    ).resolves.toEqual([expect.objectContaining({ applied: false, threshold: 0.985 })]);
-    const [reviewCase] = await service.listReviewQueue(userId);
-    if (!reviewCase) throw new Error("Low-confidence categorization was not queued for review.");
+    ).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        error: expect.objectContaining({ code: "conflict" }),
+        status: "failed",
+      }),
+    ]);
+    await expect(
+      service.applyCategorizations(
+        {
+          decisions: [
+            {
+              categoryId: shopping.id,
+              confidence: 0.965,
+              expectedTransactionUpdatedAt: now.toISOString(),
+              learnMerchant: "never",
+              rationale: "This missing transaction should fail independently.",
+              transactionId: "00000000-0000-4000-8000-000000000000",
+            },
+            {
+              categoryId: shopping.id,
+              confidence: 0.965,
+              expectedTransactionUpdatedAt: evidenceCandidate.updatedAt,
+              learnMerchant: "suggest",
+              rationale: "The user accepted the current server proposal.",
+              transactionId: evidenceCandidate.id,
+            },
+          ],
+        },
+        agentContext,
+      ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        applied: false,
+        error: expect.objectContaining({ code: "not_found" }),
+        status: "failed",
+      }),
+      expect.objectContaining({ applied: true, status: "applied" }),
+    ]);
+    const agentReviewCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Everyday Supplies",
+        notes: null,
+      },
+      context,
+    );
+    const [agentReview] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        rationale: "Review the current evidence.",
+        reason: "low_confidence",
+        status: "open",
+        suggestedCategoryId: shopping.id,
+        transactionId: agentReviewCandidate.id,
+        userId,
+      })
+      .returning();
+    const agentReviewProposal = (
+      await service.proposeCategorizations(userId, { limit: 50, review: "needs_review" })
+    ).items.find((item) => item.transaction.id === agentReviewCandidate.id);
+    if (!agentReviewProposal || !agentReview) {
+      throw new Error("The agent review proposal fixture was not created.");
+    }
     await expect(
       service.resolveReview(
-        reviewCase.id,
+        agentReview.id,
         {
           action: "recategorize",
-          categoryId: shopping.id,
+          categoryId: agentReviewProposal.suggestedCategory?.id,
+          confidence: agentReviewProposal.confidence,
+          expectedTransactionUpdatedAt: agentReviewProposal.transaction.updatedAt,
           learnMerchant: "never",
-          rationale: "A user confirmed this individual purchase.",
+          rationale: "The user accepted the current reviewed proposal.",
+        },
+        agentContext,
+      ),
+    ).resolves.toMatchObject({ applied: true });
+    const staleAgentReviewCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 7,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Everyday Supplies",
+        notes: null,
+      },
+      context,
+    );
+    const [staleAgentReview] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        rationale: "Review the current evidence.",
+        reason: "low_confidence",
+        status: "open",
+        suggestedCategoryId: shopping.id,
+        transactionId: staleAgentReviewCandidate.id,
+        userId,
+      })
+      .returning();
+    const staleAgentReviewProposal = (
+      await service.proposeCategorizations(userId, { limit: 50, review: "needs_review" })
+    ).items.find((item) => item.transaction.id === staleAgentReviewCandidate.id);
+    if (!staleAgentReviewProposal || !staleAgentReview) {
+      throw new Error("The stale agent review fixture was not created.");
+    }
+    await database.db
+      .update(financeTransactions)
+      .set({
+        notes: "Changed after the review was displayed.",
+        updatedAt: new Date("2026-07-19T12:02:00.000Z"),
+      })
+      .where(eq(financeTransactions.id, staleAgentReviewCandidate.id));
+    await expect(
+      service.resolveReview(
+        staleAgentReview.id,
+        {
+          action: "recategorize",
+          categoryId: staleAgentReviewProposal.suggestedCategory?.id,
+          confidence: staleAgentReviewProposal.confidence,
+          expectedTransactionUpdatedAt: staleAgentReviewProposal.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "This accepted review is stale.",
+        },
+        agentContext,
+      ),
+    ).rejects.toThrow("changed after the proposal");
+    await service.resolveReview(
+      staleAgentReview.id,
+      {
+        action: "recategorize",
+        categoryId: shopping.id,
+        expectedTransactionUpdatedAt: "2026-07-19T12:02:00.000Z",
+        learnMerchant: "never",
+        rationale: "The user resolved the stale review in Finance.",
+      },
+      context,
+    );
+    await database.db
+      .delete(financeTransactions)
+      .where(
+        inArray(financeTransactions.id, [
+          agentReviewCandidate.id,
+          policyRaceCandidate.id,
+          policyRaceEvidence.id,
+          staleAgentReviewCandidate.id,
+        ]),
+      );
+    const transferCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 25,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "transfer",
+        merchant: "Account movement",
+        notes: null,
+      },
+      context,
+    );
+    await service.reconcileTransfers(userId);
+    const transferReview = (await service.listReviewQueue(userId)).find(
+      (item) => item.transaction.id === transferCandidate.id,
+    );
+    if (!transferReview) throw new Error("Transfer candidate was not queued for review.");
+    const categorizationWorkflow = (
+      await service.getGuidedSetupContext(userId)
+    ).suggestedWorkflows.find((workflow) => workflow.key === "categorization_review");
+    expect(categorizationWorkflow).toMatchObject({
+      available: false,
+      unavailableReason: expect.stringContaining("ambiguous transfers"),
+    });
+    const guidedSetupSnapshot = await service.getGuidedSetupContext(userId);
+    expect(guidedSetupSnapshot.ledgerHealth.unresolvedReviews).toBe(
+      guidedSetupSnapshot.reviewSummary.count,
+    );
+    await expect(
+      service.resolveReview(
+        transferReview.id,
+        {
+          action: "confirm_transfer",
+          expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "An agent may not confirm this transfer.",
+        },
+        agentContext,
+      ),
+    ).rejects.toThrow("ambiguous transfer requires an interactive user session");
+    await expect(
+      service.resolveReview(
+        transferReview.id,
+        {
+          action: "approve",
+          expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "A generic approval must not resolve an ambiguous transfer.",
         },
         context,
       ),
-    ).resolves.toEqual(expect.objectContaining({ applied: true }));
+    ).rejects.toThrow("Confirm or recategorize an ambiguous transfer explicitly");
+    await expect(
+      service.resolveReview(
+        transferReview.id,
+        { action: "defer", learnMerchant: "never", rationale: "Review this in Finance." },
+        context,
+      ),
+    ).resolves.toEqual({ deferred: true });
+    await expect(
+      service.resolveReview(
+        transferReview.id,
+        { action: "defer", learnMerchant: "never", rationale: "Retry after a lost response." },
+        context,
+      ),
+    ).resolves.toEqual({ deferred: true });
+    const deferAudits = await database.db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "finance.review_deferred"),
+          eq(auditEvents.entityId, transferReview.id),
+        ),
+      );
+    expect(deferAudits).toHaveLength(1);
+    const concurrentTransferDecisions = await Promise.allSettled([
+      service.resolveReview(
+        transferReview.id,
+        {
+          action: "confirm_transfer",
+          expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "The user confirmed this is movement between owned accounts.",
+        },
+        context,
+      ),
+      service.resolveReview(
+        transferReview.id,
+        {
+          action: "confirm_transfer",
+          expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "A concurrent duplicate decision must not overwrite the first.",
+        },
+        context,
+      ),
+    ]);
+    expect(
+      concurrentTransferDecisions.filter((decision) => decision.status === "fulfilled"),
+    ).toHaveLength(1);
+    expect(
+      concurrentTransferDecisions.filter((decision) => decision.status === "rejected"),
+    ).toHaveLength(1);
+    expect(
+      concurrentTransferDecisions.find((decision) => decision.status === "fulfilled"),
+    ).toMatchObject({
+      status: "fulfilled",
+      value: {
+        applied: true,
+        transaction: expect.objectContaining({
+          category: "Transfers",
+          direction: "transfer",
+          needsReview: false,
+          reconciliationStatus: "confirmed",
+        }),
+      },
+    });
+    await service.reconcileTransfers(userId);
+    expect(
+      (await service.listReviewQueue(userId)).some(
+        (item) => item.transaction.id === transferCandidate.id,
+      ),
+    ).toBe(false);
+    const recategorizedTransfer = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 18,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "transfer",
+        merchant: "Misclassified purchase",
+        notes: null,
+      },
+      context,
+    );
+    await service.reconcileTransfers(userId);
+    const recategorizedTransferReview = (await service.listReviewQueue(userId)).find(
+      (item) => item.transaction.id === recategorizedTransfer.id,
+    );
+    if (!recategorizedTransferReview) {
+      throw new Error("The second transfer candidate was not queued for review.");
+    }
+    await expect(
+      service.resolveReview(
+        recategorizedTransferReview.id,
+        {
+          action: "recategorize",
+          categoryId: shopping.id,
+          expectedTransactionUpdatedAt: recategorizedTransferReview.transaction.updatedAt,
+          learnMerchant: "never",
+          nonTransferDirection: "expense",
+          rationale: "The user confirmed this was a purchase, not a transfer.",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      applied: true,
+      transaction: expect.objectContaining({
+        category: "Shopping",
+        direction: "expense",
+        needsReview: false,
+        reconciliationStatus: "not_applicable",
+      }),
+    });
+    await service.reconcileTransfers(userId);
+    expect(
+      (await service.listReviewQueue(userId)).some(
+        (item) => item.transaction.id === recategorizedTransfer.id,
+      ),
+    ).toBe(false);
     await service.updateTransaction(
       review.id,
       { category: "Shopping", learnMerchant: true },
@@ -407,13 +1641,37 @@ describe.sequential("finance service", () => {
     ).rejects.toThrow("transaction was not found");
     await service.createBudget({ category: "Groceries", limit: 400, month: "2026-07" }, context);
     const overview = await service.listOverview(userId);
-    expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 69.75 });
+    expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 97.75 });
     expect(overview.budgets).toHaveLength(1);
     await expect(service.listOverview(userId, "2026-06")).resolves.toMatchObject({
       budgets: [],
       spendingThisMonth: 0,
       transactions: [],
     });
+    await database.db.insert(domainProfiles).values({
+      categories: [],
+      domain: "finances",
+      instructions: [],
+      objective: "Keep account meanings durable.",
+      preferences: {},
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Daily spending",
+          sourceId: account.id,
+          sourceLabel: account.name,
+        },
+      ],
+      status: "active",
+      summary: "The wallet is in scope.",
+      userId,
+    });
+    await expect(service.deleteAccount(account.id, context)).rejects.toThrow(
+      "Remove this account from active approved Finance guidance",
+    );
+    await database.db
+      .delete(domainProfiles)
+      .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "finances")));
     await service.deleteAccount(account.id, context);
     expect((await service.listOverview(userId)).accounts).not.toContainEqual(
       expect.objectContaining({ id: account.id }),
@@ -422,6 +1680,262 @@ describe.sequential("finance service", () => {
       "financial account was not found",
     );
   }, 20_000);
+
+  it("uses the planning-timezone month for Finance guided setup", async () => {
+    const timezoneUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: timezoneUserId,
+      displayName: "Timezone Finance",
+      email: `timezone-finance-${timezoneUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "America/Los_Angeles",
+    });
+    const service = createFinanceService({
+      db: database.db,
+      now: () => new Date("2026-08-01T00:30:00.000Z"),
+    });
+    await expect(service.getGuidedSetupContext(timezoneUserId)).resolves.toMatchObject({
+      asOf: "2026-08-01T00:30:00.000Z",
+      budgetSummary: { month: "2026-07" },
+      ledgerHealth: { asOf: "2026-08-01T00:30:00.000Z", unresolvedReviews: 0 },
+      reviewSummary: { count: 0 },
+    });
+  });
+
+  it("rolls back default categories when manual account onboarding fails", async () => {
+    const atomicUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: atomicUserId,
+      displayName: "Atomic Finance",
+      email: `atomic-finance-${atomicUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    await expect(
+      service.createAccount(
+        { balance: 10, institution: "Atomic Bank", name: "Checking", provider: "manual" },
+        {
+          principal: financePrincipal(atomicUserId),
+          requestId: null as unknown as string,
+        },
+      ),
+    ).rejects.toThrow();
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, atomicUserId)),
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.db.select().from(financeAccounts).where(eq(financeAccounts.userId, atomicUserId)),
+    ).resolves.toHaveLength(0);
+  });
+
+  it("completes a partial default taxonomy under concurrent reconciliation", async () => {
+    const partialUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: partialUserId,
+      displayName: "Partial taxonomy",
+      email: `partial-taxonomy-${partialUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    await database.db.insert(financeAccounts).values({
+      institution: "Partial Bank",
+      name: "Partial checking",
+      provider: "manual",
+      status: "manual",
+      userId: partialUserId,
+    });
+    await database.db.insert(financeCategories).values({
+      group: "Spending",
+      isSystem: true,
+      name: "Groceries",
+      slug: "groceries",
+      userId: partialUserId,
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+
+    await expect(
+      Promise.all([
+        service.reconcileTransfers(partialUserId),
+        service.reconcileTransfers(partialUserId),
+      ]),
+    ).resolves.toEqual([
+      { paired: 0, transfers: 0 },
+      { paired: 0, transfers: 0 },
+    ]);
+    const categories = await database.db
+      .select()
+      .from(financeCategories)
+      .where(eq(financeCategories.userId, partialUserId));
+    expect(categories).toHaveLength(21);
+    expect(new Set(categories.map((category) => category.slug)).size).toBe(21);
+  });
+
+  it("records merchant merge intent without exposing the supplied rationale", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "merchant-merge-audit" };
+    const account = await service.createAccount(
+      {
+        balance: 100,
+        institution: "Merge audit",
+        name: "Merge audit wallet",
+        provider: "manual",
+      },
+      context,
+    );
+    const sourceTransaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 5,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Merge Audit Source",
+        notes: null,
+      },
+      context,
+    );
+    await service.updateTransaction(
+      sourceTransaction.id,
+      { category: "Shopping", learnMerchant: false },
+      context,
+    );
+    await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 7,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Merge Audit Target",
+        notes: null,
+      },
+      context,
+    );
+    const merchants = await service.listMerchants(userId, 200);
+    const source = merchants.find((item) => item.displayName === "Merge Audit Source");
+    const target = merchants.find((item) => item.displayName === "Merge Audit Target");
+    if (!source || !target) throw new Error("Merchant merge fixtures were not created.");
+
+    const rationale = "The private receipt confirms these are the same merchant.";
+    await service.mergeMerchants(
+      {
+        rationale,
+        sourceMerchantId: source.id,
+        targetMerchantId: target.id,
+      },
+      context,
+    );
+
+    const [event] = await database.db
+      .select({ after: auditEvents.after, before: auditEvents.before })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.action, "finance.merchants_merged"),
+          eq(auditEvents.entityId, target.id),
+        ),
+      );
+    expect(event).toEqual({
+      after: {
+        rationaleProvided: true,
+        sourceMerchantId: source.id,
+        targetMerchantId: target.id,
+      },
+      before: {
+        id: source.id,
+        isUserConfirmed: false,
+      },
+    });
+    expect(JSON.stringify(event)).not.toContain(rationale);
+    const sourceDecisions = await database.db
+      .select()
+      .from(financeClassificationDecisions)
+      .where(eq(financeClassificationDecisions.transactionId, sourceTransaction.id));
+    expect(sourceDecisions).toHaveLength(1);
+    expect(sourceDecisions[0]?.merchantId).toBe(target.id);
+  });
+
+  it("keeps tied merchant evidence non-actionable until one category has more confirmations", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "merchant-evidence-tie" };
+    const account = await service.createAccount(
+      { balance: 100, institution: "Tie Bank", name: "Tie wallet", provider: "manual" },
+      context,
+    );
+    const confirm = async (category: string) => {
+      const transaction = await service.createTransaction(
+        {
+          accountId: account.id,
+          amount: 5,
+          category: null,
+          categoryConfidence: null,
+          date: "2026-07-19",
+          direction: "expense",
+          merchant: "Evidence Tie Merchant",
+          notes: null,
+        },
+        context,
+      );
+      await service.updateTransaction(transaction.id, { category, learnMerchant: false }, context);
+    };
+    await confirm("Shopping");
+    await confirm("Dining");
+    const tiedCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 7,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "expense",
+        merchant: "Evidence Tie Merchant",
+        notes: null,
+      },
+      context,
+    );
+    const tiedProposal = (
+      await service.proposeCategorizations(userId, {
+        limit: 50,
+        review: "needs_review",
+      })
+    ).items.find((proposal) => proposal.transaction.id === tiedCandidate.id);
+    expect(tiedProposal).toMatchObject({
+      confidence: 0,
+      meetsPolicyThreshold: false,
+      suggestedCategory: null,
+    });
+
+    await confirm("Shopping");
+    const winningCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 9,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-21",
+        direction: "expense",
+        merchant: "Evidence Tie Merchant",
+        notes: null,
+      },
+      context,
+    );
+    const winningProposal = (
+      await service.proposeCategorizations(userId, {
+        limit: 50,
+        review: "needs_review",
+      })
+    ).items.find((proposal) => proposal.transaction.id === winningCandidate.id);
+    expect(winningProposal).toMatchObject({
+      meetsPolicyThreshold: true,
+      suggestedCategory: expect.objectContaining({ name: "Shopping" }),
+    });
+  });
 
   it("excludes vault moves and matched card payments while preserving rent spending", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
@@ -486,6 +2000,10 @@ describe.sequential("finance service", () => {
       },
       context,
     );
+    await database.db
+      .update(financeTransactions)
+      .set({ categoryDecidedAt: null, categorySource: "provider" })
+      .where(inArray(financeTransactions.id, [vault.id, payment.id, cardPayment.id]));
 
     await expect(service.reconcileTransfers(userId)).resolves.toEqual({ paired: 1, transfers: 3 });
     const transactions = await service.listTransactions(userId, { limit: 200, review: "all" });
@@ -505,6 +2023,92 @@ describe.sequential("finance service", () => {
       category: "RENT_AND_UTILITIES",
       direction: "expense",
     });
+    const secondPayment = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 325,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "expense",
+        merchant: "AMEX EPAYMENT",
+        notes: null,
+      },
+      context,
+    );
+    const secondCardPayment = await service.createTransaction(
+      {
+        accountId: card.id,
+        amount: 325,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "income",
+        merchant: "AUTOPAY PAYMENT - THANK YOU",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ categoryDecidedAt: null, categorySource: "provider" })
+      .where(inArray(financeTransactions.id, [secondPayment.id, secondCardPayment.id]));
+    const concurrentReconciliations = await Promise.all([
+      service.reconcileTransfers(userId),
+      service.reconcileTransfers(userId),
+    ]);
+    expect(concurrentReconciliations.reduce((sum, result) => sum + result.paired, 0)).toBe(1);
+    const concurrentlyMatched = await database.db
+      .select({
+        reconciliationStatus: financeTransactions.reconciliationStatus,
+        transferGroupId: financeTransactions.transferGroupId,
+      })
+      .from(financeTransactions)
+      .where(inArray(financeTransactions.id, [secondPayment.id, secondCardPayment.id]));
+    expect(concurrentlyMatched).toHaveLength(2);
+    expect(concurrentlyMatched[0]?.transferGroupId).toBeTruthy();
+    expect(concurrentlyMatched[1]?.transferGroupId).toBe(concurrentlyMatched[0]?.transferGroupId);
+    expect(concurrentlyMatched.every((item) => item.reconciliationStatus === "matched")).toBe(true);
+    await Promise.all([
+      service.reconcileTransfers(userId),
+      service.updateTransaction(rent.id, { category: "Shopping", learnMerchant: false }, context),
+    ]);
+    expect(
+      (await service.listTransactions(userId, { limit: 200, review: "all" })).items.find(
+        (item) => item.id === rent.id,
+      ),
+    ).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      direction: "expense",
+    });
+    const unrelatedTransactionLock = await database.pool.connect();
+    let reconciliation: ReturnType<typeof service.reconcileTransfers> | undefined;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await unrelatedTransactionLock.query("BEGIN");
+      await unrelatedTransactionLock.query(
+        "SELECT id FROM finance_transactions WHERE id = $1 FOR UPDATE",
+        [rent.id],
+      );
+      reconciliation = service.reconcileTransfers(userId);
+      await expect(
+        Promise.race([
+          reconciliation,
+          new Promise((_, reject) => {
+            timeout = setTimeout(
+              () => reject(new Error("Reconciliation waited on an explicit unrelated decision.")),
+              1_000,
+            );
+          }),
+        ]),
+      ).resolves.toEqual(expect.objectContaining({ paired: 0 }));
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      await unrelatedTransactionLock.query("ROLLBACK");
+      unrelatedTransactionLock.release();
+      if (reconciliation) await Promise.allSettled([reconciliation]);
+    }
   });
 
   it("uses posted net spending, preserves refunds, and exposes complete ledger health and export data", async () => {
@@ -807,6 +2411,16 @@ describe.sequential("finance service", () => {
   });
 
   it("creates Plaid Link sessions, exchanges tokens, and synchronizes incremental changes", async () => {
+    const [plaidOnlyUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Plaid Only",
+        email: "plaid-only@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!plaidOnlyUser) throw new Error("Plaid-only fixture user was not created.");
     const fetch = plaidFetch();
     const service = createFinanceService({
       db: database.db,
@@ -819,16 +2433,26 @@ describe.sequential("finance service", () => {
         secret: "secret",
       },
     });
-    const context = { principal: financePrincipal(userId), requestId: "plaid-finance" };
+    const context = {
+      principal: financePrincipal(plaidOnlyUser.id),
+      requestId: "plaid-finance",
+    };
     expect(service.plaidAvailable()).toBe(true);
-    await expect(service.createPlaidLinkToken(userId)).resolves.toBe("link-token");
+    await expect(service.createPlaidLinkToken(plaidOnlyUser.id)).resolves.toBe("link-token");
     const accounts = await service.exchangePlaidToken(
       { institution: "Plaid Bank", publicToken: "public-token" },
       context,
     );
     expect(accounts).toHaveLength(2);
+    await expect(service.listCategories(plaidOnlyUser.id)).resolves.not.toHaveLength(0);
     const plaidAccount = accounts[0];
+    const debtAccount = accounts[1];
     if (!plaidAccount) throw new Error("Plaid checking account was not saved.");
+    if (!debtAccount) throw new Error("Plaid debt account was not saved.");
+    await database.db
+      .update(financeAccounts)
+      .set({ kind: "debt" })
+      .where(eq(financeAccounts.id, debtAccount.id));
     await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
       changed: 4,
     });
@@ -840,17 +2464,206 @@ describe.sequential("finance service", () => {
     const [transaction] = await database.db
       .select()
       .from(financeTransactions)
-      .where(eq(financeTransactions.providerTransactionId, "txn-1"));
+      .where(
+        and(
+          eq(financeTransactions.providerTransactionId, "pending-txn-1"),
+          eq(financeTransactions.userId, plaidOnlyUser.id),
+        ),
+      );
     expect(transaction).toMatchObject({
       amount: 2200,
       categoryConfidence: 9850,
       direction: "expense",
       needsReview: false,
       pending: true,
-      pendingTransactionId: "pending-txn-1",
+      pendingTransactionId: null,
       providerCategory: "FOOD_AND_DRINK",
       providerCategoryConfidence: "VERY_HIGH",
     });
+    if (!transaction) throw new Error("The pending Plaid transaction was not found.");
+    const categories = await service.listCategories(plaidOnlyUser.id);
+    const shopping = categories.find((category) => category.name === "Shopping");
+    if (!shopping) throw new Error("The Shopping category was not seeded.");
+    await service.updateTransaction(
+      transaction.id,
+      { category: "Shopping", learnMerchant: false },
+      context,
+    );
+    const [pendingDecision] = await database.db
+      .select({
+        category: financeTransactions.category,
+        categoryDecidedAt: financeTransactions.categoryDecidedAt,
+        categoryRationale: financeTransactions.categoryRationale,
+        categorySource: financeTransactions.categorySource,
+      })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transaction.id));
+    await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
+      changed: 4,
+    });
+    const postedTransaction = (
+      await service.listTransactions(plaidOnlyUser.id, {
+        limit: 20,
+        review: "all",
+        sortBy: "date",
+        sortDirection: "desc",
+      })
+    ).items.find((item) => item.id === transaction?.id);
+    if (!postedTransaction) throw new Error("The posted Plaid transaction was not found.");
+    expect(postedTransaction).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      pending: false,
+    });
+    await expect(
+      database.db
+        .select({
+          category: financeTransactions.category,
+          categoryDecidedAt: financeTransactions.categoryDecidedAt,
+          categoryRationale: financeTransactions.categoryRationale,
+          categorySource: financeTransactions.categorySource,
+        })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, postedTransaction.id)),
+    ).resolves.toEqual([pendingDecision]);
+    const transferReviews = (await service.listReviewQueue(plaidOnlyUser.id)).filter(
+      (review) => review.reason === "possible_transfer",
+    );
+    expect(transferReviews).toHaveLength(3);
+    for (const review of transferReviews) {
+      await service.resolveReview(
+        review.id,
+        {
+          action: "recategorize",
+          categoryId: shopping.id,
+          expectedTransactionUpdatedAt: review.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "The signed provider direction must survive transfer recategorization.",
+        },
+        context,
+      );
+    }
+    // Simulate the first sync after the online provider-direction migration:
+    // legacy rows have no stored provider baseline, so their explicit
+    // non-transfer direction is the safe comparison baseline.
+    await database.db
+      .update(financeTransactions)
+      .set({ providerDirection: null })
+      .where(eq(financeTransactions.id, postedTransaction.id));
+    await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
+      changed: 4,
+    });
+    const protectedRows = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(
+        and(
+          eq(financeTransactions.userId, plaidOnlyUser.id),
+          inArray(financeTransactions.providerTransactionId, [
+            "txn-1",
+            "txn-late-counterpart",
+            "txn-late-transfer",
+            "txn-transfer-in",
+            "txn-transfer-out",
+          ]),
+        ),
+      );
+    expect(protectedRows.find((row) => row.providerTransactionId === "txn-1")).toMatchObject({
+      amount: 3000,
+      category: "Shopping",
+      categorySource: "user",
+      direction: "income",
+      needsReview: true,
+      pending: false,
+      providerDirection: "income",
+      transactionDate: "2026-07-21",
+    });
+    expect(
+      protectedRows.find((row) => row.providerTransactionId === "txn-transfer-in"),
+    ).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      direction: "income",
+      needsReview: false,
+      providerDirection: "income",
+      reconciliationStatus: "not_applicable",
+      transferGroupId: null,
+    });
+    expect(
+      protectedRows.find((row) => row.providerTransactionId === "txn-transfer-out"),
+    ).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      direction: "expense",
+      needsReview: false,
+      providerDirection: "expense",
+      reconciliationStatus: "not_applicable",
+      transferGroupId: null,
+    });
+    expect(
+      protectedRows.find((row) => row.providerTransactionId === "txn-late-transfer"),
+    ).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      direction: "expense",
+      needsReview: false,
+      reconciliationStatus: "not_applicable",
+      transferGroupId: null,
+    });
+    expect(
+      protectedRows.find((row) => row.providerTransactionId === "txn-late-counterpart"),
+    ).toMatchObject({
+      direction: "income",
+      reconciliationStatus: "not_applicable",
+      transferGroupId: null,
+    });
+    expect(await service.listReviewQueue(plaidOnlyUser.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "refund_or_reversal",
+          transaction: expect.objectContaining({ id: postedTransaction.id }),
+        }),
+      ]),
+    );
+    expect(
+      (await service.listReviewQueue(plaidOnlyUser.id)).some(
+        (review) =>
+          review.transaction.id ===
+            protectedRows.find((row) => row.providerTransactionId === "txn-transfer-in")?.id ||
+          review.transaction.id ===
+            protectedRows.find((row) => row.providerTransactionId === "txn-transfer-out")?.id,
+      ),
+    ).toBe(false);
+    const postedDecision = await database.db
+      .select()
+      .from(financeClassificationDecisions)
+      .where(eq(financeClassificationDecisions.transactionId, postedTransaction.id));
+    // A pending decision remains protected when the provider posts it, but it
+    // does not become durable learning evidence without a posted user action.
+    expect(postedDecision).toHaveLength(0);
+    const blocker = await database.pool.connect();
+    let concurrentSync: ReturnType<typeof service.syncPlaidAccount> | undefined;
+    let concurrentReconciliation: ReturnType<typeof service.reconcileTransfers> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT id FROM finance_transactions WHERE id = $1 FOR UPDATE", [
+        postedTransaction.id,
+      ]);
+      concurrentSync = service.syncPlaidAccount(plaidAccount.id, context);
+      await waitForLockWaiters(database.pool, 1);
+      concurrentReconciliation = service.reconcileTransfers(plaidOnlyUser.id);
+      await waitForLockWaiters(database.pool, 2);
+      await blocker.query("COMMIT");
+      const [syncResult] = await Promise.all([concurrentSync, concurrentReconciliation]);
+      expect(syncResult).toEqual({ changed: 4 });
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+      const pendingOperations: Promise<unknown>[] = [];
+      if (concurrentSync) pendingOperations.push(concurrentSync);
+      if (concurrentReconciliation) pendingOperations.push(concurrentReconciliation);
+      await Promise.allSettled(pendingOperations);
+    }
     const amountPage = await service.listTransactions(userId, {
       limit: 1,
       review: "all",
@@ -883,11 +2696,174 @@ describe.sequential("finance service", () => {
     await expect(service.syncPlaidAccount(manual.id, context)).rejects.toThrow(
       "not a connected Plaid account",
     );
-    const secondExchange = await service.exchangePlaidToken(
-      { institution: null, publicToken: "public-token" },
+    const exchangeBlocker = await database.pool.connect();
+    let reconnectSync: ReturnType<typeof service.syncPlaidAccount> | undefined;
+    let reconnectExchange: ReturnType<typeof service.exchangePlaidToken> | undefined;
+    try {
+      await exchangeBlocker.query("BEGIN");
+      await exchangeBlocker.query("SELECT id FROM finance_accounts WHERE id = $1 FOR UPDATE", [
+        plaidAccount.id,
+      ]);
+      reconnectExchange = service.exchangePlaidToken(
+        { institution: null, publicToken: "public-token" },
+        context,
+      );
+      await waitForLockWaiters(database.pool, 1);
+      reconnectSync = service.syncPlaidAccount(plaidAccount.id, context);
+      void reconnectSync.catch(() => undefined);
+      await waitForLockWaiters(database.pool, 2);
+      await exchangeBlocker.query("COMMIT");
+      await expect(reconnectExchange).resolves.toHaveLength(2);
+      await expect(reconnectSync).rejects.toThrow(
+        "connection changed while this sync was in progress",
+      );
+      await expect(
+        database.db
+          .select({
+            providerItemId: financeAccounts.providerItemId,
+            syncCursor: financeAccounts.syncCursor,
+          })
+          .from(financeAccounts)
+          .where(inArray(financeAccounts.id, [plaidAccount.id, debtAccount.id])),
+      ).resolves.toEqual([
+        { providerItemId: "item-2", syncCursor: null },
+        { providerItemId: "item-2", syncCursor: null },
+      ]);
+    } finally {
+      await exchangeBlocker.query("ROLLBACK");
+      exchangeBlocker.release();
+      const pendingOperations: Promise<unknown>[] = [];
+      if (reconnectSync) pendingOperations.push(reconnectSync);
+      if (reconnectExchange) pendingOperations.push(reconnectExchange);
+      await Promise.allSettled(pendingOperations);
+    }
+  });
+
+  it("replays a removal window when a later Plaid page fails before the cursor checkpoint", async () => {
+    const [restartUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Plaid Restart",
+        email: "plaid-restart@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!restartUser) throw new Error("Plaid restart fixture user was not created.");
+    let failSecondPage = true;
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const path = new URL(requestUrl).pathname;
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (path === "/item/public_token/exchange") {
+        return Response.json({ access_token: "restart-token", item_id: "restart-item" });
+      }
+      if (path === "/accounts/get") {
+        return Response.json({
+          accounts: [
+            {
+              account_id: "restart-account",
+              balances: { current: 100 },
+              name: "Restart checking",
+              official_name: null,
+            },
+          ],
+        });
+      }
+      if (path === "/transactions/sync" && body.cursor === null) {
+        return Response.json({
+          added: [],
+          has_more: true,
+          modified: [],
+          next_cursor: "restart-page-1",
+          removed: [{ transaction_id: "stale-provider-transaction" }],
+        });
+      }
+      if (path === "/transactions/sync" && body.cursor === "restart-page-1") {
+        if (failSecondPage) {
+          failSecondPage = false;
+          return Response.json({ error_message: "Temporary page failure" }, { status: 503 });
+        }
+        return Response.json({
+          added: [],
+          has_more: false,
+          modified: [],
+          next_cursor: "restart-final",
+          removed: [],
+          transactions_update_status: "HISTORICAL_UPDATE_COMPLETE",
+        });
+      }
+      return Response.json({ error_message: "Unexpected Plaid request" }, { status: 400 });
+    });
+    const service = createFinanceService({
+      db: database.db,
+      now: () => now,
+      plaid: {
+        clientId: "client",
+        encryptionKey: key,
+        environment: "sandbox",
+        fetch,
+        secret: "secret",
+      },
+    });
+    const context = {
+      principal: financePrincipal(restartUser.id),
+      requestId: "plaid-restart",
+    };
+    const [restartAccount] = await service.exchangePlaidToken(
+      { institution: "Restart Bank", publicToken: "restart-public-token" },
       context,
     );
-    expect(secondExchange).toHaveLength(2);
+    if (!restartAccount) throw new Error("Plaid restart account was not created.");
+    const [staleTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: restartAccount.id,
+        amount: 2500,
+        category: "Shopping",
+        direction: "expense",
+        merchant: "Removed purchase",
+        pending: false,
+        providerDirection: "expense",
+        providerTransactionId: "stale-provider-transaction",
+        transactionDate: "2026-07-10",
+        userId: restartUser.id,
+      })
+      .returning();
+    if (!staleTransaction) throw new Error("Stale Plaid transaction was not created.");
+
+    await expect(service.syncPlaidAccount(restartAccount.id, context)).rejects.toThrow(
+      "Temporary page failure",
+    );
+    await expect(
+      database.db
+        .select({ syncCursor: financeAccounts.syncCursor })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, restartAccount.id)),
+    ).resolves.toEqual([{ syncCursor: null }]);
+    await expect(
+      database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, staleTransaction.id)),
+    ).resolves.toHaveLength(1);
+
+    await expect(service.syncPlaidAccount(restartAccount.id, context)).resolves.toEqual({
+      changed: 1,
+    });
+    await expect(
+      database.db
+        .select({ syncCursor: financeAccounts.syncCursor })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, restartAccount.id)),
+    ).resolves.toEqual([{ syncCursor: "restart-final" }]);
+    await expect(
+      database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, staleTransaction.id)),
+    ).resolves.toHaveLength(0);
   });
 
   it("surfaces Plaid API failures without persisting credentials", async () => {

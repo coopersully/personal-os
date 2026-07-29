@@ -168,6 +168,7 @@ export type UpdateRemoteMailThreadInput = {
 export type SendRemoteMailInput = {
   body: string;
   cc: MailAddress[];
+  from: string;
   subject: string;
   threadId?: string;
   to: MailAddress[];

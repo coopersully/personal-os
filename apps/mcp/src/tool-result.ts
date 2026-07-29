@@ -15,7 +15,11 @@ export function emptyResult(message: string) {
   };
 }
 
-/** Preserve authenticated API error contracts instead of reducing them to SDK exception text. */
+/**
+ * Preserve the authenticated API's structured failure contract at the MCP boundary.
+ * Tool annotations are only hints; callers need the API code and repair details to
+ * respond safely when an external mutation may already have committed.
+ */
 export async function apiResult(operation: () => Promise<unknown>) {
   try {
     return result(await operation());

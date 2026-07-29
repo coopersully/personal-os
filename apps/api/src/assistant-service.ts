@@ -1,4 +1,10 @@
-import { attentionItems, auditEvents, type Database, domainProfiles } from "@personal-os/database";
+import {
+  attentionItems,
+  auditEvents,
+  type Database,
+  domainProfileApprovals,
+  domainProfiles,
+} from "@personal-os/database";
 import {
   type AssistantDomain,
   type AssistantSetupStatus,
@@ -14,14 +20,36 @@ import {
 import { and, desc, eq } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
-import { normalizeDomainProfilePreferences } from "./domain-profile-validation.js";
 import { AppError, isUniqueViolation } from "./errors.js";
-import { auditSnapshot } from "./serialization.js";
+import {
+  auditAttentionItemMetadata,
+  auditDomainProfileMetadata,
+  domainProfileChangedFields,
+} from "./serialization.js";
 import type { Principal } from "./types.js";
 
 type MutationContext = { principal: Principal; requestId: string };
+export type ProfileSourceTransaction = Pick<Database, "select">;
 
-export function createAssistantService({ db, now }: { db: Database; now: () => Date }) {
+export function createAssistantService({
+  db,
+  now,
+  profileRequiresApproval,
+  validateProfileSources,
+}: {
+  db: Database;
+  now: () => Date;
+  profileRequiresApproval: (domain: AssistantDomain) => boolean;
+  validateProfileSources: (
+    transaction: ProfileSourceTransaction,
+    domain: AssistantDomain,
+    userId: string,
+    sourceIds: string[],
+    status: UpsertDomainProfileInput["status"],
+    actorType: Principal["actorType"],
+    preferences: UpsertDomainProfileInput["preferences"],
+  ) => Promise<UpsertDomainProfileInput["preferences"] | undefined> | Promise<void>;
+}) {
   async function findProfile(userId: string, domain: AssistantDomain) {
     return (
       await db
@@ -35,17 +63,41 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
   return {
     async getProfile(userId: string, domain: AssistantDomain): Promise<DomainProfile | null> {
       const profile = await findProfile(userId, domain);
-      return profile ? serializeProfile(profile) : null;
+      if (!profile) return null;
+      const serialized = serializeProfile(profile);
+      if (!profileRequiresApproval(domain) || profile.status !== "active") return serialized;
+      const [approval] = await db
+        .select({ id: domainProfileApprovals.id })
+        .from(domainProfileApprovals)
+        .where(
+          and(
+            eq(domainProfileApprovals.profileId, profile.id),
+            eq(domainProfileApprovals.userId, userId),
+            eq(domainProfileApprovals.domain, domain),
+            eq(domainProfileApprovals.profileVersion, profile.version),
+          ),
+        )
+        .limit(1);
+      return approval ? serialized : { ...serialized, status: "draft" };
     },
 
     async getSetupStatus(principal: Principal): Promise<AssistantSetupStatus> {
       const profiles = await db
         .select({
+          approvedVersion: domainProfileApprovals.profileVersion,
           domain: domainProfiles.domain,
           status: domainProfiles.status,
           version: domainProfiles.version,
         })
         .from(domainProfiles)
+        .leftJoin(
+          domainProfileApprovals,
+          and(
+            eq(domainProfileApprovals.profileId, domainProfiles.id),
+            eq(domainProfileApprovals.userId, domainProfiles.userId),
+            eq(domainProfileApprovals.domain, domainProfiles.domain),
+          ),
+        )
         .where(eq(domainProfiles.userId, principal.userId));
       const byDomain = new Map(profiles.map((profile) => [profile.domain, profile]));
       return {
@@ -53,11 +105,25 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
           const access = featureAccessPolicies[domain];
           const profile = byDomain.get(domain);
           const canRead = principal.scopes.has(access.readScope);
+          const approvedVersion =
+            canRead && profileRequiresApproval(domain) ? (profile?.approvedVersion ?? null) : null;
+          const profileStatus =
+            profileRequiresApproval(domain) &&
+            profile?.status === "active" &&
+            approvedVersion === null
+              ? "draft"
+              : (profile?.status ?? null);
           return {
+            approvedProfileStatus: approvedVersion === null ? null : ("active" as const),
+            approvedProfileVersion: approvedVersion,
             canRead,
             canWrite: principal.scopes.has(access.writeScope),
             domain,
-            profileStatus: canRead ? (profile?.status ?? null) : null,
+            pendingDraftVersion:
+              approvedVersion !== null && profileStatus === "draft"
+                ? (profile?.version ?? null)
+                : null,
+            profileStatus: canRead ? profileStatus : null,
             profileVersion: canRead ? (profile?.version ?? null) : null,
           };
         }),
@@ -68,39 +134,55 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       input: UpsertDomainProfileInput,
       context: MutationContext,
     ): Promise<DomainProfile> {
-      const existing = await findProfile(context.principal.userId, input.domain);
-      const preferences = normalizeDomainProfilePreferences(
-        input,
-        existing ? serializeProfile(existing) : undefined,
-      );
-      if (existing && input.expectedVersion === undefined) {
-        throw new AppError(
-          "invalid_request",
-          "expectedVersion is required when revising a domain profile.",
-        );
-      }
-      if (
-        input.expectedVersion !== undefined &&
-        input.expectedVersion !== (existing?.version ?? 0)
-      ) {
-        throw new AppError("conflict", "The domain profile changed since it was loaded.", {
-          currentVersion: existing?.version ?? null,
-        });
-      }
-      const values = {
-        categories: input.categories,
-        domain: input.domain,
-        instructions: input.instructions,
-        objective: input.objective,
-        preferences,
-        sourceContexts: input.sourceContexts,
-        status: input.status,
-        summary: input.summary,
-      };
       const updatedAt = now();
       let saved: typeof domainProfiles.$inferSelect;
       try {
         saved = await db.transaction(async (transaction) => {
+          const preferences =
+            (await validateProfileSources(
+              transaction,
+              input.domain,
+              context.principal.userId,
+              input.sourceContexts.map((source) => source.sourceId),
+              input.status,
+              context.principal.actorType,
+              input.preferences,
+            )) ?? input.preferences;
+          const values = {
+            categories: input.categories,
+            domain: input.domain,
+            instructions: input.instructions,
+            objective: input.objective,
+            preferences,
+            sourceContexts: input.sourceContexts,
+            status: input.status,
+            summary: input.summary,
+          };
+          const [existing] = await transaction
+            .select()
+            .from(domainProfiles)
+            .where(
+              and(
+                eq(domainProfiles.userId, context.principal.userId),
+                eq(domainProfiles.domain, input.domain),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (existing && input.expectedVersion === undefined) {
+            throw new AppError(
+              "invalid_request",
+              "expectedVersion is required when revising a domain profile.",
+            );
+          }
+          if (
+            input.expectedVersion !== undefined &&
+            input.expectedVersion !== (existing?.version ?? 0)
+          ) {
+            throw new AppError("conflict", "The domain profile changed since it was loaded.", {
+              currentVersion: existing?.version ?? null,
+            });
+          }
           const [profile] = existing
             ? await transaction
                 .update(domainProfiles)
@@ -119,20 +201,61 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
           if (!profile) {
             throw new AppError("conflict", "The domain profile changed while it was being saved.");
           }
+          const recordsApproval =
+            profile.status === "active" &&
+            context.principal.actorType === "user" &&
+            profileRequiresApproval(profile.domain);
+          if (recordsApproval) {
+            await transaction
+              .insert(domainProfileApprovals)
+              .values({
+                approvedAt: updatedAt,
+                approvedByUserId: context.principal.userId,
+                domain: profile.domain,
+                profile: serializeProfile(profile),
+                profileId: profile.id,
+                profileVersion: profile.version,
+                userId: context.principal.userId,
+              })
+              .onConflictDoUpdate({
+                set: {
+                  approvedAt: updatedAt,
+                  approvedByUserId: context.principal.userId,
+                  profile: serializeProfile(profile),
+                  profileId: profile.id,
+                  profileVersion: profile.version,
+                  updatedAt,
+                },
+                target: [domainProfileApprovals.userId, domainProfileApprovals.domain],
+              });
+          }
+          const changedFields = domainProfileChangedFields(existing ?? null, profile);
           await transaction.insert(auditEvents).values(
             auditValues({
               action: existing ? "assistant.profile.updated" : "assistant.profile.created",
-              after: auditSnapshot(profile),
-              before: auditSnapshot(existing ?? null),
+              after: auditDomainProfileMetadata(profile, changedFields),
+              before: auditDomainProfileMetadata(existing ?? null, changedFields),
               entityId: profile.id,
               entityType: "domain_profile",
               ...context,
             }),
           );
+          if (recordsApproval) {
+            await transaction.insert(auditEvents).values(
+              auditValues({
+                action: "assistant.profile.approved",
+                after: { domain: profile.domain, profileVersion: profile.version },
+                before: null,
+                entityId: profile.id,
+                entityType: "domain_profile",
+                ...context,
+              }),
+            );
+          }
           return profile;
         });
       } catch (error) {
-        if (!existing && isUniqueViolation(error, "domain_profiles_user_domain_idx")) {
+        if (isUniqueViolation(error, "domain_profiles_user_domain_idx")) {
           throw new AppError("conflict", "The domain profile changed while it was being created.");
         }
         throw error;
@@ -144,6 +267,27 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
       input: CreateAttentionItemInput,
       context: MutationContext,
     ): Promise<AttentionItem> {
+      if (
+        input.domain === "mail" &&
+        (input.source !== null ||
+          input.relatedEntityType === "mail_thread" ||
+          input.relatedEntityType === "mail_account" ||
+          input.relatedEntityType === "mail_rule")
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Mail source, account, rule, and conversation provenance is reserved for Mail-owned attention paths.",
+        );
+      }
+      if (
+        input.relatedEntityType === "calendar_event" ||
+        input.source?.sourceType === "calendar_event"
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Use the Calendar attention endpoint so Ilo can validate and derive the event source.",
+        );
+      }
       const created = await db.transaction(async (transaction) => {
         const item = requireDatabaseRecord(
           (
@@ -162,7 +306,7 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "assistant.attention.created",
-            after: auditSnapshot(item),
+            after: auditAttentionItemMetadata(item),
             before: null,
             entityId: item.id,
             entityType: "attention_item",
@@ -223,8 +367,8 @@ export function createAssistantService({ db, now }: { db: Database; now: () => D
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "assistant.attention.updated",
-            after: auditSnapshot(item),
-            before: auditSnapshot(existing),
+            after: auditAttentionItemMetadata(item),
+            before: auditAttentionItemMetadata(existing),
             entityId: item.id,
             entityType: "attention_item",
             ...context,

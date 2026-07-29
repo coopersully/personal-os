@@ -6,9 +6,13 @@ import {
   agentConnectionGuideSchema,
   agentMutationPolicies,
   apiErrorSchema,
+  applyFinanceCategorizationsInputSchema,
   automationRoutineSchema,
   automationRunSchema,
+  bulkUpdateMailInputSchema,
+  calendarCommitmentCandidateSchema,
   calendarEventSchema,
+  calendarProfilePreferencesSchema,
   calendarProviderSchema,
   calendarSchema,
   connectICloudInputSchema,
@@ -28,6 +32,9 @@ import {
   eventListQuerySchema,
   featureAccessPolicies,
   featureIds,
+  financeGuidedPreferencesSchema,
+  financeReviewDecisionInputSchema,
+  financeTransactionQuerySchema,
   formatDateOnly,
   formatDateWithOrdinal,
   formatMonth,
@@ -51,6 +58,7 @@ import {
   paginationSchema,
   passwordRequirementState,
   passwordSchema,
+  previewCalendarCommitmentInputSchema,
   registerInputSchema,
   reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
@@ -58,6 +66,7 @@ import {
   reminderProfilePreferencesSchema,
   reminderSchema,
   resolveStoredMailRule,
+  sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
   taskSchema,
@@ -71,11 +80,14 @@ import {
   updateGoalInputSchema,
   updateLocalCalendarInputSchema,
   updateMailRuleInputSchema,
+  updateMailThreadInputSchema,
   updateMotiveInputSchema,
   updateReminderInputSchema,
   updateTaskInputSchema,
   updateUserInputSchema,
   upsertDomainProfileInputSchema,
+  upsertMailProfileInputSchema,
+  upsertReminderProfileInputSchema,
   userSchema,
   weatherLocationOptionSchema,
   weatherLocationSearchQuerySchema,
@@ -147,41 +159,151 @@ describe("domain schemas", () => {
         domain: "mail",
         instructions: ["Keep delivery problems visible."],
         objective: "Keep a clean inbox.",
-        preferences: { inboxStyle: "signal_only", retentionDays: 1 },
+        preferences: { retentionDays: null },
         sourceContexts: [],
         status: "draft",
         summary: "Only high-signal mail stays visible.",
       }),
-    ).toMatchObject({ domain: "mail", status: "draft" });
+    ).toMatchObject({
+      domain: "mail",
+      preferences: { retentionDays: null },
+      status: "draft",
+    });
+    expect(
+      upsertMailProfileInputSchema.parse({
+        categories: [],
+        domain: "mail",
+        instructions: ["Keep delivery problems visible."],
+        objective: "Keep a clean inbox.",
+        preferences: {
+          importantEmailHandling: "inbox_and_attention",
+          inboxStyle: "signal_only",
+          noiseDisposition: "archive_after_days",
+          noiseRetentionDays: 3,
+        },
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Personal decisions",
+            sourceId: accountId,
+            sourceLabel: "Personal",
+          },
+        ],
+        status: "draft",
+        summary: "Only high-signal mail stays visible.",
+      }),
+    ).toMatchObject({
+      preferences: { noiseDisposition: "archive_after_days", noiseRetentionDays: 3 },
+    });
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep a clean inbox.",
+        preferences: {
+          noiseDisposition: "trash_after_days",
+          noiseRetentionDays: 1,
+        },
+        sourceContexts: [],
+        status: "draft",
+        summary: "One-day recoverable Trash.",
+      }).success,
+    ).toBe(true);
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Complete Mail setup.",
+        preferences: {},
+        sourceContexts: [],
+        status: "active",
+        summary: "No inbox was mapped.",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep a clean inbox.",
+        preferences: {},
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Personal",
+            sourceId: accountId,
+            sourceLabel: "Personal",
+          },
+          {
+            notes: null,
+            purpose: "Work",
+            sourceId: accountId,
+            sourceLabel: "Duplicate",
+          },
+        ],
+        status: "draft",
+        summary: "Conflicting source meanings.",
+      }).success,
+    ).toBe(false);
     const reminderPreferences = {
-      preferredAutomaticActions: ["create", "complete"],
       defaultCapture: "due_when_stated",
       dueAtMeaning: "deadline",
       notificationLeadMinutes: 30,
       overdueBehavior: "propose_deferral",
       overdueReviewAfterDays: 2,
+      preferredAutomaticActions: ["create", "complete"],
+      preferredMutationPolicy: "approve_each",
       priorityHighMeaning: "Needs attention today",
       priorityLowMeaning: "Optional when convenient",
       priorityMediumMeaning: "Should happen soon",
-      preferredMutationPolicy: "approve_each",
       reviewPriorityAtOrAbove: "medium",
       timezoneBehavior: "ask_when_ambiguous",
-    };
+    } as const;
     expect(reminderProfilePreferencesSchema.parse(reminderPreferences)).toEqual(
       reminderPreferences,
     );
     expect(
-      upsertDomainProfileInputSchema.parse({
+      upsertReminderProfileInputSchema.parse({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep commitments visible.",
+        preferences: { priorityHighMeaning: "  Needs attention today  " },
+        sourceContexts: [],
+        status: "draft",
+        summary: "Partial Reminder setup.",
+      }),
+    ).toMatchObject({
+      domain: "reminders",
+      preferences: { priorityHighMeaning: "Needs attention today" },
+      status: "draft",
+    });
+    expect(
+      upsertReminderProfileInputSchema.safeParse({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep commitments visible.",
+        preferences: {},
+        sourceContexts: [],
+        status: "active",
+        summary: "Incomplete Reminder setup.",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertReminderProfileInputSchema.safeParse({
         categories: [],
         domain: "reminders",
         instructions: [],
         objective: "Keep commitments visible.",
         preferences: reminderPreferences,
         sourceContexts: [],
-        status: "draft",
-        summary: "Review overdue commitments.",
-      }),
-    ).toMatchObject({ domain: "reminders", preferences: reminderPreferences });
+        status: "active",
+        summary: "Complete Reminder setup.",
+      }).success,
+    ).toBe(true);
     expect(
       createAttentionItemInputSchema.parse({
         domain: "calendar",
@@ -293,6 +415,51 @@ describe("domain schemas", () => {
         enabled: true,
         name: "Unsafe active rule",
         policy: "approved_rule",
+      }).success,
+    ).toBe(false);
+    expect(
+      sendMailInputSchema.parse({
+        accountId: "00000000-0000-4000-8000-000000000001",
+        body: "No subject",
+        subject: "   ",
+        to: [{ address: "To@Example.COM", name: null }],
+      }),
+    ).toMatchObject({
+      subject: "",
+      to: [{ address: "To@Example.COM", name: null }],
+    });
+    expect(
+      createMailRuleInputSchema.safeParse({
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "sender", operator: "contains", value: "news" },
+        confidenceThreshold: 0.9,
+        name: "Decorative confidence",
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        enabled: true,
+        expectedVersion: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        expectedVersion: 1,
+        policy: "approve_each",
+      }).success,
+    ).toBe(false);
+    expect(
+      createMailRuleInputSchema.safeParse({
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "sender", operator: "contains", value: "news" },
+        name: "Duplicate source draft",
+        sourceIds: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000001"],
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        expectedVersion: 1,
+        sourceIds: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000001"],
       }).success,
     ).toBe(false);
   });
@@ -457,6 +624,29 @@ describe("domain schemas", () => {
     expect(updateFinanceTransactionInputSchema.parse({ notes: "Receipt saved" })).toEqual({
       notes: "Receipt saved",
     });
+    expect(
+      financeReviewDecisionInputSchema.parse({
+        action: "recategorize",
+        categoryId: "00000000-0000-4000-8000-000000000000",
+        confidence: 0.965,
+        expectedTransactionUpdatedAt: start,
+      }),
+    ).toMatchObject({
+      confidence: 0.965,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: "suggest",
+    });
+    expect(
+      financeReviewDecisionInputSchema.safeParse({
+        action: "approve",
+      }).success,
+    ).toBe(false);
+    expect(
+      financeReviewDecisionInputSchema.safeParse({
+        action: "recategorize",
+        expectedTransactionUpdatedAt: start,
+      }).success,
+    ).toBe(false);
     expect(() => updateFinanceTransactionInputSchema.parse({ learnMerchant: false })).toThrow();
     expect(
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
@@ -553,6 +743,12 @@ describe("domain schemas", () => {
     ).toBe(false);
     expect(reminderListQuerySchema.parse({ completed: "true" }).completed).toBe(true);
     expect(reminderListQuerySchema.parse({ completed: "false" }).completed).toBe(false);
+    expect(
+      reminderListQuerySchema.safeParse({
+        dueAfter: "2026-07-14T00:00:00.000Z",
+        dueBefore: "2026-07-13T00:00:00.000Z",
+      }).success,
+    ).toBe(false);
 
     expect(taskStatusSchema.parse("scheduled")).toBe("scheduled");
     expect(
@@ -619,14 +815,88 @@ describe("domain schemas", () => {
       location: null,
     });
     expect(createEventInputSchema.safeParse({ ...input, endsAt: start }).success).toBe(false);
+    expect(
+      createEventInputSchema.safeParse({ ...input, timezone: "Definitely/Not_A_Time_Zone" })
+        .success,
+    ).toBe(false);
     expect(updateEventInputSchema.safeParse({}).success).toBe(false);
+    expect(
+      updateEventInputSchema.safeParse({
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: start,
+      }).success,
+    ).toBe(false);
     expect(updateEventInputSchema.safeParse({ startsAt: end, endsAt: start }).success).toBe(false);
     expect(updateEventInputSchema.parse({ startsAt: start })).toEqual({ startsAt: start });
+    expect(
+      updateEventInputSchema.parse({
+        expectedBlockUpdatedAtById: { [accountId]: start },
+        expectedUpdatedAt: start,
+        title: "Revised focus",
+      }),
+    ).toEqual({
+      expectedBlockUpdatedAtById: { [accountId]: start },
+      expectedUpdatedAt: start,
+      title: "Revised focus",
+    });
     expect(createEventBlockInputSchema.parse({ calendarId: id })).toEqual({
       calendarId: id,
       mode: "busy",
     });
     expect(updateEventBlockInputSchema.parse({ mode: "details" })).toEqual({ mode: "details" });
+    const candidate = {
+      allDay: false,
+      buffer: { afterMinutes: 15, beforeMinutes: 15 },
+      calendarId: id,
+      endsAt: end,
+      evidence: {
+        kind: "ticket",
+        source: {
+          accountId,
+          provider: "google",
+          remoteId: "ticket-1",
+          revision: "v1",
+          sourceType: "mail_thread",
+        },
+        summary: "Confirmed ticket.",
+      },
+      flexibility: "hard",
+      location: null,
+      notes: null,
+      startsAt: start,
+      timezone: "UTC",
+      title: "Train",
+      visibility: "private",
+    };
+    expect(calendarCommitmentCandidateSchema.parse(candidate)).toMatchObject(candidate);
+    expect(
+      calendarCommitmentCandidateSchema.safeParse({ ...candidate, endsAt: start }).success,
+    ).toBe(false);
+    expect(previewCalendarCommitmentInputSchema.parse({ candidate }).requestedPolicy).toBe(
+      "preview",
+    );
+    expect(
+      calendarProfilePreferencesSchema.parse({
+        afterBufferMinutes: 15,
+        automaticEventCreation: false,
+        automaticEventEvidence: ["ticket", "booking"],
+        beforeBufferMinutes: 15,
+        busyBlockPrivacy: "busy",
+        defaultCalendarId: id,
+        defaultTimezone: "UTC",
+      }).defaultCalendarId,
+    ).toBe(id);
+    expect(
+      calendarProfilePreferencesSchema.safeParse({
+        afterBufferMinutes: 15,
+        automaticEventCreation: false,
+        automaticEventEvidence: ["ticket"],
+        beforeBufferMinutes: 15,
+        busyBlockPrivacy: "busy",
+        defaultCalendarId: id,
+        defaultTimezone: "Eastern",
+      }).success,
+    ).toBe(false);
     expect(updateAutomationRoutineInputSchema.safeParse({}).success).toBe(false);
     expect(
       updateAutomationRoutineInputSchema.parse({ enabled: false, schedule: "Daily at 8:00 PM" }),
@@ -702,8 +972,34 @@ describe("domain schemas", () => {
         subject: "Subject",
         to: [],
         unread: true,
+        updatedAt: start,
       }).subject,
     ).toBe("Subject");
+    expect(
+      updateMailThreadInputSchema.parse({
+        expectedUpdatedAt: start,
+        unread: false,
+      }),
+    ).toEqual({ expectedUpdatedAt: start, unread: false });
+    expect(updateMailThreadInputSchema.safeParse({ expectedUpdatedAt: start }).success).toBe(false);
+    expect(
+      bulkUpdateMailInputSchema.parse({
+        items: [{ expectedUpdatedAt: start, id }],
+        unread: false,
+      }),
+    ).toEqual({
+      items: [{ expectedUpdatedAt: start, id }],
+      unread: false,
+    });
+    expect(
+      bulkUpdateMailInputSchema.safeParse({
+        items: [
+          { expectedUpdatedAt: start, id },
+          { expectedUpdatedAt: "2026-07-28T12:00:00.000Z", id },
+        ],
+        starred: true,
+      }).success,
+    ).toBe(false);
     expect(
       mailListQuerySchema.parse({
         accountIds: `${accountId},`,
@@ -733,6 +1029,67 @@ describe("domain schemas", () => {
         mail: false,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("finance agent contracts", () => {
+  it("uses percentage points for recurring-change preferences", () => {
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        recurringAmountChangePercent: 20,
+      }).recurringAmountChangePercent,
+    ).toBe(20);
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        recurringAmountChangePercent: 101,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        futurePreference: "x".repeat(501),
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        futureNullablePreference: null,
+      }),
+    ).toMatchObject({ futureNullablePreference: null });
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        largeExpenseAlertAmount: 500,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        largeExpenseAlertAmount: 500,
+        lowBalanceAlertAmount: 100,
+        planningCurrency: "USD",
+      }),
+    ).toMatchObject({ planningCurrency: "USD" });
+  });
+
+  it("requires one revision-guarded decision per transaction", () => {
+    const decision = {
+      categoryId: accountId,
+      confidence: 0.95,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: "suggest" as const,
+      rationale: "The user accepted this proposal.",
+      transactionId: id,
+    };
+    expect(
+      applyFinanceCategorizationsInputSchema.safeParse({ decisions: [decision] }).success,
+    ).toBe(true);
+    expect(
+      applyFinanceCategorizationsInputSchema.safeParse({
+        decisions: [decision, decision],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("parses explicit Finance pending query booleans without truthy string coercion", () => {
+    expect(financeTransactionQuerySchema.parse({ pending: "false" }).pending).toBe(false);
+    expect(financeTransactionQuerySchema.parse({ pending: "true" }).pending).toBe(true);
   });
 });
 

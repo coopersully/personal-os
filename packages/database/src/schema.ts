@@ -12,6 +12,7 @@ import type {
   AutomationRunStatus,
   AutomationTemplate,
   CalendarProvider,
+  DomainProfile,
   FinanceProvider,
   GoogleConnectionService,
   HomeLocation,
@@ -29,6 +30,8 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
+  check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -305,7 +308,7 @@ export const domainProfiles = pgTable(
       .notNull()
       .default([]),
     preferences: jsonb("preferences")
-      .$type<Record<string, boolean | number | string | string[]>>()
+      .$type<Record<string, boolean | null | number | string | string[]>>()
       .notNull()
       .default({}),
     status: text("status").$type<"active" | "draft">().notNull().default("draft"),
@@ -314,9 +317,55 @@ export const domainProfiles = pgTable(
   },
   (table) => [
     uniqueIndex("domain_profiles_user_domain_idx").on(table.userId, table.domain),
+    uniqueIndex("domain_profiles_id_user_domain_idx").on(table.id, table.userId, table.domain),
     index("domain_profiles_user_status_idx").on(table.userId, table.status),
   ],
 );
+
+export const domainProfileApprovals = pgTable(
+  "domain_profile_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    profileId: uuid("profile_id").notNull(),
+    profileVersion: integer("profile_version").notNull(),
+    profile: jsonb("profile").$type<DomainProfile>().notNull(),
+    approvedByUserId: uuid("approved_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("domain_profile_approvals_user_domain_idx").on(table.userId, table.domain),
+    index("domain_profile_approvals_profile_idx").on(table.profileId),
+    foreignKey({
+      columns: [table.profileId, table.userId, table.domain],
+      foreignColumns: [domainProfiles.id, domainProfiles.userId, domainProfiles.domain],
+      name: "domain_profile_approvals_owned_profile_fk",
+    }).onDelete("cascade"),
+    check("domain_profile_approvals_owner_check", sql`${table.approvedByUserId} = ${table.userId}`),
+    check(
+      "domain_profile_approvals_snapshot_check",
+      sql`(${table.profile}->>'id' = ${table.profileId}::text
+        AND ${table.profile}->>'domain' = ${table.domain}
+        AND (${table.profile}->>'version')::integer = ${table.profileVersion}
+        AND ${table.profile}->>'status' = 'active') IS TRUE`,
+    ),
+  ],
+);
+
+export const financeSetupBackfillState = pgTable("finance_setup_backfill_state", {
+  key: text("key").primaryKey(),
+  categoriesComplete: boolean("categories_complete").notNull().default(false),
+  profileCursor: uuid("profile_cursor"),
+  profilesComplete: boolean("profiles_complete").notNull().default(false),
+  userCursor: uuid("user_cursor"),
+  ...timestamps,
+});
 
 export const attentionItems = pgTable(
   "attention_items",
@@ -638,9 +687,46 @@ export const mailDrafts = pgTable(
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    sendClaimId: uuid("send_claim_id"),
+    sendClaimedAt: timestamp("send_claimed_at", { withTimezone: true }),
+    sendStatus: text("send_status")
+      .$type<"draft" | "sending" | "sent" | "reconcile">()
+      .notNull()
+      .default("draft"),
     ...timestamps,
   },
-  (table) => [index("mail_drafts_user_updated_idx").on(table.userId, table.updatedAt)],
+  (table) => [
+    index("mail_drafts_user_updated_idx").on(table.userId, table.updatedAt),
+    check(
+      "mail_drafts_send_state_check",
+      sql`
+        (
+          ${table.sendStatus} = 'draft'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NULL
+          AND ${table.sendClaimedAt} IS NULL
+        )
+        OR (
+          ${table.sendStatus} = 'sending'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NOT NULL
+          AND ${table.sendClaimedAt} IS NOT NULL
+        )
+        OR (
+          ${table.sendStatus} = 'reconcile'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NOT NULL
+          AND ${table.sendClaimedAt} IS NOT NULL
+        )
+        OR (
+          ${table.sendStatus} = 'sent'
+          AND ${table.sentAt} IS NOT NULL
+          AND ${table.sendClaimId} IS NULL
+          AND ${table.sendClaimedAt} IS NULL
+        )
+      `,
+    ),
+  ],
 );
 
 export const mailSnoozes = pgTable(
@@ -686,6 +772,20 @@ export const mailRules = pgTable(
   (table) => [
     index("mail_rules_user_idx").on(table.userId),
     index("mail_rules_user_enabled_idx").on(table.userId, table.enabled),
+    check(
+      "mail_rules_activation_state_check",
+      sql`
+        (${table.enabled} = false AND ${table.policy} = 'preview')
+        OR (${table.enabled} = true AND ${table.policy} = 'approved_rule')
+        OR (
+          ${table.enabled} = true
+          AND ${table.policy} = 'preview'
+          AND ${table.condition} IS NULL
+          AND ${table.actions} IS NULL
+        )
+      `,
+    ),
+    check("mail_rules_exact_match_confidence_check", sql`${table.confidenceThreshold} IS NULL`),
   ],
 );
 
@@ -934,6 +1034,7 @@ export const financeTransactions = pgTable(
     providerCategory: text("provider_category"),
     providerCategoryDetailed: text("provider_category_detailed"),
     providerCategoryConfidence: text("provider_category_confidence"),
+    providerDirection: text("provider_direction").$type<"expense" | "income">(),
     merchant: text("merchant").notNull(),
     amount: integer("amount_cents").notNull(),
     direction: text("direction").$type<TransactionDirection>().notNull(),
@@ -961,6 +1062,10 @@ export const financeTransactions = pgTable(
     uniqueIndex("finance_transactions_provider_idx").on(
       table.accountId,
       table.providerTransactionId,
+    ),
+    check(
+      "finance_transactions_provider_direction_check",
+      sql`${table.providerDirection} IS NULL OR ${table.providerDirection} IN ('expense', 'income')`,
     ),
   ],
 );

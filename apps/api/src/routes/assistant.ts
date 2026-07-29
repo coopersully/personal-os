@@ -5,8 +5,11 @@ import {
   attentionItemQuerySchema,
   createAttentionItemInputSchema,
   featureAccessPolicies,
+  financeGuidedPreferencesSchema,
   updateAttentionItemInputSchema,
   upsertDomainProfileInputSchema,
+  upsertMailProfileInputSchema,
+  upsertReminderProfileInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createAssistantService } from "../assistant-service.js";
@@ -43,10 +46,16 @@ export function registerAssistantRoutes({
   app.put("/v1/assistant/profiles/:domain", async (context) => {
     const domain = assistantDomainSchema.parse(context.req.param("domain"));
     assertDomainAccess(context.get("principal"), domain, true);
-    const input = await parseBody(context, upsertDomainProfileInputSchema);
+    const input =
+      domain === "mail"
+        ? await parseBody(context, upsertMailProfileInputSchema)
+        : domain === "reminders"
+          ? await parseBody(context, upsertReminderProfileInputSchema)
+          : await parseBody(context, upsertDomainProfileInputSchema);
     if (input.domain !== domain) {
       throw new AppError("invalid_request", "The profile domain must match the request path.");
     }
+    if (domain === "finances") financeGuidedPreferencesSchema.parse(input.preferences);
     return context.json({
       profile: await assistant.upsertProfile(input, mutationContext(context)),
     });

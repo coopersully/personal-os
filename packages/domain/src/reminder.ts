@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { domainPreferenceValueSchema, upsertDomainProfileInputSchema } from "./assistant.js";
 import { idSchema, isoDateTimeSchema, paginationSchema, timeZoneSchema } from "./common.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
@@ -40,9 +41,25 @@ export const reminderProfilePreferencesSchema = z
     reviewPriorityAtOrAbove: z.enum(["low", "medium", "high", "none"]),
     timezoneBehavior: z.enum(["profile_default", "preserve_explicit", "ask_when_ambiguous"]),
   })
-  .passthrough();
+  .catchall(domainPreferenceValueSchema);
 export type ReminderProfilePreferences = z.infer<typeof reminderProfilePreferencesSchema>;
 export const reminderDraftProfilePreferencesSchema = reminderProfilePreferencesSchema.partial();
+
+const reminderProfileInputSchema = upsertDomainProfileInputSchema.extend({
+  domain: z.literal("reminders"),
+});
+
+export const upsertReminderProfileInputSchema = z.discriminatedUnion("status", [
+  reminderProfileInputSchema.extend({
+    preferences: reminderDraftProfilePreferencesSchema,
+    status: z.literal("draft"),
+  }),
+  reminderProfileInputSchema.extend({
+    preferences: reminderProfilePreferencesSchema,
+    status: z.literal("active"),
+  }),
+]);
+export type UpsertReminderProfileInput = z.infer<typeof upsertReminderProfileInputSchema>;
 
 const reminderFieldsSchema = z.object({
   title: z.string().trim().min(1).max(240),
@@ -131,13 +148,27 @@ export const reminderDeferralPreviewSchema = z.object({
 });
 export type ReminderDeferralPreview = z.infer<typeof reminderDeferralPreviewSchema>;
 
-export const reminderListQuerySchema = paginationSchema.extend({
-  completed: z
-    .enum(["true", "false"])
-    .transform((value) => value === "true")
-    .optional(),
-  dueBefore: isoDateTimeSchema.optional(),
-  dueAfter: isoDateTimeSchema.optional(),
-  query: z.string().trim().min(1).max(200).optional(),
-});
+export const reminderListQuerySchema = paginationSchema
+  .extend({
+    completed: z
+      .enum(["true", "false"])
+      .transform((value) => value === "true")
+      .optional(),
+    dueBefore: isoDateTimeSchema.optional(),
+    dueAfter: isoDateTimeSchema.optional(),
+    query: z.string().trim().min(1).max(200).optional(),
+  })
+  .superRefine((input, context) => {
+    if (
+      input.dueAfter &&
+      input.dueBefore &&
+      new Date(input.dueAfter).getTime() > new Date(input.dueBefore).getTime()
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "dueAfter must not be later than dueBefore.",
+        path: ["dueAfter"],
+      });
+    }
+  });
 export type ReminderListQuery = z.infer<typeof reminderListQuerySchema>;

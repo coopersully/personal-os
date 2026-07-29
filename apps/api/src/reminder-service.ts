@@ -1,12 +1,14 @@
 import { auditEvents, type Database, reminders } from "@personal-os/database";
-import type {
-  AgentMutationPolicy,
-  CreateReminderInput,
-  Reminder,
-  ReminderDeferralPreview,
-  ReminderDeferralPreviewInput,
-  ReminderListQuery,
-  UpdateReminderInput,
+import {
+  type AgentMutationPolicy,
+  type CreateReminderInput,
+  type Reminder,
+  type ReminderDeferralPreview,
+  type ReminderDeferralPreviewInput,
+  type ReminderListQuery,
+  reminderDraftProfilePreferencesSchema,
+  reminderProfilePreferencesSchema,
+  type UpdateReminderInput,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
@@ -86,6 +88,18 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
     }
   }
 
+  function requireAgentRevision(
+    context: MutationContext,
+    expectedUpdatedAt: string | undefined,
+  ): void {
+    if (context.principal.actorType === "agent" && !expectedUpdatedAt) {
+      throw new AppError(
+        "invalid_request",
+        "Agent Reminder mutations require expectedUpdatedAt from the current Reminder.",
+      );
+    }
+  }
+
   function revisionConflict(currentUpdatedAt: string | null): AppError {
     return new AppError("conflict", "The reminder changed while the mutation was being applied.", {
       currentUpdatedAt,
@@ -126,6 +140,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       context: MutationContext,
       expectedUpdatedAt?: string,
     ): Promise<Reminder> {
+      requireAgentRevision(context, expectedUpdatedAt);
       const before = await findActiveForMutation(context.principal.userId, id, expectedUpdatedAt);
       const after = await db.transaction(async (transaction) => {
         const [updated] = await transaction
@@ -202,6 +217,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       context: MutationContext,
       expectedUpdatedAt?: string,
     ): Promise<Reminder> {
+      requireAgentRevision(context, expectedUpdatedAt);
       const before = await findActiveForMutation(context.principal.userId, id, expectedUpdatedAt);
       const deleted = await db.transaction(async (transaction) => {
         const deletedAt = now();
@@ -357,6 +373,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       context: MutationContext,
       expectedUpdatedAt?: string,
     ): Promise<Reminder> {
+      requireAgentRevision(context, expectedUpdatedAt);
       const [before] = await db
         .select()
         .from(reminders)
@@ -416,6 +433,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       input: UpdateReminderInput,
       context: MutationContext,
     ): Promise<Reminder> {
+      requireAgentRevision(context, input.expectedUpdatedAt);
       const before = await findActiveForMutation(
         context.principal.userId,
         id,
@@ -460,6 +478,36 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
         return updated;
       });
       return serializeReminder(after);
+    },
+
+    async validateProfileSources(
+      _transaction: Pick<Database, "select">,
+      _userId: string,
+      sourceIds: string[],
+      status: "active" | "draft",
+      preferences: Record<string, boolean | number | string | string[] | null>,
+    ): Promise<Record<string, boolean | number | string | string[] | null>> {
+      if (sourceIds.length > 0) {
+        throw new AppError(
+          "invalid_request",
+          "Reminder setup uses Ilo's local Reminder collection and does not accept source contexts.",
+        );
+      }
+      const parsed = (
+        status === "draft"
+          ? reminderDraftProfilePreferencesSchema
+          : reminderProfilePreferencesSchema
+      ).safeParse(preferences);
+      if (!parsed.success) {
+        throw new AppError(
+          "invalid_request",
+          status === "active"
+            ? "An active Reminder profile requires the complete Reminder preference contract."
+            : "The Reminder profile contains invalid preferences.",
+          { issues: parsed.error.issues },
+        );
+      }
+      return parsed.data;
     },
   };
 }

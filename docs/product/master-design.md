@@ -154,7 +154,9 @@ Now
 4. Batch mode exposes the same actions, confirms destructive change count, supports undo where the provider permits it, and writes one auditable material action per affected item.
 5. A triage session shows one category or bounded batch, with shortcuts and a visible “done for now” exit. Nothing is auto-archived just because it was read.
 6. The agent can propose classifications, labels, archives, task/event drafts, unsubscribe candidates, or reply drafts. The person can approve one, approve a category/rule, edit, reject, or allow safe recurring application.
-7. Mail rules use deterministic conditions plus optional agent classification. Each rule has scope, dry-run results, confidence threshold, effective date, undo/review behavior, and a kill switch.
+7. MVP Mail rules use exact deterministic conditions, explicit scope, dry-run results, effective
+   date, undo/review behavior, and a kill switch; their shared-envelope confidence threshold stays
+   null. Optional server-owned agent classification and scored confidence remain future scope.
 8. Briefs cite source threads and distinguish “needs reply,” “FYI,” “deadline,” “event/invite,” “financial,” and “newsletter.”
 
 Mail policy tiers:
@@ -214,7 +216,7 @@ Mail policy tiers:
 
 Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
 
-**Token/scopes:** `mail:read`, `mail:manage`, `mail:send`, `calendar:read`, `calendar:write`, `calendar:rsvp`, `reminders:read`, `reminders:write`, `tasks:write`, `goals:read/write`, `finance:read`, `finance:categorize`, `automation:read/run`, and `audit:read`. Scopes are paired with account/source selections and policy tiers.
+**Token/scopes:** `mail:read`, `mail:write`, `calendar:read`, `calendar:write`, `calendar:rsvp`, `reminders:read`, `reminders:write`, `tasks:write`, `goals:read/write`, `finance:read`, `finance:categorize`, `automation:read/run`, and `audit:read`. Scopes are paired with account/source selections and policy tiers.
 
 **Presets:** Read my day; Calendar manager; Reminder/task manager; Mail triage (preview); Mail manager; Goals coach; Finance categorizer (preview); Morning routine; Midday reset; Nightly cleanup; Weekly review; Monthly finance close.
 

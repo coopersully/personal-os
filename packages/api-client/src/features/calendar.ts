@@ -1,13 +1,21 @@
 import type {
+  AttentionItem,
   Calendar,
+  CalendarCommitmentProposal,
   CalendarEvent,
+  CalendarEventMutationRevision,
   CreateEventBlockInput,
   CreateEventInput,
   CreateLocalCalendarInput,
+  DeleteEventBlockInput,
+  DeleteEventInput,
   EventListQuery,
+  PreviewCalendarCommitmentInput,
+  RestoreEventInput,
   UpdateEventBlockInput,
   UpdateEventInput,
   UpdateLocalCalendarInput,
+  UpsertCalendarAttentionItemInput,
 } from "@personal-os/domain";
 
 export type ApiRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -39,16 +47,35 @@ export function createCalendarApiClient(request: ApiRequest) {
     async deleteCalendar(id: string): Promise<void> {
       await request<void>(`/v1/calendars/${id}`, { method: "DELETE" });
     },
-    async deleteEvent(id: string): Promise<void> {
-      await request<void>(`/v1/events/${id}`, { method: "DELETE" });
+    async deleteEvent(id: string, input: DeleteEventInput = {}): Promise<void> {
+      if (Object.keys(input).length > 0) {
+        await request<{ revision: CalendarEventMutationRevision }>(`/v1/events/${id}/trash`, {
+          body: JSON.stringify(input),
+          method: "POST",
+        });
+        return;
+      }
+      await request<void>(`/v1/events/${id}`, {
+        method: "DELETE",
+      });
     },
-    async deleteEventBlock(id: string, blockId: string): Promise<CalendarEvent> {
+    async deleteEventBlock(
+      id: string,
+      blockId: string,
+      input: DeleteEventBlockInput = {},
+    ): Promise<CalendarEvent> {
+      const guarded = Object.keys(input).length > 0;
       const response = await request<{ event: CalendarEvent }>(
-        `/v1/events/${id}/blocks/${blockId}`,
+        `/v1/events/${id}/blocks/${blockId}${guarded ? "/trash" : ""}`,
         {
-          method: "DELETE",
+          ...(guarded ? { body: JSON.stringify(input) } : {}),
+          method: guarded ? "POST" : "DELETE",
         },
       );
+      return response.event;
+    },
+    async getEvent(id: string): Promise<CalendarEvent> {
+      const response = await request<{ event: CalendarEvent }>(`/v1/events/${id}`);
       return response.event;
     },
     async listCalendars(): Promise<Calendar[]> {
@@ -59,11 +86,31 @@ export function createCalendarApiClient(request: ApiRequest) {
       const response = await request<{ events: CalendarEvent[] }>(`/v1/events?${toQuery(query)}`);
       return response.events;
     },
-    async restoreEvent(id: string): Promise<CalendarEvent> {
+    async previewCalendarCommitment(
+      input: PreviewCalendarCommitmentInput,
+    ): Promise<CalendarCommitmentProposal> {
+      const response = await request<{ proposal: CalendarCommitmentProposal }>(
+        "/v1/calendars/commitments/preview",
+        {
+          body: JSON.stringify(input),
+          method: "POST",
+        },
+      );
+      return response.proposal;
+    },
+    async restoreEvent(id: string, input: RestoreEventInput = {}): Promise<CalendarEvent> {
       const response = await request<{ event: CalendarEvent }>(`/v1/events/${id}/restore`, {
+        body: JSON.stringify(input),
         method: "POST",
       });
       return response.event;
+    },
+    async trashEvent(id: string, input: DeleteEventInput): Promise<CalendarEventMutationRevision> {
+      const response = await request<{ revision: CalendarEventMutationRevision }>(
+        `/v1/events/${id}/trash`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.revision;
     },
     async setCalendarSelected(id: string, selected: boolean): Promise<Calendar> {
       const response = await request<{ calendar: Calendar }>(`/v1/calendars/${id}/selected`, {
@@ -99,6 +146,16 @@ export function createCalendarApiClient(request: ApiRequest) {
         },
       );
       return response.event;
+    },
+    async upsertCalendarAttentionItem(
+      eventId: string,
+      input: UpsertCalendarAttentionItemInput,
+    ): Promise<AttentionItem> {
+      const response = await request<{ item: AttentionItem }>(`/v1/events/${eventId}/attention`, {
+        body: JSON.stringify(input),
+        method: "PUT",
+      });
+      return response.item;
     },
   };
 }

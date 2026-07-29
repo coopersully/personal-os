@@ -14,6 +14,7 @@ export const assistantDomainSchema = z.enum(assistantDomains);
 export type AssistantDomain = z.infer<typeof assistantDomainSchema>;
 
 export const domainPreferenceValueSchema = z.union([
+  z.null(),
   z.boolean(),
   z.number(),
   z.string(),
@@ -154,6 +155,9 @@ export const assistantSetupStatusSchema = z.object({
       canRead: z.boolean(),
       canWrite: z.boolean(),
       domain: assistantDomainSchema,
+      approvedProfileStatus: z.literal("active").nullable(),
+      approvedProfileVersion: z.int().positive().nullable(),
+      pendingDraftVersion: z.int().positive().nullable(),
       profileStatus: domainProfileStatusSchema.nullable(),
       profileVersion: z.int().positive().nullable(),
     }),

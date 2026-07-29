@@ -50,9 +50,27 @@ Access management
   shared profile-and-attention workflow is available to Mail, Calendar,
   Reminders, Tasks, Finances, and Goals.
 - Mail is the first full executable setup. It can inspect connected mail
-  sources, learn account and label meanings, save a draft profile, preview
-  exact recent candidates, and create disabled preview rules. A rule becomes an
-  enabled `approved_rule` only after explicit acceptance.
+  sources with identity, mailbox, freshness, and capability context; learn
+  account and label meanings; record source-linked important-email attention;
+  save a draft profile; and create disabled preview rules. Preview is exact
+  inside a dated recent window and discloses its 200-thread limit and truncation
+  state. After explicit acceptance, the signed-in person activates the rule in
+  Settings. Activation rechecks the saved version, exact candidates, due states,
+  and preview fingerprint before atomically enabling `approved_rule`. The
+  acceptance summary states that these candidates are a bounded recent sample
+  and the enabled condition will govern future matching sync material.
+- Mail profile preferences use a typed vocabulary for inbox style, important-email
+  handling, and noise disposition. Noise remains review-only unless the person
+  chooses delayed archive or recoverable Trash, including a one-day preference.
+  Archive and recoverable Trash rules remain preview-only until a durable due-work
+  queue is implemented. Permanent deletion, provider filter creation, spam
+  classification, and unsubscribe automation remain unavailable.
+- Finance adds a domain-owned readiness and reviewed-workflow surface in
+  Finances → Profile. Richer shared handoff presentation remains outside this
+  Settings-owned page. Finance consent names account, balance, and activity
+  reads as sensitive and describes the write scope narrowly as saving setup
+  guidance drafts; transaction edits, category application, and review-state
+  changes require a signed-in Ilo session.
 - Reminders adds a typed interview and exact preview-only overdue-deferral
   proposal while retaining direct bounded CRUD; it does not add executable
   Reminder rules or notification delivery.
@@ -64,6 +82,8 @@ Access management
 - Missing Mail sources show a working route to Settings → Connections.
 - A draft or active Mail profile and the count of enabled approved Mail rules
   are visible without opening the agent host.
+- Connected Mail readiness names each account (rather than presenting opaque
+  IDs) and calls out a source that needs reconnect.
 - A failed connection-guide or readiness query renders one actionable error
   without hiding unaffected recovery actions.
 - Copy actions are individually labelled and confirm their result through the
@@ -91,10 +111,16 @@ Access management
 3. Connect a dynamic OAuth client, inspect the plain-language consent, complete
    PKCE exchange, and confirm the host appears in Settings.
 4. Choose each domain and confirm the prompt and capability statement update.
-5. With Mail connected, run `$ilo-setup`, save a draft profile, preview a rule,
-   accept it, and confirm the active profile and approved-rule count update.
-6. Revoke the OAuth host and confirm its tokens can no longer use MCP.
-7. Create each local-token preset, confirm its scopes, copy the one-time secret,
+5. With multiple Mail accounts connected, run `$ilo-setup`, confirm each inbox
+   retains its identity and freshness, save typed importance/retention
+   preferences, create a source-linked attention item, and preview a disabled
+   rule.
+6. Confirm the preview window and truncation state are stated, accept the saved
+   rule, open **Settings → Agent access → Review Mail rules**, activate it, and
+   confirm the active profile and approved-rule count update within the
+   15-minute signed-review window.
+7. Revoke the OAuth host and confirm its tokens can no longer use MCP.
+8. Create each local-token preset, confirm its scopes, copy the one-time secret,
    revoke it, and inspect revoked history.
-8. Verify error recovery, keyboard operation, copy feedback, 320 px layout, and
+9. Verify error recovery, keyboard operation, copy feedback, 320 px layout, and
    normal desktop layout.

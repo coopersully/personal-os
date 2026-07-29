@@ -283,15 +283,16 @@ describe("iCloud connector", () => {
     await value.sendMail(credentials, {
       body: "Hello",
       cc: [{ address: "cc@example.com", name: "CC" }],
+      from: credentials.email,
       subject: "Subject",
       to: [{ address: "to@example.com", name: "To" }],
     });
     expect(transport.sendMail).toHaveBeenCalledWith({
-      cc: "CC <cc@example.com>",
+      cc: [{ address: "cc@example.com", name: "CC" }],
       from: credentials.email,
       subject: "Subject",
       text: "Hello",
-      to: "To <to@example.com>",
+      to: [{ address: "to@example.com", name: "To" }],
     });
     expect(transport.close).toHaveBeenCalledOnce();
 
@@ -307,6 +308,7 @@ describe("iCloud connector", () => {
       failing.sendMail(credentials, {
         body: "Hello",
         cc: [],
+        from: credentials.email,
         subject: "Subject",
         to: [{ address: "to@example.com", name: null }],
       }),

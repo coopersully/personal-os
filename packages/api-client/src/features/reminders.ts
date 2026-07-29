@@ -55,17 +55,17 @@ export function createReminderApiClient(
       return response.preview;
     },
     async restoreReminder(id: string, expectedUpdatedAt?: string): Promise<Reminder> {
-      const response = await request<{ reminder: Reminder }>(
-        `/v1/reminders/${id}/restore?${toQuery({ expectedUpdatedAt })}`,
-        { method: "POST" },
-      );
+      const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}/restore`, {
+        body: JSON.stringify({ expectedUpdatedAt }),
+        method: "POST",
+      });
       return response.reminder;
     },
     async trashReminder(id: string, expectedUpdatedAt: string): Promise<Reminder> {
-      const response = await request<{ reminder: Reminder }>(
-        `/v1/reminders/${id}?${toQuery({ expectedUpdatedAt })}`,
-        { method: "DELETE" },
-      );
+      const response = await request<{ reminder: Reminder }>(`/v1/reminders/${id}/trash`, {
+        body: JSON.stringify({ expectedUpdatedAt }),
+        method: "POST",
+      });
       return response.reminder;
     },
     async updateReminder(id: string, input: UpdateReminderInput): Promise<Reminder> {

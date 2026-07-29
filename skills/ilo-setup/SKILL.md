@@ -15,15 +15,18 @@ user's personal preferences in this skill or rely on conversation memory as thei
    instead of requesting broader access automatically.
 3. Call `get_domain_profile` before interviewing the user. Refine an existing profile rather than
    starting over.
-4. Inspect connected sources and a small, representative material sample. Read full sensitive
-   content only when summaries cannot answer the setup question.
+4. Load the selected domain reference, then inspect connected sources and a small, representative
+   material sample. Read full sensitive content only when summaries cannot answer the setup
+   question.
 5. Ask the smallest useful set of questions. Prefer choices grounded in examples over abstract
    configuration. Ask one question at a time when the host supports conversation.
 6. Summarize the inferred objective, source meanings, categories, instructions, and exceptions.
 7. Save a `draft` profile first. Use `expectedVersion` when revising it.
-8. Preview every executable rule against exact recent candidates before creating or enabling it.
+8. Preview every executable rule against its documented bounded window before creating it. Recheck
+   the saved rule immediately before activation.
 9. State what will happen automatically, what will remain in review, and what will never happen.
-10. Activate a profile or rule only after the user explicitly accepts that summary.
+10. Activate a profile only after the user explicitly accepts that summary. Mail rule activation is
+    a signed-in Settings action; the agent re-reviews the rule and hands it back to the person.
 
 Never treat an installed skill, broad token, or confident inference as user approval. Ilo's API
 policy and rule state are authoritative.
@@ -43,7 +46,11 @@ records. Link to the source record when one exists.
 - For mail setup or cleanup rules, read [references/mail.md](references/mail.md).
 - For Reminders setup, overdue review, or Reminder CRUD, read
   [references/reminders.md](references/reminders.md).
-- For calendar, tasks, or finance interviews, read
+- For Finance setup and reviewed workflows, read
+  [references/finance.md](references/finance.md).
+- For Calendar setup or evidence-based event proposals, read
+  [references/calendar.md](references/calendar.md).
+- For task interviews, read
   [references/core-domains.md](references/core-domains.md).
 
 Goals may inform prioritization when the user enables them, but they are not required for core

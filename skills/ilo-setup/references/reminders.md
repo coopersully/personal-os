@@ -42,15 +42,15 @@ Both `preferredAutomaticActions` and `preferredMutationPolicy` are durable guida
 not access control. Saving or activating either value does not grant, revoke, or enforce mutation
 authority. Token scopes and Ilo's API policy remain authoritative. A draft may contain only the
 answers learned so far; do not invent missing preferences. Activate only after all canonical
-preferences are present and the user accepts the summary. An unchanged legacy active profile may be
-revised without fabricating new answers.
+preferences are present and the user accepts the summary.
 
 ## Act safely
 
 - Read a Reminder before updating, completing, reopening, or trashing it and pass its `updatedAt` as
   `expectedUpdatedAt`. `delete_reminder` returns the deleted revision required by
   `restore_reminder`. On a conflict, reload available state and ask again if the changed fields
-  affect intent.
+  affect intent. Ilo enforces this revision requirement for agent principals at the API service
+  boundary, regardless of whether the caller uses MCP or another API client.
 - Create, update, complete, reopen, trash, and restore only one identified Reminder per direct tool
   call. Trash is recoverable; do not describe it as permanent deletion.
 - Before deferring multiple overdue Reminders, call `preview_overdue_reminder_deferral`. A

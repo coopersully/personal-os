@@ -181,9 +181,10 @@ export const agentConnectionGuideSchema = z.object({
     installPrompt: z.string().min(1),
     invocation: z.string().min(1),
     name: z.string().min(1),
+    revision: z.string().trim().min(1).max(128),
     setupPrompt: z.string().min(1),
     sourceUrl: z.url(),
-    version: z.string().min(1),
+    version: z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/),
   }),
 });
 export type AgentConnectionGuide = z.infer<typeof agentConnectionGuideSchema>;

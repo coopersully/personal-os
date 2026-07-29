@@ -24,7 +24,9 @@
 | `MCP_PUBLIC_URL` | Canonical public MCP origin, for example `https://mcp.example.com` |
 | `MCP_RESOURCE_URL` | Canonical MCP resource URI, normally `https://mcp.example.com/mcp` |
 | `MCP_INTERNAL_SECRET` | Random 32+ character secret shared only by the API and MCP containers |
-| `AGENT_SKILL_SOURCE_URL` | Public install source for the versioned Ilo guided-setup skill; defaults to the official repository skill directory |
+| `AGENT_SKILL_SOURCE_URL` | Public install source for the Ilo guided-setup skill. It must contain the configured immutable revision. |
+| `AGENT_SKILL_VERSION` | Semantic version advertised for the exact guided-setup artifact |
+| `AGENT_SKILL_REVISION` | Immutable source identifier embedded in `AGENT_SKILL_SOURCE_URL`, such as a Git commit or release digest |
 | `REGISTRATION_MODE` | Must be `invite` in production; the API refuses to boot in open mode |
 | `OWNER_EMAILS` | Comma-separated email addresses allowed to issue invitations |
 | `X_CLIENT_ID` | X OAuth 2.0 client ID |
@@ -81,9 +83,34 @@ The public MCP endpoint publishes protected-resource metadata and directs client
 
 The authenticated connection-guide API derives its MCP URL from
 `MCP_RESOURCE_URL` and its skill install link from
-`AGENT_SKILL_SOURCE_URL`. Keep both public addresses aligned with the deployed
-environment so Settings never teaches a host to use a staging or local
-endpoint.
+`AGENT_SKILL_SOURCE_URL`. It publishes `AGENT_SKILL_VERSION` and
+`AGENT_SKILL_REVISION` beside that link and refuses a source URL that does not
+contain its revision. The defaults identify the official `ilo-setup` v0.1.0
+directory at one Git commit rather than the mutable `main` branch. A
+self-hosted deployment must publish its own public, immutable artifact URL and
+matching version/revision as one release unit. Keep the MCP and skill addresses
+aligned with the deployed environment so Settings never teaches a host to use a
+staging, local, or changing endpoint.
+
+### Guided-setup skill distribution boundary
+
+Ilo publishes the configured artifact identity but does not fetch or install it.
+The agent host performs one public HTTPS read after the person copies the
+request. No Ilo credential crosses that boundary, and copying the request is not
+an installation commit point. A denied, unreachable, rate-limited, or malformed
+source must fail in the host before `$ilo-setup` is available; it cannot grant
+more Ilo scope or activate a profile or rule. The host owns its download
+timeout, cache, and installation error, while the deployment owner repairs the
+published artifact or rolls the guide back to a prior immutable release.
+
+Configuration validation proves that the guide names a source, semantic
+version, and revision and that the URL embeds the revision. For the official
+release, the Git commit URL supplies immutable source identity. A custom server
+can still return different bytes at a version-looking URL, so local tests and
+API readiness do not prove custom-host immutability, public reachability, or
+compatible-host installation. Release evidence must separately record an HTTPS
+fetch from outside the runtime and one least-privileged install/invocation in a
+supported host.
 
 Build with the public API address compiled into the PWA:
 

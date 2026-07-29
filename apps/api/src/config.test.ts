@@ -1,4 +1,4 @@
-import { loadConfig } from "./config.js";
+import { loadConfig, officialAgentSkill } from "./config.js";
 
 const required = {
   APP_BASE_URL: "https://app.example.com",
@@ -12,7 +12,9 @@ const required = {
 describe("API configuration", () => {
   it("applies development defaults", () => {
     expect(loadConfig(required)).toEqual({
-      agentSkillSourceUrl: "https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup",
+      agentSkillRevision: officialAgentSkill.revision,
+      agentSkillSourceUrl: officialAgentSkill.sourceUrl,
+      agentSkillVersion: officialAgentSkill.version,
       allowedOrigins: ["https://app.example.com"],
       authRateLimitMaxRequests: 20,
       authRateLimitWindowSeconds: 300,
@@ -45,6 +47,35 @@ describe("API configuration", () => {
 
   it("allows an explicitly empty local email sender outside production", () => {
     expect(loadConfig({ ...required, EMAIL_FROM: "" }).emailFrom).toBe("");
+  });
+
+  it("requires a custom skill source to carry the advertised immutable revision", () => {
+    expect(
+      loadConfig({
+        ...required,
+        AGENT_SKILL_REVISION: "release-2.1.0",
+        AGENT_SKILL_SOURCE_URL: "https://skills.example.com/ilo-setup/release-2.1.0",
+        AGENT_SKILL_VERSION: "2.1.0",
+      }),
+    ).toMatchObject({
+      agentSkillRevision: "release-2.1.0",
+      agentSkillSourceUrl: "https://skills.example.com/ilo-setup/release-2.1.0",
+      agentSkillVersion: "2.1.0",
+    });
+    expect(() =>
+      loadConfig({
+        ...required,
+        AGENT_SKILL_SOURCE_URL: "https://skills.example.com/ilo-setup/latest",
+      }),
+    ).toThrow("AGENT_SKILL_SOURCE_URL must include AGENT_SKILL_REVISION");
+    expect(() =>
+      loadConfig({
+        ...required,
+        AGENT_SKILL_REVISION: "release-2.1.0",
+        AGENT_SKILL_SOURCE_URL: "https://skills.example.com/ilo-setup/release-2.1.0",
+        AGENT_SKILL_VERSION: "latest",
+      }),
+    ).toThrow();
   });
 
   it("normalizes production overrides and de-duplicates origins", () => {

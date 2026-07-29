@@ -199,8 +199,16 @@ do not replay the request, not that Ilo can reconcile a missing audit record.
 ## Authorization
 
 Open **Settings → Agent access** for the current deployment's MCP URL, the
-install request for the versioned `ilo-setup` skill, and a domain-specific
-starter prompt. A new account can go directly there from the Ready step.
+install request for the versioned `ilo-setup` skill, its immutable source
+revision, and a domain-specific starter prompt. A new account can go directly
+there from the Ready step. The handoff works with Claude, Codex, and other
+compatible MCP hosts, but Ilo does not claim to install into a host: the person
+copies the connection URL and prompts into the host they already use.
+
+The connection guide reports one artifact identity as `version`, `revision`,
+and `sourceUrl`. The official URL is pinned to the reported Git commit.
+Self-hosted deployments supply all three values and the API rejects a source URL
+that does not embed its configured revision.
 
 Remote MCP OAuth is the recommended connection. The host dynamically registers,
 the user signs in to Ilo, and the consent page lists the requested permissions

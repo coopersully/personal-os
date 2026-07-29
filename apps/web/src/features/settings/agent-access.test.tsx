@@ -15,10 +15,14 @@ const mocks = vi.hoisted(() => ({
   deleteAccessToken: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
+  getFinanceGuidedSetup: vi.fn(),
   getMailSetupContext: vi.fn(),
   listAccessTokens: vi.fn(),
+  listAttentionItems: vi.fn(),
+  listCalendars: vi.fn(),
   listMailRules: vi.fn(),
   listOAuthClients: vi.fn(),
+  listReminders: vi.fn(),
   previewSavedMailRule: vi.fn(),
   revokeOAuthClient: vi.fn(),
   toastError: vi.fn(),
@@ -94,6 +98,7 @@ describe("agent access settings", () => {
         installPrompt: "Install the Ilo Guided Setup skill from https://example.com/ilo-setup.",
         invocation: "$ilo-setup",
         name: "ilo-setup",
+        revision: "release-0.1.0",
         setupPrompt: "Use $ilo-setup to set up Ilo.",
         sourceUrl: "https://example.com/ilo-setup",
         version: "0.1.0",
@@ -131,7 +136,50 @@ describe("agent access settings", () => {
           profileStatus: "draft",
           profileVersion: 3,
         },
+        {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
+          canRead: true,
+          canWrite: true,
+          domain: "reminders",
+          pendingDraftVersion: null,
+          profileStatus: "active",
+          profileVersion: 4,
+        },
       ],
+    });
+    mocks.listAttentionItems.mockImplementation(async ({ domain }: { domain: string }) =>
+      domain === "calendar"
+        ? [
+            {
+              id: "attention-1",
+            },
+          ]
+        : [],
+    );
+    mocks.listCalendars.mockResolvedValue([
+      {
+        id: "calendar-1",
+        isSelected: true,
+        isWritable: true,
+        source: { syncStatus: "idle" },
+      },
+      {
+        id: "calendar-2",
+        isSelected: false,
+        isWritable: false,
+        source: { syncStatus: "error" },
+      },
+    ]);
+    mocks.listReminders.mockResolvedValue({
+      items: [{ id: "reminder-1" }],
+      nextCursor: null,
+    });
+    mocks.getFinanceGuidedSetup.mockResolvedValue({
+      accountSources: [{ id: "finance-1" }, { id: "finance-2" }],
+      ledgerHealth: { staleAccounts: 1 },
+      reviewSummary: { count: 3 },
+      suggestedWorkflows: [{ available: true }, { available: true }, { available: false }],
     });
     mocks.getMailSetupContext.mockResolvedValue({
       accounts: [
@@ -341,7 +389,9 @@ describe("agent access settings", () => {
 
     expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
     expect(await screen.findByText("3 connected")).toBeInTheDocument();
-    expect(await screen.findByText("1 active approved Mail rule")).toBeInTheDocument();
+    expect(await screen.findByText(/1 active approved Mail rule · profile v1/)).toBeInTheDocument();
+    expect(screen.getByText("Ilo Guided Setup v0.1.0")).toBeInTheDocument();
+    expect(screen.getByText(/Source revision release-0.1.0/)).toBeInTheDocument();
     expect(await screen.findByText(/Oldest due:/)).toBeInTheDocument();
     expect(await screen.findByText(/Last completed:/)).toBeInTheDocument();
     expect(
@@ -375,10 +425,27 @@ describe("agent access settings", () => {
 
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
     expect(screen.getByText("Preferences and attention items")).toBeInTheDocument();
+    expect(
+      await screen.findByText(/2 calendars · 1 selected · 1 writable · 1 needs reconnect/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/1 writable destination.*automatic creation is not enabled/),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 open Calendar attention item.")).toBeInTheDocument();
     expect(screen.getByLabelText<HTMLTextAreaElement>("Calendar setup prompt").value).toContain(
       "set up my Calendar",
     );
+
+    await browser.click(screen.getByRole("radio", { name: "Reminders" }));
+    expect(await screen.findByText("1 open Reminder available to the agent.")).toBeInTheDocument();
+    expect(screen.getByText(/Bounded single-item actions/)).toBeInTheDocument();
+    expect(screen.getByText("Profile v4 is active.")).toBeInTheDocument();
+
     await browser.click(screen.getByRole("radio", { name: "Finances" }));
+    expect(await screen.findByText("2 Finance accounts · 1 stale")).toBeInTheDocument();
+    expect(
+      screen.getByText(/2 guidance or review workflows available · 3 items need signed-in review/),
+    ).toBeInTheDocument();
     expect(
       await screen.findByText(/Active approved guidance is version 2, with draft version 3/),
     ).toBeInTheDocument();
@@ -527,9 +594,93 @@ describe("agent access settings", () => {
       "/settings?section=connections",
     );
     expect(screen.getByText("Not connected")).toBeInTheDocument();
+    expect(screen.getByText("Draft profile v1 is waiting for review.")).toBeInTheDocument();
+  });
+
+  it("keeps empty core domains truthful without inventing connected material", async () => {
+    const browser = userEvent.setup();
+    mocks.getAssistantSetupStatus.mockResolvedValue({
+      domains: [
+        {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
+          canRead: true,
+          canWrite: true,
+          domain: "calendar",
+          pendingDraftVersion: null,
+          profileStatus: null,
+          profileVersion: null,
+        },
+        {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
+          canRead: true,
+          canWrite: false,
+          domain: "reminders",
+          pendingDraftVersion: null,
+          profileStatus: null,
+          profileVersion: null,
+        },
+        {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
+          canRead: true,
+          canWrite: true,
+          domain: "finances",
+          pendingDraftVersion: null,
+          profileStatus: null,
+          profileVersion: null,
+        },
+      ],
+    });
+    mocks.listCalendars.mockResolvedValue([]);
+    mocks.listReminders.mockResolvedValue({ items: [], nextCursor: null });
+    mocks.getFinanceGuidedSetup.mockResolvedValue({
+      accountSources: [],
+      ledgerHealth: { staleAccounts: 0 },
+      reviewSummary: { count: 0 },
+      suggestedWorkflows: [{ available: false }],
+    });
+    mocks.listAttentionItems.mockImplementation(async ({ domain }: { domain: string }) =>
+      domain === "finances"
+        ? Array.from({ length: 100 }, (_, index) => ({ id: `attention-${index}` }))
+        : [],
+    );
+    renderSettings();
+
+    await browser.click(screen.getByRole("radio", { name: "Calendar" }));
+    expect(await screen.findByRole("link", { name: "Open Calendar" })).toBeInTheDocument();
     expect(
-      screen.getByText("Your Mail profile is drafted and waiting for review."),
+      screen.getByText("A selected writable calendar is required for commitment previews."),
     ).toBeInTheDocument();
+
+    await browser.click(screen.getByRole("radio", { name: "Reminders" }));
+    expect(await screen.findByRole("link", { name: "Open Reminders" })).toBeInTheDocument();
+    expect(
+      screen.getByText("No open Reminders. Local capture is available whenever you need it."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("This connection does not have Reminder write access."),
+    ).toBeInTheDocument();
+
+    await browser.click(screen.getByRole("radio", { name: "Finances" }));
+    expect(await screen.findByRole("link", { name: "Open Finances" })).toBeInTheDocument();
+    expect(screen.getByText("0 Finance accounts")).toBeInTheDocument();
+    expect(
+      screen.getByText("0 guidance or review workflows available · 0 items need signed-in review."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("100+ open Finances attention items.")).toBeInTheDocument();
+  });
+
+  it("isolates a selected-domain readiness failure from the connection handoff", async () => {
+    const browser = userEvent.setup();
+    mocks.listCalendars.mockRejectedValue(new Error("Calendar readiness unavailable"));
+    renderSettings();
+
+    await browser.click(screen.getByRole("radio", { name: "Calendar" }));
+    expect(await screen.findByText("Calendar readiness unavailable")).toBeInTheDocument();
+    expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp");
+    expect(screen.getByRole("button", { name: "Copy skill install request" })).toBeEnabled();
   });
 
   it("explains an empty rule sample while an inactive profile blocks activation", async () => {

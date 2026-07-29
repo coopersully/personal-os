@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -5,7 +6,27 @@ const root = resolve(import.meta.dirname, "..");
 const compute = readFileSync(resolve(root, "infra/compute.tf"), "utf8");
 const config = readFileSync(resolve(root, "apps/api/src/config.ts"), "utf8");
 const main = readFileSync(resolve(root, "apps/api/src/main.ts"), "utf8");
-const workflow = readFileSync(resolve(root, ".github/workflows/deploy.yml"), "utf8");
+const workflowSource = readFileSync(resolve(root, ".github/workflows/deploy.yml"), "utf8");
+const deploymentStepStart = workflowSource.indexOf(
+  "      - name: Deploy migration-capable API serially",
+);
+const deploymentStepEnd = workflowSource.indexOf(
+  "      - name: Deploy MCP after the API is healthy",
+  deploymentStepStart,
+);
+if (deploymentStepStart < 0 || deploymentStepEnd < 0) {
+  throw new Error("Deployment drain contract could not isolate the serial API deployment step.");
+}
+const workflow = workflowSource.slice(deploymentStepStart, deploymentStepEnd);
+const shellSource = workflow
+  .slice(workflow.indexOf("        run: |\n") + "        run: |\n".length)
+  .split("\n")
+  .map((line) => line.replace(/^ {10}/, ""))
+  .join("\n");
+const shellSyntax = spawnSync("bash", ["-n"], { encoding: "utf8", input: shellSource });
+if (shellSyntax.status !== 0) {
+  throw new Error(`Deployment drain shell syntax failed: ${shellSyntax.stderr.trim()}`);
+}
 
 function requireMatch(source, pattern, description) {
   if (!pattern.test(source))
@@ -14,7 +35,7 @@ function requireMatch(source, pattern, description) {
 
 function requireOrder(earlier, later, description) {
   const earlierIndex = workflow.indexOf(earlier);
-  const laterIndex = workflow.indexOf(later);
+  const laterIndex = workflow.lastIndexOf(later);
   if (earlierIndex < 0 || laterIndex < 0 || earlierIndex >= laterIndex) {
     throw new Error(`Deployment drain contract has unsafe ordering: ${description}.`);
   }
@@ -50,8 +71,23 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /aws ecs list-tasks[\s\S]*?api_pre_drain_task_arns=/,
-  "ListTasks authority preflight and exact task capture",
+  /api_drain_boundary=[\s\S]*?api_proven_stopped_before=[\s\S]*?api_active_stopping_before=[\s\S]*?api_stopped_inventory_stable=[\s\S]*?api_drain_task_arns=/,
+  "complete task capture across running, stopping, replacement, and drain states",
+);
+if (workflow.includes("--desired-status PENDING")) {
+  throw new Error(
+    "Deployment drain contract must not use ECS desired-status PENDING; desired RUNNING includes lastStatus PENDING.",
+  );
+}
+requireMatch(
+  workflow,
+  /--desired-status STOPPED[\s\S]*?--max-items 101[\s\S]*?post-suspension STOPPED task baseline exceeds/,
+  "a fail-fast 100-task bound before baseline description",
+);
+requireMatch(
+  workflow,
+  /for reconciliation_delay in 1 2 4 8 16 32 32 32[\s\S]*?api_stopped_inventory_stable[\s\S]*?did not converge/,
+  "bounded eventual-consistency reconciliation to a stable stopped-task inventory",
 );
 requireMatch(
   workflow,
@@ -60,8 +96,43 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /fail_closed_api_deployment\(\)[\s\S]*?--desired-count 0[\s\S]*?desiredCount,runningCount,pendingCount/,
-  "post-drain zero-state recovery and verification",
+  /fail_closed_api_deployment\(\)[\s\S]*?--suspended-state "\$api_all_suspended_state"[\s\S]*?--desired-count 0[\s\S]*?desiredCount,runningCount,pendingCount/,
+  "post-drain scaling re-suspension plus zero-state recovery and verification",
+);
+requireMatch(
+  workflow,
+  /test "\$api_minimum_healthy_percent" = "0"[\s\S]*?test "\$api_maximum_percent" = "200"/,
+  "live deployment percentages matching the declared IaC configuration",
+);
+requireMatch(
+  workflow,
+  /aws ecs wait tasks-stopped[\s\S]*?aws ecs describe-tasks/,
+  "exact stopped-task propagation before exit evidence inspection",
+);
+requireMatch(
+  workflow,
+  /trap cleanup_api_deployment EXIT[\s\S]*?trap 'cancel_api_deployment 130' INT[\s\S]*?trap 'cancel_api_deployment 143' TERM/,
+  "fail-closed cancellation and process-exit cleanup",
+);
+requireMatch(
+  workflow,
+  /cancel_api_deployment\(\)[\s\S]*?AWS_MAX_ATTEMPTS=1 aws application-autoscaling register-scalable-target[\s\S]*?--cli-read-timeout 2[\s\S]*?AWS_MAX_ATTEMPTS=1 aws ecs update-service[\s\S]*?--cli-read-timeout 2/,
+  "single-attempt cancellation mutations within the runner signal grace window",
+);
+requireMatch(
+  workflow,
+  /api_drain_boundary=[\s\S]*?api_suspension_attempted=true[\s\S]*?aws application-autoscaling register-scalable-target[\s\S]*?api_stopped_before_drain=[\s\S]*?api_service_drain_attempted=true[\s\S]*?aws ecs update-service[\s\S]*?--desired-count 0/,
+  "separate suspension-attempt and service-drain mutation phases",
+);
+requireMatch(
+  workflow,
+  /elif \{[\s\S]*?api_suspension_attempted[\s\S]*?--suspended-state "\$api_original_suspended_state"[\s\S]*?fi/,
+  "pre-drain failure restoration without stopping the healthy old service",
+);
+requireMatch(
+  workflow,
+  /api_original_suspended_state="\$\(current_scaling_suspension\)"[\s\S]*?--suspended-state "\$api_original_suspended_state"[\s\S]*?current_scaling_suspension/,
+  "exact scalable-target suspension capture, restore, and verification",
 );
 
 requireOrder(
@@ -76,7 +147,7 @@ requireOrder(
 );
 requireOrder(
   '--deployment-configuration "$api_iac_deployment_configuration"',
-  "DynamicScalingInSuspended=false",
+  '--suspended-state "$api_original_suspended_state"',
   "scaling must remain suspended until the circuit-breaker configuration is restored",
 );
 

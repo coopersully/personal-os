@@ -28,6 +28,7 @@ const scheduler = setInterval(() => {
       process.stderr.write(
         `[personal-os] scheduled automation dispatch failed: ${String(error)}\n`,
       );
+      throw error;
     });
   });
   runtimeLifecycle.startBackgroundTask("scheduled-finance-sync", dispatchFinanceSync);
@@ -40,6 +41,7 @@ const scheduler = setInterval(() => {
 runtimeLifecycle.startBackgroundTask("startup-automation-dispatch", async () => {
   await app.dispatchDueAutomations().catch((error: unknown) => {
     process.stderr.write(`[personal-os] scheduled automation dispatch failed: ${String(error)}\n`);
+    throw error;
   });
 });
 runtimeLifecycle.startBackgroundTask("startup-finance-sync", dispatchFinanceSync);
@@ -66,6 +68,7 @@ async function dispatchFinanceSync(): Promise<void> {
       );
   } catch (error) {
     process.stderr.write(`[personal-os] scheduled finance sync failed: ${String(error)}\n`);
+    throw error;
   }
 }
 
@@ -74,6 +77,7 @@ async function dispatchFinanceBackfill(): Promise<void> {
     await app.backfillFinanceLearning();
   } catch (error) {
     process.stderr.write(`[personal-os] finance learning backfill failed: ${String(error)}\n`);
+    throw error;
   }
 }
 
@@ -88,6 +92,7 @@ async function dispatchFinanceSetupIntegrity(): Promise<void> {
     process.stderr.write(
       `[personal-os] Finance setup integrity backfill failed: ${String(error)}\n`,
     );
+    throw error;
   }
 }
 
@@ -102,6 +107,7 @@ async function dispatchFinanceLedgerIntegrity(): Promise<void> {
     process.stderr.write(
       `[personal-os] finance ledger integrity backfill failed: ${String(error)}\n`,
     );
+    throw error;
   }
 }
 
@@ -114,6 +120,7 @@ async function dispatchFinanceCashflowInsights(): Promise<void> {
       );
   } catch (error) {
     process.stderr.write(`[personal-os] finance cash-flow backfill failed: ${String(error)}\n`);
+    throw error;
   }
 }
 
@@ -124,7 +131,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   shutdownStarted = true;
   const active = runtimeLifecycle.inFlight();
   process.stdout.write(
-    `[personal-os] ${signal} received; draining ${active.requests} requests and ${active.background} background tasks.\n`,
+    `[personal-os] ${signal} received; draining ${active.requests} requests and ${active.background} background tasks (${active.backgroundLabels.join(", ") || "none"}).\n`,
   );
   try {
     await shutdownApiRuntime({
@@ -147,5 +154,5 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   }
 }
 
-process.once("SIGINT", () => void shutdown("SIGINT"));
-process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
+process.on("SIGTERM", () => void shutdown("SIGTERM"));

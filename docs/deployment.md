@@ -151,19 +151,26 @@ dynamic and scheduled scaling before the drain and records the exact old task
 ARNs. On `SIGTERM`, the API stops accepting new HTTP and detached/background
 claims, awaits in-flight requests and tracked provider work, closes its HTTP
 server, and only then closes PostgreSQL. The application bound is 105 seconds
-and the essential ECS API container has a 120-second stop timeout. Deployment
-requires desired/running/pending counts all reach zero and every captured API
-container reports `STOPPED` with exit code zero and no kill/timeout evidence;
-count-only drain or a sleep is insufficient.
+and covers database closure; a tracked request/background rejection fails the
+drain instead of being treated as idle. The essential ECS API container has a
+120-second stop timeout. Deployment reconciles running, pending, already-stopping,
+and replacement tasks observed across the transition, requires
+desired/running/pending counts all reach zero, waits for the exact reconciled
+task set to stop, and requires every API container report exit code zero with no
+kill/timeout evidence. Count-only drain or a sleep is insufficient.
 
 After the old tasks exit successfully, the workflow disables circuit-breaker
 rollback before launching the migration-capable task so ECS cannot restore a
 pre-migration binary. Rollback remains disabled until the new service is stable
 as the sole completed primary deployment on the exact registered task
 definition; only then does the workflow restore and verify the declared
-rollback-enabled configuration and resume scaling. A failed graceful drain or
-any later rollout step intentionally leaves desired/running/pending at zero and
-scaling suspended for operator recovery. This bounded
+rollback-enabled configuration and the scalable target's exact pre-drain
+suspension state. Shell errors, runner cancellation signals, and workflow
+timeouts enter the same re-suspend-and-zero cleanup path. A failed graceful
+drain or later rollout step intentionally leaves desired/running/pending at zero
+and scaling suspended for operator recovery. An abrupt runner/host loss that
+cannot deliver cleanup signals remains an external control-plane recovery case;
+operators must verify the service remains zero before retrying. This bounded
 downtime is required for migrations that invalidate connector source authority:
 an old process already inside provider I/O cannot honor a fence introduced by
 the new schema. Drizzle records applied versions transactionally. Follow the
@@ -176,10 +183,15 @@ must already have verified `application-autoscaling:RegisterScalableTarget`
 authority scoped to the API scalable target, ECS service namespace, and
 `ecs:service:DesiredCount` dimension. It must also have `ecs:ListTasks` on `*`,
 which AWS requires for enumerating the exact service task ARNs later inspected
-with the existing `ecs:DescribeTasks` authority. Keep that list action isolated
-from ECS mutation permissions. The application workflow cannot grant either
-prerequisite to its own execution role; without both applied and verified,
-deployment must fail before drain or migration.
+with the existing `ecs:DescribeTasks` authority; the declared wildcard statement
+is constrained to the production cluster with `ArnEquals ecs:cluster`. Keep that
+list action isolated from ECS mutation permissions. The application workflow cannot grant either
+prerequisite to its own execution role. The role must additionally have isolated
+`application-autoscaling:DescribeScalableTargets` authority on `*` because AWS
+does not expose resource-level scoping for that read; workflow filters require
+namespace `ecs`, the exact API resource ID, and `ecs:service:DesiredCount`.
+Without all three declarations applied and verified, deployment must fail before
+drain or migration.
 
 ## Health and logs
 

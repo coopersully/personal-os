@@ -1,6 +1,7 @@
 import {
   createRuntimeLifecycle,
   RuntimeDrainTimeoutError,
+  RuntimeDrainWorkError,
   shutdownApiRuntime,
 } from "./runtime-lifecycle.js";
 
@@ -21,7 +22,11 @@ describe("API runtime lifecycle", () => {
     const requestWork = lifecycle.runRequest(() => request.promise);
     expect(requestWork).toBeDefined();
     expect(lifecycle.startBackgroundTask("provider-effect", () => background.promise)).toBe(true);
-    expect(lifecycle.inFlight()).toEqual({ background: 1, requests: 1 });
+    expect(lifecycle.inFlight()).toEqual({
+      background: 1,
+      backgroundLabels: ["provider-effect"],
+      requests: 1,
+    });
 
     lifecycle.beginQuiesce();
     expect(lifecycle.runRequest(async () => undefined)).toBeUndefined();
@@ -39,7 +44,11 @@ describe("API runtime lifecycle", () => {
     background.resolve();
     await idle;
     await requestWork;
-    expect(lifecycle.inFlight()).toEqual({ background: 0, requests: 0 });
+    expect(lifecycle.inFlight()).toEqual({
+      background: 0,
+      backgroundLabels: [],
+      requests: 0,
+    });
   });
 
   it("closes the database only after scheduling, HTTP, and tracked work drain", async () => {
@@ -77,7 +86,53 @@ describe("API runtime lifecycle", () => {
   it("fails without closing the database when the bounded drain expires", async () => {
     vi.useFakeTimers();
     const lifecycle = createRuntimeLifecycle();
-    lifecycle.startBackgroundTask("stuck-provider-effect", () => new Promise(() => undefined));
+    const providerEffect = deferred();
+    const server = deferred();
+    lifecycle.startBackgroundTask("stuck-provider-effect", () => providerEffect.promise);
+    const closeDatabase = vi.fn(async () => undefined);
+
+    const shutdown = shutdownApiRuntime({
+      closeDatabase,
+      closeHttpServer: () => server.promise,
+      lifecycle,
+      stopScheduling: () => undefined,
+      timeoutMs: 1_000,
+    });
+    const assertion = expect(shutdown).rejects.toBeInstanceOf(RuntimeDrainTimeoutError);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+    expect(closeDatabase).not.toHaveBeenCalled();
+    providerEffect.resolve();
+    server.resolve();
+    await vi.runAllTimersAsync();
+    await Promise.resolve();
+    expect(closeDatabase).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it("applies the same deadline to database closure", async () => {
+    vi.useFakeTimers();
+    const lifecycle = createRuntimeLifecycle();
+    const shutdown = shutdownApiRuntime({
+      closeDatabase: () => new Promise(() => undefined),
+      closeHttpServer: async () => undefined,
+      lifecycle,
+      stopScheduling: () => undefined,
+      timeoutMs: 1_000,
+    });
+    const assertion = expect(shutdown).rejects.toThrow("1000ms (0 requests; background: none)");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
+    vi.useRealTimers();
+  });
+
+  it("fails drain and preserves the database when accepted work rejects while quiescing", async () => {
+    const lifecycle = createRuntimeLifecycle();
+    const work = deferred();
+    lifecycle.startBackgroundTask("provider-result-projection", async () => {
+      await work.promise;
+      throw new Error("sensitive provider failure");
+    });
     const closeDatabase = vi.fn(async () => undefined);
 
     const shutdown = shutdownApiRuntime({
@@ -87,10 +142,11 @@ describe("API runtime lifecycle", () => {
       stopScheduling: () => undefined,
       timeoutMs: 1_000,
     });
-    const assertion = expect(shutdown).rejects.toBeInstanceOf(RuntimeDrainTimeoutError);
-    await vi.advanceTimersByTimeAsync(1_000);
-    await assertion;
+    work.resolve();
+
+    await expect(shutdown).rejects.toEqual(
+      new RuntimeDrainWorkError(["provider-result-projection"]),
+    );
     expect(closeDatabase).not.toHaveBeenCalled();
-    vi.useRealTimers();
   });
 });

@@ -2,6 +2,7 @@ import type {
   AutomationRoutine,
   AutomationRun,
   Calendar,
+  CalendarCommitmentProposal,
   CalendarEvent,
   DailyBrief,
   FinanceAccount,
@@ -10,6 +11,7 @@ import type {
   FinanceTransaction,
   Goal,
   Mailbox,
+  MailRule,
   MailThread,
   Motive,
   Reminder,
@@ -25,6 +27,14 @@ const user: User = {
   accentColor: "#c7d23c",
   emailVerified: true,
   id,
+  setup: {
+    completedAt: now,
+    currentStep: "ready",
+    dismissedAt: null,
+    selectedWorkspaces: ["calendar", "tasks", "mail", "finances"],
+    startedAt: now,
+    status: "complete",
+  },
   displayName: "Test",
   email: "test@example.com",
   theme: "system",
@@ -42,6 +52,13 @@ const reminder: Reminder = {
   dueAt: null,
   timezone: null,
   priority: "medium",
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: now,
+    sourceType: "reminder",
+  },
   completedAt: null,
   createdAt: now,
   updatedAt: now,
@@ -94,6 +111,46 @@ const event: CalendarEvent = {
   createdAt: now,
   updatedAt: now,
 };
+const commitmentCandidate = {
+  allDay: false,
+  buffer: { afterMinutes: 15, beforeMinutes: 15 },
+  calendarId: id,
+  endsAt: event.endsAt,
+  evidence: {
+    kind: "booking" as const,
+    source: {
+      accountId,
+      provider: "google" as const,
+      remoteId: "booking-1",
+      revision: "v1",
+      sourceType: "mail_thread" as const,
+    },
+    summary: "Confirmed reservation.",
+  },
+  flexibility: "hard" as const,
+  location: null,
+  notes: null,
+  startsAt: now,
+  timezone: "UTC",
+  title: "Reservation",
+  visibility: "private" as const,
+};
+const commitmentProposal: CalendarCommitmentProposal = {
+  authority: "caller_supplied_unverified",
+  candidate: commitmentCandidate,
+  destination: calendar,
+  possibleDuplicateEventId: null,
+  fingerprint: "a".repeat(64),
+  policy: {
+    canApply: false,
+    effectivePolicy: "preview",
+    reasons: ["Caller-supplied evidence is not authority."],
+    requestedPolicy: "approved_rule",
+    requiresInteractiveApproval: true,
+  },
+  providerEffect: "local_write",
+  warnings: [],
+};
 const mailbox: Mailbox = {
   accountId,
   id,
@@ -118,6 +175,53 @@ const mailThread: MailThread = {
   subject: "Test mail",
   to: [],
   unread: true,
+  updatedAt: now,
+};
+const mailRule: MailRule = {
+  actions: [{ afterDays: 1, mailboxId: null, type: "archive" }],
+  condition: { field: "any", operator: "contains", value: "news" },
+  confidenceThreshold: null,
+  createdAt: now,
+  description: "Archive routine newsletters after one day.",
+  domain: "mail",
+  enabled: false,
+  id,
+  name: "Archive",
+  policy: "preview",
+  profileId: null,
+  sourceIds: [accountId],
+  updatedAt: now,
+  version: 1,
+};
+const domainProfile = {
+  categories: [],
+  createdAt: now,
+  domain: "mail" as const,
+  id,
+  instructions: ["Keep only high-signal mail visible."],
+  objective: "Keep a clean inbox.",
+  preferences: { inboxStyle: "signal_only" },
+  sourceContexts: [],
+  status: "draft" as const,
+  summary: "A high-signal inbox.",
+  updatedAt: now,
+  version: 1,
+};
+const attentionItem = {
+  createdAt: now,
+  domain: "mail" as const,
+  expiresAt: null,
+  id,
+  importance: "normal" as const,
+  kind: "important" as const,
+  occursAt: null,
+  relatedEntityId: null,
+  relatedEntityType: null,
+  source: null,
+  status: "open" as const,
+  summary: "Important mail.",
+  title: "Important",
+  updatedAt: now,
 };
 const automation: AutomationRoutine = {
   id,
@@ -233,6 +337,7 @@ function apiFetch() {
     if (method === "DELETE" && url.pathname.includes("/blocks/")) return json({ event });
     if (method === "DELETE" || url.pathname === "/v1/auth/logout")
       return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/auth/invitations/validate") return json({ valid: true });
     if (url.pathname === "/v1/auth/login" || url.pathname === "/v1/auth/register")
       return json(
         { sessionToken: "sess_new", user },
@@ -245,6 +350,17 @@ function apiFetch() {
       url.pathname === "/v1/auth/email-verification"
     )
       return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/setup" && method === "PATCH")
+      return json({
+        user: {
+          ...user,
+          setup: {
+            ...user.setup,
+            ...JSON.parse(String(init?.body)),
+            status: "in_progress",
+          },
+        },
+      });
     if (url.pathname === "/v1/me" && method === "PATCH")
       return json({ user: { ...user, ...JSON.parse(String(init?.body)) } });
     if (url.pathname === "/v1/me") return json({ user });
@@ -494,6 +610,45 @@ function apiFetch() {
         ],
       });
     if (url.pathname === "/v1/finances/plaid/status") return json({ available: true });
+    if (url.pathname === "/v1/finances/guided-setup")
+      return json({
+        setup: {
+          accountSources: [financeAccount],
+          alertSummary: { open: 0, warnings: 0 },
+          asOf: now,
+          budgetSummary: { count: 1, month: "2026-07", planned: 250 },
+          cashflowSummary: {
+            financialProfileConfigured: true,
+            incomeStreams: 0,
+            recurringNeedsReview: 0,
+            recurringObligations: 0,
+          },
+          humanOnlyActions: ["manage_financial_profile", "create_merchant_rule"],
+          ledgerHealth: {
+            asOf: now,
+            balanceOnlyAccounts: 0,
+            candidateTransfers: 0,
+            missingProvenance: 0,
+            pendingTransactions: 0,
+            possibleDuplicates: 0,
+            staleAccounts: 0,
+            unresolvedReviews: 0,
+          },
+          reviewSummary: {
+            count: 0,
+            reasons: {
+              ambiguous_merchant: 0,
+              low_confidence: 0,
+              one_time: 0,
+              possible_duplicate: 0,
+              possible_transfer: 0,
+              refund_or_reversal: 0,
+              unknown_merchant: 0,
+            },
+          },
+          suggestedWorkflows: [],
+        },
+      });
     if (url.pathname === "/v1/finances/profile")
       return json({
         profile: {
@@ -585,10 +740,21 @@ function apiFetch() {
     if (url.pathname === `/v1/finances/merchants/${id}` && method === "PATCH")
       return json({ merchant: { ...financeMerchant, isUserConfirmed: true } });
     if (url.pathname === "/v1/finances/review") return json({ reviews: [] });
-    if (url.pathname === "/v1/finances/categorizations/propose") return json({ proposals: [] });
+    if (url.pathname === "/v1/finances/categorizations/propose")
+      return json({ nextCursor: "next-review-page", proposals: [] });
     if (url.pathname === "/v1/finances/categorizations/apply")
       return json({
-        results: [{ applied: true, threshold: 0.985, transaction: financeTransaction }],
+        results: [
+          {
+            applied: true,
+            error: null,
+            replayed: false,
+            status: "applied",
+            threshold: 0.985,
+            transaction: financeTransaction,
+            transactionId: financeTransaction.id,
+          },
+        ],
       });
     if (url.pathname === `/v1/finances/review/${id}`)
       return json({ result: { applied: true, threshold: 0.985, transaction: financeTransaction } });
@@ -619,17 +785,155 @@ function apiFetch() {
         },
       });
     if (url.pathname.endsWith("/sync")) return json({ result: { changed: 3 } });
+    if (url.pathname === "/v1/assistant/setup-status")
+      return json({
+        setup: {
+          domains: [
+            {
+              approvedProfileStatus: null,
+              approvedProfileVersion: null,
+              canRead: true,
+              canWrite: true,
+              domain: "mail",
+              pendingDraftVersion: null,
+              profileStatus: "draft",
+              profileVersion: 1,
+            },
+          ],
+        },
+      });
+    if (url.pathname === "/v1/assistant/connection-guide")
+      return json({
+        guide: {
+          domains: [
+            {
+              domain: "mail",
+              readScope: "mail:read",
+              support: "executable_rules",
+              writeScope: "mail:write",
+            },
+          ],
+          mcpUrl: "https://mcp.example.com/mcp",
+          skill: {
+            displayName: "Ilo Guided Setup",
+            installPrompt: "Install the Ilo skill.",
+            invocation: "$ilo-setup",
+            name: "ilo-setup",
+            revision: "release-0.1.0",
+            setupPrompt: "Set up Ilo.",
+            sourceUrl: "https://example.com/ilo-setup",
+            version: "0.1.0",
+          },
+        },
+      });
+    if (url.pathname === "/v1/assistant/profiles/mail") return json({ profile: domainProfile });
+    if (url.pathname === `/v1/assistant/attention/mail/${id}`)
+      return json({ item: { ...attentionItem, status: "resolved" } });
+    if (url.pathname === "/v1/assistant/attention" && method === "POST")
+      return json({ item: attentionItem }, 201);
+    if (url.pathname === "/v1/assistant/attention") return json({ items: [attentionItem] });
     if (url.pathname === "/v1/mail/drafts" && method === "POST")
       return json({ draft: { id } }, 201);
+    if (url.pathname === `/v1/mail/drafts/${id}/reconcile`)
+      return json({ draft: { id, sendStatus: "draft" } });
     if (url.pathname === "/v1/mail/drafts")
-      return json({ drafts: [{ body: "Draft", id, subject: "Subject" }] });
-    if (url.pathname === "/v1/mail/rules" && method === "POST") return json({ rule: { id } }, 201);
-    if (url.pathname === "/v1/mail/rules")
       return json({
-        rules: [{ action: "archive", enabled: true, id, name: "Archive", query: "news" }],
+        drafts: [
+          {
+            accountId,
+            body: "Draft",
+            cc: [],
+            createdAt: now,
+            id,
+            reconciliationState: "none",
+            sendClaimedAt: null,
+            sendStatus: "draft",
+            sentAt: null,
+            subject: "Subject",
+            threadId: null,
+            to: [{ address: "to@example.com", name: null }],
+            updatedAt: now,
+          },
+        ],
       });
-    if (url.pathname === "/v1/mail/send" || url.pathname.endsWith("/snooze"))
-      return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/mail/setup-context")
+      return json({
+        setup: {
+          accounts: [],
+          automation: {
+            executionLimitPerRun: 6,
+            failedCount: 0,
+            inProgressCount: 0,
+            lastCompletedAt: null,
+            oldestDueAt: null,
+            pendingCount: 0,
+            reconciliationCount: 0,
+          },
+          safety: {
+            delayedRetentionAutomation: true,
+            permanentDeletion: false,
+            providerFilterCreation: false,
+            spamClassification: false,
+            unsubscribeAutomation: false,
+          },
+        },
+      });
+    if (url.pathname === `/v1/mail/rules/${id}/activate`)
+      return json({
+        preview: {
+          candidates: [],
+          matchedCount: 0,
+          previewedAt: now,
+          ruleId: id,
+          ruleVersion: 1,
+          scannedCount: 1,
+          window: {
+            limit: 200,
+            newestReceivedAt: now,
+            oldestReceivedAt: now,
+            truncated: false,
+          },
+        },
+        rule: { ...mailRule, enabled: true, policy: "approved_rule", version: 2 },
+      });
+    if (url.pathname === `/v1/mail/rules/${id}/preview`)
+      return json({
+        preview: {
+          candidates: [],
+          matchedCount: 0,
+          previewedAt: now,
+          ruleId: id,
+          ruleVersion: 1,
+          scannedCount: 1,
+          window: {
+            limit: 200,
+            newestReceivedAt: now,
+            oldestReceivedAt: now,
+            truncated: false,
+          },
+        },
+      });
+    if (url.pathname === "/v1/mail/rules/preview")
+      return json({
+        preview: { candidates: [], matchedCount: 0, scannedCount: 1 },
+      });
+    if (url.pathname === `/v1/mail/rules/${id}` && method === "PATCH")
+      return json({ rule: { ...mailRule, enabled: false, version: 2 } });
+    if (url.pathname === "/v1/mail/rules" && method === "POST")
+      return json({ rule: mailRule }, 201);
+    if (url.pathname === "/v1/mail/rules") return json({ rules: [mailRule] });
+    if (url.pathname === "/v1/mail/send") return new Response(null, { status: 202 });
+    if (url.pathname.endsWith("/snooze")) return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/mail/threads/bulk")
+      return json({
+        result: {
+          failedCount: 0,
+          failures: [],
+          updatedCount: 1,
+          updatedIds: [id],
+        },
+      });
+    if (url.pathname === `/v1/mail/threads/${id}/attention`) return json({ item: attentionItem });
     if (url.pathname === `/v1/mail/threads/${id}/messages`)
       return json({
         messages: [
@@ -650,12 +954,44 @@ function apiFetch() {
     if (url.pathname === "/v1/mailboxes") return json({ mailboxes: [mailbox] });
     if (url.pathname === "/v1/calendars" && method === "POST") return json({ calendar }, 201);
     if (url.pathname === "/v1/calendars") return json({ calendars: [calendar] });
+    if (url.pathname === "/v1/calendars/commitments/preview")
+      return json({ proposal: commitmentProposal });
     if (url.pathname.includes("/calendars/")) return json({ calendar });
     if (url.pathname === "/v1/events" && method === "POST") return json({ event }, 201);
     if (url.pathname === "/v1/events") return json({ events: [event] });
+    if (url.pathname.includes("/blocks/") && url.pathname.endsWith("/trash"))
+      return json({ event });
+    if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/trash"))
+      return json({ reminder });
+    if (url.pathname.endsWith("/trash"))
+      return json({ revision: { blockUpdatedAtById: {}, eventId: id, updatedAt: now } });
+    if (url.pathname.endsWith("/attention") && url.pathname.includes("/events/"))
+      return json({ item: attentionItem });
     if (url.pathname.includes("/events/")) return json({ event });
+    if (url.pathname === "/v1/reminders/overdue-deferral-preview")
+      return json({
+        preview: {
+          candidates: [
+            {
+              dueAt: "2026-07-13T10:00:00.000Z",
+              id,
+              priority: reminder.priority,
+              proposedDueAt: "2026-07-14T13:00:00.000Z",
+              proposedTimezone: "America/New_York",
+              source: reminder.source,
+              title: reminder.title,
+              updatedAt: reminder.updatedAt,
+            },
+          ],
+          matchedCount: 1,
+          policy: "preview",
+          previewedAt: now,
+        },
+      });
     if (url.pathname === "/v1/reminders" && method === "POST") return json({ reminder }, 201);
     if (url.pathname === "/v1/reminders") return json({ items: [reminder], nextCursor: null });
+    if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/attention"))
+      return json({ item: attentionItem });
     if (url.pathname.includes("/reminders/")) return json({ reminder });
     if (url.pathname === "/v1/tasks" && method === "POST") return json({ task }, 201);
     if (url.pathname === "/v1/tasks") return json({ items: [task], nextCursor: null });
@@ -694,6 +1030,12 @@ describe("ilo API client", () => {
     await expect(api.setCalendarSelected(id, false)).resolves.toEqual(calendar);
     await api.deleteCalendar(id);
     await expect(
+      api.previewCalendarCommitment({
+        candidate: commitmentCandidate,
+        requestedPolicy: "approved_rule",
+      }),
+    ).resolves.toEqual(commitmentProposal);
+    await expect(
       api.listEvents({ from: now, to: event.endsAt, calendarIds: [id], query: "" }),
     ).resolves.toEqual([event]);
     await expect(
@@ -708,14 +1050,35 @@ describe("ilo API client", () => {
         location: null,
       }),
     ).resolves.toEqual(event);
+    await expect(api.getEvent(id)).resolves.toEqual(event);
     await expect(api.updateEvent(id, { title: "Deep focus" })).resolves.toEqual(event);
     await expect(api.createEventBlock(id, { calendarId: id, mode: "busy" })).resolves.toEqual(
       event,
     );
     await expect(api.updateEventBlock(id, id, { mode: "details" })).resolves.toEqual(event);
     await expect(api.deleteEventBlock(id, id)).resolves.toEqual(event);
+    await expect(
+      api.deleteEventBlock(id, id, {
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+      }),
+    ).resolves.toEqual(event);
     await expect(api.restoreEvent(id)).resolves.toEqual(event);
+    await expect(
+      api.trashEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now }),
+    ).resolves.toEqual({ blockUpdatedAtById: {}, eventId: id, updatedAt: now });
+    await expect(
+      api.upsertCalendarAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "upcoming",
+        occursAt: now,
+        summary: "Prepare.",
+        title: "Upcoming event",
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.deleteEvent(id);
+    await api.deleteEvent(id, { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now });
     await expect(api.listReminders({ completed: false, query: "", limit: 10 })).resolves.toEqual({
       items: [reminder],
       nextCursor: null,
@@ -729,9 +1092,29 @@ describe("ilo API client", () => {
         priority: "medium",
       }),
     ).resolves.toEqual(reminder);
+    await expect(api.getReminder(id)).resolves.toEqual(reminder);
+    await expect(
+      api.previewOverdueReminderDeferral({
+        limit: 25,
+        overdueBefore: now,
+        proposedDueAt: "2026-07-14T13:00:00.000Z",
+        timezone: "America/New_York",
+      }),
+    ).resolves.toMatchObject({ matchedCount: 1, policy: "preview" });
     await expect(api.updateReminder(id, { title: "Changed" })).resolves.toEqual(reminder);
     await expect(api.completeReminder(id, true)).resolves.toEqual(reminder);
     await expect(api.restoreReminder(id)).resolves.toEqual(reminder);
+    await expect(api.trashReminder(id, now)).resolves.toEqual(reminder);
+    await expect(
+      api.upsertReminderAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "follow_up",
+        occursAt: now,
+        summary: "Clarify this reminder.",
+        title: "Reminder needs review",
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.deleteReminder(id);
     await expect(api.listTasks({ status: "scheduled", limit: 10 })).resolves.toEqual({
       items: [task],
@@ -810,6 +1193,10 @@ describe("ilo API client", () => {
     });
     await expect(api.getFinanceBudgetPace("week")).resolves.toMatchObject({ period: "week" });
     await expect(api.getFinanceWealthSummary()).resolves.toMatchObject({ netWorth: 1000 });
+    await expect(api.getFinanceGuidedSetup()).resolves.toMatchObject({
+      accountSources: [financeAccount],
+      humanOnlyActions: expect.arrayContaining(["create_merchant_rule"]),
+    });
     await expect(api.getFinanceProfile()).resolves.toMatchObject({ employer: "Acme" });
     await expect(
       api.updateFinanceProfile({
@@ -856,19 +1243,27 @@ describe("ilo API client", () => {
       api.updateFinanceMerchant(id, { displayName: "Corner Store" }),
     ).resolves.toMatchObject({ isUserConfirmed: true });
     await expect(
-      api.mergeFinanceMerchants({ sourceMerchantId: accountId, targetMerchantId: id }),
+      api.mergeFinanceMerchants({
+        rationale: "Confirmed duplicate aliases.",
+        sourceMerchantId: accountId,
+        targetMerchantId: id,
+      }),
     ).resolves.toEqual(financeMerchant);
     await expect(api.getFinanceReviewQueue()).resolves.toEqual([]);
     await expect(api.listFinanceTransactions({ review: "needs_review" })).resolves.toMatchObject({
       nextCursor: null,
     });
-    await expect(api.proposeFinanceCategorizations()).resolves.toEqual([]);
+    await expect(api.proposeFinanceCategorizations()).resolves.toEqual({
+      items: [],
+      nextCursor: "next-review-page",
+    });
     await expect(
       api.applyFinanceCategorizations({
         decisions: [
           {
             categoryId: id,
             confidence: 0.99,
+            expectedTransactionUpdatedAt: now,
             learnMerchant: "suggest",
             rationale: "Known merchant history.",
             transactionId: accountId,
@@ -879,6 +1274,7 @@ describe("ilo API client", () => {
     await expect(
       api.resolveFinanceReview(id, {
         action: "approve",
+        expectedTransactionUpdatedAt: now,
         learnMerchant: "never",
         rationale: null,
       }),
@@ -912,9 +1308,13 @@ describe("ilo API client", () => {
     await expect(api.runAutomation(id, true)).resolves.toEqual(automationRun);
     await expect(api.listConnectors()).resolves.toHaveLength(1);
     await expect(api.getGoogleAuthorizationUrl()).resolves.toContain("accounts.google.com");
-    await expect(api.getGoogleAuthorizationUrl(accountId)).resolves.toContain(
-      "accounts.google.com",
-    );
+    await expect(
+      api.getGoogleAuthorizationUrl({
+        accountId,
+        returnTo: "/setup",
+        services: ["mail"],
+      }),
+    ).resolves.toContain("accounts.google.com");
     await expect(api.getXBookmarkAuthorizationUrl()).resolves.toContain("x.com");
     await expect(api.getXBookmarkAccount()).resolves.toMatchObject({ username: "test" });
     await expect(api.listXBookmarkFolders()).resolves.toMatchObject([{ remoteFolderId: "folder" }]);
@@ -931,6 +1331,47 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ accountId, email: "test@icloud.com" });
     await expect(api.listMailboxes()).resolves.toEqual([mailbox]);
+    await expect(api.getMailSetupContext()).resolves.toMatchObject({ accounts: [] });
+    await expect(api.getAssistantSetupStatus()).resolves.toMatchObject({
+      domains: [expect.objectContaining({ domain: "mail" })],
+    });
+    await expect(api.getAgentConnectionGuide()).resolves.toMatchObject({
+      mcpUrl: "https://mcp.example.com/mcp",
+      skill: { name: "ilo-setup" },
+    });
+    await expect(api.getDomainProfile("mail")).resolves.toEqual(domainProfile);
+    await expect(
+      api.upsertDomainProfile({
+        categories: [],
+        domain: "mail",
+        instructions: domainProfile.instructions,
+        objective: domainProfile.objective,
+        preferences: domainProfile.preferences,
+        sourceContexts: [],
+        status: "draft",
+        summary: domainProfile.summary,
+      }),
+    ).resolves.toEqual(domainProfile);
+    await expect(
+      api.listAttentionItems({ domain: "mail", limit: 50, status: "open" }),
+    ).resolves.toEqual([attentionItem]);
+    await expect(
+      api.createAttentionItem({
+        domain: "mail",
+        expiresAt: null,
+        importance: "normal",
+        kind: "important",
+        occursAt: null,
+        relatedEntityId: null,
+        relatedEntityType: null,
+        source: null,
+        summary: attentionItem.summary,
+        title: attentionItem.title,
+      }),
+    ).resolves.toEqual(attentionItem);
+    await expect(
+      api.updateAttentionItem("mail", id, { status: "resolved" }),
+    ).resolves.toMatchObject({ status: "resolved" });
     await expect(
       api.listMailThreads({
         accountIds: [accountId],
@@ -962,15 +1403,76 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ id });
     await expect(api.listMailDrafts()).resolves.toEqual([
-      { body: "Draft", id, subject: "Subject" },
+      expect.objectContaining({ body: "Draft", id, reconciliationState: "none" }),
     ]);
+    await expect(api.reconcileMailDraft(id, { outcome: "not_sent" })).resolves.toEqual({
+      id,
+      sendStatus: "draft",
+    });
     await expect(
-      api.createMailRule({ action: "archive", enabled: true, name: "Archive", query: "news" }),
-    ).resolves.toEqual({ id });
-    await expect(api.listMailRules()).resolves.toEqual([
-      { action: "archive", enabled: true, id, name: "Archive", query: "news" },
-    ]);
-    await expect(api.updateMailThread(id, { unread: false })).resolves.toEqual(mailThread);
+      api.createMailRule({
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        confidenceThreshold: null,
+        description: mailRule.description,
+        enabled: false,
+        name: mailRule.name,
+        policy: "preview",
+        profileId: null,
+        sourceIds: [accountId],
+      }),
+    ).resolves.toEqual(mailRule);
+    await expect(api.listMailRules()).resolves.toEqual([mailRule]);
+    await expect(
+      api.previewMailRule({
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        confidenceThreshold: null,
+        description: mailRule.description,
+        sourceIds: [accountId],
+      }),
+    ).resolves.toMatchObject({ matchedCount: 0 });
+    await expect(api.previewSavedMailRule(id)).resolves.toMatchObject({
+      ruleId: id,
+      ruleVersion: 1,
+    });
+    await expect(
+      api.activateMailRule(id, {
+        expectedCandidateIds: [],
+        expectedPreviewFingerprint: "a".repeat(64),
+        expectedPreviewedAt: now,
+        expectedVersion: 1,
+      }),
+    ).resolves.toMatchObject({
+      rule: { enabled: true, policy: "approved_rule", version: 2 },
+    });
+    await expect(
+      api.updateMailRule(id, { enabled: false, expectedVersion: 1 }),
+    ).resolves.toMatchObject({ enabled: false, version: 2 });
+    await expect(
+      api.updateMailThread(id, { expectedUpdatedAt: now, unread: false }),
+    ).resolves.toEqual(mailThread);
+    await expect(
+      api.bulkUpdateMail({
+        items: [{ expectedUpdatedAt: now, id }],
+        unread: false,
+      }),
+    ).resolves.toEqual({
+      failedCount: 0,
+      failures: [],
+      updatedCount: 1,
+      updatedIds: [id],
+    });
+    await expect(
+      api.upsertMailAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "important",
+        occursAt: null,
+        summary: attentionItem.summary,
+        title: attentionItem.title,
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.snoozeMailThread(id, "2026-07-14T12:00:00.000Z");
     await api.sendMail({
       accountId,
@@ -1018,6 +1520,49 @@ describe("ilo API client", () => {
       "Bearer pos_token",
     );
     expect(new Headers(fetch.mock.calls[0]?.[1]?.headers).get("x-ilo-client")).toBe("web");
+    const updateMailCall = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/mail/threads/${id}` && init?.method === "PATCH",
+    );
+    expect(JSON.parse(String(updateMailCall?.[1]?.body))).toEqual({
+      expectedUpdatedAt: now,
+      unread: false,
+    });
+    const bulkUpdateMailCall = fetch.mock.calls.find(
+      ([url]) => new URL(String(url)).pathname === "/v1/mail/threads/bulk",
+    );
+    expect(JSON.parse(String(bulkUpdateMailCall?.[1]?.body))).toEqual({
+      items: [{ expectedUpdatedAt: now, id }],
+      unread: false,
+    });
+    const guardedEventDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/trash` && init?.method === "POST",
+    );
+    expect(JSON.parse(String(guardedEventDelete?.[1]?.body))).toEqual({
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    const legacyEventDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}` && init?.method === "DELETE",
+    );
+    expect(legacyEventDelete?.[1]?.body).toBeUndefined();
+    const guardedBlockDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/blocks/${id}/trash` &&
+        init?.method === "POST",
+    );
+    expect(JSON.parse(String(guardedBlockDelete?.[1]?.body))).toEqual({
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+    });
+    const legacyBlockDelete = fetch.mock.calls.find(
+      ([url, init]) =>
+        new URL(String(url)).pathname === `/v1/events/${id}/blocks/${id}` &&
+        init?.method === "DELETE",
+    );
+    expect(legacyBlockDelete?.[1]?.body).toBeUndefined();
   });
 
   it("adopts, persists, uses, and clears a desktop session token", async () => {
@@ -1043,6 +1588,7 @@ describe("ilo API client", () => {
     );
     await api.logout();
     expect(onSessionToken).toHaveBeenLastCalledWith(null);
+    await expect(api.validateInvitation({ inviteCode: "ABCD2345" })).resolves.toBe(true);
     await expect(
       api.register({
         displayName: "Test",
@@ -1069,6 +1615,15 @@ describe("ilo API client", () => {
     );
     await expect(api.updateUser({ theme: "dark" })).resolves.toMatchObject({
       theme: "dark",
+    });
+    await expect(
+      api.updateAccountSetup({
+        action: "progress",
+        currentStep: "google",
+        selectedWorkspaces: ["calendar", "mail"],
+      }),
+    ).resolves.toMatchObject({
+      setup: { currentStep: "google", status: "in_progress" },
     });
   });
 

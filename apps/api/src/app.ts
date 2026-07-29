@@ -5,18 +5,24 @@ import {
   createXConnector,
 } from "@personal-os/connectors";
 import {
+  type AgentConnectionGuide,
+  assistantDomains,
   confirmEmailVerificationInputSchema,
   connectICloudInputSchema,
   createAccessTokenInputSchema,
   createAutomationRoutineInputSchema,
   createInvitationInputSchema,
+  featureAccessPolicies,
   loginInputSchema,
   registerInputSchema,
   requestPasswordResetInputSchema,
   resetPasswordInputSchema,
+  startGoogleAuthorizationInputSchema,
+  updateAccountSetupInputSchema,
   updateAutomationRoutineInputSchema,
   updatePinterestWallpaperSettingsInputSchema,
   updateUserInputSchema,
+  validateInvitationInputSchema,
   weatherLocationSearchQuerySchema,
   weatherQuerySchema,
 } from "@personal-os/domain";
@@ -26,10 +32,13 @@ import { getCookie, setCookie } from "hono/cookie";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
+import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
+import { calendarProviderReconciliationLog } from "./calendar-provider-log.js";
 import { createCalendarService } from "./calendar-service.js";
+import { officialAgentSkill } from "./config.js";
 import { createConnectorService } from "./connector-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
@@ -41,6 +50,7 @@ import { createOpenApiDocument } from "./openapi.js";
 import { createPinterestService } from "./pinterest-service.js";
 import { createFixedWindowRateLimiter } from "./rate-limit.js";
 import { createReminderService } from "./reminder-service.js";
+import { registerAssistantRoutes } from "./routes/assistant.js";
 import { registerCalendarRoutes } from "./routes/calendar.js";
 import { registerFinanceRoutes } from "./routes/finances.js";
 import { registerGoalsRoutes } from "./routes/goals.js";
@@ -67,6 +77,16 @@ export type PersonalOsApp = Hono<AppEnv> & {
     processed: number;
   }>;
   backfillFinanceLearning: () => Promise<{ processed: number }>;
+  backfillFinanceSetupIntegrity: () => Promise<{
+    categoriesComplete: boolean;
+    categoriesInserted: number;
+    claimed: boolean;
+    processed: number;
+    profileRowsScanned: number;
+    profilesComplete: boolean;
+    profilesDemoted: number;
+    userRowsScanned: number;
+  }>;
   dispatchDueAutomations: () => Promise<void>;
   syncDueFinances: () => Promise<{ failed: number; reasons: string[]; synced: number }>;
 };
@@ -100,7 +120,17 @@ const xFolderInputSchema = z.object({ folderId: z.string().min(1).max(100) });
 const pinterestPinsQuerySchema = z.object({
   limit: z.coerce.number().int().min(4).max(20).default(12),
 });
-
+const agentDomainSupport = {
+  calendar: "profile_and_attention",
+  finances: "profile_and_attention",
+  goals: "profile_and_attention",
+  mail: "executable_rules",
+  reminders: "profile_and_attention",
+  tasks: "profile_and_attention",
+} as const satisfies Record<
+  (typeof assistantDomains)[number],
+  AgentConnectionGuide["domains"][number]["support"]
+>;
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
@@ -162,6 +192,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     connectedEvents: connectors.eventGateway,
     db: dependencies.db,
     now,
+    observeProviderFailure: (entry) =>
+      dependencies.log?.({
+        calendarProviderReconciliation: calendarProviderReconciliationLog(entry),
+        durationMs: 0,
+        event: "calendar_provider_reconciliation",
+        method: "CALENDAR",
+        path: `/internal/calendar/provider-effects/${entry.operation}`,
+        requestId: entry.requestId,
+        status: entry.status,
+      }),
   });
   const automations = createAutomationService({
     db: dependencies.db,
@@ -173,12 +213,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const audit = createAuditService(dependencies.db);
-  const mail = createMailService({ db: dependencies.db, gateway: connectors.mailGateway, now });
-  const weather = createWeatherService({
-    ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+  const mail = createMailService({
+    db: dependencies.db,
+    gateway: connectors.mailGateway,
     now,
+    reviewSigningKey: dependencies.config.encryptionKey,
   });
-  const goalService = createGoalsService({ db: dependencies.db, now });
   const finances = createFinanceService({
     db: dependencies.db,
     now,
@@ -189,6 +229,68 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       secret: dependencies.config.plaidSecret,
     },
   });
+  const assistant = createAssistantService({
+    db: dependencies.db,
+    now,
+    profileRequiresApproval: (domain) => domain === "finances",
+    validateProfileSources: async (
+      transaction,
+      domain,
+      userId,
+      sourceIds,
+      status,
+      actorType,
+      preferences,
+    ) => {
+      if (domain === "mail") {
+        await mail.validateProfileSources(transaction, userId, sourceIds);
+      }
+      if (domain === "calendar") {
+        await calendar.validateProfileSources(transaction, userId, sourceIds, status, preferences);
+      }
+      if (domain === "reminders") {
+        return reminders.validateProfileSources(
+          transaction,
+          userId,
+          sourceIds,
+          status,
+          preferences,
+        );
+      }
+      if (domain === "finances") {
+        await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
+      }
+    },
+  });
+  const agentSkillRevision = dependencies.config.agentSkillRevision ?? officialAgentSkill.revision;
+  const agentSkillSourceUrl =
+    dependencies.config.agentSkillSourceUrl ?? officialAgentSkill.sourceUrl;
+  const agentSkillVersion = dependencies.config.agentSkillVersion ?? officialAgentSkill.version;
+  const agentConnectionGuide: AgentConnectionGuide = {
+    domains: assistantDomains.map((domain) => ({
+      domain,
+      readScope: featureAccessPolicies[domain].readScope,
+      support: agentDomainSupport[domain],
+      writeScope: featureAccessPolicies[domain].writeScope,
+    })),
+    mcpUrl: dependencies.config.mcpResourceUrl ?? `${dependencies.config.apiBaseUrl}/mcp`,
+    skill: {
+      displayName: "Ilo Guided Setup",
+      installPrompt: `Install Ilo Guided Setup v${agentSkillVersion} from ${agentSkillSourceUrl}. The published source revision is ${agentSkillRevision}. Make it available as $ilo-setup, then tell me when it is ready.`,
+      invocation: "$ilo-setup",
+      name: "ilo-setup",
+      revision: agentSkillRevision,
+      setupPrompt:
+        "Use $ilo-setup to inspect my connected Ilo domains and run the shortest useful setup interview.",
+      sourceUrl: agentSkillSourceUrl,
+      version: agentSkillVersion,
+    },
+  };
+  const weather = createWeatherService({
+    ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+    now,
+  });
+  const goalService = createGoalsService({ db: dependencies.db, now });
   const pinterest = createPinterestService({ db: dependencies.db, now });
 
   app.use("*", async (context, next) => {
@@ -204,6 +306,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     } finally {
       dependencies.log?.({
         durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
+        event: "request",
         method: context.req.method,
         path: context.req.path,
         requestId: context.get("requestId"),
@@ -216,7 +319,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     "*",
     cors({
       allowHeaders: ["Content-Type", "Authorization", "X-Request-Id"],
-      allowMethods: ["DELETE", "GET", "OPTIONS", "PATCH", "POST"],
+      allowMethods: ["DELETE", "GET", "OPTIONS", "PATCH", "POST", "PUT"],
       credentials: true,
       origin: dependencies.config.allowedOrigins,
     }),
@@ -236,6 +339,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     await next();
   };
   app.use("/v1/auth/register", rateLimitAuth);
+  app.use("/v1/auth/invitations/validate", rateLimitAuth);
   app.use("/v1/auth/login", rateLimitAuth);
   app.use("/v1/auth/recovery", rateLimitAuth);
   app.use("/v1/auth/password-reset", rateLimitAuth);
@@ -258,6 +362,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     await sendEmailVerification(result.user.email, result.user.id);
     setSessionCookie(context, dependencies, result.token, result.expiresAt);
     return context.json({ sessionToken: result.token, user: result.user }, 201);
+  });
+  app.post("/v1/auth/invitations/validate", async (context) => {
+    const { inviteCode } = await parseBody(context, validateInvitationInputSchema);
+    return context.json({ valid: await auth.validateInvitationCode(inviteCode) });
   });
   app.post("/v1/auth/login", async (context) => {
     const result = await auth.login(
@@ -298,9 +406,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
           : "Google did not return an authorization code.",
       );
     }
-    await connectors.completeGoogleAuthorization(query.state, query.code);
+    const result = await connectors.completeGoogleAuthorization(query.state, query.code);
+    void connectors.syncAccount(result.userId, result.accountId).catch(() => {
+      // The account and credentials are already saved, while syncAccount records
+      // the provider error for the settings UI and a later manual retry.
+    });
+    const separator = result.returnPath.includes("?") ? "&" : "?";
     return context.redirect(
-      `${dependencies.config.appBaseUrl}/settings/connectors?google=connected`,
+      `${dependencies.config.appBaseUrl}${result.returnPath}${separator}google=connected`,
     );
   });
   app.get("/v1/x-bookmarks/callback", async (context) => {
@@ -355,9 +468,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         "This authorization server only issues tokens for the ilo MCP resource.",
       );
     await oauthSession(context);
-    return context.html(
-      `<main><h1>Authorize ilo MCP</h1><p>This authorizes the requesting MCP client to use your ilo account. Connected services remain inside ilo.</p><form method="post"><input type="hidden" name="client_id" value="${escapeHtml(query.client_id)}"><input type="hidden" name="code_challenge" value="${escapeHtml(query.code_challenge)}"><input type="hidden" name="code_challenge_method" value="S256"><input type="hidden" name="redirect_uri" value="${escapeHtml(query.redirect_uri)}"><input type="hidden" name="resource" value="${escapeHtml(query.resource)}"><input type="hidden" name="scope" value="${escapeHtml(query.scope ?? "")}"><input type="hidden" name="state" value="${escapeHtml(query.state ?? "")}"><button type="submit">Authorize</button></form></main>`,
-    );
+    const client = await oauth.getAuthorizationClient(query.client_id, query.redirect_uri);
+    const scopes = oauth.parseScopes(query.scope);
+    return context.html(oauthConsentPage({ clientName: client.name, query, scopes }));
   });
   app.post("/oauth/authorize", async (context) => {
     const input = oauthAuthorizeSchema.parse(await context.req.parseBody());
@@ -431,6 +544,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/auth/logout", authenticate);
   app.use("/v1/auth/email-verification", authenticate, requireHuman);
   app.use("/v1/me", authenticate);
+  app.use("/v1/setup", authenticate, requireHuman);
   app.use("/v1/sessions/*", authenticate, requireHuman);
   app.use("/v1/sessions", authenticate, requireHuman);
   app.use("/v1/access-tokens/*", authenticate, requireHuman);
@@ -460,6 +574,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/weather/*", authenticate, requireHuman);
   app.use("/v1/automations", authenticate);
   app.use("/v1/automations/*", authenticate);
+  app.use("/v1/assistant/*", authenticate);
   const requireVerifiedEmail: MiddlewareHandler<AppEnv> = async (context, next) => {
     if (!(await auth.getUser(context.get("principal").userId)).emailVerified)
       throw new AppError("forbidden", "Verify your email before connecting an account.");
@@ -500,6 +615,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     if (input.email !== undefined) await sendEmailVerification(user.email, user.id);
     return context.json({ user });
   });
+  app.patch("/v1/setup", async (context) =>
+    context.json({
+      user: await auth.updateAccountSetup(
+        context.get("principal").userId,
+        await parseBody(context, updateAccountSetupInputSchema),
+      ),
+    }),
+  );
   app.post("/v1/auth/email-verification", async (context) => {
     const user = await auth.getUser(context.get("principal").userId);
     await sendEmailVerification(user.email, user.id);
@@ -559,25 +682,30 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.get("/v1/connectors", async (context) =>
     context.json({ accounts: await connectors.listAccounts(context.get("principal").userId) }),
   );
-  app.post("/v1/connectors/google/start", async (context) =>
-    context.json({
-      url: await connectors.startGoogleAuthorization(
-        context.get("principal").userId,
-        context.req.query("accountId"),
-      ),
-    }),
-  );
-  app.post("/v1/connectors/icloud", async (context) =>
-    context.json(
-      {
-        account: await connectors.connectICloud(
-          context.get("principal").userId,
-          await parseBody(context, connectICloudInputSchema),
-        ),
-      },
-      201,
-    ),
-  );
+  app.post("/v1/connectors/google/start", async (context) => {
+    const input = startGoogleAuthorizationInputSchema.parse({
+      ...(context.req.query("accountId") ? { accountId: context.req.query("accountId") } : {}),
+      ...(context.req.query("returnTo") ? { returnTo: context.req.query("returnTo") } : {}),
+      ...(context.req.query("services")
+        ? { services: context.req.query("services")?.split(",") }
+        : {}),
+    });
+    return context.json({
+      url: await connectors.startGoogleAuthorization(context.get("principal").userId, input),
+    });
+  });
+  app.post("/v1/connectors/icloud", async (context) => {
+    const result = await connectors.connectICloud(
+      context.get("principal").userId,
+      await parseBody(context, connectICloudInputSchema),
+      context.get("requestId"),
+    );
+    void connectors.syncAccount(result.userId, result.accountId).catch(() => {
+      // The account and credentials are already saved, while syncAccount records
+      // the provider error for the settings UI and a later manual retry.
+    });
+    return context.json({ account: { accountId: result.accountId, email: result.email } }, 201);
+  });
   app.post("/v1/connectors/:id/sync", async (context) =>
     context.json({
       result: await connectors.syncAccount(
@@ -587,7 +715,11 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     }),
   );
   app.delete("/v1/connectors/:id", async (context) => {
-    await connectors.disconnect(context.get("principal").userId, context.req.param("id"));
+    await connectors.disconnect(
+      context.get("principal").userId,
+      context.req.param("id"),
+      context.get("requestId"),
+    );
     return context.body(null, 204);
   });
 
@@ -718,7 +850,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ),
   );
 
-  registerMailRoutes({ app, mail });
+  registerMailRoutes({ app, mail, mutationContext });
+
+  registerAssistantRoutes({
+    app,
+    assistant,
+    connectionGuide: agentConnectionGuide,
+    mutationContext,
+  });
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 
@@ -766,8 +905,22 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     async backfillFinanceLearning() {
       return finances.backfillLearning();
     },
+    async backfillFinanceSetupIntegrity() {
+      return finances.backfillSetupIntegrity();
+    },
     async dispatchDueAutomations() {
-      await connectors.syncStaleMailAccounts();
+      await connectors.syncStaleAccounts();
+      const mailDispatchStartedAt = Date.now();
+      await connectors.dispatchDueMailRuleWork().catch(() => {
+        dependencies.log?.({
+          durationMs: Date.now() - mailDispatchStartedAt,
+          event: "mail_rule_work_dispatch_failed",
+          method: "SCHEDULER",
+          path: "/internal/mail/rule-work/dispatch",
+          requestId: randomUUID(),
+          status: 500,
+        });
+      });
       await automations.dispatchDue();
     },
     async syncDueFinances() {
@@ -802,4 +955,74 @@ function escapeHtml(value: string): string {
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character] ??
       character,
   );
+}
+
+const oauthScopeLabels: Record<string, string> = {
+  "audit:read": "Read Ilo activity history",
+  "automations:read": "Read automations",
+  "automations:write": "Run approved automations",
+  "bookmarks:read": "Read synchronized bookmarks",
+  "calendar:read": "Read calendars and events",
+  "calendar:write": "Create and manage events",
+  "finances:read": "Read sensitive financial accounts, balances, and activity",
+  "finances:write": "Save Finance setup guidance drafts",
+  "goals:read": "Read goals and motives",
+  "goals:write": "Manage goals and motives",
+  "mail:read": "Read connected mail",
+  "mail:write": "Manage mail and approved Mail rules",
+  "reminders:read": "Read reminders",
+  "reminders:write": "Create and manage reminders",
+  "tasks:read": "Read tasks",
+  "tasks:write": "Create and manage tasks",
+};
+
+function oauthConsentPage({
+  clientName,
+  query,
+  scopes,
+}: {
+  clientName: string;
+  query: z.infer<typeof oauthAuthorizeSchema>;
+  scopes: string[];
+}): string {
+  const cancel = new URL(query.redirect_uri);
+  cancel.searchParams.set("error", "access_denied");
+  if (query.state) cancel.searchParams.set("state", query.state);
+  const fields = {
+    client_id: query.client_id,
+    code_challenge: query.code_challenge,
+    code_challenge_method: "S256",
+    redirect_uri: query.redirect_uri,
+    resource: query.resource,
+    scope: scopes.join(" "),
+    state: query.state ?? "",
+  };
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize ${escapeHtml(clientName)} · Ilo</title>
+</head>
+<body>
+  <main>
+    <p>Ilo agent access</p>
+    <h1>Connect ${escapeHtml(clientName)}</h1>
+    <p>This agent host is requesting access to your Ilo account. Connected provider credentials remain inside Ilo.</p>
+    <h2>Requested permissions</h2>
+    <ul>${scopes.map((scope) => `<li>${escapeHtml(oauthScopeLabels[scope] ?? scope)}</li>`).join("")}</ul>
+    <p>You can revoke this connection at any time from Settings → Agent access.</p>
+    <form method="post">
+      ${Object.entries(fields)
+        .map(
+          ([name, value]) =>
+            `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+        )
+        .join("")}
+      <button type="submit">Authorize ${escapeHtml(clientName)}</button>
+      <a href="${escapeHtml(cancel.toString())}">Cancel</a>
+    </form>
+  </main>
+</body>
+</html>`;
 }

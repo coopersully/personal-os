@@ -1,7 +1,10 @@
 import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
+import nodemailer from "nodemailer";
 import { z } from "zod";
+import { providerFetch } from "./http.js";
 import type {
   CredentialResult,
+  GoogleAuthorizationService,
   GoogleConnector,
   GoogleCredentials,
   NormalizedRemoteEvent,
@@ -20,6 +23,12 @@ const tokenResponseSchema = z.object({
   refresh_token: z.string().optional(),
   scope: z.string().default(""),
   token_type: z.string().default("Bearer"),
+});
+
+const mailComposer = nodemailer.createTransport({
+  buffer: true,
+  newline: "unix",
+  streamTransport: true,
 });
 
 const profileSchema = z.object({
@@ -118,6 +127,10 @@ const gmailThreadSchema = z.object({
   id: z.string(),
   messages: z.array(gmailMessageSchema).min(1),
 });
+const gmailMinimalThreadSchema = z.object({
+  id: z.string(),
+  messages: z.array(z.object({ id: z.string(), labelIds: z.array(z.string()).default([]) })).min(1),
+});
 
 type GoogleEvent = z.infer<typeof eventSchema>;
 
@@ -128,6 +141,17 @@ export class ConnectorError extends Error {
     super(message);
     this.name = "ConnectorError";
     this.status = status;
+  }
+}
+
+/** A local composition or credential-refresh failure before a Mail send request begins. */
+export class MailSendPreAcceptanceError extends Error {
+  public override readonly cause: unknown;
+
+  public constructor(message: string, cause: unknown) {
+    super(message);
+    this.name = "MailSendPreAcceptanceError";
+    this.cause = cause;
   }
 }
 
@@ -164,7 +188,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     parameters: URLSearchParams,
   ): Promise<z.infer<typeof tokenResponseSchema>> {
     requireConfiguration();
-    const response = await request("https://oauth2.googleapis.com/token", {
+    const response = await providerFetch(request, "https://oauth2.googleapis.com/token", {
       body: parameters,
       headers: { "content-type": "application/x-www-form-urlencoded" },
       method: "POST",
@@ -206,7 +230,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     }
     return {
       credentials: currentCredentials,
-      response: await request(input, { ...init, headers }),
+      response: await providerFetch(request, input, { ...init, headers }),
     };
   }
 
@@ -282,8 +306,25 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
   }
 
   return {
-    authorizationUrl(state: string, loginHint?: string): string {
+    authorizationUrl(
+      state: string,
+      loginHint?: string,
+      services: GoogleAuthorizationService[] = ["calendar", "mail"],
+    ): string {
       requireConfiguration();
+      const scopes = ["openid", "email", "profile"];
+      if (services.includes("calendar")) {
+        scopes.push(
+          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+          "https://www.googleapis.com/auth/calendar.events",
+        );
+      }
+      if (services.includes("mail")) {
+        scopes.push(
+          "https://www.googleapis.com/auth/gmail.modify",
+          "https://www.googleapis.com/auth/gmail.send",
+        );
+      }
       const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
       url.search = new URLSearchParams({
         access_type: "offline",
@@ -292,15 +333,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
         prompt: "consent",
         redirect_uri: options.redirectUri,
         response_type: "code",
-        scope: [
-          "openid",
-          "email",
-          "profile",
-          "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
-          "https://www.googleapis.com/auth/calendar.events",
-          "https://www.googleapis.com/auth/gmail.modify",
-          "https://www.googleapis.com/auth/gmail.send",
-        ].join(" "),
+        scope: scopes.join(" "),
         state,
       }).toString();
       if (loginHint) url.searchParams.set("login_hint", loginHint);
@@ -368,6 +401,24 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
 
     listCalendars,
 
+    async getMailThreadState(credentials, remoteThreadId) {
+      const result = await authenticatedRequest(
+        credentials,
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(remoteThreadId)}?format=minimal`,
+      );
+      const thread = gmailMinimalThreadSchema.parse(await parseResponse(result.response));
+      const mailboxIds = [...new Set(thread.messages.flatMap((message) => message.labelIds))];
+      return {
+        credentials: result.credentials,
+        value: {
+          mailboxIds,
+          remoteThreadId: thread.id,
+          starred: mailboxIds.includes("STARRED"),
+          unread: mailboxIds.includes("UNREAD"),
+        },
+      };
+    },
+
     async syncMail(credentials) {
       const labelResult = await authenticatedRequest(
         credentials,
@@ -426,35 +477,60 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       return result.credentials;
     },
 
-    async sendMail(credentials, input) {
-      const recipients = (addresses: typeof input.to) =>
-        addresses
-          .map((address) =>
-            address.name ? `${address.name} <${address.address}>` : address.address,
-          )
-          .join(", ");
-      const raw = [
-        `To: ${recipients(input.to)}`,
-        ...(input.cc.length ? [`Cc: ${recipients(input.cc)}`] : []),
-        `Subject: ${input.subject}`,
-        "MIME-Version: 1.0",
-        'Content-Type: text/plain; charset="UTF-8"',
-        "",
-        input.body,
-      ].join("\r\n");
+    async trashMailThread(credentials, remoteThreadId) {
       const result = await authenticatedRequest(
         credentials,
-        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
-        {
-          body: JSON.stringify({
-            raw: Buffer.from(raw).toString("base64url"),
-            ...(input.threadId ? { threadId: input.threadId } : {}),
-          }),
-          method: "POST",
-        },
+        `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(remoteThreadId)}/trash`,
+        { method: "POST" },
       );
       await parseResponse(result.response);
       return result.credentials;
+    },
+
+    async sendMail(credentials, input) {
+      let currentCredentials: GoogleCredentials;
+      let raw: Buffer;
+      try {
+        const composed = (await mailComposer.sendMail({
+          cc: input.cc.map((address) => ({
+            address: address.address,
+            ...(address.name ? { name: address.name } : {}),
+          })),
+          from: input.from,
+          subject: input.subject,
+          text: input.body,
+          to: input.to.map((address) => ({
+            address: address.address,
+            ...(address.name ? { name: address.name } : {}),
+          })),
+        })) as { message: Buffer | string };
+        raw = Buffer.isBuffer(composed.message)
+          ? composed.message
+          : Buffer.from(String(composed.message));
+        currentCredentials = await validCredentials(credentials);
+      } catch (error) {
+        throw new MailSendPreAcceptanceError(
+          "Google Mail could not prepare or authorize the send request.",
+          error,
+        );
+      }
+      const headers = new Headers({ authorization: `Bearer ${currentCredentials.accessToken}` });
+      headers.set("content-type", "application/json");
+      const response = await providerFetch(
+        request,
+        "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        {
+          body: JSON.stringify({
+            raw: raw.toString("base64url"),
+            ...(input.threadId ? { threadId: input.threadId } : {}),
+          }),
+          headers,
+          method: "POST",
+        },
+      );
+      // Once the send request begins, every response/transport failure is ambiguous.
+      await parseResponse(response);
+      return currentCredentials;
     },
 
     /* v8 ignore stop */

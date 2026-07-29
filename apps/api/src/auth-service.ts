@@ -15,13 +15,20 @@ import type {
   Invitation,
   LoginInput,
   RegisterInput,
+  UpdateAccountSetupInput,
   UpdateUserInput,
   User,
 } from "@personal-os/domain";
-import { and, desc, eq, gt, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
-import { generateToken, hashPassword, hashToken, verifyPassword } from "./security.js";
+import {
+  generateInvitationCode,
+  generateToken,
+  hashPassword,
+  hashToken,
+  verifyPassword,
+} from "./security.js";
 import { serializeUser } from "./serialization.js";
 import type { Principal } from "./types.js";
 
@@ -281,7 +288,7 @@ export function createAuthService(options: AuthServiceOptions) {
       userId: string,
       input: CreateInvitationInput,
     ): Promise<Invitation & { code: string }> {
-      const code = generateToken("invite");
+      const code = generateInvitationCode();
       const record = requireDatabaseRecord(
         (
           await db
@@ -350,6 +357,41 @@ export function createAuthService(options: AuthServiceOptions) {
       }
     },
 
+    async updateAccountSetup(userId: string, input: UpdateAccountSetupInput): Promise<User> {
+      const currentTime = now();
+      const values =
+        input.action === "progress"
+          ? {
+              setupCompletedAt: null,
+              setupCurrentStep: input.currentStep,
+              setupDismissedAt: null,
+              ...(input.selectedWorkspaces === undefined
+                ? {}
+                : { setupSelectedWorkspaces: input.selectedWorkspaces }),
+              setupStartedAt: sql`coalesce(${users.setupStartedAt}, ${currentTime})`,
+              setupStatus: "in_progress" as const,
+              updatedAt: currentTime,
+            }
+          : input.action === "dismiss"
+            ? {
+                setupDismissedAt: currentTime,
+                setupStatus: "dismissed" as const,
+                updatedAt: currentTime,
+              }
+            : {
+                setupCompletedAt: currentTime,
+                setupCurrentStep: "ready" as const,
+                setupDismissedAt: null,
+                setupStatus: "complete" as const,
+                updatedAt: currentTime,
+              };
+      const user = requireDatabaseRecord(
+        (await db.update(users).set(values).where(eq(users.id, userId)).returning())[0],
+        "The setup progress could not be saved.",
+      );
+      return serializeUserWithCapabilities(user);
+    },
+
     async createEmailVerificationToken(userId: string): Promise<string> {
       const [user] = await db
         .select({ id: users.id })
@@ -404,7 +446,7 @@ export function createAuthService(options: AuthServiceOptions) {
       const records = await db
         .select()
         .from(accessTokens)
-        .where(eq(accessTokens.userId, userId))
+        .where(and(eq(accessTokens.userId, userId), isNull(accessTokens.clientId)))
         .orderBy(desc(accessTokens.createdAt));
       return records.map(serializeAccessToken);
     },
@@ -436,6 +478,22 @@ export function createAuthService(options: AuthServiceOptions) {
         token: session.token,
         user: serializeUserWithCapabilities(user),
       };
+    },
+
+    async validateInvitationCode(inviteCode: string): Promise<boolean> {
+      if (registrationMode === "open") return true;
+      const [invitation] = await db
+        .select({ id: invitations.id })
+        .from(invitations)
+        .where(
+          and(
+            eq(invitations.codeHash, hashToken(inviteCode)),
+            isNull(invitations.redeemedAt),
+            gt(invitations.expiresAt, now()),
+          ),
+        )
+        .limit(1);
+      return Boolean(invitation);
     },
 
     async register(input: RegisterInput, metadata: ClientMetadata): Promise<SessionResult> {
@@ -481,6 +539,7 @@ export function createAuthService(options: AuthServiceOptions) {
                   email: input.email,
                   passwordHash,
                   planningTimezone: input.planningTimezone,
+                  setupStatus: "not_started",
                 })
                 .returning()
             )[0],

@@ -1,4 +1,5 @@
 import type {
+  attentionItems,
   calendarEvents,
   calendars,
   mailboxes,
@@ -7,6 +8,7 @@ import type {
   users,
 } from "@personal-os/database";
 import type {
+  AttentionItem,
   Calendar,
   CalendarEvent,
   CalendarEventBlock,
@@ -18,6 +20,7 @@ import type {
 } from "@personal-os/domain";
 
 type UserRow = typeof users.$inferSelect;
+type AttentionItemRow = typeof attentionItems.$inferSelect;
 type ReminderRow = typeof reminders.$inferSelect;
 type CalendarEventRow = typeof calendarEvents.$inferSelect;
 type CalendarRow = typeof calendars.$inferSelect;
@@ -32,11 +35,38 @@ export function serializeUser(row: UserRow): User {
     email: row.email,
     emailVerified: row.emailVerifiedAt !== null,
     id: row.id,
+    setup: {
+      completedAt: row.setupCompletedAt?.toISOString() ?? null,
+      currentStep: row.setupCurrentStep,
+      dismissedAt: row.setupDismissedAt?.toISOString() ?? null,
+      selectedWorkspaces: row.setupSelectedWorkspaces,
+      startedAt: row.setupStartedAt?.toISOString() ?? null,
+      status: row.setupStatus,
+    },
     theme: row.theme,
     planningTimezone: row.planningTimezone,
     homeLocation: row.homeLocation,
     workdayEndMinute: row.workdayEndMinute,
     workdayStartMinute: row.workdayStartMinute,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function serializeAttentionItem(row: AttentionItemRow): AttentionItem {
+  return {
+    createdAt: row.createdAt.toISOString(),
+    domain: row.domain,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    id: row.id,
+    importance: row.importance,
+    kind: row.kind,
+    occursAt: row.occursAt?.toISOString() ?? null,
+    relatedEntityId: row.relatedEntityId,
+    relatedEntityType: row.relatedEntityType,
+    source: row.source,
+    status: row.status,
+    summary: row.summary,
+    title: row.title,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -49,6 +79,13 @@ export function serializeReminder(row: ReminderRow): Reminder {
     id: row.id,
     notes: row.notes,
     priority: row.priority,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: row.updatedAt.toISOString(),
+      sourceType: "reminder",
+    },
     timezone: row.timezone,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),
@@ -91,6 +128,7 @@ export function serializeCalendar(row: CalendarRow): Calendar {
 export function serializeEvent(
   row: CalendarEventRow,
   blocks: CalendarEventBlock[] = [],
+  accountId: string | null = null,
 ): CalendarEvent {
   return {
     allDay: row.allDay,
@@ -110,6 +148,13 @@ export function serializeEvent(
     recurrence: row.recurrence,
     reminders: row.reminders,
     remoteEventId: row.remoteEventId,
+    source: {
+      accountId,
+      provider: row.provider,
+      remoteId: row.remoteEventId ?? (row.provider === "local" ? row.id : null),
+      revision: row.remoteEtag ?? row.updatedAt.toISOString(),
+      sourceType: "calendar_event",
+    },
     startsAt: row.startsAt.toISOString(),
     status: row.status,
     transparency: row.transparency,
@@ -154,6 +199,7 @@ export function serializeMailThread(
     subject: row.subject,
     to: row.to,
     unread: row.unread,
+    updatedAt: row.updatedAt.toISOString(),
   };
 }
 
@@ -161,6 +207,131 @@ export function auditSnapshot(value: object | null): Record<string, unknown> | n
   return value === null
     ? null
     : (redactAuditValue(JSON.parse(JSON.stringify(value))) as Record<string, unknown>);
+}
+
+type DomainProfileAuditValue = {
+  categories: unknown[];
+  domain: string;
+  instructions: unknown[];
+  preferences: Record<string, unknown>;
+  sourceContexts: unknown[];
+  status: string;
+  version: number;
+};
+
+type AttentionItemAuditValue = {
+  domain: string;
+  importance: string;
+  kind: string;
+  relatedEntityType: string | null;
+  status: string;
+};
+
+type MailRuleAuditValue = {
+  actions: Array<{ type: string }> | null;
+  condition: { field: string; operator: string } | null;
+  enabled: boolean;
+  legacyAction: string;
+  policy: string;
+  sourceAccountIds: string[];
+  version: number;
+};
+
+const domainProfileMutableFields = [
+  "categories",
+  "instructions",
+  "objective",
+  "preferences",
+  "sourceContexts",
+  "status",
+  "summary",
+] as const;
+
+/**
+ * Return only accountability metadata for shared profile audit records.
+ * Domain profile content requires its domain read scope and must not leak to
+ * principals that can read the audit log alone.
+ */
+export function auditDomainProfileMetadata(
+  value: DomainProfileAuditValue | null,
+  changedFields: string[],
+): Record<string, unknown> | null {
+  if (!value) return null;
+  return {
+    categoryCount: value.categories.length,
+    changedFields,
+    domain: value.domain,
+    instructionCount: value.instructions.length,
+    preferenceCount: Object.keys(value.preferences).length,
+    sourceCount: value.sourceContexts.length,
+    status: value.status,
+    version: value.version,
+  };
+}
+
+export function domainProfileChangedFields(before: object | null, after: object): string[] {
+  const beforeRecord = before as Record<string, unknown> | null;
+  const afterRecord = after as Record<string, unknown>;
+  return domainProfileMutableFields.filter(
+    (field) => JSON.stringify(beforeRecord?.[field]) !== JSON.stringify(afterRecord[field]),
+  );
+}
+
+const mailRuleMutableFields = [
+  "actions",
+  "condition",
+  "confidenceThreshold",
+  "description",
+  "enabled",
+  "name",
+  "policy",
+  "profileId",
+  "sourceAccountIds",
+] as const;
+
+export function mailRuleChangedFields(before: object | null, after: object): string[] {
+  const beforeRecord = before as Record<string, unknown> | null;
+  const afterRecord = after as Record<string, unknown>;
+  return mailRuleMutableFields.filter(
+    (field) => JSON.stringify(beforeRecord?.[field]) !== JSON.stringify(afterRecord[field]),
+  );
+}
+
+/** Mail rule content and source topology require mail:read; audits expose metadata only. */
+export function auditMailRuleMetadata(
+  value: MailRuleAuditValue | null,
+  changedFields: string[],
+): Record<string, unknown> | null {
+  if (!value) return null;
+  const actionTypes = value.actions?.map((action) => action.type) ?? [value.legacyAction];
+  return {
+    actionCount: actionTypes.length,
+    actionTypes: [...new Set(actionTypes)].sort(),
+    changedFields,
+    conditionField: value.condition?.field ?? "any",
+    conditionOperator: value.condition?.operator ?? "contains",
+    enabled: value.enabled,
+    policy: value.policy,
+    sourceCount: value.sourceAccountIds.length,
+    version: value.version,
+  };
+}
+
+/**
+ * Attention audit records deliberately omit titles, summaries, entity IDs,
+ * source references, remote IDs, and timing details.
+ */
+export function auditAttentionItemMetadata(
+  value: AttentionItemAuditValue | null,
+): Record<string, unknown> | null {
+  if (!value) return null;
+  return {
+    domain: value.domain,
+    importance: value.importance,
+    kind: value.kind,
+    relatedEntityType: value.relatedEntityType,
+    status: value.status,
+  };
 }
 
 const sensitiveAuditFields = new Set([
@@ -184,6 +355,7 @@ const sensitiveAuditFields = new Set([
   "refreshToken",
   "snippet",
   "subject",
+  "summary",
   "title",
   "to",
   "tokenHash",

@@ -160,6 +160,13 @@ export type MailSyncResult = CredentialResult<{
   threads: NormalizedRemoteMailThread[];
 }>;
 
+export type RemoteMailThreadState = {
+  mailboxIds: string[];
+  remoteThreadId: string;
+  starred: boolean;
+  unread: boolean;
+};
+
 export type UpdateRemoteMailThreadInput = {
   addMailboxIds?: string[];
   removeMailboxIds?: string[];
@@ -168,13 +175,20 @@ export type UpdateRemoteMailThreadInput = {
 export type SendRemoteMailInput = {
   body: string;
   cc: MailAddress[];
+  from: string;
   subject: string;
   threadId?: string;
   to: MailAddress[];
 };
 
+export type GoogleAuthorizationService = "calendar" | "mail";
+
 export type GoogleConnector = {
-  authorizationUrl: (state: string, loginHint?: string) => string;
+  authorizationUrl: (
+    state: string,
+    loginHint?: string,
+    services?: GoogleAuthorizationService[],
+  ) => string;
   createEvent: (
     credentials: GoogleCredentials,
     remoteCalendarId: string,
@@ -188,6 +202,10 @@ export type GoogleConnector = {
   ) => Promise<GoogleCredentials>;
   exchangeCode: (code: string) => Promise<GoogleCredentials>;
   getProfile: (credentials: GoogleCredentials) => Promise<CredentialResult<ProviderProfile>>;
+  getMailThreadState?: (
+    credentials: GoogleCredentials,
+    remoteThreadId: string,
+  ) => Promise<CredentialResult<RemoteMailThreadState>>;
   listCalendars: (credentials: GoogleCredentials) => Promise<CredentialResult<RemoteCalendar[]>>;
   sendMail?: (
     credentials: GoogleCredentials,
@@ -199,6 +217,10 @@ export type GoogleConnector = {
     input: UpdateRemoteMailThreadInput,
   ) => Promise<GoogleCredentials>;
   syncMail?: (credentials: GoogleCredentials) => Promise<MailSyncResult>;
+  trashMailThread?: (
+    credentials: GoogleCredentials,
+    remoteThreadId: string,
+  ) => Promise<GoogleCredentials>;
   syncCalendar: (
     credentials: GoogleCredentials,
     remoteCalendarId: string,

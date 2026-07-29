@@ -260,6 +260,62 @@
       "when": 1786888800000,
       "tag": "0036_home_location_and_planning_timezone",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786892400000,
+      "tag": "0037_guided_account_setup",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786896000000,
+      "tag": "0038_agent_setup_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786899600000,
+      "tag": "0039_mail_exact_match_policy_normalization",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786903200000,
+      "tag": "0040_mail_draft_send_claim",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786906800000,
+      "tag": "0041_domain_profile_approvals",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786910400000,
+      "tag": "0042_finance_provider_direction",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786914000000,
+      "tag": "0043_finance_setup_backfill_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786917600000,
+      "tag": "0044_durable_mail_rule_work",
+      "breakpoints": true
     }
   ]
 }

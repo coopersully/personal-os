@@ -24,6 +24,9 @@
 | `MCP_PUBLIC_URL` | Canonical public MCP origin, for example `https://mcp.example.com` |
 | `MCP_RESOURCE_URL` | Canonical MCP resource URI, normally `https://mcp.example.com/mcp` |
 | `MCP_INTERNAL_SECRET` | Random 32+ character secret shared only by the API and MCP containers |
+| `AGENT_SKILL_SOURCE_URL` | Public install source for the Ilo guided-setup skill. It must contain the configured immutable revision. |
+| `AGENT_SKILL_VERSION` | Semantic version advertised for the exact guided-setup artifact |
+| `AGENT_SKILL_REVISION` | Immutable source identifier embedded in `AGENT_SKILL_SOURCE_URL`, such as a Git commit or release digest |
 | `REGISTRATION_MODE` | Must be `invite` in production; the API refuses to boot in open mode |
 | `OWNER_EMAILS` | Comma-separated email addresses allowed to issue invitations |
 | `X_CLIENT_ID` | X OAuth 2.0 client ID |
@@ -42,6 +45,33 @@ default, and cannot be reused.
 
 The application has an in-process authentication rate-limit backstop. Configure an equivalent shared rate limit at the public edge before running more than one API replica. Never expose PostgreSQL or container-only ports; place the API behind the same authenticated HTTPS edge used by the web app.
 
+## External dependency readiness
+
+Runtime configuration is necessary but not sufficient evidence that an external capability works.
+Boot validation can prove that a value exists and has the expected shape; it cannot prove that the
+credential is current, has the required scope or role, names the intended resource, has a
+registered callback, or is reachable from the deployed task.
+
+Before enabling a new or changed external capability in production, use the boundary record in
+[`engineering/external-boundary-reliability.md`](engineering/external-boundary-reliability.md) and
+verify:
+
+1. the intended environment receives the correct secret and non-secret configuration without
+   exposing either value;
+2. provider consent, scopes, roles, callback/webhook registration, and resource policies authorize
+   the exact operation;
+3. DNS, TLS, proxy, protocol, ingress, egress, and port rules permit the path from the deployed
+   runtime;
+4. caller deadlines, downstream timeouts, retries, pagination, payloads, concurrency, and rate
+   limits have a bounded end-to-end budget;
+5. partial success, process loss, duplicate delivery, stale work, rollback, and manual repair leave
+   durable, observable state; and
+6. a least-privileged, non-destructive production smoke proves the capability after deployment,
+   with a request or operation identifier that can be correlated in redacted logs.
+
+Record “configured,” “authorized,” “reachable,” and “verified” separately in deployment evidence.
+Never claim all integrations are healthy from secret inventory or process health alone.
+
 ## Images
 
 The root Dockerfile has `api`, `mcp`, and `web` targets. The API image runs migrations before accepting traffic, runs as an unprivileged user, and exposes liveness/readiness endpoints. The web target uses unprivileged Nginx with immutable asset caching and SPA fallback.
@@ -49,7 +79,62 @@ The MCP image binds to all container interfaces, requires an ilo bearer token fo
 
 ## MCP OAuth
 
-The public MCP endpoint publishes protected-resource metadata and directs clients to ilo's OAuth authorization server. A person signs in to ilo once and consents to the MCP client; Google, iCloud, and other connected services remain internal to that ilo account. OAuth clients use dynamic registration, exact redirect-URI matching, S256 PKCE, five-minute one-time authorization codes, one-hour MCP audience-bound access tokens, and rotating refresh tokens. Do not reuse `MCP_INTERNAL_SECRET` outside the API and MCP containers, and use distinct values per environment.
+The public MCP endpoint publishes protected-resource metadata and directs clients to ilo's OAuth authorization server. A person signs in to ilo once and consents to the MCP client; Google, iCloud, and other connected services remain internal to that ilo account. The consent screen names the registered client and translates every requested scope into a user-facing permission. OAuth clients use dynamic registration, exact redirect-URI matching, S256 PKCE, five-minute one-time authorization codes, one-hour MCP audience-bound access tokens, and rotating refresh tokens. Do not reuse `MCP_INTERNAL_SECRET` outside the API and MCP containers, and use distinct values per environment.
+
+The authenticated connection-guide API derives its MCP URL from
+`MCP_RESOURCE_URL` and its skill install link from
+`AGENT_SKILL_SOURCE_URL`. It publishes `AGENT_SKILL_VERSION` and
+`AGENT_SKILL_REVISION` beside that link and refuses a source URL that does not
+contain its revision. The defaults identify the official `ilo-setup` v0.1.0
+directory at one Git commit rather than the mutable `main` branch. A
+self-hosted deployment must publish its own public, immutable artifact URL and
+matching version/revision as one release unit. Keep the MCP and skill addresses
+aligned with the deployed environment so Settings never teaches a host to use a
+staging, local, or changing endpoint.
+
+The checked release identity lives in
+`packages/domain/src/ilo-setup-release.json`. Runtime defaults read that
+manifest, and `pnpm lint` fails if `.env.example` or Compose advertises a
+different tuple. Change the manifest and both deployment projections together
+for every release.
+
+### Upgrade from the mutable official URL
+
+Older local installs may retain the former authoritative value
+`https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup` in
+`.env`. Setup and Start recognize only that exact legacy official line when
+skill version and revision are absent or already match the official release.
+They atomically replace it with the manifest release tuple before synchronizing
+worktrees. The migration is idempotent. The API applies the same narrow
+compatibility normalization so a container or production process that does not
+use the Codex lifecycle can boot during rollout.
+
+Custom URLs, including custom URLs ending in `/main` or `/latest`, are never
+rewritten as an Ilo release. Deployments with a custom source must set all three
+values to a matching immutable tuple; invalid or incomplete custom
+configuration continues to fail startup. A legacy official URL paired with
+explicit, conflicting version metadata is also preserved for validation rather
+than silently overwritten.
+
+### Guided-setup skill distribution boundary
+
+Ilo publishes the configured artifact identity but does not fetch or install it.
+The agent host performs one public HTTPS read after the person copies the
+request. No Ilo credential crosses that boundary, and copying the request is not
+an installation commit point. A denied, unreachable, rate-limited, or malformed
+source must fail in the host before `$ilo-setup` is available; it cannot grant
+more Ilo scope or activate a profile or rule. The host owns its download
+timeout, cache, and installation error, while the deployment owner repairs the
+published artifact or rolls the guide back to a prior immutable release.
+
+Configuration validation proves that the guide names a source, semantic
+version, and revision and that the URL embeds the revision. For the official
+release, the Git commit URL supplies immutable source identity. A custom server
+can still return different bytes at a version-looking URL, so local tests and
+API readiness do not prove custom-host immutability, public reachability, or
+compatible-host installation. Release evidence must separately record an HTTPS
+fetch from outside the runtime and one least-privileged install/invocation in a
+supported host.
 
 Build with the public API address compiled into the PWA:
 
@@ -74,11 +159,44 @@ rollout rather than a long deploy-time backfill.
 
 Forward `X-Request-Id` from the edge when present. Do not log authorization headers, cookies, OAuth codes, encrypted credentials, or raw provider payloads.
 
-## Google configuration
+## Connector configuration
+
+Production's public load balancer has a 60-second idle timeout. Individual provider network calls
+are bounded to 15 seconds, and connection routes return before source discovery, pagination,
+projection, or initial synchronization. Do not increase the load-balancer timeout to accommodate a
+provider bootstrap; preserve the asynchronous boundary described in
+[`engineering/connector-reliability.md`](engineering/connector-reliability.md).
+
+The application security group must allow the transports used by enabled connectors:
+
+| Provider transport | Destination port |
+| --- | ---: |
+| HTTPS APIs, OAuth, CalDAV, and Resend | TCP 443 |
+| iCloud Mail IMAP over TLS | TCP 993 |
+| iCloud Mail SMTP submission | TCP 587 |
+
+`pnpm lint` checks this timeout and network contract against the Terraform and connector defaults.
+
+### Google
 
 Register the exact public `GOOGLE_REDIRECT_URI` in Google Cloud. Request Calendar read/write and user email scopes. OAuth state is random, user-bound, one-time-use, and expires after ten minutes. Use separate OAuth clients and encryption keys for development and production.
 
-## X Bookmarks configuration
+The OAuth callback persists the authorized account and returns to the browser before initial
+Calendar discovery and provider synchronization complete. Initial sync continues asynchronously;
+provider failures remain visible on the connector account and can be retried manually. Keep the
+callback itself below the public edge timeout instead of extending the timeout to cover provider
+bootstrap work.
+
+### Apple iCloud
+
+iCloud uses the person's Apple Account email and an app-specific password. Calendar traffic uses
+CalDAV over HTTPS; Mail reads use IMAP over TLS on port 993 and sends use SMTP submission on port
+587. The connect response confirms that the encrypted account was saved, then Calendar discovery
+and Mail sync run asynchronously. Invalid credentials or unavailable Apple services leave the
+account visible with an error so the person can retry or reconnect without holding the original
+request open.
+
+### X Bookmarks
 
 Create an X OAuth 2.0 app, register the exact public `X_REDIRECT_URI`, and set its client ID (plus client secret for a confidential client). The connector requests only `bookmark.read`, `tweet.read`, `users.read`, and `offline.access`. After connecting in **Settings → Connections**, select one bookmark folder. ilo stores the OAuth refresh token encrypted, projects only that folder's posts, and exposes the projection to agents through the `bookmarks:read` scope and the `list_x_bookmarks` MCP tool. It never writes to X.
 

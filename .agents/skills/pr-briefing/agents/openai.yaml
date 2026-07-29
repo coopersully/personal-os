@@ -1,0 +1,4 @@
+interface:
+  display_name: "PR Briefing"
+  short_description: "Summarize the actionable ilo pull request queue."
+  default_prompt: "Use $pr-briefing to summarize which ilo pull requests need attention."

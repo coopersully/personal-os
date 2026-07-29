@@ -1956,7 +1956,16 @@ function FinanceAgentGuidancePanel({
   profileStatus: "active" | "draft" | null;
   setup: FinanceGuidedSetupContext | undefined;
 }) {
+  const approvedProfile = setup?.guidance.approvedProfile ?? null;
   const draftProposal = setup?.guidance.draftProposal ?? null;
+  const guidanceStatus =
+    approvedProfile && draftProposal
+      ? "Active + draft"
+      : approvedProfile
+        ? "Active"
+        : draftProposal || profileStatus === "draft"
+          ? "Draft"
+          : "Not configured";
   const availableWorkflows =
     setup?.suggestedWorkflows.filter((workflow) => workflow.available).length ?? 0;
   const humanOnlyActionLabels =
@@ -1972,12 +1981,8 @@ function FinanceAgentGuidancePanel({
           constraints for Claude, Codex, and other scoped hosts.
         </ShadcnCardDescription>
         <ShadcnCardAction>
-          <ShadcnBadge variant={profileStatus === "active" ? "default" : "secondary"}>
-            {profileStatus === "active"
-              ? "Active"
-              : profileStatus === "draft"
-                ? "Draft"
-                : "Not configured"}
+          <ShadcnBadge variant={approvedProfile ? "default" : "secondary"}>
+            {guidanceStatus}
           </ShadcnBadge>
         </ShadcnCardAction>
       </ShadcnCardHeader>
@@ -2021,7 +2026,22 @@ function FinanceAgentGuidancePanel({
                 </ShadcnButton>
               </ShadcnItemActions>
             </ShadcnItem>
-            {profileStatus === "draft" ? (
+            {approvedProfile ? (
+              <ShadcnItem size="sm" variant="muted">
+                <ShadcnItemContent>
+                  <ShadcnItemTitle>Active approved guidance</ShadcnItemTitle>
+                  <ShadcnItemDescription>
+                    This signed-in-user-approved snapshot remains operative
+                    {draftProposal ? " while the pending draft is reviewed." : "."}
+                  </ShadcnItemDescription>
+                  <FinanceGuidanceDetails
+                    legend="Active approved Finance guidance contents"
+                    profile={approvedProfile}
+                  />
+                </ShadcnItemContent>
+              </ShadcnItem>
+            ) : null}
+            {draftProposal || profileStatus === "draft" ? (
               <ShadcnItem size="sm" variant="muted">
                 <ShadcnItemContent>
                   <ShadcnItemTitle>Draft activation</ShadcnItemTitle>
@@ -2031,64 +2051,10 @@ function FinanceAgentGuidancePanel({
                       : "Add at least one owned account source to the draft before activation."}
                   </ShadcnItemDescription>
                   {draftProposal ? (
-                    <fieldset className="mt-3 grid gap-3 text-sm">
-                      <legend className="sr-only">Finance guidance draft contents</legend>
-                      <div>
-                        <p className="font-medium">Objective</p>
-                        <p className="text-muted-foreground">{draftProposal.objective}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium">Summary</p>
-                        <p className="text-muted-foreground">{draftProposal.summary}</p>
-                      </div>
-                      <div>
-                        <p className="font-medium">Safety and operating instructions</p>
-                        {draftProposal.instructions.length > 0 ? (
-                          <ul className="list-disc pl-5 text-muted-foreground">
-                            {draftProposal.instructions.map((instruction) => (
-                              <li key={instruction}>{instruction}</li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="text-muted-foreground">None recorded.</p>
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium">Account meanings</p>
-                        {draftProposal.sourceContexts.length > 0 ? (
-                          <ul className="list-disc pl-5 text-muted-foreground">
-                            {draftProposal.sourceContexts.map((source) => (
-                              <li key={source.sourceId}>
-                                {source.sourceLabel} — {source.purpose}
-                                {source.notes ? ` — ${source.notes}` : ""}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : (
-                          <p className="text-muted-foreground">None recorded.</p>
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium">Categories</p>
-                        <p className="text-muted-foreground">
-                          {draftProposal.categories.length > 0
-                            ? draftProposal.categories
-                                .map((category) => `${category.label}: ${category.description}`)
-                                .join("; ")
-                            : "None recorded."}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-medium">Preferences</p>
-                        <p className="text-muted-foreground">
-                          {Object.keys(draftProposal.preferences).length > 0
-                            ? Object.entries(draftProposal.preferences)
-                                .map(([key, value]) => `${key}: ${String(value)}`)
-                                .join("; ")
-                            : "None recorded."}
-                        </p>
-                      </div>
-                    </fieldset>
+                    <FinanceGuidanceDetails
+                      legend="Finance guidance draft contents"
+                      profile={draftProposal}
+                    />
                   ) : null}
                 </ShadcnItemContent>
                 <ShadcnItemActions>
@@ -2106,6 +2072,75 @@ function FinanceAgentGuidancePanel({
         ) : null}
       </ShadcnCardContent>
     </ShadcnCard>
+  );
+}
+
+function FinanceGuidanceDetails({
+  legend,
+  profile,
+}: {
+  legend: string;
+  profile: NonNullable<FinanceGuidedSetupContext["guidance"]["approvedProfile"]>;
+}) {
+  return (
+    <fieldset className="mt-3 grid gap-3 text-sm">
+      <legend className="sr-only">{legend}</legend>
+      <div>
+        <p className="font-medium">Objective</p>
+        <p className="text-muted-foreground">{profile.objective}</p>
+      </div>
+      <div>
+        <p className="font-medium">Summary</p>
+        <p className="text-muted-foreground">{profile.summary}</p>
+      </div>
+      <div>
+        <p className="font-medium">Safety and operating instructions</p>
+        {profile.instructions.length > 0 ? (
+          <ul className="list-disc pl-5 text-muted-foreground">
+            {profile.instructions.map((instruction) => (
+              <li key={instruction}>{instruction}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground">None recorded.</p>
+        )}
+      </div>
+      <div>
+        <p className="font-medium">Account meanings</p>
+        {profile.sourceContexts.length > 0 ? (
+          <ul className="list-disc pl-5 text-muted-foreground">
+            {profile.sourceContexts.map((source) => (
+              <li key={source.sourceId}>
+                {source.sourceLabel} — {source.purpose}
+                {source.notes ? ` — ${source.notes}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground">None recorded.</p>
+        )}
+      </div>
+      <div>
+        <p className="font-medium">Categories</p>
+        <p className="text-muted-foreground">
+          {profile.categories.length > 0
+            ? profile.categories
+                .map((category) => `${category.label}: ${category.description}`)
+                .join("; ")
+            : "None recorded."}
+        </p>
+      </div>
+      <div>
+        <p className="font-medium">Preferences</p>
+        <p className="text-muted-foreground">
+          {Object.keys(profile.preferences).length > 0
+            ? Object.entries(profile.preferences)
+                .map(([key, value]) => `${key}: ${String(value)}`)
+                .join("; ")
+            : "None recorded."}
+        </p>
+      </div>
+    </fieldset>
   );
 }
 

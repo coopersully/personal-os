@@ -1,8 +1,11 @@
+import { cp, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import {
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfileApprovals,
   domainProfiles,
   financeAccounts,
   financeAlerts,
@@ -20,6 +23,23 @@ import type { Principal } from "./types.js";
 
 const now = new Date("2026-07-19T12:00:00.000Z");
 const key = Buffer.alloc(32, 3).toString("base64");
+
+async function migrationsWithout(
+  migrationsFolder: string,
+  prefix: string,
+  excludedTags: string[],
+): Promise<string> {
+  const folder = await mkdtemp(`${tmpdir()}/${prefix}`);
+  await cp(migrationsFolder, folder, { recursive: true });
+  for (const tag of excludedTags) await unlink(`${folder}/${tag}.sql`);
+  const journalPath = `${folder}/meta/_journal.json`;
+  const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+    entries: Array<{ tag: string }>;
+  };
+  journal.entries = journal.entries.filter((entry) => !excludedTags.includes(entry.tag));
+  await writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  return folder;
+}
 
 function financePrincipal(userId: string): Principal {
   return {
@@ -161,6 +181,19 @@ function plaidFetch(): typeof globalThis.fetch {
                       },
                       transaction_id: "txn-transfer-out",
                     },
+                    {
+                      account_id: "plaid-account-1",
+                      amount: 60,
+                      date: "2026-07-20",
+                      merchant_name: "Credit card payment",
+                      name: "CREDIT CARD PAYMENT",
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_OUT",
+                      },
+                      transaction_id: "txn-late-transfer",
+                    },
                   ],
                   has_more: false,
                   modified: [
@@ -184,12 +217,26 @@ function plaidFetch(): typeof globalThis.fetch {
                   removed: [],
                 }
               : {
-                  added: [],
+                  added: [
+                    {
+                      account_id: "plaid-account-2",
+                      amount: -60,
+                      date: "2026-07-21",
+                      merchant_name: "Payment thank you",
+                      name: "PAYMENT THANK YOU",
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
+                        primary: "GENERAL_MERCHANDISE",
+                      },
+                      transaction_id: "txn-late-counterpart",
+                    },
+                  ],
                   has_more: false,
                   modified: [
                     {
                       account_id: "plaid-account-1",
-                      amount: 30,
+                      amount: -30,
                       date: "2026-07-21",
                       merchant_name: "Trader Joe's",
                       name: "TRADER JOE'S",
@@ -256,7 +303,84 @@ describe.sequential("finance service", () => {
       .withPassword("personal_os")
       .start();
     database = createDatabaseClient(container.getConnectionUri());
-    await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
+    const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
+    const legacyMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-legacy-", [
+      "0041_domain_profile_approvals",
+      "0042_finance_provider_direction",
+      "0043_finance_default_category_backfill",
+    ]);
+    await migrateDatabase(database.db, legacyMigrations);
+    const [upgradeUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance Upgrade",
+        email: "finance-upgrade@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!upgradeUser) throw new Error("Finance upgrade fixture user was not created.");
+    const [upgradeAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Legacy Bank",
+        name: "Legacy checking",
+        provider: "manual",
+        status: "manual",
+        userId: upgradeUser.id,
+      })
+      .returning();
+    if (!upgradeAccount) throw new Error("Finance upgrade fixture account was not created.");
+    await database.db.insert(domainProfiles).values({
+      categories: [],
+      domain: "finances",
+      instructions: ["Legacy active guidance without approval provenance."],
+      objective: "Legacy objective",
+      preferences: {},
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Legacy spending",
+          sourceId: upgradeAccount.id,
+          sourceLabel: upgradeAccount.name,
+        },
+      ],
+      status: "active",
+      summary: "Legacy active Finance profile",
+      userId: upgradeUser.id,
+    });
+    const approvalMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-approval-", [
+      "0043_finance_default_category_backfill",
+    ]);
+    await migrateDatabase(database.db, approvalMigrations);
+    const [migratedProfile] = await database.db
+      .select()
+      .from(domainProfiles)
+      .where(eq(domainProfiles.userId, upgradeUser.id));
+    expect(migratedProfile).toMatchObject({ status: "draft", version: 2 });
+    await expect(
+      database.db
+        .select()
+        .from(domainProfileApprovals)
+        .where(eq(domainProfileApprovals.userId, upgradeUser.id)),
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, upgradeUser.id)),
+    ).resolves.toHaveLength(0);
+    await migrateDatabase(database.db, migrationsFolder);
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, upgradeUser.id)),
+    ).resolves.toHaveLength(20);
+    await Promise.all([
+      rm(legacyMigrations, { force: true, recursive: true }),
+      rm(approvalMigrations, { force: true, recursive: true }),
+    ]);
     const [user] = await database.db
       .insert(users)
       .values({
@@ -1262,7 +1386,7 @@ describe.sequential("finance service", () => {
       userId,
     });
     await expect(service.deleteAccount(account.id, context)).rejects.toThrow(
-      "Remove this account from the Finance agent profile",
+      "Remove this account from active approved Finance guidance",
     );
     await database.db
       .delete(domainProfiles)
@@ -1553,6 +1677,10 @@ describe.sequential("finance service", () => {
       },
       context,
     );
+    await database.db
+      .update(financeTransactions)
+      .set({ categoryDecidedAt: null, categorySource: "provider" })
+      .where(inArray(financeTransactions.id, [vault.id, payment.id, cardPayment.id]));
 
     await expect(service.reconcileTransfers(userId)).resolves.toEqual({ paired: 1, transfers: 3 });
     const transactions = await service.listTransactions(userId, { limit: 200, review: "all" });
@@ -1909,7 +2037,13 @@ describe.sequential("finance service", () => {
     expect(accounts).toHaveLength(2);
     await expect(service.listCategories(plaidOnlyUser.id)).resolves.not.toHaveLength(0);
     const plaidAccount = accounts[0];
+    const debtAccount = accounts[1];
     if (!plaidAccount) throw new Error("Plaid checking account was not saved.");
+    if (!debtAccount) throw new Error("Plaid debt account was not saved.");
+    await database.db
+      .update(financeAccounts)
+      .set({ kind: "debt" })
+      .where(eq(financeAccounts.id, debtAccount.id));
     await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
       changed: 4,
     });
@@ -1938,7 +2072,7 @@ describe.sequential("finance service", () => {
       providerCategoryConfidence: "VERY_HIGH",
     });
     await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
-      changed: 3,
+      changed: 4,
     });
     const postedTransaction = (
       await service.listTransactions(plaidOnlyUser.id, {
@@ -1960,7 +2094,7 @@ describe.sequential("finance service", () => {
     const transferReviews = (await service.listReviewQueue(plaidOnlyUser.id)).filter(
       (review) => review.reason === "possible_transfer",
     );
-    expect(transferReviews).toHaveLength(2);
+    expect(transferReviews).toHaveLength(3);
     for (const review of transferReviews) {
       await service.resolveReview(
         review.id,
@@ -1975,7 +2109,7 @@ describe.sequential("finance service", () => {
       );
     }
     await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
-      changed: 3,
+      changed: 4,
     });
     const protectedRows = await database.db
       .select()
@@ -1985,6 +2119,8 @@ describe.sequential("finance service", () => {
           eq(financeTransactions.userId, plaidOnlyUser.id),
           inArray(financeTransactions.providerTransactionId, [
             "txn-1",
+            "txn-late-counterpart",
+            "txn-late-transfer",
             "txn-transfer-in",
             "txn-transfer-out",
           ]),
@@ -1994,8 +2130,10 @@ describe.sequential("finance service", () => {
       amount: 3000,
       category: "Shopping",
       categorySource: "user",
-      needsReview: false,
+      direction: "income",
+      needsReview: true,
       pending: false,
+      providerDirection: "income",
       transactionDate: "2026-07-21",
     });
     expect(
@@ -2020,6 +2158,31 @@ describe.sequential("finance service", () => {
       reconciliationStatus: "not_applicable",
       transferGroupId: null,
     });
+    expect(
+      protectedRows.find((row) => row.providerTransactionId === "txn-late-transfer"),
+    ).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      direction: "expense",
+      needsReview: false,
+      reconciliationStatus: "not_applicable",
+      transferGroupId: null,
+    });
+    expect(
+      protectedRows.find((row) => row.providerTransactionId === "txn-late-counterpart"),
+    ).toMatchObject({
+      direction: "income",
+      reconciliationStatus: "not_applicable",
+      transferGroupId: null,
+    });
+    expect(await service.listReviewQueue(plaidOnlyUser.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "refund_or_reversal",
+          transaction: expect.objectContaining({ id: postedTransaction.id }),
+        }),
+      ]),
+    );
     expect(
       (await service.listReviewQueue(plaidOnlyUser.id)).some(
         (review) =>

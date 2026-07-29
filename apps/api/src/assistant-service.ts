@@ -34,10 +34,12 @@ export type ProfileSourceTransaction = Pick<Database, "select">;
 export function createAssistantService({
   db,
   now,
+  profileRequiresApproval,
   validateProfileSources,
 }: {
   db: Database;
   now: () => Date;
+  profileRequiresApproval: (domain: AssistantDomain) => boolean;
   validateProfileSources: (
     transaction: ProfileSourceTransaction,
     domain: AssistantDomain,
@@ -158,7 +160,11 @@ export function createAssistantService({
           if (!profile) {
             throw new AppError("conflict", "The domain profile changed while it was being saved.");
           }
-          if (profile.status === "active" && context.principal.actorType === "user") {
+          const recordsApproval =
+            profile.status === "active" &&
+            context.principal.actorType === "user" &&
+            profileRequiresApproval(profile.domain);
+          if (recordsApproval) {
             await transaction
               .insert(domainProfileApprovals)
               .values({
@@ -193,7 +199,7 @@ export function createAssistantService({
               ...context,
             }),
           );
-          if (profile.status === "active" && context.principal.actorType === "user") {
+          if (recordsApproval) {
             await transaction.insert(auditEvents).values(
               auditValues({
                 action: "assistant.profile.approved",

@@ -2622,6 +2622,60 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
+  it("shows approved Finance guidance separately from a pending draft", async () => {
+    configureFinanceWorkspace();
+    const approved = {
+      categories: [],
+      createdAt: now,
+      domain: "finances" as const,
+      id,
+      instructions: ["Keep approved transfer safeguards active."],
+      objective: "Operate from approved financial context.",
+      preferences: { reviewCadence: "monthly" },
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Approved household spending",
+          sourceId: id,
+          sourceLabel: "Approved checking",
+        },
+      ],
+      status: "active" as const,
+      summary: "This remains the operative guidance.",
+      updatedAt: now,
+      version: 2,
+    };
+    const draft = {
+      ...approved,
+      instructions: ["Proposed weekly review."],
+      objective: "Propose revised financial context.",
+      preferences: { reviewCadence: "weekly" },
+      status: "draft" as const,
+      summary: "This proposal is not operative yet.",
+      version: 3,
+    };
+    mocks.getDomainProfile.mockResolvedValue(draft);
+    mocks.getFinanceGuidedSetup.mockResolvedValue({
+      ...(await mocks.getFinanceGuidedSetup()),
+      guidance: {
+        approvedProfile: approved,
+        draftNotice:
+          "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+        draftProposal: draft,
+      },
+    });
+
+    const view = setup("/finances/profile");
+    expect(await screen.findByText("Active + draft")).toBeVisible();
+    expect(screen.getByText("Active approved guidance")).toBeVisible();
+    expect(screen.getByText(approved.objective)).toBeVisible();
+    expect(screen.getByText(approved.summary)).toBeVisible();
+    expect(screen.getByText("Draft activation")).toBeVisible();
+    expect(screen.getByText(draft.objective)).toBeVisible();
+    expect(screen.getByText(draft.summary)).toBeVisible();
+    view.unmount();
+  });
+
   it("keeps finance empty and error states explicit", async () => {
     mocks.getFinanceOverview.mockResolvedValueOnce({
       accounts: [],

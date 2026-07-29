@@ -11,7 +11,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
 import { createFinanceService } from "./finance-service.js";
 
@@ -48,6 +48,7 @@ describe.sequential("assistant setup service", () => {
     service = createAssistantService({
       db: database.db,
       now: () => new Date("2026-07-28T15:00:00.000Z"),
+      profileRequiresApproval: (domain) => domain === "finances",
       validateProfileSources: async (
         transaction,
         domain,
@@ -190,6 +191,15 @@ describe.sequential("assistant setup service", () => {
       },
     );
     expect(humanApproved).toMatchObject({ status: "active", version: 3 });
+    await database.db.insert(domainProfileApprovals).values({
+      approvedAt: new Date("2026-07-28T15:00:00.000Z"),
+      approvedByUserId: userId,
+      domain: "mail",
+      profile: humanApproved,
+      profileId: humanApproved.id,
+      profileVersion: humanApproved.version,
+      userId,
+    });
     await expect(
       service.upsertProfile(
         {
@@ -421,6 +431,72 @@ describe.sequential("assistant setup service", () => {
         financeUserContext,
       ),
     ).rejects.toMatchObject({ code: "conflict" });
+    const [draftOnlyAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Draft Bank",
+        name: "Draft-only account",
+        provider: "manual",
+        status: "manual",
+        userId: financeUser.id,
+      })
+      .returning();
+    if (!draftOnlyAccount) throw new Error("Draft-only Finance account was not created.");
+    await expect(
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: 2,
+          sourceContexts: [{ ...sourceContext, sourceId: draftOnlyAccount.id }],
+        },
+        financeContext,
+      ),
+    ).resolves.toMatchObject({ status: "draft", version: 3 });
+    await expect(finances.deleteAccount(account.id, financeUserContext)).rejects.toThrow(
+      "active approved Finance guidance",
+    );
+    await expect(finances.deleteAccount(draftOnlyAccount.id, financeUserContext)).resolves.toBe(
+      undefined,
+    );
+    const [profileAfterDraftAccountDelete] = await database.db
+      .select()
+      .from(domainProfiles)
+      .where(and(eq(domainProfiles.userId, financeUser.id), eq(domainProfiles.domain, "finances")));
+    expect(profileAfterDraftAccountDelete).toMatchObject({
+      sourceContexts: [],
+      status: "draft",
+      version: 4,
+    });
+    const [financeApproval] = await database.db
+      .select()
+      .from(domainProfileApprovals)
+      .where(
+        and(
+          eq(domainProfileApprovals.userId, financeUser.id),
+          eq(domainProfileApprovals.domain, "finances"),
+        ),
+      );
+    expect(financeApproval).toMatchObject({
+      approvedByUserId: financeUser.id,
+      profile: expect.objectContaining({
+        sourceContexts: [expect.objectContaining({ sourceId: account.id })],
+        status: "active",
+        version: 2,
+      }),
+      profileVersion: 2,
+    });
+    if (!financeApproval) throw new Error("Finance approval snapshot was not saved.");
+    await expect(
+      database.db
+        .update(domainProfileApprovals)
+        .set({
+          profile: {
+            ...financeApproval.profile,
+            id: crypto.randomUUID(),
+          },
+        })
+        .where(eq(domainProfileApprovals.id, financeApproval.id)),
+    ).rejects.toThrow();
     const [raceAccount] = await database.db
       .insert(financeAccounts)
       .values({
@@ -436,7 +512,7 @@ describe.sequential("assistant setup service", () => {
       service.upsertProfile(
         {
           ...input,
-          expectedVersion: 2,
+          expectedVersion: profileAfterDraftAccountDelete?.version,
           sourceContexts: [{ ...sourceContext, sourceId: raceAccount.id }],
         },
         financeContext,
@@ -451,7 +527,9 @@ describe.sequential("assistant setup service", () => {
         requestId: "concurrent-account-delete",
       }),
     ]);
-    expect(raceResults.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(raceResults.filter((result) => result.status === "rejected").length).toBeLessThanOrEqual(
+      1,
+    );
     const [savedRaceProfile] = await database.db
       .select({ sourceContexts: domainProfiles.sourceContexts })
       .from(domainProfiles)

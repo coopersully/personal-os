@@ -202,6 +202,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const assistant = createAssistantService({
     db: dependencies.db,
     now,
+    profileRequiresApproval: (domain) => domain === "finances",
     validateProfileSources: async (transaction, domain, userId, sourceIds, status, actorType) => {
       if (domain === "mail") {
         await mail.validateProfileSources(transaction, userId, sourceIds);

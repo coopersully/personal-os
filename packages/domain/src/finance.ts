@@ -316,7 +316,9 @@ export const financeGuidedSetupWorkflowKeySchema = z.enum([
   "monthly_review",
 ]);
 export type FinanceGuidedSetupWorkflowKey = z.infer<typeof financeGuidedSetupWorkflowKeySchema>;
-const financeDomainProfileSchema = domainProfileSchema.extend({ domain: z.literal("finances") });
+export const financeDomainProfileSchema = domainProfileSchema.extend({
+  domain: z.literal("finances"),
+});
 
 export const financeGuidedSetupContextSchema = z.object({
   accountSources: z.array(financeAccountSchema),

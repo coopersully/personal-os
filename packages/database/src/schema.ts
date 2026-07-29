@@ -31,6 +31,7 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -316,6 +317,7 @@ export const domainProfiles = pgTable(
   },
   (table) => [
     uniqueIndex("domain_profiles_user_domain_idx").on(table.userId, table.domain),
+    uniqueIndex("domain_profiles_id_user_domain_idx").on(table.id, table.userId, table.domain),
     index("domain_profiles_user_status_idx").on(table.userId, table.status),
   ],
 );
@@ -328,9 +330,7 @@ export const domainProfileApprovals = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
     domain: text("domain").$type<AssistantDomain>().notNull(),
-    profileId: uuid("profile_id")
-      .notNull()
-      .references(() => domainProfiles.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").notNull(),
     profileVersion: integer("profile_version").notNull(),
     profile: jsonb("profile").$type<DomainProfile>().notNull(),
     approvedByUserId: uuid("approved_by_user_id")
@@ -342,6 +342,18 @@ export const domainProfileApprovals = pgTable(
   (table) => [
     uniqueIndex("domain_profile_approvals_user_domain_idx").on(table.userId, table.domain),
     index("domain_profile_approvals_profile_idx").on(table.profileId),
+    foreignKey({
+      columns: [table.profileId, table.userId, table.domain],
+      foreignColumns: [domainProfiles.id, domainProfiles.userId, domainProfiles.domain],
+      name: "domain_profile_approvals_owned_profile_fk",
+    }).onDelete("cascade"),
+    check("domain_profile_approvals_owner_check", sql`${table.approvedByUserId} = ${table.userId}`),
+    check(
+      "domain_profile_approvals_snapshot_check",
+      sql`${table.profile}->>'id' = ${table.profileId}::text
+        AND ${table.profile}->>'domain' = ${table.domain}
+        AND (${table.profile}->>'version')::integer = ${table.profileVersion}`,
+    ),
   ],
 );
 

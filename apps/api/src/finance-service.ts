@@ -59,8 +59,8 @@ import type {
   UpdateFinanceRecurringObligationInput,
   UpdateFinanceTransactionInput,
 } from "@personal-os/domain";
-import { idSchema, localDateAt } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { financeDomainProfileSchema, idSchema, localDateAt } from "@personal-os/domain";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -706,12 +706,17 @@ export function createFinanceService({ db, now, plaid }: Options) {
     ]);
     const accountKinds = new Map(accounts.map((item) => [item.id, item.kind]));
     const rent = await categoryForName(userId, rentCategory);
+    const hasExplicitDecision = (item: typeof financeTransactions.$inferSelect) =>
+      item.categoryDecidedAt !== null &&
+      (item.categorySource === "user" || item.categorySource === "agent");
     const rentTransactions = transactions.filter((item) => isRentMerchant(item.merchant));
-    const vaultTransfers = transactions.filter(
-      (item) => !isRentMerchant(item.merchant) && isSoFiVaultTransfer(item.merchant),
-    );
+    const vaultTransfers = transactions
+      .filter((item) => !isRentMerchant(item.merchant) && isSoFiVaultTransfer(item.merchant))
+      .filter((item) => !hasExplicitDecision(item));
     const vaultIds = new Set(vaultTransfers.map((item) => item.id));
-    const unmatched = transactions.filter((item) => !item.pending && !vaultIds.has(item.id));
+    const unmatched = transactions.filter(
+      (item) => !item.pending && !vaultIds.has(item.id) && !hasExplicitDecision(item),
+    );
     const pairedIds = new Set<string>();
     for (const debit of unmatched) {
       if (debit.direction !== "expense" || pairedIds.has(debit.id)) continue;
@@ -1792,6 +1797,17 @@ export function createFinanceService({ db, now, plaid }: Options) {
           )
           .limit(1),
       ]);
+      let approvedProfile: FinanceGuidedSetupContext["guidance"]["approvedProfile"] = null;
+      if (approvedGuidance) {
+        const parsedApproval = financeDomainProfileSchema.safeParse(approvedGuidance.profile);
+        if (
+          parsedApproval.success &&
+          parsedApproval.data.id === approvedGuidance.profileId &&
+          parsedApproval.data.version === approvedGuidance.profileVersion
+        ) {
+          approvedProfile = parsedApproval.data;
+        }
+      }
       const reviewReasons: FinanceGuidedSetupContext["reviewSummary"]["reasons"] = {
         ambiguous_merchant: 0,
         low_confidence: 0,
@@ -1840,9 +1856,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           recurringObligations: recurring.length,
         },
         guidance: {
-          approvedProfile: approvedGuidance
-            ? { ...approvedGuidance.profile, domain: "finances" }
-            : null,
+          approvedProfile,
           draftNotice:
             guidanceProfile?.status === "draft"
               ? "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it."
@@ -2368,6 +2382,29 @@ export function createFinanceService({ db, now, plaid }: Options) {
           for (const { automatic, merchant, remote } of classified) {
             const localAccount = accountsByProviderId.get(remote.account_id);
             if (!localAccount) continue;
+            const providerDirection = remote.amount < 0 ? "income" : "expense";
+            const [existingTransaction] = await tx
+              .select()
+              .from(financeTransactions)
+              .where(
+                and(
+                  eq(financeTransactions.accountId, localAccount.id),
+                  eq(financeTransactions.providerTransactionId, remote.transaction_id),
+                ),
+              )
+              .for("update")
+              .limit(1);
+            const protectedTransaction =
+              existingTransaction?.pending === false &&
+              existingTransaction.categoryDecidedAt !== null &&
+              (existingTransaction.categorySource === "user" ||
+                existingTransaction.categorySource === "agent")
+                ? existingTransaction
+                : null;
+            const providerSignChanged =
+              protectedTransaction !== null &&
+              protectedTransaction.providerDirection !== null &&
+              protectedTransaction.providerDirection !== providerDirection;
             const providerCategory = remote.personal_finance_category;
             const inferred = isRentMerchant(merchant)
               ? categorization(merchant)
@@ -2404,7 +2441,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                 categoryId: categoryRecord?.id ?? null,
                 categoryConfidence: inferred.confidence,
                 categorySource: automatic ? "rule" : providerCategory?.primary ? "provider" : null,
-                direction: isTransfer ? "transfer" : remote.amount < 0 ? "income" : "expense",
+                direction: isTransfer ? "transfer" : providerDirection,
                 merchant,
                 merchantId: merchantRecord.id,
                 needsReview: isTransfer ? !isSoFiVaultTransfer(merchant) : inferred.needsReview,
@@ -2413,7 +2450,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
                 providerCategory: providerCategory?.primary ?? null,
                 providerCategoryDetailed: providerCategory?.detailed ?? null,
                 providerCategoryConfidence: providerCategory?.confidence_level ?? null,
-                providerDirection: remote.amount < 0 ? "income" : "expense",
+                providerDirection,
                 providerTransactionId: remote.transaction_id,
                 reconciliationStatus: isSoFiVaultTransfer(merchant)
                   ? "confirmed"
@@ -2426,89 +2463,100 @@ export function createFinanceService({ db, now, plaid }: Options) {
               .onConflictDoUpdate({
                 set: {
                   amount: Math.round(Math.abs(remote.amount) * 100),
-                  category: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.category}
-                    else excluded.category
-                  end`,
-                  categoryConfidence: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.categoryConfidence}
-                    else excluded.category_confidence_basis_points
-                  end`,
-                  categoryDecidedAt: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.categoryDecidedAt}
-                    else excluded.category_decided_at
-                  end`,
-                  categoryId: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.categoryId}
-                    else excluded.category_id
-                  end`,
-                  categoryRationale: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.categoryRationale}
-                    else excluded.category_rationale
-                  end`,
-                  categorySource: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.categorySource}
-                    else excluded.category_source
-                  end`,
-                  direction: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.direction}
-                    else excluded.direction
-                  end`,
+                  category: protectedTransaction
+                    ? protectedTransaction.category
+                    : isTransfer
+                      ? transferCategory
+                      : inferred.category,
+                  categoryConfidence: protectedTransaction
+                    ? protectedTransaction.categoryConfidence
+                    : inferred.confidence,
+                  categoryDecidedAt: protectedTransaction
+                    ? protectedTransaction.categoryDecidedAt
+                    : null,
+                  categoryId: protectedTransaction
+                    ? protectedTransaction.categoryId
+                    : (categoryRecord?.id ?? null),
+                  categoryRationale: protectedTransaction
+                    ? protectedTransaction.categoryRationale
+                    : null,
+                  categorySource: protectedTransaction
+                    ? protectedTransaction.categorySource
+                    : automatic
+                      ? "rule"
+                      : providerCategory?.primary
+                        ? "provider"
+                        : null,
+                  direction: protectedTransaction
+                    ? providerSignChanged && protectedTransaction.direction !== "transfer"
+                      ? providerDirection
+                      : protectedTransaction.direction
+                    : isTransfer
+                      ? "transfer"
+                      : providerDirection,
                   merchant,
                   merchantId: merchantRecord.id,
-                  needsReview: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.needsReview}
-                    else excluded.needs_review
-                  end`,
+                  needsReview: protectedTransaction
+                    ? providerSignChanged || protectedTransaction.needsReview
+                    : isTransfer
+                      ? !isSoFiVaultTransfer(merchant)
+                      : inferred.needsReview,
                   pending: remote.pending ?? false,
                   pendingTransactionId: remote.pending_transaction_id ?? null,
                   providerCategory: providerCategory?.primary ?? null,
                   providerCategoryDetailed: providerCategory?.detailed ?? null,
                   providerCategoryConfidence: providerCategory?.confidence_level ?? null,
-                  providerDirection: remote.amount < 0 ? "income" : "expense",
-                  reconciliationStatus: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.reconciliationStatus}
-                    else excluded.reconciliation_status
-                  end`,
+                  providerDirection,
+                  reconciliationStatus: protectedTransaction
+                    ? protectedTransaction.reconciliationStatus
+                    : isSoFiVaultTransfer(merchant)
+                      ? "confirmed"
+                      : isTransfer
+                        ? "candidate"
+                        : "not_applicable",
                   transactionDate: remote.date,
-                  transferGroupId: sql`case
-                    when ${financeTransactions.pending} = false
-                      and ${financeTransactions.categoryDecidedAt} is not null
-                      and ${financeTransactions.categorySource} in ('user', 'agent')
-                    then ${financeTransactions.transferGroupId}
-                    else excluded.transfer_group_id
-                  end`,
+                  transferGroupId: protectedTransaction
+                    ? protectedTransaction.transferGroupId
+                    : null,
                   updatedAt: now(),
                 },
                 target: [financeTransactions.accountId, financeTransactions.providerTransactionId],
               });
+            if (providerSignChanged && existingTransaction) {
+              const [existingReview] = await tx
+                .select()
+                .from(financeReviewCases)
+                .where(
+                  and(
+                    eq(financeReviewCases.transactionId, existingTransaction.id),
+                    inArray(financeReviewCases.status, ["deferred", "open"]),
+                  ),
+                )
+                .orderBy(desc(financeReviewCases.updatedAt))
+                .for("update")
+                .limit(1);
+              if (existingReview) {
+                await tx
+                  .update(financeReviewCases)
+                  .set({
+                    rationale:
+                      "The provider changed the transaction direction after categorization.",
+                    reason: "refund_or_reversal",
+                    suggestedCategoryId: existingTransaction.categoryId,
+                    updatedAt: now(),
+                  })
+                  .where(eq(financeReviewCases.id, existingReview.id));
+              } else {
+                await tx.insert(financeReviewCases).values({
+                  rationale: "The provider changed the transaction direction after categorization.",
+                  reason: "refund_or_reversal",
+                  status: "open",
+                  suggestedCategoryId: existingTransaction.categoryId,
+                  transactionId: existingTransaction.id,
+                  userId: context.principal.userId,
+                });
+              }
+            }
             changed += 1;
           }
           for (const removed of page.removed) {
@@ -3302,7 +3350,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           .limit(1);
         if (!before) throw new AppError("not_found", "The financial account was not found.");
         const [profile] = await tx
-          .select({ sourceContexts: domainProfiles.sourceContexts })
+          .select()
           .from(domainProfiles)
           .where(
             and(
@@ -3312,10 +3360,79 @@ export function createFinanceService({ db, now, plaid }: Options) {
           )
           .for("update")
           .limit(1);
-        if (profile?.sourceContexts.some((source) => source.sourceId === before.id)) {
+        const [approval] = await tx
+          .select()
+          .from(domainProfileApprovals)
+          .where(
+            and(
+              eq(domainProfileApprovals.userId, context.principal.userId),
+              eq(domainProfileApprovals.domain, "finances"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        let approvedProfile: FinanceGuidedSetupContext["guidance"]["approvedProfile"] = null;
+        if (approval) {
+          const parsedApproval = financeDomainProfileSchema.safeParse(approval.profile);
+          if (
+            parsedApproval.success &&
+            parsedApproval.data.id === approval.profileId &&
+            parsedApproval.data.version === approval.profileVersion
+          ) {
+            approvedProfile = parsedApproval.data;
+          }
+        }
+        if (approval && !approvedProfile) {
           throw new AppError(
             "conflict",
-            "Remove this account from the Finance agent profile before deleting it.",
+            "Finance guidance approval integrity must be restored before deleting this account.",
+          );
+        }
+        if (
+          approvedProfile?.sourceContexts.some((source) => source.sourceId === before.id) ||
+          (!approval &&
+            profile?.status === "active" &&
+            profile.sourceContexts.some((source) => source.sourceId === before.id))
+        ) {
+          throw new AppError(
+            "conflict",
+            "Remove this account from active approved Finance guidance before deleting it.",
+          );
+        }
+        if (
+          profile?.status === "draft" &&
+          profile.sourceContexts.some((source) => source.sourceId === before.id)
+        ) {
+          const nextSources = profile.sourceContexts.filter(
+            (source) => source.sourceId !== before.id,
+          );
+          await tx
+            .update(domainProfiles)
+            .set({
+              sourceContexts: nextSources,
+              updatedAt: now(),
+              version: profile.version + 1,
+            })
+            .where(eq(domainProfiles.id, profile.id));
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "assistant.profile.updated",
+              after: {
+                changedFields: ["sourceContexts"],
+                domain: "finances",
+                status: "draft",
+                version: profile.version + 1,
+              },
+              before: {
+                changedFields: ["sourceContexts"],
+                domain: "finances",
+                status: "draft",
+                version: profile.version,
+              },
+              entityId: profile.id,
+              entityType: "domain_profile",
+              ...context,
+            }),
           );
         }
         await tx.delete(financeAccounts).where(eq(financeAccounts.id, before.id));

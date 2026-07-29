@@ -52,7 +52,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: true,
       },
       description:
-        "Start Mail setup here. Returns each connected inbox with stable account ID, user-facing account identity, mailbox roles and counts, sync freshness/error state, automatic-rule support, and explicit deferred safety boundaries. It never returns provider credentials.",
+        "Start Mail setup here. Returns each connected inbox with stable account ID, user-facing account identity, mailbox roles and counts, sync freshness/error state, automatic-rule support, and durable delayed-work status. Pending, in-progress, reconciliation, and failed counts contain no message bodies or provider credentials.",
       inputSchema: {},
       title: "Get Mail setup context",
     },
@@ -244,7 +244,7 @@ export function registerMailTools(server: McpServer, api: PersonalOsApiClient) {
         readOnlyHint: true,
       },
       description:
-        "List the user's versioned mail rules, including exact conditions, actions, source accounts, delays, policy, and enabled state.",
+        "List the user's versioned Mail rules, including exact conditions, actions, source accounts, delays, policy, and enabled state. Call get_mail_setup_context for bounded durable-work backlog and reconciliation status.",
       inputSchema: {},
       title: "List mail rules",
     },

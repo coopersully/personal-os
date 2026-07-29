@@ -62,9 +62,12 @@ Access management
 - Mail profile preferences use a typed vocabulary for inbox style, important-email
   handling, and noise disposition. Noise remains review-only unless the person
   chooses delayed archive or recoverable Trash, including a one-day preference.
-  Archive and recoverable Trash rules remain preview-only until a durable due-work
-  queue is implemented. Permanent deletion, provider filter creation, spam
-  classification, and unsubscribe automation remain unavailable.
+  Reviewed Google archive and recoverable Trash rules use durable per-conversation
+  work, bounded scheduled execution, and exact provider reconciliation after an
+  uncertain effect. Agent access reports pending and reconciliation backlog; each
+  account also reports in-progress, failed, and last-completed state. Permanent
+  deletion, provider filter creation, spam classification, and unsubscribe
+  automation remain unavailable.
 - Finance adds a domain-owned readiness and reviewed-workflow surface in
   Finances → Profile. Richer shared handoff presentation remains outside this
   Settings-owned page. Finance consent names account, balance, and activity

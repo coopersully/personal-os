@@ -526,6 +526,35 @@ describe("Google Calendar connector", () => {
     expect(parsedEmptySubject.subject ?? "").toBe("");
   });
 
+  it("reads exact minimal Gmail state and uses recoverable Trash", async () => {
+    const fetch = queued(
+      response({
+        id: "thread/1",
+        messages: [
+          { id: "message-1", labelIds: ["INBOX", "UNREAD"] },
+          { id: "message-2", labelIds: ["STARRED"] },
+        ],
+      }),
+      response({ id: "thread/1", messages: [] }),
+    );
+    const google = connector(fetch);
+    if (!google.getMailThreadState || !google.trashMailThread)
+      throw new Error("Google Mail durable-work operations are missing.");
+    await expect(google.getMailThreadState(fresh, "thread/1")).resolves.toEqual({
+      credentials: fresh,
+      value: {
+        mailboxIds: ["INBOX", "UNREAD", "STARRED"],
+        remoteThreadId: "thread/1",
+        starred: true,
+        unread: true,
+      },
+    });
+    await expect(google.trashMailThread(fresh, "thread/1")).resolves.toEqual(fresh);
+    expect(String(fetch.mock.calls[0]?.[0])).toContain("thread%2F1?format=minimal");
+    expect(String(fetch.mock.calls[1]?.[0])).toContain("thread%2F1/trash");
+    expect(fetch.mock.calls[1]?.[1]).toMatchObject({ method: "POST" });
+  });
+
   it("distinguishes pre-request Mail send failures from ambiguous provider outcomes", async () => {
     const input = {
       body: "Hello",

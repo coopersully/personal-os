@@ -897,6 +897,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     },
     async dispatchDueAutomations() {
       await connectors.syncStaleAccounts();
+      await connectors.dispatchDueMailRuleWork();
       await automations.dispatchDue();
     },
     async syncDueFinances() {

@@ -137,6 +137,13 @@ describe("agent access settings", () => {
       accounts: [
         {
           accountId: id,
+          automation: {
+            failedCount: 0,
+            inProgressCount: 0,
+            lastCompletedAt: null,
+            pendingCount: 0,
+            reconciliationCount: 0,
+          },
           automaticRuleExecution: true,
           email: "person@example.com",
           label: "Personal",
@@ -148,6 +155,13 @@ describe("agent access settings", () => {
         },
         {
           accountId: "55555555-5555-4555-8555-555555555555",
+          automation: {
+            failedCount: 0,
+            inProgressCount: 0,
+            lastCompletedAt: null,
+            pendingCount: 0,
+            reconciliationCount: 0,
+          },
           automaticRuleExecution: false,
           email: null,
           label: "iCloud",
@@ -159,6 +173,13 @@ describe("agent access settings", () => {
         },
         {
           accountId: "66666666-6666-4666-8666-666666666666",
+          automation: {
+            failedCount: 0,
+            inProgressCount: 0,
+            lastCompletedAt: null,
+            pendingCount: 0,
+            reconciliationCount: 0,
+          },
           automaticRuleExecution: true,
           email: "work@example.com",
           label: "Work",
@@ -169,8 +190,17 @@ describe("agent access settings", () => {
           syncStatus: "idle",
         },
       ],
+      automation: {
+        executionLimitPerRun: 6,
+        failedCount: 0,
+        inProgressCount: 0,
+        lastCompletedAt: null,
+        oldestDueAt: null,
+        pendingCount: 0,
+        reconciliationCount: 0,
+      },
       safety: {
-        delayedRetentionAutomation: false,
+        delayedRetentionAutomation: true,
         permanentDeletion: false,
         providerFilterCreation: false,
         spamClassification: false,
@@ -374,7 +404,7 @@ describe("agent access settings", () => {
     expect(screen.getByText("Old agent")).toBeInTheDocument();
   });
 
-  it("keeps one-day recoverable Trash rules preview-only", async () => {
+  it("allows reviewed one-day recoverable Trash rules to activate durably", async () => {
     const browser = userEvent.setup();
     const ruleId = "33333333-3333-4333-8333-333333333333";
     mocks.listMailRules.mockResolvedValue([
@@ -429,16 +459,23 @@ describe("agent access settings", () => {
     });
     renderSettings();
     await browser.click(await screen.findByRole("button", { name: "Review" }));
-    expect(
-      await screen.findByText("Delayed Mail automation remains preview-only"),
-    ).toBeInTheDocument();
     expect(screen.getByText("(No subject)")).toBeInTheDocument();
     expect(screen.getByText(/Unknown account/)).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: no explicit account selected/)).toBeInTheDocument();
     expect(screen.getByText(/more than 200 exist/)).toBeInTheDocument();
     expect(screen.getByText(/recoverable Trash after 1d — retained until due/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Activate reviewed rule" })).toBeDisabled();
-    expect(mocks.activateMailRule).not.toHaveBeenCalled();
+    await browser.click(screen.getByRole("button", { name: "Activate reviewed rule" }));
+    await waitFor(() =>
+      expect(mocks.activateMailRule).toHaveBeenCalledWith(ruleId, {
+        expectedCandidateIds: [
+          "44444444-4444-4444-8444-444444444444",
+          "99999999-9999-4999-8999-999999999999",
+        ],
+        expectedPreviewFingerprint: "b".repeat(64),
+        expectedPreviewedAt: now,
+        expectedVersion: 1,
+      }),
+    );
   });
 
   it("keeps missing sources and connection-guide failures actionable", async () => {
@@ -459,8 +496,17 @@ describe("agent access settings", () => {
     });
     mocks.getMailSetupContext.mockResolvedValue({
       accounts: [],
+      automation: {
+        executionLimitPerRun: 6,
+        failedCount: 0,
+        inProgressCount: 0,
+        lastCompletedAt: null,
+        oldestDueAt: null,
+        pendingCount: 0,
+        reconciliationCount: 0,
+      },
       safety: {
-        delayedRetentionAutomation: false,
+        delayedRetentionAutomation: true,
         permanentDeletion: false,
         providerFilterCreation: false,
         spamClassification: false,

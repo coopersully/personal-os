@@ -43,19 +43,28 @@ provider-specific label names.
 4. Use `afterDays` for temporary retention.
 5. Treat `trash` as movement to the provider's recoverable trash. Never imply permanent deletion.
 6. Use a selected label mailbox from the same source account for `add_label`.
-7. For supported non-retention rules, after explicit acceptance call `review_mail_rule`, then
+7. After explicit acceptance call `review_mail_rule`, then
    direct the person to **Settings → Agent access → Review Mail rules**. Only the signed-in person
    can activate the reviewed rule. Activation rechecks the exact sample, due states, fingerprint,
    and rule version in one transaction before atomically recording `approved_rule` plus enabled
    state. Signed reviews expire after 15 minutes. Say plainly
    that the accepted candidates are a bounded recent sample and the activated condition will also
    govern future matching sync material.
-8. Archive and recoverable Trash rules remain disabled and preview-only in this release, including
-   immediate rules. Ilo retains previously observed threads, but it does not yet have the durable
-   due-work queue required to promise retention mutations. Record the preference and candidate
-   rule, explain this boundary, and leave activation for a follow-up release.
-9. Pause an active rule before changing its condition, actions, sources, or profile.
-10. Use `expectedVersion` for every later change. Mail matching is deterministic and has no
+8. Google archive and recoverable Trash rules may be activated after that review. Activation
+   durably enqueues matching observed conversations, and later syncs enqueue future matches. Ilo
+   derives each due time from the conversation's received time and the accepted `afterDays`;
+   immediate retention actions still cross the same durable handoff. The scheduler processes at
+   most six conversations per run with two workers, so backlog may remain pending by design.
+9. Read `automation` from `get_mail_setup_context` before describing active execution. Report
+   pending, in-progress, reconciliation, failed, oldest-due, and last-completed state without
+   message bodies. A reconciliation item means Ilo will read that exact provider thread before any
+   replay because an earlier provider effect was uncertain. A failed item stopped safely and needs
+   the signed-in person to review the named connection, source, profile, or rule.
+10. Automatic rule execution currently requires an explicit Google source. Leave rules that
+    include iCloud or another unsupported source disabled and explain the source capability.
+11. Recoverable Trash is the only action in its rule. Permanent deletion remains unavailable.
+12. Pause an active rule before changing its condition, actions, sources, or profile.
+13. Use `expectedVersion` for every later change. Mail matching is deterministic and has no
     confidence threshold.
 
 ## Preserve important email

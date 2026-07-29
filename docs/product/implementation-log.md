@@ -2,6 +2,24 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-07-29 — Durable and recoverable Mail retention rules
+
+- Added a durable work ledger keyed by account, provider thread, accepted rule revision, and action
+  fingerprint. It records source/profile revisions, due and retry time, claim lease, attempt count,
+  provider-effect certainty, terminal state, and only redacted failure details.
+- Activation enqueues matching observed conversations and synchronization enqueues future matches.
+  Gmail's bounded newest-thread page remains positive evidence only: previously observed older
+  conversations are retained and stay eligible.
+- Scheduled execution claims at most six conversations with two workers, revalidates the active
+  rule, profile, retention preference, source, condition, and label destination, and coalesces
+  compatible actions into one provider call. One-day recoverable Trash uses Gmail's dedicated
+  Trash operation; no permanent-delete capability exists.
+- Stale claims, timeouts, credential-persistence failures, and provider-success/local-commit
+  failures enter exact thread reconciliation before any replay. Rate limits back off; rejected or
+  exhausted work fails closed and creates visible account attention.
+- Mail setup and Agent access now expose pending, in-progress, reconciliation, failed, oldest-due,
+  and last-completed automation state without credentials or message bodies.
+
 ## 2026-07-28 — Finance agent-guided setup and safe review workflows
 
 - Added a Finance-owned guided context that combines owned account sources, ledger and review

@@ -273,7 +273,11 @@ API + Domain policy engine ──► Postgres + encrypted credential store + aud
               └──► Google / iCloud / Plaid / future provider connectors
 ```
 
-- Add a durable job queue, scheduler, worker lease/heartbeats, dead-letter handling, and run/event store before enabling real recurring automation.
+- Mail retention is the first domain-owned durable execution implementation: stable work identity,
+  bounded scheduler claims, lease recovery, exact provider reconciliation, terminal state, and
+  redacted audit/attention observations. Other recurring domains still require a shared durable
+  job queue, scheduler, worker lease/heartbeats, dead-letter handling, and run/event store before
+  enabling real recurring automation.
 - Model native domain records separately and expose a typed material-link/source-reference graph above them. A link carries relation type, source reference, ownership, revision/reconciliation state, and policy/audit references; it never makes a provider record and a local note falsely interchangeable.
 - Maintain provider-neutral connectors with capability discovery. Google uses incremental OAuth and Gmail write scopes only when needed; iCloud uses IMAP/CalDAV and app-specific passwords; Plaid uses Link, webhook/sync cursor, and transaction enrichment.
 - Add connector contracts for mail mutations, calendar RSVP/availability, attachments, finance transactions/rules, notification targets, and platform widgets. A capability matrix prevents unsupported controls from appearing enabled. Gmail "delete" means move to Trash unless a provider offers a separately scoped reversible behavior; permanent deletion is never implied by an archive/triage shortcut.

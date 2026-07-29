@@ -323,6 +323,7 @@ describe.sequential("finance service", () => {
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
       "0043_finance_setup_backfill_state",
+      "0044_durable_mail_rule_work",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

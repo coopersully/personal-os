@@ -62,8 +62,8 @@ provider internals.
 - Unified mailbox, search, conversation list, plain-text reader, drafts/sending, and
   provider-supported thread actions.
 - Versioned domain preference profiles, cross-domain attention items, source-aware multi-inbox Mail
-  setup, bounded exact Mail-rule previews with drift-checked activation for supported non-retention
-  actions, preview-only retention preferences, Finance readiness and proposal-first review
+  setup, bounded exact Mail-rule previews with drift-checked activation, durable Google Mail
+  retention work with exact provider reconciliation, Finance readiness and proposal-first review
   workflows, and an installable guided-setup skill for scoped MCP hosts.
 - A deployment-aware Agent access handoff with remote MCP OAuth, readable
   consent, skill-install and starter prompts, readiness state, revocation, and
@@ -124,8 +124,9 @@ The MVP is complete only when all of the following are demonstrated:
    a `mail:read` MCP token without exposing credentials; supported mutations require
    `mail:write`, important-email attention derives its source from an owned thread, and automatic
    Google Mail rules require a still-active compatible profile, explicit Google sources, a bounded
-   review, and an enabled `approved_rule`. Archive and recoverable Trash remain preview-only until
-   durable due work exists.
+   review, and an enabled `approved_rule`. Archive and recoverable Trash cross a durable bounded
+   handoff, revalidate authorization at execution time, and reconcile uncertain provider effects
+   before replay; permanent deletion remains unavailable.
 7. A person can copy the deployed MCP endpoint and skill install request,
    authorize a remote agent with visible scoped consent, start the Mail setup
    interview, and revoke the host from Settings.

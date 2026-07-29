@@ -37,6 +37,13 @@ export type Mailbox = z.infer<typeof mailboxSchema>;
 
 export const mailSetupAccountSchema = z.object({
   accountId: idSchema,
+  automation: z.object({
+    failedCount: z.int().nonnegative(),
+    inProgressCount: z.int().nonnegative(),
+    lastCompletedAt: isoDateTimeSchema.nullable(),
+    pendingCount: z.int().nonnegative(),
+    reconciliationCount: z.int().nonnegative(),
+  }),
   automaticRuleExecution: z.boolean(),
   email: z.email().nullable(),
   label: z.string().trim().min(1).max(200),
@@ -50,8 +57,17 @@ export type MailSetupAccount = z.infer<typeof mailSetupAccountSchema>;
 
 export const mailSetupContextSchema = z.object({
   accounts: z.array(mailSetupAccountSchema),
+  automation: z.object({
+    executionLimitPerRun: z.literal(6),
+    failedCount: z.int().nonnegative(),
+    inProgressCount: z.int().nonnegative(),
+    lastCompletedAt: isoDateTimeSchema.nullable(),
+    oldestDueAt: isoDateTimeSchema.nullable(),
+    pendingCount: z.int().nonnegative(),
+    reconciliationCount: z.int().nonnegative(),
+  }),
   safety: z.object({
-    delayedRetentionAutomation: z.literal(false),
+    delayedRetentionAutomation: z.literal(true),
     permanentDeletion: z.literal(false),
     providerFilterCreation: z.literal(false),
     spamClassification: z.literal(false),
@@ -266,6 +282,27 @@ export const mailRuleActionSchema = z
   });
 export type MailRuleAction = z.infer<typeof mailRuleActionSchema>;
 
+export function mailRuleActionNeedsDurableExecution(action: MailRuleAction): boolean {
+  return action.afterDays > 0 || action.type === "archive" || action.type === "trash";
+}
+
+export const mailRuleWorkStatusSchema = z.enum([
+  "pending",
+  "claimed",
+  "reconcile",
+  "succeeded",
+  "failed",
+]);
+export type MailRuleWorkStatus = z.infer<typeof mailRuleWorkStatusSchema>;
+
+export const mailRuleProviderEffectSchema = z.enum([
+  "none",
+  "rejected",
+  "indeterminate",
+  "applied",
+]);
+export type MailRuleProviderEffect = z.infer<typeof mailRuleProviderEffectSchema>;
+
 export const legacyMailRuleActionSchema = z.enum(["archive", "mark_read", "star"]);
 export type LegacyMailRuleAction = z.infer<typeof legacyMailRuleActionSchema>;
 
@@ -337,6 +374,22 @@ export const mailProfilePreferencesSchema = z
     }
   });
 export type MailProfilePreferences = z.infer<typeof mailProfilePreferencesSchema>;
+
+export function mailRuleActionsMatchRetentionPreferences(
+  actions: MailRuleAction[],
+  preferences: MailProfilePreferences,
+): boolean {
+  return actions.every((action) => {
+    if (action.afterDays === 0 || (action.type !== "archive" && action.type !== "trash"))
+      return true;
+    const expectedDisposition =
+      action.type === "archive" ? "archive_after_days" : "trash_after_days";
+    return (
+      preferences.noiseDisposition === expectedDisposition &&
+      preferences.noiseRetentionDays === action.afterDays
+    );
+  });
+}
 
 export const upsertMailProfileInputSchema = upsertDomainProfileInputSchema
   .extend({

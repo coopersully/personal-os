@@ -309,6 +309,13 @@
       "when": 1786914000000,
       "tag": "0043_finance_setup_backfill_state",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786917600000,
+      "tag": "0044_durable_mail_rule_work",
+      "breakpoints": true
     }
   ]
 }

@@ -151,6 +151,7 @@ describe.sequential("ilo API", () => {
       icloud: icloudConnector,
       log: logs,
       now: () => new Date("2026-07-13T12:00:00.000Z"),
+      runtimeLifecycle: createRuntimeLifecycle(),
       x: xConnector,
     });
   }, 120_000);
@@ -223,6 +224,7 @@ describe.sequential("ilo API", () => {
       },
       db: database.db,
     });
+    expect((await betaApp.request("/health/ready")).headers.get("x-ilo-drain-protocol")).toBeNull();
     const signUp = (email: string, inviteCode?: string) =>
       betaApp.request("/v1/auth/register", {
         body: JSON.stringify({

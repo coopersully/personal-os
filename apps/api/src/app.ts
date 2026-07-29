@@ -380,7 +380,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.get("/health/live", (context) => context.json({ status: "ok" }));
   app.get("/health/ready", async (context) => {
     await dependencies.db.execute(sql`select 1`);
-    context.header("X-Ilo-Drain-Protocol", "quiesce-v1");
+    if (dependencies.runtimeLifecycle) {
+      context.header("X-Ilo-Drain-Protocol", "quiesce-v1");
+    }
     return context.json({ status: "ready" });
   });
   app.get("/openapi.json", (context) =>

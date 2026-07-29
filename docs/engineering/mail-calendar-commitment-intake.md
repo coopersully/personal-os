@@ -78,12 +78,22 @@ Migration 0047 deletes pre-UIDVALIDITY iCloud cache/preview rows and migration 0
 sync fence. A pre-migration binary already inside provider I/O cannot honor either invariant.
 Production deployment therefore scales the API service to zero and waits for the old task to drain
 before the new migration-capable task starts. ECS dynamic/scheduled scaling is suspended during the
-drain, zero desired/running/pending tasks are required, and scaling resumes only after the new API is
-the sole completed primary deployment on the exact new task definition. A circuit-breaker rollback
-is stopped at zero and left scaling-suspended for recovery. The deploy role's narrowly scoped API
-`application-autoscaling:RegisterScalableTarget` authority must already be applied and verified
-before a drain-required rollout begins because the application workflow cannot grant its own new
-authority; this release is not safe as a mixed-version rolling deployment.
+drain. The API rejects new HTTP and detached/background claims, awaits tracked request/provider
+work within 105 seconds, and closes PostgreSQL only after that work and the HTTP server finish; ECS
+allows the essential API container 120 seconds before force-stop. Zero desired/running/pending tasks
+are required, and every exact pre-drain task ARN must report a successful API-container exit without
+kill/timeout evidence. After that proof, circuit-breaker rollback is disabled before the new task can
+run migrations and stays disabled until the new API is the sole completed primary deployment on the
+exact new task definition. The declared rollback-enabled configuration is then restored and verified
+before scaling resumes. Any failed drain or later rollout step remains stopped at zero with scaling
+suspended for recovery.
+
+The deploy role's narrowly scoped API
+`application-autoscaling:RegisterScalableTarget` authority and its separately isolated
+`ecs:ListTasks` authority on `*` must already be applied and verified before a drain-required rollout
+begins. The latter wildcard is required by AWS for task enumeration and does not grant task mutation.
+The application workflow cannot grant its own new authority; this release is not safe as a
+mixed-version rolling deployment.
 
 All tests can be green while production provider metadata is incomplete, MIME part IDs change, or
 the deployed connector lacks access to attachment bytes and authentication results. Those remain

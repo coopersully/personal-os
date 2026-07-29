@@ -19,6 +19,7 @@ describe("API configuration", () => {
       authRateLimitMaxRequests: 20,
       authRateLimitWindowSeconds: 300,
       apiBaseUrl: "https://api.example.com",
+      apiShutdownTimeoutMs: 105_000,
       appBaseUrl: "https://app.example.com",
       databaseUrl: "postgres://localhost/personal_os",
       emailFrom: "",

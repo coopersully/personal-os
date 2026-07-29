@@ -28,6 +28,7 @@ import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
 import type { EmailMessage } from "./email-delivery.js";
 import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
+import { createRuntimeLifecycle } from "./runtime-lifecycle.js";
 import { verifyPassword } from "./security.js";
 
 const invalidLowercasePassword = ["alllowercase", "123", "!"].join("");
@@ -122,6 +123,7 @@ describe.sequential("ilo API", () => {
       config: {
         allowedOrigins: ["https://app.example.com"],
         apiBaseUrl: "https://api.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://app.example.com",
         databaseUrl: container.getConnectionUri(),
         emailFrom: "",
@@ -196,6 +198,7 @@ describe.sequential("ilo API", () => {
       config: {
         allowedOrigins: ["https://beta.example.com"],
         apiBaseUrl: "https://api.beta.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://beta.example.com",
         databaseUrl: container.getConnectionUri(),
         emailFrom: "",
@@ -263,6 +266,7 @@ describe.sequential("ilo API", () => {
       config: {
         allowedOrigins: ["https://beta.example.com"],
         apiBaseUrl: "https://api.beta.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://beta.example.com",
         authRateLimitMaxRequests: 1,
         authRateLimitWindowSeconds: 300,
@@ -867,6 +871,7 @@ describe.sequential("ilo API", () => {
       config: {
         allowedOrigins: ["https://app.example.com"],
         apiBaseUrl: "https://api.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://app.example.com",
         databaseUrl: container.getConnectionUri(),
         emailFrom: "",
@@ -3033,6 +3038,7 @@ describe.sequential("ilo API", () => {
       config: {
         allowedOrigins: ["https://app.production.example.com"],
         apiBaseUrl: "https://api.production.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://app.production.example.com",
         databaseUrl: container.getConnectionUri(),
         emailFrom: "",
@@ -3225,6 +3231,53 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(200);
+  });
+
+  it("returns a structured unavailable response after runtime quiesce begins", async () => {
+    const runtimeLifecycle = createRuntimeLifecycle();
+    const drainingApp = createApp({
+      config: {
+        allowedOrigins: ["https://app.example.com"],
+        apiBaseUrl: "https://api.example.com",
+        apiShutdownTimeoutMs: 105_000,
+        appBaseUrl: "https://app.example.com",
+        databaseUrl: container.getConnectionUri(),
+        emailFrom: "",
+        encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+        googleClientId: "",
+        googleClientSecret: "",
+        googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
+        logLevel: "info",
+        plaidClientId: "",
+        plaidEnvironment: "sandbox",
+        plaidSecret: "",
+        port: 8787,
+        production: false,
+        registrationMode: "open",
+        resendApiKey: "",
+        sessionCookieName: "personal_os_session",
+        sessionTtlDays: 30,
+        xClientId: "",
+        xClientSecret: "",
+        xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
+      },
+      db: database.db,
+      runtimeLifecycle,
+    });
+
+    expect((await drainingApp.request("/health/live")).status).toBe(200);
+    runtimeLifecycle.beginQuiesce();
+    const response = await drainingApp.request("/health/live", {
+      headers: { "x-request-id": "draining-request" },
+    });
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "service_unavailable",
+        message: "The API is draining and is not accepting new work.",
+        requestId: "draining-request",
+      },
+    });
   });
 
   it("issues and rotates ilo MCP OAuth tokens with PKCE", async () => {

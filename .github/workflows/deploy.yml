@@ -251,6 +251,111 @@ jobs:
           API_TASK_DEFINITION: ${{ steps.tasks.outputs.api_task_definition }}
         run: |
           api_scaling_resource="service/${ECS_CLUSTER}/${API_SERVICE}"
+          api_drain_started=false
+
+          fail_closed_api_deployment() {
+            deployment_exit_code="$?"
+            trap - ERR
+            if test "$api_drain_started" = "true"; then
+              aws ecs update-service \
+                --cluster "$ECS_CLUSTER" \
+                --service "$API_SERVICE" \
+                --desired-count 0 \
+                >/dev/null ||
+                true
+              aws ecs wait services-stable \
+                --cluster "$ECS_CLUSTER" \
+                --services "$API_SERVICE" ||
+                true
+              api_failure_counts="$(
+                aws ecs describe-services \
+                  --cluster "$ECS_CLUSTER" \
+                  --services "$API_SERVICE" \
+                  --query 'services[0].[desiredCount,runningCount,pendingCount]' \
+                  --output text 2>/dev/null ||
+                  true
+              )"
+              if test "$api_failure_counts" != $'0\t0\t0'; then
+                echo "::error::Fail-closed recovery could not prove desired/running/pending zero: ${api_failure_counts:-unavailable}"
+              fi
+              echo "::error::The API rollout failed after drain began; the service was stopped and scaling remains suspended."
+            fi
+            exit "$deployment_exit_code"
+          }
+
+          # Prove list authority before changing scaling or desired count. The
+          # exact result is captured again after scaling is suspended.
+          aws ecs list-tasks \
+            --cluster "$ECS_CLUSTER" \
+            --service-name "$API_SERVICE" \
+            --desired-status RUNNING \
+            --query taskArns \
+            --output json \
+            >/dev/null
+
+          api_service_before="$(
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$API_SERVICE" \
+              --output json
+          )"
+          api_before_counts="$(
+            jq -r '.services[0] | [.desiredCount, .runningCount, .pendingCount] | @tsv' \
+              <<<"$api_service_before"
+          )"
+          api_before_desired="$(cut -f1 <<<"$api_before_counts")"
+          api_before_running="$(cut -f2 <<<"$api_before_counts")"
+          api_before_pending="$(cut -f3 <<<"$api_before_counts")"
+          if ! {
+            test "$api_before_pending" = "0" &&
+              test "$api_before_desired" = "$api_before_running"
+          }; then
+            echo "::error::The API service must be stable before drain: ${api_before_counts}"
+            exit 1
+          fi
+          api_minimum_healthy_percent="$(
+            jq -r '.services[0].deploymentConfiguration.minimumHealthyPercent' \
+              <<<"$api_service_before"
+          )"
+          api_maximum_percent="$(
+            jq -r '.services[0].deploymentConfiguration.maximumPercent' \
+              <<<"$api_service_before"
+          )"
+          api_breaker_enable="$(
+            jq -r '.services[0].deploymentConfiguration.deploymentCircuitBreaker.enable' \
+              <<<"$api_service_before"
+          )"
+          api_breaker_rollback="$(
+            jq -r '.services[0].deploymentConfiguration.deploymentCircuitBreaker.rollback' \
+              <<<"$api_service_before"
+          )"
+          if ! {
+            test "$api_breaker_enable" = "true" &&
+              test "$api_breaker_rollback" = "true"
+          }; then
+            echo "::error::The API circuit breaker does not match the required IaC state."
+            exit 1
+          fi
+          api_breaker_disabled_configuration="$(
+            jq -nc \
+              --argjson minimum "$api_minimum_healthy_percent" \
+              --argjson maximum "$api_maximum_percent" \
+              '{
+                minimumHealthyPercent: $minimum,
+                maximumPercent: $maximum,
+                deploymentCircuitBreaker: {enable: true, rollback: false}
+              }'
+          )"
+          api_iac_deployment_configuration="$(
+            jq -nc \
+              --argjson minimum "$api_minimum_healthy_percent" \
+              --argjson maximum "$api_maximum_percent" \
+              '{
+                minimumHealthyPercent: $minimum,
+                maximumPercent: $maximum,
+                deploymentCircuitBreaker: {enable: true, rollback: true}
+              }'
+          )"
 
           # Stop and drain the old binary before the new task runs migrations.
           # Connector lifecycle migrations invalidate cached authority and cannot
@@ -262,6 +367,27 @@ jobs:
             --suspended-state \
               DynamicScalingInSuspended=true,DynamicScalingOutSuspended=true,ScheduledScalingSuspended=true \
             >/dev/null
+          api_drain_started=true
+          trap fail_closed_api_deployment ERR
+
+          api_pre_drain_task_arns="$(
+            aws ecs list-tasks \
+              --cluster "$ECS_CLUSTER" \
+              --service-name "$API_SERVICE" \
+              --desired-status RUNNING \
+              --query taskArns \
+              --output json
+          )"
+          api_pre_drain_task_count="$(jq -r 'length' <<<"$api_pre_drain_task_arns")"
+          if test "$api_pre_drain_task_count" != "$api_before_running"; then
+            echo "::error::Exact pre-drain task capture did not match the stable running count."
+            false
+          fi
+          if test "$api_pre_drain_task_count" -gt 100; then
+            echo "::error::Exact drain validation supports at most 100 API tasks per deployment."
+            false
+          fi
+
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$API_SERVICE" \
@@ -279,25 +405,61 @@ jobs:
           )"
           test "$api_counts" = $'0\t0\t0' || {
             echo "::error::The old API service did not drain completely: ${api_counts}"
-            exit 1
+            false
           }
-          fail_closed_api_deployment() {
-            deployment_exit_code="$?"
-            trap - ERR
-            aws ecs update-service \
+
+          if test "$api_pre_drain_task_count" -gt 0; then
+            readarray -t api_pre_drain_tasks < <(jq -r '.[]' <<<"$api_pre_drain_task_arns")
+            api_stopped_tasks="$(
+              aws ecs describe-tasks \
+                --cluster "$ECS_CLUSTER" \
+                --tasks "${api_pre_drain_tasks[@]}" \
+                --output json
+            )"
+            if ! jq -e \
+              --argjson expected "$api_pre_drain_task_count" \
+              '
+                (.failures | length) == 0 and
+                (.tasks | length) == $expected and
+                all(
+                  .tasks[];
+                  .lastStatus == "STOPPED" and
+                  ([.containers[] | select(.name == "api")] | length) == 1 and
+                  ([.containers[] | select(.name == "api")][0] |
+                    .lastStatus == "STOPPED" and
+                    .exitCode == 0 and
+                    ((.reason // "") | test("kill|timeout"; "i") | not)
+                  ) and
+                  ((.stoppedReason // "") | test("kill|timeout"; "i") | not)
+                )
+              ' \
+              <<<"$api_stopped_tasks" \
+              >/dev/null; then
+              echo "::error::At least one exact pre-drain API task lacks a successful essential-container exit."
+              false
+            fi
+          fi
+
+          # Rollback to the last completed (old) deployment is unsafe after
+          # migrations. Keep the circuit breaker enabled, but rollback disabled,
+          # until the exact new primary has completed and remained healthy.
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$API_SERVICE" \
+            --deployment-configuration "$api_breaker_disabled_configuration" \
+            >/dev/null
+          api_disabled_breaker="$(
+            aws ecs describe-services \
               --cluster "$ECS_CLUSTER" \
-              --service "$API_SERVICE" \
-              --desired-count 0 \
-              >/dev/null ||
-              true
-            aws ecs wait services-stable \
-              --cluster "$ECS_CLUSTER" \
-              --services "$API_SERVICE" ||
-              true
-            echo "::error::The new API deployment failed after the old task drained; the service was stopped and scaling remains suspended."
-            exit "$deployment_exit_code"
-          }
-          trap fail_closed_api_deployment ERR
+              --services "$API_SERVICE" \
+              --query 'services[0].deploymentConfiguration.deploymentCircuitBreaker.[enable,rollback]' \
+              --output text
+          )"
+          if test "$api_disabled_breaker" != $'True\tFalse'; then
+            echo "::error::Could not prove circuit-breaker rollback is disabled before migration startup."
+            false
+          fi
+
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$API_SERVICE" \
@@ -339,9 +501,36 @@ jobs:
               --cluster "$ECS_CLUSTER" \
               --services "$API_SERVICE"
             echo "::error::The new API task did not remain the sole completed primary deployment; the service was stopped and scaling remains suspended."
-            exit 1
+            false
           fi
-          trap - ERR
+
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$API_SERVICE" \
+            --deployment-configuration "$api_iac_deployment_configuration" \
+            >/dev/null
+          api_restored_configuration="$(
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$API_SERVICE" \
+              --output json
+          )"
+          if ! jq -e \
+            --argjson minimum "$api_minimum_healthy_percent" \
+            --argjson maximum "$api_maximum_percent" \
+            '
+              .services[0].deploymentConfiguration |
+              .minimumHealthyPercent == $minimum and
+              .maximumPercent == $maximum and
+              .deploymentCircuitBreaker.enable == true and
+              .deploymentCircuitBreaker.rollback == true
+            ' \
+            <<<"$api_restored_configuration" \
+            >/dev/null; then
+            echo "::error::The healthy API service did not restore the declared circuit-breaker configuration."
+            false
+          fi
+
           aws application-autoscaling register-scalable-target \
             --service-namespace ecs \
             --resource-id "$api_scaling_resource" \
@@ -349,6 +538,7 @@ jobs:
             --suspended-state \
               DynamicScalingInSuspended=false,DynamicScalingOutSuspended=false,ScheduledScalingSuspended=false \
             >/dev/null
+          trap - ERR
 
       - name: Deploy MCP after the API is healthy
         env:

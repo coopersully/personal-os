@@ -147,12 +147,23 @@ docker build --target mcp -t personal-os-mcp .
 Run only one migration-capable API instance during a breaking schema rollout.
 The production workflow first scales the API service to zero and waits for the
 old task to stop before starting the new migration-capable task. It suspends ECS
-dynamic and scheduled scaling before the drain, requires desired/running/pending
-counts all reach zero, and restores scaling only after the new service is
-stable as the sole completed primary deployment on the exact registered task
-definition. An ECS circuit-breaker rollback is stopped back at zero, and a
-failed drain or deployment intentionally leaves scaling suspended for operator
-recovery rather than allowing an old task to restart. This bounded
+dynamic and scheduled scaling before the drain and records the exact old task
+ARNs. On `SIGTERM`, the API stops accepting new HTTP and detached/background
+claims, awaits in-flight requests and tracked provider work, closes its HTTP
+server, and only then closes PostgreSQL. The application bound is 105 seconds
+and the essential ECS API container has a 120-second stop timeout. Deployment
+requires desired/running/pending counts all reach zero and every captured API
+container reports `STOPPED` with exit code zero and no kill/timeout evidence;
+count-only drain or a sleep is insufficient.
+
+After the old tasks exit successfully, the workflow disables circuit-breaker
+rollback before launching the migration-capable task so ECS cannot restore a
+pre-migration binary. Rollback remains disabled until the new service is stable
+as the sole completed primary deployment on the exact registered task
+definition; only then does the workflow restore and verify the declared
+rollback-enabled configuration and resume scaling. A failed graceful drain or
+any later rollout step intentionally leaves desired/running/pending at zero and
+scaling suspended for operator recovery. This bounded
 downtime is required for migrations that invalidate connector source authority:
 an old process already inside provider I/O cannot honor a fence introduced by
 the new schema. Drizzle records applied versions transactionally. Follow the
@@ -163,9 +174,12 @@ rollout rather than a long deploy-time backfill.
 Before merging any change that requires this stop-and-drain path, the deploy role
 must already have verified `application-autoscaling:RegisterScalableTarget`
 authority scoped to the API scalable target, ECS service namespace, and
-`ecs:service:DesiredCount` dimension. The application workflow cannot grant this
-prerequisite to its own execution role; without it, deployment must fail before
-drain or migration.
+`ecs:service:DesiredCount` dimension. It must also have `ecs:ListTasks` on `*`,
+which AWS requires for enumerating the exact service task ARNs later inspected
+with the existing `ecs:DescribeTasks` authority. Keep that list action isolated
+from ECS mutation permissions. The application workflow cannot grant either
+prerequisite to its own execution role; without both applied and verified,
+deployment must fail before drain or migration.
 
 ## Health and logs
 

@@ -127,6 +127,18 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 
   statement {
+    sid       = "ListTasksOnlyInProductionCluster"
+    actions   = ["ecs:ListTasks"]
+    resources = ["*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.main.arn]
+    }
+  }
+
+  statement {
     sid       = "SuspendOnlyApiServiceScaling"
     actions   = ["application-autoscaling:RegisterScalableTarget"]
     resources = [aws_appautoscaling_target.ecs["api"].arn]

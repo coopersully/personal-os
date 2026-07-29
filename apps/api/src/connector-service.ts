@@ -2113,6 +2113,27 @@ export function createConnectorService({
       .where(and(eq(mailRuleWorkItems.claimId, claimId), eq(mailRuleWorkItems.status, "claimed")))
       .orderBy(asc(mailRuleWorkItems.accountId), asc(mailRuleWorkItems.remoteThreadId));
     for (const item of claimed) touchedAccountIds.add(item.accountId);
+    const outstandingAccounts = await db
+      .select({ accountId: mailRuleWorkItems.accountId })
+      .from(mailRuleWorkItems)
+      .where(inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]))
+      .groupBy(mailRuleWorkItems.accountId);
+    for (const item of outstandingAccounts) touchedAccountIds.add(item.accountId);
+    const openSummaryAccounts = await db
+      .select({ accountId: attentionItems.relatedEntityId })
+      .from(attentionItems)
+      .where(
+        and(
+          eq(attentionItems.domain, "mail"),
+          eq(attentionItems.kind, "run_summary"),
+          eq(attentionItems.status, "open"),
+          eq(attentionItems.relatedEntityType, "mail_account"),
+        ),
+      )
+      .groupBy(attentionItems.relatedEntityId);
+    for (const item of openSummaryAccounts) {
+      if (item.accountId) touchedAccountIds.add(item.accountId);
+    }
     return { claimed, maintenanceFailed, touchedAccountIds: [...touchedAccountIds] };
   }
 

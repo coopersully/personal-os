@@ -63,7 +63,7 @@ export type StartGoogleAuthorizationInput = z.infer<typeof startGoogleAuthorizat
  */
 export const materialSourceReferenceSchema = z.object({
   accountId: z.uuid().nullable(),
-  provider: z.enum(["google", "icloud", "local", "plaid", "x"]),
+  provider: z.enum(["google", "icloud", "local", "paypal", "plaid", "venmo", "x", "zelle"]),
   remoteId: z.string().nullable(),
   revision: z.string().nullable(),
   sourceType: z.enum([

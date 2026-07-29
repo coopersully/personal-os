@@ -4953,6 +4953,62 @@ describe.sequential("connector service", () => {
           ),
         ),
     ).resolves.toEqual([]);
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    const [repairedSummary] = await database.db
+      .select()
+      .from(attentionItems)
+      .where(
+        and(
+          eq(attentionItems.relatedEntityId, fixture.account.id),
+          eq(attentionItems.kind, "run_summary"),
+          eq(attentionItems.status, "open"),
+        ),
+      );
+    if (!repairedSummary) throw new Error("The Mail run summary was not repaired.");
+    expect(repairedSummary).toMatchObject({ domain: "mail", importance: "high" });
+    await expect(
+      database.db.select().from(auditEvents).where(eq(auditEvents.entityId, repairedSummary.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        action: "assistant.attention.created",
+        actorId: fixture.account.id,
+        actorType: "connector",
+      }),
+    ]);
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ status: "succeeded" })
+      .where(eq(mailRuleWorkItems.accountId, fixture.account.id));
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_background_attention_resolution_audit_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.request_id LIKE 'mail-rule-work-attention:%' THEN
+          RAISE EXCEPTION 'forced background attention resolution audit failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_background_attention_resolution_audit_for_test
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW EXECUTE FUNCTION fail_background_attention_resolution_audit_for_test();
+    `);
+    try {
+      await expect(service.dispatchDueMailRuleWork()).rejects.toThrow(
+        'Failed query: insert into "audit_events"',
+      );
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_background_attention_resolution_audit_for_test ON audit_events;
+        DROP FUNCTION IF EXISTS fail_background_attention_resolution_audit_for_test();
+      `);
+    }
+    await expect(
+      database.db.select().from(attentionItems).where(eq(attentionItems.id, repairedSummary.id)),
+    ).resolves.toEqual([expect.objectContaining({ status: "open", version: 1 })]);
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db.select().from(attentionItems).where(eq(attentionItems.id, repairedSummary.id)),
+    ).resolves.toEqual([expect.objectContaining({ status: "resolved", version: 2 })]);
   });
 
   it("reconciles provider success after rotated credentials fail to persist", async () => {

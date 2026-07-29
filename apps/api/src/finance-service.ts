@@ -65,7 +65,7 @@ import type {
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 import { financeDomainProfileSchema, idSchema, localDateAt } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -88,8 +88,14 @@ type PlaidOptions = {
   fetch?: typeof globalThis.fetch;
   secret: string;
 };
-type Options = { db: Database; now: () => Date; plaid?: PlaidOptions };
+type Options = {
+  db: Database;
+  now: () => Date;
+  onProposalSnapshotRead?: () => Promise<void>;
+  plaid?: PlaidOptions;
+};
 type FinanceProfileSourceExecutor = Pick<Database, "select">;
+type FinanceReadExecutor = Pick<Database, "select">;
 type FinanceReviewExecutor = Pick<Database, "insert" | "select" | "update">;
 type PlaidCredentials = { accessToken: string };
 type PlaidAccount = {
@@ -490,7 +496,7 @@ function merchantAuditSnapshot(value: FinanceMerchant) {
   };
 }
 
-export function createFinanceService({ db, now, plaid }: Options) {
+export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }: Options) {
   async function seedCategories(
     userId: string,
     executor: Pick<Database, "insert" | "select"> = db,
@@ -1009,10 +1015,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
     account: typeof financeAccounts.$inferSelect,
     item: typeof financeTransactions.$inferSelect,
   ): MaterialSourceReference {
+    const provider = account.provider === "manual" ? ("local" as const) : account.provider;
     return {
       accountId: account.id,
-      provider: account.provider === "plaid" ? "plaid" : "local",
-      remoteId: account.provider === "plaid" ? item.providerTransactionId : item.id,
+      provider,
+      remoteId: provider === "local" ? item.id : item.providerTransactionId,
       revision: item.updatedAt.toISOString(),
       sourceType: "finance_transaction",
     };
@@ -1026,10 +1033,13 @@ export function createFinanceService({ db, now, plaid }: Options) {
     if (!row) throw new AppError("not_found", "The finance merchant was not found.");
     return row;
   }
-  async function enrichTransaction(row: typeof financeTransactions.$inferSelect) {
+  async function enrichTransaction(
+    row: typeof financeTransactions.$inferSelect,
+    executor: FinanceReadExecutor = db,
+  ) {
     const merchant = row.merchantId
       ? (
-          await db
+          await executor
             .select()
             .from(financeMerchants)
             .where(eq(financeMerchants.id, row.merchantId))
@@ -1041,6 +1051,84 @@ export function createFinanceService({ db, now, plaid }: Options) {
       row,
       merchant?.displayName ?? titleCaseMerchant(normalizedDisplayName || row.merchant),
     );
+  }
+
+  async function listTransactionsPage(
+    userId: string,
+    query: TransactionListQuery,
+    executor: FinanceReadExecutor = db,
+  ) {
+    const conditions = [eq(financeTransactions.userId, userId)];
+    const sortBy = query.sortBy ?? "date";
+    const sortDirection = query.sortDirection ?? "desc";
+    if (query.accountId) conditions.push(eq(financeTransactions.accountId, query.accountId));
+    if (query.categoryId) conditions.push(eq(financeTransactions.categoryId, query.categoryId));
+    if (query.from) conditions.push(gte(financeTransactions.transactionDate, query.from));
+    if (query.to) conditions.push(lte(financeTransactions.transactionDate, query.to));
+    if (query.pending !== undefined)
+      conditions.push(eq(financeTransactions.pending, query.pending));
+    if (query.review === "needs_review") conditions.push(eq(financeTransactions.needsReview, true));
+    if (query.review === "resolved") conditions.push(eq(financeTransactions.needsReview, false));
+    const sortColumn =
+      sortBy === "amount"
+        ? financeTransactions.amount
+        : sortBy === "merchant"
+          ? financeTransactions.merchant
+          : financeTransactions.transactionDate;
+    if (query.cursor) {
+      const cursor = decodeTransactionCursor(query.cursor);
+      if (cursor.sortBy !== sortBy || cursor.direction !== sortDirection) {
+        throw new AppError("invalid_request", "The transaction cursor does not match this sort.");
+      }
+      const isAscending = sortDirection === "asc";
+      const paginationCondition = or(
+        isAscending ? gt(sortColumn, cursor.value) : lt(sortColumn, cursor.value),
+        and(
+          eq(sortColumn, cursor.value),
+          isAscending
+            ? gt(financeTransactions.id, cursor.id)
+            : lt(financeTransactions.id, cursor.id),
+        ),
+      );
+      if (paginationCondition) conditions.push(paginationCondition);
+    }
+    const rows = await executor
+      .select()
+      .from(financeTransactions)
+      .where(and(...conditions))
+      .orderBy(
+        sortDirection === "asc" ? asc(sortColumn) : desc(sortColumn),
+        sortDirection === "asc" ? asc(financeTransactions.id) : desc(financeTransactions.id),
+      )
+      .limit(query.limit + 1);
+    const page = rows.slice(0, query.limit);
+    const last = page.at(-1);
+    const merchantIds = [
+      ...new Set(page.map((item) => item.merchantId).filter(Boolean)),
+    ] as string[];
+    const merchants =
+      merchantIds.length === 0
+        ? []
+        : await executor
+            .select()
+            .from(financeMerchants)
+            .where(inArray(financeMerchants.id, merchantIds));
+    const merchantNames = new Map(merchants.map((item) => [item.id, item.displayName]));
+    const items = page.map((item) => {
+      const normalizedDisplayName = normalizedMerchant(item.merchant).replaceAll("-", " ");
+      return transaction(
+        item,
+        (item.merchantId ? merchantNames.get(item.merchantId) : null) ??
+          titleCaseMerchant(normalizedDisplayName || item.merchant),
+      );
+    });
+    return {
+      items,
+      nextCursor:
+        rows.length > query.limit && last
+          ? encodeTransactionCursor(last, sortBy, sortDirection)
+          : null,
+    };
   }
 
   async function persistTransactionEnrichment(row: typeof financeTransactions.$inferSelect) {
@@ -1915,7 +2003,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
         await tx.insert(auditEvents).values(
           auditValues({
             action: existing ? "assistant.attention.updated" : "assistant.attention.created",
-            after: auditAttentionItemMetadata(item),
+            after: {
+              ...auditAttentionItemMetadata(item),
+              policy: "approved_rule",
+              source,
+            },
             before: auditAttentionItemMetadata(existing ?? null),
             entityId: item.id,
             entityType: "attention_item",
@@ -3279,59 +3371,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
       });
     },
     async listTransactions(userId: string, query: TransactionListQuery) {
-      const conditions = [eq(financeTransactions.userId, userId)];
-      const sortBy = query.sortBy ?? "date";
-      const sortDirection = query.sortDirection ?? "desc";
-      if (query.accountId) conditions.push(eq(financeTransactions.accountId, query.accountId));
-      if (query.categoryId) conditions.push(eq(financeTransactions.categoryId, query.categoryId));
-      if (query.from) conditions.push(gte(financeTransactions.transactionDate, query.from));
-      if (query.to) conditions.push(lte(financeTransactions.transactionDate, query.to));
-      if (query.pending !== undefined)
-        conditions.push(eq(financeTransactions.pending, query.pending));
-      if (query.review === "needs_review")
-        conditions.push(eq(financeTransactions.needsReview, true));
-      if (query.review === "resolved") conditions.push(eq(financeTransactions.needsReview, false));
-      const sortColumn =
-        sortBy === "amount"
-          ? financeTransactions.amount
-          : sortBy === "merchant"
-            ? financeTransactions.merchant
-            : financeTransactions.transactionDate;
-      if (query.cursor) {
-        const cursor = decodeTransactionCursor(query.cursor);
-        if (cursor.sortBy !== sortBy || cursor.direction !== sortDirection) {
-          throw new AppError("invalid_request", "The transaction cursor does not match this sort.");
-        }
-        const isAscending = sortDirection === "asc";
-        const paginationCondition = or(
-          isAscending ? gt(sortColumn, cursor.value) : lt(sortColumn, cursor.value),
-          and(
-            eq(sortColumn, cursor.value),
-            isAscending
-              ? gt(financeTransactions.id, cursor.id)
-              : lt(financeTransactions.id, cursor.id),
-          ),
-        );
-        if (paginationCondition) conditions.push(paginationCondition);
-      }
-      const rows = await db
-        .select()
-        .from(financeTransactions)
-        .where(and(...conditions))
-        .orderBy(
-          sortDirection === "asc" ? asc(sortColumn) : desc(sortColumn),
-          sortDirection === "asc" ? asc(financeTransactions.id) : desc(financeTransactions.id),
-        )
-        .limit(query.limit + 1);
-      const page = rows.slice(0, query.limit);
-      const last = page.at(-1);
-      return {
-        items: await Promise.all(page.map(enrichTransaction)),
-        nextCursor:
-          rows.length > query.limit && last
-            ? encodeTransactionCursor(last, sortBy, sortDirection)
-            : null,
-      };
+      return listTransactionsPage(userId, query);
     },
     async listReviewQueue(userId: string, limit = 50): Promise<FinanceReviewCase[]> {
       const categories = new Map((await existingCategories(userId)).map((item) => [item.id, item]));
@@ -3368,48 +3408,53 @@ export function createFinanceService({ db, now, plaid }: Options) {
       userId: string,
       query: TransactionListQuery,
     ): Promise<FinanceCategorizationProposalPage> {
-      const transactions = await this.listTransactions(userId, {
-        ...query,
-        review: "needs_review",
-      });
-      const sourceByTransaction = new Map<string, MaterialSourceReference>();
-      if (transactions.items.length > 0) {
-        const sourceRows = await db
-          .select({ account: financeAccounts, item: financeTransactions })
-          .from(financeTransactions)
-          .innerJoin(financeAccounts, eq(financeAccounts.id, financeTransactions.accountId))
-          .where(
-            and(
-              eq(financeTransactions.userId, userId),
-              eq(financeAccounts.userId, userId),
-              inArray(
-                financeTransactions.id,
-                transactions.items.map((item) => item.id),
+      return db.transaction(async (tx) => {
+        await tx.execute(sql`SET TRANSACTION ISOLATION LEVEL REPEATABLE READ`);
+        const transactions = await listTransactionsPage(
+          userId,
+          { ...query, review: "needs_review" },
+          tx,
+        );
+        await onProposalSnapshotRead?.();
+        const sourceByTransaction = new Map<string, MaterialSourceReference>();
+        if (transactions.items.length > 0) {
+          const sourceRows = await tx
+            .select({ account: financeAccounts, item: financeTransactions })
+            .from(financeTransactions)
+            .innerJoin(financeAccounts, eq(financeAccounts.id, financeTransactions.accountId))
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                eq(financeAccounts.userId, userId),
+                inArray(
+                  financeTransactions.id,
+                  transactions.items.map((item) => item.id),
+                ),
               ),
-            ),
-          );
-        for (const row of sourceRows) {
-          sourceByTransaction.set(
-            row.item.id,
-            financeTransactionSourceValue(row.account, row.item),
-          );
+            );
+          for (const row of sourceRows) {
+            sourceByTransaction.set(
+              row.item.id,
+              financeTransactionSourceValue(row.account, row.item),
+            );
+          }
         }
-      }
-      return {
-        items: await Promise.all(
-          transactions.items.map((item) => {
-            const source = sourceByTransaction.get(item.id);
-            if (!source) {
-              throw new AppError(
-                "conflict",
-                "The transaction source changed while proposals were being prepared.",
-              );
-            }
-            return categorizationProposal(userId, item, source);
-          }),
-        ),
-        nextCursor: transactions.nextCursor,
-      };
+        return {
+          items: await Promise.all(
+            transactions.items.map((item) => {
+              const source = sourceByTransaction.get(item.id);
+              if (!source) {
+                throw new AppError(
+                  "conflict",
+                  "The transaction source changed while proposals were being prepared.",
+                );
+              }
+              return categorizationProposal(userId, item, source);
+            }),
+          ),
+          nextCursor: transactions.nextCursor,
+        };
+      });
     },
     async applyCategorizations(
       input: ApplyFinanceCategorizationsInput,
@@ -3938,6 +3983,74 @@ export function createFinanceService({ db, now, plaid }: Options) {
             }),
           );
         }
+        const ownedTransactions = await tx
+          .select({ id: financeTransactions.id })
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.accountId, before.id),
+              eq(financeTransactions.userId, context.principal.userId),
+            ),
+          )
+          .orderBy(financeTransactions.id)
+          .for("update");
+        if (ownedTransactions.length > 0) {
+          const linkedAttention = await tx
+            .select()
+            .from(attentionItems)
+            .where(
+              and(
+                eq(attentionItems.userId, context.principal.userId),
+                eq(attentionItems.domain, "finances"),
+                eq(attentionItems.relatedEntityType, "finance_transaction"),
+                inArray(
+                  attentionItems.relatedEntityId,
+                  ownedTransactions.map((item) => item.id),
+                ),
+              ),
+            )
+            .orderBy(attentionItems.id)
+            .for("update");
+          for (const linked of linkedAttention) {
+            const [resolved] = await tx
+              .update(attentionItems)
+              .set({
+                relatedEntityId: null,
+                relatedEntityType: null,
+                source: null,
+                status: "resolved",
+                updatedAt: now(),
+                version: linked.version + 1,
+              })
+              .where(
+                and(eq(attentionItems.id, linked.id), eq(attentionItems.version, linked.version)),
+              )
+              .returning();
+            if (!resolved) {
+              throw new AppError(
+                "conflict",
+                "Finance attention changed while its account was being deleted.",
+              );
+            }
+            await tx.insert(auditEvents).values(
+              auditValues({
+                action: "assistant.attention.resolved",
+                after: {
+                  ...auditAttentionItemMetadata(resolved),
+                  policy: "approve_each",
+                  source: null,
+                },
+                before: {
+                  ...auditAttentionItemMetadata(linked),
+                  source: linked.source,
+                },
+                entityId: resolved.id,
+                entityType: "attention_item",
+                ...context,
+              }),
+            );
+          }
+        }
         await tx.delete(financeAccounts).where(eq(financeAccounts.id, before.id));
         await tx.insert(auditEvents).values(
           auditValues({
@@ -4086,7 +4199,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         pendingSpendThisMonth: pendingSpend / 100,
         refundCreditsThisMonth: refunds / 100,
         spendingThisMonth: spending / 100,
-        transactions: await Promise.all(transactions.map(enrichTransaction)),
+        transactions: await Promise.all(transactions.map((item) => enrichTransaction(item))),
       };
     },
     async getWealthSummary(userId: string): Promise<FinanceWealthSummary> {
@@ -4233,7 +4346,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
         incomeStreams,
         profile,
         recurringObligations,
-        transactions: await Promise.all(transactions.map(enrichTransaction)),
+        transactions: await Promise.all(transactions.map((item) => enrichTransaction(item))),
       };
     },
     async updateTransaction(

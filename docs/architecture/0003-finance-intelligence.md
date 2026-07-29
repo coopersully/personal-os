@@ -201,7 +201,13 @@ remain shared MCP transport follow-ups rather than Finance-local contracts.
 An account referenced by the durable Finance profile cannot be deleted until
 the human removes that source context. Profile saves and account deletion lock
 the account before the profile so a concurrent save/delete cannot create a
-dangling JSON source reference.
+dangling JSON source reference. Account deletion also locks its transactions
+and resolves/detaches their Finance attention before the cascade, so concurrent
+attention upserts cannot leave stale material links. Transaction attribution
+uses `local` only for manual accounts; Plaid, PayPal, Venmo, and Zelle retain
+their provider namespace and use a provider transaction identity only when one
+exists. Categorization pages read transaction rows and their attribution from
+one repeatable-read snapshot.
 
 ## Migration policy
 

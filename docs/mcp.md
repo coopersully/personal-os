@@ -111,7 +111,10 @@ cash-flow recommendation.
 `create_finance_attention_item` is the bounded exception to the otherwise read/proposal Finance
 surface: it locks one owned transaction, derives provider/account/remote/revision attribution
 server-side, deduplicates the same open transaction/kind item, and writes a redacted audit in the
-same transaction. Categorization proposals carry that same derived transaction source reference.
+same transaction. The audit carries `approved_rule` policy and privacy-safe source attribution
+without merchant, amount, title, or summary content. Categorization proposals carry that same
+derived transaction source reference from a consistent snapshot. Provider-backed CSV accounts
+retain PayPal, Venmo, or Zelle attribution rather than being mislabeled as local.
 Generic attention cannot claim Finance transaction provenance.
 
 Categorization is intentionally proposal-first:

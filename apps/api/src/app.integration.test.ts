@@ -1376,6 +1376,17 @@ describe.sequential("ilo API", () => {
     );
     agentToken = limitedToken.token.token;
     expect((await request("/v1/reminders", { auth: "agent" })).status).toBe(200);
+    const emptyDeferralPreview = await request(
+      "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T12%3A00%3A00.000Z",
+      { auth: "agent" },
+    );
+    expect(emptyDeferralPreview.status).toBe(200);
+    expect((await payload(emptyDeferralPreview)).preview).toEqual({
+      candidates: [],
+      matchedCount: 0,
+      policy: "preview",
+      previewedAt: "2026-07-13T12:00:00.000Z",
+    });
     expect(
       (
         await request("/v1/reminders", {
@@ -1572,6 +1583,186 @@ describe.sequential("ilo API", () => {
         }),
       )
     ).reminder;
+    expect(first.source).toEqual({
+      accountId: null,
+      provider: "local",
+      remoteId: first.id,
+      revision: first.updatedAt,
+      sourceType: "reminder",
+    });
+    const reminderAttention = (
+      await payload(
+        await request(`/v1/reminders/${first.id}/attention`, {
+          auth: "agent",
+          body: {
+            occursAt: first.dueAt,
+            summary: "Confirm whether this deadline still applies.",
+            title: "Reminder needs review",
+          },
+          method: "PUT",
+        }),
+      )
+    ).item;
+    expect(reminderAttention).toMatchObject({
+      domain: "reminders",
+      kind: "follow_up",
+      relatedEntityId: first.id,
+      relatedEntityType: "reminder",
+      source: first.source,
+    });
+    expect(
+      (
+        await payload(
+          await request(`/v1/reminders/${first.id}/attention`, {
+            auth: "agent",
+            body: {
+              expiresAt: "2026-07-30T12:00:00.000Z",
+              occursAt: null,
+              summary: "Use the current Reminder revision.",
+              title: "Reminder review refreshed",
+            },
+            method: "PUT",
+          }),
+        )
+      ).item,
+    ).toMatchObject({ id: reminderAttention.id, source: first.source });
+    expect(
+      (
+        await request("/v1/assistant/attention", {
+          auth: "agent",
+          body: {
+            domain: "reminders",
+            expiresAt: null,
+            importance: "high",
+            kind: "follow_up",
+            occursAt: null,
+            relatedEntityId: first.id,
+            relatedEntityType: "reminder",
+            source: first.source,
+            summary: "Caller-supplied Reminder provenance.",
+            title: "Forged Reminder attention",
+          },
+        })
+      ).status,
+    ).toBe(400);
+    const overdueOne = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: {
+            dueAt: "2026-07-11T10:00:00.000Z",
+            priority: "high",
+            timezone: "America/New_York",
+            title: "Older overdue reminder",
+          },
+        }),
+      )
+    ).reminder;
+    const overdueTwo = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: {
+            dueAt: "2026-07-12T10:00:00.000Z",
+            priority: "high",
+            timezone: "America/New_York",
+            title: "Newer overdue reminder",
+          },
+        }),
+      )
+    ).reminder;
+    const cutoffBoundary = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: {
+            dueAt: "2026-07-13T12:00:00.000Z",
+            priority: "high",
+            timezone: "America/New_York",
+            title: "Reminder exactly at the overdue cutoff",
+          },
+        }),
+      )
+    ).reminder;
+    const deferralPreview = await payload(
+      await request(
+        "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T13%3A00%3A00.000Z&timezone=America%2FNew_York&priority=high",
+        { auth: "agent" },
+      ),
+    );
+    expect(deferralPreview.preview).toEqual({
+      candidates: [
+        expect.objectContaining({
+          dueAt: "2026-07-11T10:00:00.000Z",
+          id: overdueOne.id,
+          proposedDueAt: "2026-07-14T13:00:00.000Z",
+          proposedTimezone: "America/New_York",
+          source: overdueOne.source,
+          updatedAt: overdueOne.updatedAt,
+        }),
+        expect.objectContaining({
+          dueAt: "2026-07-12T10:00:00.000Z",
+          id: overdueTwo.id,
+          source: overdueTwo.source,
+        }),
+      ],
+      matchedCount: 2,
+      policy: "preview",
+      previewedAt: "2026-07-13T12:00:00.000Z",
+    });
+    const oversizedPreview = await request(
+      "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T13%3A00%3A00.000Z&priority=high&limit=1",
+      { auth: "agent" },
+    );
+    expect(oversizedPreview.status).toBe(400);
+    expect((await payload(oversizedPreview)).error).toMatchObject({
+      code: "invalid_request",
+      details: { limit: 1, matchedCountAtLeast: 2 },
+    });
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-13T11%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-13T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-10T12%3A00%3A00.000Z&proposedDueAt=2026-07-12T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-14T12%3A00%3A00.000Z&proposedDueAt=2026-07-15T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    await request(`/v1/reminders/${overdueOne.id}/trash`, {
+      auth: "agent",
+      body: { expectedUpdatedAt: overdueOne.updatedAt },
+    });
+    await request(`/v1/reminders/${overdueTwo.id}/trash`, {
+      auth: "agent",
+      body: { expectedUpdatedAt: overdueTwo.updatedAt },
+    });
+    await request(`/v1/reminders/${cutoffBoundary.id}/trash`, {
+      auth: "agent",
+      body: { expectedUpdatedAt: cutoffBoundary.updatedAt },
+    });
     await expect(
       request(`/v1/automations/${routine.id}/runs`, { auth: "agent", body: { dryRun: true } }),
     ).resolves.toMatchObject({ status: 201 });
@@ -1605,6 +1796,15 @@ describe.sequential("ilo API", () => {
       ).items,
     ).toHaveLength(1);
     expect((await request("/v1/reminders?cursor=bad", { auth: "agent" })).status).toBe(400);
+    const nonUuidReminderCursor = Buffer.from("2026-07-13T12:00:00Z|not-a-uuid", "utf8").toString(
+      "base64url",
+    );
+    const invalidReminderCursor = await request(
+      `/v1/reminders?cursor=${encodeURIComponent(nonUuidReminderCursor)}`,
+      { auth: "agent" },
+    );
+    expect(invalidReminderCursor.status).toBe(400);
+    expect((await payload(invalidReminderCursor)).error.code).toBe("invalid_request");
     expect(
       (
         await request("/v1/reminders", {
@@ -1613,11 +1813,32 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(401);
+    expect(
+      (
+        await request(`/v1/reminders/${first.id}`, {
+          auth: "agent",
+          method: "PATCH",
+          body: { title: "Unguarded agent update" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(`/v1/reminders/${first.id}/complete`, {
+          auth: "agent",
+          body: { completed: true },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await payload(await request(`/v1/reminders/${first.id}`, { auth: "agent" }))).reminder,
+    ).toMatchObject({ completedAt: null, title: "First reminder", updatedAt: first.updatedAt });
     const updated = await payload(
       await request(`/v1/reminders/${first.id}`, {
         auth: "agent",
         method: "PATCH",
         body: {
+          expectedUpdatedAt: first.updatedAt,
           title: "Updated reminder",
           notes: null,
           dueAt: null,
@@ -1632,44 +1853,60 @@ describe.sequential("ilo API", () => {
       dueAt: null,
       priority: "low",
     });
-    expect(
-      (
-        await payload(
-          await request(`/v1/reminders/${first.id}`, {
-            auth: "agent",
-            method: "PATCH",
-            body: { title: "Partially updated reminder" },
-          }),
-        )
-      ).reminder,
-    ).toMatchObject({
+    const conflictingUpdate = await request(`/v1/reminders/${first.id}`, {
+      auth: "agent",
+      method: "PATCH",
+      body: {
+        expectedUpdatedAt: first.updatedAt,
+        title: "Stale agent update",
+      },
+    });
+    expect(conflictingUpdate.status).toBe(409);
+    expect((await payload(conflictingUpdate)).error).toMatchObject({
+      code: "conflict",
+      details: { currentUpdatedAt: updated.reminder.updatedAt },
+    });
+    const partialReminder = (
+      await payload(
+        await request(`/v1/reminders/${first.id}`, {
+          auth: "agent",
+          method: "PATCH",
+          body: {
+            expectedUpdatedAt: updated.reminder.updatedAt,
+            title: "Partially updated reminder",
+          },
+        }),
+      )
+    ).reminder;
+    expect(partialReminder).toMatchObject({
       dueAt: null,
       notes: null,
       priority: "low",
       timezone: null,
       title: "Partially updated reminder",
     });
-    expect(
-      (
-        await payload(
-          await request(`/v1/reminders/${first.id}`, {
-            auth: "agent",
-            method: "PATCH",
-            body: { dueAt: "2026-07-13T18:00:00.000Z" },
-          }),
-        )
-      ).reminder.dueAt,
-    ).toBe("2026-07-13T18:00:00.000Z");
-    expect(
-      (
-        await payload(
-          await request(`/v1/reminders/${first.id}/complete`, {
-            auth: "agent",
-            body: { completed: true },
-          }),
-        )
-      ).reminder.completedAt,
-    ).toBeTruthy();
+    const dueReminder = (
+      await payload(
+        await request(`/v1/reminders/${first.id}`, {
+          auth: "agent",
+          method: "PATCH",
+          body: {
+            dueAt: "2026-07-13T18:00:00.000Z",
+            expectedUpdatedAt: partialReminder.updatedAt,
+          },
+        }),
+      )
+    ).reminder;
+    expect(dueReminder.dueAt).toBe("2026-07-13T18:00:00.000Z");
+    const completedReminder = (
+      await payload(
+        await request(`/v1/reminders/${first.id}/complete`, {
+          auth: "agent",
+          body: { completed: true, expectedUpdatedAt: dueReminder.updatedAt },
+        }),
+      )
+    ).reminder;
+    expect(completedReminder.completedAt).toBeTruthy();
     expect(
       (await payload(await request("/v1/reminders?completed=true", { auth: "agent" }))).items,
     ).toHaveLength(1);
@@ -1681,31 +1918,179 @@ describe.sequential("ilo API", () => {
         ...briefAfterCompletion.brief.today,
       ].some((reminder: { id: string }) => reminder.id === first.id),
     ).toBe(false);
-    expect(
-      (
-        await payload(
-          await request(`/v1/reminders/${first.id}/complete`, {
-            auth: "agent",
-            body: { completed: false },
-          }),
-        )
-      ).reminder.completedAt,
-    ).toBeNull();
+    const reopenedReminder = (
+      await payload(
+        await request(`/v1/reminders/${first.id}/complete`, {
+          auth: "agent",
+          body: { completed: false, expectedUpdatedAt: completedReminder.updatedAt },
+        }),
+      )
+    ).reminder;
+    expect(reopenedReminder.completedAt).toBeNull();
     expect(
       (await request(`/v1/reminders/${second.id}`, { auth: "agent", method: "DELETE" })).status,
-    ).toBe(204);
+    ).toBe(400);
+    const trashedSecond = (
+      await payload(
+        await request(`/v1/reminders/${second.id}/trash`, {
+          auth: "agent",
+          body: { expectedUpdatedAt: second.updatedAt },
+        }),
+      )
+    ).reminder;
     expect((await request(`/v1/reminders/${second.id}`, { auth: "agent" })).status).toBe(404);
     expect(
       (
+        await request(`/v1/reminders/${second.id}/restore`, {
+          auth: "agent",
+          body: {},
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
         await payload(
-          await request(`/v1/reminders/${second.id}/restore`, { auth: "agent", method: "POST" }),
+          await request(`/v1/reminders/${second.id}/restore`, {
+            auth: "agent",
+            body: { expectedUpdatedAt: trashedSecond.updatedAt },
+          }),
         )
       ).reminder.id,
     ).toBe(second.id);
     expect(
-      (await request(`/v1/reminders/${second.id}/restore`, { auth: "agent", method: "POST" }))
-        .status,
+      (
+        await request(`/v1/reminders/${second.id}/restore`, {
+          auth: "agent",
+          body: { expectedUpdatedAt: trashedSecond.updatedAt },
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await request(`/v1/reminders/${crypto.randomUUID()}/restore`, {
+          auth: "session",
+          body: {},
+        })
+      ).status,
     ).toBe(404);
+
+    const updateRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent update" },
+        }),
+      )
+    ).reminder;
+    const updateRace = await Promise.all([
+      request(`/v1/reminders/${updateRaceReminder.id}`, {
+        auth: "agent",
+        body: {
+          expectedUpdatedAt: updateRaceReminder.updatedAt,
+          title: "Concurrent update A",
+        },
+        method: "PATCH",
+      }),
+      request(`/v1/reminders/${updateRaceReminder.id}`, {
+        auth: "agent",
+        body: {
+          expectedUpdatedAt: updateRaceReminder.updatedAt,
+          title: "Concurrent update B",
+        },
+        method: "PATCH",
+      }),
+    ]);
+    expect(updateRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    const successfulConcurrentUpdate = await payload(
+      updateRace.find((response) => response.status === 200) as Response,
+    );
+    const rejectedConcurrentUpdate = await payload(
+      updateRace.find((response) => response.status === 409) as Response,
+    );
+    expect(rejectedConcurrentUpdate.error).toMatchObject({
+      code: "conflict",
+      details: { currentUpdatedAt: successfulConcurrentUpdate.reminder.updatedAt },
+    });
+
+    const stateRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent state change" },
+        }),
+      )
+    ).reminder;
+    const completionRace = await Promise.all([
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: true, expectedUpdatedAt: stateRaceReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: true, expectedUpdatedAt: stateRaceReminder.updatedAt },
+      }),
+    ]);
+    expect(completionRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    const completedStateRaceReminder = (
+      await payload(await request(`/v1/reminders/${stateRaceReminder.id}`, { auth: "agent" }))
+    ).reminder;
+    const reopenRace = await Promise.all([
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: false, expectedUpdatedAt: completedStateRaceReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: false, expectedUpdatedAt: completedStateRaceReminder.updatedAt },
+      }),
+    ]);
+    expect(reopenRace.map((response) => response.status).sort()).toEqual([200, 409]);
+
+    const trashRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent trash" },
+        }),
+      )
+    ).reminder;
+    const trashRace = await Promise.all([
+      request(`/v1/reminders/${trashRaceReminder.id}/trash`, {
+        auth: "agent",
+        body: { expectedUpdatedAt: trashRaceReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${trashRaceReminder.id}/trash`, {
+        auth: "agent",
+        body: { expectedUpdatedAt: trashRaceReminder.updatedAt },
+      }),
+    ]);
+    expect(trashRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    const trashedReminder = (
+      await payload(trashRace.find((response) => response.status === 200) as Response)
+    ).reminder;
+    const restoreRace = await Promise.all([
+      request(`/v1/reminders/${trashRaceReminder.id}/restore`, {
+        auth: "agent",
+        body: { expectedUpdatedAt: trashedReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${trashRaceReminder.id}/restore`, {
+        auth: "agent",
+        body: { expectedUpdatedAt: trashedReminder.updatedAt },
+      }),
+    ]);
+    expect(restoreRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    await request(`/v1/reminders/${updateRaceReminder.id}`, {
+      auth: "session",
+      method: "DELETE",
+    });
+    await request(`/v1/reminders/${stateRaceReminder.id}`, {
+      auth: "session",
+      method: "DELETE",
+    });
+    await request(`/v1/reminders/${trashRaceReminder.id}`, {
+      auth: "session",
+      method: "DELETE",
+    });
 
     expect(
       (
@@ -2313,13 +2698,39 @@ describe.sequential("ilo API", () => {
       ).status,
     ).toBe(400);
 
-    const audit = (await payload(await request("/v1/audit", { auth: "agent" }))).events;
+    const audit = (await payload(await request("/v1/audit?limit=100", { auth: "agent" }))).events;
     expect(
-      audit.some(
+      audit.find(
         (entry: { action: string; actorType: string }) =>
           entry.action === "reminder.created" && entry.actorType === "agent",
       ),
-    ).toBe(true);
+    ).toMatchObject({
+      after: {
+        authorization: {
+          kind: "scoped_agent_permission",
+        },
+        notes: "[redacted]",
+        policy: "approved_rule",
+        source: {
+          accountId: null,
+          provider: "local",
+          sourceType: "reminder",
+        },
+        title: "[redacted]",
+      },
+    });
+    expect(
+      audit.find(
+        (entry: { action: string; entityId: string }) =>
+          entry.action === "assistant.attention.updated" && entry.entityId === reminderAttention.id,
+      ),
+    ).toMatchObject({
+      after: {
+        relatedEntityId: first.id,
+        relatedEntityType: "reminder",
+        source: first.source,
+      },
+    });
     expect(audit.some((entry: { action: string }) => entry.action === "task.created")).toBe(true);
     expect(logs).toHaveBeenCalled();
     expect(

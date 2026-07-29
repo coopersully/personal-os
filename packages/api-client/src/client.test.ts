@@ -52,6 +52,13 @@ const reminder: Reminder = {
   dueAt: null,
   timezone: null,
   priority: "medium",
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: now,
+    sourceType: "reminder",
+  },
   completedAt: null,
   createdAt: now,
   updatedAt: now,
@@ -944,13 +951,37 @@ function apiFetch() {
     if (url.pathname === "/v1/events") return json({ events: [event] });
     if (url.pathname.includes("/blocks/") && url.pathname.endsWith("/trash"))
       return json({ event });
+    if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/trash"))
+      return json({ reminder });
     if (url.pathname.endsWith("/trash"))
       return json({ revision: { blockUpdatedAtById: {}, eventId: id, updatedAt: now } });
     if (url.pathname.endsWith("/attention") && url.pathname.includes("/events/"))
       return json({ item: attentionItem });
     if (url.pathname.includes("/events/")) return json({ event });
+    if (url.pathname === "/v1/reminders/overdue-deferral-preview")
+      return json({
+        preview: {
+          candidates: [
+            {
+              dueAt: "2026-07-13T10:00:00.000Z",
+              id,
+              priority: reminder.priority,
+              proposedDueAt: "2026-07-14T13:00:00.000Z",
+              proposedTimezone: "America/New_York",
+              source: reminder.source,
+              title: reminder.title,
+              updatedAt: reminder.updatedAt,
+            },
+          ],
+          matchedCount: 1,
+          policy: "preview",
+          previewedAt: now,
+        },
+      });
     if (url.pathname === "/v1/reminders" && method === "POST") return json({ reminder }, 201);
     if (url.pathname === "/v1/reminders") return json({ items: [reminder], nextCursor: null });
+    if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/attention"))
+      return json({ item: attentionItem });
     if (url.pathname.includes("/reminders/")) return json({ reminder });
     if (url.pathname === "/v1/tasks" && method === "POST") return json({ task }, 201);
     if (url.pathname === "/v1/tasks") return json({ items: [task], nextCursor: null });
@@ -1051,9 +1082,29 @@ describe("ilo API client", () => {
         priority: "medium",
       }),
     ).resolves.toEqual(reminder);
+    await expect(api.getReminder(id)).resolves.toEqual(reminder);
+    await expect(
+      api.previewOverdueReminderDeferral({
+        limit: 25,
+        overdueBefore: now,
+        proposedDueAt: "2026-07-14T13:00:00.000Z",
+        timezone: "America/New_York",
+      }),
+    ).resolves.toMatchObject({ matchedCount: 1, policy: "preview" });
     await expect(api.updateReminder(id, { title: "Changed" })).resolves.toEqual(reminder);
     await expect(api.completeReminder(id, true)).resolves.toEqual(reminder);
     await expect(api.restoreReminder(id)).resolves.toEqual(reminder);
+    await expect(api.trashReminder(id, now)).resolves.toEqual(reminder);
+    await expect(
+      api.upsertReminderAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "follow_up",
+        occursAt: now,
+        summary: "Clarify this reminder.",
+        title: "Reminder needs review",
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.deleteReminder(id);
     await expect(api.listTasks({ status: "scheduled", limit: 10 })).resolves.toEqual({
       items: [task],

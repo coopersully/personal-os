@@ -1,4 +1,5 @@
 import type {
+  attentionItems,
   calendarEvents,
   calendars,
   mailboxes,
@@ -7,6 +8,7 @@ import type {
   users,
 } from "@personal-os/database";
 import type {
+  AttentionItem,
   Calendar,
   CalendarEvent,
   CalendarEventBlock,
@@ -18,6 +20,7 @@ import type {
 } from "@personal-os/domain";
 
 type UserRow = typeof users.$inferSelect;
+type AttentionItemRow = typeof attentionItems.$inferSelect;
 type ReminderRow = typeof reminders.$inferSelect;
 type CalendarEventRow = typeof calendarEvents.$inferSelect;
 type CalendarRow = typeof calendars.$inferSelect;
@@ -49,6 +52,25 @@ export function serializeUser(row: UserRow): User {
   };
 }
 
+export function serializeAttentionItem(row: AttentionItemRow): AttentionItem {
+  return {
+    createdAt: row.createdAt.toISOString(),
+    domain: row.domain,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    id: row.id,
+    importance: row.importance,
+    kind: row.kind,
+    occursAt: row.occursAt?.toISOString() ?? null,
+    relatedEntityId: row.relatedEntityId,
+    relatedEntityType: row.relatedEntityType,
+    source: row.source,
+    status: row.status,
+    summary: row.summary,
+    title: row.title,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
 export function serializeReminder(row: ReminderRow): Reminder {
   return {
     completedAt: row.completedAt?.toISOString() ?? null,
@@ -57,6 +79,13 @@ export function serializeReminder(row: ReminderRow): Reminder {
     id: row.id,
     notes: row.notes,
     priority: row.priority,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: row.updatedAt.toISOString(),
+      sourceType: "reminder",
+    },
     timezone: row.timezone,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),

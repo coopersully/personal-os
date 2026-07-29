@@ -60,9 +60,12 @@ import {
   passwordSchema,
   previewCalendarCommitmentInputSchema,
   registerInputSchema,
+  reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
   reminderPrioritySchema,
+  reminderProfilePreferencesSchema,
   reminderSchema,
+  reminderTimeZoneSchema,
   resolveStoredMailRule,
   sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
@@ -85,6 +88,8 @@ import {
   updateUserInputSchema,
   upsertDomainProfileInputSchema,
   upsertMailProfileInputSchema,
+  upsertReminderAttentionItemInputSchema,
+  upsertReminderProfileInputSchema,
   userSchema,
   weatherLocationOptionSchema,
   weatherLocationSearchQuerySchema,
@@ -156,7 +161,7 @@ describe("domain schemas", () => {
         domain: "mail",
         instructions: ["Keep delivery problems visible."],
         objective: "Keep a clean inbox.",
-        preferences: { inboxStyle: "signal_only", retentionDays: null },
+        preferences: { retentionDays: null },
         sourceContexts: [],
         status: "draft",
         summary: "Only high-signal mail stays visible.",
@@ -244,6 +249,69 @@ describe("domain schemas", () => {
         summary: "Conflicting source meanings.",
       }).success,
     ).toBe(false);
+    const reminderPreferences = {
+      defaultCapture: "due_when_stated",
+      dueAtMeaning: "deadline",
+      notificationLeadMinutes: 30,
+      overdueBehavior: "propose_deferral",
+      overdueReviewAfterDays: 2,
+      preferredAutomaticActions: ["create", "complete"],
+      preferredMutationPolicy: "approve_each",
+      priorityHighMeaning: "Needs attention today",
+      priorityLowMeaning: "Optional when convenient",
+      priorityMediumMeaning: "Should happen soon",
+      reviewPriorityAtOrAbove: "medium",
+      timezoneBehavior: "ask_when_ambiguous",
+    } as const;
+    expect(reminderProfilePreferencesSchema.parse(reminderPreferences)).toEqual(
+      reminderPreferences,
+    );
+    expect(
+      reminderProfilePreferencesSchema.safeParse({
+        ...reminderPreferences,
+        preferredMutationPolicy: "approved_rule",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertReminderProfileInputSchema.parse({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep commitments visible.",
+        preferences: { priorityHighMeaning: "  Needs attention today  " },
+        sourceContexts: [],
+        status: "draft",
+        summary: "Partial Reminder setup.",
+      }),
+    ).toMatchObject({
+      domain: "reminders",
+      preferences: { priorityHighMeaning: "Needs attention today" },
+      status: "draft",
+    });
+    expect(
+      upsertReminderProfileInputSchema.safeParse({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep commitments visible.",
+        preferences: {},
+        sourceContexts: [],
+        status: "active",
+        summary: "Incomplete Reminder setup.",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertReminderProfileInputSchema.safeParse({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep commitments visible.",
+        preferences: reminderPreferences,
+        sourceContexts: [],
+        status: "active",
+        summary: "Complete Reminder setup.",
+      }).success,
+    ).toBe(true);
     expect(
       createAttentionItemInputSchema.parse({
         domain: "calendar",
@@ -660,10 +728,58 @@ describe("domain schemas", () => {
         createdAt: start,
         updatedAt: start,
         completedAt: null,
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: id,
+          revision: start,
+          sourceType: "reminder",
+        },
       }).priority,
     ).toBe("medium");
+    expect(
+      reminderDeferralPreviewInputSchema.parse({
+        overdueBefore: start,
+        proposedDueAt: end,
+      }),
+    ).toMatchObject({ limit: 100, timezone: null });
+    expect(
+      reminderDeferralPreviewInputSchema.safeParse({
+        overdueBefore: end,
+        proposedDueAt: start,
+      }).success,
+    ).toBe(false);
+    expect(
+      reminderDeferralPreviewInputSchema.safeParse({
+        overdueBefore: start,
+        proposedDueAt: start,
+      }).success,
+    ).toBe(false);
+    expect(reminderTimeZoneSchema.safeParse("definitely/not-a-zone").success).toBe(false);
+    expect(
+      reminderDeferralPreviewInputSchema.safeParse({
+        overdueBefore: start,
+        proposedDueAt: end,
+        timezone: "definitely/not-a-zone",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertReminderAttentionItemInputSchema.parse({
+        summary: "Clarify what needs to happen.",
+        title: "Reminder needs review",
+      }),
+    ).toMatchObject({
+      importance: "high",
+      kind: "follow_up",
+    });
     expect(reminderListQuerySchema.parse({ completed: "true" }).completed).toBe(true);
     expect(reminderListQuerySchema.parse({ completed: "false" }).completed).toBe(false);
+    expect(
+      reminderListQuerySchema.safeParse({
+        dueAfter: "2026-07-14T00:00:00.000Z",
+        dueBefore: "2026-07-13T00:00:00.000Z",
+      }).success,
+    ).toBe(false);
 
     expect(taskStatusSchema.parse("scheduled")).toBe("scheduled");
     expect(

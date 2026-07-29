@@ -49,14 +49,20 @@ describe("pagination, errors, and OpenAPI", () => {
   });
 
   it("round-trips valid cursors and rejects every malformed shape", () => {
-    const cursor = { createdAt: new Date("2026-07-13T12:00:00Z"), id: "abc" };
+    const cursor = {
+      createdAt: new Date("2026-07-13T12:00:00Z"),
+      id: "11111111-1111-4111-8111-111111111111",
+    };
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
     for (const value of [
       "",
-      Buffer.from("not-a-date|id").toString("base64url"),
+      Buffer.from("not-a-date|11111111-1111-4111-8111-111111111111").toString("base64url"),
       Buffer.from("date-only").toString("base64url"),
       Buffer.from("2026-07-13T12:00:00Z||").toString("base64url"),
-      Buffer.from("2026-07-13T12:00:00Z|id|extra").toString("base64url"),
+      Buffer.from("2026-07-13T12:00:00Z|not-a-uuid").toString("base64url"),
+      Buffer.from("2026-07-13T12:00:00Z|11111111-1111-4111-8111-111111111111|extra").toString(
+        "base64url",
+      ),
     ]) {
       expect(() => decodeCursor(value)).toThrow("pagination cursor is invalid");
     }
@@ -151,5 +157,14 @@ describe("pagination, errors, and OpenAPI", () => {
     expect(Object.keys(document.paths)).toEqual(
       expect.arrayContaining(["/v1/goals", "/v1/goals/{id}", "/v1/motives", "/v1/motives/{id}"]),
     );
+    expect(document.paths["/v1/reminders/{id}"].delete.responses).toEqual({
+      204: { description: "Reminder moved to trash" },
+    });
+    expect(document.paths["/v1/reminders/{id}/trash"].post.responses).toEqual({
+      200: { description: expect.stringContaining("Guarded recoverable") },
+    });
+    expect(document.paths["/v1/reminders/{id}/attention"].put.responses).toEqual({
+      200: { description: expect.stringContaining("attention item") },
+    });
   });
 });

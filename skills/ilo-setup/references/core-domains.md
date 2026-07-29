@@ -3,11 +3,11 @@
 Use the same sequence for every domain: inspect sources, ask concise example-based questions, save a
 draft profile, preview proposed behavior, and activate only after acceptance.
 
-## Reminders and tasks
+## Tasks
 
-Learn when the user means a simple reminder versus a planned task, default capture location,
-priority meanings, estimate and scheduling preferences, notification lead times, and how overdue
-items should be deferred or reviewed. Keep deadlines distinct from scheduled work.
+Learn when the user means planned work rather than a simple reminder, default capture location,
+priority meanings, estimate and scheduling preferences, and how overdue work should be deferred or
+reviewed. Keep deadlines distinct from scheduled work.
 
 ## Attention items
 

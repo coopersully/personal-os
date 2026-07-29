@@ -25,6 +25,7 @@ import {
   auditAttentionItemMetadata,
   auditDomainProfileMetadata,
   domainProfileChangedFields,
+  serializeAttentionItem,
 } from "./serialization.js";
 import type { Principal } from "./types.js";
 
@@ -48,7 +49,7 @@ export function createAssistantService({
     status: UpsertDomainProfileInput["status"],
     actorType: Principal["actorType"],
     preferences: UpsertDomainProfileInput["preferences"],
-  ) => Promise<void>;
+  ) => Promise<UpsertDomainProfileInput["preferences"] | undefined>;
 }) {
   async function findProfile(userId: string, domain: AssistantDomain) {
     return (
@@ -134,29 +135,30 @@ export function createAssistantService({
       input: UpsertDomainProfileInput,
       context: MutationContext,
     ): Promise<DomainProfile> {
-      const values = {
-        categories: input.categories,
-        domain: input.domain,
-        instructions: input.instructions,
-        objective: input.objective,
-        preferences: input.preferences,
-        sourceContexts: input.sourceContexts,
-        status: input.status,
-        summary: input.summary,
-      };
       const updatedAt = now();
       let saved: typeof domainProfiles.$inferSelect;
       try {
         saved = await db.transaction(async (transaction) => {
-          await validateProfileSources(
-            transaction,
-            input.domain,
-            context.principal.userId,
-            input.sourceContexts.map((source) => source.sourceId),
-            input.status,
-            context.principal.actorType,
-            input.preferences,
-          );
+          const preferences =
+            (await validateProfileSources(
+              transaction,
+              input.domain,
+              context.principal.userId,
+              input.sourceContexts.map((source) => source.sourceId),
+              input.status,
+              context.principal.actorType,
+              input.preferences,
+            )) ?? input.preferences;
+          const values = {
+            categories: input.categories,
+            domain: input.domain,
+            instructions: input.instructions,
+            objective: input.objective,
+            preferences,
+            sourceContexts: input.sourceContexts,
+            status: input.status,
+            summary: input.summary,
+          };
           const [existing] = await transaction
             .select()
             .from(domainProfiles)
@@ -287,6 +289,19 @@ export function createAssistantService({
           "Use the Calendar attention endpoint so Ilo can validate and derive the event source.",
         );
       }
+      if (
+        (input.domain === "reminders" &&
+          (input.relatedEntityId !== null ||
+            input.relatedEntityType !== null ||
+            input.source !== null)) ||
+        input.relatedEntityType === "reminder" ||
+        input.source?.sourceType === "reminder"
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Use the Reminder attention endpoint so Ilo can validate and derive the Reminder source.",
+        );
+      }
       const created = await db.transaction(async (transaction) => {
         const item = requireDatabaseRecord(
           (
@@ -394,24 +409,5 @@ function serializeProfile(row: typeof domainProfiles.$inferSelect): DomainProfil
     summary: row.summary,
     updatedAt: row.updatedAt.toISOString(),
     version: row.version,
-  };
-}
-
-function serializeAttentionItem(row: typeof attentionItems.$inferSelect): AttentionItem {
-  return {
-    createdAt: row.createdAt.toISOString(),
-    domain: row.domain,
-    expiresAt: row.expiresAt?.toISOString() ?? null,
-    id: row.id,
-    importance: row.importance,
-    kind: row.kind,
-    occursAt: row.occursAt?.toISOString() ?? null,
-    relatedEntityId: row.relatedEntityId,
-    relatedEntityType: row.relatedEntityType,
-    source: row.source,
-    status: row.status,
-    summary: row.summary,
-    title: row.title,
-    updatedAt: row.updatedAt.toISOString(),
   };
 }

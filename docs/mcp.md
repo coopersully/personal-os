@@ -15,12 +15,13 @@ exchange is a bounded shared-MCP follow-up; Finance does not invent a domain-loc
 
 ## Tools
 
-The server exposes read/create/update/complete/delete reminder tools; read/create/update/delete event
-tools; calendar discovery and an evidence-based commitment preview tool; mailbox, mail search,
-conversation, and mail rule tools; actor-aware activity history; and Finance tools. Destructive,
-read-only, idempotent, and open-world annotations are compatible-host UX hints only. Authorization,
-policy, source evidence, provider capability, conflict handling, and partial-effect reporting remain
-deterministic API behavior.
+The server exposes focused Reminder list/get/create/update/complete/trash/restore tools and an exact,
+read-only overdue-deferral preview; read/create/update/delete event tools; calendar discovery and an
+evidence-based commitment preview tool; mailbox, mail search, conversation, and mail rule tools;
+actor-aware activity history; and Finance tools. Destructive, read-only, idempotent, and open-world
+annotations are compatible-host UX hints only. Authorization, policy, source evidence, provider
+capability, structured errors, conflict handling, audit history, recoverable deletion, and
+partial-effect reporting remain deterministic API behavior.
 
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
 
@@ -33,6 +34,25 @@ The shared assistant tools give Claude, Codex, and other MCP hosts one consisten
   the owned event, derives its source reference, refreshes the open event/kind item, and writes a
   redacted audit atomically. Generic unlinked Calendar notes remain available, but generic callers
   cannot claim `calendar_event` provenance.
+
+Reminders use a typed profile vocabulary for capture defaults, priority meanings, deadline versus
+notification intent, time zones, overdue review, thresholds, and preferred automatic actions.
+Those stored preferences guide agents; they do not grant, revoke, or enforce API authority.
+`dueAt` drives due/overdue views and is not proof of notification delivery. Direct single-Reminder
+mutations remain audited API actions. Their audit policy comes from the API's validated interactive
+user or scoped-agent decision, never from profile preferences. Bulk overdue deferral begins with
+`preview_overdue_reminder_deferral`, which returns the complete bounded candidate set, `preview`
+policy, `previewedAt`, source references, and revisions without mutating. Guarded individual updates and
+consequential state changes use `expectedUpdatedAt` so concurrent changes surface as conflicts.
+The API service requires that revision for every agent update, complete/reopen, trash, and restore,
+not merely for MCP callers. Guarded trash and restore revisions travel in POST request bodies;
+the bodyless DELETE route remains signed-in-user compatibility and still performs recoverable
+trash rather than permanent deletion.
+`create_reminder_attention_item` locks and validates one active Reminder, derives its local source
+and revision, and refreshes the open Reminder/kind item. Generic attention writes cannot claim
+Reminder provenance.
+Reminder list pagination accepts the returned `nextCursor`, and Reminder MCP failures preserve the
+API error code, safe details, request ID, and HTTP status in structured content.
 
 Rules share a versioned envelope—name, description, profile, sources, nullable confidence
 threshold, policy, enabled state, and version—while each feature owns its condition and action

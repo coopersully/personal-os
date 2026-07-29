@@ -24,6 +24,13 @@ const reminder: Reminder = {
   dueAt: null,
   timezone: null,
   priority: "medium",
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: now,
+    sourceType: "reminder",
+  },
   completedAt: null,
   createdAt: now,
   updatedAt: now,
@@ -411,6 +418,27 @@ function mockApi() {
     deleteReminder: vi.fn(async () => undefined),
     deleteTask: vi.fn(async () => undefined),
     listReminders: vi.fn(async () => ({ items: [reminder], nextCursor: null })),
+    getReminder: vi.fn(async () => reminder),
+    previewOverdueReminderDeferral: vi.fn(async () => ({
+      candidates: [
+        {
+          dueAt: "2026-07-13T10:00:00.000Z",
+          id,
+          priority: reminder.priority,
+          proposedDueAt: "2026-07-14T13:00:00.000Z",
+          proposedTimezone: "America/New_York",
+          source: reminder.source,
+          title: reminder.title,
+          updatedAt: reminder.updatedAt,
+        },
+      ],
+      matchedCount: 1,
+      policy: "preview" as const,
+      previewedAt: now,
+    })),
+    restoreReminder: vi.fn(async () => reminder),
+    trashReminder: vi.fn(async () => reminder),
+    upsertReminderAttentionItem: vi.fn(async () => attentionItem),
     listTasks: vi.fn(async () => ({ items: [task], nextCursor: null })),
     listGoals: vi.fn(async () => []),
     createGoal: vi.fn(async () => ({
@@ -585,13 +613,17 @@ describe("ilo MCP server", () => {
       "get_finance_review_queue",
       "propose_finance_categorizations",
       "get_finance_overview",
-      "list_x_bookmarks",
-      "sync_x_bookmarks",
       "list_reminders",
+      "get_reminder",
+      "preview_overdue_reminder_deferral",
       "create_reminder",
+      "create_reminder_attention_item",
       "update_reminder",
       "complete_reminder",
       "delete_reminder",
+      "restore_reminder",
+      "list_x_bookmarks",
+      "sync_x_bookmarks",
       "list_tasks",
       "create_task",
       "update_task",
@@ -636,6 +668,23 @@ describe("ilo MCP server", () => {
     ]);
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
+    });
+    const reminderTools = tools.tools.filter((tool) => tool.name.includes("reminder"));
+    expect(reminderTools).toHaveLength(9);
+    for (const tool of reminderTools) {
+      expect(tool.annotations).toEqual(
+        expect.objectContaining({
+          destructiveHint: expect.any(Boolean),
+          idempotentHint: expect.any(Boolean),
+          openWorldHint: false,
+          readOnlyHint: expect.any(Boolean),
+        }),
+      );
+    }
+    expect(tools.tools.find((tool) => tool.name === "delete_reminder")?.annotations).toMatchObject({
+      destructiveHint: true,
+      idempotentHint: false,
+      readOnlyHint: false,
     });
     expect(
       tools.tools.find((tool) => tool.name === "propose_finance_categorizations")?.annotations,
@@ -942,13 +991,31 @@ describe("ilo MCP server", () => {
     await client.callTool({ name: "sync_x_bookmarks", arguments: {} });
     await client.callTool({
       name: "list_reminders",
-      arguments: { completed: false, query: "Test" },
+      arguments: { completed: false, cursor: "next-page", limit: 25, query: "Test" },
+    });
+    await client.callTool({ name: "get_reminder", arguments: { id } });
+    await client.callTool({
+      name: "preview_overdue_reminder_deferral",
+      arguments: {
+        overdueBefore: now,
+        proposedDueAt: "2026-07-14T13:00:00.000Z",
+        timezone: "America/New_York",
+      },
     });
     await client.callTool({ name: "create_reminder", arguments: { title: "Test" } });
+    await client.callTool({
+      name: "create_reminder_attention_item",
+      arguments: {
+        reminderId: id,
+        summary: "Clarify this reminder.",
+        title: "Reminder needs review",
+      },
+    });
     await client.callTool({
       name: "update_reminder",
       arguments: {
         id,
+        expectedUpdatedAt: now,
         title: "Changed",
         dueAt: null,
         notes: null,
@@ -956,9 +1023,43 @@ describe("ilo MCP server", () => {
         priority: "high",
       },
     });
-    await client.callTool({ name: "complete_reminder", arguments: { id } });
-    const deletedReminder = await client.callTool({ name: "delete_reminder", arguments: { id } });
-    expect(deletedReminder.structuredContent).toEqual({ ok: true });
+    api.updateReminder.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "conflict",
+        details: { currentUpdatedAt: "2026-07-13T12:01:00.000Z" },
+        message: "The reminder changed since it was loaded.",
+        requestId: "request-conflict",
+        status: 409,
+      }),
+    );
+    const conflict = await client.callTool({
+      name: "update_reminder",
+      arguments: { expectedUpdatedAt: now, id, title: "Stale change" },
+    });
+    expect(conflict).toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: {
+          code: "conflict",
+          details: { currentUpdatedAt: "2026-07-13T12:01:00.000Z" },
+          requestId: "request-conflict",
+          status: 409,
+        },
+      },
+    });
+    await client.callTool({
+      name: "complete_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
+    const deletedReminder = await client.callTool({
+      name: "delete_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
+    expect(deletedReminder.structuredContent).toEqual({ result: reminder });
+    await client.callTool({
+      name: "restore_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
     await client.callTool({ name: "list_tasks", arguments: { status: "scheduled" } });
     await client.callTool({
       name: "create_task",
@@ -1138,7 +1239,21 @@ describe("ilo MCP server", () => {
       timezone: null,
       priority: "medium",
     });
-    expect(api.completeReminder).toHaveBeenCalledWith(id, true);
+    expect(api.completeReminder).toHaveBeenCalledWith(id, true, now);
+    expect(api.getReminder).toHaveBeenCalledWith(id);
+    expect(api.previewOverdueReminderDeferral).toHaveBeenCalledWith({
+      limit: 100,
+      overdueBefore: now,
+      priority: undefined,
+      proposedDueAt: "2026-07-14T13:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    expect(api.updateReminder).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ expectedUpdatedAt: now, title: "Changed" }),
+    );
+    expect(api.trashReminder).toHaveBeenCalledWith(id, now);
+    expect(api.restoreReminder).toHaveBeenCalledWith(id, now);
     expect(api.createTask).toHaveBeenCalledWith({
       title: "Plan task",
       dueAt: null,

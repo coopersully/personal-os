@@ -44,11 +44,13 @@ records. Link to the source record when one exists.
 ## Route by domain
 
 - For mail setup or cleanup rules, read [references/mail.md](references/mail.md).
+- For Reminders setup, overdue review, or Reminder CRUD, read
+  [references/reminders.md](references/reminders.md).
 - For Finance setup and reviewed workflows, read
   [references/finance.md](references/finance.md).
 - For Calendar setup or evidence-based event proposals, read
   [references/calendar.md](references/calendar.md).
-- For reminders/tasks interviews, read
+- For task interviews, read
   [references/core-domains.md](references/core-domains.md).
 
 Goals may inform prioritization when the user enables them, but they are not required for core

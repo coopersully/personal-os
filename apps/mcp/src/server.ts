@@ -7,6 +7,7 @@ import { registerAssistantTools } from "./tools/assistant.js";
 import { registerCalendarEventTools, registerCalendarListTools } from "./tools/calendar.js";
 import { registerFinanceTools } from "./tools/finances.js";
 import { registerMailTools } from "./tools/mail.js";
+import { registerReminderTools } from "./tools/reminders.js";
 import { registerXBookmarkTools } from "./tools/x-bookmarks.js";
 
 type ServerOptions = {
@@ -27,84 +28,8 @@ export function createPersonalOsMcpServer(options: ServerOptions): McpServer {
 
   registerAssistantTools(server, options.api);
   registerFinanceTools(server, options.api);
+  registerReminderTools(server, options.api);
   registerXBookmarkTools(server, options.api);
-
-  server.registerTool(
-    "list_reminders",
-    {
-      annotations: { openWorldHint: false, readOnlyHint: true },
-      description: "List and search the user's reminders.",
-      inputSchema: {
-        completed: z.boolean().optional(),
-        dueAfter: isoDateTime.optional(),
-        dueBefore: isoDateTime.optional(),
-        query: z.string().max(200).optional(),
-      },
-      title: "List reminders",
-    },
-    async (input) => result(await options.api.listReminders(input)),
-  );
-
-  server.registerTool(
-    "create_reminder",
-    {
-      annotations: { openWorldHint: false },
-      description: "Create a reminder in the user's ilo.",
-      inputSchema: {
-        dueAt: isoDateTime.nullable().default(null),
-        notes: z.string().max(10_000).nullable().default(null),
-        priority: z.enum(["low", "medium", "high"]).default("medium"),
-        timezone: timeZone.nullable().default(null),
-        title: z.string().min(1).max(240),
-      },
-      title: "Create reminder",
-    },
-    async (input) => result(await options.api.createReminder(input)),
-  );
-
-  server.registerTool(
-    "update_reminder",
-    {
-      annotations: { idempotentHint: true, openWorldHint: false },
-      description: "Change a reminder's title, notes, deadline, time zone, or priority.",
-      inputSchema: {
-        dueAt: isoDateTime.nullable().optional(),
-        id,
-        notes: z.string().max(10_000).nullable().optional(),
-        priority: z.enum(["low", "medium", "high"]).optional(),
-        timezone: timeZone.nullable().optional(),
-        title: z.string().min(1).max(240).optional(),
-      },
-      title: "Update reminder",
-    },
-    async ({ id: reminderId, ...input }) =>
-      result(await options.api.updateReminder(reminderId, input)),
-  );
-
-  server.registerTool(
-    "complete_reminder",
-    {
-      annotations: { idempotentHint: true, openWorldHint: false },
-      description: "Mark a reminder complete or reopen it.",
-      inputSchema: { completed: z.boolean().default(true), id },
-      title: "Complete or reopen reminder",
-    },
-    async (input) => result(await options.api.completeReminder(input.id, input.completed)),
-  );
-
-  server.registerTool(
-    "delete_reminder",
-    {
-      annotations: { destructiveHint: true, idempotentHint: true, openWorldHint: false },
-      description: "Move a reminder to the recoverable trash.",
-      inputSchema: { id },
-      title: "Delete reminder",
-    },
-    async (input) => {
-      await options.api.deleteReminder(input.id);
-      return emptyResult("Reminder moved to trash.");
-    },
-  );
 
   server.registerTool(
     "list_tasks",

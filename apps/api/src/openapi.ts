@@ -106,16 +106,36 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: { security, responses: { 200: { description: "Reminder page" } } },
         post: { security, responses: { 201: { description: "Reminder created" } } },
       },
+      "/v1/reminders/overdue-deferral-preview": {
+        get: {
+          security,
+          responses: { 200: { description: "Exact read-only overdue deferral preview" } },
+        },
+      },
       "/v1/reminders/{id}": {
-        delete: { security, responses: { 204: { description: "Reminder deleted" } } },
+        delete: { security, responses: { 204: { description: "Reminder moved to trash" } } },
         get: { security, responses: { 200: { description: "Reminder" } } },
         patch: { security, responses: { 200: { description: "Reminder updated" } } },
+      },
+      "/v1/reminders/{id}/trash": {
+        post: {
+          security,
+          responses: { 200: { description: "Guarded recoverable Reminder trash revision" } },
+        },
       },
       "/v1/reminders/{id}/complete": {
         post: { security, responses: { 200: { description: "Reminder completed or reopened" } } },
       },
       "/v1/reminders/{id}/restore": {
         post: { security, responses: { 200: { description: "Reminder restored" } } },
+      },
+      "/v1/reminders/{id}/attention": {
+        put: {
+          security,
+          responses: {
+            200: { description: "Reminder attention item created or refreshed" },
+          },
+        },
       },
       "/v1/tasks": {
         get: { security, responses: { 200: { description: "Task page" } } },

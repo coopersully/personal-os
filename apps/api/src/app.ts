@@ -239,6 +239,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       if (domain === "calendar") {
         await calendar.validateProfileSources(transaction, userId, sourceIds, status, preferences);
       }
+      if (domain === "reminders") {
+        return reminders.validateProfileSources(
+          transaction,
+          userId,
+          sourceIds,
+          status,
+          preferences,
+        );
+      }
       if (domain === "finances") {
         await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
       }

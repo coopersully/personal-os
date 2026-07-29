@@ -3,6 +3,7 @@ import type {
   GoogleConnector,
   GoogleCredentials,
   ICloudConnector,
+  MailSyncResult,
   NormalizedRemoteEvent,
 } from "@personal-os/connectors";
 import { ConnectorError, MailSendPreAcceptanceError } from "@personal-os/connectors";
@@ -618,6 +619,7 @@ describe.sequential("connector service", () => {
     await database.db
       .update(calendarAccounts)
       .set({
+        syncClaimId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
         syncStatus: "syncing",
         updatedAt: new Date(timestamp.getTime() - 31 * 60_000),
       })
@@ -1089,63 +1091,82 @@ describe.sequential("connector service", () => {
     ]);
     const syncMail = google.syncMail;
     if (!syncMail) throw new Error("Google Mail sync is unavailable.");
-    vi.mocked(syncMail).mockResolvedValueOnce({
-      credentials,
-      value: {
-        mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
-        threads: [
-          {
-            bodyText: "Body",
-            from: { address: "sender@example.com", name: "Sender" },
-            mailboxIds: ["INBOX", "UNREAD"],
-            messages: [
-              {
-                attachments: [
-                  {
-                    contentType: "application/pdf",
-                    filename: "brief.pdf",
-                    id: "attachment-1",
-                    size: 42,
-                  },
-                  {
-                    contentType: "text/calendar; method=REQUEST",
-                    filename: "invite.ics",
-                    id: "calendar-attachment-1",
-                    providerAttachmentId: "calendar-attachment-1",
-                    providerPartId: "2",
-                    size: 84,
-                  },
-                  {
-                    contentType: "text/calendar; method=REQUEST",
-                    filename: "",
-                    id: "part:3",
-                    providerAttachmentId: null,
-                    providerPartId: "3",
-                    size: 64,
-                  },
-                ],
-                bodyText: "Body",
-                cc: [],
-                from: { address: "sender@example.com", name: "Sender" },
-                mailboxIds: ["INBOX", "SENT"],
-                providerRevision: "history-1",
-                receivedAt: timestamp,
-                remoteMessageId: "ruled-message",
-                to: [],
-              },
-            ],
-            messageCount: 1,
-            receivedAt: timestamp,
-            remoteThreadId: "ruled-thread",
-            snippet: "Google Mail",
-            starred: false,
-            subject: "Google Mail",
-            to: [],
-            unread: true,
-          },
-        ],
-      },
-    });
+    const completeMailValue: MailSyncResult["value"] = {
+      mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
+      threads: [
+        {
+          bodyText: "Body",
+          from: { address: "sender@example.com", name: "Sender" },
+          mailboxIds: ["INBOX", "UNREAD"],
+          messages: [
+            {
+              attachments: [
+                {
+                  contentType: "text/calendar",
+                  filename: "removed.ics",
+                  id: "removed-calendar-attachment",
+                  providerAttachmentId: "removed-calendar-attachment",
+                  providerPartId: "1",
+                  size: 72,
+                },
+              ],
+              bodyText: "Removed message",
+              cc: [],
+              from: { address: "sender@example.com", name: "Sender" },
+              mailboxIds: ["INBOX"],
+              providerRevision: "history-removed",
+              receivedAt: new Date(timestamp.getTime() - 1_000),
+              remoteMessageId: "removed-message",
+              to: [],
+            },
+            {
+              attachments: [
+                {
+                  contentType: "application/pdf",
+                  filename: "brief.pdf",
+                  id: "attachment-1",
+                  size: 42,
+                },
+                {
+                  contentType: "text/calendar; method=REQUEST",
+                  filename: "invite.ics",
+                  id: "calendar-attachment-1",
+                  providerAttachmentId: "calendar-attachment-1",
+                  providerPartId: "2",
+                  size: 84,
+                },
+                {
+                  contentType: "text/calendar; method=REQUEST",
+                  filename: "",
+                  id: "part:3",
+                  providerAttachmentId: null,
+                  providerPartId: "3",
+                  size: 64,
+                },
+              ],
+              bodyText: "Body",
+              cc: [],
+              from: { address: "sender@example.com", name: "Sender" },
+              mailboxIds: ["INBOX", "SENT"],
+              providerRevision: "history-1",
+              receivedAt: timestamp,
+              remoteMessageId: "ruled-message",
+              to: [],
+            },
+          ],
+          messagesComplete: true,
+          messageCount: 2,
+          receivedAt: timestamp,
+          remoteThreadId: "ruled-thread",
+          snippet: "Google Mail",
+          starred: false,
+          subject: "Google Mail",
+          to: [],
+          unread: true,
+        },
+      ],
+    };
+    vi.mocked(syncMail).mockResolvedValueOnce({ credentials, value: completeMailValue });
     await service.syncAccount(userId, account.id);
     expect(google.updateMailThread).toHaveBeenCalledWith(expect.anything(), "ruled-thread", {
       addMailboxIds: ["STARRED"],
@@ -1181,9 +1202,12 @@ describe.sequential("connector service", () => {
         }),
       ]),
     );
-    await expect(database.db.select().from(mailMessages)).resolves.toEqual([
-      expect.objectContaining({ remoteMessageId: "ruled-message" }),
-    ]);
+    await expect(database.db.select().from(mailMessages)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ remoteMessageId: "removed-message" }),
+        expect.objectContaining({ remoteMessageId: "ruled-message" }),
+      ]),
+    );
     await expect(database.db.select().from(mailCalendarCommitmentIntakes)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -1228,7 +1252,10 @@ describe.sequential("connector service", () => {
     });
     expect(JSON.stringify(intakeAudit)).not.toContain("invite.ics");
 
-    const [intake] = await database.db.select().from(mailCalendarCommitmentIntakes);
+    const [intake] = await database.db
+      .select()
+      .from(mailCalendarCommitmentIntakes)
+      .where(eq(mailCalendarCommitmentIntakes.remoteMessageId, "ruled-message"));
     const [message] = await database.db
       .select()
       .from(mailMessages)
@@ -1559,6 +1586,91 @@ describe.sequential("connector service", () => {
         .from(mailMessages)
         .where(eq(mailMessages.remoteMessageId, "atomic-message")),
     ).resolves.toEqual([]);
+
+    const [removedIntake] = await database.db
+      .select()
+      .from(mailCalendarCommitmentIntakes)
+      .where(eq(mailCalendarCommitmentIntakes.remoteMessageId, "removed-message"));
+    if (!removedIntake) throw new Error("Removed-message intake fixture is missing.");
+    await database.db
+      .update(mailCalendarCommitmentIntakes)
+      .set({
+        authority: "server_verified",
+        evidenceKind: "test_verified_invitation",
+        status: "succeeded",
+      })
+      .where(eq(mailCalendarCommitmentIntakes.id, removedIntake.id));
+    const completeThread = completeMailValue.threads[0];
+    if (!completeThread?.messages) throw new Error("Complete Gmail thread fixture is missing.");
+    vi.mocked(syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        ...completeMailValue,
+        threads: [
+          {
+            ...completeThread,
+            messageCount: 1,
+            messages: completeThread.messages.filter(
+              (candidate) => candidate.remoteMessageId === "ruled-message",
+            ),
+          },
+        ],
+      },
+    });
+    await service.syncAccount(userId, account.id);
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.id, removedIntake.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        authority: "provider_projected_unverified",
+        evidenceKind: "source_message_missing",
+        sourceMessageId: null,
+        status: "preview_only",
+      }),
+    ]);
+    await expect(
+      database.db
+        .select()
+        .from(mailMessages)
+        .where(eq(mailMessages.remoteMessageId, "removed-message")),
+    ).resolves.toEqual([]);
+    const missingMessageAudits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, removedIntake.id));
+    expect(missingMessageAudits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "mail_calendar_intake.source_unavailable",
+          after: expect.objectContaining({
+            changedFields: expect.arrayContaining(["sourceMessage"]),
+          }),
+        }),
+      ]),
+    );
+    expect(JSON.stringify(missingMessageAudits)).not.toContain("Removed message");
+    vi.mocked(syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        ...completeMailValue,
+        threads: [
+          {
+            ...completeThread,
+            messageCount: 1,
+            messages: completeThread.messages.filter(
+              (candidate) => candidate.remoteMessageId === "ruled-message",
+            ),
+          },
+        ],
+      },
+    });
+    await service.syncAccount(userId, account.id);
+    await expect(
+      database.db.select().from(auditEvents).where(eq(auditEvents.entityId, removedIntake.id)),
+    ).resolves.toHaveLength(missingMessageAudits.length);
   });
 
   it("bounds automatic Mail runs, preserves rules, and drains backlog on a later sync", async () => {
@@ -1606,23 +1718,29 @@ describe.sequential("connector service", () => {
     });
     const boundedSync = service.syncAccount(userId, account.id);
     try {
-      await vi.waitFor(() => expect(updateMailThread).toHaveBeenCalledTimes(2));
+      await vi.waitFor(() => expect(updateMailThread).toHaveBeenCalledOnce());
     } finally {
       releaseWrites?.();
     }
     await boundedSync;
     expect(updateMailThread).toHaveBeenCalledTimes(6);
-    expect(maximumWrites).toBe(2);
+    expect(maximumWrites).toBe(1);
     const runAudits = await database.db
       .select()
       .from(auditEvents)
-      .where(eq(auditEvents.action, "mail.rule.run"));
-    expect(runAudits.at(-1)?.after).toMatchObject({
-      attemptedCount: 6,
-      backlogCount: 1,
-      failedCount: 0,
-      succeededCount: 6,
-    });
+      .where(and(eq(auditEvents.action, "mail.rule.run"), eq(auditEvents.entityId, account.id)));
+    expect(runAudits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          after: expect.objectContaining({
+            attemptedCount: 6,
+            backlogCount: 1,
+            failedCount: 0,
+            succeededCount: 6,
+          }),
+        }),
+      ]),
+    );
     await expect(
       database.db
         .select()
@@ -1656,6 +1774,169 @@ describe.sequential("connector service", () => {
     await service.syncAccount(userId, account.id);
     expect(updateMailThread).toHaveBeenCalledTimes(1);
     vi.mocked(updateMailThread).mockResolvedValue(rotatedCredentials);
+  });
+
+  it("serializes lifecycle transitions against sync-owned Mail provider effects", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Connected account fixture is missing.");
+    const syncMail = google.syncMail;
+    const updateMailThread = google.updateMailThread;
+    if (!syncMail || !updateMailThread) throw new Error("Google Mail fixtures are unavailable.");
+    vi.mocked(syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
+        threads: [
+          {
+            bodyText: "Google Mail",
+            from: { address: "sender@example.com", name: "Sender" },
+            mailboxIds: ["INBOX", "UNREAD"],
+            messageCount: 1,
+            receivedAt: timestamp,
+            remoteThreadId: "lifecycle-fenced-rule-thread",
+            snippet: "Google Mail",
+            starred: false,
+            subject: "Google Mail lifecycle fence",
+            to: [],
+            unread: true,
+          },
+        ],
+      },
+    });
+    let providerStarted: (() => void) | undefined;
+    let releaseProvider: (() => void) | undefined;
+    const providerCallStarted = new Promise<void>((resolveStarted) => {
+      providerStarted = resolveStarted;
+    });
+    vi.mocked(updateMailThread).mockImplementationOnce(async () => {
+      providerStarted?.();
+      await new Promise<void>((resolveProvider) => {
+        releaseProvider = resolveProvider;
+      });
+      return rotatedCredentials;
+    });
+
+    const staleSync = service.syncAccount(userId, account.id);
+    await providerCallStarted;
+    let transitionCompleted = false;
+    const lifecycleTransition = database.db
+      .update(calendarAccounts)
+      .set({
+        syncClaimId: null,
+        syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+        syncStatus: "idle",
+      })
+      .where(eq(calendarAccounts.id, account.id))
+      .then(() => {
+        transitionCompleted = true;
+      });
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+    expect(transitionCompleted).toBe(false);
+    releaseProvider?.();
+    await lifecycleTransition;
+    await expect(staleSync).rejects.toMatchObject({
+      code: "service_unavailable",
+      details: expect.objectContaining({
+        partialEffect: true,
+        repairAction: "reconnect_then_sync_mail_account",
+      }),
+    });
+    await expect(
+      database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, account.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        syncClaimId: null,
+        syncStatus: "idle",
+      }),
+    ]);
+  });
+
+  it("serializes rule revocation against inline Mail provider acceptance", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    const [rule] = await database.db
+      .select()
+      .from(mailRules)
+      .where(eq(mailRules.name, "Read project mail"));
+    if (!account || !rule) throw new Error("Mail rule lifecycle fixtures are missing.");
+    const syncMail = google.syncMail;
+    const updateMailThread = google.updateMailThread;
+    if (!syncMail || !updateMailThread) throw new Error("Google Mail fixtures are unavailable.");
+    vi.mocked(syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
+        threads: [
+          {
+            bodyText: "Google Mail",
+            from: { address: "sender@example.com", name: "Sender" },
+            mailboxIds: ["INBOX", "UNREAD"],
+            messageCount: 1,
+            receivedAt: timestamp,
+            remoteThreadId: "rule-revocation-fenced-thread",
+            snippet: "Google Mail",
+            starred: false,
+            subject: "Google Mail rule revocation fence",
+            to: [],
+            unread: true,
+          },
+        ],
+      },
+    });
+    let providerStarted: (() => void) | undefined;
+    let releaseProvider: (() => void) | undefined;
+    const providerCallStarted = new Promise<void>((resolveStarted) => {
+      providerStarted = resolveStarted;
+    });
+    vi.mocked(updateMailThread).mockImplementationOnce(async () => {
+      providerStarted?.();
+      await new Promise<void>((resolveProvider) => {
+        releaseProvider = resolveProvider;
+      });
+      return rotatedCredentials;
+    });
+
+    const sync = service.syncAccount(userId, account.id);
+    await providerCallStarted;
+    let revocationCompleted = false;
+    const revoke = database.db
+      .update(mailRules)
+      .set({
+        enabled: false,
+        policy: "preview",
+        version: sql`${mailRules.version} + 1`,
+      })
+      .where(eq(mailRules.id, rule.id))
+      .then(() => {
+        revocationCompleted = true;
+      });
+    await new Promise<void>((resolveTurn) => setImmediate(resolveTurn));
+    expect(revocationCompleted).toBe(false);
+    releaseProvider?.();
+    await revoke;
+    try {
+      await expect(sync).rejects.toMatchObject({
+        code: "service_unavailable",
+        details: expect.objectContaining({
+          partialEffect: true,
+          repairAction: "sync_mail_account",
+        }),
+      });
+    } finally {
+      await database.db
+        .update(mailRules)
+        .set({
+          enabled: true,
+          policy: "approved_rule",
+          version: sql`${mailRules.version} + 1`,
+        })
+        .where(eq(mailRules.id, rule.id));
+    }
   });
 
   it("preserves provider repair details when supplemental Mail run-summary persistence fails", async () => {
@@ -4413,7 +4694,14 @@ describe.sequential("connector service", () => {
 
     const restoredMail = {
       mailboxes: [
-        { id: "INBOX", name: "Inbox", role: "inbox" as const, totalCount: 1, unreadCount: 0 },
+        {
+          id: "INBOX",
+          name: "Inbox",
+          providerRevision: "100",
+          role: "inbox" as const,
+          totalCount: 1,
+          unreadCount: 0,
+        },
       ],
       threads: [
         {
@@ -4476,8 +4764,99 @@ describe.sequential("connector service", () => {
       }),
     ]);
 
-    let releaseInFlightMail: ((mail: typeof restoredMail) => void) | undefined;
-    const inFlightMail = new Promise<typeof restoredMail>((resolveMail) => {
+    const [preResetIntake] = await database.db
+      .select()
+      .from(mailCalendarCommitmentIntakes)
+      .where(eq(mailCalendarCommitmentIntakes.remoteMessageId, "capability-message"));
+    if (!preResetIntake) throw new Error("Pre-reset iCloud intake fixture is missing.");
+    await database.db
+      .update(mailCalendarCommitmentIntakes)
+      .set({
+        authority: "server_verified",
+        evidenceKind: "test_verified_invitation",
+        status: "succeeded",
+      })
+      .where(eq(mailCalendarCommitmentIntakes.id, preResetIntake.id));
+    const resetMail = {
+      ...restoredMail,
+      mailboxes: restoredMail.mailboxes.map((mailbox) => ({
+        ...mailbox,
+        providerRevision: "101",
+      })),
+      threads: restoredMail.threads.map((remoteThread) => ({
+        ...remoteThread,
+        messages: remoteThread.messages?.map((remoteMessage) => ({
+          ...remoteMessage,
+          attachments: remoteMessage.attachments.map((attachment, index) => ({
+            ...attachment,
+            id: `INBOX:101:7:${String(index)}`,
+            providerPartId: `INBOX:101:7:${String(index)}`,
+          })),
+          providerRevision: "101:7",
+          remoteMessageId: "INBOX:101:7",
+        })),
+        remoteThreadId: "INBOX:101:7",
+      })),
+    };
+    vi.mocked(icloud.syncMail).mockResolvedValueOnce(resetMail);
+    await service.syncAccount(capabilityUser.id, connected.accountId);
+    await expect(
+      database.db
+        .select()
+        .from(mailCalendarCommitmentIntakes)
+        .where(eq(mailCalendarCommitmentIntakes.id, preResetIntake.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        authority: "provider_projected_unverified",
+        evidenceKind: "source_mailbox_revision_changed",
+        sourceMessageId: null,
+        sourceThreadId: null,
+        status: "preview_only",
+      }),
+    ]);
+    await expect(
+      database.db
+        .select()
+        .from(mailMessages)
+        .where(eq(mailMessages.remoteMessageId, "capability-message")),
+    ).resolves.toEqual([]);
+    const secondResetMail = {
+      ...resetMail,
+      mailboxes: resetMail.mailboxes.map((mailbox) => ({
+        ...mailbox,
+        providerRevision: "102",
+      })),
+      threads: resetMail.threads.map((remoteThread) => ({
+        ...remoteThread,
+        messages: remoteThread.messages?.map((remoteMessage) => ({
+          ...remoteMessage,
+          attachments: remoteMessage.attachments.map((attachment, index) => ({
+            ...attachment,
+            id: `INBOX:102:7:${String(index)}`,
+            providerPartId: `INBOX:102:7:${String(index)}`,
+          })),
+          providerRevision: "102:7",
+          remoteMessageId: "INBOX:102:7",
+        })),
+        remoteThreadId: "INBOX:102:7",
+      })),
+    };
+    vi.mocked(icloud.syncMail).mockResolvedValueOnce(secondResetMail);
+    await service.syncAccount(capabilityUser.id, connected.accountId);
+    const preResetAudits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, preResetIntake.id));
+    expect(
+      preResetAudits.filter(
+        (audit) =>
+          audit.action === "mail_calendar_intake.source_unavailable" &&
+          JSON.stringify(audit.after).includes("mailboxRevision"),
+      ),
+    ).toHaveLength(1);
+
+    let releaseInFlightMail: ((mail: typeof resetMail) => void) | undefined;
+    const inFlightMail = new Promise<typeof resetMail>((resolveMail) => {
       releaseInFlightMail = resolveMail;
     });
     const priorICloudSyncCount = vi.mocked(icloud.syncMail).mock.calls.length;
@@ -4494,21 +4873,59 @@ describe.sequential("connector service", () => {
       },
       "disable-mail-during-sync",
     );
-    releaseInFlightMail?.(restoredMail);
-    await inFlightSync;
+    await service.connectICloud(capabilityUser.id, {
+      appSpecificPassword: "newest-password",
+      calendar: true,
+      email: "capability@icloud.example",
+      mail: true,
+    });
+    const newerMail = {
+      ...resetMail,
+      threads: resetMail.threads.map((remoteThread) => ({
+        ...remoteThread,
+        bodyText: "NEWER BEGIN:VCALENDAR",
+        messages: remoteThread.messages?.map((remoteMessage) => ({
+          ...remoteMessage,
+          bodyText: "NEWER BEGIN:VCALENDAR",
+        })),
+      })),
+    };
+    vi.mocked(icloud.syncMail).mockResolvedValueOnce(newerMail);
+    await service.syncAccount(capabilityUser.id, connected.accountId);
+    releaseInFlightMail?.(resetMail);
+    await expect(inFlightSync).rejects.toMatchObject({ code: "conflict" });
     await expect(
-      database.db.select().from(mailThreads).where(eq(mailThreads.accountId, connected.accountId)),
-    ).resolves.toEqual([]);
+      database.db
+        .select()
+        .from(mailMessages)
+        .where(eq(mailMessages.remoteMessageId, "INBOX:101:7")),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        bodyText: "NEWER BEGIN:VCALENDAR",
+        providerRevision: "101:7",
+      }),
+    ]);
     await expect(
       database.db
         .select()
         .from(mailCalendarCommitmentIntakes)
-        .where(eq(mailCalendarCommitmentIntakes.accountId, connected.accountId)),
+        .where(eq(mailCalendarCommitmentIntakes.remoteMessageId, "INBOX:101:7")),
     ).resolves.toEqual([
       expect.objectContaining({
-        evidenceKind: "source_mail_capability_disabled",
-        sourceMessageId: null,
-        sourceThreadId: null,
+        evidenceKind: "calendar_attachment_metadata",
+        sourceMessageRevision: "101:7",
+      }),
+    ]);
+    await expect(
+      database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, connected.accountId)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        mailEnabled: true,
+        syncClaimId: null,
+        syncStatus: "idle",
       }),
     ]);
   });

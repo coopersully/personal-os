@@ -2,6 +2,8 @@ import { type MailAttachment, mailCalendarCommitmentIntakeSchema } from "@person
 import {
   isCalendarCommitmentAttachment,
   mailCommitmentSourceFingerprint,
+  reconcileMissingMailCalendarCommitmentMessages,
+  recordMailCalendarCommitmentIntakes,
 } from "./mail-calendar-intake.js";
 
 describe("Mail-to-Calendar intake evidence", () => {
@@ -90,5 +92,76 @@ describe("Mail-to-Calendar intake evidence", () => {
         status: "pending",
       }).success,
     ).toBe(true);
+  });
+
+  it("rejects missing-message reconciliation across user or account topology", async () => {
+    const input = {
+      accountId: "account-1",
+      observedRemoteMessageIds: new Set<string>(),
+      principal: {
+        actorId: "connector-1",
+        actorType: "connector" as const,
+        userId: "user-1",
+      },
+      reconciledAt: new Date("2026-07-29T12:00:00.000Z"),
+      requestId: "request-1",
+      thread: {
+        accountId: "account-1",
+        userId: "user-1",
+      },
+    };
+    await expect(
+      reconcileMissingMailCalendarCommitmentMessages({} as never, {
+        ...input,
+        thread: { ...input.thread, userId: "user-2" } as never,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      reconcileMissingMailCalendarCommitmentMessages({} as never, {
+        ...input,
+        thread: { ...input.thread, accountId: "account-2" } as never,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+  });
+
+  it("rejects intake recording across user, account, or message topology", async () => {
+    const input = {
+      accountId: "account-1",
+      message: { threadId: "thread-1" },
+      principal: {
+        actorId: "connector-1",
+        actorType: "connector" as const,
+        userId: "user-1",
+      },
+      providerAccountAddressHint: null,
+      recordedAt: new Date("2026-07-29T12:00:00.000Z"),
+      requestId: "request-1",
+      thread: {
+        accountId: "account-1",
+        id: "thread-1",
+        userId: "user-1",
+      },
+    };
+    await expect(
+      recordMailCalendarCommitmentIntakes({} as never, {
+        ...input,
+        message: input.message as never,
+        thread: { ...input.thread, userId: "user-2" } as never,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      recordMailCalendarCommitmentIntakes({} as never, {
+        ...input,
+        message: input.message as never,
+        thread: { ...input.thread, accountId: "account-2" } as never,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      recordMailCalendarCommitmentIntakes({} as never, {
+        ...input,
+        message: { threadId: "thread-2" } as never,
+        thread: input.thread as never,
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
   });
 });

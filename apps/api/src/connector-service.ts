@@ -53,6 +53,8 @@ import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import {
   invalidateMailCalendarCommitmentIntakes,
+  reconcileMailCalendarMailboxRevisionChange,
+  reconcileMissingMailCalendarCommitmentMessages,
   recordMailCalendarCommitmentIntakes,
 } from "./mail-calendar-intake.js";
 import {
@@ -73,7 +75,7 @@ import {
 
 const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
-const MAIL_RULE_WRITE_CONCURRENCY = 2;
+const MAIL_RULE_WRITE_CONCURRENCY = 1;
 const MAIL_RULE_WORK_CLAIM_LEASE_MS = 10 * 60_000;
 const MAIL_RULE_WORK_MAX_ATTEMPTS = 5;
 
@@ -85,6 +87,7 @@ type AccountRow = typeof calendarAccounts.$inferSelect & {
 type DatabaseTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
 type CalendarProviderMutationAction = "create" | "delete" | "update";
 type MailRuleWorkRow = typeof mailRuleWorkItems.$inferSelect;
+type SyncClaim = { generation: number; id: string };
 
 function calendarProviderMutationError(
   error: unknown,
@@ -321,6 +324,7 @@ export function createConnectorService({
     accountId: string,
     value: GoogleCredentials,
     requireExisting = false,
+    syncClaim?: SyncClaim,
   ): Promise<GoogleCredentials> {
     return db.transaction(async (transaction) => {
       const [account] = await transaction
@@ -329,10 +333,26 @@ export function createConnectorService({
           id: calendarAccounts.id,
         })
         .from(calendarAccounts)
-        .where(eq(calendarAccounts.id, accountId))
+        .where(
+          and(
+            eq(calendarAccounts.id, accountId),
+            ...(syncClaim
+              ? [
+                  eq(calendarAccounts.syncGeneration, syncClaim.generation),
+                  eq(calendarAccounts.syncClaimId, syncClaim.id),
+                ]
+              : []),
+          ),
+        )
         .for("update")
         .limit(1);
       if (!account?.encryptedCredentials) {
+        if (syncClaim) {
+          throw new AppError(
+            "conflict",
+            "The connector synchronization claim was superseded before credentials were saved.",
+          );
+        }
         if (requireExisting) {
           throw new AppError(
             "not_found",
@@ -362,6 +382,44 @@ export function createConnectorService({
       }
       return merged;
     });
+  }
+
+  async function withConnectorSyncClaim<T>(
+    account: AccountRow,
+    syncClaim: SyncClaim,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    return db.transaction(async (transaction) => {
+      await requireConnectorSyncClaim(transaction, account, syncClaim, "projection");
+      return work();
+    });
+  }
+
+  async function requireConnectorSyncClaim(
+    transaction: DatabaseTransaction,
+    account: Pick<AccountRow, "id" | "userId">,
+    syncClaim: SyncClaim,
+    operation: string,
+  ): Promise<void> {
+    const [currentClaim] = await transaction
+      .select({ id: calendarAccounts.id })
+      .from(calendarAccounts)
+      .where(
+        and(
+          eq(calendarAccounts.id, account.id),
+          eq(calendarAccounts.userId, account.userId),
+          eq(calendarAccounts.syncGeneration, syncClaim.generation),
+          eq(calendarAccounts.syncClaimId, syncClaim.id),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!currentClaim) {
+      throw new AppError(
+        "conflict",
+        `The connector synchronization claim was superseded before ${operation}.`,
+      );
+    }
   }
 
   const eventGateway: ConnectedEventGateway = {
@@ -599,9 +657,16 @@ export function createConnectorService({
     options: { skipMail?: boolean } = {},
   ): Promise<{ changed: number }> {
     const staleBefore = new Date(now().getTime() - CONNECTOR_SYNC_LEASE_MS);
+    const syncClaimId = randomUUID();
     const [claimedAccount] = await db
       .update(calendarAccounts)
-      .set({ syncError: null, syncStatus: "syncing", updatedAt: now() })
+      .set({
+        syncClaimId,
+        syncError: null,
+        syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+        syncStatus: "syncing",
+        updatedAt: now(),
+      })
       .where(
         and(
           eq(calendarAccounts.id, accountId),
@@ -632,7 +697,11 @@ export function createConnectorService({
         syncStatus: current.syncStatus,
       });
     }
-    const requestId = `sync:${randomUUID()}`;
+    const syncClaim: SyncClaim = {
+      generation: claimedAccount.syncGeneration,
+      id: syncClaimId,
+    };
+    const requestId = `sync:${syncClaimId}`;
     const principal = { actorId: claimedAccount.id, actorType: "connector", userId } as const;
     try {
       if (!claimedAccount.encryptedCredentials) {
@@ -652,7 +721,14 @@ export function createConnectorService({
         if (account.provider === "google" && googleCredentials) {
           const remoteCalendars = await google.listCalendars(googleCredentials);
           googleCredentials = remoteCalendars.credentials;
-          await saveCalendars(account, remoteCalendars.value, "google", principal, requestId);
+          await saveCalendars(
+            account,
+            remoteCalendars.value,
+            "google",
+            principal,
+            requestId,
+            syncClaim,
+          );
         } else if (account.provider === "icloud" && icloudCredentials) {
           await saveCalendars(
             account,
@@ -660,6 +736,7 @@ export function createConnectorService({
             "icloud",
             principal,
             requestId,
+            syncClaim,
           );
         }
         const accountCalendars = await db
@@ -687,14 +764,21 @@ export function createConnectorService({
           } else {
             continue;
           }
-          changed += await projectCalendarChanges(userId, calendar, result, principal, requestId);
+          changed += await withConnectorSyncClaim(account, syncClaim, () =>
+            projectCalendarChanges(userId, calendar, result, principal, requestId),
+          );
         }
       }
       if (account.mailEnabled && !options.skipMail) {
         let mail: MailSyncResult["value"];
         if (account.provider === "google" && googleCredentials && google.syncMail) {
           const result = await google.syncMail(googleCredentials);
-          googleCredentials = await saveGoogleCredentials(account.id, result.credentials, true);
+          googleCredentials = await saveGoogleCredentials(
+            account.id,
+            result.credentials,
+            true,
+            syncClaim,
+          );
           mailCredentialsPersisted = true;
           mail = result.value;
         } else if (account.provider === "icloud" && icloudCredentials) {
@@ -702,23 +786,44 @@ export function createConnectorService({
         } else {
           throw new AppError("internal_error", "Mail credentials are unavailable.");
         }
-        const projected = await projectMail(account, mail, principal, requestId, googleCredentials);
+        const projected = await projectMail(
+          account,
+          mail,
+          principal,
+          requestId,
+          googleCredentials,
+          syncClaim,
+        );
         changed += projected.changed;
         mailCredentialsPersisted = mailCredentialsPersisted || projected.credentials !== null;
         googleCredentials = projected.credentials ?? googleCredentials;
       }
-      await db
+      const [completedAccount] = await db
         .update(calendarAccounts)
         .set({
           ...(googleCredentials && !mailCredentialsPersisted
             ? { encryptedCredentials: encryptJson(googleCredentials, encryptionKey) }
             : {}),
           lastSyncedAt: now(),
+          syncClaimId: null,
           syncError: null,
           syncStatus: "idle",
           updatedAt: now(),
         })
-        .where(eq(calendarAccounts.id, account.id));
+        .where(
+          and(
+            eq(calendarAccounts.id, account.id),
+            eq(calendarAccounts.syncGeneration, syncClaim.generation),
+            eq(calendarAccounts.syncClaimId, syncClaim.id),
+          ),
+        )
+        .returning({ id: calendarAccounts.id });
+      if (!completedAccount) {
+        throw new AppError(
+          "conflict",
+          "The connector synchronization claim was superseded before completion.",
+        );
+      }
       return { changed };
     } catch (error) {
       try {
@@ -726,10 +831,17 @@ export function createConnectorService({
           .update(calendarAccounts)
           .set({
             syncError: error instanceof Error ? error.message : "Unknown connector error",
+            syncClaimId: null,
             syncStatus: "error",
             updatedAt: now(),
           })
-          .where(eq(calendarAccounts.id, claimedAccount.id));
+          .where(
+            and(
+              eq(calendarAccounts.id, claimedAccount.id),
+              eq(calendarAccounts.syncGeneration, syncClaim.generation),
+              eq(calendarAccounts.syncClaimId, syncClaim.id),
+            ),
+          );
       } catch {
         // Terminal status is best-effort and must not mask a structured
         // provider partial-effect/reconciliation contract.
@@ -1335,6 +1447,7 @@ export function createConnectorService({
     principal: { actorId: string; actorType: "connector"; userId: string },
     requestId: string,
     initialGoogleCredentials: GoogleCredentials | null,
+    syncClaim: SyncClaim,
   ): Promise<{ changed: number; credentials: GoogleCredentials | null }> {
     const provider = account.provider === "icloud" ? "icloud" : "google";
     let updatedGoogleCredentials: GoogleCredentials | null = null;
@@ -1350,6 +1463,8 @@ export function createConnectorService({
               eq(calendarAccounts.id, account.id),
               eq(calendarAccounts.userId, account.userId),
               eq(calendarAccounts.mailEnabled, true),
+              eq(calendarAccounts.syncGeneration, syncClaim.generation),
+              eq(calendarAccounts.syncClaimId, syncClaim.id),
             ),
           )
           .for("update")
@@ -1357,6 +1472,36 @@ export function createConnectorService({
       )[0];
       if (!activeAccount) return false;
       for (const mailbox of value.mailboxes) {
+        const [existingMailbox] = await transaction
+          .select({ providerRevision: mailboxes.providerRevision })
+          .from(mailboxes)
+          .where(
+            and(eq(mailboxes.accountId, account.id), eq(mailboxes.remoteMailboxId, mailbox.id)),
+          )
+          .for("update")
+          .limit(1);
+        if (
+          provider === "icloud" &&
+          existingMailbox?.providerRevision &&
+          mailbox.providerRevision &&
+          existingMailbox.providerRevision !== mailbox.providerRevision
+        ) {
+          await reconcileMailCalendarMailboxRevisionChange(transaction, {
+            accountId: account.id,
+            mailboxId: mailbox.id,
+            principal,
+            reconciledAt: now(),
+            requestId,
+          });
+          await transaction
+            .delete(mailThreads)
+            .where(
+              and(
+                eq(mailThreads.accountId, account.id),
+                sql<boolean>`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.id])}::jsonb`,
+              ),
+            );
+        }
         await transaction
           .insert(mailboxes)
           .values({
@@ -1365,6 +1510,7 @@ export function createConnectorService({
             lastSyncedAt: now(),
             name: mailbox.name,
             provider,
+            providerRevision: mailbox.providerRevision ?? null,
             remoteMailboxId: mailbox.id,
             role: mailbox.role,
             totalCount: mailbox.totalCount,
@@ -1376,6 +1522,7 @@ export function createConnectorService({
               deletedAt: null,
               lastSyncedAt: now(),
               name: mailbox.name,
+              providerRevision: mailbox.providerRevision ?? null,
               role: mailbox.role,
               totalCount: mailbox.totalCount,
               unreadCount: mailbox.unreadCount,
@@ -1436,7 +1583,8 @@ export function createConnectorService({
           .returning();
         if (!storedThread)
           throw new AppError("internal_error", "The mail conversation could not be saved.");
-        for (const message of thread.messages ?? []) {
+        const projectedMessages = thread.messages ?? [];
+        for (const message of projectedMessages) {
           const [storedMessage] = await transaction
             .insert(mailMessages)
             .values({
@@ -1478,13 +1626,36 @@ export function createConnectorService({
             thread: storedThread,
           });
         }
+        if (thread.messagesComplete === true) {
+          await reconcileMissingMailCalendarCommitmentMessages(transaction, {
+            accountId: account.id,
+            observedRemoteMessageIds: new Set(
+              projectedMessages.map((message) => message.remoteMessageId),
+            ),
+            principal,
+            reconciledAt: now(),
+            requestId,
+            thread: storedThread,
+          });
+        }
       }
       return true;
     });
-    if (!sourceProjectionApplied) return { changed: 0, credentials: null };
+    if (!sourceProjectionApplied) {
+      throw new AppError(
+        "conflict",
+        "The connector synchronization claim was superseded before Mail projection.",
+      );
+    }
     const rules = await executableMailRules(account, principal, requestId);
     if (rules.length > 0) {
       await db.transaction(async (transaction) => {
+        await requireConnectorSyncClaim(
+          transaction,
+          account,
+          syncClaim,
+          "durable Mail rule enqueue",
+        );
         for (const { profileVersion, resolved, rule } of rules) {
           const matchingRemoteThreadIds = value.threads
             .filter((thread) =>
@@ -1550,7 +1721,7 @@ export function createConnectorService({
                 ...credentialCoordinator,
                 refreshToken: credentialCoordinator.refreshToken || candidate.refreshToken,
               };
-          const persisted = await saveGoogleCredentials(account.id, merged, true);
+          const persisted = await saveGoogleCredentials(account.id, merged, true, syncClaim);
           credentialCoordinator = persisted;
           currentCredentials = persisted;
           return persisted;
@@ -1692,15 +1863,50 @@ export function createConnectorService({
               : {};
           let providerCredentials: GoogleCredentials;
           try {
-            providerCredentials = await updateMailThread(
-              credentialCoordinator,
-              planned.remoteThreadId,
-              {
+            providerCredentials = await db.transaction(async (transaction) => {
+              await requireConnectorSyncClaim(
+                transaction,
+                account,
+                syncClaim,
+                "Mail rule provider execution",
+              );
+              for (const { profileVersion, rule } of planned.authorizations) {
+                const [authorization] = await transaction
+                  .select({ id: mailRules.id })
+                  .from(mailRules)
+                  .innerJoin(domainProfiles, eq(domainProfiles.id, mailRules.profileId))
+                  .where(
+                    and(
+                      eq(mailRules.id, rule.id),
+                      eq(mailRules.enabled, true),
+                      eq(mailRules.version, rule.version),
+                      eq(domainProfiles.status, "active"),
+                      eq(domainProfiles.version, profileVersion),
+                    ),
+                  )
+                  .for("share");
+                if (!authorization) {
+                  throw new AppError(
+                    "conflict",
+                    "A Mail rule authorization changed before provider execution.",
+                  );
+                }
+              }
+              return updateMailThread(credentialCoordinator, planned.remoteThreadId, {
                 addMailboxIds: planned.addMailboxIds,
                 removeMailboxIds: planned.removeMailboxIds,
-              },
-            );
+              });
+            });
           } catch (error) {
+            if (error instanceof AppError && error.code === "conflict") {
+              outcomes[index] = {
+                authorizationChanged: true,
+                error,
+                providerEffect: false,
+                succeeded: false,
+              };
+              continue;
+            }
             outcomes[index] = {
               error: mailProviderPartialEffectError({
                 accountId: account.id,
@@ -1720,6 +1926,12 @@ export function createConnectorService({
             providerCredentials = await persistProviderCredentials(providerCredentials);
             credentialsPersisted = true;
             await db.transaction(async (transaction) => {
+              await requireConnectorSyncClaim(
+                transaction,
+                account,
+                syncClaim,
+                "Mail rule result projection",
+              );
               for (const { profileVersion, rule } of planned.authorizations) {
                 const [authorization] = await transaction
                   .select({ id: mailRules.id })
@@ -1826,6 +2038,12 @@ export function createConnectorService({
       if (plannedMutations.length > 0) {
         try {
           await db.transaction(async (transaction) => {
+            await requireConnectorSyncClaim(
+              transaction,
+              account,
+              syncClaim,
+              "Mail rule run summary",
+            );
             await transaction.insert(auditEvents).values(
               auditValues({
                 action: "mail.rule.run",
@@ -1947,22 +2165,30 @@ export function createConnectorService({
       updatedGoogleCredentials = currentCredentials;
     }
     try {
-      await db.insert(auditEvents).values(
-        auditValues({
-          action: "mail.synced",
-          after: {
-            mailboxes: value.mailboxes.length,
-            retainedPriorThreads: true,
-            runSummaryPersisted,
-            threads: value.threads.length,
-          },
-          before: null,
-          entityId: account.id,
-          entityType: "mail_account",
-          principal,
-          requestId,
-        }),
-      );
+      await db.transaction(async (transaction) => {
+        await requireConnectorSyncClaim(
+          transaction,
+          account,
+          syncClaim,
+          "Mail synchronization audit",
+        );
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "mail.synced",
+            after: {
+              mailboxes: value.mailboxes.length,
+              retainedPriorThreads: true,
+              runSummaryPersisted,
+              threads: value.threads.length,
+            },
+            before: null,
+            entityId: account.id,
+            entityType: "mail_account",
+            principal,
+            requestId,
+          }),
+        );
+      });
     } catch (error) {
       if (successfulRuleMutationCount === 0) throw error;
       throw new AppError(
@@ -2953,7 +3179,9 @@ export function createConnectorService({
                 encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
                 label: profileResult.value.name ?? profileResult.value.email,
                 mailEnabled,
+                syncClaimId: null,
                 syncError: null,
+                syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
                 syncStatus: "idle",
                 updatedAt: now(),
               })
@@ -3042,7 +3270,9 @@ export function createConnectorService({
                 calendarEnabled: input.calendar,
                 encryptedCredentials: encryptJson(icloudCredentials, encryptionKey),
                 mailEnabled: input.mail,
+                syncClaimId: null,
                 syncError: null,
+                syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
                 syncStatus: "idle",
                 updatedAt: now(),
               })
@@ -3217,8 +3447,10 @@ export function createConnectorService({
     provider: Extract<CalendarProvider, "google" | "icloud">,
     principal: { actorId: string; actorType: "connector"; userId: string },
     requestId: string,
+    syncClaim: SyncClaim,
   ): Promise<void> {
     await db.transaction(async (transaction) => {
+      await requireConnectorSyncClaim(transaction, account, syncClaim, "Calendar projection");
       const existing = await transaction
         .select()
         .from(calendars)

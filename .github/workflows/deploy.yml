@@ -250,6 +250,54 @@ jobs:
         env:
           API_TASK_DEFINITION: ${{ steps.tasks.outputs.api_task_definition }}
         run: |
+          api_scaling_resource="service/${ECS_CLUSTER}/${API_SERVICE}"
+
+          # Stop and drain the old binary before the new task runs migrations.
+          # Connector lifecycle migrations invalidate cached authority and cannot
+          # safely coexist with a pre-fence process that is still in provider I/O.
+          aws application-autoscaling register-scalable-target \
+            --service-namespace ecs \
+            --resource-id "$api_scaling_resource" \
+            --scalable-dimension ecs:service:DesiredCount \
+            --suspended-state \
+              DynamicScalingInSuspended=true,DynamicScalingOutSuspended=true,ScheduledScalingSuspended=true \
+            >/dev/null
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$API_SERVICE" \
+            --desired-count 0 \
+            >/dev/null
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$API_SERVICE"
+          api_counts="$(
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$API_SERVICE" \
+              --query 'services[0].[desiredCount,runningCount,pendingCount]' \
+              --output text
+          )"
+          test "$api_counts" = $'0\t0\t0' || {
+            echo "::error::The old API service did not drain completely: ${api_counts}"
+            exit 1
+          }
+          fail_closed_api_deployment() {
+            deployment_exit_code="$?"
+            trap - ERR
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER" \
+              --service "$API_SERVICE" \
+              --desired-count 0 \
+              >/dev/null ||
+              true
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER" \
+              --services "$API_SERVICE" ||
+              true
+            echo "::error::The new API deployment failed after the old task drained; the service was stopped and scaling remains suspended."
+            exit "$deployment_exit_code"
+          }
+          trap fail_closed_api_deployment ERR
           aws ecs update-service \
             --cluster "$ECS_CLUSTER" \
             --service "$API_SERVICE" \
@@ -259,6 +307,48 @@ jobs:
           aws ecs wait services-stable \
             --cluster "$ECS_CLUSTER" \
             --services "$API_SERVICE"
+          api_service_state="$(
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$API_SERVICE" \
+              --output json
+          )"
+          api_primary_count="$(
+            jq -r '[.services[0].deployments[] | select(.status == "PRIMARY")] | length' \
+              <<<"$api_service_state"
+          )"
+          api_primary_task="$(
+            jq -r '.services[0].deployments[] | select(.status == "PRIMARY") | .taskDefinition' \
+              <<<"$api_service_state"
+          )"
+          api_primary_rollout="$(
+            jq -r '.services[0].deployments[] | select(.status == "PRIMARY") | .rolloutState' \
+              <<<"$api_service_state"
+          )"
+          if ! {
+            test "$api_primary_count" = "1" &&
+              test "$api_primary_task" = "$API_TASK_DEFINITION" &&
+              test "$api_primary_rollout" = "COMPLETED"
+          }; then
+            aws ecs update-service \
+              --cluster "$ECS_CLUSTER" \
+              --service "$API_SERVICE" \
+              --desired-count 0 \
+              >/dev/null
+            aws ecs wait services-stable \
+              --cluster "$ECS_CLUSTER" \
+              --services "$API_SERVICE"
+            echo "::error::The new API task did not remain the sole completed primary deployment; the service was stopped and scaling remains suspended."
+            exit 1
+          fi
+          trap - ERR
+          aws application-autoscaling register-scalable-target \
+            --service-namespace ecs \
+            --resource-id "$api_scaling_resource" \
+            --scalable-dimension ecs:service:DesiredCount \
+            --suspended-state \
+              DynamicScalingInSuspended=false,DynamicScalingOutSuspended=false,ScheduledScalingSuspended=false \
+            >/dev/null
 
       - name: Deploy MCP after the API is healthy
         env:

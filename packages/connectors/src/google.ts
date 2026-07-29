@@ -599,6 +599,7 @@ function normalizeMailThread(
       remoteMessageId: message.id,
       to: splitAddresses(gmailHeader(message, "to")),
     })),
+    messagesComplete: true,
     messageCount: thread.messages.length,
     receivedAt: Number.isNaN(receivedAt.getTime()) ? new Date(0) : receivedAt,
     remoteThreadId: thread.id,

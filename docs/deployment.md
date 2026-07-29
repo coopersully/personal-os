@@ -94,10 +94,25 @@ docker build --target mcp -t personal-os-mcp .
 ```
 
 Run only one migration-capable API instance during a breaking schema rollout.
-Drizzle records applied versions transactionally. Follow the
+The production workflow first scales the API service to zero and waits for the
+old task to stop before starting the new migration-capable task. It suspends ECS
+dynamic and scheduled scaling before the drain, requires desired/running/pending
+counts all reach zero, and restores scaling only after the new service is
+stable as the sole completed primary deployment on the exact registered task
+definition. An ECS circuit-breaker rollback is stopped back at zero, and a
+failed drain or deployment intentionally leaves scaling suspended for operator
+recovery rather than allowing an old task to restart. This bounded
+downtime is required for migrations that invalidate connector source authority:
+an old process already inside provider I/O cannot honor a fence introduced by
+the new schema. Drizzle records applied versions transactionally. Follow the
 [database migration policy](engineering/database-migrations.md): published
 migrations are append-only, and live-data changes use an expand–migrate–contract
 rollout rather than a long deploy-time backfill.
+
+Before merging PR #43, merge, apply, and verify prerequisite PR #48 / issue #47,
+which grants `aws_iam_role_policy.github_deploy` authority to update only the API
+scalable target. The application workflow cannot grant this prerequisite to its
+own execution role; without it, deployment must fail before drain or migration.
 
 ## Health and logs
 

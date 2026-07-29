@@ -404,6 +404,7 @@ describe("Google Calendar connector", () => {
       bodyText: "Plain body",
       from: { address: "ada@example.com", name: "Ada Lovelace" },
       mailboxIds: ["INBOX", "UNREAD", "STARRED"],
+      messagesComplete: true,
       messageCount: 2,
       remoteThreadId: "thread/1",
       starred: true,

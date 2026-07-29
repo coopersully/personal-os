@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import {
+  calendarAccounts,
   domainProfileApprovals,
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
@@ -108,6 +109,10 @@ describe("database schema contracts", () => {
       resolve(process.cwd(), "packages/database/migrations/0046_mail_calendar_account_hint.sql"),
       "utf8",
     );
+    const uidValidityMigrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0047_icloud_uidvalidity_identity.sql"),
+      "utf8",
+    );
     expect(schemaSql).toContain(`"idempotency_key" ~ '^[0-9a-f]{64}$'`);
     expect(accountAddressSql).toContain(`"provider_account_address_hint_hash" IS NULL`);
     expect(renameMigrationSql).toContain(
@@ -118,6 +123,13 @@ describe("database schema contracts", () => {
     );
     expect(renameMigrationSql).toContain('DELETE FROM "mail_messages" AS "message"');
     expect(renameMigrationSql).toContain(`"account"."provider" = 'icloud'`);
+    expect(uidValidityMigrationSql).toContain(
+      'DELETE FROM "mail_calendar_commitment_intakes" AS "intake"',
+    );
+    expect(uidValidityMigrationSql).toContain(
+      'ALTER TABLE "mailboxes" ADD COLUMN "provider_revision" text',
+    );
+    expect(uidValidityMigrationSql).toContain('DELETE FROM "mail_threads" AS "thread"');
     expect(authorityStatusSql).toContain(`"authority" <> 'provider_projected_unverified'`);
     expect(renameMigrationSql).toContain("\"authority\" <> 'provider_projected_unverified'");
     expect(migrationSql).toContain('"provider_mailbox_ids" jsonb');
@@ -134,5 +146,31 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain(
       "\"status\" IN ('preview_only', 'pending', 'claimed', 'reconcile', 'succeeded', 'failed')",
     );
+  });
+
+  it("keeps connector sync generation and claim state aligned", async () => {
+    const table = getTableConfig(calendarAccounts);
+    const generationCheck = table.checks.find(
+      (candidate) => candidate.name === "calendar_accounts_sync_generation_check",
+    );
+    const claimCheck = table.checks.find(
+      (candidate) => candidate.name === "calendar_accounts_sync_claim_check",
+    );
+    if (!generationCheck || !claimCheck) {
+      throw new Error("Connector sync generation checks are missing.");
+    }
+    const generationSql = new PgDialect().sqlToQuery(generationCheck.value).sql;
+    const claimSql = new PgDialect().sqlToQuery(claimCheck.value).sql;
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0048_connector_sync_generation.sql"),
+      "utf8",
+    );
+
+    expect(generationSql).toContain(`"calendar_accounts"."sync_generation" >= 0`);
+    expect(claimSql).toContain(`"calendar_accounts"."sync_status" = 'syncing'`);
+    expect(claimSql).toContain(`"calendar_accounts"."sync_claim_id" IS NOT NULL`);
+    expect(migrationSql).toContain('ADD COLUMN "sync_generation" integer DEFAULT 0 NOT NULL');
+    expect(migrationSql).toContain('ADD COLUMN "sync_claim_id" uuid');
+    expect(migrationSql).toContain(`WHERE "sync_status" = 'syncing'`);
   });
 });

@@ -28,6 +28,7 @@ type ImapClient = Pick<
   | "messageFlagsAdd"
   | "messageFlagsRemove"
   | "messageMove"
+  | "mailbox"
 >;
 
 type ICloudConnectorOptions = {
@@ -144,21 +145,33 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
       try {
         await client.connect();
         connected = true;
-        const listed = await client.list({ statusQuery: { messages: true, unseen: true } });
+        const listed = await client.list({
+          statusQuery: { messages: true, uidValidity: true, unseen: true },
+        });
         const selectable = listed.filter((mailbox) => !mailbox.flags.has("\\Noselect"));
-        const mailboxes: RemoteMailbox[] = selectable.map((mailbox) => ({
-          id: mailbox.path,
-          name: mailbox.name,
-          role: imapMailboxRole(mailbox.specialUse, mailbox.path),
-          totalCount: mailbox.status?.messages ?? 0,
-          unreadCount: mailbox.status?.unseen ?? 0,
-        }));
+        const mailboxes: RemoteMailbox[] = [];
         const threads: NormalizedRemoteMailThread[] = [];
         for (const mailbox of selectable) {
-          const total = mailbox.status?.messages ?? 0;
-          if (total === 0) continue;
           const lock = await client.getMailboxLock(mailbox.path);
           try {
+            const selectedMailbox = client.mailbox;
+            if (!selectedMailbox || selectedMailbox.path !== mailbox.path) {
+              throw new ConnectorError(
+                `iCloud did not select the expected mailbox ${mailbox.path}.`,
+                502,
+              );
+            }
+            const mailboxRevision = selectedMailbox.uidValidity.toString();
+            const total = selectedMailbox.exists;
+            mailboxes.push({
+              id: mailbox.path,
+              name: mailbox.name,
+              providerRevision: mailboxRevision,
+              role: imapMailboxRole(mailbox.specialUse, mailbox.path),
+              totalCount: total,
+              unreadCount: mailbox.status?.unseen ?? 0,
+            });
+            if (total === 0) continue;
             const start = Math.max(1, total - 24);
             for await (const message of client.fetch(`${start}:*`, {
               envelope: true,
@@ -180,18 +193,18 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
                     attachments: parsed.attachments.map((attachment, index) => ({
                       contentType: attachment.contentType || "application/octet-stream",
                       filename: attachment.filename || `attachment-${index + 1}`,
-                      id: `${mailbox.path}:${String(message.uid)}:${index}`,
+                      id: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}:${index}`,
                       providerAttachmentId: null,
-                      providerPartId: `${mailbox.path}:${String(message.uid)}:${index}`,
+                      providerPartId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}:${index}`,
                       size: attachment.size,
                     })),
                     bodyText,
                     cc: parsedAddresses(parsed.cc),
                     from: mailAddress(parsed.from?.value[0]),
                     mailboxIds: [mailbox.path],
-                    providerRevision: String(message.uid),
+                    providerRevision: `${mailboxRevision}:${String(message.uid)}`,
                     receivedAt: parsed.date ?? new Date(message.internalDate ?? 0),
-                    remoteMessageId: `${mailbox.path}:${String(message.uid)}`,
+                    remoteMessageId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
                     to: parsedAddresses(parsed.to),
                   },
                 ],
@@ -199,7 +212,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
                 receivedAt: parsed.date ?? new Date(message.internalDate ?? 0),
                 // iCloud's IMAP thread identifier is not portable across mailboxes. Persist
                 // the mailbox + UID instead so flag and move actions can write through.
-                remoteThreadId: `${mailbox.path}:${String(message.uid)}`,
+                remoteThreadId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
                 snippet: bodyText.replace(/\s+/g, " ").slice(0, 240),
                 starred: message.flags?.has("\\Flagged") ?? false,
                 subject: parsed.subject || "(No subject)",
@@ -267,10 +280,18 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     /* v8 ignore stop */
     /* v8 ignore start -- IMAP command variants are covered by connector contract tests */
     async updateMailThread(credentials, remoteThreadId, input) {
-      const separator = remoteThreadId.lastIndexOf(":");
-      const mailboxPath = remoteThreadId.slice(0, separator);
-      const uid = Number(remoteThreadId.slice(separator + 1));
-      if (!mailboxPath || !Number.isSafeInteger(uid) || uid < 1) {
+      const uidSeparator = remoteThreadId.lastIndexOf(":");
+      const mailboxAndValidity = remoteThreadId.slice(0, uidSeparator);
+      const validitySeparator = mailboxAndValidity.lastIndexOf(":");
+      const mailboxPath = mailboxAndValidity.slice(0, validitySeparator);
+      const expectedUidValidity = mailboxAndValidity.slice(validitySeparator + 1);
+      const uid = Number(remoteThreadId.slice(uidSeparator + 1));
+      if (
+        !mailboxPath ||
+        !/^\d+$/u.test(expectedUidValidity) ||
+        !Number.isSafeInteger(uid) ||
+        uid < 1
+      ) {
         throw new ConnectorError("This iCloud message can no longer be updated.", 404);
       }
       const client = imapFactory(credentials);
@@ -284,6 +305,17 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         );
         const lock = await client.getMailboxLock(mailboxPath);
         try {
+          const selectedMailbox = client.mailbox;
+          if (
+            !selectedMailbox ||
+            selectedMailbox.path !== mailboxPath ||
+            selectedMailbox.uidValidity.toString() !== expectedUidValidity
+          ) {
+            throw new ConnectorError(
+              "This iCloud message source revision is no longer current.",
+              409,
+            );
+          }
           const add = new Set(input.addMailboxIds ?? []);
           const remove = new Set(input.removeMailboxIds ?? []);
           if (add.delete("STARRED"))

@@ -90,6 +90,11 @@ This log records delivered vertical slices against the master plan. It does not 
   hint preserve the Google SENT-reply verification seam; the verifier must fetch Gmail profile
   identity. No event creation, provider write, rule preset activation, or MCP task machinery is
   included.
+- Bound iCloud identities to mailbox UIDVALIDITY plus UID, reconcile Gmail message disappearance
+  only from explicit complete-thread responses, and fence projection with persisted connector sync
+  generations, including inline rule effects and their local/audit projection. Mailbox reset, source
+  deletion, capability transitions, and reordered old sync responses therefore demote, serialize,
+  or fail closed instead of preserving stale authority.
 
 ## 2026-07-28 — Agent-guided setup and shared assistant contracts
 

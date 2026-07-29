@@ -18,10 +18,13 @@ This prerequisite boundary specializes
   Account/message/part uniqueness, a stable idempotency key, and a transaction-scoped advisory lock
   make concurrent first observation converge on one row and audit.
 - Google identity is provider message ID plus MIME `partId`; attachment ID is retained only as the
-  byte-retrieval locator. iCloud preview identity is provider mailbox plus UID plus parsed part
-  index, never CID, RFC Message-ID, or filename. Migration 0046 removes pre-release iCloud preview
-  rows and cached iCloud messages recorded with the earlier non-provider-native identity so none
-  can retain stale authority; normal Mail sync recreates them under the durable identity.
+  byte-retrieval locator. iCloud preview identity is provider mailbox plus IMAP UIDVALIDITY plus UID
+  plus parsed part index, never CID, RFC Message-ID, or filename. UIDVALIDITY is requested and read
+  from the selected mailbox while its IMAP lock is held, projected even for empty mailboxes, included
+  in message/thread/part identities and message revision, and rechecked under the same selected
+  mailbox lock before write-through. Migration 0047 removes pre-release iCloud preview rows and
+  cached threads recorded without UIDVALIDITY; normal Mail sync recreates them under the durable
+  identity.
 - The durable database insert is the handoff. It survives the sync request and does not depend on
   an MCP caller or in-memory task.
 - Every current row is `provider_projected_unverified` and `preview_only`. Attachment type, name,
@@ -32,10 +35,21 @@ This prerequisite boundary specializes
   demotes the same identity to unverified preview so stale verification cannot authorize work.
 - Message projection and intake reconciliation commit in one transaction. A currently missing or
   no-longer-calendar part is demoted and audited rather than silently retaining prior authority.
+  A full Gmail thread response is an explicit completeness boundary: stored messages absent from a
+  still-observed complete thread are locked, demoted as `source_message_missing`, audited, and
+  removed from the cache. iCloud synthetic one-message threads do not claim cross-sync completeness.
+  An iCloud mailbox UIDVALIDITY change similarly locks and demotes every intake from the prior
+  mailbox generation before replacing its cache.
   Mail capability disable demotes its intakes in the same account transaction; disconnect audits
   invalidation before account cascade deletion. Disabled Mail accounts are excluded from setup
-  readiness counts. Source projection locks and rechecks the account capability, so a provider
-  response already in flight cannot recreate Mail sources after disable.
+  readiness counts.
+- Every connector sync has a persisted claim ID and monotonically increasing account generation.
+  Credential/capability transitions advance the generation and clear the claim. Connector
+  projection, durable Mail-rule enqueue, inline Mail provider effects and result/audit projection,
+  refreshed-credential persistence, and terminal status updates require the exact claimed
+  generation. Inline Mail effects are serialized under the account lifecycle lock, so a transition
+  either waits for an authoritative effect or supersedes the old sync before its next effect; an old
+  response cannot become current after disable and re-enable or overwrite a newer sync.
 - Audit records contain safe IDs, state, fingerprints, and hashes of remote identities. They omit
   message bodies, addresses, subjects, filenames, provider payloads, and credentials.
 - Mail setup reports preview-only intake count, zero server-verified items, and
@@ -53,12 +67,22 @@ reconciliation, succeeded, and failed work, but this prerequisite does not enter
 | Capability and owner | Mail owns provider source capture. Integration will own verification and the cross-domain handoff. Calendar owns destination validation and provider effects. |
 | Configuration and authority | Existing Mail read authority permits projection only. No profile preference, MCP annotation, attachment, or caller payload authorizes Calendar creation. |
 | Transport | Existing Google HTTPS or iCloud IMAP sync transports supply metadata. No attachment download, verifier, queue, port, or credential is added. |
-| Time and capacity | Intake is bounded by the provider sync page and projected messages. Stable identity makes repeat sync idempotent. |
+| Time and capacity | Intake is bounded by the provider sync page and projected messages. Stable identity and persisted sync generation make repeat and reordered delivery deterministic. Inline Google rule effects intentionally take the exclusive account lifecycle lock one at a time through the bounded provider timeout: a shared lock would allow another external call to delay durable credential/result projection for an already accepted effect and compound indeterminate outcomes. The per-sync execution budget remains six; delayed durable work uses its separate work ledger. |
 | Commit point | Exact Mail message projection, intake reconciliation, and redacted audit commit in one transaction. |
-| Delivery semantics | Duplicate observation converges on one account/message/part row. Changed, missing, or ineligible source material demotes verification state. |
+| Delivery semantics | Duplicate observation converges on one account/message/part row. Changed, missing, ineligible, reset-mailbox, or superseded-sync source material cannot preserve verification state. |
 | Degraded behavior | Failure fails the owning sync visibly; a later sync retries the same deterministic insert. Calendar remains unchanged. |
 | Recovery and observation | Setup exposes preview-only count. Database state and redacted activity identify the source handoff without exposing content. |
-| Evidence | Unit tests cover MIME boundaries and revision fingerprints; database tests cover identity and lifecycle constraints; connector integration covers persistence and audit redaction. |
+| Evidence | Unit tests cover MIME boundaries, Gmail completeness, UIDVALIDITY reset/reuse, and revision fingerprints; database tests cover identity and sync-claim constraints; connector integration covers missing-message demotion, reset-mailbox demotion, stale-sync fencing, persistence, and audit redaction. |
+
+Migration 0047 deletes pre-UIDVALIDITY iCloud cache/preview rows and migration 0048 introduces the
+sync fence. A pre-migration binary already inside provider I/O cannot honor either invariant.
+Production deployment therefore scales the API service to zero and waits for the old task to drain
+before the new migration-capable task starts. ECS dynamic/scheduled scaling is suspended during the
+drain, zero desired/running/pending tasks are required, and scaling resumes only after the new API is
+the sole completed primary deployment on the exact new task definition. A circuit-breaker rollback
+is stopped at zero and left scaling-suspended for recovery. Prerequisite PR #48 / issue #47 must be
+merged, applied, and verified before this PR merges because the application workflow cannot grant
+its own new authority; this release is not safe as a mixed-version rolling deployment.
 
 All tests can be green while production provider metadata is incomplete, MIME part IDs change, or
 the deployed connector lacks access to attachment bytes and authentication results. Those remain
@@ -89,7 +113,9 @@ explicit evidence gaps, not provider success.
   expected source fingerprint, provider revision/labels, MIME part identity, and attachment digest
   before a CAS promotion. Sync uses the same lock so stale projection cannot overwrite a concurrent
   promotion and source drift cannot preserve one. Also lock the owning account row and require
-  current `mailEnabled` in the promotion transaction so capability invalidation fences verification.
+  current `mailEnabled`, sync generation, and source mailbox/message revision in the promotion
+  transaction so capability changes, UIDVALIDITY reset, and newer synchronization fence
+  verification.
 - Add separately specified authenticated ticket/reservation formats only when their issuer,
   commitment status, time, and stable provider identity can be verified without prose inference.
 

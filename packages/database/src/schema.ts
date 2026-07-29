@@ -479,6 +479,8 @@ export const calendarAccounts = pgTable(
     calendarEnabled: boolean("calendar_enabled").notNull().default(true),
     mailEnabled: boolean("mail_enabled").notNull().default(false),
     syncStatus: text("sync_status").$type<"idle" | "syncing" | "error">().notNull().default("idle"),
+    syncGeneration: integer("sync_generation").notNull().default(0),
+    syncClaimId: uuid("sync_claim_id"),
     syncError: text("sync_error"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
@@ -489,6 +491,11 @@ export const calendarAccounts = pgTable(
       table.userId,
       table.provider,
       table.providerAccountId,
+    ),
+    check("calendar_accounts_sync_generation_check", sql`${table.syncGeneration} >= 0`),
+    check(
+      "calendar_accounts_sync_claim_check",
+      sql`(${table.syncStatus} = 'syncing') = (${table.syncClaimId} IS NOT NULL)`,
     ),
   ],
 );
@@ -609,6 +616,7 @@ export const mailboxes = pgTable(
     remoteMailboxId: text("remote_mailbox_id").notNull(),
     name: text("name").notNull(),
     role: text("role").$type<MailboxRole>().notNull().default("custom"),
+    providerRevision: text("provider_revision"),
     unreadCount: integer("unread_count").notNull().default(0),
     totalCount: integer("total_count").notNull().default(0),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),

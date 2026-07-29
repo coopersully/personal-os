@@ -3,7 +3,7 @@ import {
   auditEvents,
   type Database,
   mailCalendarCommitmentIntakes,
-  type mailMessages,
+  mailMessages,
   type mailThreads,
 } from "@personal-os/database";
 import type { MailAttachment } from "@personal-os/domain";
@@ -25,6 +25,14 @@ const CALENDAR_ATTACHMENT_TYPES = new Set(["application/ics", "text/calendar", "
 
 function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function changedFieldNames(
+  comparisons: Array<{ after: unknown; before: unknown; name: string }>,
+): string[] {
+  return comparisons
+    .filter((comparison) => comparison.before !== comparison.after)
+    .map((comparison) => comparison.name);
 }
 
 export function isCalendarCommitmentAttachment(attachment: MailAttachment): boolean {
@@ -214,20 +222,26 @@ export async function recordMailCalendarCommitmentIntakes(
       existing.status !== intake.status;
     if (changed) {
       const changedFields = existing
-        ? [
-            ...(existing.sourceFingerprint !== intake.sourceFingerprint
-              ? ["sourceFingerprint"]
-              : []),
-            ...(existing.attachmentFingerprint !== intake.attachmentFingerprint
-              ? ["attachmentFingerprint"]
-              : []),
-            ...(existing.providerAccountAddressHintHash !== intake.providerAccountAddressHintHash
-              ? ["providerAccountAddressHint"]
-              : []),
-            ...(existing.evidenceKind !== intake.evidenceKind ? ["evidenceKind"] : []),
-            ...(existing.authority !== intake.authority ? ["authority"] : []),
-            ...(existing.status !== intake.status ? ["status"] : []),
-          ]
+        ? changedFieldNames([
+            {
+              after: intake.sourceFingerprint,
+              before: existing.sourceFingerprint,
+              name: "sourceFingerprint",
+            },
+            {
+              after: intake.attachmentFingerprint,
+              before: existing.attachmentFingerprint,
+              name: "attachmentFingerprint",
+            },
+            {
+              after: intake.providerAccountAddressHintHash,
+              before: existing.providerAccountAddressHintHash,
+              name: "providerAccountAddressHint",
+            },
+            { after: intake.evidenceKind, before: existing.evidenceKind, name: "evidenceKind" },
+            { after: intake.authority, before: existing.authority, name: "authority" },
+            { after: intake.status, before: existing.status, name: "status" },
+          ])
         : ["intake"];
       await writeIntakeAudit(transaction, {
         action: existing ? "mail_calendar_intake.source_changed" : "mail_calendar_intake.recorded",
@@ -275,15 +289,21 @@ export async function recordMailCalendarCommitmentIntakes(
         action: "mail_calendar_intake.source_unavailable",
         after: intake,
         before: existing,
-        changedFields: [
-          ...(existing.sourceFingerprint !== intake.sourceFingerprint ? ["sourceFingerprint"] : []),
-          ...(existing.providerAccountAddressHintHash !== intake.providerAccountAddressHintHash
-            ? ["providerAccountAddressHint"]
-            : []),
-          ...(existing.authority !== intake.authority ? ["authority"] : []),
-          ...(existing.status !== intake.status ? ["status"] : []),
-          ...(existing.evidenceKind !== intake.evidenceKind ? ["evidenceKind"] : []),
-        ],
+        changedFields: changedFieldNames([
+          {
+            after: intake.sourceFingerprint,
+            before: existing.sourceFingerprint,
+            name: "sourceFingerprint",
+          },
+          {
+            after: intake.providerAccountAddressHintHash,
+            before: existing.providerAccountAddressHintHash,
+            name: "providerAccountAddressHint",
+          },
+          { after: intake.authority, before: existing.authority, name: "authority" },
+          { after: intake.status, before: existing.status, name: "status" },
+          { after: intake.evidenceKind, before: existing.evidenceKind, name: "evidenceKind" },
+        ]),
         principal: input.principal,
         requestId: input.requestId,
       });
@@ -340,4 +360,210 @@ export async function invalidateMailCalendarCommitmentIntakes(
     });
   }
   return rows.length;
+}
+
+export async function reconcileMissingMailCalendarCommitmentMessages(
+  transaction: DatabaseTransaction,
+  input: {
+    accountId: string;
+    observedRemoteMessageIds: ReadonlySet<string>;
+    principal: IntakePrincipal;
+    reconciledAt: Date;
+    requestId: string;
+    thread: MailThreadRow;
+  },
+): Promise<number> {
+  if (
+    input.thread.userId !== input.principal.userId ||
+    input.thread.accountId !== input.accountId
+  ) {
+    throw new AppError(
+      "forbidden",
+      "Missing Mail-to-Calendar messages require one owned account and thread topology.",
+    );
+  }
+  const candidates = await transaction
+    .select({ remoteMessageId: mailCalendarCommitmentIntakes.remoteMessageId })
+    .from(mailCalendarCommitmentIntakes)
+    .where(
+      and(
+        eq(mailCalendarCommitmentIntakes.accountId, input.accountId),
+        eq(mailCalendarCommitmentIntakes.remoteThreadId, input.thread.remoteThreadId),
+      ),
+    );
+  const storedMessages = await transaction
+    .select({ remoteMessageId: mailMessages.remoteMessageId })
+    .from(mailMessages)
+    .where(eq(mailMessages.threadId, input.thread.id));
+  const missingRemoteMessageIds = [
+    ...new Set(
+      [...candidates, ...storedMessages]
+        .map((candidate) => candidate.remoteMessageId)
+        .filter((remoteMessageId) => !input.observedRemoteMessageIds.has(remoteMessageId)),
+    ),
+  ].sort();
+  let demoted = 0;
+  for (const remoteMessageId of missingRemoteMessageIds) {
+    const lockKey = mailCommitmentMessageLockKey(input.accountId, remoteMessageId);
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+    const rows = await transaction
+      .select()
+      .from(mailCalendarCommitmentIntakes)
+      .where(
+        and(
+          eq(mailCalendarCommitmentIntakes.accountId, input.accountId),
+          eq(mailCalendarCommitmentIntakes.remoteMessageId, remoteMessageId),
+        ),
+      )
+      .orderBy(mailCalendarCommitmentIntakes.id)
+      .for("update");
+    for (const existing of rows) {
+      const changed =
+        existing.authority !== "provider_projected_unverified" ||
+        existing.status !== "preview_only" ||
+        existing.evidenceKind !== "source_message_missing" ||
+        existing.sourceMessageId !== null;
+      const intake = requireDatabaseRecord(
+        (
+          await transaction
+            .update(mailCalendarCommitmentIntakes)
+            .set({
+              authority: "provider_projected_unverified",
+              evidenceKind: "source_message_missing",
+              sourceMessageId: null,
+              sourceThreadId: input.thread.id,
+              sourceThreadRevision: input.thread.updatedAt,
+              status: "preview_only",
+              updatedAt: input.reconciledAt,
+            })
+            .where(eq(mailCalendarCommitmentIntakes.id, existing.id))
+            .returning()
+        )[0],
+        "The missing Mail-to-Calendar source message could not be reconciled.",
+      );
+      if (changed) {
+        await writeIntakeAudit(transaction, {
+          action: "mail_calendar_intake.source_unavailable",
+          after: intake,
+          before: existing,
+          changedFields: changedFieldNames([
+            { after: intake.authority, before: existing.authority, name: "authority" },
+            { after: intake.status, before: existing.status, name: "status" },
+            { after: intake.evidenceKind, before: existing.evidenceKind, name: "evidenceKind" },
+            {
+              after: intake.sourceMessageId,
+              before: existing.sourceMessageId,
+              name: "sourceMessage",
+            },
+          ]),
+          principal: input.principal,
+          requestId: input.requestId,
+        });
+        demoted += 1;
+      }
+    }
+    await transaction
+      .delete(mailMessages)
+      .where(
+        and(
+          eq(mailMessages.threadId, input.thread.id),
+          eq(mailMessages.remoteMessageId, remoteMessageId),
+        ),
+      );
+  }
+  return demoted;
+}
+
+export async function reconcileMailCalendarMailboxRevisionChange(
+  transaction: DatabaseTransaction,
+  input: {
+    accountId: string;
+    mailboxId: string;
+    principal: IntakePrincipal;
+    reconciledAt: Date;
+    requestId: string;
+  },
+): Promise<number> {
+  const candidates = await transaction
+    .select({ remoteMessageId: mailCalendarCommitmentIntakes.remoteMessageId })
+    .from(mailCalendarCommitmentIntakes)
+    .where(
+      and(
+        eq(mailCalendarCommitmentIntakes.accountId, input.accountId),
+        eq(mailCalendarCommitmentIntakes.userId, input.principal.userId),
+        sql<boolean>`${mailCalendarCommitmentIntakes.sourceMessageMailboxIds} @> ${JSON.stringify([input.mailboxId])}::jsonb`,
+      ),
+    );
+  let demoted = 0;
+  for (const remoteMessageId of [
+    ...new Set(candidates.map((candidate) => candidate.remoteMessageId)),
+  ].sort()) {
+    const lockKey = mailCommitmentMessageLockKey(input.accountId, remoteMessageId);
+    await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+    const rows = await transaction
+      .select()
+      .from(mailCalendarCommitmentIntakes)
+      .where(
+        and(
+          eq(mailCalendarCommitmentIntakes.accountId, input.accountId),
+          eq(mailCalendarCommitmentIntakes.remoteMessageId, remoteMessageId),
+        ),
+      )
+      .orderBy(mailCalendarCommitmentIntakes.id)
+      .for("update");
+    for (const existing of rows) {
+      const changed =
+        existing.authority !== "provider_projected_unverified" ||
+        existing.status !== "preview_only" ||
+        existing.evidenceKind !== "source_mailbox_revision_changed" ||
+        existing.sourceMessageId !== null ||
+        existing.sourceThreadId !== null;
+      const intake = requireDatabaseRecord(
+        (
+          await transaction
+            .update(mailCalendarCommitmentIntakes)
+            .set({
+              authority: "provider_projected_unverified",
+              evidenceKind: "source_mailbox_revision_changed",
+              sourceMessageId: null,
+              sourceThreadId: null,
+              status: "preview_only",
+              updatedAt: input.reconciledAt,
+            })
+            .where(eq(mailCalendarCommitmentIntakes.id, existing.id))
+            .returning()
+        )[0],
+        "The changed Mail mailbox revision could not be reconciled.",
+      );
+      if (changed) {
+        await writeIntakeAudit(transaction, {
+          action: "mail_calendar_intake.source_unavailable",
+          after: intake,
+          before: existing,
+          changedFields: [
+            "mailboxRevision",
+            ...changedFieldNames([
+              { after: intake.authority, before: existing.authority, name: "authority" },
+              { after: intake.status, before: existing.status, name: "status" },
+              { after: intake.evidenceKind, before: existing.evidenceKind, name: "evidenceKind" },
+              {
+                after: intake.sourceMessageId,
+                before: existing.sourceMessageId,
+                name: "sourceMessage",
+              },
+              {
+                after: intake.sourceThreadId,
+                before: existing.sourceThreadId,
+                name: "sourceThread",
+              },
+            ]),
+          ],
+          principal: input.principal,
+          requestId: input.requestId,
+        });
+        demoted += 1;
+      }
+    }
+  }
+  return demoted;
 }

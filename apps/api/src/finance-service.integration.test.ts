@@ -2548,6 +2548,133 @@ describe.sequential("finance service", () => {
     }
   });
 
+  it("replays a removal window when a later Plaid page fails before the cursor checkpoint", async () => {
+    const [restartUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Plaid Restart",
+        email: "plaid-restart@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!restartUser) throw new Error("Plaid restart fixture user was not created.");
+    let failSecondPage = true;
+    const fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const path = new URL(requestUrl).pathname;
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (path === "/item/public_token/exchange") {
+        return Response.json({ access_token: "restart-token", item_id: "restart-item" });
+      }
+      if (path === "/accounts/get") {
+        return Response.json({
+          accounts: [
+            {
+              account_id: "restart-account",
+              balances: { current: 100 },
+              name: "Restart checking",
+              official_name: null,
+            },
+          ],
+        });
+      }
+      if (path === "/transactions/sync" && body.cursor === null) {
+        return Response.json({
+          added: [],
+          has_more: true,
+          modified: [],
+          next_cursor: "restart-page-1",
+          removed: [{ transaction_id: "stale-provider-transaction" }],
+        });
+      }
+      if (path === "/transactions/sync" && body.cursor === "restart-page-1") {
+        if (failSecondPage) {
+          failSecondPage = false;
+          return Response.json({ error_message: "Temporary page failure" }, { status: 503 });
+        }
+        return Response.json({
+          added: [],
+          has_more: false,
+          modified: [],
+          next_cursor: "restart-final",
+          removed: [],
+          transactions_update_status: "HISTORICAL_UPDATE_COMPLETE",
+        });
+      }
+      return Response.json({ error_message: "Unexpected Plaid request" }, { status: 400 });
+    });
+    const service = createFinanceService({
+      db: database.db,
+      now: () => now,
+      plaid: {
+        clientId: "client",
+        encryptionKey: key,
+        environment: "sandbox",
+        fetch,
+        secret: "secret",
+      },
+    });
+    const context = {
+      principal: financePrincipal(restartUser.id),
+      requestId: "plaid-restart",
+    };
+    const [restartAccount] = await service.exchangePlaidToken(
+      { institution: "Restart Bank", publicToken: "restart-public-token" },
+      context,
+    );
+    if (!restartAccount) throw new Error("Plaid restart account was not created.");
+    const [staleTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: restartAccount.id,
+        amount: 2500,
+        category: "Shopping",
+        direction: "expense",
+        merchant: "Removed purchase",
+        pending: false,
+        providerDirection: "expense",
+        providerTransactionId: "stale-provider-transaction",
+        transactionDate: "2026-07-10",
+        userId: restartUser.id,
+      })
+      .returning();
+    if (!staleTransaction) throw new Error("Stale Plaid transaction was not created.");
+
+    await expect(service.syncPlaidAccount(restartAccount.id, context)).rejects.toThrow(
+      "Temporary page failure",
+    );
+    await expect(
+      database.db
+        .select({ syncCursor: financeAccounts.syncCursor })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, restartAccount.id)),
+    ).resolves.toEqual([{ syncCursor: null }]);
+    await expect(
+      database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, staleTransaction.id)),
+    ).resolves.toHaveLength(1);
+
+    await expect(service.syncPlaidAccount(restartAccount.id, context)).resolves.toEqual({
+      changed: 1,
+    });
+    await expect(
+      database.db
+        .select({ syncCursor: financeAccounts.syncCursor })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, restartAccount.id)),
+    ).resolves.toEqual([{ syncCursor: "restart-final" }]);
+    await expect(
+      database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, staleTransaction.id)),
+    ).resolves.toHaveLength(0);
+  });
+
   it("surfaces Plaid API failures without persisting credentials", async () => {
     const service = createFinanceService({
       db: database.db,

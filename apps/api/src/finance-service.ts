@@ -2410,7 +2410,8 @@ export function createFinanceService({ db, now, plaid }: Options) {
         ),
       );
       const itemAccountIds = itemAccounts.map((row) => row.id).sort();
-      let cursor = syncAccount.syncCursor;
+      const persistedCursor = syncAccount.syncCursor;
+      let cursor = persistedCursor;
       let hasMore = true;
       let changed = 0;
       const removedTransactionIds = new Set<string>();
@@ -2499,7 +2500,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
           if (
             !currentSyncAccount ||
             currentSyncAccount.providerItemId !== syncAccount.providerItemId ||
-            currentSyncAccount.syncCursor !== cursor ||
+            currentSyncAccount.syncCursor !== persistedCursor ||
             JSON.stringify(currentSyncAccount.encryptedCredentials) !==
               JSON.stringify(syncAccount.encryptedCredentials)
           ) {
@@ -2712,16 +2713,16 @@ export function createFinanceService({ db, now, plaid }: Options) {
                     )
                     .returning({ id: financeTransactions.id });
             changed += deleted.length;
+            await tx
+              .update(financeAccounts)
+              .set({
+                lastSyncedAt:
+                  page.transactions_update_status === "NOT_READY" ? before.lastSyncedAt : now(),
+                syncCursor: page.next_cursor,
+                updatedAt: now(),
+              })
+              .where(inArray(financeAccounts.id, itemAccountIds));
           }
-          await tx
-            .update(financeAccounts)
-            .set({
-              lastSyncedAt:
-                page.transactions_update_status === "NOT_READY" ? before.lastSyncedAt : now(),
-              syncCursor: page.next_cursor,
-              updatedAt: now(),
-            })
-            .where(inArray(financeAccounts.id, itemAccountIds));
         });
         cursor = page.next_cursor;
         hasMore = page.has_more;

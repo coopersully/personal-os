@@ -500,6 +500,11 @@ function defaults() {
       recurringNeedsReview: 0,
       recurringObligations: 0,
     },
+    guidance: {
+      approvedProfile: null,
+      draftNotice: null,
+      draftProposal: null,
+    },
     humanOnlyActions: [
       "connect_or_disconnect_source",
       "import_transactions",
@@ -2584,8 +2589,22 @@ describe("ilo web app", () => {
     };
     mocks.getDomainProfile.mockResolvedValue(draft);
     mocks.upsertDomainProfile.mockResolvedValue({ ...draft, status: "active", version: 2 });
+    mocks.getFinanceGuidedSetup.mockResolvedValue({
+      ...(await mocks.getFinanceGuidedSetup()),
+      guidance: {
+        approvedProfile: null,
+        draftNotice:
+          "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+        draftProposal: draft,
+      },
+    });
 
     const view = setup("/finances/profile");
+    expect(await screen.findByText(draft.objective)).toBeVisible();
+    expect(screen.getByText(draft.summary)).toBeVisible();
+    expect(screen.getByText(draft.instructions[0] ?? "")).toBeVisible();
+    expect(screen.getByText("Checking — Bills and daily spending")).toBeVisible();
+    expect(screen.getByText("reviewCadence: weekly")).toBeVisible();
     await userEvent.setup().click(await screen.findByRole("button", { name: "Activate guidance" }));
     await waitFor(() =>
       expect(mocks.upsertDomainProfile).toHaveBeenCalledWith({
@@ -2773,7 +2792,7 @@ describe("ilo web app", () => {
     await userEvent.setup().click(screen.getByRole("button", { name: "Confirm transfer" }));
     await waitFor(() =>
       expect(mocks.resolveFinanceReview).toHaveBeenCalledWith(secondId, {
-        action: "not_purchase",
+        action: "confirm_transfer",
         categoryId: undefined,
         expectedTransactionUpdatedAt: now,
         learnMerchant: "suggest",

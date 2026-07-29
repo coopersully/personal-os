@@ -45,7 +45,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: true,
       },
       description:
-        "Read the user's durable preferences, source meanings, categories, and operating instructions for one ilo domain.",
+        "Read one ilo domain profile and its status. Active profiles are operative guidance; draft profiles are unapproved proposals and must not be treated as operating instructions.",
       inputSchema: { domain: assistantDomain },
       title: "Get ilo domain profile",
     },
@@ -62,7 +62,7 @@ export function registerAssistantTools(server: McpServer, api: PersonalOsApiClie
         readOnlyHint: false,
       },
       description:
-        "Create or revise one domain's durable preference profile after a short user interview. Preserve user wording and use expectedVersion when updating. Domain-specific API validation of source ownership, connectivity, status, and preferences is authoritative.",
+        "Create or revise one domain preference profile after a short user interview. Save a draft first, preserve user wording, and use expectedVersion when updating. A saved draft is not approval; domain-specific API validation of source ownership, connectivity, activation authority, and preferences is authoritative.",
       inputSchema: {
         categories: z
           .array(

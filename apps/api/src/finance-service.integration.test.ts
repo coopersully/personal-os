@@ -4,6 +4,7 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   domainProfiles,
+  financeAccounts,
   financeAlerts,
   financeCategories,
   financeClassificationDecisions,
@@ -107,29 +108,131 @@ function plaidFetch(): typeof globalThis.fetch {
               next_cursor: "cursor-1",
               removed: [],
             }
-          : {
-              added: [],
-              has_more: false,
-              modified: [
-                {
-                  account_id: "plaid-account-1",
-                  amount: 22,
-                  date: "2026-07-19",
-                  merchant_name: "Trader Joe's",
-                  name: "TRADER JOE'S",
-                  pending: true,
-                  pending_transaction_id: "pending-txn-1",
-                  personal_finance_category: {
-                    confidence_level: "VERY_HIGH",
-                    detailed: "FOOD_AND_DRINK_GROCERIES",
-                    primary: "FOOD_AND_DRINK",
+          : syncCall === 2
+            ? {
+                added: [],
+                has_more: false,
+                modified: [
+                  {
+                    account_id: "plaid-account-1",
+                    amount: 22,
+                    date: "2026-07-19",
+                    merchant_name: "Trader Joe's",
+                    name: "TRADER JOE'S",
+                    pending: true,
+                    pending_transaction_id: "pending-txn-1",
+                    personal_finance_category: {
+                      confidence_level: "VERY_HIGH",
+                      detailed: "FOOD_AND_DRINK_GROCERIES",
+                      primary: "FOOD_AND_DRINK",
+                    },
+                    transaction_id: "txn-1",
                   },
-                  transaction_id: "txn-1",
+                ],
+                next_cursor: "cursor-2",
+                removed: [{ transaction_id: "txn-2" }],
+              }
+            : syncCall === 3
+              ? {
+                  added: [
+                    {
+                      account_id: "plaid-account-1",
+                      amount: -40,
+                      date: "2026-07-20",
+                      merchant_name: "Incoming transfer",
+                      name: "INCOMING TRANSFER",
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_IN",
+                      },
+                      transaction_id: "txn-transfer-in",
+                    },
+                    {
+                      account_id: "plaid-account-1",
+                      amount: 35,
+                      date: "2026-07-20",
+                      merchant_name: "Outgoing transfer",
+                      name: "OUTGOING TRANSFER",
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_OUT",
+                      },
+                      transaction_id: "txn-transfer-out",
+                    },
+                  ],
+                  has_more: false,
+                  modified: [
+                    {
+                      account_id: "plaid-account-1",
+                      amount: 22,
+                      date: "2026-07-19",
+                      merchant_name: "Trader Joe's",
+                      name: "TRADER JOE'S",
+                      pending: false,
+                      pending_transaction_id: "pending-txn-1",
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "FOOD_AND_DRINK_GROCERIES",
+                        primary: "FOOD_AND_DRINK",
+                      },
+                      transaction_id: "txn-1",
+                    },
+                  ],
+                  next_cursor: "cursor-3",
+                  removed: [],
+                }
+              : {
+                  added: [],
+                  has_more: false,
+                  modified: [
+                    {
+                      account_id: "plaid-account-1",
+                      amount: 30,
+                      date: "2026-07-21",
+                      merchant_name: "Trader Joe's",
+                      name: "TRADER JOE'S",
+                      pending: false,
+                      personal_finance_category: {
+                        confidence_level: "LOW",
+                        detailed: "GENERAL_MERCHANDISE_OTHER_GENERAL_MERCHANDISE",
+                        primary: "GENERAL_MERCHANDISE",
+                      },
+                      transaction_id: "txn-1",
+                    },
+                    {
+                      account_id: "plaid-account-1",
+                      amount: -40,
+                      date: "2026-07-21",
+                      merchant_name: "Incoming transfer renamed",
+                      name: "INCOMING TRANSFER RENAMED",
+                      pending: false,
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_IN",
+                      },
+                      transaction_id: "txn-transfer-in",
+                    },
+                    {
+                      account_id: "plaid-account-1",
+                      amount: 35,
+                      date: "2026-07-21",
+                      merchant_name: "Outgoing transfer renamed",
+                      name: "OUTGOING TRANSFER RENAMED",
+                      pending: false,
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_OUT",
+                      },
+                      transaction_id: "txn-transfer-out",
+                    },
+                  ],
+                  next_cursor: "cursor-4",
+                  removed: [],
                 },
-              ],
-              next_cursor: "cursor-2",
-              removed: [{ transaction_id: "txn-2" }],
-            },
       );
     }
     return Response.json({ error_message: "Unexpected Plaid path" }, { status: 400 });
@@ -287,7 +390,10 @@ describe.sequential("finance service", () => {
         { category: "Shopping", learnMerchant: false },
         agentContext,
       ),
-    ).rejects.toThrow("Direct category edits");
+    ).rejects.toThrow("transaction edits require an interactive user session");
+    await expect(
+      service.updateTransaction(review.id, { notes: "Agent overwrite" }, agentContext),
+    ).rejects.toThrow("transaction edits require an interactive user session");
     const stale = await service.createTransaction(
       {
         accountId: account.id,
@@ -501,6 +607,18 @@ describe.sequential("finance service", () => {
     );
     expect(replayDecisions).toHaveLength(1);
     expect(replayAudits).toHaveLength(1);
+    await expect(
+      service.resolveReview(
+        lowConfidenceReview.id,
+        {
+          action: "confirm_transfer",
+          expectedTransactionUpdatedAt: lowConfidenceReview.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "A non-transfer review cannot become a transfer.",
+        },
+        context,
+      ),
+    ).rejects.toThrow("Only a possible-transfer review can be confirmed as a transfer");
     await service.resolveReview(
       lowConfidenceReview.id,
       {
@@ -836,11 +954,15 @@ describe.sequential("finance service", () => {
       available: false,
       unavailableReason: expect.stringContaining("ambiguous transfers"),
     });
+    const guidedSetupSnapshot = await service.getGuidedSetupContext(userId);
+    expect(guidedSetupSnapshot.ledgerHealth.unresolvedReviews).toBe(
+      guidedSetupSnapshot.reviewSummary.count,
+    );
     await expect(
       service.resolveReview(
         transferReview.id,
         {
-          action: "not_purchase",
+          action: "confirm_transfer",
           expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
           learnMerchant: "never",
           rationale: "An agent may not confirm this transfer.",
@@ -888,7 +1010,7 @@ describe.sequential("finance service", () => {
       service.resolveReview(
         transferReview.id,
         {
-          action: "not_purchase",
+          action: "confirm_transfer",
           expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
           learnMerchant: "never",
           rationale: "The user confirmed this is movement between owned accounts.",
@@ -898,7 +1020,7 @@ describe.sequential("finance service", () => {
       service.resolveReview(
         transferReview.id,
         {
-          action: "not_purchase",
+          action: "confirm_transfer",
           expectedTransactionUpdatedAt: transferReview.transaction.updatedAt,
           learnMerchant: "never",
           rationale: "A concurrent duplicate decision must not overwrite the first.",
@@ -922,12 +1044,62 @@ describe.sequential("finance service", () => {
           category: "Transfers",
           direction: "transfer",
           needsReview: false,
+          reconciliationStatus: "confirmed",
         }),
       },
     });
+    await service.reconcileTransfers(userId);
     expect(
       (await service.listReviewQueue(userId)).some(
         (item) => item.transaction.id === transferCandidate.id,
+      ),
+    ).toBe(false);
+    const recategorizedTransfer = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 18,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "transfer",
+        merchant: "Misclassified purchase",
+        notes: null,
+      },
+      context,
+    );
+    await service.reconcileTransfers(userId);
+    const recategorizedTransferReview = (await service.listReviewQueue(userId)).find(
+      (item) => item.transaction.id === recategorizedTransfer.id,
+    );
+    if (!recategorizedTransferReview) {
+      throw new Error("The second transfer candidate was not queued for review.");
+    }
+    await expect(
+      service.resolveReview(
+        recategorizedTransferReview.id,
+        {
+          action: "recategorize",
+          categoryId: shopping.id,
+          expectedTransactionUpdatedAt: recategorizedTransferReview.transaction.updatedAt,
+          learnMerchant: "never",
+          nonTransferDirection: "expense",
+          rationale: "The user confirmed this was a purchase, not a transfer.",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      applied: true,
+      transaction: expect.objectContaining({
+        category: "Shopping",
+        direction: "expense",
+        needsReview: false,
+        reconciliationStatus: "not_applicable",
+      }),
+    });
+    await service.reconcileTransfers(userId);
+    expect(
+      (await service.listReviewQueue(userId)).some(
+        (item) => item.transaction.id === recategorizedTransfer.id,
       ),
     ).toBe(false);
     await service.updateTransaction(
@@ -1064,7 +1236,7 @@ describe.sequential("finance service", () => {
     ).rejects.toThrow("transaction was not found");
     await service.createBudget({ category: "Groceries", limit: 400, month: "2026-07" }, context);
     const overview = await service.listOverview(userId);
-    expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 79.75 });
+    expect(overview).toMatchObject({ reviewCount: 3, spendingThisMonth: 97.75 });
     expect(overview.budgets).toHaveLength(1);
     await expect(service.listOverview(userId, "2026-06")).resolves.toMatchObject({
       budgets: [],
@@ -1104,6 +1276,57 @@ describe.sequential("finance service", () => {
     );
   }, 20_000);
 
+  it("uses the planning-timezone month for Finance guided setup", async () => {
+    const timezoneUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: timezoneUserId,
+      displayName: "Timezone Finance",
+      email: `timezone-finance-${timezoneUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "America/Los_Angeles",
+    });
+    const service = createFinanceService({
+      db: database.db,
+      now: () => new Date("2026-08-01T00:30:00.000Z"),
+    });
+    await expect(service.getGuidedSetupContext(timezoneUserId)).resolves.toMatchObject({
+      asOf: "2026-08-01T00:30:00.000Z",
+      budgetSummary: { month: "2026-07" },
+      ledgerHealth: { asOf: "2026-08-01T00:30:00.000Z", unresolvedReviews: 0 },
+      reviewSummary: { count: 0 },
+    });
+  });
+
+  it("rolls back default categories when manual account onboarding fails", async () => {
+    const atomicUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: atomicUserId,
+      displayName: "Atomic Finance",
+      email: `atomic-finance-${atomicUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    await expect(
+      service.createAccount(
+        { balance: 10, institution: "Atomic Bank", name: "Checking", provider: "manual" },
+        {
+          principal: financePrincipal(atomicUserId),
+          requestId: null as unknown as string,
+        },
+      ),
+    ).rejects.toThrow();
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, atomicUserId)),
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.db.select().from(financeAccounts).where(eq(financeAccounts.userId, atomicUserId)),
+    ).resolves.toHaveLength(0);
+  });
+
   it("records merchant merge intent without exposing the supplied rationale", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "merchant-merge-audit" };
@@ -1116,7 +1339,7 @@ describe.sequential("finance service", () => {
       },
       context,
     );
-    await service.createTransaction(
+    const sourceTransaction = await service.createTransaction(
       {
         accountId: account.id,
         amount: 5,
@@ -1127,6 +1350,11 @@ describe.sequential("finance service", () => {
         merchant: "Merge Audit Source",
         notes: null,
       },
+      context,
+    );
+    await service.updateTransaction(
+      sourceTransaction.id,
+      { category: "Shopping", learnMerchant: false },
       context,
     );
     await service.createTransaction(
@@ -1178,6 +1406,88 @@ describe.sequential("finance service", () => {
       },
     });
     expect(JSON.stringify(event)).not.toContain(rationale);
+    const sourceDecisions = await database.db
+      .select()
+      .from(financeClassificationDecisions)
+      .where(eq(financeClassificationDecisions.transactionId, sourceTransaction.id));
+    expect(sourceDecisions).toHaveLength(1);
+    expect(sourceDecisions[0]?.merchantId).toBe(target.id);
+  });
+
+  it("keeps tied merchant evidence non-actionable until one category has more confirmations", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "merchant-evidence-tie" };
+    const account = await service.createAccount(
+      { balance: 100, institution: "Tie Bank", name: "Tie wallet", provider: "manual" },
+      context,
+    );
+    const confirm = async (category: string) => {
+      const transaction = await service.createTransaction(
+        {
+          accountId: account.id,
+          amount: 5,
+          category: null,
+          categoryConfidence: null,
+          date: "2026-07-19",
+          direction: "expense",
+          merchant: "Evidence Tie Merchant",
+          notes: null,
+        },
+        context,
+      );
+      await service.updateTransaction(transaction.id, { category, learnMerchant: false }, context);
+    };
+    await confirm("Shopping");
+    await confirm("Dining");
+    const tiedCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 7,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "expense",
+        merchant: "Evidence Tie Merchant",
+        notes: null,
+      },
+      context,
+    );
+    const tiedProposal = (
+      await service.proposeCategorizations(userId, {
+        limit: 50,
+        review: "needs_review",
+      })
+    ).items.find((proposal) => proposal.transaction.id === tiedCandidate.id);
+    expect(tiedProposal).toMatchObject({
+      confidence: 0,
+      meetsPolicyThreshold: false,
+      suggestedCategory: null,
+    });
+
+    await confirm("Shopping");
+    const winningCandidate = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 9,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-21",
+        direction: "expense",
+        merchant: "Evidence Tie Merchant",
+        notes: null,
+      },
+      context,
+    );
+    const winningProposal = (
+      await service.proposeCategorizations(userId, {
+        limit: 50,
+        review: "needs_review",
+      })
+    ).items.find((proposal) => proposal.transaction.id === winningCandidate.id);
+    expect(winningProposal).toMatchObject({
+      meetsPolicyThreshold: true,
+      suggestedCategory: expect.objectContaining({ name: "Shopping" }),
+    });
   });
 
   it("excludes vault moves and matched card payments while preserving rent spending", async () => {
@@ -1626,6 +1936,108 @@ describe.sequential("finance service", () => {
       pendingTransactionId: "pending-txn-1",
       providerCategory: "FOOD_AND_DRINK",
       providerCategoryConfidence: "VERY_HIGH",
+    });
+    await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
+      changed: 3,
+    });
+    const postedTransaction = (
+      await service.listTransactions(plaidOnlyUser.id, {
+        limit: 20,
+        review: "all",
+        sortBy: "date",
+        sortDirection: "desc",
+      })
+    ).items.find((item) => item.id === transaction?.id);
+    if (!postedTransaction) throw new Error("The posted Plaid transaction was not found.");
+    await service.updateTransaction(
+      postedTransaction.id,
+      { category: "Shopping", learnMerchant: false },
+      context,
+    );
+    const categories = await service.listCategories(plaidOnlyUser.id);
+    const shopping = categories.find((category) => category.name === "Shopping");
+    if (!shopping) throw new Error("The Shopping category was not seeded.");
+    const transferReviews = (await service.listReviewQueue(plaidOnlyUser.id)).filter(
+      (review) => review.reason === "possible_transfer",
+    );
+    expect(transferReviews).toHaveLength(2);
+    for (const review of transferReviews) {
+      await service.resolveReview(
+        review.id,
+        {
+          action: "recategorize",
+          categoryId: shopping.id,
+          expectedTransactionUpdatedAt: review.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: "The signed provider direction must survive transfer recategorization.",
+        },
+        context,
+      );
+    }
+    await expect(service.syncPlaidAccount(plaidAccount.id, context)).resolves.toEqual({
+      changed: 3,
+    });
+    const protectedRows = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(
+        and(
+          eq(financeTransactions.userId, plaidOnlyUser.id),
+          inArray(financeTransactions.providerTransactionId, [
+            "txn-1",
+            "txn-transfer-in",
+            "txn-transfer-out",
+          ]),
+        ),
+      );
+    expect(protectedRows.find((row) => row.providerTransactionId === "txn-1")).toMatchObject({
+      amount: 3000,
+      category: "Shopping",
+      categorySource: "user",
+      needsReview: false,
+      pending: false,
+      transactionDate: "2026-07-21",
+    });
+    expect(
+      protectedRows.find((row) => row.providerTransactionId === "txn-transfer-in"),
+    ).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      direction: "income",
+      needsReview: false,
+      providerDirection: "income",
+      reconciliationStatus: "not_applicable",
+      transferGroupId: null,
+    });
+    expect(
+      protectedRows.find((row) => row.providerTransactionId === "txn-transfer-out"),
+    ).toMatchObject({
+      category: "Shopping",
+      categorySource: "user",
+      direction: "expense",
+      needsReview: false,
+      providerDirection: "expense",
+      reconciliationStatus: "not_applicable",
+      transferGroupId: null,
+    });
+    expect(
+      (await service.listReviewQueue(plaidOnlyUser.id)).some(
+        (review) =>
+          review.transaction.id ===
+            protectedRows.find((row) => row.providerTransactionId === "txn-transfer-in")?.id ||
+          review.transaction.id ===
+            protectedRows.find((row) => row.providerTransactionId === "txn-transfer-out")?.id,
+      ),
+    ).toBe(false);
+    const postedDecision = await database.db
+      .select()
+      .from(financeClassificationDecisions)
+      .where(eq(financeClassificationDecisions.transactionId, postedTransaction.id));
+    expect(postedDecision).toHaveLength(1);
+    expect(postedDecision[0]).toMatchObject({
+      categoryName: "Shopping",
+      outcome: "corrected",
+      source: "user",
     });
     const amountPage = await service.listTransactions(userId, {
       limit: 1,

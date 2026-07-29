@@ -90,7 +90,7 @@ const scopeLabels: Record<AccessScope, string> = {
   "calendar:read": "Read calendar",
   "calendar:write": "Manage calendar",
   "finances:read": "Read sensitive financial accounts and activity",
-  "finances:write": "Save Finance guidance and transaction notes",
+  "finances:write": "Save Finance guidance drafts",
   "goals:read": "Read goals & motives",
   "goals:write": "Manage goals & motives",
   "mail:read": "Read mail",

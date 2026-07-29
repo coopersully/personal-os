@@ -68,9 +68,9 @@ Access management
 - Finance adds a domain-owned readiness and reviewed-workflow surface in
   Finances → Profile. Richer shared handoff presentation remains outside this
   Settings-owned page. Finance consent names account, balance, and activity
-  reads as sensitive and describes the write scope narrowly as setup guidance
-  and transaction notes; category application and review-state changes still
-  require a signed-in Ilo session.
+  reads as sensitive and describes the write scope narrowly as saving setup
+  guidance drafts; transaction edits, category application, and review-state
+  changes require a signed-in Ilo session.
 - Other domains honestly state that they currently support profiles and
   attention items but not domain-owned executable rules.
 

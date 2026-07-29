@@ -12,6 +12,7 @@ import type {
   AutomationRunStatus,
   AutomationTemplate,
   CalendarProvider,
+  DomainProfile,
   FinanceProvider,
   GoogleConnectionService,
   HomeLocation,
@@ -316,6 +317,31 @@ export const domainProfiles = pgTable(
   (table) => [
     uniqueIndex("domain_profiles_user_domain_idx").on(table.userId, table.domain),
     index("domain_profiles_user_status_idx").on(table.userId, table.status),
+  ],
+);
+
+export const domainProfileApprovals = pgTable(
+  "domain_profile_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    profileId: uuid("profile_id")
+      .notNull()
+      .references(() => domainProfiles.id, { onDelete: "cascade" }),
+    profileVersion: integer("profile_version").notNull(),
+    profile: jsonb("profile").$type<DomainProfile>().notNull(),
+    approvedByUserId: uuid("approved_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("domain_profile_approvals_user_domain_idx").on(table.userId, table.domain),
+    index("domain_profile_approvals_profile_idx").on(table.profileId),
   ],
 );
 
@@ -986,6 +1012,7 @@ export const financeTransactions = pgTable(
     providerCategory: text("provider_category"),
     providerCategoryDetailed: text("provider_category_detailed"),
     providerCategoryConfidence: text("provider_category_confidence"),
+    providerDirection: text("provider_direction").$type<"expense" | "income">(),
     merchant: text("merchant").notNull(),
     amount: integer("amount_cents").notNull(),
     direction: text("direction").$type<TransactionDirection>().notNull(),
@@ -1013,6 +1040,10 @@ export const financeTransactions = pgTable(
     uniqueIndex("finance_transactions_provider_idx").on(
       table.accountId,
       table.providerTransactionId,
+    ),
+    check(
+      "finance_transactions_provider_direction_check",
+      sql`${table.providerDirection} IS NULL OR ${table.providerDirection} IN ('expense', 'income')`,
     ),
   ],
 );

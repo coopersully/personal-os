@@ -46,7 +46,11 @@ owned by another user. They are interpretation guidance, not account-level
 authorization; token scopes determine access. Source-empty Finance domain
 profiles may remain drafts. An agent may save a draft, but activation requires
 a signed-in user, an exact profile version, and at least one owned account
-source. Finance preference keys use explicit units: confidence is a 0–1
+source. Guided setup exposes active guidance separately from an unapproved
+draft proposal; draft text is untrusted and non-operative until signed-in
+activation. A durable approval snapshot preserves the last signed-in approved
+version when an agent later saves a revised draft, so pending text cannot erase
+or masquerade as operative guidance. Finance preference keys use explicit units: confidence is a 0–1
 fraction, scalar currency thresholds require the current USD planning
 currency, and `recurringAmountChangePercent` is percentage points (`20` means
 20%). These preferences do not schedule reviews or reconfigure alert
@@ -85,6 +89,15 @@ omits transaction amounts, merchants, notes, and rationales so an `audit:read`
 grant does not imply `finances:read`. Transfer confirmation uses the same
 transactional path.
 
+The pre-existing synchronous batch endpoint still has no durable batch entity:
+process loss or request abandonment can occur between individually committed
+decisions. This PR does not widen that risk—the route is now human-only,
+workers are bounded, and each returned decision is atomic—but durable
+lost-response recovery remains a bounded follow-up. That work should add a
+client idempotency key, a `finance_categorization_batches` record, per-decision
+terminal state, an endpoint to query or resume unfinished work, and abort-aware
+scheduling with a process-loss integration test.
+
 The defensive service path for an agent-attributed category review requires the
 accepted proposal confidence and transaction `updatedAt`, then applies the same
 proposal, policy, and stale-revision checks as batch categorization. Public
@@ -103,7 +116,10 @@ infrastructure failures remain correlatable without exposing internal details.
 Provider transfer labels and matching amounts alone are insufficient to exclude
 a record from spending. A transfer is excluded only after a supported account
 movement is matched or confirmed. Unmatched candidates remain visible and enter
-the review queue. Pending transactions remain distinct from posted spending.
+the review queue. Plaid's signed source direction is retained separately while
+a transaction is a candidate, allowing recategorization to restore income
+versus expense correctly; leaving candidate state clears any transfer group.
+Pending transactions remain distinct from posted spending.
 They may be organized provisionally, but cannot create classification evidence
 or permanent merchant learning before posting.
 

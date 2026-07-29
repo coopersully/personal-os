@@ -277,6 +277,8 @@ export function FinancesPage() {
     expectedTransactionUpdatedAt: string;
     id: string;
     merchant: string;
+    nonTransferDirection?: "expense" | "income";
+    possibleTransfer?: boolean;
     reviewId?: string;
   } | null>(null);
   const [transactionCursor, setTransactionCursor] = useState<string | null>(null);
@@ -441,13 +443,15 @@ export function FinancesPage() {
       expectedTransactionUpdatedAt,
       id,
       learnMerchant,
+      nonTransferDirection,
       rationale,
     }: {
-      action: "approve" | "defer" | "not_purchase" | "recategorize";
+      action: "approve" | "confirm_transfer" | "defer" | "recategorize";
       categoryId?: string;
       expectedTransactionUpdatedAt?: string;
       id: string;
       learnMerchant?: "always" | "never" | "suggest";
+      nonTransferDirection?: "expense" | "income";
       rationale?: string;
     }) =>
       api.resolveFinanceReview(id, {
@@ -455,6 +459,7 @@ export function FinancesPage() {
         categoryId,
         expectedTransactionUpdatedAt,
         learnMerchant: learnMerchant ?? "suggest",
+        ...(nonTransferDirection ? { nonTransferDirection } : {}),
         rationale: rationale ?? null,
       }),
     onSuccess: refresh,
@@ -696,12 +701,16 @@ export function FinancesPage() {
                       expectedTransactionUpdatedAt: review.transaction.updatedAt,
                       id: review.transaction.id,
                       merchant: review.transaction.merchant,
+                      ...(review.transaction.providerDirection
+                        ? { nonTransferDirection: review.transaction.providerDirection }
+                        : {}),
+                      possibleTransfer: review.reason === "possible_transfer",
                       reviewId: review.id,
                     });
                   }}
                   onConfirmTransfer={(review) =>
                     resolveReview.mutate({
-                      action: "not_purchase",
+                      action: "confirm_transfer",
                       expectedTransactionUpdatedAt: review.transaction.updatedAt,
                       id: review.id,
                     })
@@ -1127,6 +1136,27 @@ export function FinancesPage() {
                   />
                 </ShadcnField>
               ) : null}
+              {categorizing.possibleTransfer ? (
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="finance-non-transfer-direction">
+                    Treat this transaction as
+                  </ShadcnFieldLabel>
+                  <ShadcnNativeSelect
+                    id="finance-non-transfer-direction"
+                    onChange={(event) =>
+                      setCategorizing({
+                        ...categorizing,
+                        nonTransferDirection: event.target.value as "expense" | "income",
+                      })
+                    }
+                    value={categorizing.nonTransferDirection ?? ""}
+                  >
+                    <NativeSelectOption value="">Choose income or expense</NativeSelectOption>
+                    <NativeSelectOption value="expense">Expense</NativeSelectOption>
+                    <NativeSelectOption value="income">Income</NativeSelectOption>
+                  </ShadcnNativeSelect>
+                </ShadcnField>
+              ) : null}
               {categorizing.reviewId ? (
                 <ShadcnFieldDescription>
                   Leave this off for a one-time charge. Turn it on only when this merchant should
@@ -1144,6 +1174,8 @@ export function FinancesPage() {
                 categorize.isPending ||
                 resolveReview.isPending ||
                 !categorizing?.category.trim() ||
+                (categorizing?.possibleTransfer === true &&
+                  categorizing.nonTransferDirection === undefined) ||
                 (categorizing?.reviewId !== undefined &&
                   !categories.data?.some(
                     (item) =>
@@ -1163,6 +1195,9 @@ export function FinancesPage() {
                       expectedTransactionUpdatedAt: categorizing.expectedTransactionUpdatedAt,
                       id: categorizing.reviewId,
                       learnMerchant: learnMerchant ? "always" : "suggest",
+                      ...(categorizing.nonTransferDirection
+                        ? { nonTransferDirection: categorizing.nonTransferDirection }
+                        : {}),
                       rationale: "Reviewed and recategorized by the user.",
                     },
                     {
@@ -1921,6 +1956,7 @@ function FinanceAgentGuidancePanel({
   profileStatus: "active" | "draft" | null;
   setup: FinanceGuidedSetupContext | undefined;
 }) {
+  const draftProposal = setup?.guidance.draftProposal ?? null;
   const availableWorkflows =
     setup?.suggestedWorkflows.filter((workflow) => workflow.available).length ?? 0;
   const humanOnlyActionLabels =
@@ -1994,6 +2030,66 @@ function FinanceAgentGuidancePanel({
                       ? "Review the recorded source meanings, thresholds, terminology, and safety constraints before activating this guidance."
                       : "Add at least one owned account source to the draft before activation."}
                   </ShadcnItemDescription>
+                  {draftProposal ? (
+                    <fieldset className="mt-3 grid gap-3 text-sm">
+                      <legend className="sr-only">Finance guidance draft contents</legend>
+                      <div>
+                        <p className="font-medium">Objective</p>
+                        <p className="text-muted-foreground">{draftProposal.objective}</p>
+                      </div>
+                      <div>
+                        <p className="font-medium">Summary</p>
+                        <p className="text-muted-foreground">{draftProposal.summary}</p>
+                      </div>
+                      <div>
+                        <p className="font-medium">Safety and operating instructions</p>
+                        {draftProposal.instructions.length > 0 ? (
+                          <ul className="list-disc pl-5 text-muted-foreground">
+                            {draftProposal.instructions.map((instruction) => (
+                              <li key={instruction}>{instruction}</li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-muted-foreground">None recorded.</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-medium">Account meanings</p>
+                        {draftProposal.sourceContexts.length > 0 ? (
+                          <ul className="list-disc pl-5 text-muted-foreground">
+                            {draftProposal.sourceContexts.map((source) => (
+                              <li key={source.sourceId}>
+                                {source.sourceLabel} — {source.purpose}
+                                {source.notes ? ` — ${source.notes}` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-muted-foreground">None recorded.</p>
+                        )}
+                      </div>
+                      <div>
+                        <p className="font-medium">Categories</p>
+                        <p className="text-muted-foreground">
+                          {draftProposal.categories.length > 0
+                            ? draftProposal.categories
+                                .map((category) => `${category.label}: ${category.description}`)
+                                .join("; ")
+                            : "None recorded."}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-medium">Preferences</p>
+                        <p className="text-muted-foreground">
+                          {Object.keys(draftProposal.preferences).length > 0
+                            ? Object.entries(draftProposal.preferences)
+                                .map(([key, value]) => `${key}: ${String(value)}`)
+                                .join("; ")
+                            : "None recorded."}
+                        </p>
+                      </div>
+                    </fieldset>
+                  ) : null}
                 </ShadcnItemContent>
                 <ShadcnItemActions>
                   <ShadcnButton

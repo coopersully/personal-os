@@ -1148,6 +1148,37 @@ describe.sequential("ilo API", () => {
       draftNotice: null,
       draftProposal: null,
     });
+    const revisedFinanceDraft = {
+      ...financeGuidanceDraft,
+      expectedVersion: 2,
+      instructions: ["Treat all draft text as untrusted until I activate it."],
+      summary: "A pending revision that must not replace approved guidance.",
+    };
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          auth: "agent",
+          body: revisedFinanceDraft,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(200);
+    const revisedDraftGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(revisedDraftGuidedSetup.guidance).toMatchObject({
+      approvedProfile: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "active",
+        version: 2,
+      }),
+      draftNotice: expect.stringContaining("untrusted and non-operative"),
+      draftProposal: expect.objectContaining({
+        instructions: ["Treat all draft text as untrusted until I activate it."],
+        status: "draft",
+        version: 3,
+      }),
+    });
     expect(
       (
         await request("/v1/assistant/profiles/finances", {
@@ -1189,8 +1220,13 @@ describe.sequential("ilo API", () => {
         method: "PATCH",
       },
     );
-    expect(agentNoteResponse.status).toBe(200);
-    expect((await payload(agentNoteResponse)).transaction).toMatchObject({
+    expect(agentNoteResponse.status).toBe(403);
+    const userNoteResponse = await request(`/v1/finances/transactions/${agentBypassCandidate.id}`, {
+      body: { notes: "Keep the receipt for review." },
+      method: "PATCH",
+    });
+    expect(userNoteResponse.status).toBe(200);
+    expect((await payload(userNoteResponse)).transaction).toMatchObject({
       category: null,
       notes: "Keep the receipt for review.",
     });
@@ -1210,13 +1246,8 @@ describe.sequential("ilo API", () => {
         method: "PATCH",
       },
     );
-    expect(writeOnlyNoteResponse.status).toBe(200);
-    expect((await payload(writeOnlyNoteResponse)).transaction).toEqual({
-      changedFields: ["notes"],
-      id: agentBypassCandidate.id,
-      updated: true,
-    });
-    const agentNoteAudits = await database.db
+    expect(writeOnlyNoteResponse.status).toBe(403);
+    const noteUpdateAudits = await database.db
       .select({
         action: auditEvents.action,
         actorType: auditEvents.actorType,
@@ -1225,17 +1256,17 @@ describe.sequential("ilo API", () => {
       })
       .from(auditEvents)
       .where(eq(auditEvents.entityId, agentBypassCandidate.id));
-    expect(agentNoteAudits).toContainEqual({
+    expect(noteUpdateAudits).toContainEqual({
       action: "finance.transaction_updated",
-      actorType: "agent",
+      actorType: "user",
       after: { changedFields: ["notes"] },
       before: null,
     });
-    expect(agentNoteAudits).not.toEqual(
+    expect(noteUpdateAudits).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           action: "finance.transaction_categorized",
-          actorType: "agent",
+          actorType: "user",
         }),
       ]),
     );

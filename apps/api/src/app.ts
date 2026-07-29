@@ -895,7 +895,7 @@ const oauthScopeLabels: Record<string, string> = {
   "calendar:read": "Read calendars and events",
   "calendar:write": "Create and manage events",
   "finances:read": "Read sensitive financial accounts, balances, and activity",
-  "finances:write": "Save Finance setup guidance and transaction notes",
+  "finances:write": "Save Finance setup guidance drafts",
   "goals:read": "Read goals and motives",
   "goals:write": "Manage goals and motives",
   "mail:read": "Read connected mail",

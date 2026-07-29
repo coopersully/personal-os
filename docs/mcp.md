@@ -88,10 +88,20 @@ merchants require a signed-in Ilo session. Provider administration,
 account/import/financial-profile/budget changes, permanent merchant rules, and
 ambiguous transfer confirmation are also human-only.
 
+The signed-in categorization batch API predates this guided-setup work and
+commits each decision independently. Its bounded workers and per-item results
+do not provide a durable batch or resume record if the process ends between
+decisions. A follow-up must add an idempotency key, persisted per-item state,
+query or resume support, and abort-aware scheduling. MCP does not expose this
+human-only apply endpoint.
+
 The shared `save_domain_profile` tool may save a Finance guidance draft with
 `finances:write`. It cannot activate that draft: activation is a signed-in
 action in **Finances → Profile**, requires an owned account source, and uses
-the profile version guard. `sourceContexts` describe how to interpret accounts;
+the profile version guard. `get_finance_guided_setup` exposes active guidance
+separately from a draft proposal. Draft text is explicitly untrusted and
+non-operative until that signed-in activation; hosts must not inject it as
+operating instructions. `sourceContexts` describe how to interpret accounts;
 they do not limit which accounts a token can read. Scalar alert preferences
 currently use one USD planning currency. Cadence and threshold preferences
 guide later agent conversations; they neither schedule runs nor reconfigure

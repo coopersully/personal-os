@@ -231,6 +231,7 @@ export const financeTransactionSchema = z.object({
     .enum(["HIGH", "LOW", "MEDIUM", "UNKNOWN", "VERY_HIGH"])
     .nullable()
     .optional(),
+  providerDirection: z.enum(["expense", "income"]).nullable().optional(),
   rawMerchant: z.string().min(1).max(240).optional(),
   reconciliationStatus: z.enum(["candidate", "confirmed", "matched", "not_applicable"]).optional(),
   accountId: idSchema,
@@ -315,6 +316,7 @@ export const financeGuidedSetupWorkflowKeySchema = z.enum([
   "monthly_review",
 ]);
 export type FinanceGuidedSetupWorkflowKey = z.infer<typeof financeGuidedSetupWorkflowKeySchema>;
+const financeDomainProfileSchema = domainProfileSchema.extend({ domain: z.literal("finances") });
 
 export const financeGuidedSetupContextSchema = z.object({
   accountSources: z.array(financeAccountSchema),
@@ -352,13 +354,13 @@ export const financeGuidedSetupContextSchema = z.object({
     ]),
   ),
   guidance: z.object({
-    approvedProfile: domainProfileSchema.nullable(),
+    approvedProfile: financeDomainProfileSchema.nullable(),
     draftNotice: z
       .literal(
         "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
       )
       .nullable(),
-    draftProposal: domainProfileSchema.nullable(),
+    draftProposal: financeDomainProfileSchema.nullable(),
   }),
   ledgerHealth: financeLedgerHealthSchema,
   reviewSummary: z.object({
@@ -377,20 +379,15 @@ export const financeGuidedSetupContextSchema = z.object({
 });
 export type FinanceGuidedSetupContext = z.infer<typeof financeGuidedSetupContextSchema>;
 
-export const financeTransactionUpdateReceiptSchema = z.object({
-  changedFields: z.array(z.literal("notes")).min(1),
-  id: idSchema,
-  updated: z.literal(true),
-});
-export type FinanceTransactionUpdateReceipt = z.infer<typeof financeTransactionUpdateReceiptSchema>;
-
 export const financeTransactionQuerySchema = z.object({
   accountId: idSchema.optional(),
   categoryId: idSchema.optional(),
   cursor: z.string().min(1).max(600).optional(),
   from: z.iso.date().optional(),
   limit: z.coerce.number().int().min(1).max(200).default(50),
-  pending: z.coerce.boolean().optional(),
+  pending: z
+    .union([z.boolean(), z.enum(["true", "false"]).transform((value) => value === "true")])
+    .optional(),
   review: z.enum(["all", "needs_review", "resolved"]).default("all"),
   sortBy: z.enum(["amount", "date", "merchant"]).default("date"),
   sortDirection: z.enum(["asc", "desc"]).default("desc"),
@@ -468,11 +465,12 @@ export type FinanceCategorizationApplyResult = z.infer<
 
 export const financeReviewDecisionInputSchema = z
   .object({
-    action: z.enum(["approve", "defer", "not_purchase", "recategorize"]),
+    action: z.enum(["approve", "confirm_transfer", "defer", "recategorize"]),
     categoryId: idSchema.optional(),
     confidence: z.number().min(0).max(1).optional(),
     expectedTransactionUpdatedAt: isoDateTimeSchema.optional(),
     learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
+    nonTransferDirection: z.enum(["expense", "income"]).optional(),
     rationale: z.string().trim().max(1_000).nullable().default(null),
   })
   .superRefine((value, context) => {

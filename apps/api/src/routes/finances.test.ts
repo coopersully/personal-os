@@ -63,6 +63,7 @@ describe("finance routes", () => {
       app.request("/v1/finances/categorizations/apply", json),
       app.request(`/v1/finances/review/${id}`, json),
       app.request("/v1/finances/transactions", json),
+      app.request(`/v1/finances/transactions/${id}`, { ...json, method: "PATCH" }),
     ]);
     for (const response of humanOnlyResponses) {
       expect(response.status).toBe(403);
@@ -90,6 +91,7 @@ describe("finance routes", () => {
   it("keeps POST proposal compatibility on the Finance read scope", async () => {
     const app = new Hono<AppEnv>();
     const finances = {
+      listTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),
       proposeCategorizations: vi.fn(async () => ({ items: [], nextCursor: "opaque-next" })),
     };
     app.use("*", async (context, next) => {
@@ -122,6 +124,11 @@ describe("finance routes", () => {
     expect(finances.proposeCategorizations).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ cursor: "opaque" }),
+    );
+    expect((await app.request("/v1/finances/transactions?pending=false")).status).toBe(200);
+    expect(finances.listTransactions).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ pending: false }),
     );
   });
 });

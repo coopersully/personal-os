@@ -1,4 +1,10 @@
-import { attentionItems, auditEvents, type Database, domainProfiles } from "@personal-os/database";
+import {
+  attentionItems,
+  auditEvents,
+  type Database,
+  domainProfileApprovals,
+  domainProfiles,
+} from "@personal-os/database";
 import {
   type AssistantDomain,
   type AssistantSetupStatus,
@@ -152,6 +158,30 @@ export function createAssistantService({
           if (!profile) {
             throw new AppError("conflict", "The domain profile changed while it was being saved.");
           }
+          if (profile.status === "active" && context.principal.actorType === "user") {
+            await transaction
+              .insert(domainProfileApprovals)
+              .values({
+                approvedAt: updatedAt,
+                approvedByUserId: context.principal.userId,
+                domain: profile.domain,
+                profile: serializeProfile(profile),
+                profileId: profile.id,
+                profileVersion: profile.version,
+                userId: context.principal.userId,
+              })
+              .onConflictDoUpdate({
+                set: {
+                  approvedAt: updatedAt,
+                  approvedByUserId: context.principal.userId,
+                  profile: serializeProfile(profile),
+                  profileId: profile.id,
+                  profileVersion: profile.version,
+                  updatedAt,
+                },
+                target: [domainProfileApprovals.userId, domainProfileApprovals.domain],
+              });
+          }
           const changedFields = domainProfileChangedFields(existing ?? null, profile);
           await transaction.insert(auditEvents).values(
             auditValues({
@@ -163,6 +193,18 @@ export function createAssistantService({
               ...context,
             }),
           );
+          if (profile.status === "active" && context.principal.actorType === "user") {
+            await transaction.insert(auditEvents).values(
+              auditValues({
+                action: "assistant.profile.approved",
+                after: { domain: profile.domain, profileVersion: profile.version },
+                before: null,
+                entityId: profile.id,
+                entityType: "domain_profile",
+                ...context,
+              }),
+            );
+          }
           return profile;
         });
       } catch (error) {

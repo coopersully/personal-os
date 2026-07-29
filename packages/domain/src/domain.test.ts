@@ -32,6 +32,7 @@ import {
   featureIds,
   financeGuidedPreferencesSchema,
   financeReviewDecisionInputSchema,
+  financeTransactionQuerySchema,
   formatDateOnly,
   formatDateWithOrdinal,
   formatMonth,
@@ -922,6 +923,11 @@ describe("finance agent contracts", () => {
         decisions: [decision, decision],
       }).success,
     ).toBe(false);
+  });
+
+  it("parses explicit Finance pending query booleans without truthy string coercion", () => {
+    expect(financeTransactionQuerySchema.parse({ pending: "false" }).pending).toBe(false);
+    expect(financeTransactionQuerySchema.parse({ pending: "true" }).pending).toBe(true);
   });
 });
 

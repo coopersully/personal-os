@@ -4,6 +4,7 @@ import {
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfileApprovals,
   domainProfiles,
   financeAccounts,
   migrateDatabase,
@@ -167,6 +168,53 @@ describe.sequential("assistant setup service", () => {
         context(),
       ),
     ).resolves.toMatchObject({ status: "active", version: 2 });
+    const humanApproved = await service.upsertProfile(
+      {
+        categories: profile.categories,
+        domain: profile.domain,
+        expectedVersion: 2,
+        instructions: profile.instructions,
+        objective: profile.objective,
+        preferences: profile.preferences,
+        sourceContexts: profile.sourceContexts,
+        status: "active",
+        summary: "Human-approved Mail guidance.",
+      },
+      {
+        principal: {
+          ...context().principal,
+          actorId: userId,
+          actorType: "user",
+        },
+        requestId: "human-mail-approval",
+      },
+    );
+    expect(humanApproved).toMatchObject({ status: "active", version: 3 });
+    await expect(
+      service.upsertProfile(
+        {
+          categories: profile.categories,
+          domain: profile.domain,
+          expectedVersion: 3,
+          instructions: profile.instructions,
+          objective: profile.objective,
+          preferences: profile.preferences,
+          sourceContexts: profile.sourceContexts,
+          status: "active",
+          summary: "Later agent-active Mail revision.",
+        },
+        context(),
+      ),
+    ).resolves.toMatchObject({ status: "active", version: 4 });
+    const [preservedApproval] = await database.db
+      .select()
+      .from(domainProfileApprovals)
+      .where(eq(domainProfileApprovals.userId, userId));
+    expect(preservedApproval).toMatchObject({
+      approvedByUserId: userId,
+      profile: expect.objectContaining({ summary: "Human-approved Mail guidance.", version: 3 }),
+      profileVersion: 3,
+    });
     await expect(
       service.upsertProfile(
         {
@@ -218,7 +266,7 @@ describe.sequential("assistant setup service", () => {
           canWrite: true,
           domain: "mail",
           profileStatus: "active",
-          profileVersion: 2,
+          profileVersion: 4,
         },
         {
           canRead: true,
@@ -415,6 +463,58 @@ describe.sequential("assistant setup service", () => {
     expect(
       savedRaceProfile?.sourceContexts.some((source) => source.sourceId === raceAccount.id),
     ).toBe(Boolean(savedRaceAccount));
+    const orderedAccounts = await database.db
+      .insert(financeAccounts)
+      .values([
+        {
+          institution: "Ordered Bank",
+          name: "First lock",
+          provider: "manual",
+          status: "manual",
+          userId: financeUser.id,
+        },
+        {
+          institution: "Ordered Bank",
+          name: "Second lock",
+          provider: "manual",
+          status: "manual",
+          userId: financeUser.id,
+        },
+      ])
+      .returning();
+    const currentProfile = await service.getProfile(financeUser.id, "finances");
+    if (!currentProfile || orderedAccounts.length !== 2) {
+      throw new Error("Ordered Finance lock fixtures were not created.");
+    }
+    const contexts = orderedAccounts.map((source) => ({
+      ...sourceContext,
+      sourceId: source.id,
+      sourceLabel: source.name,
+    }));
+    const orderedLockResults = await Promise.allSettled([
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: currentProfile.version,
+          sourceContexts: contexts,
+        },
+        financeContext,
+      ),
+      service.upsertProfile(
+        {
+          ...input,
+          expectedVersion: currentProfile.version,
+          sourceContexts: [...contexts].reverse(),
+        },
+        financeContext,
+      ),
+    ]);
+    expect(orderedLockResults.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(orderedLockResults.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(orderedLockResults.find((result) => result.status === "rejected")).toMatchObject({
+      reason: expect.objectContaining({ code: "conflict" }),
+      status: "rejected",
+    });
   });
 
   it("uses one cross-domain attention shape and audits changes", async () => {

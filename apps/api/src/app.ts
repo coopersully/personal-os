@@ -76,9 +76,14 @@ export type PersonalOsApp = Hono<AppEnv> & {
   }>;
   backfillFinanceLearning: () => Promise<{ processed: number }>;
   backfillFinanceSetupIntegrity: () => Promise<{
-    categoriesSeeded: number;
+    categoriesComplete: boolean;
+    categoriesInserted: number;
+    claimed: boolean;
     processed: number;
+    profileRowsScanned: number;
+    profilesComplete: boolean;
     profilesDemoted: number;
+    userRowsScanned: number;
   }>;
   dispatchDueAutomations: () => Promise<void>;
   syncDueFinances: () => Promise<{ failed: number; reasons: string[]; synced: number }>;

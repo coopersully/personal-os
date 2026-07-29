@@ -181,9 +181,11 @@ describe.sequential("ilo API", () => {
     await expect(app.backfillFinanceCashflowInsights()).resolves.toEqual({ processed: 0 });
     await expect(app.backfillFinanceLedgerIntegrity()).resolves.toMatchObject({ processed: 0 });
     await expect(app.backfillFinanceLearning()).resolves.toEqual({ processed: 0 });
-    await expect(app.backfillFinanceSetupIntegrity()).resolves.toEqual({
-      categoriesSeeded: 0,
-      processed: 0,
+    await expect(app.backfillFinanceSetupIntegrity()).resolves.toMatchObject({
+      categoriesComplete: true,
+      categoriesInserted: 0,
+      claimed: true,
+      profilesComplete: true,
       profilesDemoted: 0,
     });
     await expect(app.syncDueFinances()).resolves.toEqual({ failed: 0, reasons: [], synced: 0 });

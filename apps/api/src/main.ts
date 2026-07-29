@@ -59,9 +59,9 @@ async function dispatchFinanceBackfill(): Promise<void> {
 async function dispatchFinanceSetupIntegrity(): Promise<void> {
   try {
     const result = await app.backfillFinanceSetupIntegrity();
-    if (result.processed)
+    if (result.profilesDemoted || result.categoriesInserted)
       process.stdout.write(
-        `[personal-os] repaired Finance setup for ${result.processed} records: ${result.profilesDemoted} unapproved profiles demoted, ${result.categoriesSeeded} category owners seeded.\n`,
+        `[personal-os] repaired Finance setup after scanning ${result.processed} records: ${result.profilesDemoted} unapproved profiles demoted, ${result.categoriesInserted} default categories inserted.\n`,
       );
   } catch (error) {
     process.stderr.write(

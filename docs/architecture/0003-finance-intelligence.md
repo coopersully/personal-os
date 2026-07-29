@@ -201,10 +201,13 @@ schema transition. It replaced the private branch-only 0016–0020 chain before
 this PR was published and retains the required confidence and transfer-review
 backfills. It is now immutable; every Finance schema correction is append-only
 and follows the repository-wide [database migration policy](../engineering/database-migrations.md).
-The approval and provider-direction migrations are expand-only. A bounded,
-idempotent startup repair demotes legacy active Finance domain profiles that
-lack signed approval and seeds missing per-owner categories, reporting counts
-and retrying on the scheduler. Until repair completes, shared and Finance
+The approval, provider-direction, and setup-repair checkpoint migrations are
+expand-only. A bounded, idempotent startup repair uses a durable keyset
+checkpoint and database row claim so only one API instance scans each batch.
+It demotes legacy active Finance domain profiles that lack signed approval and
+seeds missing per-owner categories, reporting actual mutations and retrying on
+the scheduler. After both keysets converge, each pass performs only the
+constant-time checkpoint read. Until repair completes, shared and Finance
 readers treat an unapproved active row as an untrusted draft and category reads
 serve the stable taxonomy without writing.
 

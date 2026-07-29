@@ -145,6 +145,7 @@ describe.sequential("mail service", () => {
       "0040_mail_draft_send_claim",
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
+      "0043_finance_setup_backfill_state",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -172,6 +173,7 @@ describe.sequential("mail service", () => {
       "0040_mail_draft_send_claim",
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
+      "0043_finance_setup_backfill_state",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

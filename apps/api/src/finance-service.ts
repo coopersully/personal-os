@@ -18,6 +18,7 @@ import {
   financeProfiles,
   financeRecurringObligations,
   financeReviewCases,
+  financeSetupBackfillState,
   financeTransactions,
   users,
 } from "@personal-os/database";
@@ -60,7 +61,7 @@ import type {
   UpdateFinanceTransactionInput,
 } from "@personal-os/domain";
 import { financeDomainProfileSchema, idSchema, localDateAt } from "@personal-os/domain";
-import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -173,7 +174,9 @@ function categorySlug(name: string) {
 
 function defaultCategoryId(userId: string, slug: string) {
   const hex = createHash("sha256").update(`finance-category:${userId}:${slug}`).digest("hex");
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+  // UUIDv8 identifies this as a custom SHA-256 layout rather than implying
+  // the namespace/SHA-1 algorithm required by UUIDv5.
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-8${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 function titleCaseMerchant(value: string) {
@@ -468,11 +471,11 @@ function merchantAuditSnapshot(value: FinanceMerchant) {
 }
 
 export function createFinanceService({ db, now, plaid }: Options) {
-  async function ensureCategories(
+  async function seedCategories(
     userId: string,
     executor: Pick<Database, "insert" | "select"> = db,
   ) {
-    await executor
+    const inserted = await executor
       .insert(financeCategories)
       .values(
         defaultCategories.map(([name, slug]) => ({
@@ -484,12 +487,20 @@ export function createFinanceService({ db, now, plaid }: Options) {
           userId,
         })),
       )
-      .onConflictDoNothing({ target: [financeCategories.userId, financeCategories.slug] });
-    return executor
+      .onConflictDoNothing()
+      .returning({ id: financeCategories.id });
+    const categories = await executor
       .select()
       .from(financeCategories)
       .where(eq(financeCategories.userId, userId))
       .orderBy(financeCategories.group, financeCategories.name);
+    return { categories, inserted: inserted.length };
+  }
+  async function ensureCategories(
+    userId: string,
+    executor: Pick<Database, "insert" | "select"> = db,
+  ) {
+    return (await seedCategories(userId, executor)).categories;
   }
   async function existingCategories(userId: string) {
     return db
@@ -2799,36 +2810,63 @@ export function createFinanceService({ db, now, plaid }: Options) {
       return { confirmedMovements, paired, processed: userIds.length };
     },
     async backfillSetupIntegrity(limit = 100) {
-      const legacyProfiles = await db
-        .select({ id: domainProfiles.id, userId: domainProfiles.userId })
-        .from(domainProfiles)
-        .leftJoin(
-          domainProfileApprovals,
-          and(
-            eq(domainProfileApprovals.profileId, domainProfiles.id),
-            eq(domainProfileApprovals.userId, domainProfiles.userId),
-            eq(domainProfileApprovals.domain, domainProfiles.domain),
-          ),
-        )
-        .where(
-          and(
-            eq(domainProfiles.domain, "finances"),
-            eq(domainProfiles.status, "active"),
-            isNull(domainProfileApprovals.id),
-          ),
-        )
-        .orderBy(domainProfiles.id)
-        .limit(limit);
-      let profilesDemoted = 0;
-      for (const candidate of legacyProfiles) {
-        profilesDemoted += await db.transaction(async (tx) => {
-          const [profile] = await tx
-            .select()
-            .from(domainProfiles)
-            .where(eq(domainProfiles.id, candidate.id))
-            .for("update")
-            .limit(1);
-          if (profile?.status !== "active") return 0;
+      const stateKey = "finance_setup_integrity_v1";
+      const requestedLimit = Number.isFinite(limit) ? Math.trunc(limit) : 100;
+      const scanLimit = Math.max(1, Math.min(100, requestedLimit));
+      const [existingState] = await db
+        .select({ key: financeSetupBackfillState.key })
+        .from(financeSetupBackfillState)
+        .where(eq(financeSetupBackfillState.key, stateKey))
+        .limit(1);
+      if (!existingState) {
+        await db
+          .insert(financeSetupBackfillState)
+          .values({ key: stateKey })
+          .onConflictDoNothing({ target: financeSetupBackfillState.key });
+      }
+      return db.transaction(async (tx) => {
+        const [state] = await tx
+          .select()
+          .from(financeSetupBackfillState)
+          .where(eq(financeSetupBackfillState.key, stateKey))
+          .for("update", { skipLocked: true })
+          .limit(1);
+        if (!state) {
+          return {
+            categoriesComplete: false,
+            categoriesInserted: 0,
+            claimed: false,
+            processed: 0,
+            profileRowsScanned: 0,
+            profilesComplete: false,
+            profilesDemoted: 0,
+            userRowsScanned: 0,
+          };
+        }
+        if (state.profilesComplete && state.categoriesComplete) {
+          return {
+            categoriesComplete: true,
+            categoriesInserted: 0,
+            claimed: true,
+            processed: 0,
+            profileRowsScanned: 0,
+            profilesComplete: true,
+            profilesDemoted: 0,
+            userRowsScanned: 0,
+          };
+        }
+        const profileRows = state.profilesComplete
+          ? []
+          : await tx
+              .select()
+              .from(domainProfiles)
+              .where(state.profileCursor ? gt(domainProfiles.id, state.profileCursor) : undefined)
+              .orderBy(domainProfiles.id)
+              .limit(scanLimit)
+              .for("update");
+        let profilesDemoted = 0;
+        for (const profile of profileRows) {
+          if (profile.domain !== "finances" || profile.status !== "active") continue;
           const [approval] = await tx
             .select({ id: domainProfileApprovals.id })
             .from(domainProfileApprovals)
@@ -2837,10 +2875,11 @@ export function createFinanceService({ db, now, plaid }: Options) {
                 eq(domainProfileApprovals.profileId, profile.id),
                 eq(domainProfileApprovals.userId, profile.userId),
                 eq(domainProfileApprovals.domain, "finances"),
+                eq(domainProfileApprovals.profileVersion, profile.version),
               ),
             )
             .limit(1);
-          if (approval) return 0;
+          if (approval) continue;
           const [demoted] = await tx
             .update(domainProfiles)
             .set({ status: "draft", updatedAt: now(), version: profile.version + 1 })
@@ -2848,7 +2887,7 @@ export function createFinanceService({ db, now, plaid }: Options) {
               and(eq(domainProfiles.id, profile.id), eq(domainProfiles.version, profile.version)),
             )
             .returning({ version: domainProfiles.version });
-          if (!demoted) return 0;
+          if (!demoted) continue;
           await tx.insert(auditEvents).values(
             auditValues({
               action: "assistant.profile.demoted_unapproved",
@@ -2864,30 +2903,49 @@ export function createFinanceService({ db, now, plaid }: Options) {
               requestId: "finance-setup-integrity-backfill",
             }),
           );
-          return 1;
-        });
-      }
-      const defaultSlugs = defaultCategories.map(([, slug]) => slug);
-      const categoryOwners = await db
-        .select({ userId: financeAccounts.userId })
-        .from(financeAccounts)
-        .leftJoin(
-          financeCategories,
-          and(
-            eq(financeCategories.userId, financeAccounts.userId),
-            inArray(financeCategories.slug, defaultSlugs),
-          ),
-        )
-        .groupBy(financeAccounts.userId)
-        .having(sql`count(distinct ${financeCategories.slug}) < ${defaultCategories.length}`)
-        .orderBy(financeAccounts.userId)
-        .limit(limit);
-      for (const owner of categoryOwners) await ensureCategories(owner.userId);
-      return {
-        categoriesSeeded: categoryOwners.length,
-        processed: profilesDemoted + categoryOwners.length,
-        profilesDemoted,
-      };
+          profilesDemoted += 1;
+        }
+        const userRows = state.categoriesComplete
+          ? []
+          : await tx
+              .select({ id: users.id })
+              .from(users)
+              .where(state.userCursor ? gt(users.id, state.userCursor) : undefined)
+              .orderBy(users.id)
+              .limit(scanLimit);
+        let categoriesInserted = 0;
+        for (const user of userRows) {
+          const [account] = await tx
+            .select({ id: financeAccounts.id })
+            .from(financeAccounts)
+            .where(eq(financeAccounts.userId, user.id))
+            .limit(1);
+          if (!account) continue;
+          categoriesInserted += (await seedCategories(user.id, tx)).inserted;
+        }
+        const profilesComplete = state.profilesComplete || profileRows.length < scanLimit;
+        const categoriesComplete = state.categoriesComplete || userRows.length < scanLimit;
+        await tx
+          .update(financeSetupBackfillState)
+          .set({
+            categoriesComplete,
+            profileCursor: profileRows.at(-1)?.id ?? state.profileCursor,
+            profilesComplete,
+            updatedAt: now(),
+            userCursor: userRows.at(-1)?.id ?? state.userCursor,
+          })
+          .where(eq(financeSetupBackfillState.key, stateKey));
+        return {
+          categoriesComplete,
+          categoriesInserted,
+          claimed: true,
+          processed: profileRows.length + userRows.length,
+          profileRowsScanned: profileRows.length,
+          profilesComplete,
+          profilesDemoted,
+          userRowsScanned: userRows.length,
+        };
+      });
     },
     async listCategories(userId: string) {
       const existing = await existingCategories(userId);

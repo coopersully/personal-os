@@ -20,4 +20,20 @@ describe("database schema contracts", () => {
     );
     expect(migrationSql).toContain(`AND "profile"->>'status' = 'active'\n\t\t\t) IS TRUE`);
   });
+
+  it("keeps the Finance setup checkpoint in its own schema expansion", async () => {
+    const approvalMigration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0041_domain_profile_approvals.sql"),
+      "utf8",
+    );
+    const checkpointMigration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0043_finance_setup_backfill_state.sql"),
+      "utf8",
+    );
+
+    expect(approvalMigration).not.toContain("finance_setup_backfill_state");
+    expect(checkpointMigration).toContain('CREATE TABLE "finance_setup_backfill_state"');
+    expect(checkpointMigration).toContain('"categories_complete" boolean DEFAULT false NOT NULL');
+    expect(checkpointMigration).toContain('"profiles_complete" boolean DEFAULT false NOT NULL');
+  });
 });

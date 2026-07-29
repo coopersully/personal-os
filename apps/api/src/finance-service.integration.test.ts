@@ -12,6 +12,7 @@ import {
   financeCategories,
   financeClassificationDecisions,
   financeReviewCases,
+  financeSetupBackfillState,
   financeTransactions,
   migrateDatabase,
   users,
@@ -337,8 +338,14 @@ describe.sequential("finance service", () => {
     const legacyMigrations = await migrationsWithout(migrationsFolder, "ilo-finance-legacy-", [
       "0041_domain_profile_approvals",
       "0042_finance_provider_direction",
+      "0043_finance_setup_backfill_state",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
+    await expect(
+      database.pool.query<{ relation: string | null }>(
+        "SELECT to_regclass('public.finance_setup_backfill_state')::text AS relation",
+      ),
+    ).resolves.toMatchObject({ rows: [{ relation: null }] });
     const [upgradeUser] = await database.db
       .insert(users)
       .values({
@@ -399,24 +406,30 @@ describe.sequential("finance service", () => {
       })
       .returning();
     if (!secondUpgradeAccount) throw new Error("Second Finance upgrade account was not created.");
-    await database.db.insert(domainProfiles).values({
-      categories: [],
-      domain: "finances",
-      instructions: ["Second legacy active guidance."],
-      objective: "Second legacy objective",
-      preferences: {},
-      sourceContexts: [
-        {
-          notes: null,
-          purpose: "Second legacy spending",
-          sourceId: secondUpgradeAccount.id,
-          sourceLabel: secondUpgradeAccount.name,
-        },
-      ],
-      status: "active",
-      summary: "Second legacy active Finance profile",
-      userId: secondUpgradeUser.id,
-    });
+    const [secondUpgradeProfile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "finances",
+        instructions: ["Second legacy active guidance."],
+        objective: "Second legacy objective",
+        preferences: {},
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Second legacy spending",
+            sourceId: secondUpgradeAccount.id,
+            sourceLabel: secondUpgradeAccount.name,
+          },
+        ],
+        status: "active",
+        summary: "Second legacy active Finance profile",
+        userId: secondUpgradeUser.id,
+      })
+      .returning();
+    if (!secondUpgradeProfile) {
+      throw new Error("Second Finance upgrade profile was not created.");
+    }
     const [legacyPostedTransaction] = (
       await database.pool.query<{ id: string }>(
         `INSERT INTO finance_transactions (
@@ -472,11 +485,46 @@ describe.sequential("finance service", () => {
     }
     await migrateDatabase(database.db, migrationsFolder);
     await expect(
+      database.pool.query<{ relation: string | null }>(
+        "SELECT to_regclass('public.finance_setup_backfill_state')::text AS relation",
+      ),
+    ).resolves.toMatchObject({ rows: [{ relation: "finance_setup_backfill_state" }] });
+    await expect(
       database.db.select().from(domainProfiles).where(eq(domainProfiles.domain, "finances")),
     ).resolves.toEqual([
       expect.objectContaining({ status: "active", version: 1 }),
       expect.objectContaining({ status: "active", version: 1 }),
     ]);
+    await database.db.insert(domainProfileApprovals).values({
+      approvedAt: new Date("2026-07-18T12:00:00.000Z"),
+      approvedByUserId: secondUpgradeUser.id,
+      domain: "finances",
+      profile: {
+        categories: secondUpgradeProfile.categories,
+        createdAt: secondUpgradeProfile.createdAt.toISOString(),
+        domain: secondUpgradeProfile.domain,
+        id: secondUpgradeProfile.id,
+        instructions: secondUpgradeProfile.instructions,
+        objective: secondUpgradeProfile.objective,
+        preferences: secondUpgradeProfile.preferences,
+        sourceContexts: secondUpgradeProfile.sourceContexts,
+        status: secondUpgradeProfile.status,
+        summary: secondUpgradeProfile.summary,
+        updatedAt: secondUpgradeProfile.updatedAt.toISOString(),
+        version: secondUpgradeProfile.version,
+      },
+      profileId: secondUpgradeProfile.id,
+      profileVersion: secondUpgradeProfile.version,
+      userId: secondUpgradeUser.id,
+    });
+    await database.db
+      .update(domainProfiles)
+      .set({
+        summary: "A newer active revision without signed approval.",
+        updatedAt: new Date("2026-07-18T13:00:00.000Z"),
+        version: secondUpgradeProfile.version + 1,
+      })
+      .where(eq(domainProfiles.id, secondUpgradeProfile.id));
     await expect(
       database.db
         .select()
@@ -502,37 +550,95 @@ describe.sequential("finance service", () => {
         .where(eq(financeTransactions.id, legacyManualTransaction.id)),
     ).resolves.toEqual([{ providerDirection: null }]);
     const upgradeService = createFinanceService({ db: database.db, now: () => now });
-    await expect(upgradeService.listCategories(upgradeUser.id)).resolves.toHaveLength(20);
+    const syntheticCategories = await upgradeService.listCategories(upgradeUser.id);
+    expect(syntheticCategories).toHaveLength(20);
+    expect(
+      syntheticCategories.every((category) =>
+        /^[0-9a-f]{8}-[0-9a-f]{4}-8[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{12}$/.test(category.id),
+      ),
+    ).toBe(true);
+    await expect(upgradeService.listCategories(upgradeUser.id)).resolves.toEqual(
+      syntheticCategories,
+    );
     await expect(upgradeService.getGuidedSetupContext(upgradeUser.id)).resolves.toMatchObject({
       guidance: {
         approvedProfile: null,
         draftProposal: { status: "draft", version: 1 },
       },
     });
-    await expect(upgradeService.backfillSetupIntegrity(1)).resolves.toEqual({
-      categoriesSeeded: 1,
+    await database.db
+      .insert(financeSetupBackfillState)
+      .values({ key: "finance_setup_integrity_v1" })
+      .onConflictDoNothing();
+    const backfillLock = await database.pool.connect();
+    try {
+      await backfillLock.query("BEGIN");
+      await backfillLock.query(
+        "SELECT key FROM finance_setup_backfill_state WHERE key = $1 FOR UPDATE",
+        ["finance_setup_integrity_v1"],
+      );
+      await expect(upgradeService.backfillSetupIntegrity(1)).resolves.toMatchObject({
+        categoriesInserted: 0,
+        claimed: false,
+        processed: 0,
+        profilesDemoted: 0,
+      });
+    } finally {
+      await backfillLock.query("ROLLBACK");
+      backfillLock.release();
+    }
+    const firstPass = await upgradeService.backfillSetupIntegrity(1);
+    expect(firstPass).toMatchObject({
+      categoriesInserted: 20,
+      claimed: true,
       processed: 2,
+      profileRowsScanned: 1,
       profilesDemoted: 1,
+      userRowsScanned: 1,
     });
     await expect(
       database.db.select().from(domainProfiles).where(eq(domainProfiles.status, "active")),
     ).resolves.toHaveLength(1);
-    await expect(upgradeService.backfillSetupIntegrity(1)).resolves.toEqual({
-      categoriesSeeded: 1,
-      processed: 2,
-      profilesDemoted: 1,
+    const restartedUpgradeService = createFinanceService({ db: database.db, now: () => now });
+    const passes = [firstPass];
+    for (let pass = 0; pass < 5; pass += 1) {
+      const result = await restartedUpgradeService.backfillSetupIntegrity(1);
+      passes.push(result);
+      if (result.profilesComplete && result.categoriesComplete) break;
+    }
+    expect(passes.at(-1)).toMatchObject({
+      categoriesComplete: true,
+      profilesComplete: true,
     });
-    await expect(upgradeService.backfillSetupIntegrity(1)).resolves.toEqual({
-      categoriesSeeded: 0,
+    expect(passes.reduce((sum, result) => sum + result.profilesDemoted, 0)).toBe(2);
+    expect(passes.reduce((sum, result) => sum + result.categoriesInserted, 0)).toBe(40);
+    await expect(restartedUpgradeService.backfillSetupIntegrity(1)).resolves.toEqual({
+      categoriesComplete: true,
+      categoriesInserted: 0,
+      claimed: true,
       processed: 0,
+      profileRowsScanned: 0,
+      profilesComplete: true,
       profilesDemoted: 0,
+      userRowsScanned: 0,
     });
-    await expect(
-      database.db.select().from(domainProfiles).where(eq(domainProfiles.domain, "finances")),
-    ).resolves.toEqual([
-      expect.objectContaining({ status: "draft", version: 2 }),
-      expect.objectContaining({ status: "draft", version: 2 }),
-    ]);
+    const repairedProfiles = await database.db
+      .select()
+      .from(domainProfiles)
+      .where(eq(domainProfiles.domain, "finances"));
+    expect(repairedProfiles).toHaveLength(2);
+    expect(
+      repairedProfiles.find((profile) => profile.id === secondUpgradeProfile.id),
+    ).toMatchObject({
+      status: "draft",
+      version: 3,
+    });
+    expect(
+      repairedProfiles.find((profile) => profile.id !== secondUpgradeProfile.id),
+    ).toMatchObject({
+      status: "draft",
+      version: 2,
+    });
     await expect(
       database.db
         .select()
@@ -1608,6 +1714,48 @@ describe.sequential("finance service", () => {
     await expect(
       database.db.select().from(financeAccounts).where(eq(financeAccounts.userId, atomicUserId)),
     ).resolves.toHaveLength(0);
+  });
+
+  it("completes a partial default taxonomy under concurrent reconciliation", async () => {
+    const partialUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: partialUserId,
+      displayName: "Partial taxonomy",
+      email: `partial-taxonomy-${partialUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    await database.db.insert(financeAccounts).values({
+      institution: "Partial Bank",
+      name: "Partial checking",
+      provider: "manual",
+      status: "manual",
+      userId: partialUserId,
+    });
+    await database.db.insert(financeCategories).values({
+      group: "Spending",
+      isSystem: true,
+      name: "Groceries",
+      slug: "groceries",
+      userId: partialUserId,
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+
+    await expect(
+      Promise.all([
+        service.reconcileTransfers(partialUserId),
+        service.reconcileTransfers(partialUserId),
+      ]),
+    ).resolves.toEqual([
+      { paired: 0, transfers: 0 },
+      { paired: 0, transfers: 0 },
+    ]);
+    const categories = await database.db
+      .select()
+      .from(financeCategories)
+      .where(eq(financeCategories.userId, partialUserId));
+    expect(categories).toHaveLength(21);
+    expect(new Set(categories.map((category) => category.slug)).size).toBe(21);
   });
 
   it("records merchant merge intent without exposing the supplied rationale", async () => {

@@ -358,6 +358,15 @@ export const domainProfileApprovals = pgTable(
   ],
 );
 
+export const financeSetupBackfillState = pgTable("finance_setup_backfill_state", {
+  key: text("key").primaryKey(),
+  categoriesComplete: boolean("categories_complete").notNull().default(false),
+  profileCursor: uuid("profile_cursor"),
+  profilesComplete: boolean("profiles_complete").notNull().default(false),
+  userCursor: uuid("user_cursor"),
+  ...timestamps,
+});
+
 export const attentionItems = pgTable(
   "attention_items",
   {

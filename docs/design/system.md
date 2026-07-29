@@ -252,6 +252,10 @@ Copy earns its space by changing a decision. Apply these rules mechanically:
   place real people, production identifiers, plausible credentials, or
   placeholder-only instructions in a field. Labels remain present because a
   placeholder is not a label.
+- Readiness copy names its evidence boundary. Loading and failed reads never
+  become zero, empty, or absent claims; platform capability never becomes
+  connected-agent authority without an active host carrying the required
+  scope.
 - The app-frame title is orientation, not a hero. It stays compact; the block
   that owns the immediate task carries the strongest page-level emphasis.
 - Connected providers use their recognizable service mark when one exists. Do

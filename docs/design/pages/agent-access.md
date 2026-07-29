@@ -15,9 +15,10 @@ the conversation and call the same scoped Ilo API.
 
 ```text
 Connection state
-├── connected sources
+├── selected core domain
+├── domain-owned material, profile, workflow, and attention readiness
 ├── authorized agent hosts
-└── Mail profile and approved-rule state
+└── Mail approved-rule and durable-work state when Mail is selected
 
 Recommended handoff
 ├── 1. Add the remote MCP URL
@@ -32,9 +33,14 @@ Access management
 ## Connection contract
 
 - The API publishes a typed connection guide containing the configured MCP
-  resource URL, skill source and version, install request, invocation, and
-  support level for each domain. The web client does not hard-code deployment
-  endpoints.
+  resource URL, immutable skill source, semantic version, source revision,
+  install request, invocation, and support level for each domain. The official
+  source is pinned to the reported Git commit. Self-hosted deployments publish
+  their own matching URL/version/revision unit. The web client does not
+  hard-code deployment endpoints.
+- The three steps are a copyable handoff, not a one-click installer. Ilo tells
+  the person to open the host they already use and never claims it can
+  deep-install into Claude, Codex, or another host.
 - Remote MCP with Ilo OAuth is the recommended path. The consent page names the
   requesting host, lists each requested permission in plain language, explains
   that provider credentials stay in Ilo, and provides authorize and cancel
@@ -46,9 +52,17 @@ Access management
 - The setup skill stores durable preferences in Ilo domain profiles rather than
   host memory. It inspects the current profile before asking questions and
   requests only the shortest example-based interview needed to improve it.
-- Domain selection changes the starter prompt and capability statement. The
-  shared profile-and-attention workflow is available to Mail, Calendar,
-  Reminders, Tasks, Finances, and Goals.
+- Domain selection changes readiness, the starter prompt, and the capability
+  statement. The first-run selector covers the four core implementations:
+  Mail, Finances, Calendar, and Reminders. Their profile-and-attention envelopes
+  remain shared while each domain-owned feature adapter derives material and
+  workflow rows from its authoritative API. Settings only composes the common
+  row contract.
+- Selectors are enabled only when the connection guide contains that domain
+  with published support. Missing and explicitly unsupported entries disable
+  setup and do not inherit a generic capability. Capability and starter copy
+  are domain-owned, including if a non-Mail domain later publishes executable
+  rules.
 - Mail is the first full executable setup. It can inspect connected mail
   sources with identity, mailbox, freshness, and capability context; learn
   account and label meanings; record source-linked important-email attention;
@@ -89,6 +103,24 @@ Access management
   IDs) and calls out a source that needs reconnect.
 - A failed connection-guide or readiness query renders one actionable error
   without hiding unaffected recovery actions.
+- Loading, unavailable, empty, and zero are distinct states. Counts and
+  “run the interview” empty guidance appear only after the owning query
+  succeeds; a failed profile, rules, material, or attention query stays
+  unavailable.
+- Calendar readiness reports selected/writable calendars and source errors;
+  commitment intake remains preview-only. Reminders reports the bounded open
+  page and direct/preview workflow without implying notification delivery.
+  Finance reports owned account count, stale-source state, approved/draft
+  guidance, suggested workflow count, and signed-in review count without
+  exposing balances.
+- Attention readiness reports the bounded open result for the selected domain;
+  `100+` means the API page limit was reached rather than claiming an exhaustive
+  count.
+- Agent authority comes from active, unexpired personal access tokens and
+  currently authorized OAuth clients. The selected domain reports how many
+  connected hosts carry its read and write scopes. Signed-in browser
+  capabilities and platform workflow support never stand in for connected-host
+  permission.
 - Copy actions are individually labelled and confirm their result through the
   shared transient-feedback system.
 - Connected OAuth clients and access tokens show a compact permission count and
@@ -113,7 +145,9 @@ Access management
 2. Confirm the configured MCP URL and skill install request can be copied.
 3. Connect a dynamic OAuth client, inspect the plain-language consent, complete
    PKCE exchange, and confirm the host appears in Settings.
-4. Choose each domain and confirm the prompt and capability statement update.
+4. Choose Mail, Finances, Calendar, and Reminders; confirm material, profile,
+   workflow, attention, prompt, and capability state all update from that
+   domain's fixtures.
 5. With multiple Mail accounts connected, run `$ilo-setup`, confirm each inbox
    retains its identity and freshness, save typed importance/retention
    preferences, create a source-linked attention item, and preview a disabled
@@ -127,3 +161,7 @@ Access management
    revoke it, and inspect revoked history.
 9. Verify error recovery, keyboard operation, copy feedback, 320 px layout, and
    normal desktop layout.
+10. In a real compatible host, fetch the reported immutable skill URL, confirm
+    the installed version/revision, connect through the advertised MCP URL, and
+    invoke `$ilo-setup`. Record this external-host evidence separately from
+    mocked or local component tests.

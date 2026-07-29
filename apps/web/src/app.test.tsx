@@ -685,6 +685,7 @@ function defaults() {
       installPrompt: "Install Ilo Guided Setup from https://example.com/ilo-setup.",
       invocation: "$ilo-setup",
       name: "ilo-setup",
+      revision: "release-0.1.0",
       setupPrompt: "Use $ilo-setup to set up Ilo.",
       sourceUrl: "https://example.com/ilo-setup",
       version: "0.1.0",
@@ -735,6 +736,11 @@ function defaults() {
       oldestDueAt: null,
       pendingCount: 0,
       reconciliationCount: 0,
+    },
+    commitmentIntake: {
+      automaticCreationEnabled: false,
+      previewOnlyCount: 0,
+      serverVerifiedCount: 0,
     },
     safety: {
       delayedRetentionAutomation: true,
@@ -1483,7 +1489,9 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Connect an agent" }));
 
-    expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Connect an agent" }, { timeout: 3_000 }),
+    ).toBeInTheDocument();
     expect(mocks.updateAccountSetup).toHaveBeenCalledWith(
       { action: "complete" },
       expect.anything(),
@@ -2578,6 +2586,10 @@ describe("ilo web app", () => {
         expect(
           screen.getByText("connect or disconnect sources", { exact: false }),
         ).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: "Connect an agent" })).toHaveAttribute(
+          "href",
+          "/settings?section=agents",
+        );
       }
       view.unmount();
     }

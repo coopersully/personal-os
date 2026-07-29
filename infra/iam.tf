@@ -127,6 +127,42 @@ data "aws_iam_policy_document" "github_deploy" {
   }
 
   statement {
+    sid       = "ListTasksOnlyInProductionCluster"
+    actions   = ["ecs:ListTasks"]
+    resources = ["*"]
+
+    condition {
+      test     = "ArnEquals"
+      variable = "ecs:cluster"
+      values   = [aws_ecs_cluster.main.arn]
+    }
+  }
+
+  statement {
+    sid       = "SuspendOnlyApiServiceScaling"
+    actions   = ["application-autoscaling:RegisterScalableTarget"]
+    resources = [aws_appautoscaling_target.ecs["api"].arn]
+
+    condition {
+      test     = "StringEquals"
+      variable = "application-autoscaling:service-namespace"
+      values   = ["ecs"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "application-autoscaling:scalable-dimension"
+      values   = ["ecs:service:DesiredCount"]
+    }
+  }
+
+  statement {
+    sid       = "ObserveScalingStateForDrainRestore"
+    actions   = ["application-autoscaling:DescribeScalableTargets"]
+    resources = ["*"]
+  }
+
+  statement {
     sid       = "PassOnlyPersonalOsTaskRoles"
     actions   = ["iam:PassRole"]
     resources = [aws_iam_role.task_execution.arn, aws_iam_role.api_task.arn, aws_iam_role.mcp_task.arn]

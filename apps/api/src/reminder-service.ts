@@ -51,6 +51,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       relatedEntityType: row.relatedEntityType,
       source: row.source,
       status: row.status,
+      version: row.version,
     };
   }
 

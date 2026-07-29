@@ -4914,15 +4914,22 @@ describe.sequential("connector service", () => {
       mailboxId: null,
       type: "archive",
     });
+    const secondFixture = await createDurableMailWorkFixture("Independent run summary", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
     const updateMailThread = vi.mocked(
       google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
     );
     updateMailThread.mockReset();
     updateMailThread.mockRejectedValueOnce(new ConnectorError("Not found", 404));
+    updateMailThread.mockRejectedValueOnce(new ConnectorError("Not found", 404));
     await database.pool.query(`
       CREATE OR REPLACE FUNCTION fail_background_attention_audit_for_test() RETURNS trigger AS $$
       BEGIN
-        IF NEW.request_id LIKE 'mail-rule-work-attention:%' THEN
+        IF NEW.request_id LIKE 'mail-rule-work-attention:%'
+          AND NEW.actor_id = '${fixture.account.id}' THEN
           RAISE EXCEPTION 'forced background attention audit failure';
         END IF;
         RETURN NEW;
@@ -4953,6 +4960,18 @@ describe.sequential("connector service", () => {
           ),
         ),
     ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            eq(attentionItems.relatedEntityId, secondFixture.account.id),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toEqual([expect.objectContaining({ importance: "high" })]);
     await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
     const [repairedSummary] = await database.db
       .select()

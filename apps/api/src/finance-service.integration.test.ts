@@ -929,27 +929,34 @@ describe.sequential("finance service", () => {
       }),
     ).rejects.toMatchObject({ code: "not_found" });
 
-    await database.pool.query(`
-      CREATE OR REPLACE FUNCTION fail_finance_attention_audit_for_test() RETURNS trigger AS $$
-      BEGIN
-        IF NEW.request_id = 'finance-attention-audit-failure' THEN
-          RAISE EXCEPTION 'forced Finance attention audit failure';
-        END IF;
-        RETURN NEW;
-      END;
-      $$ LANGUAGE plpgsql;
-      CREATE TRIGGER fail_finance_attention_audit_for_test
-      BEFORE INSERT ON audit_events
-      FOR EACH ROW EXECUTE FUNCTION fail_finance_attention_audit_for_test();
-    `);
     try {
-      await expect(
-        service.upsertAttentionItem(
+      await database.pool.query(`
+        CREATE OR REPLACE FUNCTION fail_finance_attention_audit_for_test() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.request_id = 'finance-attention-audit-failure' THEN
+            RAISE EXCEPTION 'forced Finance attention audit failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER fail_finance_attention_audit_for_test
+        BEFORE INSERT ON audit_events
+        FOR EACH ROW EXECUTE FUNCTION fail_finance_attention_audit_for_test();
+      `);
+      let auditFailure: unknown;
+      try {
+        await service.upsertAttentionItem(
           financeTransaction.id,
           { ...input, kind: "follow_up", title: "Must roll back" },
           { ...context, requestId: "finance-attention-audit-failure" },
-        ),
-      ).rejects.toThrow('Failed query: insert into "audit_events"');
+        );
+      } catch (error) {
+        auditFailure = error;
+      }
+      expect(auditFailure).toBeInstanceOf(Error);
+      expect((auditFailure as Error & { cause?: Error }).cause?.message).toContain(
+        "forced Finance attention audit failure",
+      );
     } finally {
       await database.pool.query(`
         DROP TRIGGER IF EXISTS fail_finance_attention_audit_for_test ON audit_events;

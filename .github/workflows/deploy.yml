@@ -85,7 +85,7 @@ jobs:
             }
           done
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.announce.outputs.release_sha }}
 

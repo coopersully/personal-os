@@ -1,11 +1,7 @@
+import { iloSetupRelease, semanticVersionSchema } from "@personal-os/domain";
 import { z } from "zod";
 
-export const officialAgentSkill = {
-  revision: "d8c27c725d18827829a3f99534d5d6dfbe715360",
-  sourceUrl:
-    "https://github.com/coopersully/personal-os/tree/d8c27c725d18827829a3f99534d5d6dfbe715360/skills/ilo-setup",
-  version: "0.1.0",
-} as const;
+export const officialAgentSkill = iloSetupRelease;
 
 const configSchema = z
   .object({
@@ -22,11 +18,7 @@ const configSchema = z
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/)
       .default(officialAgentSkill.revision),
     AGENT_SKILL_SOURCE_URL: z.url().default(officialAgentSkill.sourceUrl),
-    AGENT_SKILL_VERSION: z
-      .string()
-      .trim()
-      .regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/)
-      .default(officialAgentSkill.version),
+    AGENT_SKILL_VERSION: semanticVersionSchema.default(officialAgentSkill.version),
     APP_ENCRYPTION_KEY: z.string().min(1),
     DATABASE_URL: z.string().min(1),
     EMAIL_FROM: z.string().default(""),
@@ -144,7 +136,7 @@ export type AppConfig = {
 };
 
 export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
-  const value = configSchema.parse(environment);
+  const value = configSchema.parse(migrateLegacyOfficialAgentSkill(environment));
   return {
     agentSkillRevision: value.AGENT_SKILL_REVISION,
     agentSkillSourceUrl: value.AGENT_SKILL_SOURCE_URL,
@@ -186,5 +178,29 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     xClientId: value.X_CLIENT_ID,
     xClientSecret: value.X_CLIENT_SECRET,
     xRedirectUri: value.X_REDIRECT_URI,
+  };
+}
+
+function migrateLegacyOfficialAgentSkill(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (environment.AGENT_SKILL_SOURCE_URL !== officialAgentSkill.legacySourceUrl) {
+    return environment;
+  }
+  if (
+    environment.AGENT_SKILL_VERSION &&
+    environment.AGENT_SKILL_VERSION !== officialAgentSkill.version
+  ) {
+    return environment;
+  }
+  if (
+    environment.AGENT_SKILL_REVISION &&
+    environment.AGENT_SKILL_REVISION !== officialAgentSkill.revision
+  ) {
+    return environment;
+  }
+  return {
+    ...environment,
+    AGENT_SKILL_REVISION: officialAgentSkill.revision,
+    AGENT_SKILL_SOURCE_URL: officialAgentSkill.sourceUrl,
+    AGENT_SKILL_VERSION: officialAgentSkill.version,
   };
 }

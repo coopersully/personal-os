@@ -120,6 +120,17 @@ const xFolderInputSchema = z.object({ folderId: z.string().min(1).max(100) });
 const pinterestPinsQuerySchema = z.object({
   limit: z.coerce.number().int().min(4).max(20).default(12),
 });
+const agentDomainSupport = {
+  calendar: "profile_and_attention",
+  finances: "profile_and_attention",
+  goals: "profile_and_attention",
+  mail: "executable_rules",
+  reminders: "profile_and_attention",
+  tasks: "profile_and_attention",
+} as const satisfies Record<
+  (typeof assistantDomains)[number],
+  AgentConnectionGuide["domains"][number]["support"]
+>;
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
@@ -259,7 +270,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     domains: assistantDomains.map((domain) => ({
       domain,
       readScope: featureAccessPolicies[domain].readScope,
-      support: domain === "mail" ? "executable_rules" : "profile_and_attention",
+      support: agentDomainSupport[domain],
       writeScope: featureAccessPolicies[domain].writeScope,
     })),
     mcpUrl: dependencies.config.mcpResourceUrl ?? `${dependencies.config.apiBaseUrl}/mcp`,

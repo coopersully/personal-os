@@ -208,7 +208,14 @@ copies the connection URL and prompts into the host they already use.
 The connection guide reports one artifact identity as `version`, `revision`,
 and `sourceUrl`. The official URL is pinned to the reported Git commit.
 Self-hosted deployments supply all three values and the API rejects a source URL
-that does not embed its configured revision.
+that does not embed its configured revision. The official tuple is sourced from
+the checked release manifest; deployment projections are verified by the
+repository lint contract. The one-time legacy official `main` URL migration is
+documented in [deployment](deployment.md#upgrade-from-the-mutable-official-url).
+
+Domain support is explicit. A missing or `unsupported` guide entry is not a
+profile-only fallback, and hosts must not infer executable behavior from a
+different domain's support level.
 
 Remote MCP OAuth is the recommended connection. The host dynamically registers,
 the user signs in to Ilo, and the consent page lists the requested permissions

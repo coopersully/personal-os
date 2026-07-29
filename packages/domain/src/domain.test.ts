@@ -67,6 +67,7 @@ import {
   reminderSchema,
   reminderTimeZoneSchema,
   resolveStoredMailRule,
+  semanticVersionSchema,
   sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
@@ -156,6 +157,8 @@ describe("domain schemas", () => {
         },
       }),
     ).toMatchObject({ domains: [{ domain: "mail", support: "executable_rules" }] });
+    expect(semanticVersionSchema.parse("1.2.3-rc.1+build.7")).toBe("1.2.3-rc.1+build.7");
+    expect(() => semanticVersionSchema.parse("1.2.3-01")).toThrow();
     expect(
       upsertDomainProfileInputSchema.parse({
         categories: [],

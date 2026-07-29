@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { idSchema, isoDateTimeSchema } from "./common.js";
+import { idSchema, isoDateTimeSchema, semanticVersionSchema } from "./common.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
 export const assistantDomains = [
@@ -168,7 +168,7 @@ export type AssistantSetupStatus = z.infer<typeof assistantSetupStatusSchema>;
 export const agentDomainSupportSchema = z.object({
   domain: assistantDomainSchema,
   readScope: z.string().min(1),
-  support: z.enum(["profile_and_attention", "executable_rules"]),
+  support: z.enum(["unsupported", "profile_and_attention", "executable_rules"]),
   writeScope: z.string().min(1),
 });
 export type AgentDomainSupport = z.infer<typeof agentDomainSupportSchema>;
@@ -184,7 +184,7 @@ export const agentConnectionGuideSchema = z.object({
     revision: z.string().trim().min(1).max(128),
     setupPrompt: z.string().min(1),
     sourceUrl: z.url(),
-    version: z.string().regex(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/),
+    version: semanticVersionSchema,
   }),
 });
 export type AgentConnectionGuide = z.infer<typeof agentConnectionGuideSchema>;

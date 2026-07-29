@@ -55,7 +55,14 @@ Access management
 - Domain selection changes readiness, the starter prompt, and the capability
   statement. The first-run selector covers the four core implementations:
   Mail, Finances, Calendar, and Reminders. Their profile-and-attention envelopes
-  remain shared while each readiness row is derived from its domain-owned API.
+  remain shared while each domain-owned feature adapter derives material and
+  workflow rows from its authoritative API. Settings only composes the common
+  row contract.
+- Selectors are enabled only when the connection guide contains that domain
+  with published support. Missing and explicitly unsupported entries disable
+  setup and do not inherit a generic capability. Capability and starter copy
+  are domain-owned, including if a non-Mail domain later publishes executable
+  rules.
 - Mail is the first full executable setup. It can inspect connected mail
   sources with identity, mailbox, freshness, and capability context; learn
   account and label meanings; record source-linked important-email attention;
@@ -96,6 +103,10 @@ Access management
   IDs) and calls out a source that needs reconnect.
 - A failed connection-guide or readiness query renders one actionable error
   without hiding unaffected recovery actions.
+- Loading, unavailable, empty, and zero are distinct states. Counts and
+  “run the interview” empty guidance appear only after the owning query
+  succeeds; a failed profile, rules, material, or attention query stays
+  unavailable.
 - Calendar readiness reports selected/writable calendars and source errors;
   commitment intake remains preview-only. Reminders reports the bounded open
   page and direct/preview workflow without implying notification delivery.
@@ -105,6 +116,11 @@ Access management
 - Attention readiness reports the bounded open result for the selected domain;
   `100+` means the API page limit was reached rather than claiming an exhaustive
   count.
+- Agent authority comes from active, unexpired personal access tokens and
+  currently authorized OAuth clients. The selected domain reports how many
+  connected hosts carry its read and write scopes. Signed-in browser
+  capabilities and platform workflow support never stand in for connected-host
+  permission.
 - Copy actions are individually labelled and confirm their result through the
   shared transient-feedback system.
 - Connected OAuth clients and access tokens show a compact permission count and

@@ -92,6 +92,30 @@ matching version/revision as one release unit. Keep the MCP and skill addresses
 aligned with the deployed environment so Settings never teaches a host to use a
 staging, local, or changing endpoint.
 
+The checked release identity lives in
+`packages/domain/src/ilo-setup-release.json`. Runtime defaults read that
+manifest, and `pnpm lint` fails if `.env.example` or Compose advertises a
+different tuple. Change the manifest and both deployment projections together
+for every release.
+
+### Upgrade from the mutable official URL
+
+Older local installs may retain the former authoritative value
+`https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup` in
+`.env`. Setup and Start recognize only that exact legacy official line when
+skill version and revision are absent or already match the official release.
+They atomically replace it with the manifest release tuple before synchronizing
+worktrees. The migration is idempotent. The API applies the same narrow
+compatibility normalization so a container or production process that does not
+use the Codex lifecycle can boot during rollout.
+
+Custom URLs, including custom URLs ending in `/main` or `/latest`, are never
+rewritten as an Ilo release. Deployments with a custom source must set all three
+values to a matching immutable tuple; invalid or incomplete custom
+configuration continues to fail startup. A legacy official URL paired with
+explicit, conflicting version metadata is also preserved for validation rather
+than silently overwritten.
+
 ### Guided-setup skill distribution boundary
 
 Ilo publishes the configured artifact identity but does not fetch or install it.

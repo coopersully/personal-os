@@ -15,9 +15,11 @@ const allScopes = new Set<AccessScope>([
   "audit:read",
   "automations:read",
   "automations:write",
+  "bookmarks:read",
   "calendar:read",
   "calendar:write",
   "mail:read",
+  "mail:write",
   "goals:read",
   "goals:write",
   "finances:read",
@@ -30,6 +32,16 @@ const allScopes = new Set<AccessScope>([
 
 export function createOAuthService(options: { db: Database; now: () => Date; resource: string }) {
   const { db, now, resource } = options;
+  const getAuthorizationClient = async (clientId: string, redirectUri: string) => {
+    const [client] = await db
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.id, clientId))
+      .limit(1);
+    if (!client?.redirectUris.includes(redirectUri))
+      throw new AppError("invalid_request", "The redirect URI is not registered for this client.");
+    return { id: client.id, name: client.name };
+  };
   const issue = async (userId: string, clientId: string, scopes: AccessScope[]) => {
     const token = generateToken("mcp");
     const refreshToken = generateToken("mcp_refresh");
@@ -64,6 +76,7 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
     };
   };
   return {
+    getAuthorizationClient,
     async listAuthorizedClients(userId: string) {
       const records = await db
         .select({ client: oauthClients, token: accessTokens })
@@ -130,16 +143,7 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       scopes: AccessScope[];
       userId: string;
     }) {
-      const [client] = await db
-        .select()
-        .from(oauthClients)
-        .where(eq(oauthClients.id, input.clientId))
-        .limit(1);
-      if (!client?.redirectUris.includes(input.redirectUri))
-        throw new AppError(
-          "invalid_request",
-          "The redirect URI is not registered for this client.",
-        );
+      await getAuthorizationClient(input.clientId, input.redirectUri);
       const code = generateToken("oauth_code");
       await db.insert(oauthAuthorizationCodes).values({
         clientId: input.clientId,

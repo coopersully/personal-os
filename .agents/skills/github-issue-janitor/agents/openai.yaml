@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Issue Janitor"
+  short_description: "Audit issue and pull request hygiene."
+  default_prompt: "Use $github-issue-janitor to dry-run a conservative GitHub issue and pull request hygiene pass."

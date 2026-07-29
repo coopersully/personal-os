@@ -3,6 +3,7 @@ import type {
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
   FinanceForecast,
+  FinanceGuidedSetupContext,
   FinanceLedgerHealth,
   FinanceRecurringObligation,
   FinanceReviewCase,
@@ -28,7 +29,6 @@ import {
   Download,
 } from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { usePlaidLink } from "react-plaid-link";
 import { Link, useLocation } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
@@ -88,9 +88,27 @@ import {
 } from "@/components/ui/table";
 import { api } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
+import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { BudgetPaceGraph } from "./budget-pace-graph.js";
 import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
+import { PlaidConnectButton } from "./plaid-connect.js";
+
+const financeHumanOnlyActionLabels = {
+  add_manual_transaction: "add manual transactions",
+  apply_categorization: "apply category decisions",
+  confirm_ambiguous_transfer: "confirm ambiguous transfers",
+  connect_or_disconnect_source: "connect or disconnect sources",
+  create_merchant_rule: "create permanent merchant rules",
+  import_transactions: "import transactions",
+  manage_accounts: "manage accounts",
+  manage_budgets: "manage budgets",
+  manage_financial_profile: "manage the financial profile",
+  manage_merchants: "rename or merge merchants",
+  refresh_provider_data: "refresh provider data",
+  resolve_alert: "resolve or dismiss alerts",
+  review_recurring_obligation: "change recurring-obligation review state",
+} satisfies Record<FinanceGuidedSetupContext["humanOnlyActions"][number], string>;
 
 export function FinancesPage() {
   const location = useLocation();
@@ -154,6 +172,40 @@ export function FinancesPage() {
     enabled: section === "profile" || section === "cashflow" || section === "overview",
     queryFn: api.getFinanceProfile,
     queryKey: ["finance-profile"],
+  });
+  const agentSetup = useQuery({
+    enabled: section === "profile",
+    queryFn: () => api.getFinanceGuidedSetup(),
+    queryKey: ["finance-guided-setup"],
+  });
+  const agentProfile = useQuery({
+    enabled: section === "profile",
+    queryFn: () => api.getDomainProfile("finances"),
+    queryKey: ["domain-profile", "finances"],
+  });
+  const activateAgentProfile = useMutation({
+    mutationFn: async () => {
+      const current = agentProfile.data;
+      if (!current) throw new Error("No Finance guidance draft is available to activate.");
+      return api.upsertDomainProfile({
+        categories: current.categories,
+        domain: "finances",
+        expectedVersion: current.version,
+        instructions: current.instructions,
+        objective: current.objective,
+        preferences: current.preferences,
+        sourceContexts: current.sourceContexts,
+        status: "active",
+        summary: current.summary,
+      });
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["domain-profile", "finances"] }),
+        queryClient.invalidateQueries({ queryKey: ["finance-guided-setup"] }),
+        queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
+      ]);
+    },
   });
   const incomeStreams = useQuery({
     enabled: section === "cashflow" || section === "profile" || section === "overview",
@@ -223,8 +275,11 @@ export function FinancesPage() {
   const [learnMerchant, setLearnMerchant] = useState(false);
   const [categorizing, setCategorizing] = useState<{
     category: string;
+    expectedTransactionUpdatedAt: string;
     id: string;
     merchant: string;
+    nonTransferDirection?: "expense" | "income";
+    possibleTransfer?: boolean;
     reviewId?: string;
   } | null>(null);
   const [transactionCursor, setTransactionCursor] = useState<string | null>(null);
@@ -386,20 +441,26 @@ export function FinancesPage() {
     mutationFn: ({
       action,
       categoryId,
+      expectedTransactionUpdatedAt,
       id,
       learnMerchant,
+      nonTransferDirection,
       rationale,
     }: {
-      action: "approve" | "defer" | "recategorize";
+      action: "approve" | "confirm_transfer" | "defer" | "recategorize";
       categoryId?: string;
+      expectedTransactionUpdatedAt?: string;
       id: string;
       learnMerchant?: "always" | "never" | "suggest";
+      nonTransferDirection?: "expense" | "income";
       rationale?: string;
     }) =>
       api.resolveFinanceReview(id, {
         action,
         categoryId,
+        expectedTransactionUpdatedAt,
         learnMerchant: learnMerchant ?? "suggest",
+        ...(nonTransferDirection ? { nonTransferDirection } : {}),
         rationale: rationale ?? null,
       }),
     onSuccess: refresh,
@@ -408,6 +469,7 @@ export function FinancesPage() {
     setLearnMerchant(false);
     setCategorizing({
       category: item.category ?? "",
+      expectedTransactionUpdatedAt: item.updatedAt,
       id: item.id,
       merchant: item.merchant,
     });
@@ -486,13 +548,26 @@ export function FinancesPage() {
         </div>
       ) : null}
       {section === "profile" ? (
-        <FinancialProfilePanel
-          accounts={overview.data?.accounts ?? []}
-          form={profileForm}
-          onChange={setProfileForm}
-          onSave={() => saveProfile.mutate()}
-          saving={saveProfile.isPending}
-        />
+        <>
+          <FinanceAgentGuidancePanel
+            activating={activateAgentProfile.isPending}
+            activationEligible={
+              agentProfile.data?.status === "draft" && agentProfile.data.sourceContexts.length > 0
+            }
+            error={agentSetup.error ?? agentProfile.error ?? activateAgentProfile.error}
+            loading={agentSetup.isPending || agentProfile.isPending}
+            onActivate={() => activateAgentProfile.mutate()}
+            profileStatus={agentProfile.data?.status ?? null}
+            setup={agentSetup.data}
+          />
+          <FinancialProfilePanel
+            accounts={overview.data?.accounts ?? []}
+            form={profileForm}
+            onChange={setProfileForm}
+            onSave={() => saveProfile.mutate()}
+            saving={saveProfile.isPending}
+          />
+        </>
       ) : null}
       {section === "cashflow" ? (
         <CashflowPanel
@@ -613,16 +688,34 @@ export function FinancesPage() {
                 <FinanceReviewItems
                   cases={reviewQueue.data}
                   isPending={resolveReview.isPending}
-                  onApprove={(id) => resolveReview.mutate({ action: "approve", id })}
+                  onApprove={(review) =>
+                    resolveReview.mutate({
+                      action: "approve",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
+                      id: review.id,
+                    })
+                  }
                   onCategorize={(review) => {
                     setLearnMerchant(false);
                     setCategorizing({
                       category: review.transaction.category ?? "",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
                       id: review.transaction.id,
                       merchant: review.transaction.merchant,
+                      ...(review.transaction.providerDirection
+                        ? { nonTransferDirection: review.transaction.providerDirection }
+                        : {}),
+                      possibleTransfer: review.reason === "possible_transfer",
                       reviewId: review.id,
                     });
                   }}
+                  onConfirmTransfer={(review) =>
+                    resolveReview.mutate({
+                      action: "confirm_transfer",
+                      expectedTransactionUpdatedAt: review.transaction.updatedAt,
+                      id: review.id,
+                    })
+                  }
                   onDefer={(id) => resolveReview.mutate({ action: "defer", id })}
                 />
               ) : visibleTransactions.length === 0 ? (
@@ -820,7 +913,7 @@ export function FinancesPage() {
                   >
                     Track account
                   </ShadcnButton>
-                  <PlaidConnect onConnected={refresh} />
+                  <PlaidConnectButton onConnected={refresh} />
                 </div>
               </ShadcnCardAction>
             </ShadcnCardHeader>
@@ -1044,6 +1137,27 @@ export function FinancesPage() {
                   />
                 </ShadcnField>
               ) : null}
+              {categorizing.possibleTransfer ? (
+                <ShadcnField>
+                  <ShadcnFieldLabel htmlFor="finance-non-transfer-direction">
+                    Treat this transaction as
+                  </ShadcnFieldLabel>
+                  <ShadcnNativeSelect
+                    id="finance-non-transfer-direction"
+                    onChange={(event) =>
+                      setCategorizing({
+                        ...categorizing,
+                        nonTransferDirection: event.target.value as "expense" | "income",
+                      })
+                    }
+                    value={categorizing.nonTransferDirection ?? ""}
+                  >
+                    <NativeSelectOption value="">Choose income or expense</NativeSelectOption>
+                    <NativeSelectOption value="expense">Expense</NativeSelectOption>
+                    <NativeSelectOption value="income">Income</NativeSelectOption>
+                  </ShadcnNativeSelect>
+                </ShadcnField>
+              ) : null}
               {categorizing.reviewId ? (
                 <ShadcnFieldDescription>
                   Leave this off for a one-time charge. Turn it on only when this merchant should
@@ -1061,6 +1175,8 @@ export function FinancesPage() {
                 categorize.isPending ||
                 resolveReview.isPending ||
                 !categorizing?.category.trim() ||
+                (categorizing?.possibleTransfer === true &&
+                  categorizing.nonTransferDirection === undefined) ||
                 (categorizing?.reviewId !== undefined &&
                   !categories.data?.some(
                     (item) =>
@@ -1077,8 +1193,12 @@ export function FinancesPage() {
                     {
                       action: "recategorize",
                       categoryId,
+                      expectedTransactionUpdatedAt: categorizing.expectedTransactionUpdatedAt,
                       id: categorizing.reviewId,
                       learnMerchant: learnMerchant ? "always" : "suggest",
+                      ...(categorizing.nonTransferDirection
+                        ? { nonTransferDirection: categorizing.nonTransferDirection }
+                        : {}),
                       rationale: "Reviewed and recategorized by the user.",
                     },
                     {
@@ -1817,6 +1937,220 @@ function FinanceBudgetDetailDialog({
         </div>
       </ShadcnDialogContent>
     </ShadcnDialog>
+  );
+}
+
+function FinanceAgentGuidancePanel({
+  activating,
+  activationEligible,
+  error,
+  loading,
+  onActivate,
+  profileStatus,
+  setup,
+}: {
+  activating: boolean;
+  activationEligible: boolean;
+  error: Error | null;
+  loading: boolean;
+  onActivate: () => void;
+  profileStatus: "active" | "draft" | null;
+  setup: FinanceGuidedSetupContext | undefined;
+}) {
+  const approvedProfile = setup?.guidance.approvedProfile ?? null;
+  const draftProposal = setup?.guidance.draftProposal ?? null;
+  const guidanceStatus =
+    approvedProfile && draftProposal
+      ? "Active + draft"
+      : approvedProfile
+        ? "Active"
+        : draftProposal || profileStatus === "draft"
+          ? "Draft"
+          : "Not configured";
+  const availableWorkflows =
+    setup?.suggestedWorkflows.filter((workflow) => workflow.available).length ?? 0;
+  const humanOnlyActionLabels =
+    setup?.humanOnlyActions
+      .map((action) => financeHumanOnlyActionLabels[action])
+      .filter((label): label is string => Boolean(label)) ?? [];
+  return (
+    <ShadcnCard>
+      <ShadcnCardHeader>
+        <ShadcnCardTitle>Agent guidance</ShadcnCardTitle>
+        <ShadcnCardDescription>
+          Durable source meanings, review preferences, terminology, thresholds, and safety
+          constraints for Claude, Codex, and other scoped hosts.
+        </ShadcnCardDescription>
+        <ShadcnCardAction>
+          <ShadcnBadge variant={approvedProfile ? "default" : "secondary"}>
+            {guidanceStatus}
+          </ShadcnBadge>
+        </ShadcnCardAction>
+      </ShadcnCardHeader>
+      <ShadcnCardContent className="flex flex-col gap-4">
+        {loading ? <Spinner label="Loading Finance agent guidance" /> : null}
+        {error ? <InlineError error={error} /> : null}
+        {setup ? (
+          <ShadcnItemGroup>
+            <ShadcnItem size="sm" variant="muted">
+              <ShadcnItemContent>
+                <ShadcnItemTitle>Sources ready</ShadcnItemTitle>
+                <ShadcnItemDescription>
+                  {setup.accountSources.length} account
+                  {setup.accountSources.length === 1 ? "" : "s"} available for a short,
+                  example-based interview. Profile source meanings guide interpretation; they do not
+                  restrict the accounts an authorized token can read.
+                </ShadcnItemDescription>
+              </ShadcnItemContent>
+            </ShadcnItem>
+            <ShadcnItem size="sm" variant="muted">
+              <ShadcnItemContent>
+                <ShadcnItemTitle>Suggested workflows</ShadcnItemTitle>
+                <ShadcnItemDescription>
+                  {availableWorkflows} available now. Ledger health and evidence come before
+                  categorization, cash-flow, or monthly-review guidance.
+                </ShadcnItemDescription>
+              </ShadcnItemContent>
+            </ShadcnItem>
+            <ShadcnItem size="sm" variant="muted">
+              <ShadcnItemContent>
+                <ShadcnItemTitle>Human-only boundaries</ShadcnItemTitle>
+                <ShadcnItemDescription>
+                  {humanOnlyActionLabels.length > 0
+                    ? `${humanOnlyActionLabels.join(", ")} stay in Finance.`
+                    : "Consequential finance actions stay in Finance."}
+                </ShadcnItemDescription>
+              </ShadcnItemContent>
+              <ShadcnItemActions>
+                <ShadcnButton asChild size="sm" variant="outline">
+                  <Link to="/settings?section=agents">Connect an agent</Link>
+                </ShadcnButton>
+              </ShadcnItemActions>
+            </ShadcnItem>
+            {approvedProfile ? (
+              <ShadcnItem size="sm" variant="muted">
+                <ShadcnItemContent>
+                  <ShadcnItemTitle>Active approved guidance</ShadcnItemTitle>
+                  <ShadcnItemDescription>
+                    This signed-in-user-approved snapshot remains operative
+                    {draftProposal ? " while the pending draft is reviewed." : "."}
+                  </ShadcnItemDescription>
+                  <FinanceGuidanceDetails
+                    legend="Active approved Finance guidance contents"
+                    profile={approvedProfile}
+                  />
+                </ShadcnItemContent>
+              </ShadcnItem>
+            ) : null}
+            {draftProposal || profileStatus === "draft" ? (
+              <ShadcnItem size="sm" variant="muted">
+                <ShadcnItemContent>
+                  <ShadcnItemTitle>Draft activation</ShadcnItemTitle>
+                  <ShadcnItemDescription>
+                    {activationEligible
+                      ? "Review the recorded source meanings, thresholds, terminology, and safety constraints before activating this guidance."
+                      : "Add at least one owned account source to the draft before activation."}
+                  </ShadcnItemDescription>
+                  {draftProposal ? (
+                    <FinanceGuidanceDetails
+                      legend="Finance guidance draft contents"
+                      profile={draftProposal}
+                    />
+                  ) : null}
+                </ShadcnItemContent>
+                <ShadcnItemActions>
+                  <ShadcnButton
+                    disabled={!activationEligible || activating}
+                    onClick={onActivate}
+                    size="sm"
+                  >
+                    {activating ? "Activating…" : "Activate guidance"}
+                  </ShadcnButton>
+                </ShadcnItemActions>
+              </ShadcnItem>
+            ) : null}
+          </ShadcnItemGroup>
+        ) : null}
+      </ShadcnCardContent>
+    </ShadcnCard>
+  );
+}
+
+function withOccurrenceKeys(values: string[]) {
+  const occurrences = new Map<string, number>();
+  return values.map((value) => {
+    const occurrence = (occurrences.get(value) ?? 0) + 1;
+    occurrences.set(value, occurrence);
+    return { key: `${value}:${occurrence}`, value };
+  });
+}
+
+function FinanceGuidanceDetails({
+  legend,
+  profile,
+}: {
+  legend: string;
+  profile: NonNullable<FinanceGuidedSetupContext["guidance"]["approvedProfile"]>;
+}) {
+  return (
+    <fieldset className="mt-3 grid gap-3 text-sm">
+      <legend className="sr-only">{legend}</legend>
+      <div>
+        <p className="font-medium">Objective</p>
+        <p className="text-muted-foreground">{profile.objective}</p>
+      </div>
+      <div>
+        <p className="font-medium">Summary</p>
+        <p className="text-muted-foreground">{profile.summary}</p>
+      </div>
+      <div>
+        <p className="font-medium">Safety and operating instructions</p>
+        {profile.instructions.length > 0 ? (
+          <ul className="list-disc pl-5 text-muted-foreground">
+            {withOccurrenceKeys(profile.instructions).map(({ key, value }) => (
+              <li key={key}>{value}</li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground">None recorded.</p>
+        )}
+      </div>
+      <div>
+        <p className="font-medium">Account meanings</p>
+        {profile.sourceContexts.length > 0 ? (
+          <ul className="list-disc pl-5 text-muted-foreground">
+            {profile.sourceContexts.map((source) => (
+              <li key={source.sourceId}>
+                {source.sourceLabel} — {source.purpose}
+                {source.notes ? ` — ${source.notes}` : ""}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-muted-foreground">None recorded.</p>
+        )}
+      </div>
+      <div>
+        <p className="font-medium">Categories</p>
+        <p className="text-muted-foreground">
+          {profile.categories.length > 0
+            ? profile.categories
+                .map((category) => `${category.label}: ${category.description}`)
+                .join("; ")
+            : "None recorded."}
+        </p>
+      </div>
+      <div>
+        <p className="font-medium">Preferences</p>
+        <p className="text-muted-foreground">
+          {Object.keys(profile.preferences).length > 0
+            ? Object.entries(profile.preferences)
+                .map(([key, value]) => `${key}: ${String(value)}`)
+                .join("; ")
+            : "None recorded."}
+        </p>
+      </div>
+    </fieldset>
   );
 }
 
@@ -2677,12 +3011,14 @@ function FinanceReviewItems({
   isPending,
   onApprove,
   onCategorize,
+  onConfirmTransfer,
   onDefer,
 }: {
   cases: FinanceReviewCase[];
   isPending: boolean;
-  onApprove: (id: string) => void;
+  onApprove: (review: FinanceReviewCase) => void;
   onCategorize: (review: FinanceReviewCase) => void;
+  onConfirmTransfer: (review: FinanceReviewCase) => void;
   onDefer: (id: string) => void;
 }) {
   if (cases.length === 0)
@@ -2695,7 +3031,9 @@ function FinanceReviewItems({
     <ShadcnItemGroup>
       {cases.map((review) => {
         const item = review.transaction;
-        const canApprove = item.categoryId !== null && item.category !== null;
+        const isPossibleTransfer = review.reason === "possible_transfer";
+        const canApprove =
+          !isPossibleTransfer && item.categoryId !== null && item.category !== null;
         return (
           <ShadcnItem key={review.id} variant="outline">
             <ShadcnItemContent>
@@ -2711,8 +3049,17 @@ function FinanceReviewItems({
             <ShadcnItemActions>
               <span className="text-sm font-medium">{formatMoney(item.amount)}</span>
               {canApprove ? (
-                <ShadcnButton disabled={isPending} onClick={() => onApprove(review.id)} size="sm">
+                <ShadcnButton disabled={isPending} onClick={() => onApprove(review)} size="sm">
                   Approve
+                </ShadcnButton>
+              ) : null}
+              {isPossibleTransfer ? (
+                <ShadcnButton
+                  disabled={isPending}
+                  onClick={() => onConfirmTransfer(review)}
+                  size="sm"
+                >
+                  Confirm transfer
                 </ShadcnButton>
               ) : null}
               <ShadcnButton
@@ -2765,44 +3112,6 @@ function FinanceTextField({
   );
 }
 
-function PlaidConnect({ onConnected }: { onConnected: () => Promise<unknown> }) {
-  const [token, setToken] = useState<string | null>(null);
-  const status = useQuery({ queryFn: api.getPlaidStatus, queryKey: ["plaid-status"] });
-  const exchange = useMutation({
-    mutationFn: (publicToken: string) => api.exchangePlaidToken({ institution: null, publicToken }),
-    onSuccess: onConnected,
-  });
-  const { open, ready } = usePlaidLink({
-    onSuccess: (publicToken) => exchange.mutate(publicToken),
-    token,
-  });
-  useEffect(() => {
-    if (token && ready) open();
-  }, [open, ready, token]);
-  if (status.isPending) {
-    return (
-      <ShadcnButton disabled size="sm" variant="outline">
-        Checking Plaid
-      </ShadcnButton>
-    );
-  }
-  if (status.isError || !status.data.available) {
-    return (
-      <ShadcnButton disabled size="sm" variant="outline">
-        Plaid needs keys
-      </ShadcnButton>
-    );
-  }
-  return (
-    <ShadcnButton
-      disabled={exchange.isPending}
-      onClick={() => api.getPlaidLinkToken().then(setToken)}
-      size="sm"
-    >
-      Connect bank
-    </ShadcnButton>
-  );
-}
 function downloadFinanceCsv(name: string, rows: Array<Record<string, unknown>>) {
   const columns = Array.from(new Set(rows.flatMap((row) => Object.keys(row))));
   const csvCell = (value: unknown) => {
@@ -2883,27 +3192,5 @@ function transactionAmountTone(direction: FinanceTransaction["direction"]) {
 }
 
 function FinancePageSkeleton() {
-  return (
-    <section
-      aria-busy="true"
-      aria-label="Loading finances"
-      className="wide-page flex w-full max-w-6xl flex-col gap-6 pb-8"
-    >
-      <div className="space-y-3">
-        <div className="h-3 w-36 animate-pulse rounded bg-muted" />
-        <div className="h-10 w-48 animate-pulse rounded bg-muted" />
-        <div className="h-4 w-full max-w-xl animate-pulse rounded bg-muted" />
-      </div>
-      <div className="grid gap-4 md:grid-cols-3">
-        {["spend", "accounts", "review"].map((name) => (
-          <div className="h-24 animate-pulse rounded-xl border bg-muted/40" key={name} />
-        ))}
-      </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        {["primary", "secondary"].map((name) => (
-          <div className="h-40 animate-pulse rounded-xl border bg-muted/40" key={name} />
-        ))}
-      </div>
-    </section>
-  );
+  return <WorkspaceSkeleton kind="finances" />;
 }

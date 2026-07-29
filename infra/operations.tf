@@ -348,23 +348,22 @@ resource "aws_cloudwatch_metric_alarm" "target_latency" {
 
 resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   alarm_name          = "${local.name}-alb-5xx"
-  alarm_description   = "The public load balancer returned a 5xx response."
+  alarm_description   = "Dashboard-only signal for load-balancer-generated 5xx responses; deployment-safe external health alarms page operators."
+  actions_enabled     = false
   namespace           = "AWS/ApplicationELB"
   metric_name         = "HTTPCode_ELB_5XX_Count"
   statistic           = "Sum"
   comparison_operator = "GreaterThanOrEqualToThreshold"
-  threshold           = 1
+  threshold           = 5
   period              = 300
-  evaluation_periods  = 1
-  datapoints_to_alarm = 1
+  evaluation_periods  = 3
+  datapoints_to_alarm = 2
   treat_missing_data  = "notBreaching"
 
   dimensions = {
     LoadBalancer = aws_lb.public.arn_suffix
   }
 
-  alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {

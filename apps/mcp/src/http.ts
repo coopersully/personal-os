@@ -12,9 +12,9 @@ import {
 } from "./security.js";
 import { createPersonalOsMcpServer } from "./server.js";
 
-const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8787";
+const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8788";
 const host = process.env.HOST ?? "127.0.0.1";
-const port = Number(process.env.PORT ?? 8788);
+const port = Number(process.env.PORT ?? 8789);
 const publicUrl = (process.env.MCP_PUBLIC_URL ?? `http://${host}:${port}`).replace(/\/$/, "");
 const authorizationServer = (
   process.env.OAUTH_AUTHORIZATION_SERVER_URL ??

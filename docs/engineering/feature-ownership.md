@@ -70,6 +70,19 @@ from repeatedly conflicting on the same file.
 - Read/write capability is checked before a UI, MCP, or automation operation is
   offered or executed.
 
+### External dependencies
+
+- A feature owner owns the capability, domain state, degraded behavior, and repair path for an
+  external dependency it introduces.
+- Integration owns shared edge deadlines, composition-root wiring, runtime configuration, network
+  policy, deployment ordering, and cross-feature infrastructure. A change that adds a credential,
+  callback, webhook, host class, protocol, port, queue, or native bridge crosses both ownership
+  surfaces.
+- The feature and Integration owners use the boundary record in
+  [`external-boundary-reliability.md`](external-boundary-reliability.md) to agree on the durable
+  commit point and production evidence. Neither side may infer that the other supplied the missing
+  runtime contract.
+
 ### Agent actions and source links
 
 Every agent mutation declares one policy level:

@@ -11,6 +11,10 @@ its UI predictable to build and review.
 - [`pages/today.md`](pages/today.md) is the reference page specification. New
   page specifications use its structure: user job, information hierarchy, block
   contract, state matrix, and verification criteria.
+- [`pages/setup.md`](pages/setup.md) defines immediate, resumable account setup
+  and the shared provider-connection contract.
+- [`pages/authentication.md`](pages/authentication.md) defines sign-in,
+  invitation redemption, recovery, and reusable credential-field contracts.
 - [`../engineering/settings-ui-standards.md`](../engineering/settings-ui-standards.md)
   remains the settings-specific extension of this system.
 

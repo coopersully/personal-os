@@ -72,6 +72,7 @@ describe("assistant setup routes", () => {
           installPrompt: "Install the Ilo skill.",
           invocation: "$ilo-setup",
           name: "ilo-setup",
+          revision: "release-0.1.0",
           setupPrompt: "Set up Ilo.",
           sourceUrl: "https://example.com/ilo-setup",
           version: "0.1.0",

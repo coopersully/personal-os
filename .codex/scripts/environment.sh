@@ -12,6 +12,7 @@ LOG_DIR="$RUN_DIR/logs"
 ENV_FILE="$ROOT/.env"
 PRIMARY_ENV_FILE="$PRIMARY_ROOT/.env"
 ENV_OVERLAY_FILE="$ROOT/.env.codex.local"
+AGENT_SKILL_RELEASE_MANIFEST="$ROOT/packages/domain/src/ilo-setup-release.json"
 
 BASE_API_PORT=8788
 BASE_MCP_PORT=8789
@@ -105,6 +106,13 @@ generate_internal_secret() {
   fi
 }
 
+migrate_legacy_agent_skill_environment() {
+  [[ -f "$PRIMARY_ENV_FILE" ]] || return
+  node "$ROOT/scripts/migrate-agent-skill-environment.mjs" \
+    "$PRIMARY_ENV_FILE" \
+    "$AGENT_SKILL_RELEASE_MANIFEST"
+}
+
 ensure_env_file() {
   local key internal_secret temporary
 
@@ -122,6 +130,8 @@ ensure_env_file() {
     mv "$temporary" "$PRIMARY_ENV_FILE"
     log "Created the primary checkout's .env with generated local secrets."
   fi
+
+  migrate_legacy_agent_skill_environment
 
   if [[ "$ROOT" != "$PRIMARY_ROOT" ]]; then
     temporary="$(mktemp "$RUN_DIR/env.XXXXXX")"

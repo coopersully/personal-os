@@ -1,4 +1,7 @@
+import { iloSetupRelease, semanticVersionSchema } from "@personal-os/domain";
 import { z } from "zod";
+
+export const officialAgentSkill = iloSetupRelease;
 
 const configSchema = z
   .object({
@@ -7,9 +10,15 @@ const configSchema = z
     AUTH_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).max(1_000).default(20),
     AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3_600).default(300),
     API_BASE_URL: z.url(),
-    AGENT_SKILL_SOURCE_URL: z
-      .url()
-      .default("https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup"),
+    AGENT_SKILL_REVISION: z
+      .string()
+      .trim()
+      .min(1)
+      .max(128)
+      .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/)
+      .default(officialAgentSkill.revision),
+    AGENT_SKILL_SOURCE_URL: z.url().default(officialAgentSkill.sourceUrl),
+    AGENT_SKILL_VERSION: semanticVersionSchema.default(officialAgentSkill.version),
     APP_ENCRYPTION_KEY: z.string().min(1),
     DATABASE_URL: z.string().min(1),
     EMAIL_FROM: z.string().default(""),
@@ -35,6 +44,14 @@ const configSchema = z
     X_REDIRECT_URI: z.url(),
   })
   .superRefine((value, context) => {
+    if (!sourceIdentifiesRevision(value.AGENT_SKILL_SOURCE_URL, value.AGENT_SKILL_REVISION)) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "AGENT_SKILL_SOURCE_URL must include AGENT_SKILL_REVISION so the guide identifies a release instead of a generic latest endpoint.",
+        path: ["AGENT_SKILL_SOURCE_URL"],
+      });
+    }
     if (value.NODE_ENV !== "production") return;
     if (!value.EMAIL_FROM) {
       context.addIssue({
@@ -74,8 +91,20 @@ const configSchema = z
     }
   });
 
+function sourceIdentifiesRevision(sourceUrl: string, revision: string): boolean {
+  const url = new URL(sourceUrl);
+  const pathSegments = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+  return (
+    pathSegments.includes(revision) ||
+    [...url.searchParams.values()].includes(revision) ||
+    url.hash.slice(1).split(/[/:]/).filter(Boolean).map(decodeURIComponent).includes(revision)
+  );
+}
+
 export type AppConfig = {
+  agentSkillRevision?: string;
   agentSkillSourceUrl?: string;
+  agentSkillVersion?: string;
   allowedOrigins: string[];
   authRateLimitMaxRequests?: number;
   authRateLimitWindowSeconds?: number;
@@ -107,9 +136,11 @@ export type AppConfig = {
 };
 
 export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
-  const value = configSchema.parse(environment);
+  const value = configSchema.parse(migrateLegacyOfficialAgentSkill(environment));
   return {
+    agentSkillRevision: value.AGENT_SKILL_REVISION,
     agentSkillSourceUrl: value.AGENT_SKILL_SOURCE_URL,
+    agentSkillVersion: value.AGENT_SKILL_VERSION,
     allowedOrigins: value.ALLOWED_ORIGINS
       ? [
           ...new Set([
@@ -147,5 +178,29 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     xClientId: value.X_CLIENT_ID,
     xClientSecret: value.X_CLIENT_SECRET,
     xRedirectUri: value.X_REDIRECT_URI,
+  };
+}
+
+function migrateLegacyOfficialAgentSkill(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  if (environment.AGENT_SKILL_SOURCE_URL !== officialAgentSkill.legacySourceUrl) {
+    return environment;
+  }
+  if (
+    environment.AGENT_SKILL_VERSION &&
+    environment.AGENT_SKILL_VERSION !== officialAgentSkill.version
+  ) {
+    return environment;
+  }
+  if (
+    environment.AGENT_SKILL_REVISION &&
+    environment.AGENT_SKILL_REVISION !== officialAgentSkill.revision
+  ) {
+    return environment;
+  }
+  return {
+    ...environment,
+    AGENT_SKILL_REVISION: officialAgentSkill.revision,
+    AGENT_SKILL_SOURCE_URL: officialAgentSkill.sourceUrl,
+    AGENT_SKILL_VERSION: officialAgentSkill.version,
   };
 }

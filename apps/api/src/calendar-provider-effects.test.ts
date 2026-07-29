@@ -129,6 +129,29 @@ describe("Calendar provider effect ledger", () => {
     });
   });
 
+  it("refuses to commit after only part of the declared provider plan ran", async () => {
+    const ledger = createCalendarProviderEffectLedger("incomplete_update", [
+      sourceEffect,
+      blockEffect,
+    ]);
+    await ledger.run(sourceEffect, async () => ({ remoteEventId: "created-source" }));
+    const commit = vi.fn(async () => "committed");
+    await expect(ledger.commit(commit)).rejects.toMatchObject({
+      code: "internal_error",
+      details: {
+        completedEffects: [
+          expect.objectContaining({
+            remoteEventId: "created-source",
+            role: "source",
+          }),
+        ],
+        operation: "incomplete_update",
+        pendingEffects: [blockEffect],
+      },
+    });
+    expect(commit).not.toHaveBeenCalled();
+  });
+
   it("reports a projection failure after a provider result and preserves DB details", async () => {
     const ledger = createCalendarProviderEffectLedger("update_event_block", [blockEffect]);
     await ledger.run(blockEffect, async () => ({ remoteEventId: "updated-block" }));

@@ -1130,6 +1130,10 @@ describe.sequential("assistant setup service", () => {
         context(),
       ),
     ).resolves.toMatchObject({ domain: "calendar", status: "active", version: 1 });
+    await database.db
+      .update(domainProfiles)
+      .set({ preferences: { defaultCalendarId: writableCalendarId } })
+      .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "calendar")));
     await calendar.deleteLocalCalendar(writableCalendarId, context());
     await expect(service.getProfile(userId, "calendar")).resolves.toMatchObject({
       sourceContexts: [

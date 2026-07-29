@@ -31,7 +31,13 @@ function fakeAws(args) {
   logCall(state, args);
 
   if (service === "application-autoscaling" && operation === "describe-scalable-targets") {
+    state.describeScalingCalls += 1;
     writeState(statePath, state);
+    if (state.failDescribeScalingAt === state.describeScalingCalls) {
+      process.stderr.write("Scaling state unavailable\n");
+      process.exitCode = 254;
+      return;
+    }
     process.stdout.write(
       JSON.stringify({ ScalableTargets: [{ SuspendedState: state.suspension }] }),
     );
@@ -44,6 +50,17 @@ function fakeAws(args) {
       process.stderr.write("AccessDenied\n");
       process.exitCode = 254;
       return;
+    }
+    if (
+      state.cancelDuringRecoveryRegister &&
+      state.primaryTaskDefinition === "new-task-definition" &&
+      !state.recoveryRegisterCancelled
+    ) {
+      state.recoveryRegisterCancelled = true;
+      state.cancellationSignalAt = Date.now();
+      writeState(statePath, state);
+      process.kill(process.ppid, "SIGTERM");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10_000);
     }
     state.suspension = JSON.parse(argument(args, "--suspended-state") ?? "{}");
     writeState(statePath, state);
@@ -60,6 +77,10 @@ function fakeAws(args) {
     if (desiredStatus === "STOPPED") {
       const index = state.stoppedListCalls;
       state.stoppedListCalls += 1;
+      const taskUpdates = state.stoppedTaskUpdates?.[index] ?? {};
+      for (const [taskArn, update] of Object.entries(taskUpdates)) {
+        state.tasks[taskArn] = { ...state.tasks[taskArn], ...update };
+      }
       const inventory =
         state.stoppedInventories[Math.min(index, state.stoppedInventories.length - 1)];
       writeState(statePath, state);
@@ -100,6 +121,28 @@ function fakeAws(args) {
   if (service === "ecs" && operation === "describe-services") {
     const query = argument(args, "--query") ?? "";
     writeState(statePath, state);
+    if (
+      state.cancelDuringPostLaunchRead &&
+      state.primaryTaskDefinition === "new-task-definition" &&
+      !state.postLaunchReadCancelled
+    ) {
+      state.postLaunchReadCancelled = true;
+      state.cancellationSignalAt = Date.now();
+      writeState(statePath, state);
+      process.kill(process.ppid, "SIGINT");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10_000);
+    }
+    if (
+      state.failPostLaunchRead &&
+      state.primaryTaskDefinition === "new-task-definition" &&
+      !state.postLaunchReadFailed
+    ) {
+      state.postLaunchReadFailed = true;
+      writeState(statePath, state);
+      process.stderr.write("Post-launch read failed\n");
+      process.exitCode = 255;
+      return;
+    }
     if (query.includes("desiredCount,runningCount,pendingCount")) {
       process.stdout.write(`${state.desiredCount}\t${state.runningCount}\t${state.pendingCount}\n`);
       return;
@@ -152,14 +195,29 @@ function fakeAws(args) {
     }
     const taskDefinition = argument(args, "--task-definition");
     if (taskDefinition) state.primaryTaskDefinition = taskDefinition;
-    const cancel = state.cancelAfterFirstZero && state.zeroCalls === 1;
     writeState(statePath, state);
-    if (cancel) process.kill(process.ppid, "SIGINT");
     return;
   }
 
   if (service === "ecs" && operation === "wait") {
+    state.serviceWaitCalls += 1;
     writeState(statePath, state);
+    if (state.failFirstServiceWait && state.serviceWaitCalls === 1) {
+      process.stderr.write("Wait failed\n");
+      process.exitCode = 255;
+      return;
+    }
+    if (
+      state.cancelDuringPostZeroWait &&
+      state.desiredCount === 0 &&
+      !state.postZeroWaitCancelled
+    ) {
+      state.postZeroWaitCancelled = true;
+      state.cancellationSignalAt = Date.now();
+      writeState(statePath, state);
+      process.kill(process.ppid, "SIGINT");
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10_000);
+    }
     return;
   }
 
@@ -194,19 +252,27 @@ if (process.argv[2] === "--fake-aws") {
     return {
       breaker: { enable: true, rollback: true },
       calls: [],
-      cancelAfterFirstZero: false,
+      cancelDuringRecoveryRegister: false,
+      cancelDuringPostLaunchRead: false,
+      cancelDuringPostZeroWait: false,
       denyRegister: false,
+      describeScalingCalls: 0,
       desiredCount: 1,
+      failDescribeScalingAt: undefined,
+      failFirstServiceWait: false,
+      failPostLaunchRead: false,
       pendingCount: 0,
       primaryTaskDefinition: "old-task-definition",
       runningCount: 1,
       runningInventory: ["task-old"],
+      serviceWaitCalls: 0,
       stoppedInventories: [
         ["task-historical"],
         ["task-historical"],
         ...Array.from({ length: 8 }, () => ["task-historical", "task-old"]),
       ],
       stoppedListCalls: 0,
+      stoppedTaskUpdates: {},
       suspension: originalSuspension,
       tasks: { "task-historical": historical, "task-old": oldTask },
       zeroCalls: 0,
@@ -226,23 +292,22 @@ if (process.argv[2] === "--fake-aws") {
       { mode: 0o755 },
     );
     writeFileSync(resolve(bin, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-    writeFileSync(resolve(bin, "date"), "#!/bin/sh\nprintf '%s\\n' 2026-07-29T12:00:00\n", {
-      mode: 0o755,
-    });
-    const result = spawnSync("bash", [deployScript], {
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        API_SERVICE: "ilo-api",
-        API_TASK_DEFINITION: "new-task-definition",
-        ECS_CLUSTER: "ilo-production",
-        FAKE_AWS_STATE: statePath,
-        PATH: `${bin}${delimiter}${process.env.PATH}`,
-      },
-    });
-    const finalState = readState(statePath);
-    rmSync(directory, { force: true, recursive: true });
-    return { result, state: finalState };
+    try {
+      const result = spawnSync("bash", [deployScript], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          API_SERVICE: "ilo-api",
+          API_TASK_DEFINITION: "new-task-definition",
+          ECS_CLUSTER: "ilo-production",
+          FAKE_AWS_STATE: statePath,
+          PATH: `${bin}${delimiter}${process.env.PATH}`,
+        },
+      });
+      return { completedAt: Date.now(), result, state: readState(statePath) };
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
   }
 
   function assert(condition, message) {
@@ -261,7 +326,21 @@ if (process.argv[2] === "--fake-aws") {
     "Failed pre-drain restoration must emit an operator-visible error.",
   );
 
-  const cancelled = runScenario("cancel-after-zero", baseState({ cancelAfterFirstZero: true }));
+  const unverifiedRestoration = runScenario(
+    "restoration-read-failed",
+    baseState({ failDescribeScalingAt: 3, failFirstServiceWait: true }),
+  );
+  assert(unverifiedRestoration.result.status !== 0, "A pre-drain wait failure must fail.");
+  assert(
+    unverifiedRestoration.state.desiredCount === 1,
+    "A pre-drain failure must preserve the healthy service.",
+  );
+  assert(
+    unverifiedRestoration.result.stdout.includes("could not prove exact scaling-state restoration"),
+    "A failed restoration readback must emit an operator-visible unverified-state error.",
+  );
+
+  const cancelled = runScenario("cancel-after-zero", baseState({ cancelDuringPostZeroWait: true }));
   assert(
     cancelled.result.status === 130,
     `Cancellation after zero must exit with signal status (status=${cancelled.result.status}, signal=${cancelled.result.signal}, stderr=${cancelled.result.stderr}).`,
@@ -273,6 +352,63 @@ if (process.argv[2] === "--fake-aws") {
   assert(
     JSON.stringify(cancelled.state.suspension) === JSON.stringify(allSuspended),
     "Cancellation recovery must re-suspend all scaling modes.",
+  );
+  assert(
+    cancelled.completedAt - cancelled.state.cancellationSignalAt < 5_000,
+    "Cancellation must interrupt a blocked AWS waiter before runner escalation.",
+  );
+  assert(cancelled.state.zeroCalls >= 2, "Cancellation recovery must issue a second zero.");
+  assert(
+    cancelled.state.calls.some(
+      (call) =>
+        call.startsWith("application-autoscaling register-scalable-target") &&
+        call.includes("--cli-read-timeout 2"),
+    ),
+    "Cancellation recovery must issue the bounded scaling re-suspension.",
+  );
+
+  const postLaunchCancelled = runScenario(
+    "cancel-post-launch-read",
+    baseState({ cancelDuringPostLaunchRead: true }),
+  );
+  assert(
+    postLaunchCancelled.result.status === 130,
+    "Cancellation during a post-launch read must exit with signal status.",
+  );
+  assert(
+    postLaunchCancelled.completedAt - postLaunchCancelled.state.cancellationSignalAt < 5_000,
+    "Cancellation must interrupt a blocked post-launch AWS read.",
+  );
+  assert(
+    postLaunchCancelled.state.desiredCount === 0 &&
+      JSON.stringify(postLaunchCancelled.state.suspension) === JSON.stringify(allSuspended),
+    "Post-launch cancellation must re-suspend scaling and return the service to zero.",
+  );
+  assert(
+    postLaunchCancelled.state.zeroCalls >= 2,
+    "Post-launch cancellation recovery must issue a second zero mutation.",
+  );
+
+  const recoveryCancelled = runScenario(
+    "cancel-fail-closed-recovery",
+    baseState({ cancelDuringRecoveryRegister: true, failPostLaunchRead: true }),
+  );
+  assert(
+    recoveryCancelled.result.status === 143,
+    "Cancellation during fail-closed recovery must exit through the TERM handler.",
+  );
+  assert(
+    recoveryCancelled.completedAt - recoveryCancelled.state.cancellationSignalAt < 5_000,
+    "Cancellation must interrupt a stalled fail-closed recovery request.",
+  );
+  assert(
+    recoveryCancelled.state.desiredCount === 0 &&
+      JSON.stringify(recoveryCancelled.state.suspension) === JSON.stringify(allSuspended),
+    "Cancelled fail-closed recovery must still re-suspend scaling and stop at zero.",
+  );
+  assert(
+    recoveryCancelled.state.zeroCalls >= 2,
+    "Cancelled fail-closed recovery must issue the bounded cancellation zero.",
   );
 
   const replacement = {
@@ -296,6 +432,57 @@ if (process.argv[2] === "--fake-aws") {
     "A task stopped during suspension must enter exact exit proof.",
   );
 
+  const delayedReplacementState = baseState();
+  delayedReplacementState.tasks["task-delayed-replacement"] = replacement;
+  delayedReplacementState.stoppedInventories = [
+    ["task-historical"],
+    ["task-historical"],
+    ...Array.from({ length: 7 }, () => ["task-historical", "task-old"]),
+    ...Array.from({ length: 7 }, () => ["task-delayed-replacement", "task-historical", "task-old"]),
+  ];
+  const delayedReplacement = runScenario("delayed-replacement", delayedReplacementState);
+  assert(
+    delayedReplacement.result.status === 0,
+    "A replacement exposed after the earlier short convergence window must still succeed.",
+  );
+  assert(
+    delayedReplacement.state.calls.some(
+      (call) => call.startsWith("ecs describe-tasks") && call.includes("task-delayed-replacement"),
+    ),
+    "Five-minute reconciliation must include a late-visible replacement in exit proof.",
+  );
+
+  const initiallyStoppingState = baseState();
+  initiallyStoppingState.tasks["task-initially-stopping"] = {
+    exitCode: undefined,
+    lastStatus: "RUNNING",
+  };
+  initiallyStoppingState.stoppedInventories = [
+    ["task-historical", "task-initially-stopping"],
+    ...Array.from({ length: 15 }, () => ["task-historical", "task-initially-stopping", "task-old"]),
+  ];
+  initiallyStoppingState.stoppedTaskUpdates = {
+    1: {
+      "task-initially-stopping": {
+        exitCode: 137,
+        lastStatus: "STOPPED",
+        reason: "SIGKILL",
+        stoppedAt: "2026-07-29T11:59:59+00:00",
+      },
+    },
+  };
+  const initiallyStopping = runScenario("initially-stopping", initiallyStoppingState);
+  assert(
+    initiallyStopping.result.status !== 0,
+    "A task still stopping in the initial baseline must remain in exact exit proof.",
+  );
+  assert(
+    !initiallyStopping.state.calls.some(
+      (call) => call.startsWith("ecs update-service") && call.includes("--task-definition"),
+    ),
+    "An initially stopping task with a failed exit must block migration startup.",
+  );
+
   const killedState = baseState();
   killedState.tasks["task-old"] = {
     exitCode: 137,
@@ -316,6 +503,30 @@ if (process.argv[2] === "--fake-aws") {
   assert(
     JSON.stringify(killed.state.suspension) === JSON.stringify(allSuspended),
     "Post-zero failure must leave every scaling mode suspended.",
+  );
+
+  const missingTimestampState = baseState();
+  missingTimestampState.tasks["task-unknown-time"] = {
+    exitCode: 137,
+    lastStatus: "STOPPED",
+    reason: "SIGKILL",
+    stoppedReason: "Timestamp not projected yet",
+  };
+  missingTimestampState.stoppedInventories = [
+    ["task-historical"],
+    ["task-historical", "task-unknown-time"],
+    ...Array.from({ length: 8 }, () => ["task-historical", "task-old", "task-unknown-time"]),
+  ];
+  const missingTimestamp = runScenario("missing-timestamp", missingTimestampState);
+  assert(
+    missingTimestamp.result.status !== 0,
+    "Missing stoppedAt evidence must not classify a task as historical.",
+  );
+  assert(
+    !missingTimestamp.state.calls.some(
+      (call) => call.startsWith("ecs update-service") && call.includes("--task-definition"),
+    ),
+    "Missing stoppedAt plus failed exit evidence must block migration startup.",
   );
 
   const success = runScenario("success", baseState());

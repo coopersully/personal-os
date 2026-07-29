@@ -157,12 +157,17 @@ drain instead of being treated as idle. The essential ECS API container has a
 and replacement tasks observed across the transition. ECS desired status uses
 only `RUNNING`/`STOPPED`, so the `RUNNING` inventory also contains tasks whose
 last status is still `PENDING`; a mismatch with service counts fails closed.
-The recent STOPPED baseline is capped at 100 before mutation, and post-drain
-STOPPED inventories must converge under bounded backoff before the exact
-at-most-100 task set is accepted. Desired/running/pending service counts must all
+The recent STOPPED baseline is capped at 100 before mutation. Only entries
+described with complete STOPPED evidence in that initial snapshot are historical;
+incomplete or later observations remain in the drain proof without relying on
+cross-system clock comparisons. Post-drain STOPPED inventories reconcile across
+the full five-minute ECS eventual-consistency bound and must converge before the
+exact at-most-100 task set is accepted. Desired/running/pending service counts must all
 reach zero, every exact task is waited to `STOPPED`, and every API container
 must report exit code zero with no kill/timeout evidence. Count-only drain or a
-fixed sleep is insufficient.
+fixed sleep is insufficient. This bound follows AWS's
+[ECS eventual-consistency guidance](https://docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/ecs/AmazonECSClient.html),
+which recommends exponential backoff that grows to five minutes.
 
 After the old tasks exit successfully, the workflow disables circuit-breaker
 rollback before launching the migration-capable task so ECS cannot restore a
@@ -173,8 +178,10 @@ rollback-enabled configuration and the scalable target's exact pre-drain
 suspension state. Suspension attempt and service-drain attempt are separate
 phases: failure before desired-count zero restores the prior scaling state and
 preserves the healthy old service; once zeroing may have committed, errors
-re-suspend and stop at zero. Delivered cancellation signals use single-attempt,
-tightly bounded re-suspend/zero mutations within the runner grace window.
+re-suspend and stop at zero. Every AWS operation after suspension begins, plus
+reconciliation delays, runs as an interruptible child process so delivered
+cancellation signals can stop the child, then use single-attempt, tightly bounded
+re-suspend/zero mutations within the runner grace window.
 An abrupt runner/host loss that cannot deliver cleanup signals remains an
 external control-plane recovery case; operators must verify the service remains
 zero before retrying. This bounded

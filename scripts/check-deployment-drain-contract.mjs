@@ -69,7 +69,7 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /api_drain_boundary=[\s\S]*?api_proven_stopped_before=[\s\S]*?api_active_stopping_before=[\s\S]*?api_stopped_inventory_stable=[\s\S]*?api_drain_task_arns=/,
+  /api_stopped_preflight_details=[\s\S]*?api_proven_stopped_before=[\s\S]*?api_active_stopping_before=[\s\S]*?api_stopped_inventory_stable=[\s\S]*?api_drain_task_arns=/,
   "complete task capture across running, stopping, replacement, and drain states",
 );
 if (workflow.includes("--desired-status PENDING")) {
@@ -89,8 +89,8 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /for reconciliation_delay in 1 2 4 8 16 32 32 32[\s\S]*?api_stopped_inventory_stable[\s\S]*?did not converge/,
-  "bounded eventual-consistency reconciliation to a stable stopped-task inventory",
+  /for reconciliation_delay in 1 2 4 8 16 32 32 32 32 32 32 32 32 32[\s\S]*?api_stopped_inventory_attempt" -ge 14[\s\S]*?api_stopped_inventory_stable[\s\S]*?did not converge/,
+  "five-minute eventual-consistency reconciliation to a stable stopped-task inventory",
 );
 requireMatch(
   workflow,
@@ -99,7 +99,7 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /fail_closed_api_deployment\(\)[\s\S]*?--suspended-state "\$api_all_suspended_state"[\s\S]*?--desired-count 0[\s\S]*?desiredCount,runningCount,pendingCount/,
+  /fail_closed_api_deployment\(\)[\s\S]*?trap - ERR EXIT[\s\S]*?run_interruptible aws application-autoscaling register-scalable-target[\s\S]*?--suspended-state "\$api_all_suspended_state"[\s\S]*?run_interruptible aws ecs update-service[\s\S]*?--desired-count 0[\s\S]*?capture_interruptible aws ecs describe-services[\s\S]*?desiredCount,runningCount,pendingCount/,
   "post-drain scaling re-suspension plus zero-state recovery and verification",
 );
 requireMatch(
@@ -109,7 +109,7 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /aws ecs wait tasks-stopped[\s\S]*?aws ecs describe-tasks/,
+  /run_interruptible aws ecs wait tasks-stopped[\s\S]*?aws ecs describe-tasks/,
   "exact stopped-task propagation before exit evidence inspection",
 );
 requireMatch(
@@ -124,8 +124,13 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /api_drain_boundary=[\s\S]*?api_suspension_attempted=true[\s\S]*?aws application-autoscaling register-scalable-target[\s\S]*?api_stopped_before_drain=[\s\S]*?api_service_drain_attempted=true[\s\S]*?aws ecs update-service[\s\S]*?--desired-count 0/,
+  /api_proven_stopped_before=[\s\S]*?api_suspension_attempted=true[\s\S]*?run_interruptible aws application-autoscaling register-scalable-target[\s\S]*?api_stopped_before_drain=[\s\S]*?api_service_drain_attempted=true[\s\S]*?run_interruptible aws ecs update-service[\s\S]*?--desired-count 0/,
   "separate suspension-attempt and service-drain mutation phases",
+);
+requireMatch(
+  workflow,
+  /run_interruptible\(\)[\s\S]*?api_active_child_pid="pending"[\s\S]*?wait "\$api_active_child_pid"[\s\S]*?capture_interruptible\(\)[\s\S]*?cancel_api_deployment\(\)[\s\S]*?jobs -pr[\s\S]*?kill -TERM "\$api_active_child_pid"/,
+  "prompt cancellation of foreground waits before fail-closed recovery",
 );
 requireMatch(
   workflow,
@@ -134,7 +139,7 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /api_original_suspended_state="\$\(current_scaling_suspension\)"[\s\S]*?--suspended-state "\$api_original_suspended_state"[\s\S]*?current_scaling_suspension/,
+  /current_scaling_suspension[\s\S]*?api_original_suspended_state="\$api_scaling_suspension"[\s\S]*?--suspended-state "\$api_original_suspended_state"[\s\S]*?current_scaling_suspension/,
   "exact scalable-target suspension capture, restore, and verification",
 );
 

@@ -83,15 +83,19 @@ work within 105 seconds, and closes PostgreSQL only after that work and the HTTP
 allows the essential API container 120 seconds before force-stop. The bound includes database closure,
 and rejected tracked work fails the drain. Zero desired/running/pending service counts are required.
 ECS desired-`RUNNING` inventory includes last-status `PENDING`; already-stopping and replacement
-tasks are reconciled from a capped STOPPED baseline plus converged post-drain inventories under
-bounded backoff. Every exact at-most-100 task must then report a successful API-container exit
+tasks are reconciled from a capped STOPPED baseline plus post-drain inventories across the full
+five-minute ECS eventual-consistency bound. Only tasks described with complete STOPPED evidence in
+the initial pre-mutation snapshot are historical; incomplete and later observations enter the exact
+proof without cross-system clock comparisons. Every exact at-most-100 task must then report a
+successful API-container exit
 without kill/timeout evidence. After that
 proof, circuit-breaker rollback is disabled before the new task can run migrations and stays disabled
 until the new API is the sole completed primary deployment on the exact new task definition. The
 declared rollback-enabled configuration and exact prior scaling suspension state are then restored and
 verified. Pre-zero failures restore prior scaling and preserve the healthy old service. Once zero may
-have committed, shell errors re-suspend and stop at zero; delivered cancellation signals use tightly
-bounded single-attempt mutations. Abrupt control-plane runner loss still requires operator
+have committed, shell errors re-suspend and stop at zero; every AWS operation after suspension begins
+is interruptible so delivered cancellation signals can stop the child before tightly bounded
+single-attempt mutations. Abrupt control-plane runner loss still requires operator
 verification before retry.
 
 The deploy role's narrowly scoped API

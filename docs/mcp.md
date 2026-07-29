@@ -48,6 +48,9 @@ The API service requires that revision for every agent update, complete/reopen, 
 not merely for MCP callers. Guarded trash and restore revisions travel in POST request bodies;
 the bodyless DELETE route remains signed-in-user compatibility and still performs recoverable
 trash rather than permanent deletion.
+`create_reminder_attention_item` locks and validates one active Reminder, derives its local source
+and revision, and refreshes the open Reminder/kind item. Generic attention writes cannot claim
+Reminder provenance.
 Reminder list pagination accepts the returned `nextCursor`, and Reminder MCP failures preserve the
 API error code, safe details, request ID, and HTTP status in structured content.
 

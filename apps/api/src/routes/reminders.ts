@@ -7,6 +7,7 @@ import {
   reminderListQuerySchema,
   reminderRevisionInputSchema,
   updateReminderInputSchema,
+  upsertReminderAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { ZodType } from "zod";
@@ -112,6 +113,15 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
       ),
     });
   });
+  app.put("/v1/reminders/:id/attention", async (context) =>
+    context.json({
+      item: await reminders.upsertAttentionItem(
+        context.req.param("id"),
+        await parseBody(context, upsertReminderAttentionItemInputSchema),
+        reminderMutationContext(context),
+      ),
+    }),
+  );
 }
 
 async function parseOptionalBody<T>(context: Context<AppEnv>, schema: ZodType<T>): Promise<T> {

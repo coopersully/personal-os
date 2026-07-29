@@ -1589,6 +1589,60 @@ describe.sequential("ilo API", () => {
       revision: first.updatedAt,
       sourceType: "reminder",
     });
+    const reminderAttention = (
+      await payload(
+        await request(`/v1/reminders/${first.id}/attention`, {
+          auth: "agent",
+          body: {
+            occursAt: first.dueAt,
+            summary: "Confirm whether this deadline still applies.",
+            title: "Reminder needs review",
+          },
+          method: "PUT",
+        }),
+      )
+    ).item;
+    expect(reminderAttention).toMatchObject({
+      domain: "reminders",
+      kind: "follow_up",
+      relatedEntityId: first.id,
+      relatedEntityType: "reminder",
+      source: first.source,
+    });
+    expect(
+      (
+        await payload(
+          await request(`/v1/reminders/${first.id}/attention`, {
+            auth: "agent",
+            body: {
+              occursAt: first.dueAt,
+              summary: "Use the current Reminder revision.",
+              title: "Reminder review refreshed",
+            },
+            method: "PUT",
+          }),
+        )
+      ).item,
+    ).toMatchObject({ id: reminderAttention.id, source: first.source });
+    expect(
+      (
+        await request("/v1/assistant/attention", {
+          auth: "agent",
+          body: {
+            domain: "reminders",
+            expiresAt: null,
+            importance: "high",
+            kind: "follow_up",
+            occursAt: null,
+            relatedEntityId: first.id,
+            relatedEntityType: "reminder",
+            source: first.source,
+            summary: "Caller-supplied Reminder provenance.",
+            title: "Forged Reminder attention",
+          },
+        })
+      ).status,
+    ).toBe(400);
     const overdueOne = (
       await payload(
         await request("/v1/reminders", {
@@ -2614,7 +2668,7 @@ describe.sequential("ilo API", () => {
       ).status,
     ).toBe(400);
 
-    const audit = (await payload(await request("/v1/audit", { auth: "agent" }))).events;
+    const audit = (await payload(await request("/v1/audit?limit=100", { auth: "agent" }))).events;
     expect(
       audit.find(
         (entry: { action: string; actorType: string }) =>
@@ -2633,6 +2687,18 @@ describe.sequential("ilo API", () => {
           sourceType: "reminder",
         },
         title: "[redacted]",
+      },
+    });
+    expect(
+      audit.find(
+        (entry: { action: string; entityId: string }) =>
+          entry.action === "assistant.attention.updated" && entry.entityId === reminderAttention.id,
+      ),
+    ).toMatchObject({
+      after: {
+        relatedEntityId: first.id,
+        relatedEntityType: "reminder",
+        source: first.source,
       },
     });
     expect(audit.some((entry: { action: string }) => entry.action === "task.created")).toBe(true);

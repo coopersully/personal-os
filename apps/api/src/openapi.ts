@@ -129,6 +129,14 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/reminders/{id}/restore": {
         post: { security, responses: { 200: { description: "Reminder restored" } } },
       },
+      "/v1/reminders/{id}/attention": {
+        put: {
+          security,
+          responses: {
+            200: { description: "Reminder attention item created or refreshed" },
+          },
+        },
+      },
       "/v1/tasks": {
         get: { security, responses: { 200: { description: "Task page" } } },
         post: { security, responses: { 201: { description: "Task created" } } },

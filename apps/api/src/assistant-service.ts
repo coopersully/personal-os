@@ -288,6 +288,19 @@ export function createAssistantService({
           "Use the Calendar attention endpoint so Ilo can validate and derive the event source.",
         );
       }
+      if (
+        (input.domain === "reminders" &&
+          (input.relatedEntityId !== null ||
+            input.relatedEntityType !== null ||
+            input.source !== null)) ||
+        input.relatedEntityType === "reminder" ||
+        input.source?.sourceType === "reminder"
+      ) {
+        throw new AppError(
+          "invalid_request",
+          "Use the Reminder attention endpoint so Ilo can validate and derive the Reminder source.",
+        );
+      }
       const created = await db.transaction(async (transaction) => {
         const item = requireDatabaseRecord(
           (

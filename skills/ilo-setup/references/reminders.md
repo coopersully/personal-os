@@ -59,7 +59,9 @@ preferences are present and the user accepts the summary.
   the cutoff or priority.
 - Show IDs, titles, current due times, proposed due time, and time zone. Apply an accepted set with
   guarded individual updates; stop and report any conflict instead of silently changing the set.
-- Use a Reminders `follow_up` attention item when an ambiguous or conflicted item needs review.
-  Include the Reminder's source and related entity ID. Resolve it when the review is complete.
+- Use `create_reminder_attention_item` when an ambiguous or conflicted Reminder needs review. Ilo
+  validates the active Reminder and derives its source, current revision, and related entity ID;
+  never submit those provenance fields through the generic attention tool. Resolve the item when
+  the review is complete.
 - Tool annotations help clients present actions; they never replace API authorization, policy,
   audit, or recoverability.

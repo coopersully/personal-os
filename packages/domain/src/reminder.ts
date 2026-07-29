@@ -1,9 +1,22 @@
 import { z } from "zod";
-import { domainPreferenceValueSchema, upsertDomainProfileInputSchema } from "./assistant.js";
+import {
+  attentionItemImportanceSchema,
+  attentionItemKindSchema,
+  domainPreferenceValueSchema,
+  upsertDomainProfileInputSchema,
+} from "./assistant.js";
 import { idSchema, isoDateTimeSchema, paginationSchema, timeZoneSchema } from "./common.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
 export const reminderPrioritySchema = z.enum(["low", "medium", "high"]);
+export const reminderTimeZoneSchema = timeZoneSchema.refine((value) => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}, "Must be a valid IANA time zone");
 
 export const reminderAutomaticActionSchema = z.enum([
   "create",
@@ -65,7 +78,7 @@ const reminderFieldsSchema = z.object({
   title: z.string().trim().min(1).max(240),
   notes: z.string().trim().max(10_000).nullable().default(null),
   dueAt: isoDateTimeSchema.nullable().default(null),
-  timezone: timeZoneSchema.nullable().default(null),
+  timezone: reminderTimeZoneSchema.nullable().default(null),
   priority: reminderPrioritySchema.default("medium"),
 });
 
@@ -78,7 +91,7 @@ export const updateReminderInputSchema = z
     title: z.string().trim().min(1).max(240).optional(),
     notes: z.string().trim().max(10_000).nullable().optional(),
     dueAt: isoDateTimeSchema.nullable().optional(),
-    timezone: timeZoneSchema.nullable().optional(),
+    timezone: reminderTimeZoneSchema.nullable().optional(),
     priority: reminderPrioritySchema.optional(),
   })
   .refine(
@@ -112,7 +125,7 @@ export const reminderDeferralPreviewInputSchema = z
     overdueBefore: isoDateTimeSchema,
     priority: reminderPrioritySchema.optional(),
     proposedDueAt: isoDateTimeSchema,
-    timezone: timeZoneSchema.nullable().default(null),
+    timezone: reminderTimeZoneSchema.nullable().default(null),
   })
   .superRefine((input, context) => {
     if (new Date(input.proposedDueAt).getTime() <= new Date(input.overdueBefore).getTime()) {
@@ -172,3 +185,17 @@ export const reminderListQuerySchema = paginationSchema
     }
   });
 export type ReminderListQuery = z.infer<typeof reminderListQuerySchema>;
+
+export const upsertReminderAttentionItemInputSchema = z.object({
+  expiresAt: isoDateTimeSchema.nullable().default(null),
+  importance: attentionItemImportanceSchema.default("high"),
+  kind: attentionItemKindSchema
+    .extract(["important", "upcoming", "follow_up"])
+    .default("follow_up"),
+  occursAt: isoDateTimeSchema.nullable().default(null),
+  summary: z.string().trim().min(1).max(4_000),
+  title: z.string().trim().min(1).max(240),
+});
+export type UpsertReminderAttentionItemInput = z.infer<
+  typeof upsertReminderAttentionItemInputSchema
+>;

@@ -1,10 +1,12 @@
 import type {
+  AttentionItem,
   CreateReminderInput,
   Reminder,
   ReminderDeferralPreview,
   ReminderDeferralPreviewInput,
   ReminderListQuery,
   UpdateReminderInput,
+  UpsertReminderAttentionItemInput,
 } from "@personal-os/domain";
 
 export type ReminderApiRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -74,6 +76,19 @@ export function createReminderApiClient(
         method: "PATCH",
       });
       return response.reminder;
+    },
+    async upsertReminderAttentionItem(
+      reminderId: string,
+      input: UpsertReminderAttentionItemInput,
+    ): Promise<AttentionItem> {
+      const response = await request<{ item: AttentionItem }>(
+        `/v1/reminders/${reminderId}/attention`,
+        {
+          body: JSON.stringify(input),
+          method: "PUT",
+        },
+      );
+      return response.item;
     },
   };
 }

@@ -1,6 +1,14 @@
-import { auditEvents, type Database, reminders } from "@personal-os/database";
+import { isDeepStrictEqual } from "node:util";
+import {
+  attentionItems,
+  auditEvents,
+  type Database,
+  domainProfiles,
+  reminders,
+} from "@personal-os/database";
 import {
   type AgentMutationPolicy,
+  type AttentionItem,
   type CreateReminderInput,
   type Reminder,
   type ReminderDeferralPreview,
@@ -9,6 +17,7 @@ import {
   reminderDraftProfilePreferencesSchema,
   reminderProfilePreferencesSchema,
   type UpdateReminderInput,
+  type UpsertReminderAttentionItemInput,
 } from "@personal-os/domain";
 import { and, asc, desc, eq, gte, ilike, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
@@ -30,6 +39,40 @@ type ReminderServiceOptions = {
 };
 
 export function createReminderService({ db, now }: ReminderServiceOptions) {
+  function auditAttentionState(
+    row: typeof attentionItems.$inferSelect | null,
+  ): Record<string, unknown> | null {
+    if (!row) return null;
+    return {
+      domain: row.domain,
+      importance: row.importance,
+      kind: row.kind,
+      relatedEntityId: row.relatedEntityId,
+      relatedEntityType: row.relatedEntityType,
+      source: row.source,
+      status: row.status,
+    };
+  }
+
+  function serializeAttentionItem(row: typeof attentionItems.$inferSelect): AttentionItem {
+    return {
+      createdAt: row.createdAt.toISOString(),
+      domain: row.domain,
+      expiresAt: row.expiresAt?.toISOString() ?? null,
+      id: row.id,
+      importance: row.importance,
+      kind: row.kind,
+      occursAt: row.occursAt?.toISOString() ?? null,
+      relatedEntityId: row.relatedEntityId,
+      relatedEntityType: row.relatedEntityType,
+      source: row.source,
+      status: row.status,
+      summary: row.summary,
+      title: row.title,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
   function auditState(
     row: typeof reminders.$inferSelect,
     context: MutationContext,
@@ -480,9 +523,86 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       return serializeReminder(after);
     },
 
+    async upsertAttentionItem(
+      reminderId: string,
+      input: UpsertReminderAttentionItemInput,
+      context: MutationContext,
+    ): Promise<AttentionItem> {
+      const saved = await db.transaction(async (transaction) => {
+        const reminder = (
+          await transaction
+            .select()
+            .from(reminders)
+            .where(
+              and(
+                eq(reminders.id, reminderId),
+                eq(reminders.userId, context.principal.userId),
+                eq(reminders.kind, "reminder"),
+                isNull(reminders.deletedAt),
+              ),
+            )
+            .for("update")
+            .limit(1)
+        )[0];
+        if (!reminder) throw new AppError("not_found", "The reminder was not found.");
+        const existing = (
+          await transaction
+            .select()
+            .from(attentionItems)
+            .where(
+              and(
+                eq(attentionItems.userId, context.principal.userId),
+                eq(attentionItems.domain, "reminders"),
+                eq(attentionItems.relatedEntityId, reminder.id),
+                eq(attentionItems.relatedEntityType, "reminder"),
+                eq(attentionItems.kind, input.kind),
+                eq(attentionItems.status, "open"),
+              ),
+            )
+            .limit(1)
+        )[0];
+        const values = {
+          domain: "reminders" as const,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
+          importance: input.importance,
+          kind: input.kind,
+          occursAt: input.occursAt ? new Date(input.occursAt) : null,
+          relatedEntityId: reminder.id,
+          relatedEntityType: "reminder",
+          source: serializeReminder(reminder).source,
+          status: "open" as const,
+          summary: input.summary,
+          title: input.title,
+          userId: context.principal.userId,
+        };
+        const item = requireDatabaseRecord(
+          (existing
+            ? await transaction
+                .update(attentionItems)
+                .set({ ...values, updatedAt: now() })
+                .where(eq(attentionItems.id, existing.id))
+                .returning()
+            : await transaction.insert(attentionItems).values(values).returning())[0],
+          "The Reminder attention item could not be saved.",
+        );
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: existing ? "assistant.attention.updated" : "assistant.attention.created",
+            after: auditAttentionState(item),
+            before: auditAttentionState(existing ?? null),
+            entityId: item.id,
+            entityType: "attention_item",
+            ...context,
+          }),
+        );
+        return item;
+      });
+      return serializeAttentionItem(saved);
+    },
+
     async validateProfileSources(
-      _transaction: Pick<Database, "select">,
-      _userId: string,
+      transaction: Pick<Database, "select">,
+      userId: string,
       sourceIds: string[],
       status: "active" | "draft",
       preferences: Record<string, boolean | number | string | string[] | null>,
@@ -493,12 +613,30 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           "Reminder setup uses Ilo's local Reminder collection and does not accept source contexts.",
         );
       }
-      const parsed = (
+      const schema =
         status === "draft"
           ? reminderDraftProfilePreferencesSchema
-          : reminderProfilePreferencesSchema
-      ).safeParse(preferences);
+          : reminderProfilePreferencesSchema;
+      const parsed = schema.safeParse(preferences);
       if (!parsed.success) {
+        const existing =
+          status === "active"
+            ? (
+                await transaction
+                  .select({
+                    preferences: domainProfiles.preferences,
+                    status: domainProfiles.status,
+                  })
+                  .from(domainProfiles)
+                  .where(
+                    and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "reminders")),
+                  )
+                  .limit(1)
+              )[0]
+            : undefined;
+        if (existing?.status === "active" && isDeepStrictEqual(existing.preferences, preferences)) {
+          return preferences;
+        }
         throw new AppError(
           "invalid_request",
           status === "active"

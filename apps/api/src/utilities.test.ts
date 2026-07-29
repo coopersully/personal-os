@@ -157,5 +157,8 @@ describe("pagination, errors, and OpenAPI", () => {
     expect(document.paths["/v1/reminders/{id}/trash"].post.responses).toEqual({
       200: { description: expect.stringContaining("Guarded recoverable") },
     });
+    expect(document.paths["/v1/reminders/{id}/attention"].put.responses).toEqual({
+      200: { description: expect.stringContaining("attention item") },
+    });
   });
 });

@@ -424,6 +424,78 @@ describe.sequential("assistant setup service", () => {
         context(),
       ),
     ).rejects.toBeTruthy();
+
+    const [legacyActiveUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Legacy Reminder",
+        email: "legacy-reminder@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!legacyActiveUser) throw new Error("Legacy Reminder user was not created.");
+    const [legacyActive] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep reminders visible.",
+        preferences: {},
+        sourceContexts: [],
+        status: "active",
+        summary: "Legacy active Reminder setup.",
+        userId: legacyActiveUser.id,
+      })
+      .returning();
+    if (!legacyActive) throw new Error("Legacy active Reminder profile was not created.");
+    const legacyContext = {
+      principal: {
+        actorId: legacyActiveUser.id,
+        actorType: "agent" as const,
+        scopes: new Set(["reminders:read" as const, "reminders:write" as const]),
+        userId: legacyActiveUser.id,
+      },
+      requestId: "legacy-reminder-revision",
+    };
+    await expect(
+      service.upsertProfile(
+        {
+          categories: [],
+          domain: "reminders",
+          expectedVersion: legacyActive.version,
+          instructions: ["Ask before assigning a due time."],
+          objective: legacyActive.objective,
+          preferences: {},
+          sourceContexts: [],
+          status: "active",
+          summary: "Revised legacy active Reminder setup.",
+        },
+        legacyContext,
+      ),
+    ).resolves.toMatchObject({
+      preferences: {},
+      status: "active",
+      summary: "Revised legacy active Reminder setup.",
+      version: 2,
+    });
+    await expect(
+      service.upsertProfile(
+        {
+          categories: [],
+          domain: "reminders",
+          expectedVersion: 2,
+          instructions: [],
+          objective: legacyActive.objective,
+          preferences: { priorityHighMeaning: "Changed incomplete guidance" },
+          sourceContexts: [],
+          status: "active",
+          summary: "Invalid changed legacy guidance.",
+        },
+        legacyContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   it("treats legacy active Finance guidance without signed approval as a draft", async () => {
@@ -886,6 +958,29 @@ describe.sequential("assistant setup service", () => {
       expiresAt: "2026-07-31T15:00:00.000Z",
       occursAt: null,
     });
+    await expect(
+      service.createAttentionItem(
+        {
+          domain: "reminders",
+          expiresAt: null,
+          importance: "high",
+          kind: "follow_up",
+          occursAt: null,
+          relatedEntityId: crypto.randomUUID(),
+          relatedEntityType: "reminder",
+          source: {
+            accountId: null,
+            provider: "local",
+            remoteId: crypto.randomUUID(),
+            revision: "caller-revision",
+            sourceType: "reminder",
+          },
+          summary: "Caller-supplied Reminder provenance.",
+          title: "Forged Reminder attention",
+        },
+        context(),
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
     await expect(
       service.createAttentionItem(
         {

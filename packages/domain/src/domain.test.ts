@@ -65,6 +65,7 @@ import {
   reminderPrioritySchema,
   reminderProfilePreferencesSchema,
   reminderSchema,
+  reminderTimeZoneSchema,
   resolveStoredMailRule,
   sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
@@ -87,6 +88,7 @@ import {
   updateUserInputSchema,
   upsertDomainProfileInputSchema,
   upsertMailProfileInputSchema,
+  upsertReminderAttentionItemInputSchema,
   upsertReminderProfileInputSchema,
   userSchema,
   weatherLocationOptionSchema,
@@ -741,6 +743,23 @@ describe("domain schemas", () => {
         proposedDueAt: start,
       }).success,
     ).toBe(false);
+    expect(reminderTimeZoneSchema.safeParse("definitely/not-a-zone").success).toBe(false);
+    expect(
+      reminderDeferralPreviewInputSchema.safeParse({
+        overdueBefore: start,
+        proposedDueAt: end,
+        timezone: "definitely/not-a-zone",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertReminderAttentionItemInputSchema.parse({
+        summary: "Clarify what needs to happen.",
+        title: "Reminder needs review",
+      }),
+    ).toMatchObject({
+      importance: "high",
+      kind: "follow_up",
+    });
     expect(reminderListQuerySchema.parse({ completed: "true" }).completed).toBe(true);
     expect(reminderListQuerySchema.parse({ completed: "false" }).completed).toBe(false);
     expect(

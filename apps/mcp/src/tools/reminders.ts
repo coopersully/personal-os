@@ -4,14 +4,15 @@ import {
   idSchema,
   isoDateTimeSchema,
   reminderPrioritySchema,
-  timeZoneSchema,
+  reminderTimeZoneSchema,
+  upsertReminderAttentionItemInputSchema,
 } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
 const id = idSchema.describe("ilo reminder identifier");
 const isoDateTime = isoDateTimeSchema.describe("ISO 8601 date-time with offset");
-const timeZone = timeZoneSchema.describe("IANA time zone, for example America/New_York");
+const timeZone = reminderTimeZoneSchema.describe("IANA time zone, for example America/New_York");
 const directMutation =
   "This is a direct, audited mutation. Ilo's API scopes and scoped-agent policy decision are authoritative; profile preferences and MCP annotations do not grant access.";
 
@@ -108,6 +109,22 @@ export function registerReminderTools(server: McpServer, api: PersonalOsApiClien
       title: "Create reminder",
     },
     async (input) => apiResult(() => api.createReminder(input)),
+  );
+
+  server.registerTool(
+    "create_reminder_attention_item",
+    {
+      annotations: annotations.create,
+      description:
+        "Create or refresh one open important, upcoming, or follow-up item for an owned active Reminder. Ilo locks and validates the Reminder, derives its local source and current revision, and deduplicates the open Reminder/kind pair.",
+      inputSchema: {
+        ...upsertReminderAttentionItemInputSchema.shape,
+        reminderId: id,
+      },
+      title: "Create Reminder attention item",
+    },
+    async ({ reminderId, ...input }) =>
+      apiResult(() => api.upsertReminderAttentionItem(reminderId, input)),
   );
 
   server.registerTool(

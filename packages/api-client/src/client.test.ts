@@ -979,6 +979,8 @@ function apiFetch() {
       });
     if (url.pathname === "/v1/reminders" && method === "POST") return json({ reminder }, 201);
     if (url.pathname === "/v1/reminders") return json({ items: [reminder], nextCursor: null });
+    if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/attention"))
+      return json({ item: attentionItem });
     if (url.pathname.includes("/reminders/")) return json({ reminder });
     if (url.pathname === "/v1/tasks" && method === "POST") return json({ task }, 201);
     if (url.pathname === "/v1/tasks") return json({ items: [task], nextCursor: null });
@@ -1092,6 +1094,16 @@ describe("ilo API client", () => {
     await expect(api.completeReminder(id, true)).resolves.toEqual(reminder);
     await expect(api.restoreReminder(id)).resolves.toEqual(reminder);
     await expect(api.trashReminder(id, now)).resolves.toEqual(reminder);
+    await expect(
+      api.upsertReminderAttentionItem(id, {
+        expiresAt: null,
+        importance: "high",
+        kind: "follow_up",
+        occursAt: now,
+        summary: "Clarify this reminder.",
+        title: "Reminder needs review",
+      }),
+    ).resolves.toEqual(attentionItem);
     await api.deleteReminder(id);
     await expect(api.listTasks({ status: "scheduled", limit: 10 })).resolves.toEqual({
       items: [task],

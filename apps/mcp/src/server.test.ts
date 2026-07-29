@@ -437,6 +437,7 @@ function mockApi() {
     })),
     restoreReminder: vi.fn(async () => reminder),
     trashReminder: vi.fn(async () => reminder),
+    upsertReminderAttentionItem: vi.fn(async () => attentionItem),
     listTasks: vi.fn(async () => ({ items: [task], nextCursor: null })),
     listGoals: vi.fn(async () => []),
     createGoal: vi.fn(async () => ({
@@ -615,6 +616,7 @@ describe("ilo MCP server", () => {
       "get_reminder",
       "preview_overdue_reminder_deferral",
       "create_reminder",
+      "create_reminder_attention_item",
       "update_reminder",
       "complete_reminder",
       "delete_reminder",
@@ -667,7 +669,7 @@ describe("ilo MCP server", () => {
       destructiveHint: true,
     });
     const reminderTools = tools.tools.filter((tool) => tool.name.includes("reminder"));
-    expect(reminderTools).toHaveLength(8);
+    expect(reminderTools).toHaveLength(9);
     for (const tool of reminderTools) {
       expect(tool.annotations).toEqual(
         expect.objectContaining({
@@ -1000,6 +1002,14 @@ describe("ilo MCP server", () => {
       },
     });
     await client.callTool({ name: "create_reminder", arguments: { title: "Test" } });
+    await client.callTool({
+      name: "create_reminder_attention_item",
+      arguments: {
+        reminderId: id,
+        summary: "Clarify this reminder.",
+        title: "Reminder needs review",
+      },
+    });
     await client.callTool({
       name: "update_reminder",
       arguments: {

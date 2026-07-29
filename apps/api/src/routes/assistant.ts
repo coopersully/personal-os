@@ -9,7 +9,6 @@ import {
   updateAttentionItemInputSchema,
   upsertDomainProfileInputSchema,
   upsertMailProfileInputSchema,
-  upsertReminderProfileInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createAssistantService } from "../assistant-service.js";
@@ -49,9 +48,7 @@ export function registerAssistantRoutes({
     const input =
       domain === "mail"
         ? await parseBody(context, upsertMailProfileInputSchema)
-        : domain === "reminders"
-          ? await parseBody(context, upsertReminderProfileInputSchema)
-          : await parseBody(context, upsertDomainProfileInputSchema);
+        : await parseBody(context, upsertDomainProfileInputSchema);
     if (input.domain !== domain) {
       throw new AppError("invalid_request", "The profile domain must match the request path.");
     }

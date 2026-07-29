@@ -2,7 +2,6 @@ import type { AuditEvent } from "@personal-os/api-client";
 import { EmptyState } from "@personal-os/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, ChevronDown, Cloud, Command, Search, UserRound } from "lucide-react";
-import { type FormEvent, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { api } from "../../api.js";
@@ -12,16 +11,12 @@ import { formatRelativeTime } from "../../lib/time-format.js";
 export function ActivityTopbarControls() {
   const [searchParams, setSearchParams] = useSearchParams();
   const search = activitySearchFromSearch(searchParams);
-  const [searchDraft, setSearchDraft] = useState(search);
 
-  useEffect(() => setSearchDraft(search), [search]);
-
-  const applySearch = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const updateSearch = (value: string) => {
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
-        const query = searchDraft.trim();
+        const query = value.trim();
         if (query) next.set("q", query);
         else next.delete("q");
         return next;
@@ -31,33 +26,18 @@ export function ActivityTopbarControls() {
   };
 
   return (
-    <form onSubmit={applySearch}>
-      <InputGroup className="activity-topbar__search">
-        <InputGroupAddon>
-          <Search aria-hidden="true" />
-        </InputGroupAddon>
-        <InputGroupInput
-          aria-label="Search activity"
-          onChange={(event) => {
-            const value = event.currentTarget.value;
-            setSearchDraft(value);
-            if (!value) {
-              setSearchParams(
-                (current) => {
-                  const next = new URLSearchParams(current);
-                  next.delete("q");
-                  return next;
-                },
-                { replace: true },
-              );
-            }
-          }}
-          placeholder="Search activity"
-          type="search"
-          value={searchDraft}
-        />
-      </InputGroup>
-    </form>
+    <InputGroup className="activity-topbar__search">
+      <InputGroupAddon>
+        <Search aria-hidden="true" />
+      </InputGroupAddon>
+      <InputGroupInput
+        aria-label="Search activity"
+        onChange={(event) => updateSearch(event.currentTarget.value)}
+        placeholder="Search activity"
+        type="search"
+        value={search}
+      />
+    </InputGroup>
   );
 }
 

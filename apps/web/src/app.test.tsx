@@ -4056,13 +4056,12 @@ describe("ilo web app", () => {
     expect(screen.getByText(/System ·/)).toBeInTheDocument();
     expect(screen.getByText(/You ·/)).toBeInTheDocument();
     const activitySearch = screen.getByRole("searchbox", { name: "Search activity" });
-    await browser.type(activitySearch, "system{Enter}");
+    await browser.type(activitySearch, "system");
     expect(await screen.findByText(/System ·/)).toBeInTheDocument();
     expect(screen.queryByText(/Agent ·/)).not.toBeInTheDocument();
     await browser.clear(activitySearch);
-    await browser.keyboard("{Enter}");
     expect(await screen.findByText(/Agent ·/)).toBeInTheDocument();
-    await browser.type(activitySearch, "no matching audit material{Enter}");
+    await browser.type(activitySearch, "no matching audit material");
     expect(await screen.findByText("No matching activity")).toBeInTheDocument();
     await browser.clear(activitySearch);
 

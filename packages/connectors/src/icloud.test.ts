@@ -1,5 +1,10 @@
 import { ConnectorError } from "./google.js";
 import { createICloudConnector } from "./icloud.js";
+import {
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  MAX_MAIL_SOURCE_BYTES,
+} from "./mail-attachments.js";
 
 const credentials = {
   appSpecificPassword: "xxxx-xxxx-xxxx-xxxx",
@@ -336,6 +341,109 @@ describe("iCloud connector", () => {
       providerRevision: "101:7",
       remoteMessageId: "INBOX:101:7",
     });
+  });
+
+  it("collapses excessive iCloud calendar MIME parts to one provider-scoped marker", async () => {
+    const calendarParts = Array.from(
+      { length: MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE + 1 },
+      (_, index) =>
+        [
+          "--calendar-parts",
+          `Content-Type: text/calendar; name="invite-${String(index)}.ics"`,
+          `Content-Disposition: attachment; filename="invite-${String(index)}.ics"`,
+          "",
+          "BEGIN:VCALENDAR",
+          "END:VCALENDAR",
+        ].join("\r\n"),
+    ).join("\r\n");
+    const source = Buffer.from(
+      [
+        "From: organizer@example.com",
+        "Subject: Excessive invitations",
+        'Content-Type: multipart/mixed; boundary="calendar-parts"',
+        "",
+        calendarParts,
+        "--calendar-parts--",
+      ].join("\r\n"),
+    );
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        yield { source, uid: 9 };
+      }),
+      mailbox: { exists: 1, path: "INBOX", uidValidity: 888n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 888n },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const mail = await connector(davClient(), imap).value.syncMail(credentials);
+    expect(mail.threads[0]?.messages?.[0]?.attachments).toEqual([
+      expect.objectContaining({
+        ...calendarAttachmentProjectionOverflow("ignored"),
+        id: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+        providerPartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+      }),
+    ]);
+  });
+
+  it("bounds iCloud RFC822 retrieval before MIME parsing", async () => {
+    const fetch = vi.fn(async function* () {
+      yield {
+        envelope: {
+          date: new Date("2026-07-15T13:00:00.000Z"),
+          from: [{ address: "organizer@example.com", name: "Organizer" }],
+          subject: "Oversized source",
+          to: [{ address: "user@example.com", name: "User" }],
+        },
+        size: MAX_MAIL_SOURCE_BYTES + 1,
+        source: Buffer.from("truncated-untrusted-source"),
+        uid: 10,
+      };
+    });
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch,
+      mailbox: { exists: 1, path: "INBOX", uidValidity: 889n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 889n },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+
+    const mail = await connector(davClient(), imap).value.syncMail(credentials);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "1:*",
+      expect.objectContaining({
+        size: true,
+        source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 },
+      }),
+    );
+    expect(mail.threads[0]).toMatchObject({
+      bodyText: "",
+      from: { address: "organizer@example.com", name: "Organizer" },
+      subject: "Oversized source",
+      to: [{ address: "user@example.com", name: "User" }],
+    });
+    expect(mail.threads[0]?.messages?.[0]?.attachments).toEqual([
+      expect.objectContaining({
+        projectionIssue: "calendar_attachment_projection_overflow",
+        providerPartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+      }),
+    ]);
   });
 
   it("sends iCloud mail through the authenticated SMTP transport", async () => {

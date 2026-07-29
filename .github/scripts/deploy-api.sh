@@ -9,6 +9,9 @@ api_scaling_suspension=""
 api_service_drain_attempted=false
 api_suspension_attempted=false
 api_rollout_complete=false
+api_recovery_entry=false
+api_recovery_marker_persisted=false
+api_recovery_cleanup_persisted=false
 api_all_suspended_state="$(
   jq -nc '{
     DynamicScalingInSuspended: true,
@@ -16,6 +19,34 @@ api_all_suspended_state="$(
     ScheduledScalingSuspended: true
   }'
 )"
+
+describe_task_definition() {
+  capture_interruptible aws ecs describe-task-definition \
+    --task-definition "$1" \
+    --query taskDefinition \
+    --output json
+}
+
+task_definition_has_shutdown_contract() {
+  task_definition_json="$1"
+  jq -e \
+    '
+      ([.containerDefinitions[] | select(.name == "api")] | length) == 1 and
+      (
+        [.containerDefinitions[] | select(.name == "api")][0] |
+        .stopTimeout == 120 and
+        ([.environment[]? | select(
+          .name == "API_SHUTDOWN_TIMEOUT_MS" and
+          .value == "105000"
+        )] | length) == 1 and
+        ([.environment[]? | select(
+          .name == "API_SHUTDOWN_TIMEOUT_MS"
+        )] | length) == 1
+      )
+    ' \
+    <<<"$task_definition_json" \
+    >/dev/null
+}
 
 run_interruptible() {
   api_active_child_pid="pending"
@@ -98,6 +129,155 @@ current_scaling_suspension() {
   )"
 }
 
+persist_failed_rollout_marker() {
+  if test "$api_recovery_marker_persisted" = "true"; then
+    return 0
+  fi
+  recovery_marker="$(
+    jq -nc \
+      --arg failedTaskDefinitionArn "$API_TASK_DEFINITION" \
+      '{version: 1, failedTaskDefinitionArn: $failedTaskDefinitionArn}'
+  )"
+  recovery_task_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-recovery.XXXXXX")"
+  jq \
+    --arg marker "$recovery_marker" \
+    '
+      .containerDefinitions |= map(
+        if .name == "api" then
+          .environment = (
+            [
+              .environment[]? |
+              select(.name != "ILO_DEPLOYMENT_RECOVERY_MARKER")
+            ] +
+            [{name: "ILO_DEPLOYMENT_RECOVERY_MARKER", value: $marker}]
+          )
+        else . end
+      ) |
+      del(
+        .compatibilities,
+        .deregisteredAt,
+        .registeredAt,
+        .registeredBy,
+        .requiresAttributes,
+        .revision,
+        .status,
+        .taskDefinitionArn
+      )
+    ' \
+    <<<"$api_final_task_definition_json" >"$recovery_task_file"
+  api_recovery_registration=""
+  if AWS_MAX_ATTEMPTS=1 capture_interruptible aws ecs register-task-definition \
+    --cli-input-json "file://${recovery_task_file}" \
+    --query taskDefinition \
+    --output json \
+    --cli-connect-timeout 1 \
+    --cli-read-timeout 2; then
+    api_recovery_registration="$api_captured_output"
+  fi
+  rm -f "$recovery_task_file"
+  if test -z "$api_recovery_registration"; then
+    api_recovery_registration='{}'
+  fi
+  if ! jq -e \
+    --arg marker "$recovery_marker" \
+    '
+      (.taskDefinitionArn | type) == "string" and
+      (.taskDefinitionArn | length) > 0 and
+      ([.containerDefinitions[] | select(.name == "api")] | length) == 1 and
+      (
+        [.containerDefinitions[] | select(.name == "api")][0] |
+        ([.environment[]? | select(
+          .name == "ILO_DEPLOYMENT_RECOVERY_MARKER" and
+          .value == $marker
+        )] | length) == 1
+      )
+    ' \
+    <<<"$api_recovery_registration" \
+    >/dev/null; then
+    echo "::error::Could not persist and verify the failed-rollout recovery marker; operator recovery is required."
+    return 1
+  fi
+  api_recovery_marker_persisted=true
+}
+
+clear_successful_recovery_marker() {
+  if test "$api_recovery_cleanup_persisted" = "true"; then
+    return 0
+  fi
+  cleared_restore_state="$(
+    jq -c '
+      .postDrainTaskDefinitionArns = [] |
+      .recoveryAuthorized = false
+    ' <<<"$api_restore_state"
+  )"
+  cleanup_task_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-recovery-clear.XXXXXX")"
+  jq \
+    --arg restore "$cleared_restore_state" \
+    '
+      .containerDefinitions |= map(
+        if .name == "api" then
+          .environment = (
+            [
+              .environment[]? |
+              select(
+                .name != "ILO_DEPLOYMENT_RECOVERY_MARKER" and
+                .name != "ILO_DEPLOYMENT_RESTORE_STATE"
+              )
+            ] +
+            [{name: "ILO_DEPLOYMENT_RESTORE_STATE", value: $restore}]
+          )
+        else . end
+      ) |
+      del(
+        .compatibilities,
+        .deregisteredAt,
+        .registeredAt,
+        .registeredBy,
+        .requiresAttributes,
+        .revision,
+        .status,
+        .taskDefinitionArn
+      )
+    ' \
+    <<<"$api_final_task_definition_json" >"$cleanup_task_file"
+  api_cleanup_registration=""
+  if AWS_MAX_ATTEMPTS=1 capture_interruptible aws ecs register-task-definition \
+    --cli-input-json "file://${cleanup_task_file}" \
+    --query taskDefinition \
+    --output json \
+    --cli-connect-timeout 1 \
+    --cli-read-timeout 2; then
+    api_cleanup_registration="$api_captured_output"
+  fi
+  rm -f "$cleanup_task_file"
+  if test -z "$api_cleanup_registration"; then
+    api_cleanup_registration='{}'
+  fi
+  if ! jq -e \
+    --arg restore "$cleared_restore_state" \
+    '
+      (.taskDefinitionArn | type) == "string" and
+      (.taskDefinitionArn | length) > 0 and
+      ([.containerDefinitions[] | select(.name == "api")] | length) == 1 and
+      (
+        [.containerDefinitions[] | select(.name == "api")][0] |
+        ([.environment[]? | select(
+          .name == "ILO_DEPLOYMENT_RECOVERY_MARKER"
+        )] | length) == 0 and
+        ([.environment[]? | select(
+          .name == "ILO_DEPLOYMENT_RESTORE_STATE" and
+          .value == $restore
+        )] | length) == 1
+      )
+    ' \
+    <<<"$api_cleanup_registration" \
+    >/dev/null; then
+    echo "::error::Could not persist and verify recovery-marker cleanup; failing closed with a new marker."
+    return 1
+  fi
+  api_recovery_cleanup_persisted=true
+}
+
 fail_closed_api_deployment() {
   deployment_exit_code="$1"
   trap - ERR EXIT
@@ -152,6 +332,7 @@ fail_closed_api_deployment() {
     else
       echo "::error::The API rollout failed after drain began; scaling was re-suspended and the service was stopped at desired/running/pending zero."
     fi
+    persist_failed_rollout_marker || true
   fi
   trap - ERR EXIT INT TERM
   exit "$deployment_exit_code"
@@ -225,6 +406,7 @@ cancel_api_deployment() {
       --cli-read-timeout 2 \
       >/dev/null ||
       true
+    persist_failed_rollout_marker || true
   elif test "$api_suspension_attempted" = "true"; then
     AWS_MAX_ATTEMPTS=1 aws application-autoscaling register-scalable-target \
       --service-namespace ecs \
@@ -242,6 +424,237 @@ cancel_api_deployment() {
 trap cleanup_api_deployment EXIT
 trap 'cancel_api_deployment 130' INT
 trap 'cancel_api_deployment 143' TERM
+
+# The final task definition is also the durable recovery record. A failed
+# post-drain run leaves the service at zero/all-suspended, while the latest
+# immutable task definition retains the desired count and exact scaling state
+# observed before that drain. A later run must inherit this record rather than
+# misclassifying the emergency posture as operator intent.
+describe_task_definition "$API_TASK_DEFINITION"
+api_final_task_definition_json="$api_captured_output"
+if ! task_definition_has_shutdown_contract "$api_final_task_definition_json"; then
+  echo "::error::The migration-capable API task definition did not inherit the prerequisite 120-second/105-second shutdown contract."
+  exit 1
+fi
+api_restore_state="$(
+  jq -cer '
+    [.containerDefinitions[] | select(.name == "api")][0] |
+    [.environment[]? | select(.name == "ILO_DEPLOYMENT_RESTORE_STATE") | .value][0] |
+    fromjson |
+    select(
+      (.desiredCount | type) == "number" and
+      (.desiredCount | floor) == .desiredCount and
+      .desiredCount > 0 and
+      .desiredCount <= 100 and
+      (.suspendedState | type) == "object" and
+      (.postDrainTaskDefinitionArns | type) == "array" and
+      (.postDrainTaskDefinitionArns | length) <= 100 and
+      (.postDrainTaskDefinitionArns | unique | length) ==
+        (.postDrainTaskDefinitionArns | length) and
+      (.recoveryAuthorized | type) == "boolean" and
+      all(
+        .postDrainTaskDefinitionArns[];
+        type == "string" and length > 0
+      )
+    ) |
+    {
+      desiredCount,
+      suspendedState: {
+        DynamicScalingInSuspended: (.suspendedState.DynamicScalingInSuspended // false),
+        DynamicScalingOutSuspended: (.suspendedState.DynamicScalingOutSuspended // false),
+        ScheduledScalingSuspended: (.suspendedState.ScheduledScalingSuspended // false)
+      },
+      postDrainTaskDefinitionArns,
+      recoveryAuthorized
+    }
+  ' <<<"$api_final_task_definition_json"
+)" || {
+  echo "::error::The migration-capable API task definition lacks a valid persisted restore intent."
+  exit 1
+}
+api_restore_desired_count="$(jq -r '.desiredCount' <<<"$api_restore_state")"
+api_restore_suspended_state="$(jq -c '.suspendedState' <<<"$api_restore_state")"
+api_post_drain_task_definitions="$(
+  jq -c '.postDrainTaskDefinitionArns' <<<"$api_restore_state"
+)"
+api_recovery_authorized="$(jq -r '.recoveryAuthorized' <<<"$api_restore_state")"
+api_candidate_marker_count="$(
+  jq -r '
+    [.containerDefinitions[] | select(.name == "api")][0] |
+    [.environment[]? | select(.name == "ILO_DEPLOYMENT_RECOVERY_MARKER")] |
+    length
+  ' <<<"$api_final_task_definition_json"
+)"
+api_candidate_failed_definition="$(
+  jq -rer '
+    [.containerDefinitions[] | select(.name == "api")][0] |
+    [.environment[]? | select(.name == "ILO_DEPLOYMENT_RECOVERY_MARKER") | .value][0] |
+    fromjson |
+    select(
+      .version == 1 and
+      (.failedTaskDefinitionArn | type) == "string" and
+      (.failedTaskDefinitionArn | length) > 0
+    ) |
+    .failedTaskDefinitionArn
+  ' <<<"$api_final_task_definition_json" 2>/dev/null || true
+)"
+if {
+  test "$api_recovery_authorized" = "true" &&
+    {
+      test "$api_candidate_marker_count" != "1" ||
+        test -z "$api_candidate_failed_definition" ||
+        ! jq -e \
+          --arg definition "$api_candidate_failed_definition" \
+          'index($definition) != null' \
+          <<<"$api_post_drain_task_definitions" \
+          >/dev/null
+    }
+}; then
+  echo "::error::The authorized recovery candidate lacks its exact unconsumed failed-rollout marker."
+  exit 1
+elif {
+  test "$api_recovery_authorized" = "false" &&
+    test "$api_candidate_marker_count" != "0"
+}; then
+  echo "::error::A normal migration-capable task definition must not carry a recovery marker."
+  exit 1
+fi
+
+capture_interruptible aws ecs describe-services \
+  --cluster "$ECS_CLUSTER" \
+  --services "$API_SERVICE" \
+  --output json
+api_gate_service="$api_captured_output"
+api_gate_desired="$(
+  jq -r '.services[0].desiredCount' <<<"$api_gate_service"
+)"
+api_gate_running="$(
+  jq -r '.services[0].runningCount' <<<"$api_gate_service"
+)"
+api_gate_pending="$(
+  jq -r '.services[0].pendingCount' <<<"$api_gate_service"
+)"
+api_current_primary="$(
+  jq -r '
+    [.services[0].deployments[] | select(.status == "PRIMARY")][0].taskDefinition // ""
+  ' <<<"$api_gate_service"
+)"
+if test -z "$api_current_primary"; then
+  echo "::error::The API service lacks an observable primary task definition."
+  exit 1
+fi
+describe_task_definition "$api_current_primary"
+api_current_task_definition_json="$api_captured_output"
+if ! task_definition_has_shutdown_contract "$api_current_task_definition_json"; then
+  echo "::error::The live API primary has not completed the prerequisite 120-second/105-second shutdown rollout."
+  exit 1
+fi
+api_current_image="$(
+  jq -r '[.containerDefinitions[] | select(.name == "api")][0].image' \
+    <<<"$api_current_task_definition_json"
+)"
+current_scaling_suspension
+api_gate_suspended_state="$api_scaling_suspension"
+if {
+  test "$api_gate_desired" = "0" &&
+    test "$api_gate_running" = "0" &&
+    test "$api_gate_pending" = "0" &&
+    test "$api_gate_suspended_state" = "$api_all_suspended_state"
+}; then
+  if test "$api_recovery_authorized" != "true"; then
+    echo "::error::The API is zero/all-suspended without consumed failed-rollout authorization; preserving the stop."
+    exit 1
+  fi
+  api_recovery_entry=true
+elif ! {
+  test "$api_gate_desired" -gt 0 &&
+    test "$api_gate_desired" = "$api_gate_running" &&
+    test "$api_gate_pending" = "0"
+}; then
+  echo "::error::The live API service is neither a healthy bootstrapped primary nor a recognized fail-closed recovery state."
+  exit 1
+fi
+if {
+  test "$api_recovery_entry" != "true" &&
+    {
+      test "$api_restore_desired_count" != "$api_gate_desired" ||
+      test "$api_restore_suspended_state" != "$api_gate_suspended_state" ||
+        test "$api_post_drain_task_definitions" != "[]" ||
+        test "$api_recovery_authorized" != "false"
+    }
+}; then
+  echo "::error::The release restore intent does not match the live pre-drain desired/scaling state."
+  exit 1
+fi
+
+if test "$api_recovery_entry" != "true"; then
+  capture_interruptible aws ecs list-tasks \
+    --cluster "$ECS_CLUSTER" \
+    --service-name "$API_SERVICE" \
+    --desired-status RUNNING \
+    --query taskArns \
+    --output json
+  api_gate_running_arns="$api_captured_output"
+  if test "$(jq -r 'length' <<<"$api_gate_running_arns")" != "$api_gate_running"; then
+    echo "::error::The drain-protocol gate could not capture the exact running API task set."
+    exit 1
+  fi
+  describe_task_arns "$api_gate_running_arns"
+  api_gate_tasks="$api_described_tasks"
+  if ! jq -e \
+    --arg definition "$api_current_primary" \
+    --arg image "$api_current_image" \
+    --argjson expected "$api_gate_running" \
+    '
+      (.failures | length) == 0 and
+      (.tasks | length) == $expected and
+      ([
+        .tasks[].containers[] |
+        select(.name == "api") |
+        .imageDigest |
+        select(type == "string" and length > 0)
+      ] | length) == $expected and
+      ([
+        .tasks[].containers[] |
+        select(.name == "api") |
+        .imageDigest
+      ] | unique | length) == 1 and
+      all(
+        .tasks[];
+        .taskDefinitionArn == $definition and
+        ([.containers[] | select(
+          .name == "api" and
+          .lastStatus == "RUNNING" and
+          .image == $image
+        )] | length) == 1
+      )
+    ' \
+    <<<"$api_gate_tasks" \
+    >/dev/null; then
+    echo "::error::Every live API task must match the bootstrapped primary definition/image and one identical nonempty image digest before drain."
+    exit 1
+  fi
+  capture_interruptible curl \
+    --fail \
+    --silent \
+    --show-error \
+    --dump-header - \
+    --output /dev/null \
+    "${API_URL}/health/ready"
+  api_drain_protocol="$(
+    awk '
+      tolower($1) == "x-ilo-drain-protocol:" { value = $2 }
+      END {
+        gsub("\r", "", value)
+        print value
+      }
+    ' <<<"$api_captured_output"
+  )"
+  if test "$api_drain_protocol" != "quiesce-v1"; then
+    echo "::error::The live API readiness endpoint did not prove drain protocol quiesce-v1."
+    exit 1
+  fi
+fi
 
 # Prove list authority before changing scaling or desired count. The
 # exact result is captured again after scaling is suspended.
@@ -286,6 +699,27 @@ api_proven_stopped_before="$(
     ]' \
     <<<"$api_stopped_preflight_details"
 )"
+if test "$api_recovery_entry" = "true"; then
+  # A prior migration-capable task may itself have failed after the old binary
+  # already passed exit proof. Only task definitions accumulated explicitly in
+  # immutable recovery metadata are exempted as prior failed rollout evidence.
+  # Every other recent STOPPED task remains in the old-task exit proof.
+  api_proven_stopped_before="$(
+    jq -c \
+      --argjson postDrainDefinitions "$api_post_drain_task_definitions" \
+      '[
+        .tasks[] |
+        select(
+          .lastStatus == "STOPPED" and
+          ((.stoppedAt | type) == "string") and
+          (.taskDefinitionArn as $definition |
+            $postDrainDefinitions | index($definition))
+        ) |
+        .taskArn
+      ]' \
+      <<<"$api_stopped_preflight_details"
+  )"
+fi
 api_unproven_stopped_at_preflight="$(
   jq -nc \
     --argjson listed "$api_stopped_preflight" \
@@ -293,7 +727,11 @@ api_unproven_stopped_at_preflight="$(
     '[$listed[] | select(. as $arn | $proven | index($arn) | not)]'
 )"
 current_scaling_suspension
-api_original_suspended_state="$api_scaling_suspension"
+if test "$api_recovery_entry" = "true"; then
+  api_original_suspended_state="$api_restore_suspended_state"
+else
+  api_original_suspended_state="$api_scaling_suspension"
+fi
 
 api_service_before="$(
   aws ecs describe-services \
@@ -335,7 +773,13 @@ if ! {
   test "$api_minimum_healthy_percent" = "0" &&
     test "$api_maximum_percent" = "200" &&
     test "$api_breaker_enable" = "true" &&
-    test "$api_breaker_rollback" = "true"
+    {
+      test "$api_breaker_rollback" = "true" ||
+        {
+          test "$api_recovery_entry" = "true" &&
+            test "$api_breaker_rollback" = "false"
+        }
+    }
 }; then
   echo "::error::The API deployment configuration does not match the required IaC state (minimum 0, maximum 200, circuit breaker enabled with rollback)."
   exit 1
@@ -641,6 +1085,45 @@ if ! jq -e \
   >/dev/null; then
   echo "::error::The healthy API service did not restore the declared circuit-breaker configuration."
   false
+fi
+
+if test "$api_restore_desired_count" != "1"; then
+  run_interruptible aws ecs update-service \
+    --cluster "$ECS_CLUSTER" \
+    --service "$API_SERVICE" \
+    --desired-count "$api_restore_desired_count" \
+    >/dev/null
+  run_interruptible aws ecs wait services-stable \
+    --cluster "$ECS_CLUSTER" \
+    --services "$API_SERVICE"
+  capture_interruptible aws ecs describe-services \
+    --cluster "$ECS_CLUSTER" \
+    --services "$API_SERVICE" \
+    --output json
+  api_scaled_service_state="$api_captured_output"
+  if ! jq -e \
+    --arg definition "$API_TASK_DEFINITION" \
+    --argjson desired "$api_restore_desired_count" \
+    '
+      .services[0] |
+      .desiredCount == $desired and
+      .runningCount == $desired and
+      .pendingCount == 0 and
+      ([.deployments[] | select(
+        .status == "PRIMARY" and
+        .taskDefinition == $definition and
+        .rolloutState == "COMPLETED"
+      )] | length) == 1
+    ' \
+    <<<"$api_scaled_service_state" \
+    >/dev/null; then
+    echo "::error::The healthy serial API primary did not scale to the persisted desired count."
+    false
+  fi
+fi
+
+if test "$api_recovery_authorized" = "true"; then
+  clear_successful_recovery_marker
 fi
 
 run_interruptible aws application-autoscaling register-scalable-target \

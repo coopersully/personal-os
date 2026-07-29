@@ -40,7 +40,6 @@ import type {
 import {
   MAIL_RULE_EXECUTION_LIMIT_PER_RUN,
   mailProfilePreferencesSchema,
-  mailRuleActionNeedsDurableExecution,
   mailRuleActionSchema,
   mailRuleActionsMatchRetentionPreferences,
   matchesMailRule,
@@ -75,7 +74,7 @@ import {
 
 const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
-const MAIL_RULE_WRITE_CONCURRENCY = 1;
+const MAIL_RULE_WORK_CONCURRENCY = 2;
 const MAIL_RULE_WORK_CLAIM_LEASE_MS = 10 * 60_000;
 const MAIL_RULE_WORK_MAX_ATTEMPTS = 5;
 
@@ -1083,6 +1082,36 @@ export function createConnectorService({
     reasonCode: "account_disconnected" | "mail_capability_disabled",
     requestId: string,
   ): Promise<void> {
+    const [unresolvedProviderEffect] = await transaction
+      .select({
+        id: mailRuleWorkItems.id,
+        providerEffect: mailRuleWorkItems.providerEffect,
+        status: mailRuleWorkItems.status,
+      })
+      .from(mailRuleWorkItems)
+      .where(
+        and(
+          eq(mailRuleWorkItems.accountId, account.id),
+          or(
+            eq(mailRuleWorkItems.status, "claimed"),
+            and(
+              inArray(mailRuleWorkItems.status, ["reconcile", "failed"]),
+              inArray(mailRuleWorkItems.providerEffect, ["applied", "indeterminate"]),
+            ),
+          ),
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (unresolvedProviderEffect) {
+      const message =
+        unresolvedProviderEffect.status === "claimed"
+          ? "Mail automation is reconciling a provider effect. Retry this connection change after it settles."
+          : account.provider === "google"
+            ? "Mail automation retains unresolved provider-effect evidence. Reauthorize this Google Mail account to restart exact reconciliation before changing the connection."
+            : "Legacy unresolved Mail provider-effect evidence requires support review before this connection can be changed.";
+      throw new AppError("conflict", message);
+    }
     const principal = {
       actorId: account.userId,
       actorType: "user" as const,
@@ -1420,27 +1449,6 @@ export function createConnectorService({
     return executable;
   }
 
-  async function mailRuleAuthorizationIsCurrent(
-    rule: typeof mailRules.$inferSelect,
-    profileVersion: number,
-  ): Promise<boolean> {
-    const [authorization] = await db
-      .select({ id: mailRules.id })
-      .from(mailRules)
-      .innerJoin(domainProfiles, eq(domainProfiles.id, mailRules.profileId))
-      .where(
-        and(
-          eq(mailRules.id, rule.id),
-          eq(mailRules.enabled, true),
-          eq(mailRules.version, rule.version),
-          eq(domainProfiles.status, "active"),
-          eq(domainProfiles.version, profileVersion),
-        ),
-      )
-      .limit(1);
-    return authorization !== undefined;
-  }
-
   async function projectMail(
     account: AccountRow,
     value: MailSyncResult["value"],
@@ -1450,8 +1458,6 @@ export function createConnectorService({
     syncClaim: SyncClaim,
   ): Promise<{ changed: number; credentials: GoogleCredentials | null }> {
     const provider = account.provider === "icloud" ? "icloud" : "google";
-    let updatedGoogleCredentials: GoogleCredentials | null = null;
-    let successfulRuleMutationCount = 0;
     const mailboxIds = value.mailboxes.map((mailbox) => mailbox.id);
     const sourceProjectionApplied = await db.transaction(async (transaction) => {
       const activeAccount = (
@@ -1494,10 +1500,12 @@ export function createConnectorService({
             requestId,
           });
           await transaction
-            .delete(mailThreads)
+            .update(mailThreads)
+            .set({ deletedAt: now(), updatedAt: now() })
             .where(
               and(
                 eq(mailThreads.accountId, account.id),
+                isNull(mailThreads.deletedAt),
                 sql<boolean>`${mailThreads.remoteMailboxIds} @> ${JSON.stringify([mailbox.id])}::jsonb`,
               ),
             );
@@ -1648,569 +1656,63 @@ export function createConnectorService({
       );
     }
     const rules = await executableMailRules(account, principal, requestId);
-    if (rules.length > 0) {
-      await db.transaction(async (transaction) => {
-        await requireConnectorSyncClaim(
-          transaction,
-          account,
-          syncClaim,
-          "durable Mail rule enqueue",
-        );
-        for (const { profileVersion, resolved, rule } of rules) {
-          const matchingRemoteThreadIds = value.threads
-            .filter((thread) =>
-              matchesMailRule(resolved.condition, {
-                from: thread.from,
-                snippet: thread.snippet,
-                subject: thread.subject,
-              }),
-            )
-            .map((thread) => thread.remoteThreadId);
-          if (matchingRemoteThreadIds.length === 0) continue;
-          const matchingThreads = await transaction
-            .select()
-            .from(mailThreads)
-            .where(
-              and(
-                eq(mailThreads.userId, account.userId),
-                eq(mailThreads.accountId, account.id),
-                isNull(mailThreads.deletedAt),
-                inArray(mailThreads.remoteThreadId, matchingRemoteThreadIds),
-              ),
-            )
-            .orderBy(asc(mailThreads.id))
-            .for("share");
-          if (!rule.profileId) continue;
-          await enqueueDurableMailRuleWork(transaction, {
-            actions: resolved.actions,
-            profileId: rule.profileId,
-            profileVersion,
-            ruleId: rule.id,
-            ruleVersion: rule.version,
-            threads: matchingThreads,
-            userId: account.userId,
-          });
-        }
-      });
-    }
-    let runSummaryPersisted = true;
-    if (account.provider === "google" && google.updateMailThread && rules.length > 0) {
-      const updateMailThread = google.updateMailThread;
-      let currentCredentials = initialGoogleCredentials ?? credentials<GoogleCredentials>(account);
-      let credentialCoordinator = currentCredentials;
-      let credentialWriteTail = Promise.resolve();
-      const persistProviderCredentials = async (
-        candidate: GoogleCredentials,
-      ): Promise<GoogleCredentials> => {
-        const previousWrite = credentialWriteTail;
-        let releaseWrite: (() => void) | undefined;
-        credentialWriteTail = new Promise<void>((resolveWrite) => {
-          releaseWrite = resolveWrite;
-        });
-        await previousWrite;
-        try {
-          const candidateIsNewer =
-            new Date(candidate.expiresAt).getTime() >=
-            new Date(credentialCoordinator.expiresAt).getTime();
-          const merged = candidateIsNewer
-            ? {
-                ...candidate,
-                refreshToken: candidate.refreshToken || credentialCoordinator.refreshToken,
-              }
-            : {
-                ...credentialCoordinator,
-                refreshToken: credentialCoordinator.refreshToken || candidate.refreshToken,
-              };
-          const persisted = await saveGoogleCredentials(account.id, merged, true, syncClaim);
-          credentialCoordinator = persisted;
-          currentCredentials = persisted;
-          return persisted;
-        } finally {
-          releaseWrite?.();
-        }
-      };
-      const accountMailboxes = await db
-        .select({ id: mailboxes.id, remoteMailboxId: mailboxes.remoteMailboxId })
-        .from(mailboxes)
-        .where(
-          and(
-            eq(mailboxes.accountId, account.id),
-            eq(mailboxes.userId, account.userId),
-            isNull(mailboxes.deletedAt),
-          ),
-        );
-      const remoteMailboxById = new Map(
-        accountMailboxes.map((mailbox) => [mailbox.id, mailbox.remoteMailboxId]),
-      );
-      const plannedMutations: Array<{
-        addMailboxIds: string[];
-        authorizations: Array<{
-          profileVersion: number;
-          rule: typeof mailRules.$inferSelect;
-        }>;
-        nextMailboxIds: string[];
-        nextStarred: boolean;
-        nextUnread: boolean;
-        remoteThreadId: string;
-        removeMailboxIds: string[];
-      }> = [];
-      for (const thread of value.threads) {
-        let projectedMailboxIds = thread.mailboxIds;
-        let projectedStarred = thread.starred;
-        let projectedUnread = thread.unread;
-        const authorizations: Array<{
-          profileVersion: number;
-          rule: typeof mailRules.$inferSelect;
-        }> = [];
-        for (const { profileVersion, resolved: resolvedRule, rule } of rules) {
-          if (
-            !matchesMailRule(resolvedRule.condition, {
+    await db.transaction(async (transaction) => {
+      await requireConnectorSyncClaim(transaction, account, syncClaim, "durable Mail rule handoff");
+      for (const { profileVersion, resolved, rule } of rules) {
+        const matchingRemoteThreadIds = value.threads
+          .filter((thread) =>
+            matchesMailRule(resolved.condition, {
               from: thread.from,
               snippet: thread.snippet,
               subject: thread.subject,
-            })
+            }),
           )
-            continue;
-          const addMailboxIds: string[] = [];
-          const removeMailboxIds: string[] = [];
-          for (const action of resolvedRule.actions.filter(
-            (candidate) => !mailRuleActionNeedsDurableExecution(candidate),
-          )) {
-            if (action.type === "mark_read" && projectedUnread) removeMailboxIds.push("UNREAD");
-            if (action.type === "star" && !projectedStarred) addMailboxIds.push("STARRED");
-            if (action.type === "add_label" && action.mailboxId) {
-              const remoteMailboxId = remoteMailboxById.get(action.mailboxId);
-              if (remoteMailboxId && !projectedMailboxIds.includes(remoteMailboxId))
-                addMailboxIds.push(remoteMailboxId);
-            }
-          }
-          const uniqueAddMailboxIds = [...new Set(addMailboxIds)];
-          const uniqueRemoveMailboxIds = [...new Set(removeMailboxIds)];
-          if (uniqueAddMailboxIds.length === 0 && uniqueRemoveMailboxIds.length === 0) continue;
-          authorizations.push({ profileVersion, rule });
-          const nextMailboxIds = [
-            ...projectedMailboxIds.filter(
-              (mailboxId) => !uniqueRemoveMailboxIds.includes(mailboxId),
+          .map((thread) => thread.remoteThreadId);
+        if (matchingRemoteThreadIds.length === 0) continue;
+        const matchingThreads = await transaction
+          .select()
+          .from(mailThreads)
+          .where(
+            and(
+              eq(mailThreads.userId, account.userId),
+              eq(mailThreads.accountId, account.id),
+              isNull(mailThreads.deletedAt),
+              inArray(mailThreads.remoteThreadId, matchingRemoteThreadIds),
             ),
-            ...uniqueAddMailboxIds.filter(
-              (mailboxId) => mailboxId !== "STARRED" && !projectedMailboxIds.includes(mailboxId),
-            ),
-          ];
-          projectedMailboxIds = nextMailboxIds;
-          if (uniqueRemoveMailboxIds.includes("UNREAD")) projectedUnread = false;
-          if (uniqueAddMailboxIds.includes("STARRED")) projectedStarred = true;
-        }
-        if (authorizations.length > 0) {
-          const finalMailboxIds = new Set(projectedMailboxIds);
-          const originalMailboxIds = new Set(thread.mailboxIds);
-          const removeMailboxIds = [
-            ...new Set([
-              ...thread.mailboxIds.filter((mailboxId) => !finalMailboxIds.has(mailboxId)),
-              ...(thread.unread && !projectedUnread ? ["UNREAD"] : []),
-            ]),
-          ];
-          const removals = new Set(removeMailboxIds);
-          const addMailboxIds = [
-            ...new Set([
-              ...projectedMailboxIds.filter((mailboxId) => !originalMailboxIds.has(mailboxId)),
-              ...(!thread.starred && projectedStarred ? ["STARRED"] : []),
-            ]),
-          ].filter((mailboxId) => !removals.has(mailboxId));
-          plannedMutations.push({
-            addMailboxIds,
-            authorizations,
-            nextMailboxIds: projectedMailboxIds,
-            nextStarred: projectedStarred,
-            nextUnread: projectedUnread,
-            remoteThreadId: thread.remoteThreadId,
-            removeMailboxIds,
-          });
-        }
+          )
+          .orderBy(asc(mailThreads.id))
+          .for("share");
+        if (!rule.profileId) continue;
+        await enqueueDurableMailRuleWork(transaction, {
+          actions: resolved.actions,
+          profileId: rule.profileId,
+          profileVersion,
+          ruleId: rule.id,
+          ruleVersion: rule.version,
+          threads: matchingThreads,
+          userId: account.userId,
+        });
       }
-      const executionBudget = plannedMutations.slice(0, MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
-      const backlogCount = Math.max(0, plannedMutations.length - executionBudget.length);
-      const outcomes: Array<{
-        authorizationChanged?: boolean;
-        error?: AppError;
-        providerEffect?: boolean;
-        succeeded: boolean;
-      }> = new Array(executionBudget.length);
-      let nextMutationIndex = 0;
-      const executeWorker = async () => {
-        while (nextMutationIndex < executionBudget.length) {
-          const index = nextMutationIndex++;
-          const planned = executionBudget[index] as (typeof executionBudget)[number];
-          const authorizationsCurrent = await Promise.all(
-            planned.authorizations.map(({ profileVersion, rule }) =>
-              mailRuleAuthorizationIsCurrent(rule, profileVersion),
-            ),
-          );
-          if (authorizationsCurrent.some((current) => !current)) {
-            outcomes[index] = {
-              authorizationChanged: true,
-              error: new AppError(
-                "conflict",
-                "A Mail rule authorization changed before provider execution.",
-              ),
-              providerEffect: false,
-              succeeded: false,
-            };
-            continue;
-          }
-          const ruleErrorDetails =
-            planned.authorizations.length === 1 && planned.authorizations[0]
-              ? { ruleId: planned.authorizations[0].rule.id }
-              : {};
-          let providerCredentials: GoogleCredentials;
-          try {
-            providerCredentials = await db.transaction(async (transaction) => {
-              await requireConnectorSyncClaim(
-                transaction,
-                account,
-                syncClaim,
-                "Mail rule provider execution",
-              );
-              for (const { profileVersion, rule } of planned.authorizations) {
-                const [authorization] = await transaction
-                  .select({ id: mailRules.id })
-                  .from(mailRules)
-                  .innerJoin(domainProfiles, eq(domainProfiles.id, mailRules.profileId))
-                  .where(
-                    and(
-                      eq(mailRules.id, rule.id),
-                      eq(mailRules.enabled, true),
-                      eq(mailRules.version, rule.version),
-                      eq(domainProfiles.status, "active"),
-                      eq(domainProfiles.version, profileVersion),
-                    ),
-                  )
-                  .for("share");
-                if (!authorization) {
-                  throw new AppError(
-                    "conflict",
-                    "A Mail rule authorization changed before provider execution.",
-                  );
-                }
-              }
-              return updateMailThread(credentialCoordinator, planned.remoteThreadId, {
-                addMailboxIds: planned.addMailboxIds,
-                removeMailboxIds: planned.removeMailboxIds,
-              });
-            });
-          } catch (error) {
-            if (error instanceof AppError && error.code === "conflict") {
-              outcomes[index] = {
-                authorizationChanged: true,
-                error,
-                providerEffect: false,
-                succeeded: false,
-              };
-              continue;
-            }
-            outcomes[index] = {
-              error: mailProviderPartialEffectError({
-                accountId: account.id,
-                cause: error,
-                credentialsPersisted: true,
-                operation: "rule_execution",
-                remoteThreadId: planned.remoteThreadId,
-                ...ruleErrorDetails,
-              }),
-              providerEffect: true,
-              succeeded: false,
-            };
-            continue;
-          }
-          let credentialsPersisted = false;
-          try {
-            providerCredentials = await persistProviderCredentials(providerCredentials);
-            credentialsPersisted = true;
-            await db.transaction(async (transaction) => {
-              await requireConnectorSyncClaim(
-                transaction,
-                account,
-                syncClaim,
-                "Mail rule result projection",
-              );
-              for (const { profileVersion, rule } of planned.authorizations) {
-                const [authorization] = await transaction
-                  .select({ id: mailRules.id })
-                  .from(mailRules)
-                  .innerJoin(domainProfiles, eq(domainProfiles.id, mailRules.profileId))
-                  .where(
-                    and(
-                      eq(mailRules.id, rule.id),
-                      eq(mailRules.enabled, true),
-                      eq(mailRules.version, rule.version),
-                      eq(domainProfiles.status, "active"),
-                      eq(domainProfiles.version, profileVersion),
-                    ),
-                  )
-                  .for("update");
-                if (!authorization) {
-                  throw new AppError(
-                    "conflict",
-                    "A Mail rule authorization changed during provider execution.",
-                  );
-                }
-              }
-              const [updatedThread] = await transaction
-                .update(mailThreads)
-                .set({
-                  remoteMailboxIds: planned.nextMailboxIds,
-                  starred: planned.nextStarred,
-                  unread: planned.nextUnread,
-                  updatedAt: now(),
-                })
-                .where(
-                  and(
-                    eq(mailThreads.accountId, account.id),
-                    eq(mailThreads.remoteThreadId, planned.remoteThreadId),
-                  ),
-                )
-                .returning({ id: mailThreads.id });
-              if (!updatedThread) {
-                throw new AppError("not_found", "The projected Mail conversation was not found.");
-              }
-              await transaction.insert(auditEvents).values(
-                auditValues({
-                  action: "mail.rule.applied",
-                  after: {
-                    contributingRuleCount: planned.authorizations.length,
-                    providerMutationCount:
-                      planned.addMailboxIds.length + planned.removeMailboxIds.length,
-                  },
-                  before: null,
-                  entityId: updatedThread.id,
-                  entityType: "mail_thread",
-                  principal,
-                  requestId,
-                }),
-              );
-            });
-            outcomes[index] = { succeeded: true };
-          } catch (error) {
-            outcomes[index] = {
-              error: mailProviderPartialEffectError({
-                accountId: account.id,
-                cause: error,
-                credentialsPersisted,
-                operation: "rule_execution",
-                remoteThreadId: planned.remoteThreadId,
-                ...ruleErrorDetails,
-              }),
-              providerEffect: true,
-              succeeded: false,
-            };
-          }
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(MAIL_RULE_WRITE_CONCURRENCY, executionBudget.length) }, () =>
-          executeWorker(),
-        ),
-      );
-      const succeededCount = outcomes.filter((outcome) => outcome?.succeeded).length;
-      successfulRuleMutationCount = succeededCount;
-      const failures = outcomes.filter(
-        (
-          outcome,
-        ): outcome is {
-          authorizationChanged?: boolean;
-          error: AppError;
-          providerEffect?: boolean;
-          succeeded: false;
-        } => outcome?.succeeded === false && outcome.error !== undefined,
-      );
-      const authorizationChangedCount = failures.filter(
-        ({ authorizationChanged }) => authorizationChanged === true,
-      ).length;
-      const partialEffectCount = failures.filter(
-        ({ providerEffect }) => providerEffect === true,
-      ).length;
-      const hasCredentialFailure = failures.some(
-        ({ error }) =>
-          typeof error.details === "object" &&
-          error.details !== null &&
-          (error.details as Record<string, unknown>).credentialPersistenceMayHaveFailed === true,
-      );
-      const failedProviderEffect = failures.some(({ providerEffect }) => providerEffect === true);
-      if (plannedMutations.length > 0) {
-        try {
-          await db.transaction(async (transaction) => {
-            await requireConnectorSyncClaim(
-              transaction,
-              account,
-              syncClaim,
-              "Mail rule run summary",
-            );
-            await transaction.insert(auditEvents).values(
-              auditValues({
-                action: "mail.rule.run",
-                after: {
-                  attemptedCount: executionBudget.length,
-                  authorizationChangedCount,
-                  backlogCount,
-                  failedCount: failures.length,
-                  partialEffectCount,
-                  succeededCount,
-                },
-                before: null,
-                entityId: account.id,
-                entityType: "mail_account",
-                principal,
-                requestId,
-              }),
-            );
-            if (backlogCount > 0 || failures.length > 0) {
-              const [existingRunAttention] = await transaction
-                .select({ id: attentionItems.id })
-                .from(attentionItems)
-                .where(
-                  and(
-                    eq(attentionItems.userId, account.userId),
-                    eq(attentionItems.domain, "mail"),
-                    eq(attentionItems.kind, "follow_up"),
-                    eq(attentionItems.status, "open"),
-                    eq(attentionItems.relatedEntityType, "mail_account"),
-                    eq(attentionItems.relatedEntityId, account.id),
-                  ),
-                )
-                .limit(1);
-              const attentionValues = failedProviderEffect
-                ? {
-                    importance: "high" as const,
-                    kind: "follow_up" as const,
-                    summary: `Mail automation applied ${succeededCount} thread updates; ${partialEffectCount} failed updates need ${hasCredentialFailure ? "account reconnection and Mail sync" : "Mail sync and provider reconciliation"}, ${authorizationChangedCount} need policy review, and ${backlogCount} remain for a later sync.`,
-                    title: hasCredentialFailure
-                      ? "Reconnect Mail to reconcile automation"
-                      : "Mail automation needs provider reconciliation",
-                    updatedAt: now(),
-                  }
-                : authorizationChangedCount > 0
-                  ? {
-                      importance: "high" as const,
-                      kind: "follow_up" as const,
-                      summary: `Mail automation applied ${succeededCount} thread updates; ${authorizationChangedCount} were stopped before provider access and need rule or profile review, and ${backlogCount} remain for a later sync.`,
-                      title: "Mail automation needs policy review",
-                      updatedAt: now(),
-                    }
-                  : {
-                      importance: "normal" as const,
-                      kind: "follow_up" as const,
-                      summary: `Mail automation applied ${succeededCount} thread updates; ${backlogCount} remain for a later sync.`,
-                      title: "Mail automation has pending work",
-                      updatedAt: now(),
-                    };
-              if (existingRunAttention) {
-                await transaction
-                  .update(attentionItems)
-                  .set(attentionValues)
-                  .where(eq(attentionItems.id, existingRunAttention.id));
-              } else {
-                // The per-account sync lease serializes this Mail-owned run-summary upsert.
-                await transaction.insert(attentionItems).values({
-                  ...attentionValues,
-                  domain: "mail",
-                  relatedEntityId: account.id,
-                  relatedEntityType: "mail_account",
-                  status: "open",
-                  userId: account.userId,
-                });
-              }
-            }
-          });
-        } catch {
-          runSummaryPersisted = false;
-        }
-      }
-      if (failures.length > 0) {
-        const hasProviderEffect = succeededCount > 0 || failedProviderEffect;
-        throw new AppError(
-          hasProviderEffect ? "service_unavailable" : "conflict",
-          hasCredentialFailure
-            ? "Mail automation had partial provider effects and could not persist provider credentials. Reconnect this account, then sync before retrying."
-            : failedProviderEffect
-              ? "Mail automation had partial provider effects. Sync this account to reconcile before retrying."
-              : succeededCount > 0
-                ? "Mail automation applied some authorized work, while other policy changed before provider execution. Review the current Mail policy."
-                : "Mail automation authorization changed before provider execution. Review the current Mail policy.",
-          {
-            attemptedCount: executionBudget.length,
-            authorizationChangedCount,
-            backlogCount,
-            failedCount: failures.length,
-            partialEffect: hasProviderEffect,
-            repairAction: hasCredentialFailure
-              ? "reconnect_then_sync_mail_account"
-              : failedProviderEffect
-                ? "sync_mail_account"
-                : "review_current_policy",
-            runSummaryPersisted,
-            succeededCount,
-            userAction: hasCredentialFailure
-              ? "Open Settings → Connections, reconnect this Mail account, then open Mail and choose Sync."
-              : failedProviderEffect
-                ? "Open Mail and choose Sync before retrying any failed automation."
-                : "Open Settings → Agent access → Review Mail rules and review the current policy.",
-            userActionDestination: hasCredentialFailure
-              ? "Settings → Connections → reconnect; Mail → Sync"
-              : failedProviderEffect
-                ? "Mail → Sync"
-                : "Settings → Agent access → Review Mail rules",
-            userActionRequired: true,
+      await transaction.insert(auditEvents).values(
+        auditValues({
+          action: "mail.synced",
+          after: {
+            durableRuleHandoffCompleted: true,
+            mailboxes: value.mailboxes.length,
+            retainedPriorThreads: true,
+            threads: value.threads.length,
           },
-        );
-      }
-      updatedGoogleCredentials = currentCredentials;
-    }
-    try {
-      await db.transaction(async (transaction) => {
-        await requireConnectorSyncClaim(
-          transaction,
-          account,
-          syncClaim,
-          "Mail synchronization audit",
-        );
-        await transaction.insert(auditEvents).values(
-          auditValues({
-            action: "mail.synced",
-            after: {
-              mailboxes: value.mailboxes.length,
-              retainedPriorThreads: true,
-              runSummaryPersisted,
-              threads: value.threads.length,
-            },
-            before: null,
-            entityId: account.id,
-            entityType: "mail_account",
-            principal,
-            requestId,
-          }),
-        );
-      });
-    } catch (error) {
-      if (successfulRuleMutationCount === 0) throw error;
-      throw new AppError(
-        "service_unavailable",
-        "Mail automation changed provider state, but Ilo could not record the final synchronization audit. Sync this account before retrying.",
-        {
-          accountId: account.id,
-          operation: "rule_execution",
-          partialEffect: true,
-          repairAction: "sync_mail_account",
-          runSummaryPersisted,
-          succeededCount: successfulRuleMutationCount,
-          synchronizationAuditPersisted: false,
-          userAction: "Open Mail and choose Sync before retrying any automation.",
-          userActionDestination: "Mail → Sync",
-          userActionRequired: true,
-        },
+          before: null,
+          entityId: account.id,
+          entityType: "mail_account",
+          principal,
+          requestId,
+        }),
       );
-    }
+    });
     return {
       changed: value.mailboxes.length + value.threads.length,
-      credentials: updatedGoogleCredentials,
+      credentials: initialGoogleCredentials,
     };
   }
 
@@ -2346,6 +1848,7 @@ export function createConnectorService({
             due.profile_version
           FROM next_thread_rule due
           INNER JOIN mail_threads threads ON threads.id = due.thread_id
+          INNER JOIN calendar_accounts accounts ON accounts.id = threads.account_id
           WHERE NOT EXISTS (
             SELECT 1
             FROM mail_rule_work_items active
@@ -2353,7 +1856,7 @@ export function createConnectorService({
               AND active.status = 'claimed'
           )
           ORDER BY due.next_due, threads.id
-          FOR UPDATE OF threads SKIP LOCKED
+          FOR UPDATE OF threads, accounts SKIP LOCKED
           LIMIT ${MAIL_RULE_EXECUTION_LIMIT_PER_RUN}
         )
         UPDATE mail_rule_work_items work
@@ -2435,7 +1938,7 @@ export function createConnectorService({
       if (!first) return;
       await transaction.insert(auditEvents).values(
         auditValues({
-          action: "mail.rule.delayed_state_changed",
+          action: "mail.rule.durable_state_changed",
           after: {
             affectedCount: transitioned.length,
             errorCode: input.code,
@@ -2456,17 +1959,16 @@ export function createConnectorService({
     });
   }
 
-  async function validateClaimedMailRuleWork(
+  async function resolveClaimedMailRuleAction(
     work: MailRuleWorkRow,
-    thread: typeof mailThreads.$inferSelect,
     executor: Database | DatabaseTransaction = db,
+    includeDeletedDestination = false,
   ): Promise<
     { action: MailRuleAction; remoteMailboxId: string | null } | { code: string; message: string }
   > {
     const parsedAction = mailRuleActionSchema.safeParse(work.action);
     if (
       !parsedAction.success ||
-      !mailRuleActionNeedsDurableExecution(parsedAction.data) ||
       durableMailRuleActionFingerprint(parsedAction.data) !== work.actionFingerprint
     ) {
       return {
@@ -2474,6 +1976,46 @@ export function createConnectorService({
         message: "The durable Mail action no longer matches its accepted snapshot.",
       };
     }
+    let remoteMailboxId: string | null = null;
+    if (parsedAction.data.type === "add_label") {
+      if (!parsedAction.data.mailboxId) {
+        return {
+          code: "destination_changed",
+          message: "The accepted destination label is no longer available.",
+        };
+      }
+      const destinationConditions = [
+        eq(mailboxes.id, parsedAction.data.mailboxId),
+        eq(mailboxes.userId, work.userId),
+        eq(mailboxes.accountId, work.accountId),
+        eq(mailboxes.role, "custom"),
+      ];
+      if (!includeDeletedDestination) destinationConditions.push(isNull(mailboxes.deletedAt));
+      const [mailbox] = await executor
+        .select({ remoteMailboxId: mailboxes.remoteMailboxId })
+        .from(mailboxes)
+        .where(and(...destinationConditions))
+        .limit(1);
+      if (!mailbox) {
+        return {
+          code: "destination_changed",
+          message: "The accepted destination label is no longer available.",
+        };
+      }
+      remoteMailboxId = mailbox.remoteMailboxId;
+    }
+    return { action: parsedAction.data, remoteMailboxId };
+  }
+
+  async function validateClaimedMailRuleWork(
+    work: MailRuleWorkRow,
+    thread: typeof mailThreads.$inferSelect,
+    executor: Database | DatabaseTransaction = db,
+  ): Promise<
+    { action: MailRuleAction; remoteMailboxId: string | null } | { code: string; message: string }
+  > {
+    const resolvedAction = await resolveClaimedMailRuleAction(work, executor);
+    if ("code" in resolvedAction) return resolvedAction;
     const [rule] = await executor
       .select()
       .from(mailRules)
@@ -2572,43 +2114,19 @@ export function createConnectorService({
         message: "The Mail conversation no longer matches the accepted rule and source identity.",
       };
     }
-    let remoteMailboxId: string | null = null;
-    if (parsedAction.data.type === "add_label") {
-      if (!parsedAction.data.mailboxId) {
-        return {
-          code: "destination_changed",
-          message: "The accepted destination label is no longer available.",
-        };
-      }
-      const [mailbox] = await executor
-        .select({ remoteMailboxId: mailboxes.remoteMailboxId })
-        .from(mailboxes)
-        .where(
-          and(
-            eq(mailboxes.id, parsedAction.data.mailboxId),
-            eq(mailboxes.userId, work.userId),
-            eq(mailboxes.accountId, work.accountId),
-            eq(mailboxes.role, "custom"),
-            isNull(mailboxes.deletedAt),
-          ),
-        )
-        .limit(1);
-      if (!mailbox) {
-        return {
-          code: "destination_changed",
-          message: "The accepted destination label is no longer available.",
-        };
-      }
-      remoteMailboxId = mailbox.remoteMailboxId;
-    }
-    return { action: parsedAction.data, remoteMailboxId };
+    return resolvedAction;
   }
 
   async function persistMailRuleWorkProjection(
-    work: MailRuleWorkRow[],
+    results: Array<{
+      action: MailRuleAction;
+      observedApplied: boolean;
+      providerMutated: boolean;
+      remoteMailboxId: string | null;
+      work: MailRuleWorkRow;
+    }>,
     thread: typeof mailThreads.$inferSelect,
     state: RemoteMailThreadState,
-    providerMutated: boolean,
     principal: { actorId: string; actorType: "connector"; userId: string },
   ): Promise<void> {
     await db.transaction(async (transaction) => {
@@ -2623,13 +2141,29 @@ export function createConnectorService({
       }
       const successful: MailRuleWorkRow[] = [];
       const changedAuthorization: MailRuleWorkRow[] = [];
-      for (const item of work) {
-        const authorization = await validateClaimedMailRuleWork(item, lockedThread, transaction);
-        if ("code" in authorization) changedAuthorization.push(item);
-        else successful.push(item);
+      const effects = new Map<string, MailRuleWorkRow["providerEffect"]>();
+      for (const result of results) {
+        const authorization = await validateClaimedMailRuleWork(
+          result.work,
+          lockedThread,
+          transaction,
+        );
+        const provedApplied = result.observedApplied || result.providerMutated;
+        effects.set(
+          result.work.id,
+          strongestMailRuleProviderEffect(
+            [result.work.providerEffect, provedApplied ? "applied" : "none"],
+            "none",
+          ),
+        );
+        if ("code" in authorization && !result.observedApplied) {
+          changedAuthorization.push(result.work);
+        } else {
+          successful.push(result.work);
+        }
       }
       const completedAt = now();
-      if (successful.length > 0) {
+      for (const item of successful) {
         await transaction
           .update(mailRuleWorkItems)
           .set({
@@ -2640,46 +2174,40 @@ export function createConnectorService({
             lastErrorCode: null,
             lastErrorMessage: null,
             nextAttemptAt: completedAt,
-            providerEffect: providerMutated ? "applied" : "none",
+            providerEffect: effects.get(item.id) ?? item.providerEffect,
             status: "succeeded",
             updatedAt: completedAt,
           })
           .where(
             and(
-              inArray(
-                mailRuleWorkItems.id,
-                successful.map((item) => item.id),
-              ),
-              inArray(
-                mailRuleWorkItems.claimId,
-                successful.map((item) => item.claimId).filter(Boolean) as string[],
-              ),
+              eq(mailRuleWorkItems.id, item.id),
+              eq(mailRuleWorkItems.claimId, item.claimId as string),
               eq(mailRuleWorkItems.status, "claimed"),
             ),
           );
       }
-      if (changedAuthorization.length > 0) {
+      for (const item of changedAuthorization) {
+        const effect = effects.get(item.id) ?? item.providerEffect;
+        const providerMayHaveChanged = effect === "applied" || effect === "indeterminate";
         await transaction
           .update(mailRuleWorkItems)
           .set({
             claimId: null,
             claimedAt: null,
             claimMode: null,
-            completedAt: providerMutated ? null : completedAt,
+            completedAt: providerMayHaveChanged ? null : completedAt,
             lastErrorCode: "authorization_changed",
             lastErrorMessage:
               "The rule authorization changed during execution; review current provider state before retrying.",
             nextAttemptAt: completedAt,
-            providerEffect: providerMutated ? "applied" : "none",
-            status: providerMutated ? "reconcile" : "failed",
+            providerEffect: effect,
+            status: providerMayHaveChanged ? "reconcile" : "failed",
             updatedAt: completedAt,
           })
           .where(
             and(
-              inArray(
-                mailRuleWorkItems.id,
-                changedAuthorization.map((item) => item.id),
-              ),
+              eq(mailRuleWorkItems.id, item.id),
+              eq(mailRuleWorkItems.claimId, item.claimId as string),
               eq(mailRuleWorkItems.status, "claimed"),
             ),
           );
@@ -2696,11 +2224,19 @@ export function createConnectorService({
       if (successful.length > 0) {
         await transaction.insert(auditEvents).values(
           auditValues({
-            action: "mail.rule.delayed_applied",
+            action: "mail.rule.durable_applied",
             after: {
               actionCount: successful.length,
-              delayed: true,
-              providerMutation: providerMutated,
+              delayedActionCount: successful.filter((item) => item.action.afterDays > 0).length,
+              durable: true,
+              providerMutation: results.some(
+                (result) =>
+                  successful.some((item) => item.id === result.work.id) && result.providerMutated,
+              ),
+              providerObservation: results.some(
+                (result) =>
+                  successful.some((item) => item.id === result.work.id) && result.observedApplied,
+              ),
               ruleCount: new Set(successful.map((item) => item.ruleId)).size,
             },
             before: null,
@@ -2766,14 +2302,31 @@ export function createConnectorService({
       });
       return;
     }
-    const valid: Array<{
+    const candidates: Array<{
       action: MailRuleAction;
+      authorization:
+        | { action: MailRuleAction; remoteMailboxId: string | null }
+        | { code: string; message: string };
       remoteMailboxId: string | null;
       work: MailRuleWorkRow;
     }> = [];
     for (const item of work) {
+      const resolvedAction = await resolveClaimedMailRuleAction(
+        item,
+        db,
+        item.claimMode === "reconcile",
+      );
+      if ("code" in resolvedAction) {
+        await transitionMailRuleWork([item], {
+          code: resolvedAction.code,
+          effect: item.providerEffect,
+          message: resolvedAction.message,
+          status: "failed",
+        });
+        continue;
+      }
       const authorization = await validateClaimedMailRuleWork(item, thread);
-      if ("code" in authorization) {
+      if ("code" in authorization && item.claimMode !== "reconcile") {
         await transitionMailRuleWork([item], {
           code: authorization.code,
           effect: item.providerEffect,
@@ -2781,10 +2334,10 @@ export function createConnectorService({
           status: "failed",
         });
       } else {
-        valid.push({ ...authorization, work: item });
+        candidates.push({ ...resolvedAction, authorization, work: item });
       }
     }
-    if (valid.length === 0) return;
+    if (candidates.length === 0) return;
     let state: RemoteMailThreadState = {
       mailboxIds: thread.remoteMailboxIds,
       remoteThreadId: thread.remoteThreadId,
@@ -2795,21 +2348,20 @@ export function createConnectorService({
       ...account,
       encryptedCredentials: account.encryptedCredentials,
     });
-    const needsReconciliation = valid.some(({ work: item }) => item.claimMode === "reconcile");
+    const needsReconciliation = candidates.some(({ work: item }) => item.claimMode === "reconcile");
     if (needsReconciliation) {
       if (!google.getMailThreadState) {
-        await transitionMailRuleWork(
-          valid.map(({ work: item }) => item),
-          {
+        for (const candidate of candidates) {
+          await transitionMailRuleWork([candidate.work], {
             code: "reconciliation_unavailable",
             effect: strongestMailRuleProviderEffect(
-              valid.map(({ work: item }) => item.providerEffect),
-              "indeterminate",
+              [candidate.work.providerEffect, "indeterminate"],
+              "none",
             ),
             message: "This connector cannot read exact provider state for reconciliation.",
             status: "reconcile",
-          },
-        );
+          });
+        }
         return;
       }
       try {
@@ -2818,26 +2370,79 @@ export function createConnectorService({
         state = observed.value;
       } catch (error) {
         const failure = classifyMailRuleProviderFailure(error);
-        const retryable = valid.every(
-          ({ work: item }) => item.attemptCount < MAIL_RULE_WORK_MAX_ATTEMPTS,
-        );
-        await transitionMailRuleWork(
-          valid.map(({ work: item }) => item),
-          {
+        for (const candidate of candidates) {
+          const retryable = candidate.work.attemptCount < MAIL_RULE_WORK_MAX_ATTEMPTS;
+          await transitionMailRuleWork([candidate.work], {
             code: failure.code,
             effect: strongestMailRuleProviderEffect(
-              valid.map(({ work: item }) => item.providerEffect),
-              failure.effect,
+              [candidate.work.providerEffect, failure.effect],
+              "none",
             ),
             message: failure.message,
             status:
               failure.disposition === "failed" ? "failed" : retryable ? "reconcile" : "failed",
-          },
-        );
+          });
+        }
         return;
       }
     }
-    const notApplied = valid.filter(
+    const exactlyObservedApplied = needsReconciliation
+      ? candidates.filter(({ action, remoteMailboxId }) =>
+          mailRuleActionIsApplied(action, state, remoteMailboxId),
+        )
+      : [];
+    if (exactlyObservedApplied.length > 0) {
+      try {
+        await persistMailRuleWorkProjection(
+          exactlyObservedApplied.map((candidate) => ({
+            ...candidate,
+            observedApplied: true,
+            providerMutated: false,
+          })),
+          thread,
+          state,
+          { actorId: account.id, actorType: "connector", userId: account.userId },
+        );
+      } catch {
+        for (const candidate of exactlyObservedApplied) {
+          await transitionMailRuleWork([candidate.work], {
+            code: "projection_commit_failed",
+            effect: "applied",
+            message: "Ilo observed the provider change but could not commit its projection.",
+            status: "reconcile",
+          }).catch(() => {});
+        }
+      }
+    }
+    const mutationCandidates: typeof candidates = [];
+    for (const candidate of candidates) {
+      if (exactlyObservedApplied.includes(candidate)) continue;
+      if (needsReconciliation) {
+        if ("code" in candidate.authorization) {
+          await transitionMailRuleWork([candidate.work], {
+            code: candidate.authorization.code,
+            effect: candidate.work.providerEffect,
+            message:
+              "The accepted rule is no longer authorized; exact provider state was observed without replaying the action.",
+            status: "failed",
+          });
+          continue;
+        }
+        const currentAuthorization = await validateClaimedMailRuleWork(candidate.work, thread);
+        if ("code" in currentAuthorization) {
+          await transitionMailRuleWork([candidate.work], {
+            code: currentAuthorization.code,
+            effect: candidate.work.providerEffect,
+            message:
+              "The accepted rule changed during reconciliation; exact provider state was observed without replaying the action.",
+            status: "failed",
+          });
+          continue;
+        }
+      }
+      mutationCandidates.push(candidate);
+    }
+    const notApplied = mutationCandidates.filter(
       ({ action, remoteMailboxId }) => !mailRuleActionIsApplied(action, state, remoteMailboxId),
     );
     let providerMutated = false;
@@ -2881,32 +2486,35 @@ export function createConnectorService({
         const failure = classifyMailRuleProviderFailure(error);
         const retryable =
           failure.disposition === "retry" &&
-          valid.every(({ work: item }) => item.attemptCount < MAIL_RULE_WORK_MAX_ATTEMPTS);
-        await transitionMailRuleWork(
-          valid.map(({ work: item }) => item),
-          {
+          mutationCandidates.every(
+            ({ work: item }) => item.attemptCount < MAIL_RULE_WORK_MAX_ATTEMPTS,
+          );
+        for (const candidate of mutationCandidates) {
+          await transitionMailRuleWork([candidate.work], {
             code: failure.code,
-            effect: failure.effect,
+            effect: strongestMailRuleProviderEffect(
+              [candidate.work.providerEffect, failure.effect],
+              "none",
+            ),
             message: failure.message,
             status:
               failure.disposition === "reconcile" ? "reconcile" : retryable ? "pending" : "failed",
-          },
-        );
+          });
+        }
         return;
       }
       try {
         currentCredentials = await saveGoogleCredentials(account.id, currentCredentials, true);
       } catch {
-        await transitionMailRuleWork(
-          valid.map(({ work: item }) => item),
-          {
+        for (const candidate of mutationCandidates) {
+          await transitionMailRuleWork([candidate.work], {
             code: "credential_persistence_failed",
             effect: "applied",
             message:
               "The provider change completed, but refreshed Mail credentials were not persisted.",
             status: "reconcile",
-          },
-        );
+          });
+        }
         return;
       }
       for (const { action, remoteMailboxId } of notApplied) {
@@ -2916,29 +2524,33 @@ export function createConnectorService({
         };
       }
     }
+    if (mutationCandidates.length === 0) return;
     try {
       await persistMailRuleWorkProjection(
-        valid.map(({ work: item }) => item),
+        mutationCandidates.map((candidate) => ({
+          ...candidate,
+          observedApplied: false,
+          providerMutated: providerMutated && notApplied.includes(candidate),
+        })),
         thread,
         state,
-        providerMutated,
         { actorId: account.id, actorType: "connector", userId: account.userId },
       );
     } catch {
-      await transitionMailRuleWork(
-        valid.map(({ work: item }) => item),
-        {
+      for (const candidate of mutationCandidates) {
+        const itemMutated = providerMutated && notApplied.includes(candidate);
+        await transitionMailRuleWork([candidate.work], {
           code: "projection_commit_failed",
           effect: strongestMailRuleProviderEffect(
-            valid.map(({ work: item }) => item.providerEffect),
-            providerMutated ? "applied" : "none",
+            [candidate.work.providerEffect, itemMutated ? "applied" : "none"],
+            "none",
           ),
-          message: providerMutated
+          message: itemMutated
             ? "The provider change completed, but Ilo could not commit its projection."
             : "Ilo could not commit the reconciled Mail projection.",
-          status: providerMutated ? "reconcile" : "pending",
-        },
-      ).catch(() => {});
+          status: itemMutated ? "reconcile" : "pending",
+        }).catch(() => {});
+      }
     }
   }
 
@@ -2998,7 +2610,7 @@ export function createConnectorService({
         }
         const values = {
           importance: reconcile > 0 || failed > 0 ? ("high" as const) : ("normal" as const),
-          summary: `${pending} delayed Mail actions are pending; ${reconcile} require exact provider reconciliation; ${failed} stopped safely and need rule, source, or connection review.`,
+          summary: `${pending} durable Mail actions are pending; ${reconcile} require exact provider reconciliation; ${failed} stopped safely and need rule, source, or connection review.`,
           title:
             reconcile > 0
               ? "Mail automation needs reconciliation"
@@ -3052,7 +2664,7 @@ export function createConnectorService({
       }
     };
     await Promise.all(
-      Array.from({ length: Math.min(MAIL_RULE_WRITE_CONCURRENCY, entries.length) }, () => worker()),
+      Array.from({ length: Math.min(MAIL_RULE_WORK_CONCURRENCY, entries.length) }, () => worker()),
     );
     await refreshMailRuleWorkAttention(claim.touchedAccountIds);
     if (claimed.length === 0) {
@@ -3168,7 +2780,7 @@ export function createConnectorService({
         }
         const calendarEnabled = lockedMatchedAccount.calendarEnabled || requestedCalendar;
         const mailEnabled = lockedMatchedAccount.mailEnabled || requestedMail;
-        return requireDatabaseRecord(
+        const updatedAccount = requireDatabaseRecord(
           (
             await transaction
               .update(calendarAccounts)
@@ -3190,6 +2802,50 @@ export function createConnectorService({
           )[0],
           "The Google account could not be saved.",
         );
+        if (requestedMail) {
+          const reconciliationRequeued = await transaction
+            .update(mailRuleWorkItems)
+            .set({
+              attemptCount: 0,
+              completedAt: null,
+              lastErrorCode: "mail_reauthorized",
+              lastErrorMessage:
+                "Google Mail access was renewed; exact provider reconciliation is queued without replaying the action.",
+              nextAttemptAt: now(),
+              status: "reconcile",
+              updatedAt: now(),
+            })
+            .where(
+              and(
+                eq(mailRuleWorkItems.accountId, updatedAccount.id),
+                eq(mailRuleWorkItems.status, "failed"),
+                inArray(mailRuleWorkItems.providerEffect, ["applied", "indeterminate"]),
+              ),
+            )
+            .returning({ id: mailRuleWorkItems.id });
+          if (reconciliationRequeued.length > 0) {
+            await transaction.insert(auditEvents).values(
+              auditValues({
+                action: "mail.rule.reconciliation_requeued",
+                after: {
+                  affectedCount: reconciliationRequeued.length,
+                  providerEvidencePreserved: true,
+                  status: "reconcile",
+                },
+                before: { status: "failed" },
+                entityId: updatedAccount.id,
+                entityType: "mail_account",
+                principal: {
+                  actorId: oauthState.userId,
+                  actorType: "user",
+                  userId: oauthState.userId,
+                },
+                requestId: randomUUID(),
+              }),
+            );
+          }
+        }
+        return updatedAccount;
       });
       return {
         accountId: account.id,

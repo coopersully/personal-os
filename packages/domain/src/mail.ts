@@ -133,11 +133,29 @@ export const mailAttachmentSchema = z.object({
   contentType: z.string(),
   filename: z.string(),
   id: z.string(),
+  projectionIssue: z.enum(["calendar_attachment_projection_overflow"]).optional(),
   providerAttachmentId: z.string().nullable().optional(),
   providerPartId: z.string().nullable().optional(),
   size: z.number().int().nonnegative(),
 });
 export type MailAttachment = z.infer<typeof mailAttachmentSchema>;
+
+export const MAIL_CALENDAR_PROJECTION_OVERFLOW = "calendar_attachment_projection_overflow" as const;
+// A provider message may expose multiple iTIP revisions, but normal invitations stay well
+// below this server-enforced ceiling. Larger fanout is kept as one non-executable preview.
+export const MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE = 16;
+
+export function calendarAttachmentProjectionOverflow(providerPartId: string): MailAttachment {
+  return {
+    contentType: "application/x-ilo-calendar-projection-overflow",
+    filename: "",
+    id: providerPartId,
+    projectionIssue: MAIL_CALENDAR_PROJECTION_OVERFLOW,
+    providerAttachmentId: null,
+    providerPartId,
+    size: 0,
+  };
+}
 
 export const mailMessageSchema = z.object({
   attachments: z.array(mailAttachmentSchema),
@@ -325,8 +343,10 @@ export const mailRuleActionSchema = z
   });
 export type MailRuleAction = z.infer<typeof mailRuleActionSchema>;
 
-export function mailRuleActionNeedsDurableExecution(action: MailRuleAction): boolean {
-  return action.afterDays > 0 || action.type === "archive" || action.type === "trash";
+export function mailRuleActionNeedsDurableExecution(_action: MailRuleAction): boolean {
+  // Every approved rule effect crosses the durable provider-effect ledger before
+  // provider access. Immediate actions differ only in dueAt, never in durability.
+  return true;
 }
 
 export const mailRuleWorkStatusSchema = z.enum([

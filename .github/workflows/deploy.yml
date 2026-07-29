@@ -197,6 +197,124 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
+          api_scaling_resource="service/${ECS_CLUSTER}/${API_SERVICE}"
+          api_latest_definition="$(
+            aws ecs describe-task-definition \
+              --task-definition "$API_SERVICE" \
+              --query taskDefinition \
+              --output json
+          )"
+          api_previous_restore_state="$(
+            jq -r '
+              .containerDefinitions[]
+              | select(.name == "api")
+              | [.environment[]? | select(.name == "ILO_DEPLOYMENT_RESTORE_STATE") | .value][0] // ""
+            ' <<<"$api_latest_definition"
+          )"
+          api_previous_recovery_marker="$(
+            jq -r '
+              .containerDefinitions[]
+              | select(.name == "api")
+              | [.environment[]? | select(.name == "ILO_DEPLOYMENT_RECOVERY_MARKER") | .value][0] // ""
+            ' <<<"$api_latest_definition"
+          )"
+          api_latest_definition_arn="$(
+            jq -r '.taskDefinitionArn // ""' <<<"$api_latest_definition"
+          )"
+          api_live_service="$(
+            aws ecs describe-services \
+              --cluster "$ECS_CLUSTER" \
+              --services "$API_SERVICE" \
+              --query 'services[0]' \
+              --output json
+          )"
+          api_live_scaling="$(
+            aws application-autoscaling describe-scalable-targets \
+              --service-namespace ecs \
+              --resource-ids "$api_scaling_resource" \
+              --scalable-dimension ecs:service:DesiredCount \
+              --query 'ScalableTargets[0].SuspendedState' \
+              --output json
+          )"
+          api_all_suspended='{"DynamicScalingInSuspended":true,"DynamicScalingOutSuspended":true,"ScheduledScalingSuspended":true}'
+          api_is_emergency="$(
+            jq -nr \
+              --argjson service "$api_live_service" \
+              --argjson scaling "$api_live_scaling" \
+              --argjson allSuspended "$api_all_suspended" \
+              '(
+                $service.desiredCount == 0 and
+                $service.runningCount == 0 and
+                $service.pendingCount == 0 and
+                (($scaling // {}) + {
+                  DynamicScalingInSuspended: (($scaling // {}).DynamicScalingInSuspended // false),
+                  DynamicScalingOutSuspended: (($scaling // {}).DynamicScalingOutSuspended // false),
+                  ScheduledScalingSuspended: (($scaling // {}).ScheduledScalingSuspended // false)
+                }) == $allSuspended
+              )'
+          )"
+          if test "$api_is_emergency" = "true"; then
+            if {
+              test -z "$api_previous_restore_state" ||
+                test -z "$api_latest_definition_arn" ||
+                test -z "$api_previous_recovery_marker"
+            }; then
+              echo "::error::The API is zero/all-suspended without an explicit failed-rollout recovery marker; preserving the intentional/manual stop."
+              exit 1
+            fi
+            api_failed_definition_arn="$(
+              jq -Rcer '
+                fromjson |
+                select(
+                  .version == 1 and
+                  (.failedTaskDefinitionArn | type) == "string" and
+                  (.failedTaskDefinitionArn | length) > 0
+                ) |
+                .failedTaskDefinitionArn
+              ' <<<"$api_previous_recovery_marker"
+            )" || {
+              echo "::error::The fail-closed API recovery marker is malformed."
+              exit 1
+            }
+            api_candidate_recovery_marker="$api_previous_recovery_marker"
+            api_restore_state="$(
+              jq -Rce \
+                --arg priorDefinition "$api_failed_definition_arn" \
+                '
+                  fromjson |
+                  .postDrainTaskDefinitionArns = (
+                    ((.postDrainTaskDefinitionArns // []) + [$priorDefinition]) |
+                    unique
+                  ) |
+                  .recoveryAuthorized = true |
+                  select(
+                    (.postDrainTaskDefinitionArns | length) <= 100 and
+                    all(.postDrainTaskDefinitionArns[]; type == "string" and length > 0)
+                  )
+                ' <<<"$api_previous_restore_state"
+            )" || {
+              echo "::error::The fail-closed API recovery task-definition history is malformed or exceeds 100 entries."
+              exit 1
+            }
+          else
+            api_candidate_recovery_marker=""
+            api_restore_state="$(
+              jq -nc \
+                --argjson desired "$(jq -r '.desiredCount' <<<"$api_live_service")" \
+                --argjson suspended "$api_live_scaling" \
+                '{
+                  desiredCount: $desired,
+                  suspendedState: {
+                    DynamicScalingInSuspended: ($suspended.DynamicScalingInSuspended // false),
+                    DynamicScalingOutSuspended: ($suspended.DynamicScalingOutSuspended // false),
+                    ScheduledScalingSuspended: ($suspended.ScheduledScalingSuspended // false)
+                  },
+                  postDrainTaskDefinitionArns: [],
+                  recoveryAuthorized: false
+                }'
+            )"
+          fi
+
           register_task() {
             local family="$1"
             local container="$2"
@@ -212,9 +330,33 @@ jobs:
               jq \
                 --arg container "$container" \
                 --arg image "$image" \
+                --arg api_restore_state "$api_restore_state" \
+                --arg api_recovery_marker "$api_candidate_recovery_marker" \
                 '.taskDefinition
                 | .containerDefinitions |= map(
-                    if .name == $container then .image = $image else . end
+                    if .name == $container then
+                      .image = $image
+                      | if $container == "api" then
+                          .environment = (
+                              [
+                                .environment[]?
+                                | select(
+                                    .name != "ILO_DEPLOYMENT_RESTORE_STATE" and
+                                    .name != "ILO_DEPLOYMENT_RECOVERY_MARKER"
+                                  )
+                              ] +
+                              [
+                                {name: "ILO_DEPLOYMENT_RESTORE_STATE", value: $api_restore_state}
+                              ] +
+                              if $api_recovery_marker == "" then
+                                []
+                              else
+                                [{name: "ILO_DEPLOYMENT_RECOVERY_MARKER", value: $api_recovery_marker}]
+                              end
+                            )
+                        else .
+                        end
+                    else . end
                   )
                 | del(
                     .compatibilities,
@@ -236,15 +378,15 @@ jobs:
           }
 
           register_task \
-            "$API_SERVICE" \
-            api \
-            "${API_ECR_REPOSITORY}:${RELEASE_TAG}" \
-            api_task_definition
-          register_task \
             "$MCP_SERVICE" \
             mcp \
             "${MCP_ECR_REPOSITORY}:${RELEASE_TAG}" \
             mcp_task_definition
+          register_task \
+            "$API_SERVICE" \
+            api \
+            "${API_ECR_REPOSITORY}:${RELEASE_TAG}" \
+            api_task_definition
 
       - name: Deploy migration-capable API serially
         env:

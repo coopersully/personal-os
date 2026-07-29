@@ -45,11 +45,11 @@ This prerequisite boundary specializes
   readiness counts.
 - Every connector sync has a persisted claim ID and monotonically increasing account generation.
   Credential/capability transitions advance the generation and clear the claim. Connector
-  projection, durable Mail-rule enqueue, inline Mail provider effects and result/audit projection,
-  refreshed-credential persistence, and terminal status updates require the exact claimed
-  generation. Inline Mail effects are serialized under the account lifecycle lock, so a transition
-  either waits for an authoritative effect or supersedes the old sync before its next effect; an old
-  response cannot become current after disable and re-enable or overwrite a newer sync.
+  projection, durable Mail-rule enqueue, refreshed-credential persistence, and terminal status
+  updates require the exact claimed generation. Every approved Mail rule effect is claimed from
+  the durable provider-effect ledger after sync commits; connection lifecycle changes refuse while
+  claimed effects are settling, and stale claims reconcile exact provider state after restart.
+  An old sync response cannot become current after disable and re-enable or overwrite a newer sync.
 - Audit records contain safe IDs, state, fingerprints, and hashes of remote identities. They omit
   message bodies, addresses, subjects, filenames, provider payloads, and credentials.
 - Mail setup reports preview-only intake count, zero server-verified items, and
@@ -67,17 +67,25 @@ reconciliation, succeeded, and failed work, but this prerequisite does not enter
 | Capability and owner | Mail owns provider source capture. Integration will own verification and the cross-domain handoff. Calendar owns destination validation and provider effects. |
 | Configuration and authority | Existing Mail read authority permits projection only. No profile preference, MCP annotation, attachment, or caller payload authorizes Calendar creation. |
 | Transport | Existing Google HTTPS or iCloud IMAP sync transports supply metadata. No attachment download, verifier, queue, port, or credential is added. |
-| Time and capacity | Intake is bounded by the provider sync page and projected messages. Stable identity and persisted sync generation make repeat and reordered delivery deterministic. Inline Google rule effects intentionally take the exclusive account lifecycle lock one at a time through the bounded provider timeout: a shared lock would allow another external call to delay durable credential/result projection for an already accepted effect and compound indeterminate outcomes. The per-sync execution budget remains six; delayed durable work uses its separate work ledger. |
+| Time and capacity | Intake is bounded by the provider sync page, 256 MIME nodes, depth 24, 1,024-character MIME metadata, and 16 eligible calendar parts per message. iCloud RFC822 retrieval is additionally capped at 10 MiB before MIME parsing. Any of these overflows collapses to one redacted preview-only record and audit. Stable identity and persisted sync generation make repeat and reordered delivery deterministic. Approved Mail rule effects use a separate six-conversation durable claim budget with two workers. |
 | Commit point | Exact Mail message projection, intake reconciliation, and redacted audit commit in one transaction. |
 | Delivery semantics | Duplicate observation converges on one account/message/part row. Changed, missing, ineligible, reset-mailbox, or superseded-sync source material cannot preserve verification state. |
 | Degraded behavior | Failure fails the owning sync visibly; a later sync retries the same deterministic insert. Calendar remains unchanged. |
 | Recovery and observation | Setup exposes preview-only count. Database state and redacted activity identify the source handoff without exposing content. |
 | Evidence | Unit tests cover MIME boundaries, Gmail completeness, UIDVALIDITY reset/reuse, and revision fingerprints; database tests cover identity and sync-claim constraints; connector integration covers missing-message demotion, reset-mailbox demotion, stale-sync fencing, persistence, and audit redaction. |
 
-Migration 0047 deletes pre-UIDVALIDITY iCloud cache/preview rows and migration 0048 introduces the
-sync fence. A pre-migration binary already inside provider I/O cannot honor either invariant.
-Production deployment therefore scales the API service to zero and waits for the old task to drain
-before the new migration-capable task starts. ECS dynamic/scheduled scaling is suspended during the
+Migration 0047 soft-retires pre-UIDVALIDITY iCloud cache rows so snoozes, draft links, and attention
+provenance retain their historical source identity; new UIDVALIDITY-qualified messages project as
+distinct current rows. Migration 0048 introduces the sync fence. A pre-migration binary already
+inside provider I/O cannot honor either invariant.
+Production deployment therefore requires a separately deployed, non-migrating lifecycle bootstrap
+before this migration release can run. The drain workflow fails before scaling mutation unless the
+exact live primary and every running API task share the expected image/task-definition projection,
+one nonempty image digest, the 120-second stop timeout, exactly one
+`API_SHUTDOWN_TIMEOUT_MS=105000` task environment entry, and the live readiness endpoint returns the hard-coded
+`X-Ilo-Drain-Protocol: quiesce-v1` header. Only then does it scale the
+API service to zero and wait for the current task to drain before the new migration-capable task
+starts. ECS dynamic/scheduled scaling is suspended during the
 drain. The API rejects new HTTP and detached/background claims, awaits tracked request/provider
 work within 105 seconds, and closes PostgreSQL only after that work and the HTTP server finish; ECS
 allows the essential API container 120 seconds before force-stop. The bound includes database closure,
@@ -96,7 +104,21 @@ verified. Pre-zero failures restore prior scaling and preserve the healthy old s
 have committed, shell errors re-suspend and stop at zero; every AWS operation after suspension begins
 is interruptible so delivered cancellation signals can stop the child before tightly bounded
 single-attempt mutations. Abrupt control-plane runner loss still requires operator
-verification before retry.
+verification before retry. The immutable release task definition retains the pre-drain desired count
+and exact scaling suspension state. A later run may enter recovery only from the recognizable
+zero/all-suspended posture plus an explicit immutable failed-rollout marker tied to the failed
+release. Posture alone may be an intentional stop and cannot authorize restart. Handled failures
+persist and verify the marker; failure to do so requires manual operator recovery. The next release
+retains it on the recovery candidate through all pre-script failure windows and restores recorded
+intent only after exact-primary health. A marker-cleared normal-metadata revision is registered and
+verified before autoscaling resumes; cleanup failure fails closed with a new marker. A missing
+marker/recovery record or legacy live task fails before migration. Recovery still launches exactly
+one migration-capable task; after exact-primary health and rollback restoration it may scale to the
+recorded steady-state count before autoscaling suspension is restored. The recovery record also
+accumulates at most 100 unique prior post-drain task-definition ARNs. Only stopped tasks on that
+explicit set may be treated as failed migration-rollout evidence; all other recent stopped tasks
+retain the exit-zero/no-kill requirement. Abrupt runner loss cannot create the marker and remains a
+fail-closed manual path.
 
 The deploy role's narrowly scoped API
 `application-autoscaling:RegisterScalableTarget` authority and its separately isolated

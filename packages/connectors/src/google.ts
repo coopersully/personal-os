@@ -2,6 +2,14 @@ import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
 import nodemailer from "nodemailer";
 import { z } from "zod";
 import { providerFetch } from "./http.js";
+import {
+  calendarAttachmentProjectionOverflow,
+  isCalendarMimeType,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  MAX_MAIL_MIME_DEPTH,
+  MAX_MAIL_MIME_PARTS_PER_MESSAGE,
+  mailAttachmentMetadataIsBounded,
+} from "./mail-attachments.js";
 import type {
   CredentialResult,
   GoogleAuthorizationService,
@@ -447,18 +455,23 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
         threadIds.push(...page.threads.map((thread) => thread.id));
         pageToken = threadIds.length < 100 ? page.nextPageToken : undefined;
       } while (pageToken);
-      const threadResults: Array<z.infer<typeof gmailThreadSchema>> = [];
+      const threads: NormalizedRemoteMailThread[] = [];
       for (const threadId of threadIds) {
         const result = await authenticatedRequest(
           currentCredentials,
           `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
         );
         currentCredentials = result.credentials;
-        threadResults.push(gmailThreadSchema.parse(await parseResponse(result.response)));
+        // Normalize and release each full provider response before requesting the
+        // next thread. Attachment traversal applies its per-message bounds here,
+        // so the sync never retains up to 100 raw MIME trees at once.
+        threads.push(
+          normalizeMailThread(gmailThreadSchema.parse(await parseResponse(result.response))),
+        );
       }
       return {
         credentials: currentCredentials,
-        value: { mailboxes, threads: threadResults.map(normalizeMailThread) },
+        value: { mailboxes, threads },
       };
     },
 
@@ -589,7 +602,7 @@ function normalizeMailThread(
     from: parseMailAddress(gmailHeader(last, "from")),
     mailboxIds: [...new Set(thread.messages.flatMap((message) => message.labelIds))],
     messages: thread.messages.map((message) => ({
-      attachments: gmailAttachments(message.payload),
+      attachments: projectGmailAttachments(message.payload),
       bodyText: gmailBody(message.payload).trim(),
       cc: splitAddresses(gmailHeader(message, "cc")),
       from: parseMailAddress(gmailHeader(message, "from")),
@@ -617,47 +630,81 @@ function normalizedGmailDate(value: string | undefined): Date {
   return Number.isNaN(date.getTime()) ? new Date(0) : date;
 }
 
-/* v8 ignore start -- attachment metadata is projected verbatim; download bytes stay provider-owned */
-function gmailAttachments(part: z.infer<typeof gmailPartSchema>) {
-  const contentType = part.mimeType.toLowerCase().split(";")[0]?.trim() ?? "";
-  const providerPartId = part.partId || "root";
-  const includePart =
-    part.filename.length > 0 ||
-    contentType === "application/ics" ||
-    contentType === "text/calendar" ||
-    contentType === "text/x-vcalendar";
-  const attachments = includePart
-    ? [
-        {
-          contentType: part.mimeType || "application/octet-stream",
-          filename: part.filename,
-          id: part.body.attachmentId ?? `part:${providerPartId}`,
-          providerAttachmentId: part.body.attachmentId ?? null,
-          providerPartId,
-          size: part.body.size ?? 0,
-        },
-      ]
-    : [];
-  for (const child of part.parts) {
-    const parsed = gmailPartSchema.safeParse(child);
-    if (parsed.success) attachments.push(...gmailAttachments(parsed.data));
+export function projectGmailAttachments(part: z.infer<typeof gmailPartSchema>) {
+  const attachments = [];
+  const pending: Array<{ depth: number; part: z.infer<typeof gmailPartSchema> }> = [
+    { depth: 0, part },
+  ];
+  let calendarParts = 0;
+  let visitedParts = 0;
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (!current) break;
+    visitedParts += 1;
+    if (
+      current.depth > MAX_MAIL_MIME_DEPTH ||
+      visitedParts > MAX_MAIL_MIME_PARTS_PER_MESSAGE ||
+      current.part.parts.length + pending.length + visitedParts > MAX_MAIL_MIME_PARTS_PER_MESSAGE
+    ) {
+      return [calendarAttachmentProjectionOverflow("part:projection-overflow")];
+    }
+    const providerPartId = current.part.partId || "root";
+    if (
+      !mailAttachmentMetadataIsBounded(
+        current.part.mimeType,
+        current.part.filename,
+        providerPartId,
+        current.part.body.attachmentId,
+      )
+    ) {
+      return [calendarAttachmentProjectionOverflow("part:projection-overflow")];
+    }
+    const calendarPart = isCalendarMimeType(current.part.mimeType);
+    if (calendarPart && ++calendarParts > MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE) {
+      return [calendarAttachmentProjectionOverflow("part:projection-overflow")];
+    }
+    if (current.part.filename.length > 0 || calendarPart) {
+      attachments.push({
+        contentType: current.part.mimeType || "application/octet-stream",
+        filename: current.part.filename,
+        id: current.part.body.attachmentId ?? `part:${providerPartId}`,
+        providerAttachmentId: current.part.body.attachmentId ?? null,
+        providerPartId,
+        size: current.part.body.size ?? 0,
+      });
+    }
+    for (let index = current.part.parts.length - 1; index >= 0; index -= 1) {
+      const parsed = gmailPartSchema.safeParse(current.part.parts[index]);
+      if (parsed.success) pending.push({ depth: current.depth + 1, part: parsed.data });
+    }
   }
   return attachments;
 }
-/* v8 ignore stop */
 
 function gmailHeader(message: z.infer<typeof gmailMessageSchema>, name: string): string {
   return message.payload.headers.find((header) => header.name.toLowerCase() === name)?.value ?? "";
 }
 
-function gmailBody(part: z.infer<typeof gmailPartSchema>): string {
+function gmailBody(
+  part: z.infer<typeof gmailPartSchema>,
+  state = { visitedParts: 0 },
+  depth = 0,
+): string {
+  state.visitedParts += 1;
+  if (
+    depth > MAX_MAIL_MIME_DEPTH ||
+    state.visitedParts > MAX_MAIL_MIME_PARTS_PER_MESSAGE ||
+    part.parts.length + state.visitedParts > MAX_MAIL_MIME_PARTS_PER_MESSAGE
+  ) {
+    return "";
+  }
   if (part.mimeType === "text/plain" && part.body.data) {
     return Buffer.from(part.body.data, "base64url").toString("utf8");
   }
   for (const child of part.parts) {
     const parsed = gmailPartSchema.safeParse(child);
     if (!parsed.success) continue;
-    const value = gmailBody(parsed.data);
+    const value = gmailBody(parsed.data, state, depth + 1);
     if (value) return value;
   }
   return part.body.data ? Buffer.from(part.body.data, "base64url").toString("utf8") : "";

@@ -142,6 +142,21 @@ requireMatch(
   /current_scaling_suspension[\s\S]*?api_original_suspended_state="\$api_scaling_suspension"[\s\S]*?--suspended-state "\$api_original_suspended_state"[\s\S]*?current_scaling_suspension/,
   "exact scalable-target suspension capture, restore, and verification",
 );
+requireMatch(
+  workflow,
+  /task_definition_has_shutdown_contract[\s\S]*?stopTimeout == 120[\s\S]*?API_SHUTDOWN_TIMEOUT_MS[\s\S]*?105000[\s\S]*?api_gate_running_arns[\s\S]*?imageDigest[\s\S]*?unique \| length\) == 1[\s\S]*?\.taskDefinitionArn == \$definition[\s\S]*?\.image == \$image[\s\S]*?\/health\/ready[\s\S]*?quiesce-v1/,
+  "a pre-mutation exact-task and live-readiness lifecycle bootstrap gate",
+);
+requireMatch(
+  workflowSource,
+  /ILO_DEPLOYMENT_RESTORE_STATE[\s\S]*?ILO_DEPLOYMENT_RECOVERY_MARKER[\s\S]*?api_is_emergency[\s\S]*?failedTaskDefinitionArn[\s\S]*?postDrainTaskDefinitionArns[\s\S]*?recoveryAuthorized = true[\s\S]*?api_candidate_recovery_marker[\s\S]*?register_task \\\n {12}"\$MCP_SERVICE"[\s\S]*?register_task \\\n {12}"\$API_SERVICE"/,
+  "explicit marker-gated bounded recovery-intent inheritance",
+);
+requireMatch(
+  workflow,
+  /persist_failed_rollout_marker[\s\S]*?ILO_DEPLOYMENT_RECOVERY_MARKER[\s\S]*?register-task-definition[\s\S]*?clear_successful_recovery_marker[\s\S]*?ILO_DEPLOYMENT_RECOVERY_MARKER[\s\S]*?api_recovery_authorized[\s\S]*?api_recovery_entry=true[\s\S]*?postDrainDefinitions[\s\S]*?index\(\$definition\)[\s\S]*?api_original_suspended_state="\$api_restore_suspended_state"[\s\S]*?--task-definition "\$API_TASK_DEFINITION"[\s\S]*?--desired-count 1[\s\S]*?clear_successful_recovery_marker/,
+  "explicit zero/all-suspended retry recovery to persisted desired and scaling intent",
+);
 
 requireOrder(
   '--deployment-configuration "$api_breaker_disabled_configuration"',

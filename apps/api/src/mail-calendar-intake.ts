@@ -6,7 +6,11 @@ import {
   mailMessages,
   type mailThreads,
 } from "@personal-os/database";
-import type { MailAttachment } from "@personal-os/domain";
+import {
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  type MailAttachment,
+} from "@personal-os/domain";
 import { and, eq, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
@@ -36,8 +40,23 @@ function changedFieldNames(
 }
 
 export function isCalendarCommitmentAttachment(attachment: MailAttachment): boolean {
+  if (attachment.projectionIssue === "calendar_attachment_projection_overflow") return true;
   const [contentType = ""] = attachment.contentType.toLowerCase().split(";");
   return CALENDAR_ATTACHMENT_TYPES.has(contentType.trim());
+}
+
+export function calendarCommitmentAttachmentCandidates(
+  attachments: readonly MailAttachment[],
+  overflowPartId = "part:projection-overflow",
+): MailAttachment[] {
+  const projectedOverflow = attachments.find(
+    (attachment) => attachment.projectionIssue === "calendar_attachment_projection_overflow",
+  );
+  if (projectedOverflow) return [calendarAttachmentProjectionOverflow(overflowPartId)];
+  const candidates = attachments.filter(isCalendarCommitmentAttachment);
+  return candidates.length > MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE
+    ? [calendarAttachmentProjectionOverflow(overflowPartId)]
+    : candidates;
 }
 
 export function mailCommitmentSourceFingerprint(
@@ -154,7 +173,12 @@ export async function recordMailCalendarCommitmentIntakes(
   const existingByPart = new Map(existingRows.map((intake) => [intake.remotePartId, intake]));
   const observedParts = new Set<string>();
   let recorded = 0;
-  for (const attachment of input.message.attachments.filter(isCalendarCommitmentAttachment)) {
+  for (const attachment of calendarCommitmentAttachmentCandidates(
+    input.message.attachments,
+    `projection-overflow:${createHash("sha256")
+      .update(input.message.remoteMessageId)
+      .digest("hex")}`,
+  )) {
     const remotePartId = attachment.providerPartId ?? attachment.id;
     observedParts.add(remotePartId);
     const attachmentFingerprint = fingerprint({
@@ -177,6 +201,8 @@ export async function recordMailCalendarCommitmentIntakes(
         existing.sourceFingerprint !== sourceFingerprint ||
         existing.attachmentFingerprint !== attachmentFingerprint ||
         existing.providerAccountAddressHintHash !== providerAccountAddressHintHash);
+    const projectionOverflow =
+      attachment.projectionIssue === "calendar_attachment_projection_overflow";
     const values = {
       accountId: input.accountId,
       attachment,
@@ -187,7 +213,11 @@ export async function recordMailCalendarCommitmentIntakes(
           ? existing.authority
           : ("provider_projected_unverified" as const),
       evidenceKind:
-        existing && !sourceChanged ? existing.evidenceKind : "calendar_attachment_metadata",
+        existing && !sourceChanged
+          ? existing.evidenceKind
+          : projectionOverflow
+            ? "calendar_attachment_projection_overflow"
+            : "calendar_attachment_metadata",
       idempotencyKey,
       remoteMessageId: input.message.remoteMessageId,
       remotePartId,

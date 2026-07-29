@@ -129,7 +129,9 @@ describe("database schema contracts", () => {
     expect(uidValidityMigrationSql).toContain(
       'ALTER TABLE "mailboxes" ADD COLUMN "provider_revision" text',
     );
-    expect(uidValidityMigrationSql).toContain('DELETE FROM "mail_threads" AS "thread"');
+    expect(uidValidityMigrationSql).toContain('UPDATE "mail_threads" AS "thread"');
+    expect(uidValidityMigrationSql).toContain('"deleted_at" = CURRENT_TIMESTAMP');
+    expect(uidValidityMigrationSql).not.toContain('DELETE FROM "mail_threads" AS "thread"');
     expect(authorityStatusSql).toContain(`"authority" <> 'provider_projected_unverified'`);
     expect(renameMigrationSql).toContain("\"authority\" <> 'provider_projected_unverified'");
     expect(migrationSql).toContain('"provider_mailbox_ids" jsonb');

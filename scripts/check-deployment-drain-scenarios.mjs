@@ -30,6 +30,29 @@ function fakeAws(args) {
   const [service, operation] = args;
   logCall(state, args);
 
+  if (service === "ecs" && operation === "describe-task-definition") {
+    const taskDefinition = argument(args, "--task-definition");
+    const definition = state.taskDefinitions[taskDefinition];
+    writeState(statePath, state);
+    if (!definition) throw new Error(`Missing fake task definition ${taskDefinition}.`);
+    process.stdout.write(JSON.stringify(definition));
+    return;
+  }
+
+  if (service === "ecs" && operation === "register-task-definition") {
+    const input = argument(args, "--cli-input-json");
+    if (!input?.startsWith("file://")) throw new Error("Expected file task definition input.");
+    const definition = JSON.parse(readFileSync(input.slice("file://".length), "utf8"));
+    state.registerTaskDefinitionCalls += 1;
+    const taskDefinitionArn = `recovery-marker-definition-${state.registerTaskDefinitionCalls}`;
+    const registered = { ...definition, taskDefinitionArn };
+    state.taskDefinitions[taskDefinitionArn] = registered;
+    state.latestTaskDefinition = taskDefinitionArn;
+    writeState(statePath, state);
+    process.stdout.write(JSON.stringify(registered));
+    return;
+  }
+
   if (service === "application-autoscaling" && operation === "describe-scalable-targets") {
     state.describeScalingCalls += 1;
     writeState(statePath, state);
@@ -98,19 +121,25 @@ function fakeAws(args) {
     const tasks = taskArns.map((taskArn) => {
       const task = state.tasks[taskArn];
       if (!task) throw new Error(`Missing fake task ${taskArn}.`);
+      const isRunning = state.desiredCount > 0 && state.runningInventory.includes(taskArn);
+      const taskDefinitionArn = task.taskDefinitionArn ?? "old-task-definition";
       return {
         containers: [
           {
-            exitCode: task.exitCode,
-            lastStatus: task.lastStatus,
+            exitCode: isRunning ? undefined : task.exitCode,
+            image:
+              task.image ?? state.taskDefinitions[taskDefinitionArn].containerDefinitions[0].image,
+            imageDigest: task.imageDigest ?? "sha256:api-stable",
+            lastStatus: isRunning ? "RUNNING" : task.lastStatus,
             name: "api",
             reason: task.reason ?? "",
           },
         ],
-        lastStatus: task.lastStatus,
-        stoppedAt: task.stoppedAt,
+        lastStatus: isRunning ? "RUNNING" : task.lastStatus,
+        stoppedAt: isRunning ? undefined : task.stoppedAt,
         stoppedReason: task.stoppedReason ?? "",
         taskArn,
+        taskDefinitionArn,
       };
     });
     writeState(statePath, state);
@@ -194,7 +223,12 @@ function fakeAws(args) {
       }
     }
     const taskDefinition = argument(args, "--task-definition");
-    if (taskDefinition) state.primaryTaskDefinition = taskDefinition;
+    if (taskDefinition) {
+      state.primaryTaskDefinition = taskDefinition;
+      for (const taskArn of state.runningInventory) {
+        state.tasks[taskArn].taskDefinitionArn = taskDefinition;
+      }
+    }
     writeState(statePath, state);
     return;
   }
@@ -224,8 +258,21 @@ function fakeAws(args) {
   throw new Error(`Unhandled fake AWS call: ${args.join(" ")}`);
 }
 
+function fakeCurl(args) {
+  const statePath = process.env.FAKE_AWS_STATE;
+  if (!statePath) throw new Error("FAKE_AWS_STATE is required.");
+  const state = readState(statePath);
+  logCall(state, ["curl", ...args]);
+  writeState(statePath, state);
+  process.stdout.write(
+    `HTTP/1.1 200 OK\r\nX-Ilo-Drain-Protocol: ${state.drainProtocol ?? "quiesce-v1"}\r\n\r\n`,
+  );
+}
+
 if (process.argv[2] === "--fake-aws") {
   fakeAws(process.argv.slice(3));
+} else if (process.argv[2] === "--fake-curl") {
+  fakeCurl(process.argv.slice(3));
 } else {
   const allSuspended = {
     DynamicScalingInSuspended: true,
@@ -248,7 +295,27 @@ if (process.argv[2] === "--fake-aws") {
       exitCode: 0,
       lastStatus: "STOPPED",
       stoppedAt: "2026-07-29T12:00:01+00:00",
+      taskDefinitionArn: "old-task-definition",
     };
+    const restoreState = JSON.stringify({
+      desiredCount: 1,
+      postDrainTaskDefinitionArns: [],
+      recoveryAuthorized: false,
+      suspendedState: originalSuspension,
+    });
+    const readyDefinition = (image, restore = restoreState) => ({
+      containerDefinitions: [
+        {
+          environment: [
+            { name: "API_SHUTDOWN_TIMEOUT_MS", value: "105000" },
+            { name: "ILO_DEPLOYMENT_RESTORE_STATE", value: restore },
+          ],
+          image,
+          name: "api",
+          stopTimeout: 120,
+        },
+      ],
+    });
     return {
       breaker: { enable: true, rollback: true },
       calls: [],
@@ -258,11 +325,13 @@ if (process.argv[2] === "--fake-aws") {
       denyRegister: false,
       describeScalingCalls: 0,
       desiredCount: 1,
+      drainProtocol: "quiesce-v1",
       failDescribeScalingAt: undefined,
       failFirstServiceWait: false,
       failPostLaunchRead: false,
       pendingCount: 0,
       primaryTaskDefinition: "old-task-definition",
+      registerTaskDefinitionCalls: 0,
       runningCount: 1,
       runningInventory: ["task-old"],
       serviceWaitCalls: 0,
@@ -274,37 +343,56 @@ if (process.argv[2] === "--fake-aws") {
       stoppedListCalls: 0,
       stoppedTaskUpdates: {},
       suspension: originalSuspension,
-      tasks: { "task-historical": historical, "task-old": oldTask },
+      taskDefinitions: {
+        "new-task-definition": readyDefinition("api:new"),
+        "old-task-definition": readyDefinition("api:old"),
+      },
+      tasks: {
+        "task-historical": { ...historical, taskDefinitionArn: "old-task-definition" },
+        "task-old": oldTask,
+      },
       zeroCalls: 0,
       ...overrides,
     };
   }
 
-  function runScenario(name, state) {
-    const directory = mkdtempSync(resolve(tmpdir(), `ilo-drain-${name}-`));
+  function runScenarioInDirectory(directory, state, initialize = true) {
     const statePath = resolve(directory, "state.json");
     const bin = resolve(directory, "bin");
-    mkdirSync(bin);
-    writeState(statePath, state);
-    writeFileSync(
-      resolve(bin, "aws"),
-      `#!/bin/sh\nexec "${process.execPath}" "${import.meta.filename}" --fake-aws "$@"\n`,
-      { mode: 0o755 },
-    );
-    writeFileSync(resolve(bin, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    if (initialize) {
+      mkdirSync(bin);
+      writeState(statePath, state);
+      writeFileSync(
+        resolve(bin, "aws"),
+        `#!/bin/sh\nexec "${process.execPath}" "${import.meta.filename}" --fake-aws "$@"\n`,
+        { mode: 0o755 },
+      );
+      writeFileSync(
+        resolve(bin, "curl"),
+        `#!/bin/sh\nexec "${process.execPath}" "${import.meta.filename}" --fake-curl "$@"\n`,
+        { mode: 0o755 },
+      );
+      writeFileSync(resolve(bin, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    }
+    const result = spawnSync("bash", [deployScript], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        API_SERVICE: "ilo-api",
+        API_TASK_DEFINITION: state.apiTaskDefinition ?? "new-task-definition",
+        API_URL: "https://api.example.com",
+        ECS_CLUSTER: "ilo-production",
+        FAKE_AWS_STATE: statePath,
+        PATH: `${bin}${delimiter}${process.env.PATH}`,
+      },
+    });
+    return { completedAt: Date.now(), result, state: readState(statePath) };
+  }
+
+  function runScenario(name, state) {
+    const directory = mkdtempSync(resolve(tmpdir(), `ilo-drain-${name}-`));
     try {
-      const result = spawnSync("bash", [deployScript], {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          API_SERVICE: "ilo-api",
-          API_TASK_DEFINITION: "new-task-definition",
-          ECS_CLUSTER: "ilo-production",
-          FAKE_AWS_STATE: statePath,
-          PATH: `${bin}${delimiter}${process.env.PATH}`,
-        },
-      });
-      return { completedAt: Date.now(), result, state: readState(statePath) };
+      return runScenarioInDirectory(directory, state);
     } finally {
       rmSync(directory, { force: true, recursive: true });
     }
@@ -312,6 +400,24 @@ if (process.argv[2] === "--fake-aws") {
 
   function assert(condition, message) {
     if (!condition) throw new Error(message);
+  }
+
+  function setRestoreState(state, taskDefinition, restoreState) {
+    const environment = state.taskDefinitions[taskDefinition].containerDefinitions[0].environment;
+    const restoreEntry = environment.find((entry) => entry.name === "ILO_DEPLOYMENT_RESTORE_STATE");
+    if (!restoreEntry) throw new Error(`Missing restore entry for ${taskDefinition}.`);
+    restoreEntry.value = JSON.stringify(restoreState);
+  }
+
+  function setRecoveryMarker(state, taskDefinition, failedTaskDefinitionArn) {
+    const environment = state.taskDefinitions[taskDefinition].containerDefinitions[0].environment;
+    state.taskDefinitions[taskDefinition].containerDefinitions[0].environment = [
+      ...environment.filter((entry) => entry.name !== "ILO_DEPLOYMENT_RECOVERY_MARKER"),
+      {
+        name: "ILO_DEPLOYMENT_RECOVERY_MARKER",
+        value: JSON.stringify({ version: 1, failedTaskDefinitionArn }),
+      },
+    ];
   }
 
   const denied = runScenario("register-denied", baseState({ denyRegister: true }));
@@ -328,7 +434,7 @@ if (process.argv[2] === "--fake-aws") {
 
   const unverifiedRestoration = runScenario(
     "restoration-read-failed",
-    baseState({ failDescribeScalingAt: 3, failFirstServiceWait: true }),
+    baseState({ failDescribeScalingAt: 4, failFirstServiceWait: true }),
   );
   assert(unverifiedRestoration.result.status !== 0, "A pre-drain wait failure must fail.");
   assert(
@@ -538,6 +644,403 @@ if (process.argv[2] === "--fake-aws") {
   assert(
     success.state.primaryTaskDefinition === "new-task-definition",
     "Success must launch the exact new task definition.",
+  );
+  const successfulReadiness = success.state.calls.findIndex((call) => call.startsWith("curl "));
+  const successfulSuspension = success.state.calls.findIndex((call) =>
+    call.startsWith("application-autoscaling register-scalable-target"),
+  );
+  const successfulDrain = success.state.calls.findIndex(
+    (call) => call.startsWith("ecs update-service") && call.includes("--desired-count 0"),
+  );
+  const successfulMigrationLaunch = success.state.calls.findIndex(
+    (call) =>
+      call.startsWith("ecs update-service") &&
+      call.includes("--task-definition new-task-definition"),
+  );
+  assert(
+    successfulReadiness >= 0 &&
+      successfulReadiness < successfulSuspension &&
+      successfulSuspension < successfulDrain &&
+      successfulDrain < successfulMigrationLaunch,
+    "The proven live quiesce prerequisite must precede suspension, exact drain, and migration startup.",
+  );
+
+  const retryDirectory = mkdtempSync(resolve(tmpdir(), "ilo-drain-retry-"));
+  try {
+    const firstAttempt = runScenarioInDirectory(
+      retryDirectory,
+      baseState({ failPostLaunchRead: true }),
+    );
+    assert(firstAttempt.result.status !== 0, "The first retry scenario run must fail post-drain.");
+    assert(
+      firstAttempt.state.desiredCount === 0 &&
+        JSON.stringify(firstAttempt.state.suspension) === JSON.stringify(allSuspended) &&
+        firstAttempt.state.breaker.rollback === false,
+      "A post-launch failure must persist the recognizable fail-closed emergency posture.",
+    );
+    const persistedMarkerDefinition =
+      firstAttempt.state.taskDefinitions[firstAttempt.state.latestTaskDefinition];
+    const persistedMarker = persistedMarkerDefinition.containerDefinitions[0].environment.find(
+      (entry) => entry.name === "ILO_DEPLOYMENT_RECOVERY_MARKER",
+    );
+    assert(
+      JSON.parse(persistedMarker?.value ?? "{}").failedTaskDefinitionArn === "new-task-definition",
+      "Handled post-drain failure must persist a marker tied to the failed release.",
+    );
+    const retryState = {
+      ...firstAttempt.state,
+      apiTaskDefinition: "retry-task-definition",
+      calls: [],
+      failPostLaunchRead: false,
+      runningInventory: [],
+      stoppedInventories: Array.from({ length: 20 }, () => ["task-historical", "task-old"]),
+      stoppedListCalls: 0,
+    };
+    retryState.taskDefinitions["abandoned-retry-definition"] =
+      structuredClone(persistedMarkerDefinition);
+    setRestoreState(retryState, "abandoned-retry-definition", {
+      desiredCount: 1,
+      postDrainTaskDefinitionArns: ["new-task-definition"],
+      recoveryAuthorized: true,
+      suspendedState: originalSuspension,
+    });
+    retryState.latestTaskDefinition = "abandoned-retry-definition";
+    assert(
+      retryState.taskDefinitions[
+        "abandoned-retry-definition"
+      ].containerDefinitions[0].environment.some(
+        (entry) => entry.name === "ILO_DEPLOYMENT_RECOVERY_MARKER",
+      ),
+      "A recovery candidate registered before a pre-script failure must retain its marker.",
+    );
+    retryState.taskDefinitions["retry-task-definition"] = structuredClone(
+      retryState.taskDefinitions["abandoned-retry-definition"],
+    );
+    setRestoreState(retryState, "retry-task-definition", {
+      desiredCount: 1,
+      postDrainTaskDefinitionArns: ["new-task-definition"],
+      recoveryAuthorized: true,
+      suspendedState: originalSuspension,
+    });
+    writeState(resolve(retryDirectory, "state.json"), retryState);
+    const secondAttempt = runScenarioInDirectory(retryDirectory, retryState, false);
+    assert(
+      secondAttempt.result.status === 0,
+      `A second run must recover from fail-closed state (${secondAttempt.result.stderr}).`,
+    );
+    assert(
+      secondAttempt.state.desiredCount === 1 &&
+        JSON.stringify(secondAttempt.state.suspension) === JSON.stringify(originalSuspension) &&
+        secondAttempt.state.breaker.rollback === true &&
+        secondAttempt.state.primaryTaskDefinition === "retry-task-definition",
+      "Successful retry must restore the persisted desired count, exact suspension intent, and rollback configuration.",
+    );
+    const clearedLatest =
+      secondAttempt.state.taskDefinitions[secondAttempt.state.latestTaskDefinition];
+    assert(
+      !clearedLatest.containerDefinitions[0].environment.some(
+        (entry) => entry.name === "ILO_DEPLOYMENT_RECOVERY_MARKER",
+      ),
+      "Successful retry must publish a marker-cleared latest task-definition revision.",
+    );
+  } finally {
+    rmSync(retryDirectory, { force: true, recursive: true });
+  }
+
+  const intentionalStop = runScenario(
+    "intentional-zero-suspended",
+    baseState({
+      desiredCount: 0,
+      runningCount: 0,
+      runningInventory: [],
+      suspension: allSuspended,
+    }),
+  );
+  assert(
+    intentionalStop.result.status !== 0 &&
+      intentionalStop.state.desiredCount === 0 &&
+      intentionalStop.state.registerTaskDefinitionCalls === 0 &&
+      !intentionalStop.state.calls.some(
+        (call) =>
+          call.startsWith("ecs update-service") &&
+          call.includes("--task-definition new-task-definition"),
+      ),
+    "Intentional zero/all-suspended posture with stale normal metadata must not restart.",
+  );
+
+  const scaleRecoveryState = baseState({
+    breaker: { enable: true, rollback: false },
+    desiredCount: 0,
+    runningCount: 0,
+    runningInventory: [],
+    suspension: allSuspended,
+  });
+  setRestoreState(scaleRecoveryState, "new-task-definition", {
+    desiredCount: 2,
+    postDrainTaskDefinitionArns: ["failed-migration-definition"],
+    recoveryAuthorized: true,
+    suspendedState: originalSuspension,
+  });
+  setRecoveryMarker(scaleRecoveryState, "new-task-definition", "failed-migration-definition");
+  const scaleRecovery = runScenario("recover-scale-two", scaleRecoveryState);
+  assert(scaleRecovery.result.status === 0, "A desired-count-two recovery must succeed.");
+  const migrationLaunchCalls = scaleRecovery.state.calls.filter(
+    (call) =>
+      call.startsWith("ecs update-service") &&
+      call.includes("--task-definition new-task-definition"),
+  );
+  assert(
+    migrationLaunchCalls.length === 1 && migrationLaunchCalls[0].includes("--desired-count 1"),
+    "Recovery must launch exactly one migration-capable API task.",
+  );
+  const restoreScaleCall = scaleRecovery.state.calls.findIndex(
+    (call) =>
+      call.startsWith("ecs update-service") &&
+      call.includes("--desired-count 2") &&
+      !call.includes("--task-definition"),
+  );
+  const rollbackRestoreCall = scaleRecovery.state.calls.findIndex(
+    (call) =>
+      call.startsWith("ecs update-service") &&
+      call.includes("deploymentCircuitBreaker") &&
+      call.includes('"rollback":true'),
+  );
+  assert(
+    rollbackRestoreCall >= 0 &&
+      restoreScaleCall > rollbackRestoreCall &&
+      scaleRecovery.state.desiredCount === 2,
+    "Persisted capacity must be restored only after serial migration health and rollback restoration.",
+  );
+
+  const failedMigrationRecovery = baseState({
+    apiTaskDefinition: "retry-task-definition",
+    breaker: { enable: true, rollback: false },
+    desiredCount: 0,
+    primaryTaskDefinition: "failed-migration-definition",
+    runningCount: 0,
+    runningInventory: [],
+    suspension: allSuspended,
+  });
+  failedMigrationRecovery.taskDefinitions["failed-migration-definition"] = structuredClone(
+    failedMigrationRecovery.taskDefinitions["old-task-definition"],
+  );
+  failedMigrationRecovery.taskDefinitions["retry-task-definition"] = structuredClone(
+    failedMigrationRecovery.taskDefinitions["new-task-definition"],
+  );
+  setRestoreState(failedMigrationRecovery, "retry-task-definition", {
+    desiredCount: 1,
+    postDrainTaskDefinitionArns: ["failed-migration-definition"],
+    recoveryAuthorized: true,
+    suspendedState: originalSuspension,
+  });
+  setRecoveryMarker(
+    failedMigrationRecovery,
+    "retry-task-definition",
+    "failed-migration-definition",
+  );
+  failedMigrationRecovery.tasks["task-failed-migration"] = {
+    exitCode: 137,
+    lastStatus: "STOPPED",
+    reason: "SIGKILL",
+    stoppedAt: "2026-07-29T12:02:00+00:00",
+    stoppedReason: "Timeout waiting for container",
+    taskDefinitionArn: "failed-migration-definition",
+  };
+  failedMigrationRecovery.stoppedInventories = Array.from({ length: 20 }, () => [
+    "task-historical",
+    "task-old",
+    "task-failed-migration",
+  ]);
+  const failedMigrationRetry = runScenario("failed-migration-retry", failedMigrationRecovery);
+  assert(
+    failedMigrationRetry.result.status === 0,
+    "A recorded failed migration task must not poison old-binary exit proof on retry.",
+  );
+  assert(
+    failedMigrationRetry.state.primaryTaskDefinition === "retry-task-definition",
+    "Recovery must launch the exact retry task definition after excluding recorded failed rollout evidence.",
+  );
+  const unlistedFailedMigration = structuredClone(failedMigrationRecovery);
+  setRestoreState(unlistedFailedMigration, "retry-task-definition", {
+    desiredCount: 1,
+    postDrainTaskDefinitionArns: ["different-failed-definition"],
+    recoveryAuthorized: true,
+    suspendedState: originalSuspension,
+  });
+  setRecoveryMarker(
+    unlistedFailedMigration,
+    "retry-task-definition",
+    "different-failed-definition",
+  );
+  const unlistedFailedRetry = runScenario("unlisted-failed-migration", unlistedFailedMigration);
+  assert(
+    unlistedFailedRetry.result.status !== 0 &&
+      !unlistedFailedRetry.state.calls.some(
+        (call) =>
+          call.startsWith("ecs update-service") &&
+          call.includes("--task-definition retry-task-definition"),
+      ),
+    "An unlisted nonzero task must remain in old-task exit proof and block retry startup.",
+  );
+
+  const repeatedRecovery = baseState({
+    apiTaskDefinition: "retry-v3",
+    breaker: { enable: true, rollback: false },
+    desiredCount: 0,
+    primaryTaskDefinition: "failed-v2",
+    runningCount: 0,
+    runningInventory: [],
+    suspension: allSuspended,
+  });
+  for (const definition of ["failed-v1", "failed-v2", "retry-v3"]) {
+    repeatedRecovery.taskDefinitions[definition] = structuredClone(
+      repeatedRecovery.taskDefinitions["new-task-definition"],
+    );
+  }
+  setRestoreState(repeatedRecovery, "retry-v3", {
+    desiredCount: 1,
+    postDrainTaskDefinitionArns: ["failed-v1", "failed-v2"],
+    recoveryAuthorized: true,
+    suspendedState: originalSuspension,
+  });
+  setRecoveryMarker(repeatedRecovery, "retry-v3", "failed-v2");
+  for (const [index, definition] of ["failed-v1", "failed-v2"].entries()) {
+    repeatedRecovery.tasks[`task-${definition}`] = {
+      exitCode: 137,
+      lastStatus: "STOPPED",
+      reason: "SIGKILL",
+      stoppedAt: `2026-07-29T12:0${index + 2}:00+00:00`,
+      stoppedReason: "Timeout waiting for container",
+      taskDefinitionArn: definition,
+    };
+  }
+  repeatedRecovery.stoppedInventories = Array.from({ length: 20 }, () => [
+    "task-historical",
+    "task-old",
+    "task-failed-v1",
+    "task-failed-v2",
+  ]);
+  const repeatedRetry = runScenario("repeated-failed-migration-retry", repeatedRecovery);
+  assert(
+    repeatedRetry.result.status === 0 && repeatedRetry.state.primaryTaskDefinition === "retry-v3",
+    "Repeated recovery must honor the bounded accumulated failed-task-definition set.",
+  );
+
+  const legacyDefinition = {
+    containerDefinitions: [
+      {
+        environment: [],
+        image: "api:legacy",
+        name: "api",
+        stopTimeout: 30,
+      },
+    ],
+  };
+  const legacy = runScenario(
+    "legacy-primary",
+    baseState({
+      taskDefinitions: {
+        "new-task-definition": baseState().taskDefinitions["new-task-definition"],
+        "old-task-definition": legacyDefinition,
+      },
+    }),
+  );
+  assert(legacy.result.status !== 0, "A legacy primary must fail the rollout readiness gate.");
+  assert(
+    legacy.state.zeroCalls === 0 &&
+      !legacy.state.calls.some((call) =>
+        call.startsWith("application-autoscaling register-scalable-target"),
+      ),
+    "The lifecycle bootstrap gate must fail before scaling suspension or service drain.",
+  );
+  assert(
+    legacy.result.stdout.includes("prerequisite 120-second/105-second shutdown rollout"),
+    "The lifecycle bootstrap failure must name the required shutdown prerequisite rollout.",
+  );
+
+  for (const [name, mutate] of [
+    [
+      "missing-shutdown-timeout",
+      (environment) => environment.filter((entry) => entry.name !== "API_SHUTDOWN_TIMEOUT_MS"),
+    ],
+    [
+      "wrong-shutdown-timeout",
+      (environment) =>
+        environment.map((entry) =>
+          entry.name === "API_SHUTDOWN_TIMEOUT_MS" ? { ...entry, value: "104999" } : entry,
+        ),
+    ],
+    [
+      "duplicate-shutdown-timeout",
+      (environment) => [...environment, { name: "API_SHUTDOWN_TIMEOUT_MS", value: "105000" }],
+    ],
+  ]) {
+    const invalidShutdown = baseState();
+    invalidShutdown.taskDefinitions["old-task-definition"].containerDefinitions[0].environment =
+      mutate(
+        invalidShutdown.taskDefinitions["old-task-definition"].containerDefinitions[0].environment,
+      );
+    const invalidShutdownResult = runScenario(name, invalidShutdown);
+    assert(
+      invalidShutdownResult.result.status !== 0 &&
+        invalidShutdownResult.state.zeroCalls === 0 &&
+        !invalidShutdownResult.state.calls.some((call) =>
+          call.startsWith("application-autoscaling register-scalable-target"),
+        ),
+      `${name} must fail the exact shutdown contract before rollout mutation.`,
+    );
+  }
+
+  const mixedDigestState = baseState({
+    desiredCount: 2,
+    runningCount: 2,
+    runningInventory: ["task-old", "task-old-second"],
+  });
+  setRestoreState(mixedDigestState, "new-task-definition", {
+    desiredCount: 2,
+    postDrainTaskDefinitionArns: [],
+    recoveryAuthorized: false,
+    suspendedState: originalSuspension,
+  });
+  mixedDigestState.tasks["task-old"].imageDigest = "sha256:first";
+  mixedDigestState.tasks["task-old-second"] = {
+    imageDigest: "sha256:second",
+    lastStatus: "STOPPED",
+    taskDefinitionArn: "old-task-definition",
+  };
+  const mixedDigest = runScenario("mixed-image-digests", mixedDigestState);
+  assert(mixedDigest.result.status !== 0, "Mixed live image digests must fail.");
+  assert(
+    mixedDigest.state.zeroCalls === 0 &&
+      !mixedDigest.state.calls.some((call) =>
+        call.startsWith("application-autoscaling register-scalable-target"),
+      ),
+    "Same-tag tasks with mixed image digests must fail before scaling mutation.",
+  );
+  const emptyDigestState = baseState();
+  emptyDigestState.tasks["task-old"].imageDigest = "";
+  const emptyDigest = runScenario("empty-image-digest", emptyDigestState);
+  assert(
+    emptyDigest.result.status !== 0 && emptyDigest.state.zeroCalls === 0,
+    "An empty live API image digest must fail before service drain.",
+  );
+
+  const unready = runScenario("missing-quiesce-readiness", baseState({ drainProtocol: "legacy" }));
+  assert(unready.result.status !== 0, "Missing quiesce-v1 readiness evidence must fail.");
+  assert(
+    unready.state.zeroCalls === 0 &&
+      !unready.state.calls.some((call) =>
+        call.startsWith("application-autoscaling register-scalable-target"),
+      ),
+    "Readiness protocol proof must complete before scaling suspension or service drain.",
+  );
+  const readinessCall = unready.state.calls.findIndex((call) => call.startsWith("curl "));
+  const firstMutation = unready.state.calls.findIndex((call) =>
+    call.startsWith("application-autoscaling register-scalable-target"),
+  );
+  assert(
+    readinessCall >= 0 && firstMutation === -1,
+    "The exact readiness endpoint must be observed before any rollout mutation.",
   );
 
   const overflowState = baseState({

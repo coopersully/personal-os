@@ -145,8 +145,22 @@ docker build --target mcp -t personal-os-mcp .
 ```
 
 Run only one migration-capable API instance during a breaking schema rollout.
-The production workflow first scales the API service to zero and waits for the
-old task to stop before starting the new migration-capable task. It suspends ECS
+The stop-and-drain workflow is not itself the bootstrap for this contract. A
+prior non-migrating rollout must already have placed every live API task on a
+task definition with a 120-second essential-container stop timeout and a binary
+whose readiness response carries the hard-coded
+`X-Ilo-Drain-Protocol: quiesce-v1` header. Before any scaling mutation,
+deployment describes the exact primary task definition and every running task
+and proves that their task definition and image agree, every API container has
+the same nonempty immutable image digest, and the task definition contains
+exactly one `API_SHUTDOWN_TIMEOUT_MS=105000` entry alongside the 120-second stop
+timeout. It then calls the live `/health/ready` endpoint and requires that exact
+protocol header.
+Legacy or mixed task sets fail before drain; lifecycle readiness must be shipped
+and verified separately before a migration-required release can use this path.
+
+After that gate, the production workflow scales the API service to zero and waits for the
+current tasks to stop before starting the new migration-capable task. It suspends ECS
 dynamic and scheduled scaling before the drain and records the exact old task
 ARNs. On `SIGTERM`, the API stops accepting new HTTP and detached/background
 claims, awaits in-flight requests and tracked provider work, closes its HTTP
@@ -183,8 +197,37 @@ reconciliation delays, runs as an interruptible child process so delivered
 cancellation signals can stop the child, then use single-attempt, tightly bounded
 re-suspend/zero mutations within the runner grace window.
 An abrupt runner/host loss that cannot deliver cleanup signals remains an
-external control-plane recovery case; operators must verify the service remains
-zero before retrying. This bounded
+external control-plane recovery case. The workflow stores the pre-drain desired
+count, exact suspension state, and a bounded set of failed post-drain task
+definition ARNs in the immutable release task definition. Zero/all-suspended is
+not sufficient recovery authority because it can be an intentional operator
+stop and successful definitions retain stale metadata. A handled post-drain
+failure therefore registers a separate immutable recovery-marker task-definition
+revision tied to the failed release. If marker persistence cannot be verified,
+the service remains stopped and deployment reports that operator recovery is
+required. A later run requires and consumes that marker, inherits the persisted
+intent, and appends the marker's failed release task definition before
+registering the retry. Fallible sibling registration runs before API
+registration, and the recovery candidate deliberately retains the marker and a
+one-run authorization until deployment succeeds. This means a runner or sibling
+failure after candidate registration cannot erase recovery authority. After the
+exact recovered primary is healthy, rollback and intended capacity are
+restored, deployment registers and verifies a marker-cleared normal-metadata
+revision before autoscaling resumes. Cleanup failure stops the service and
+publishes a new marker. Normal registration resets authorization and history.
+The unique history is
+capped at 100 entries. During retry, only stopped tasks on those exact
+post-drain definitions are treated as failed rollout evidence; every other
+recent stopped task must still pass the old-binary exit-zero/no-kill proof.
+Rollback stays disabled until the exact new primary is healthy. Only a successful retry
+starts one migration-capable task, proves it as the exact healthy primary,
+restores rollback configuration, then scales to the recorded desired count
+before restoring the exact suspension state. This keeps migrations serial even
+when intended steady-state capacity is greater than one. Missing or malformed
+recovery intent fails without starting a task. Operators must still verify
+zero/suspended state after an abrupt runner loss; because an unhandled host loss
+cannot persist the marker, that path remains manual and cannot auto-restart.
+This bounded
 downtime is required for migrations that invalidate connector source authority:
 an old process already inside provider I/O cannot honor a fence introduced by
 the new schema. Drizzle records applied versions transactionally. Follow the
@@ -205,7 +248,8 @@ prerequisite to its own execution role. The role must additionally have isolated
 does not expose resource-level scoping for that read; workflow filters require
 namespace `ecs`, the exact API resource ID, and `ecs:service:DesiredCount`.
 Without all three declarations applied and verified, deployment must fail before
-drain or migration.
+drain or migration. The lifecycle-marker bootstrap is an independent deployed
+prerequisite, not evidence supplied by the migration release being launched.
 
 ## Health and logs
 

@@ -1,5 +1,6 @@
 import { type MailAttachment, mailCalendarCommitmentIntakeSchema } from "@personal-os/domain";
 import {
+  calendarCommitmentAttachmentCandidates,
   isCalendarCommitmentAttachment,
   mailCommitmentSourceFingerprint,
   reconcileMissingMailCalendarCommitmentMessages,
@@ -34,6 +35,138 @@ describe("Mail-to-Calendar intake evidence", () => {
         contentType: "application/pdf",
       }),
     ).toBe(false);
+    expect(
+      isCalendarCommitmentAttachment({
+        ...calendarAttachment,
+        contentType: "application/x-ilo-calendar-projection-overflow",
+        projectionIssue: "calendar_attachment_projection_overflow",
+      }),
+    ).toBe(true);
+  });
+
+  it("collapses untrusted intake fanout to one redacted overflow candidate", () => {
+    const oversized = Array.from({ length: 17 }, (_, index) => ({
+      ...calendarAttachment,
+      filename: `attacker-${String(index)}.ics`,
+      id: `part-${String(index)}`,
+    }));
+    expect(
+      calendarCommitmentAttachmentCandidates(oversized, "message-1:projection-overflow"),
+    ).toEqual([
+      {
+        contentType: "application/x-ilo-calendar-projection-overflow",
+        filename: "",
+        id: "message-1:projection-overflow",
+        projectionIssue: "calendar_attachment_projection_overflow",
+        providerAttachmentId: null,
+        providerPartId: "message-1:projection-overflow",
+        size: 0,
+      },
+    ]);
+    expect(
+      JSON.stringify(
+        calendarCommitmentAttachmentCandidates(oversized, "message-1:projection-overflow"),
+      ),
+    ).not.toContain("attacker-");
+    expect(
+      calendarCommitmentAttachmentCandidates(
+        [
+          {
+            ...calendarAttachment,
+            contentType: "application/x-ilo-calendar-projection-overflow",
+            id: "attacker-controlled-id",
+            projectionIssue: "calendar_attachment_projection_overflow",
+            providerPartId: "attacker-controlled-part",
+          },
+        ],
+        "canonical-overflow-id",
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        id: "canonical-overflow-id",
+        providerPartId: "canonical-overflow-id",
+      }),
+    ]);
+  });
+
+  it("records one redacted preview intake and audit for excessive calendar parts", async () => {
+    const intakeWrites: Array<Record<string, unknown>> = [];
+    const auditWrites: Array<Record<string, unknown>> = [];
+    const transaction = {
+      execute: vi.fn(async () => undefined),
+      insert: vi.fn(() => ({
+        values: vi.fn((value: Record<string, unknown>) => {
+          if ("remotePartId" in value) {
+            intakeWrites.push(value);
+            return {
+              returning: vi.fn(async () => [
+                {
+                  ...value,
+                  createdAt: new Date("2026-07-29T12:00:00.000Z"),
+                  id: "intake-1",
+                  updatedAt: new Date("2026-07-29T12:00:00.000Z"),
+                },
+              ]),
+            };
+          }
+          auditWrites.push(value);
+          return Promise.resolve();
+        }),
+      })),
+      select: vi.fn(() => ({
+        from: vi.fn(() => ({
+          where: vi.fn(() => ({ for: vi.fn(async () => []) })),
+        })),
+      })),
+    };
+    const attachments = Array.from({ length: 17 }, (_, index) => ({
+      ...calendarAttachment,
+      filename: `attacker-${String(index)}.ics`,
+      id: `part-${String(index)}`,
+    }));
+    await expect(
+      recordMailCalendarCommitmentIntakes(transaction as never, {
+        accountId: "account-1",
+        message: {
+          attachments,
+          bodyText: "Calendar attachments",
+          cc: [],
+          from: { address: "organizer@example.com", name: null },
+          id: "message-row-1",
+          providerMailboxIds: ["INBOX"],
+          providerRevision: "history-1",
+          receivedAt: new Date("2026-07-29T12:00:00.000Z"),
+          remoteMessageId: "message-1",
+          threadId: "thread-1",
+          to: [],
+        } as never,
+        principal: { actorId: "connector-1", actorType: "connector", userId: "user-1" },
+        providerAccountAddressHint: null,
+        recordedAt: new Date("2026-07-29T12:00:00.000Z"),
+        requestId: "request-1",
+        thread: {
+          accountId: "account-1",
+          id: "thread-1",
+          remoteThreadId: "remote-thread-1",
+          updatedAt: new Date("2026-07-29T12:00:00.000Z"),
+          userId: "user-1",
+        } as never,
+      }),
+    ).resolves.toBe(1);
+    expect(intakeWrites).toEqual([
+      expect.objectContaining({
+        attachment: expect.objectContaining({
+          filename: "",
+          projectionIssue: "calendar_attachment_projection_overflow",
+        }),
+        authority: "provider_projected_unverified",
+        evidenceKind: "calendar_attachment_projection_overflow",
+        remotePartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+        status: "preview_only",
+      }),
+    ]);
+    expect(auditWrites).toHaveLength(1);
+    expect(JSON.stringify({ auditWrites, intakeWrites })).not.toContain("attacker-");
   });
 
   it("binds the handoff revision to exact cached message material", () => {

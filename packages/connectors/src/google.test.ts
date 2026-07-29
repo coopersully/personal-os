@@ -1,5 +1,16 @@
 import { simpleParser } from "mailparser";
-import { ConnectorError, createGoogleConnector, MailSendPreAcceptanceError } from "./google.js";
+import {
+  ConnectorError,
+  createGoogleConnector,
+  MailSendPreAcceptanceError,
+  projectGmailAttachments,
+} from "./google.js";
+import {
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_ATTACHMENT_METADATA_LENGTH,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  MAX_MAIL_MIME_DEPTH,
+} from "./mail-attachments.js";
 import type { GoogleCredentials } from "./types.js";
 
 const now = new Date("2026-07-13T12:00:00.000Z");
@@ -52,6 +63,59 @@ function queued(...responses: Response[]) {
 }
 
 describe("Google Calendar connector", () => {
+  it("bounds nested Gmail MIME trees and calendar attachment metadata", () => {
+    let nested: Record<string, unknown> = {
+      body: {},
+      filename: "",
+      mimeType: "text/plain",
+      partId: "leaf",
+      parts: [],
+    };
+    for (let depth = 0; depth <= MAX_MAIL_MIME_DEPTH; depth += 1) {
+      nested = {
+        body: {},
+        filename: "",
+        mimeType: "multipart/mixed",
+        partId: `nested-${String(depth)}`,
+        parts: [nested],
+      };
+    }
+    expect(projectGmailAttachments(nested as never)).toEqual([
+      calendarAttachmentProjectionOverflow("part:projection-overflow"),
+    ]);
+
+    const excessiveCalendarParts = {
+      body: {},
+      filename: "",
+      headers: [],
+      mimeType: "multipart/mixed",
+      partId: "root",
+      parts: Array.from({ length: MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE + 1 }, (_, index) => ({
+        body: { attachmentId: `body-${String(index)}`, size: 1 },
+        filename: "",
+        headers: [],
+        mimeType: "text/calendar",
+        partId: String(index),
+        parts: [],
+      })),
+    };
+    expect(projectGmailAttachments(excessiveCalendarParts)).toEqual([
+      calendarAttachmentProjectionOverflow("part:projection-overflow"),
+    ]);
+
+    const oversizedIdentifier = {
+      body: {},
+      filename: "",
+      headers: [],
+      mimeType: "text/calendar",
+      partId: "x".repeat(MAX_MAIL_ATTACHMENT_METADATA_LENGTH + 1),
+      parts: [],
+    };
+    const overflow = projectGmailAttachments(oversizedIdentifier);
+    expect(overflow).toEqual([calendarAttachmentProjectionOverflow("part:projection-overflow")]);
+    expect(JSON.stringify(overflow)).not.toContain(oversizedIdentifier.partId);
+  });
+
   it("builds authorization and exchanges an offline code", async () => {
     const fetch = queued(
       response({ access_token: "new", expires_in: 3600, refresh_token: "offline" }),

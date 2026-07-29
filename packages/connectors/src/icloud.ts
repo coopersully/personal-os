@@ -7,6 +7,13 @@ import nodemailer from "nodemailer";
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject } from "tsdav";
 import { ConnectorError } from "./google.js";
 import { PROVIDER_REQUEST_TIMEOUT_MS } from "./http.js";
+import {
+  boundFlatMailAttachments,
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_MIME_PARTS_PER_MESSAGE,
+  MAX_MAIL_SOURCE_BYTES,
+  redactedProjectionOverflowPartId,
+} from "./mail-attachments.js";
 import type {
   ICloudConnector,
   ICloudCredentials,
@@ -177,46 +184,66 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
               envelope: true,
               flags: true,
               internalDate: true,
-              source: true,
+              size: true,
+              source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 },
               threadId: true,
               uid: true,
             })) {
               if (!message.source) continue;
-              const parsed = await simpleParser(message.source);
-              const bodyText = parsed.text?.trim() ?? "";
+              const sourceOverflow =
+                (message.size ?? message.source.length) > MAX_MAIL_SOURCE_BYTES ||
+                message.source.length > MAX_MAIL_SOURCE_BYTES;
+              const parsed = sourceOverflow ? null : await simpleParser(message.source);
+              const bodyText = parsed?.text?.trim() ?? "";
+              const overflowPartId = redactedProjectionOverflowPartId(
+                `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
+              );
+              const receivedAt =
+                parsed?.date ?? message.envelope?.date ?? new Date(message.internalDate ?? 0);
               threads.push({
                 bodyText,
-                from: mailAddress(parsed.from?.value[0]),
+                from: parsed
+                  ? mailAddress(parsed.from?.value[0])
+                  : mailAddress(message.envelope?.from?.[0]),
                 mailboxIds: [mailbox.path],
                 messages: [
                   {
-                    attachments: parsed.attachments.map((attachment, index) => ({
-                      contentType: attachment.contentType || "application/octet-stream",
-                      filename: attachment.filename || `attachment-${index + 1}`,
-                      id: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}:${index}`,
-                      providerAttachmentId: null,
-                      providerPartId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}:${index}`,
-                      size: attachment.size,
-                    })),
+                    attachments:
+                      sourceOverflow ||
+                      (parsed?.attachments.length ?? 0) > MAX_MAIL_MIME_PARTS_PER_MESSAGE
+                        ? [calendarAttachmentProjectionOverflow(overflowPartId)]
+                        : boundFlatMailAttachments(
+                            (parsed?.attachments ?? []).map((attachment, index) => ({
+                              contentType: attachment.contentType || "application/octet-stream",
+                              filename: attachment.filename || `attachment-${index + 1}`,
+                              id: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}:${index}`,
+                              providerAttachmentId: null,
+                              providerPartId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}:${index}`,
+                              size: attachment.size,
+                            })),
+                            overflowPartId,
+                          ),
                     bodyText,
-                    cc: parsedAddresses(parsed.cc),
-                    from: mailAddress(parsed.from?.value[0]),
+                    cc: parsed ? parsedAddresses(parsed.cc) : imapAddresses(message.envelope?.cc),
+                    from: parsed
+                      ? mailAddress(parsed.from?.value[0])
+                      : mailAddress(message.envelope?.from?.[0]),
                     mailboxIds: [mailbox.path],
                     providerRevision: `${mailboxRevision}:${String(message.uid)}`,
-                    receivedAt: parsed.date ?? new Date(message.internalDate ?? 0),
+                    receivedAt,
                     remoteMessageId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
-                    to: parsedAddresses(parsed.to),
+                    to: parsed ? parsedAddresses(parsed.to) : imapAddresses(message.envelope?.to),
                   },
                 ],
                 messageCount: 1,
-                receivedAt: parsed.date ?? new Date(message.internalDate ?? 0),
+                receivedAt,
                 // iCloud's IMAP thread identifier is not portable across mailboxes. Persist
                 // the mailbox + UID instead so flag and move actions can write through.
                 remoteThreadId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
                 snippet: bodyText.replace(/\s+/g, " ").slice(0, 240),
                 starred: message.flags?.has("\\Flagged") ?? false,
-                subject: parsed.subject || "(No subject)",
-                to: parsedAddresses(parsed.to),
+                subject: parsed?.subject || message.envelope?.subject || "(No subject)",
+                to: parsed ? parsedAddresses(parsed.to) : imapAddresses(message.envelope?.to),
                 unread: !(message.flags?.has("\\Seen") ?? false),
               });
             }
@@ -477,6 +504,12 @@ function parsedAddresses(value: AddressObject | AddressObject[] | undefined): Ma
   return (Array.isArray(value) ? value : [value])
     .flatMap((group) => group?.value ?? [])
     .map(mailAddress);
+}
+
+function imapAddresses(
+  value: Array<{ address?: string | undefined; name?: string | undefined }> | undefined,
+): MailAddress[] {
+  return (value ?? []).map(mailAddress);
 }
 
 function providerError(service: string, error: unknown): ConnectorError {

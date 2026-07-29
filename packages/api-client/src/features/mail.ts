@@ -43,7 +43,7 @@ export type MailApiClient = {
   reconcileMailDraft(
     id: string,
     input: ReconcileMailDraftInput,
-  ): Promise<{ id: string; sendStatus: "draft" | "reconcile" | "sending" | "sent" }>;
+  ): Promise<Pick<MailDraft, "id" | "sendStatus">>;
   updateMailRule(id: string, input: UpdateMailRuleInput): Promise<MailRule>;
   updateMailThread(id: string, input: UpdateMailThreadInput): Promise<MailThread>;
   upsertMailAttentionItem(
@@ -126,7 +126,7 @@ export function createMailApiClient(
     },
     async reconcileMailDraft(id, input) {
       const response = await request<{
-        draft: { id: string; sendStatus: "draft" | "reconcile" | "sending" | "sent" };
+        draft: Pick<MailDraft, "id" | "sendStatus">;
       }>(`/v1/mail/drafts/${id}/reconcile`, {
         body: JSON.stringify(input),
         method: "POST",

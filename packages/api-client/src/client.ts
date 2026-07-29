@@ -177,7 +177,9 @@ export function createApiClient(options: ClientOptions) {
         status: response.status,
       });
     }
-    return response.status === 204 ? (undefined as T) : ((await response.json()) as T);
+    if (response.status === 204) return undefined as T;
+    const body = await response.text();
+    return body.length === 0 ? (undefined as T) : (JSON.parse(body) as T);
   }
 
   return {

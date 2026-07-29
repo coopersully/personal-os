@@ -639,6 +639,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     const result = await connectors.connectICloud(
       context.get("principal").userId,
       await parseBody(context, connectICloudInputSchema),
+      context.get("requestId"),
     );
     void connectors.syncAccount(result.userId, result.accountId).catch(() => {
       // The account and credentials are already saved, while syncAccount records

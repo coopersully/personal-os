@@ -298,6 +298,7 @@ export function createMailService({
     input: UpdateMailThreadInput,
     principal: { actorId: string; actorType: "agent" | "user" },
     requestId: string,
+    knownMailboxIds?: Map<string, string>,
   ): Promise<MailThread> {
     const [before] = await db
       .select()
@@ -317,7 +318,7 @@ export function createMailService({
         { currentUpdatedAt: before.updatedAt.toISOString() },
       );
     }
-    const currentMailboxIds = await mailboxMap(userId);
+    const currentMailboxIds = knownMailboxIds ?? (await mailboxMap(userId));
     if (input.mailboxIds && new Set(input.mailboxIds).size !== input.mailboxIds.length) {
       throw new AppError("invalid_request", "Mail conversation mailbox IDs must be unique.");
     }
@@ -352,7 +353,7 @@ export function createMailService({
           ...before.remoteMailboxIds.filter((mailboxId) => !knownRemoteMailboxIds.has(mailboxId)),
         ]
       : undefined;
-    const addMailboxIds = input.starred === undefined ? [] : input.starred ? ["STARRED"] : [];
+    const addMailboxIds = input.starred ? ["STARRED"] : [];
     const removeMailboxIds = input.starred === false ? ["STARRED"] : [];
     if (input.unread !== undefined)
       (input.unread ? addMailboxIds : removeMailboxIds).push("UNREAD");
@@ -586,7 +587,7 @@ export function createMailService({
               isNull(mailDrafts.sentAt),
             ),
           )
-          .returning({ id: mailDrafts.id });
+          .returning();
         if (!claimed) {
           const [currentDraft] = await db
             .select({
@@ -619,6 +620,33 @@ export function createMailService({
               sendClaimedAt: currentDraft.sendClaimedAt?.toISOString() ?? null,
               sendStatus: currentDraft.sendStatus,
             },
+          );
+        }
+        if (
+          claimed.accountId !== input.accountId ||
+          claimed.threadId !== (input.threadId ?? null) ||
+          claimed.subject !== input.subject ||
+          claimed.body !== input.body ||
+          !recipientsMatch(claimed.to, input.to) ||
+          !recipientsMatch(claimed.cc, input.cc)
+        ) {
+          const release = await transitionOwnedDraftClaim(
+            db,
+            input.draftId,
+            userId,
+            claimId,
+            now(),
+            "draft",
+          );
+          if (release === "failed") {
+            throw draftClaimReleaseFailed(input.accountId, input.draftId);
+          }
+          if (release === "lost") {
+            throw draftSendClaimOwnershipLost(input.accountId, input.draftId, false);
+          }
+          throw new AppError(
+            "invalid_request",
+            "The draft changed before its send claim was acquired. Read it again and send its exact saved account, thread, recipients, subject, and body.",
           );
         }
       }
@@ -1569,6 +1597,7 @@ export function createMailService({
       context: MutationContext,
     ): Promise<BulkUpdateMailResult> {
       const settled: PromiseSettledResult<MailThread>[] = new Array(input.items.length);
+      const currentMailboxIds = await mailboxMap(context.principal.userId);
       let nextIndex = 0;
       const worker = async () => {
         while (nextIndex < input.items.length) {
@@ -1587,6 +1616,7 @@ export function createMailService({
                 },
                 context.principal,
                 context.requestId,
+                currentMailboxIds,
               ),
             };
           } catch (error) {

@@ -21,6 +21,11 @@ const mocks = vi.hoisted(() => ({
   listOAuthClients: vi.fn(),
   previewSavedMailRule: vi.fn(),
   revokeOAuthClient: vi.fn(),
+  toastError: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: { error: mocks.toastError, success: vi.fn() },
 }));
 
 vi.mock("../../api.js", () => ({
@@ -315,6 +320,9 @@ describe("agent access settings", () => {
     await expect(navigator.clipboard.readText()).resolves.toBe("https://mcp.example.com/mcp");
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Clipboard denied"));
     await browser.click(screen.getByRole("button", { name: "Copy skill install request" }));
+    await waitFor(() =>
+      expect(mocks.toastError).toHaveBeenCalledWith("Could not copy skill install request."),
+    );
 
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
     expect(screen.getByText("Preferences and attention items")).toBeInTheDocument();

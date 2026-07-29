@@ -811,8 +811,8 @@ function apiFetch() {
     if (url.pathname === "/v1/mail/rules" && method === "POST")
       return json({ rule: mailRule }, 201);
     if (url.pathname === "/v1/mail/rules") return json({ rules: [mailRule] });
-    if (url.pathname === "/v1/mail/send" || url.pathname.endsWith("/snooze"))
-      return new Response(null, { status: 204 });
+    if (url.pathname === "/v1/mail/send") return new Response(null, { status: 202 });
+    if (url.pathname.endsWith("/snooze")) return new Response(null, { status: 204 });
     if (url.pathname === "/v1/mail/threads/bulk")
       return json({
         result: {

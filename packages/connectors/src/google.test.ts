@@ -458,6 +458,7 @@ describe("Google Calendar connector", () => {
     await google.sendMail(fresh, {
       body: "Hello",
       cc: [{ address: "cc@example.com", name: 'Zoë "Ops, Inc."' }],
+      from: "sender@example.com",
       subject: "Résumé, review",
       threadId: "thread/1",
       to: [{ address: "to@example.com", name: 'Renée "Primary, Team"' }],
@@ -465,12 +466,14 @@ describe("Google Calendar connector", () => {
     await google.sendMail(fresh, {
       body: "Hello",
       cc: [],
+      from: "sender@example.com",
       subject: "Subject",
       to: [{ address: "to@example.com", name: null }],
     });
     await google.sendMail(fresh, {
       body: "Hello",
       cc: [],
+      from: "sender@example.com",
       subject: "Safe\r\nBcc: attacker@example.com",
       to: [
         {
@@ -482,6 +485,7 @@ describe("Google Calendar connector", () => {
     await google.sendMail(fresh, {
       body: "No subject",
       cc: [],
+      from: "sender@example.com",
       subject: "",
       to: [{ address: "to@example.com", name: null }],
     });
@@ -501,6 +505,7 @@ describe("Google Calendar connector", () => {
       : parsedFirst.cc?.value;
     expect(parsedFirstTo).toEqual([{ address: "to@example.com", name: 'Renée "Primary, Team"' }]);
     expect(parsedFirstCc).toEqual([{ address: "cc@example.com", name: 'Zoë "Ops, Inc."' }]);
+    expect(parsedFirst.from?.value).toEqual([{ address: "sender@example.com", name: "" }]);
     const secondMessage = JSON.parse(String(fetch.mock.calls[2]?.[1]?.body));
     expect(secondMessage.threadId).toBeUndefined();
     expect(Buffer.from(secondMessage.raw, "base64url").toString()).toContain("To: to@example.com");
@@ -525,6 +530,7 @@ describe("Google Calendar connector", () => {
     const input = {
       body: "Hello",
       cc: [],
+      from: "sender@example.com",
       subject: "Subject",
       to: [{ address: "to@example.com", name: null }],
     };
@@ -691,6 +697,7 @@ describe("Google Calendar connector", () => {
       google.sendMail(fresh, {
         body: "Hello",
         cc: [{ address: "cc@example.com", name: "CC" }],
+        from: "sender@example.com",
         subject: "Hello there",
         threadId: "thread/1",
         to: [{ address: "to@example.com", name: "To" }],
@@ -699,6 +706,7 @@ describe("Google Calendar connector", () => {
     const sent = JSON.parse(String(fetch.mock.calls[1]?.[1]?.body));
     expect(sent.threadId).toBe("thread/1");
     expect(Buffer.from(sent.raw, "base64url").toString()).toContain("Cc: CC <cc@example.com>");
+    expect(Buffer.from(sent.raw, "base64url").toString()).toContain("From: sender@example.com");
     expect(Buffer.from(sent.raw, "base64url").toString()).toContain("Subject: Hello there");
   });
 });

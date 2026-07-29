@@ -25,6 +25,12 @@ const tokenResponseSchema = z.object({
   token_type: z.string().default("Bearer"),
 });
 
+const mailComposer = nodemailer.createTransport({
+  buffer: true,
+  newline: "unix",
+  streamTransport: true,
+});
+
 const profileSchema = z.object({
   email: z.email(),
   id: z.string(),
@@ -453,16 +459,12 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       let currentCredentials: GoogleCredentials;
       let raw: Buffer;
       try {
-        const composer = nodemailer.createTransport({
-          buffer: true,
-          newline: "unix",
-          streamTransport: true,
-        });
-        const composed = (await composer.sendMail({
+        const composed = (await mailComposer.sendMail({
           cc: input.cc.map((address) => ({
             address: address.address,
             ...(address.name ? { name: address.name } : {}),
           })),
+          from: input.from,
           subject: input.subject,
           text: input.body,
           to: input.to.map((address) => ({

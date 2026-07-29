@@ -283,6 +283,7 @@ describe("iCloud connector", () => {
     await value.sendMail(credentials, {
       body: "Hello",
       cc: [{ address: "cc@example.com", name: "CC" }],
+      from: credentials.email,
       subject: "Subject",
       to: [{ address: "to@example.com", name: "To" }],
     });
@@ -307,6 +308,7 @@ describe("iCloud connector", () => {
       failing.sendMail(credentials, {
         body: "Hello",
         cc: [],
+        from: credentials.email,
         subject: "Subject",
         to: [{ address: "to@example.com", name: null }],
       }),

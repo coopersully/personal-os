@@ -2963,12 +2963,12 @@ p {
 }
 .mail-send-recovery p {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.5;
 }
 .mail-send-recovery__loading {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   margin: 0 0 10px;
 }
 .mail-send-recovery__items {
@@ -2997,7 +2997,7 @@ p {
 }
 .mail-send-recovery__item span {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 13px;
 }
 .mail-send-recovery__actions {
   display: flex;

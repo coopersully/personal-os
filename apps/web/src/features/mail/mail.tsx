@@ -183,7 +183,7 @@ function MailSendRecovery({
             {draft.reconciliationState === "sent_mail_review_required" ? (
               <div className="mail-send-recovery__actions">
                 <Button
-                  aria-label={`I found ${draft.subject || "this message"} in Sent Mail`}
+                  aria-label={`I found it in Sent Mail: ${draft.subject || "this message"}`}
                   disabled={mutationPending}
                   onClick={() => reconcile(draft.id, "sent")}
                   type="button"
@@ -191,7 +191,7 @@ function MailSendRecovery({
                   I found it in Sent Mail
                 </Button>
                 <Button
-                  aria-label={`I confirmed ${draft.subject || "this message"} was not sent`}
+                  aria-label={`It was not sent: ${draft.subject || "this message"}`}
                   disabled={mutationPending}
                   onClick={() => reconcile(draft.id, "not_sent")}
                   tone="ghost"

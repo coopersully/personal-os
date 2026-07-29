@@ -4125,13 +4125,13 @@ describe("ilo web app", () => {
     expect(recovery).toHaveTextContent("First inspect this account’s provider Sent Mail");
     expect(
       within(recovery).queryByRole("button", {
-        name: "I confirmed Travel details was not sent",
+        name: "It was not sent: Travel details",
       }),
     ).not.toBeInTheDocument();
     expect(within(recovery).getByText("Waiting for the provider result…")).toBeInTheDocument();
     await browser.click(
       within(recovery).getByRole("button", {
-        name: "I found Quarterly reply in Sent Mail",
+        name: "I found it in Sent Mail: Quarterly reply",
       }),
     );
     await waitFor(() =>
@@ -4139,7 +4139,7 @@ describe("ilo web app", () => {
     );
     await browser.click(
       await within(recovery).findByRole("button", {
-        name: "I confirmed Travel details was not sent",
+        name: "It was not sent: Travel details",
       }),
     );
     await waitFor(() =>
@@ -4176,13 +4176,13 @@ describe("ilo web app", () => {
     expect(within(recovery).getByText("(No subject)")).toBeInTheDocument();
     await browser.click(
       within(recovery).getByRole("button", {
-        name: "I found this message in Sent Mail",
+        name: "I found it in Sent Mail: this message",
       }),
     );
     expect(await within(recovery).findByRole("alert")).toHaveTextContent("Recovery unavailable");
     expect(
       within(recovery).getByRole("button", {
-        name: "I confirmed this message was not sent",
+        name: "It was not sent: this message",
       }),
     ).toBeInTheDocument();
   });
@@ -4227,7 +4227,9 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Connect a mailbox")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "I found Disconnected send in Sent Mail" }),
+      screen.getByRole("button", {
+        name: "I found it in Sent Mail: Disconnected send",
+      }),
     ).toBeInTheDocument();
   });
 

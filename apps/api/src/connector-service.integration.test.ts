@@ -181,6 +181,26 @@ describe.sequential("connector service", () => {
   let icloud: ICloudConnector;
   let service: ReturnType<typeof createConnectorService>;
 
+  async function waitForDomainProfileLock(): Promise<boolean> {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const result = await database.pool.query<{ blocked: boolean }>(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND query LIKE '%domain_profiles%'
+            AND query LIKE '%for update%'
+        ) AS blocked
+      `);
+      if (result.rows[0]?.blocked) return true;
+      await new Promise<void>((resolveAttempt) => {
+        setTimeout(resolveAttempt, 25);
+      });
+    }
+    return false;
+  }
+
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
       .withDatabase("personal_os")
@@ -395,6 +415,67 @@ describe.sequential("connector service", () => {
     expect(syncMail).toHaveBeenCalledOnce();
   });
 
+  it("releases the sync lease when credential setup fails", async () => {
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        email: "corrupt-credentials@example.com",
+        encryptedCredentials: {
+          ciphertext: "invalid",
+          iv: "invalid",
+          tag: "invalid",
+          version: 1,
+        },
+        label: "Corrupt credentials",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "corrupt-credentials",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Corrupt credential account fixture was not created.");
+
+    await expect(service.syncAccount(userId, account.id)).rejects.toBeDefined();
+    await expect(
+      database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, account.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        syncError: expect.any(String),
+        syncStatus: "error",
+      }),
+    ]);
+    const [missingCredentialsAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        email: "missing-credentials@example.com",
+        label: "Missing credentials",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "missing-credentials",
+        userId,
+      })
+      .returning();
+    if (!missingCredentialsAccount) {
+      throw new Error("Missing credential account fixture was not created.");
+    }
+    await expect(service.syncAccount(userId, missingCredentialsAccount.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(
+      database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, missingCredentialsAccount.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        syncError: "The connected account was not found.",
+        syncStatus: "error",
+      }),
+    ]);
+  });
+
   it("recovers a stale sync lease", async () => {
     const [account] = await database.db
       .select()
@@ -558,6 +639,32 @@ describe.sequential("connector service", () => {
         removeMailboxIds: ["UNREAD"],
       }),
     ).rejects.toThrow("Mail is not enabled");
+    const [missingSender] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        encryptedCredentials: {
+          ciphertext: "unused",
+          iv: "unused",
+          tag: "unused",
+          version: 1,
+        },
+        label: "Missing sender",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "missing-sender",
+        userId,
+      })
+      .returning();
+    if (!missingSender) throw new Error("Missing sender account fixture was not created.");
+    await expect(
+      service.mailGateway.send(userId, missingSender.id, {
+        body: "Blocked",
+        cc: [],
+        subject: "Blocked",
+        to: [{ address: "to@example.com", name: null }],
+      }),
+    ).rejects.toThrow("no sender address");
   });
 
   it("classifies only failures before a Google send request as safe pre-acceptance failures", async () => {
@@ -2108,6 +2215,18 @@ describe.sequential("connector service", () => {
     await expect(
       service.completeGoogleAuthorization(String(state), "code-again"),
     ).rejects.toMatchObject({ code: "invalid_request" });
+    const concurrentAuthorizationUrl = await service.startGoogleAuthorization(userId);
+    const concurrentState = String(new URL(concurrentAuthorizationUrl).searchParams.get("state"));
+    const exchangeCountBeforeRace = vi.mocked(google.exchangeCode).mock.calls.length;
+    const concurrentResults = await Promise.allSettled([
+      service.completeGoogleAuthorization(concurrentState, "concurrent-code-1"),
+      service.completeGoogleAuthorization(concurrentState, "concurrent-code-2"),
+    ]);
+    expect(concurrentResults.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(concurrentResults.filter((result) => result.status === "rejected")).toEqual([
+      expect.objectContaining({ reason: expect.objectContaining({ code: "invalid_request" }) }),
+    ]);
+    expect(vi.mocked(google.exchangeCode).mock.calls).toHaveLength(exchangeCountBeforeRace + 1);
 
     expect(
       (await service.listAccounts(userId)).find((item) => item.id === connected.accountId),
@@ -3008,26 +3127,7 @@ describe.sequential("connector service", () => {
       await blocker.query("BEGIN");
       await blocker.query("SELECT id FROM domain_profiles WHERE id = $1 FOR UPDATE", [profile.id]);
       const disconnect = service.disconnect(raceUser.id, account.id, "activation-disconnect-race");
-      let disconnectIsWaiting = false;
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const result = await database.pool.query<{ blocked: boolean }>(`
-          SELECT EXISTS (
-            SELECT 1
-            FROM pg_stat_activity
-            WHERE datname = current_database()
-              AND wait_event_type = 'Lock'
-              AND query LIKE '%domain_profiles%'
-              AND query LIKE '%for update%'
-          ) AS blocked
-        `);
-        if (result.rows[0]?.blocked) {
-          disconnectIsWaiting = true;
-          break;
-        }
-        await new Promise<void>((resolveAttempt) => {
-          setTimeout(resolveAttempt, 25);
-        });
-      }
+      const disconnectIsWaiting = await waitForDomainProfileLock();
       expect(disconnectIsWaiting).toBe(true);
       const activation = mail.activateRule(
         rule.id,
@@ -3129,26 +3229,7 @@ describe.sequential("connector service", () => {
       await blocker.query("BEGIN");
       await blocker.query("SELECT id FROM domain_profiles WHERE id = $1 FOR UPDATE", [profile.id]);
       const disconnect = service.disconnect(raceUser.id, account.id, "rule-save-disconnect-race");
-      let disconnectIsWaiting = false;
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const result = await database.pool.query<{ blocked: boolean }>(`
-          SELECT EXISTS (
-            SELECT 1
-            FROM pg_stat_activity
-            WHERE datname = current_database()
-              AND wait_event_type = 'Lock'
-              AND query LIKE '%domain_profiles%'
-              AND query LIKE '%for update%'
-          ) AS blocked
-        `);
-        if (result.rows[0]?.blocked) {
-          disconnectIsWaiting = true;
-          break;
-        }
-        await new Promise<void>((resolveAttempt) => {
-          setTimeout(resolveAttempt, 25);
-        });
-      }
+      const disconnectIsWaiting = await waitForDomainProfileLock();
       expect(disconnectIsWaiting).toBe(true);
       const create = mail.createRule(
         {
@@ -3424,12 +3505,16 @@ describe.sequential("connector service", () => {
       throw new Error("Capability attention fixtures were not created.");
     }
 
-    await service.connectICloud(capabilityUser.id, {
-      appSpecificPassword: "replacement-password",
-      calendar: true,
-      email: "capability@icloud.example",
-      mail: false,
-    });
+    await service.connectICloud(
+      capabilityUser.id,
+      {
+        appSpecificPassword: "replacement-password",
+        calendar: true,
+        email: "capability@icloud.example",
+        mail: false,
+      },
+      "disable-mail-capability",
+    );
 
     const [account] = await database.db
       .select()
@@ -3482,8 +3567,14 @@ describe.sequential("connector service", () => {
     expect(JSON.stringify(lifecycleAudits)).not.toContain(connected.accountId);
     expect(lifecycleAudits).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ action: "assistant.profile.updated" }),
-        expect.objectContaining({ action: "mail.rule.paused_policy_mismatch" }),
+        expect.objectContaining({
+          action: "assistant.profile.updated",
+          requestId: "disable-mail-capability",
+        }),
+        expect.objectContaining({
+          action: "mail.rule.paused_policy_mismatch",
+          requestId: "disable-mail-capability",
+        }),
       ]),
     );
   });

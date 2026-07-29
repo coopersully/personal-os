@@ -306,7 +306,7 @@ export const domainProfiles = pgTable(
       .notNull()
       .default([]),
     preferences: jsonb("preferences")
-      .$type<Record<string, boolean | number | string | string[]>>()
+      .$type<Record<string, boolean | null | number | string | string[]>>()
       .notNull()
       .default({}),
     status: text("status").$type<"active" | "draft">().notNull().default("draft"),

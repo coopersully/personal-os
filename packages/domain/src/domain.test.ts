@@ -149,12 +149,16 @@ describe("domain schemas", () => {
         domain: "mail",
         instructions: ["Keep delivery problems visible."],
         objective: "Keep a clean inbox.",
-        preferences: { inboxStyle: "signal_only", retentionDays: 1 },
+        preferences: { inboxStyle: "signal_only", retentionDays: null },
         sourceContexts: [],
         status: "draft",
         summary: "Only high-signal mail stays visible.",
       }),
-    ).toMatchObject({ domain: "mail", status: "draft" });
+    ).toMatchObject({
+      domain: "mail",
+      preferences: { retentionDays: null },
+      status: "draft",
+    });
     expect(
       upsertMailProfileInputSchema.parse({
         categories: [],

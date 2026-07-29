@@ -54,6 +54,8 @@ import {
 
 const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
+const MAIL_RULE_EXECUTION_BUDGET = 6;
+const MAIL_RULE_WRITE_CONCURRENCY = 2;
 
 type CalendarRow = typeof calendars.$inferSelect;
 type EventRow = typeof calendarEvents.$inferSelect;
@@ -366,8 +368,12 @@ export function createConnectorService({
       if (!account.mailEnabled) {
         throw new AppError("invalid_request", "Mail is not enabled for this connected account.");
       }
+      if (!account.email) {
+        throw new AppError("internal_error", "The connected Mail account has no sender address.");
+      }
+      const providerInput = { ...input, from: account.email };
       if (account.provider === "icloud" && icloud.sendMail) {
-        await icloud.sendMail(credentials<ICloudCredentials>(account), input);
+        await icloud.sendMail(credentials<ICloudCredentials>(account), providerInput);
         return;
       }
       if (account.provider !== "google" || !google.sendMail) {
@@ -378,7 +384,10 @@ export function createConnectorService({
       }
       let updatedCredentials: GoogleCredentials;
       try {
-        updatedCredentials = await google.sendMail(credentials<GoogleCredentials>(account), input);
+        updatedCredentials = await google.sendMail(
+          credentials<GoogleCredentials>(account),
+          providerInput,
+        );
       } catch (error) {
         if (error instanceof MailSendPreAcceptanceError) {
           throw new MailProviderRejectedError(
@@ -479,22 +488,22 @@ export function createConnectorService({
         syncStatus: current.syncStatus,
       });
     }
-    if (!claimedAccount.encryptedCredentials) {
-      throw new AppError("not_found", "The connected account was not found.");
-    }
-    const account: AccountRow = {
-      ...claimedAccount,
-      encryptedCredentials: claimedAccount.encryptedCredentials,
-    };
-    let googleCredentials =
-      account.provider === "google" ? credentials<GoogleCredentials>(account) : null;
-    const icloudCredentials =
-      account.provider === "icloud" ? credentials<ICloudCredentials>(account) : null;
     const requestId = `sync:${randomUUID()}`;
-    const principal = { actorId: account.id, actorType: "connector", userId } as const;
-    let changed = 0;
-    let mailCredentialsPersisted = false;
+    const principal = { actorId: claimedAccount.id, actorType: "connector", userId } as const;
     try {
+      if (!claimedAccount.encryptedCredentials) {
+        throw new AppError("not_found", "The connected account was not found.");
+      }
+      const account: AccountRow = {
+        ...claimedAccount,
+        encryptedCredentials: claimedAccount.encryptedCredentials,
+      };
+      let googleCredentials =
+        account.provider === "google" ? credentials<GoogleCredentials>(account) : null;
+      const icloudCredentials =
+        account.provider === "icloud" ? credentials<ICloudCredentials>(account) : null;
+      let changed = 0;
+      let mailCredentialsPersisted = false;
       if (account.calendarEnabled) {
         if (account.provider === "google" && googleCredentials) {
           const remoteCalendars = await google.listCalendars(googleCredentials);
@@ -570,7 +579,7 @@ export function createConnectorService({
             syncStatus: "error",
             updatedAt: now(),
           })
-          .where(eq(calendarAccounts.id, account.id));
+          .where(eq(calendarAccounts.id, claimedAccount.id));
       } catch {
         // Terminal status is best-effort and must not mask a structured
         // provider partial-effect/reconciliation contract.
@@ -824,6 +833,18 @@ export function createConnectorService({
       .orderBy(asc(mailThreads.id))
       .for("update");
     const threadIds = new Set(accountThreads.map((thread) => thread.id));
+    const rules = await transaction
+      .select()
+      .from(mailRules)
+      .where(
+        and(
+          eq(mailRules.userId, account.userId),
+          eq(mailRules.enabled, true),
+          sql<boolean>`${mailRules.sourceAccountIds} @> ${JSON.stringify([account.id])}::jsonb`,
+        ),
+      )
+      .orderBy(asc(mailRules.id))
+      .for("update");
     const openMailAttention = await transaction
       .select()
       .from(attentionItems)
@@ -910,18 +931,6 @@ export function createConnectorService({
         }),
       );
     }
-    const rules = await transaction
-      .select()
-      .from(mailRules)
-      .where(
-        and(
-          eq(mailRules.userId, account.userId),
-          eq(mailRules.enabled, true),
-          sql<boolean>`${mailRules.sourceAccountIds} @> ${JSON.stringify([account.id])}::jsonb`,
-        ),
-      )
-      .orderBy(asc(mailRules.id))
-      .for("update");
     for (const rule of rules) {
       await pauseInvalidMailRuleInTransaction(
         transaction,
@@ -957,6 +966,11 @@ export function createConnectorService({
       .select()
       .from(mailRules)
       .where(and(eq(mailRules.userId, account.userId), eq(mailRules.enabled, true)));
+    const [mailProfile] = await db
+      .select()
+      .from(domainProfiles)
+      .where(and(eq(domainProfiles.userId, account.userId), eq(domainProfiles.domain, "mail")))
+      .limit(1);
     const executable = [];
     for (const rule of rules) {
       const resolved = resolveStoredMailRule({
@@ -986,21 +1000,7 @@ export function createConnectorService({
       ) {
         invalidReason = "The rule does not have a unique explicit Mail account source set.";
       }
-      const profile = rule.profileId
-        ? (
-            await db
-              .select()
-              .from(domainProfiles)
-              .where(
-                and(
-                  eq(domainProfiles.id, rule.profileId),
-                  eq(domainProfiles.userId, rule.userId),
-                  eq(domainProfiles.domain, "mail"),
-                ),
-              )
-              .limit(1)
-          )[0]
-        : null;
+      const profile = rule.profileId === mailProfile?.id ? mailProfile : null;
       if (!invalidReason && profile?.status !== "active") {
         invalidReason = "The linked Mail profile is no longer active.";
       }
@@ -1298,6 +1298,10 @@ export function createConnectorService({
         let projectedMailboxIds = thread.mailboxIds;
         let projectedStarred = thread.starred;
         let projectedUnread = thread.unread;
+        const authorizations: Array<{
+          profileVersion: number;
+          rule: typeof mailRules.$inferSelect;
+        }> = [];
         for (const { profileVersion, resolved: resolvedRule, rule } of rules) {
           if (
             !matchesMailRule(resolvedRule.condition, {
@@ -1321,6 +1325,7 @@ export function createConnectorService({
           const uniqueAddMailboxIds = [...new Set(addMailboxIds)];
           const uniqueRemoveMailboxIds = [...new Set(removeMailboxIds)];
           if (uniqueAddMailboxIds.length === 0 && uniqueRemoveMailboxIds.length === 0) continue;
+          authorizations.push({ profileVersion, rule });
           const nextMailboxIds = [
             ...projectedMailboxIds.filter(
               (mailboxId) => !uniqueRemoveMailboxIds.includes(mailboxId),
@@ -1329,65 +1334,38 @@ export function createConnectorService({
               (mailboxId) => mailboxId !== "STARRED" && !projectedMailboxIds.includes(mailboxId),
             ),
           ];
-          const existingPlan = plannedMutations.find(
-            (planned) => planned.remoteThreadId === thread.remoteThreadId,
-          );
-          if (existingPlan) {
-            existingPlan.addMailboxIds = [
-              ...new Set([...existingPlan.addMailboxIds, ...uniqueAddMailboxIds]),
-            ];
-            existingPlan.authorizations.push({ profileVersion, rule });
-            existingPlan.nextMailboxIds = nextMailboxIds;
-            existingPlan.nextStarred = uniqueAddMailboxIds.includes("STARRED") || projectedStarred;
-            existingPlan.nextUnread = uniqueRemoveMailboxIds.includes("UNREAD")
-              ? false
-              : projectedUnread;
-            existingPlan.removeMailboxIds = [
-              ...new Set([...existingPlan.removeMailboxIds, ...uniqueRemoveMailboxIds]),
-            ];
-          } else {
-            plannedMutations.push({
-              addMailboxIds: uniqueAddMailboxIds,
-              authorizations: [{ profileVersion, rule }],
-              nextMailboxIds,
-              nextStarred: uniqueAddMailboxIds.includes("STARRED") || projectedStarred,
-              nextUnread: uniqueRemoveMailboxIds.includes("UNREAD") ? false : projectedUnread,
-              remoteThreadId: thread.remoteThreadId,
-              removeMailboxIds: uniqueRemoveMailboxIds,
-            });
-          }
           projectedMailboxIds = nextMailboxIds;
           if (uniqueRemoveMailboxIds.includes("UNREAD")) projectedUnread = false;
           if (uniqueAddMailboxIds.includes("STARRED")) projectedStarred = true;
         }
-        const finalPlan = plannedMutations.find(
-          (planned) => planned.remoteThreadId === thread.remoteThreadId,
-        );
-        if (finalPlan) {
+        if (authorizations.length > 0) {
           const finalMailboxIds = new Set(projectedMailboxIds);
           const originalMailboxIds = new Set(thread.mailboxIds);
-          finalPlan.addMailboxIds = [
-            ...new Set([
-              ...projectedMailboxIds.filter((mailboxId) => !originalMailboxIds.has(mailboxId)),
-              ...(!thread.starred && projectedStarred ? ["STARRED"] : []),
-            ]),
-          ];
-          finalPlan.removeMailboxIds = [
+          const removeMailboxIds = [
             ...new Set([
               ...thread.mailboxIds.filter((mailboxId) => !finalMailboxIds.has(mailboxId)),
               ...(thread.unread && !projectedUnread ? ["UNREAD"] : []),
             ]),
           ];
-          const removals = new Set(finalPlan.removeMailboxIds);
-          finalPlan.addMailboxIds = finalPlan.addMailboxIds.filter(
-            (mailboxId) => !removals.has(mailboxId),
-          );
-          finalPlan.nextMailboxIds = projectedMailboxIds;
-          finalPlan.nextStarred = projectedStarred;
-          finalPlan.nextUnread = projectedUnread;
+          const removals = new Set(removeMailboxIds);
+          const addMailboxIds = [
+            ...new Set([
+              ...projectedMailboxIds.filter((mailboxId) => !originalMailboxIds.has(mailboxId)),
+              ...(!thread.starred && projectedStarred ? ["STARRED"] : []),
+            ]),
+          ].filter((mailboxId) => !removals.has(mailboxId));
+          plannedMutations.push({
+            addMailboxIds,
+            authorizations,
+            nextMailboxIds: projectedMailboxIds,
+            nextStarred: projectedStarred,
+            nextUnread: projectedUnread,
+            remoteThreadId: thread.remoteThreadId,
+            removeMailboxIds,
+          });
         }
       }
-      const executionBudget = plannedMutations.slice(0, 6);
+      const executionBudget = plannedMutations.slice(0, MAIL_RULE_EXECUTION_BUDGET);
       const backlogCount = Math.max(0, plannedMutations.length - executionBudget.length);
       const outcomes: Array<{
         authorizationChanged?: boolean;
@@ -1525,7 +1503,9 @@ export function createConnectorService({
         }
       };
       await Promise.all(
-        Array.from({ length: Math.min(2, executionBudget.length) }, () => executeWorker()),
+        Array.from({ length: Math.min(MAIL_RULE_WRITE_CONCURRENCY, executionBudget.length) }, () =>
+          executeWorker(),
+        ),
       );
       const succeededCount = outcomes.filter((outcome) => outcome?.succeeded).length;
       successfulRuleMutationCount = succeededCount;
@@ -1720,8 +1700,8 @@ export function createConnectorService({
   return {
     async completeGoogleAuthorization(state: string, code: string) {
       const [oauthState] = await db
-        .select()
-        .from(oauthStates)
+        .update(oauthStates)
+        .set({ consumedAt: now() })
         .where(
           and(
             eq(oauthStates.tokenHash, hashToken(state)),
@@ -1730,17 +1710,13 @@ export function createConnectorService({
             gt(oauthStates.expiresAt, now()),
           ),
         )
-        .limit(1);
+        .returning();
       if (!oauthState) {
         throw new AppError(
           "invalid_request",
           "The Google authorization state is invalid or expired.",
         );
       }
-      await db
-        .update(oauthStates)
-        .set({ consumedAt: now() })
-        .where(eq(oauthStates.id, oauthState.id));
       let googleCredentials = await google.exchangeCode(code);
       const profileResult = await google.getProfile(googleCredentials);
       googleCredentials = profileResult.credentials;
@@ -1756,81 +1732,71 @@ export function createConnectorService({
           throw new AppError("invalid_request", "Authorize the same Google account you selected.");
         }
       }
-      const [matchedAccount] = target
-        ? [target]
-        : await db
-            .select()
-            .from(calendarAccounts)
-            .where(
-              and(
-                eq(calendarAccounts.userId, oauthState.userId),
-                eq(calendarAccounts.provider, "google"),
-                eq(calendarAccounts.providerAccountId, profileResult.value.id),
-              ),
-            )
-            .limit(1);
-      const calendarEnabled =
-        matchedAccount?.calendarEnabled === true || requestedServices.includes("calendar");
-      const mailEnabled =
-        matchedAccount?.mailEnabled === true ||
-        (requestedServices.includes("mail") && hasGoogleMailScope(googleCredentials));
       const account = await db.transaction(async (transaction) => {
-        const [lockedMatchedAccount] = matchedAccount
-          ? await transaction
+        const requestedCalendar = requestedServices.includes("calendar");
+        const requestedMail =
+          requestedServices.includes("mail") && hasGoogleMailScope(googleCredentials);
+        await transaction
+          .insert(calendarAccounts)
+          .values({
+            calendarEnabled: requestedCalendar,
+            avatarUrl: profileResult.value.pictureUrl,
+            email: profileResult.value.email,
+            encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
+            label: profileResult.value.name ?? profileResult.value.email,
+            mailEnabled: requestedMail,
+            provider: "google",
+            providerAccountId: profileResult.value.id,
+            userId: oauthState.userId,
+          })
+          .onConflictDoNothing({
+            target: [
+              calendarAccounts.userId,
+              calendarAccounts.provider,
+              calendarAccounts.providerAccountId,
+            ],
+          });
+        const lockedMatchedAccount = requireDatabaseRecord(
+          (
+            await transaction
               .select()
               .from(calendarAccounts)
-              .where(eq(calendarAccounts.id, matchedAccount.id))
+              .where(
+                and(
+                  eq(calendarAccounts.userId, oauthState.userId),
+                  eq(calendarAccounts.provider, "google"),
+                  eq(calendarAccounts.providerAccountId, profileResult.value.id),
+                ),
+              )
               .for("update")
               .limit(1)
-          : [];
-        if (matchedAccount && !lockedMatchedAccount) {
+          )[0],
+          "The Google account could not be saved.",
+        );
+        if (target && lockedMatchedAccount.id !== target.id) {
           throw new AppError(
             "conflict",
             "The selected Google account changed while authorization was completing.",
           );
         }
-        if (lockedMatchedAccount?.mailEnabled && !mailEnabled) {
-          await invalidateMailAccountDependents(
-            transaction,
-            lockedMatchedAccount,
-            "Mail access for a connected account was turned off.",
-            "mail_capability_disabled",
-            randomUUID(),
-          );
-        }
+        const calendarEnabled = lockedMatchedAccount.calendarEnabled || requestedCalendar;
+        const mailEnabled = lockedMatchedAccount.mailEnabled || requestedMail;
         return requireDatabaseRecord(
           (
             await transaction
-              .insert(calendarAccounts)
-              .values({
-                calendarEnabled,
+              .update(calendarAccounts)
+              .set({
                 avatarUrl: profileResult.value.pictureUrl,
+                calendarEnabled,
                 email: profileResult.value.email,
                 encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
                 label: profileResult.value.name ?? profileResult.value.email,
                 mailEnabled,
-                provider: "google",
-                providerAccountId: profileResult.value.id,
-                userId: oauthState.userId,
+                syncError: null,
+                syncStatus: "idle",
+                updatedAt: now(),
               })
-              .onConflictDoUpdate({
-                set: {
-                  calendarEnabled,
-                  avatarUrl: profileResult.value.pictureUrl,
-                  email: profileResult.value.email,
-                  encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
-                  label: profileResult.value.name ?? profileResult.value.email,
-                  mailEnabled,
-                  syncError: null,
-                  syncStatus: "idle",
-                  updatedAt: now(),
-                },
-                target: [
-                  calendarAccounts.userId,
-                  calendarAccounts.provider,
-                  calendarAccounts.providerAccountId,
-                ],
-              })
+              .where(eq(calendarAccounts.id, lockedMatchedAccount.id))
               .returning()
           )[0],
           "The Google account could not be saved.",
@@ -1848,63 +1814,75 @@ export function createConnectorService({
       };
     },
 
-    async connectICloud(userId: string, input: ConnectICloudInput) {
+    async connectICloud(
+      userId: string,
+      input: ConnectICloudInput,
+      requestId: string = randomUUID(),
+    ) {
       const icloudCredentials: ICloudCredentials = {
         appSpecificPassword: input.appSpecificPassword,
         email: input.email,
       };
       const account = await db.transaction(async (transaction) => {
-        const [existing] = await transaction
-          .select()
-          .from(calendarAccounts)
-          .where(
-            and(
-              eq(calendarAccounts.userId, userId),
-              eq(calendarAccounts.provider, "icloud"),
-              eq(calendarAccounts.providerAccountId, input.email),
-            ),
-          )
-          .for("update")
-          .limit(1);
-        if (existing?.mailEnabled && !input.mail) {
+        await transaction
+          .insert(calendarAccounts)
+          .values({
+            calendarEnabled: input.calendar,
+            email: input.email,
+            encryptedCredentials: encryptJson(icloudCredentials, encryptionKey),
+            label: input.email,
+            mailEnabled: input.mail,
+            provider: "icloud",
+            providerAccountId: input.email,
+            syncStatus: "idle",
+            userId,
+          })
+          .onConflictDoNothing({
+            target: [
+              calendarAccounts.userId,
+              calendarAccounts.provider,
+              calendarAccounts.providerAccountId,
+            ],
+          });
+        const existing = requireDatabaseRecord(
+          (
+            await transaction
+              .select()
+              .from(calendarAccounts)
+              .where(
+                and(
+                  eq(calendarAccounts.userId, userId),
+                  eq(calendarAccounts.provider, "icloud"),
+                  eq(calendarAccounts.providerAccountId, input.email),
+                ),
+              )
+              .for("update")
+              .limit(1)
+          )[0],
+          "The iCloud account could not be saved.",
+        );
+        if (existing.mailEnabled && !input.mail) {
           await invalidateMailAccountDependents(
             transaction,
             existing,
             "Mail access for a connected account was turned off.",
             "mail_capability_disabled",
-            randomUUID(),
+            requestId,
           );
         }
         return requireDatabaseRecord(
           (
             await transaction
-              .insert(calendarAccounts)
-              .values({
+              .update(calendarAccounts)
+              .set({
                 calendarEnabled: input.calendar,
-                email: input.email,
                 encryptedCredentials: encryptJson(icloudCredentials, encryptionKey),
-                label: input.email,
                 mailEnabled: input.mail,
-                provider: "icloud",
-                providerAccountId: input.email,
+                syncError: null,
                 syncStatus: "idle",
-                userId,
+                updatedAt: now(),
               })
-              .onConflictDoUpdate({
-                set: {
-                  calendarEnabled: input.calendar,
-                  encryptedCredentials: encryptJson(icloudCredentials, encryptionKey),
-                  mailEnabled: input.mail,
-                  syncError: null,
-                  syncStatus: "idle",
-                  updatedAt: now(),
-                },
-                target: [
-                  calendarAccounts.userId,
-                  calendarAccounts.provider,
-                  calendarAccounts.providerAccountId,
-                ],
-              })
+              .where(eq(calendarAccounts.id, existing.id))
               .returning()
           )[0],
           "The iCloud account could not be saved.",

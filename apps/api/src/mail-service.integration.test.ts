@@ -27,6 +27,25 @@ import { createMailService } from "./mail-service.js";
 import { registerMailRoutes } from "./routes/mail.js";
 import type { AppEnv } from "./types.js";
 
+async function migrationsWithout(
+  migrationsFolder: string,
+  prefix: string,
+  excludedTags: string[],
+): Promise<string> {
+  const folder = await mkdtemp(join(tmpdir(), prefix));
+  await cp(migrationsFolder, folder, { recursive: true });
+  for (const tag of excludedTags) {
+    await unlink(join(folder, `${tag}.sql`));
+  }
+  const journalPath = join(folder, "meta/_journal.json");
+  const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+    entries: Array<{ tag: string }>;
+  };
+  journal.entries = journal.entries.filter((entry) => !excludedTags.includes(entry.tag));
+  await writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+  return folder;
+}
+
 describe.sequential("mail service", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
@@ -57,6 +76,61 @@ describe.sequential("mail service", () => {
     requestId,
   });
 
+  async function expectDraftClaimReleaseInterference(mode: "failed" | "lost"): Promise<void> {
+    const draft = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "Original body",
+      cc: [],
+      subject: "Original subject",
+      to: [{ address: "to@example.com", name: null }],
+    });
+    gateway.send.mockClear();
+    const releaseAction =
+      mode === "failed" ? "RAISE EXCEPTION 'forced claim release failure';" : "RETURN NULL;";
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION interfere_with_mail_draft_claim_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF OLD.send_status = 'draft' AND NEW.send_status = 'sending' THEN
+          NEW.subject = NEW.subject || ' changed';
+        ELSIF OLD.send_status = 'sending' AND NEW.send_status = 'draft' THEN
+          ${releaseAction}
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER interfere_with_mail_draft_claim_for_test
+      BEFORE UPDATE ON mail_drafts
+      FOR EACH ROW EXECUTE FUNCTION interfere_with_mail_draft_claim_for_test();
+    `);
+    try {
+      await expect(
+        service.send(
+          userId,
+          {
+            accountId: enabledAccountId,
+            body: draft.body,
+            cc: draft.cc,
+            draftId: draft.id,
+            subject: draft.subject,
+            to: draft.to,
+          },
+          mutationContext(`draft-claim-release-${mode}`),
+        ),
+      ).rejects.toMatchObject({
+        code: mode === "failed" ? "service_unavailable" : "conflict",
+        message: expect.stringContaining(
+          mode === "failed" ? "could not safely release" : "no longer owns the draft claim",
+        ),
+      });
+      expect(gateway.send).not.toHaveBeenCalled();
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS interfere_with_mail_draft_claim_for_test ON mail_drafts;
+        DROP FUNCTION IF EXISTS interfere_with_mail_draft_claim_for_test();
+      `);
+    }
+  }
+
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
       .withDatabase("personal_os")
@@ -65,22 +139,11 @@ describe.sequential("mail service", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
-    temporaryMigrationsFolder = await mkdtemp(join(tmpdir(), "ilo-mail-migrations-"));
-    await cp(migrationsFolder, temporaryMigrationsFolder, { recursive: true });
-    await unlink(join(temporaryMigrationsFolder, "0038_agent_setup_foundation.sql"));
-    await unlink(join(temporaryMigrationsFolder, "0039_mail_exact_match_policy_normalization.sql"));
-    await unlink(join(temporaryMigrationsFolder, "0040_mail_draft_send_claim.sql"));
-    const journalPath = join(temporaryMigrationsFolder, "meta/_journal.json");
-    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    journal.entries = journal.entries.filter(
-      (entry) =>
-        entry.tag !== "0038_agent_setup_foundation" &&
-        entry.tag !== "0039_mail_exact_match_policy_normalization" &&
-        entry.tag !== "0040_mail_draft_send_claim",
-    );
-    await writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+    temporaryMigrationsFolder = await migrationsWithout(migrationsFolder, "ilo-mail-migrations-", [
+      "0038_agent_setup_foundation",
+      "0039_mail_exact_match_policy_normalization",
+      "0040_mail_draft_send_claim",
+    ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
       .insert(users)
@@ -102,20 +165,10 @@ describe.sequential("mail service", () => {
     const migratedRuleId = legacyRule.rows[0]?.id;
     if (!migratedRuleId) throw new Error("Legacy rule fixture was not created.");
     legacyRuleId = migratedRuleId;
-    setupMigrationsFolder = await mkdtemp(join(tmpdir(), "ilo-mail-setup-migration-"));
-    await cp(migrationsFolder, setupMigrationsFolder, { recursive: true });
-    await unlink(join(setupMigrationsFolder, "0039_mail_exact_match_policy_normalization.sql"));
-    await unlink(join(setupMigrationsFolder, "0040_mail_draft_send_claim.sql"));
-    const setupJournalPath = join(setupMigrationsFolder, "meta/_journal.json");
-    const setupJournal = JSON.parse(await readFile(setupJournalPath, "utf8")) as {
-      entries: Array<{ tag: string }>;
-    };
-    setupJournal.entries = setupJournal.entries.filter(
-      (entry) =>
-        entry.tag !== "0039_mail_exact_match_policy_normalization" &&
-        entry.tag !== "0040_mail_draft_send_claim",
-    );
-    await writeFile(setupJournalPath, `${JSON.stringify(setupJournal, null, 2)}\n`);
+    setupMigrationsFolder = await migrationsWithout(migrationsFolder, "ilo-mail-setup-migration-", [
+      "0039_mail_exact_match_policy_normalization",
+      "0040_mail_draft_send_claim",
+    ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(
       `INSERT INTO mail_rules (
@@ -956,6 +1009,71 @@ describe.sequential("mail service", () => {
     await expect(
       database.db.select().from(mailDrafts).where(eq(mailDrafts.id, draft.id)),
     ).resolves.toEqual([expect.objectContaining({ sendStatus: "sent" })]);
+  });
+
+  it("revalidates the saved draft after acquiring its send claim", async () => {
+    const draft = await service.createDraft(userId, {
+      accountId: enabledAccountId,
+      body: "Original body",
+      cc: [],
+      subject: "Original subject",
+      to: [{ address: "to@example.com", name: null }],
+    });
+    gateway.send.mockClear();
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION change_claimed_mail_draft_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF OLD.send_status = 'draft' AND NEW.send_status = 'sending' THEN
+          NEW.subject = NEW.subject || ' changed';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER change_claimed_mail_draft_for_test
+      BEFORE UPDATE ON mail_drafts
+      FOR EACH ROW EXECUTE FUNCTION change_claimed_mail_draft_for_test();
+    `);
+    try {
+      await expect(
+        service.send(
+          userId,
+          {
+            accountId: enabledAccountId,
+            body: draft.body,
+            cc: draft.cc,
+            draftId: draft.id,
+            subject: draft.subject,
+            to: draft.to,
+          },
+          mutationContext("changed-during-draft-claim"),
+        ),
+      ).rejects.toMatchObject({
+        code: "invalid_request",
+        message: expect.stringContaining("changed before its send claim"),
+      });
+      expect(gateway.send).not.toHaveBeenCalled();
+      await expect(
+        database.db.select().from(mailDrafts).where(eq(mailDrafts.id, draft.id)),
+      ).resolves.toEqual([
+        expect.objectContaining({
+          sendClaimId: null,
+          sendStatus: "draft",
+          subject: "Original subject changed",
+        }),
+      ]);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS change_claimed_mail_draft_for_test ON mail_drafts;
+        DROP FUNCTION IF EXISTS change_claimed_mail_draft_for_test();
+      `);
+    }
+  });
+
+  it.each([
+    "failed",
+    "lost",
+  ] as const)("reports a %s draft-claim release after post-claim validation", async (mode) => {
+    await expectDraftClaimReleaseInterference(mode);
   });
 
   it("releases only proven provider rejections and reconciles ambiguous or stale claims", async () => {
@@ -2428,6 +2546,7 @@ describe.sequential("mail service", () => {
     );
     const reviewed = await service.previewSavedRule(userId, rule.id);
     const updater = await database.pool.connect();
+    let committed = false;
     try {
       await updater.query("BEGIN");
       await updater.query(
@@ -2450,9 +2569,10 @@ describe.sequential("mail service", () => {
         setImmediate(resolveTurn);
       });
       await updater.query("COMMIT");
+      committed = true;
       await expect(activation).rejects.toThrow("exact Mail rule preview changed");
     } finally {
-      await updater.query("ROLLBACK");
+      if (!committed) await updater.query("ROLLBACK");
       updater.release();
     }
     const [stored] = await database.db.select().from(mailRules).where(eq(mailRules.id, rule.id));

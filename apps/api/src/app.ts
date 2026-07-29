@@ -134,6 +134,16 @@ const agentDomainSupport = {
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
+  const startBackgroundTask = (label: string, operation: () => Promise<void>): boolean => {
+    if (dependencies.runtimeLifecycle) {
+      return dependencies.runtimeLifecycle.startBackgroundTask(label, operation);
+    }
+    void operation().catch(() => {
+      // Detached connector bootstrap failures are persisted by the connector
+      // service and retried by the scheduler.
+    });
+    return true;
+  };
   const authRateLimiter = createFixedWindowRateLimiter({
     maxRequests: dependencies.config.authRateLimitMaxRequests ?? 20,
     now: () => now().getTime(),
@@ -174,6 +184,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     google,
     icloud: dependencies.icloud ?? createICloudConnector(),
     now,
+    ...(dependencies.runtimeLifecycle
+      ? {
+          shutdown: {
+            deadlineMs: dependencies.runtimeLifecycle.deadlineMs,
+            signal: dependencies.runtimeLifecycle.signal,
+          },
+        }
+      : {}),
   });
   const xBookmarks = createXBookmarksService({
     db: dependencies.db,
@@ -299,6 +317,20 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     context.header("x-request-id", requestId);
     await next();
   });
+  app.use("*", async (_context, next) => {
+    if (!dependencies.runtimeLifecycle) {
+      await next();
+      return;
+    }
+    const request = dependencies.runtimeLifecycle.runRequest(next);
+    if (!request) {
+      throw new AppError(
+        "service_unavailable",
+        "The API is draining and is not accepting new work.",
+      );
+    }
+    await request;
+  });
   app.use("*", async (context, next) => {
     const startedAt = performance.now();
     try {
@@ -348,6 +380,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.get("/health/live", (context) => context.json({ status: "ok" }));
   app.get("/health/ready", async (context) => {
     await dependencies.db.execute(sql`select 1`);
+    context.header("X-Ilo-Drain-Protocol", "quiesce-v1");
     return context.json({ status: "ready" });
   });
   app.get("/openapi.json", (context) =>
@@ -407,9 +440,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       );
     }
     const result = await connectors.completeGoogleAuthorization(query.state, query.code);
-    void connectors.syncAccount(result.userId, result.accountId).catch(() => {
-      // The account and credentials are already saved, while syncAccount records
-      // the provider error for the settings UI and a later manual retry.
+    startBackgroundTask("google-connector-initial-sync", async () => {
+      await connectors.syncAccount(result.userId, result.accountId);
     });
     const separator = result.returnPath.includes("?") ? "&" : "?";
     return context.redirect(
@@ -700,9 +732,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await parseBody(context, connectICloudInputSchema),
       context.get("requestId"),
     );
-    void connectors.syncAccount(result.userId, result.accountId).catch(() => {
-      // The account and credentials are already saved, while syncAccount records
-      // the provider error for the settings UI and a later manual retry.
+    startBackgroundTask("icloud-connector-initial-sync", async () => {
+      await connectors.syncAccount(result.userId, result.accountId);
     });
     return context.json({ account: { accountId: result.accountId, email: result.email } }, 201);
   });

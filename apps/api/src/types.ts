@@ -3,6 +3,7 @@ import type { Database } from "@personal-os/database";
 import type { AccessScope, ActorType } from "@personal-os/domain";
 import type { AppConfig } from "./config.js";
 import type { EmailDelivery } from "./email-delivery.js";
+import type { RuntimeLifecycle } from "./runtime-lifecycle.js";
 
 export type Principal = {
   actorId: string;
@@ -20,6 +21,7 @@ export type AppDependencies = {
   icloud?: ICloudConnector;
   log?: (entry: RequestLog) => void;
   now?: () => Date;
+  runtimeLifecycle?: RuntimeLifecycle;
   x?: XConnector;
 };
 

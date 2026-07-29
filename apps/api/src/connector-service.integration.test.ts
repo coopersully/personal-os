@@ -543,6 +543,100 @@ describe.sequential("connector service", () => {
     expect(syncMail).toHaveBeenCalledOnce();
   });
 
+  it("settles a quiesce-interrupted sync durably and allows a new runtime to retry it", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("runtime quiescing");
+    const cancellableGoogle = mockGoogle();
+    let markProviderStarted: () => void = () => {};
+    const providerStarted = new Promise<void>((resolve) => {
+      markProviderStarted = resolve;
+    });
+    vi.mocked(cancellableGoogle.listCalendars).mockImplementationOnce(
+      async (_currentCredentials, operation) => {
+        markProviderStarted();
+        return new Promise((_resolve, reject) => {
+          operation?.signal?.addEventListener("abort", () => reject(operation.signal?.reason), {
+            once: true,
+          });
+        });
+      },
+    );
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        email: "quiesce-retry@example.com",
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        label: "Quiesce retry",
+        lastSyncedAt: timestamp,
+        mailEnabled: false,
+        provider: "google",
+        providerAccountId: "quiesce-retry",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Quiesce retry account fixture was not created.");
+    const cancellableService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: cancellableGoogle,
+      now: () => timestamp,
+      shutdown: {
+        deadlineMs: () => timestamp.getTime() + 105_000,
+        signal: controller.signal,
+      },
+    });
+
+    const sync = cancellableService.syncAccount(userId, account.id);
+    await providerStarted;
+    controller.abort(interrupted);
+    await expect(sync).rejects.toBe(interrupted);
+
+    const [settled] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(settled).toMatchObject({
+      lastSyncedAt: null,
+      syncError: "Synchronization was interrupted by API shutdown and will retry.",
+      syncStatus: "idle",
+    });
+
+    const retryService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: cancellableGoogle,
+      now: () => timestamp,
+    });
+    await expect(retryService.syncAccount(userId, account.id)).resolves.toEqual(
+      expect.objectContaining({ changed: expect.any(Number) }),
+    );
+
+    const [lateAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        email: "late-quiesce-claim@example.com",
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        label: "Late quiesce claim",
+        mailEnabled: false,
+        provider: "google",
+        providerAccountId: "late-quiesce-claim",
+        userId,
+      })
+      .returning();
+    if (!lateAccount) throw new Error("Late quiesce account fixture was not created.");
+    const providerCallsBeforeLateClaim = vi.mocked(cancellableGoogle.listCalendars).mock.calls
+      .length;
+    await expect(cancellableService.syncAccount(userId, lateAccount.id)).rejects.toBe(interrupted);
+    expect(vi.mocked(cancellableGoogle.listCalendars)).toHaveBeenCalledTimes(
+      providerCallsBeforeLateClaim,
+    );
+    await expect(
+      database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, lateAccount.id)),
+    ).resolves.toEqual([expect.objectContaining({ syncError: null, syncStatus: "idle" })]);
+  });
+
   it("releases the sync lease when credential setup fails", async () => {
     const [account] = await database.db
       .insert(calendarAccounts)

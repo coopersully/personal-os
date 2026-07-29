@@ -12,6 +12,7 @@ import type {
   ICloudCredentials,
   NormalizedRemoteEvent,
   NormalizedRemoteMailThread,
+  ProviderOperationOptions,
   RemoteCalendar,
   RemoteMailbox,
 } from "./types.js";
@@ -21,6 +22,7 @@ type DavClient = Awaited<ReturnType<typeof createDAVClient>>;
 type ImapClient = Pick<
   ImapFlow,
   | "connect"
+  | "close"
   | "fetch"
   | "getMailboxLock"
   | "list"
@@ -31,7 +33,10 @@ type ImapClient = Pick<
 >;
 
 type ICloudConnectorOptions = {
-  createDavClient?: (credentials: ICloudCredentials) => Promise<DavClient>;
+  createDavClient?: (
+    credentials: ICloudCredentials,
+    operation?: ProviderOperationOptions,
+  ) => Promise<DavClient>;
   createImapClient?: (credentials: ICloudCredentials) => ImapClient;
   createSmtpTransport?: (credentials: ICloudCredentials) => {
     close: () => void;
@@ -43,7 +48,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
   /* v8 ignore start -- default factories are exercised only against Apple's live services */
   const davFactory =
     options.createDavClient ??
-    ((credentials: ICloudCredentials) =>
+    ((credentials: ICloudCredentials, operation?: ProviderOperationOptions) =>
       createDAVClient({
         authMethod: "Basic",
         credentials: {
@@ -51,6 +56,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
           username: credentials.email,
         },
         defaultAccountType: "caldav",
+        ...(operation?.signal ? { fetchOptions: { signal: operation.signal } } : {}),
         serverUrl: "https://caldav.icloud.com",
       }));
   const imapFactory =
@@ -68,16 +74,26 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
       }));
   /* v8 ignore stop */
 
-  async function dav(credentials: ICloudCredentials): Promise<DavClient> {
+  async function dav(
+    credentials: ICloudCredentials,
+    operation?: ProviderOperationOptions,
+  ): Promise<DavClient> {
     try {
-      return await davFactory(credentials);
+      throwIfCancelled(operation);
+      return await davFactory(credentials, operation);
     } catch (error) {
+      if (operation?.signal?.aborted) throw operation.signal.reason;
       throw providerError("iCloud Calendar", error);
     }
   }
 
-  async function calendarByUrl(client: DavClient, remoteCalendarId: string): Promise<DAVCalendar> {
-    const calendars = await client.fetchCalendars();
+  async function calendarByUrl(
+    client: DavClient,
+    remoteCalendarId: string,
+    operation?: ProviderOperationOptions,
+  ): Promise<DAVCalendar> {
+    throwIfCancelled(operation);
+    const calendars = await client.fetchCalendars(fetchOptions(operation));
     const calendar = calendars.find((item) => item.url === remoteCalendarId);
     if (!calendar) throw new ConnectorError("The iCloud calendar no longer exists.", 404);
     return calendar;
@@ -110,16 +126,21 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
       }
     },
 
-    async listCalendars(credentials) {
-      const client = await dav(credentials);
-      const calendars = await client.fetchCalendars();
+    async listCalendars(credentials, operation) {
+      const client = await dav(credentials, operation);
+      throwIfCancelled(operation);
+      const calendars = await client.fetchCalendars(fetchOptions(operation));
       return calendars.map(remoteCalendar);
     },
 
-    async syncCalendar(credentials, remoteCalendarId, _syncToken) {
-      const client = await dav(credentials);
-      const calendar = await calendarByUrl(client, remoteCalendarId);
-      const objects = await client.fetchCalendarObjects({ calendar });
+    async syncCalendar(credentials, remoteCalendarId, _syncToken, operation) {
+      const client = await dav(credentials, operation);
+      const calendar = await calendarByUrl(client, remoteCalendarId, operation);
+      throwIfCancelled(operation);
+      const objects = await client.fetchCalendarObjects({
+        calendar,
+        ...fetchOptions(operation),
+      });
       const changes = objects
         .filter((object): object is DAVCalendarObject & { data: string } =>
           Boolean(typeof object.data === "string" && object.data.includes("BEGIN:VEVENT")),
@@ -138,12 +159,16 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     },
 
     /* v8 ignore start -- IMAP projection edge variants are covered by live provider compatibility tests */
-    async syncMail(credentials) {
+    async syncMail(credentials, operation) {
+      throwIfCancelled(operation);
       const client = imapFactory(credentials);
       let connected = false;
+      const abort = () => client.close();
+      operation?.signal?.addEventListener("abort", abort, { once: true });
       try {
         await client.connect();
         connected = true;
+        throwIfCancelled(operation);
         const listed = await client.list({ statusQuery: { messages: true, unseen: true } });
         const selectable = listed.filter((mailbox) => !mailbox.flags.has("\\Noselect"));
         const mailboxes: RemoteMailbox[] = selectable.map((mailbox) => ({
@@ -155,6 +180,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         }));
         const threads: NormalizedRemoteMailThread[] = [];
         for (const mailbox of selectable) {
+          throwIfCancelled(operation);
           const total = mailbox.status?.messages ?? 0;
           if (total === 0) continue;
           const lock = await client.getMailboxLock(mailbox.path);
@@ -168,6 +194,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
               threadId: true,
               uid: true,
             })) {
+              throwIfCancelled(operation);
               if (!message.source) continue;
               const parsed = await simpleParser(message.source);
               const bodyText = parsed.text?.trim() ?? "";
@@ -209,10 +236,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         }
         return { mailboxes, threads };
       } catch (error) {
+        if (operation?.signal?.aborted) throw operation.signal.reason;
         throw providerError("iCloud Mail", error);
         /* v8 ignore next -- V8 exposes a synthetic finally branch after both paths are tested */
       } finally {
-        if (connected) await client.logout();
+        operation?.signal?.removeEventListener("abort", abort);
+        if (operation?.signal?.aborted) client.close();
+        else if (connected) await client.logout();
       }
     },
 
@@ -449,4 +479,20 @@ function providerError(service: string, error: unknown): ConnectorError {
     `${service} could not connect. Check the Apple Account email and app-specific password.`,
     401,
   );
+}
+
+function fetchOptions(operation?: ProviderOperationOptions): {
+  fetchOptions?: RequestInit;
+} {
+  return operation?.signal ? { fetchOptions: { signal: operation.signal } } : {};
+}
+
+function throwIfCancelled(operation?: ProviderOperationOptions): void {
+  operation?.signal?.throwIfAborted();
+  if (operation?.deadlineMs !== undefined && Date.now() >= operation.deadlineMs) {
+    throw (
+      operation.signal?.reason ??
+      new DOMException("Provider operation deadline expired.", "TimeoutError")
+    );
+  }
 }

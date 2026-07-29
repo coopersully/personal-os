@@ -170,6 +170,38 @@ describe("Google Calendar connector", () => {
     );
   });
 
+  it("aborts an in-flight multi-page calendar sync before fetching more pages", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("runtime quiescing");
+    let markSecondPageStarted: () => void = () => {};
+    const secondPageStarted = new Promise<void>((resolve) => {
+      markSecondPageStarted = resolve;
+    });
+    const fetch = vi.fn(
+      async (_input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+        if (fetch.mock.calls.length === 1) {
+          return response({ items: [], nextPageToken: "page-2" });
+        }
+        markSecondPageStarted();
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), {
+            once: true,
+          });
+        });
+      },
+    );
+
+    const sync = connector(fetch).syncCalendar(fresh, "calendar", null, {
+      deadlineMs: Date.now() + 105_000,
+      signal: controller.signal,
+    });
+    await secondPageStarted;
+    controller.abort(interrupted);
+
+    await expect(sync).rejects.toBe(interrupted);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("creates, updates, and deletes timed and all-day events", async () => {
     const fetch = queued(
       response(timedEvent),

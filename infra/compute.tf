@@ -146,6 +146,7 @@ resource "aws_ecs_task_definition" "api" {
     name           = "api"
     image          = "${aws_ecr_repository.api.repository_url}:bootstrap"
     essential      = true
+    stopTimeout    = 120
     portMappings   = [{ containerPort = 8787, hostPort = 8787, protocol = "tcp" }]
     mountPoints    = []
     systemControls = []
@@ -155,6 +156,7 @@ resource "aws_ecs_task_definition" "api" {
       { name = "PORT", value = "8787" },
       { name = "APP_BASE_URL", value = "https://${local.app_domain}" },
       { name = "API_BASE_URL", value = "https://${local.api_domain}" },
+      { name = "API_SHUTDOWN_TIMEOUT_MS", value = "105000" },
       { name = "ALLOWED_ORIGINS", value = "https://${local.app_domain}" },
       { name = "EMAIL_FROM", value = var.email_from },
       { name = "GOOGLE_CLIENT_ID", value = var.google_client_id },

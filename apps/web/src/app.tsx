@@ -66,7 +66,6 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
-  Circle,
   Clock3,
   Cloud,
   CloudRain,
@@ -81,7 +80,6 @@ import {
   FileText,
   Grid3X3,
   Image,
-  Inbox,
   KeyRound,
   Layers3,
   ListChecks,
@@ -277,7 +275,6 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { api, errorMessage, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { InlineError, PageLoading } from "./components/async-state.js";
-import { WorkspaceSkeleton } from "./components/workspace-skeleton.js";
 import {
   getWorkspaceCalendarEntry,
   workspaceCalendarSummary,
@@ -306,10 +303,25 @@ import {
   MailSidebar as MailFeatureSidebar,
 } from "./features/mail/mail.js";
 import { mailNavigationItem } from "./features/mail/manifest.js";
+import {
+  ReminderRow,
+  RemindersCreateButton,
+  RemindersPage,
+  RemindersSidebar,
+  RemindersTopbarControls,
+} from "./features/reminders/page.js";
 import { AgentAccessSettings } from "./features/settings/agent-access.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
 import { SetupPage } from "./features/setup/page.js";
-import { formatOrdinalDate } from "./lib/date-format.js";
+import {
+  TaskRow,
+  TasksCreateButton,
+  TasksPage,
+  TasksSidebar,
+  TasksTopbarControls,
+} from "./features/tasks/page.js";
+import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
+import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import { timeToMinute } from "./time.js";
 
@@ -1135,7 +1147,9 @@ function AuthenticatedApp({ user }: { user: User }) {
                   </Tooltip>
                 )}
                 {sidebarMode === "tasks" ? (
-                  <TaskCreateButton setEditor={setEditor} />
+                  <TasksCreateButton onCreate={() => setEditor({ kind: "task" })} />
+                ) : sidebarMode === "reminders" ? (
+                  <RemindersCreateButton onCreate={() => setEditor({ kind: "reminder" })} />
                 ) : sidebarMode === "calendar" ? (
                   <CalendarCreateButton setEditor={setEditor} />
                 ) : location.pathname === "/mail" ? (
@@ -1163,6 +1177,10 @@ function AuthenticatedApp({ user }: { user: User }) {
                 <MailTopbarControls />
               ) : location.pathname === "/activity" ? (
                 <ActivityTopbarControls />
+              ) : location.pathname === "/reminders" ? (
+                <RemindersTopbarControls />
+              ) : location.pathname === "/tasks" ? (
+                <TasksTopbarControls />
               ) : null
             }
             leading={
@@ -1361,8 +1379,24 @@ function WorkspaceRoutes({
         path="/calendar"
         element={<CalendarPage setEditor={setEditor} todaySnap={calendarTodaySnap} user={user} />}
       />
-      <Route path="/reminders" element={<RemindersPage setEditor={setEditor} user={user} />} />
-      <Route path="/tasks" element={<TasksPage setEditor={setEditor} user={user} />} />
+      <Route
+        path="/reminders"
+        element={
+          <RemindersPage
+            onEdit={(reminder) => setEditor({ kind: "reminder", reminder })}
+            timeZone={user.planningTimezone}
+          />
+        }
+      />
+      <Route
+        path="/tasks"
+        element={
+          <TasksPage
+            onEdit={(task) => setEditor({ kind: "task", task })}
+            timeZone={user.planningTimezone}
+          />
+        }
+      />
       <Route path="/mail" element={<MailFeaturePage user={user} />} />
       <Route
         path="/automations"
@@ -1915,14 +1949,6 @@ function CalendarCreateButton({ setEditor }: { setEditor: (editor: Editor) => vo
   return (
     <ShadcnButton onClick={() => setEditor({ kind: "event" })}>
       <CalendarPlus aria-hidden="true" data-icon="inline-start" /> New event
-    </ShadcnButton>
-  );
-}
-
-function TaskCreateButton({ setEditor }: { setEditor: (editor: Editor) => void }) {
-  return (
-    <ShadcnButton onClick={() => setEditor({ kind: "task" })}>
-      <Plus aria-hidden="true" data-icon="inline-start" /> New task
     </ShadcnButton>
   );
 }
@@ -4107,276 +4133,6 @@ function MonthCalendarView({
         })}
       </div>
     </div>
-  );
-}
-
-function RemindersSidebar({ onNavigate }: { onNavigate: () => void }) {
-  const [searchParams] = useSearchParams();
-  const showCompleted = searchParams.get("view") === "completed";
-  return (
-    <ShadcnSidebarGroup>
-      <ShadcnSidebarGroupLabel>View</ShadcnSidebarGroupLabel>
-      <ShadcnSidebarGroupContent>
-        <nav aria-label="Reminder views">
-          <ShadcnSidebarMenu>
-            <ShadcnSidebarMenuItem>
-              <ShadcnSidebarMenuButton asChild isActive={!showCompleted}>
-                <Link
-                  aria-current={!showCompleted ? "page" : undefined}
-                  onClick={onNavigate}
-                  to="/reminders"
-                >
-                  <ListTodo aria-hidden="true" />
-                  <span>Open</span>
-                </Link>
-              </ShadcnSidebarMenuButton>
-            </ShadcnSidebarMenuItem>
-            <ShadcnSidebarMenuItem>
-              <ShadcnSidebarMenuButton asChild isActive={showCompleted}>
-                <Link
-                  aria-current={showCompleted ? "page" : undefined}
-                  onClick={onNavigate}
-                  to="/reminders?view=completed"
-                >
-                  <CheckCircle2 aria-hidden="true" />
-                  <span>Completed</span>
-                </Link>
-              </ShadcnSidebarMenuButton>
-            </ShadcnSidebarMenuItem>
-          </ShadcnSidebarMenu>
-        </nav>
-      </ShadcnSidebarGroupContent>
-    </ShadcnSidebarGroup>
-  );
-}
-
-function RemindersPage({ setEditor, user }: { setEditor: (editor: Editor) => void; user: User }) {
-  const [searchParams] = useSearchParams();
-  const showCompleted = searchParams.get("view") === "completed";
-  const reminders = useQuery({
-    queryFn: () => api.listReminders({ completed: showCompleted }),
-    queryKey: ["reminders", showCompleted],
-  });
-  const timeZone = user.planningTimezone;
-  return (
-    <div className="narrow-page">
-      {reminders.isPending ? (
-        <PageLoading />
-      ) : reminders.isError ? (
-        <InlineError error={reminders.error} />
-      ) : reminders.data.items.length === 0 ? (
-        <EmptyState
-          icon={<ListTodo />}
-          title={showCompleted ? "No completed reminders" : "A clear slate"}
-        >
-          {showCompleted
-            ? "Completed items will collect here."
-            : "Create the first reminder worth keeping."}
-        </EmptyState>
-      ) : (
-        <div className="reminder-list reminder-list--large">
-          {reminders.data.items.map((reminder) => (
-            <ReminderRow
-              key={reminder.id}
-              onEdit={() => setEditor({ kind: "reminder", reminder })}
-              reminder={reminder}
-              timeZone={timeZone}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-type TaskView = "completed" | "inbox" | "next" | "scheduled";
-
-function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
-  const [searchParams] = useSearchParams();
-  const view = (searchParams.get("view") ?? "inbox") as TaskView;
-  const views: Array<{ icon: LucideIcon; label: string; value: TaskView }> = [
-    { icon: Inbox, label: "Inbox", value: "inbox" },
-    { icon: ListChecks, label: "Next", value: "next" },
-    { icon: Clock3, label: "Scheduled", value: "scheduled" },
-    { icon: CheckCircle2, label: "Completed", value: "completed" },
-  ];
-  return (
-    <ShadcnSidebarGroup>
-      <ShadcnSidebarGroupLabel>View</ShadcnSidebarGroupLabel>
-      <ShadcnSidebarGroupContent>
-        <nav aria-label="Task views">
-          <ShadcnSidebarMenu>
-            {views.map(({ icon: Icon, label, value }) => {
-              const selected = view === value;
-              return (
-                <ShadcnSidebarMenuItem key={value}>
-                  <ShadcnSidebarMenuButton asChild isActive={selected}>
-                    <Link
-                      aria-current={selected ? "page" : undefined}
-                      onClick={onNavigate}
-                      to={value === "inbox" ? "/tasks" : `/tasks?view=${value}`}
-                    >
-                      <Icon aria-hidden="true" />
-                      <span>{label}</span>
-                    </Link>
-                  </ShadcnSidebarMenuButton>
-                </ShadcnSidebarMenuItem>
-              );
-            })}
-          </ShadcnSidebarMenu>
-        </nav>
-      </ShadcnSidebarGroupContent>
-    </ShadcnSidebarGroup>
-  );
-}
-
-function TasksPage({ setEditor, user }: { setEditor: (editor: Editor) => void; user: User }) {
-  const [searchParams] = useSearchParams();
-  const requestedView = searchParams.get("view");
-  const view: TaskView =
-    requestedView === "next" || requestedView === "scheduled" || requestedView === "completed"
-      ? requestedView
-      : "inbox";
-  const tasks = useQuery({
-    queryFn: () =>
-      api.listTasks(
-        view === "completed" ? { completed: true } : { completed: false, status: view },
-      ),
-    queryKey: ["tasks", view],
-  });
-  const copy: Record<TaskView, { description: string; empty: string; title: string }> = {
-    completed: {
-      description: "A quiet record of work you finished.",
-      empty: "Completed tasks will collect here.",
-      title: "Completed tasks",
-    },
-    inbox: {
-      description: "Capture first. Decide what belongs next later.",
-      empty: "Capture the first task worth keeping.",
-      title: "Task inbox",
-    },
-    next: {
-      description: "A deliberately short queue for your attention.",
-      empty: "Move a task here when it is ready for attention.",
-      title: "Next tasks",
-    },
-    scheduled: {
-      description: "Tasks with a protected place in time.",
-      empty: "Schedule a task when it needs a specific time block.",
-      title: "Scheduled tasks",
-    },
-  };
-  const detail = copy[view];
-  if (tasks.isPending) return <WorkspaceSkeleton kind="tasks" />;
-  return (
-    <div className="narrow-page">
-      <ShadcnCard>
-        <ShadcnCardHeader>
-          <ShadcnCardTitle>{detail.title}</ShadcnCardTitle>
-          <ShadcnCardDescription>{detail.description}</ShadcnCardDescription>
-        </ShadcnCardHeader>
-        <ShadcnCardContent>
-          {tasks.isError ? (
-            <InlineError error={tasks.error} />
-          ) : tasks.data.items.length === 0 ? (
-            <EmptyState icon={<ListChecks />} title="Nothing here yet">
-              {detail.empty}
-            </EmptyState>
-          ) : (
-            <ShadcnItemGroup>
-              {tasks.data.items.map((task) => (
-                <TaskRow
-                  key={task.id}
-                  onEdit={() => setEditor({ kind: "task", task })}
-                  task={task}
-                  timeZone={user.planningTimezone}
-                />
-              ))}
-            </ShadcnItemGroup>
-          )}
-        </ShadcnCardContent>
-      </ShadcnCard>
-    </div>
-  );
-}
-
-function TaskRow({
-  onEdit,
-  recommendation,
-  task,
-  timeZone,
-}: {
-  onEdit: () => void;
-  recommendation?: DailyBrief["recommendedTasks"][number];
-  task: Task;
-  timeZone: string;
-}) {
-  const queryClient = useQueryClient();
-  const complete = useMutation({
-    mutationFn: (completed: boolean) => api.completeTask(task.id, completed),
-    onSuccess: () => invalidateMaterial(queryClient),
-  });
-  const remove = useMutation({
-    mutationFn: () => api.deleteTask(task.id),
-    onSuccess: () => invalidateMaterial(queryClient),
-  });
-  const completeTask = task.completedAt !== null;
-  return (
-    <ShadcnItem variant="outline">
-      <ShadcnItemMedia>
-        <ShadcnCheckbox
-          aria-label={`${completeTask ? "Reopen" : "Complete"} ${task.title}`}
-          checked={completeTask}
-          disabled={complete.isPending}
-          onCheckedChange={(checked) => complete.mutate(checked === true)}
-        />
-      </ShadcnItemMedia>
-      <ShadcnItemContent>
-        <ShadcnItemTitle
-          className={completeTask ? "line-through text-muted-foreground" : undefined}
-        >
-          {task.title}
-        </ShadcnItemTitle>
-        <ShadcnItemDescription>{taskDescription(task, timeZone)}</ShadcnItemDescription>
-        {recommendation ? (
-          <ShadcnItemDescription>{recommendationCopy(recommendation)}</ShadcnItemDescription>
-        ) : null}
-        {task.tags.length > 0 ? (
-          <ul aria-label="Task tags" className="flex flex-wrap gap-1">
-            {task.tags.map((tag) => (
-              <ShadcnBadge asChild key={tag} variant="outline">
-                <li>{tag}</li>
-              </ShadcnBadge>
-            ))}
-          </ul>
-        ) : null}
-      </ShadcnItemContent>
-      <ShadcnItemActions>
-        <ShadcnBadge variant="secondary">{task.status}</ShadcnBadge>
-        <ShadcnButton
-          aria-label={`Edit ${task.title}`}
-          onClick={onEdit}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <Edit3 />
-        </ShadcnButton>
-        <ShadcnButton
-          aria-label={`Remove ${task.title}`}
-          disabled={remove.isPending}
-          onClick={() => remove.mutate()}
-          size="icon-sm"
-          variant="ghost"
-        >
-          <Trash2 />
-        </ShadcnButton>
-      </ShadcnItemActions>
-      {complete.isError || remove.isError ? (
-        <ShadcnItemDescription className="basis-full text-destructive" role="alert">
-          {errorMessage(complete.error ?? remove.error)}
-        </ShadcnItemDescription>
-      ) : null}
-    </ShadcnItem>
   );
 }
 
@@ -6978,62 +6734,6 @@ function TaskGroup({
   );
 }
 
-function ReminderRow({
-  onEdit,
-  reminder,
-  timeZone,
-}: {
-  onEdit: () => void;
-  reminder: Reminder;
-  timeZone: string;
-}) {
-  const queryClient = useQueryClient();
-  const complete = useMutation({
-    mutationFn: () => api.completeReminder(reminder.id, !reminder.completedAt),
-    onSuccess: () => invalidateMaterial(queryClient),
-  });
-  const remove = useMutation({
-    mutationFn: () => api.deleteReminder(reminder.id),
-    onSuccess: () => invalidateMaterial(queryClient),
-  });
-  return (
-    <article className={`reminder-row${reminder.completedAt ? " reminder-row--done" : ""}`}>
-      <button
-        aria-label={
-          reminder.completedAt ? `Reopen ${reminder.title}` : `Complete ${reminder.title}`
-        }
-        className="check-button"
-        disabled={complete.isPending}
-        onClick={() => complete.mutate()}
-        type="button"
-      >
-        {reminder.completedAt ? <Check size={15} /> : <Circle size={18} />}
-      </button>
-      <button className="reminder-row__material" onClick={onEdit} type="button">
-        <strong>{reminder.title}</strong>
-        <span>
-          {reminder.dueAt ? (
-            <>
-              <Clock3 size={13} /> {formatDue(reminder.dueAt, timeZone)}
-            </>
-          ) : (
-            "No deadline"
-          )}
-        </span>
-      </button>
-      <Badge className={`priority priority--${reminder.priority}`}>{reminder.priority}</Badge>
-      <Button
-        aria-label={`Delete ${reminder.title}`}
-        disabled={remove.isPending}
-        onClick={() => remove.mutate()}
-        tone="ghost"
-      >
-        <Trash2 size={15} />
-      </Button>
-    </article>
-  );
-}
-
 function EventCard({
   currentTime,
   event,
@@ -7900,14 +7600,6 @@ function LogoMark({ compact = false }: { compact?: boolean }) {
   );
 }
 
-async function invalidateMaterial(queryClient: ReturnType<typeof useQueryClient>) {
-  await Promise.all(
-    ["daily-brief", "agenda", "events", "reminders", "calendars", "activity"].map((key) =>
-      queryClient.invalidateQueries({ queryKey: [key] }),
-    ),
-  );
-}
-
 function initials(name: string) {
   return name
     .split(/\s+/)
@@ -8025,38 +7717,8 @@ function formatEventRange(event: CalendarEvent, timeZone: string): string {
   if (sameLocalDate(startDay, endDay)) {
     return `${dateFormatter.format(start)} · ${formatTime(event.startsAt, timeZone)}–${formatTime(event.endsAt, timeZone)}`;
   }
-  return `${formatDue(event.startsAt, timeZone)} – ${formatDue(event.endsAt, timeZone)}`;
-}
-function taskDescription(task: Task, timeZone: string): string {
-  const details = [
-    task.scheduledAt ? `Reserved ${formatDue(task.scheduledAt, timeZone)}` : null,
-    task.dueAt ? `Due ${formatDue(task.dueAt, timeZone)}` : null,
-    task.estimateMinutes ? `${task.estimateMinutes} min` : null,
-  ].filter((detail): detail is string => detail !== null);
-  return details.length > 0 ? details.join(" · ") : task.notes || "No date or estimate yet";
-}
-function recommendationCopy(recommendation: DailyBrief["recommendedTasks"][number]) {
-  const urgency = {
-    due_today: "Due today",
-    inbox: "Captured for later",
-    next: "Ready next",
-    overdue: "Overdue",
-  }[recommendation.urgency];
-  const capacity = {
-    does_not_fit: "does not fit in the remaining planning window",
-    fits_remaining_time: "fits in the remaining planning window",
-    needs_estimate: "needs an estimate before it can be planned",
-  }[recommendation.capacity];
-  return `${urgency} · ${capacity}`;
-}
-function formatDue(value: string, timeZone: string) {
-  return new Intl.DateTimeFormat("en", {
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    month: "short",
-    timeZone,
-  }).format(new Date(value));
+  const includeYear = startDay.year !== endDay.year;
+  return `${formatMaterialDateTime(event.startsAt, timeZone, { includeYear })} – ${formatMaterialDateTime(event.endsAt, timeZone, { includeYear })}`;
 }
 const formatRelative = formatRelativeTime;
 function formatMinutes(value: number) {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatOrdinalDate, ordinalSuffix } from "./date-format.js";
+import { formatMaterialDateTime, formatOrdinalDate, ordinalSuffix } from "./date-format.js";
 
 describe("ordinalSuffix", () => {
   it("uses English ordinal suffixes, including teen exceptions", () => {
@@ -21,6 +21,10 @@ describe("ordinalSuffix", () => {
   it("formats a time-zone aware long date", () => {
     expect(formatOrdinalDate(new Date("2026-07-13T12:00:00.000Z"), "UTC")).toBe(
       "Monday, July 13th",
+    );
+    expect(formatMaterialDateTime("2026-07-13T12:05:00.000Z", "UTC")).toBe("Jul 13, 12:05 PM");
+    expect(formatMaterialDateTime("2026-07-13T12:05:00.000Z", "UTC", { includeYear: true })).toBe(
+      "Jul 13, 2026, 12:05 PM",
     );
   });
 });

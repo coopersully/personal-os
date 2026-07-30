@@ -2137,7 +2137,7 @@ describe("ilo web app", () => {
     ).length;
     await browser.click(screen.getByRole("menuitem", { name: "Tasks" }));
 
-    expect(await screen.findByText("Task inbox")).toBeInTheDocument();
+    expect(await screen.findByText("Draft brief")).toBeInTheDocument();
     await waitFor(() =>
       expect(
         mocks.listTasks.mock.calls.filter(([query]) => query?.status === "inbox").length,
@@ -2163,8 +2163,8 @@ describe("ilo web app", () => {
   it("captures, completes, and organizes tasks", async () => {
     const browser = userEvent.setup();
     const { queryClient } = setup("/tasks");
-    expect(await screen.findByText("Task inbox")).toBeInTheDocument();
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("aria-current", "page");
     expect(within(screen.getByLabelText("Task tags")).getByText("planning")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "New task" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent("Capture a task");
@@ -2189,16 +2189,17 @@ describe("ilo web app", () => {
     const invalidate = vi.spyOn(queryClient, "invalidateQueries");
     await browser.click(screen.getByRole("button", { name: "Remove Draft brief" }));
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["daily-brief"] }));
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ["tasks"] });
     invalidate.mockRestore();
     await browser.click(screen.getByRole("link", { name: "Next" }));
-    expect(await screen.findByText("Next tasks")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute("aria-current", "page");
     expect(mocks.listTasks).toHaveBeenCalledWith({ completed: false, status: "next" });
   });
 
   it("captures unscheduled tasks cleanly and communicates a pending save", async () => {
     const browser = userEvent.setup();
     const view = setup("/tasks");
-    await screen.findByText("Task inbox");
+    await screen.findByText("Draft brief");
     await browser.click(screen.getByRole("button", { name: "New task" }));
     await browser.type(screen.getByLabelText("Task"), "Unscheduled capture");
     let resolveCreate: ((value: typeof task) => void) | undefined;
@@ -2282,9 +2283,72 @@ describe("ilo web app", () => {
 
     mocks.listTasks.mockResolvedValueOnce({ items: [], nextCursor: null });
     const completed = setup("/tasks?view=completed");
-    expect(await screen.findByText("Completed tasks")).toBeInTheDocument();
+    expect(await screen.findByText("Nothing here yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Completed" })).toHaveAttribute("aria-current", "page");
     expect(mocks.listTasks).toHaveBeenCalledWith({ completed: true });
     completed.unmount();
+  });
+
+  it("searches Tasks and Reminders from the app frame with honest empty states", async () => {
+    const browser = userEvent.setup();
+    mocks.listTasks.mockImplementation(async (query) => ({
+      items: query.query ? [] : [task],
+      nextCursor: null,
+    }));
+    const tasksView = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.type(screen.getByRole("searchbox", { name: "Search tasks" }), "missing");
+    expect(await screen.findByText("No matching tasks")).toBeInTheDocument();
+    expect(mocks.listTasks).toHaveBeenCalledWith({
+      completed: false,
+      query: "missing",
+      status: "inbox",
+    });
+    await browser.click(screen.getByRole("link", { name: "Next" }));
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("missing");
+    expect(mocks.listTasks).toHaveBeenCalledWith({
+      completed: false,
+      query: "missing",
+      status: "next",
+    });
+    tasksView.unmount();
+
+    mocks.listReminders.mockImplementation(async (query) => ({
+      items: query.query ? [] : [reminder],
+      nextCursor: null,
+    }));
+    const remindersView = setup("/reminders");
+    await screen.findByText("Test reminder");
+    await browser.type(screen.getByRole("searchbox", { name: "Search reminders" }), "missing");
+    expect(await screen.findByText("No matching reminders")).toBeInTheDocument();
+    expect(mocks.listReminders).toHaveBeenCalledWith({
+      completed: false,
+      query: "missing",
+    });
+    await browser.click(screen.getByRole("link", { name: "Completed" }));
+    expect(screen.getByRole("searchbox", { name: "Search reminders" })).toHaveValue("missing");
+    expect(mocks.listReminders).toHaveBeenCalledWith({
+      completed: true,
+      query: "missing",
+    });
+    remindersView.unmount();
+  });
+
+  it("keeps reminder rows actionable when completion or deletion fails", async () => {
+    const browser = userEvent.setup();
+    mocks.completeReminder.mockRejectedValueOnce(new Error("Reminder completion failed"));
+    const completionView = setup("/reminders");
+    await screen.findByText("Test reminder");
+    await browser.click(screen.getByRole("button", { name: "Complete Test reminder" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Reminder completion failed");
+    completionView.unmount();
+
+    mocks.deleteReminder.mockRejectedValueOnce(new Error("Reminder deletion failed"));
+    const deletionView = setup("/reminders");
+    await screen.findByText("Test reminder");
+    await browser.click(screen.getByRole("button", { name: "Delete Test reminder" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Reminder deletion failed");
+    deletionView.unmount();
   });
 
   it("does not invent an up-next event when something is already happening", async () => {
@@ -3761,13 +3825,21 @@ describe("ilo web app", () => {
       startsAt: "2026-07-13T23:00:00.000Z",
       title: "Overnight work",
     };
-    mocks.listEvents.mockResolvedValue([allDayEvent, multiDay, overnight]);
+    const crossYear = {
+      ...event,
+      endsAt: "2027-01-01T01:00:00.000Z",
+      id: "77777777-7777-4777-8777-777777777778",
+      location: null,
+      startsAt: "2026-12-31T23:00:00.000Z",
+      title: "New year work",
+    };
+    mocks.listEvents.mockResolvedValue([allDayEvent, multiDay, overnight, crossYear]);
     mocks.getDailyBrief.mockResolvedValue({
       allDay: [allDayEvent, multiDay],
       anytime: [],
       capacity,
       generatedAt: now,
-      laterToday: [overnight],
+      laterToday: [overnight, crossYear],
       next: overnight,
       now: [],
       overdue: [],
@@ -3789,6 +3861,9 @@ describe("ilo web app", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: /^11:00 PM Overnight work/ }));
     expect(screen.getByText("Jul 13, 11:00 PM – Jul 14, 1:00 AM")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await browser.click(screen.getByRole("button", { name: /^11:00 PM New year work/ }));
+    expect(screen.getByText("Dec 31, 2026, 11:00 PM – Jan 1, 2027, 1:00 AM")).toBeInTheDocument();
   });
 
   it("reschedules writable events by drag and rolls back rejected moves", async () => {
@@ -4062,8 +4137,7 @@ describe("ilo web app", () => {
 
     await browser.click(screen.getAllByRole("link", { name: "Reminders" })[0] as HTMLElement);
     expect(await screen.findByRole("heading", { name: "Reminders" })).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Add" }));
-    await browser.click(screen.getByRole("menuitem", { name: "Reminder" }));
+    await browser.click(screen.getByRole("button", { name: "New reminder" }));
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
     await browser.click(screen.getByRole("link", { name: "Completed" }));
     expect(await screen.findByRole("heading", { name: "Completed reminders" })).toBeInTheDocument();

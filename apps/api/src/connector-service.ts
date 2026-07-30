@@ -46,7 +46,21 @@ import {
   matchesMailRule,
   resolveStoredMailRule,
 } from "@personal-os/domain";
-import { and, asc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  notExists,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { requireDatabaseRecord } from "./database.js";
@@ -1985,13 +1999,39 @@ export function createConnectorService({
     await releaseMailRuleClaimForQuiesce(claimId);
     for (const item of claimed) touchedAccountIds.add(item.accountId);
     const outstandingAccounts = await db
-      .select({ accountId: mailRuleWorkItems.accountId })
+      .select({
+        accountId: mailRuleWorkItems.accountId,
+        oldestUpdatedAt: sql<Date>`min(${mailRuleWorkItems.updatedAt})`,
+      })
       .from(mailRuleWorkItems)
-      .where(inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]))
-      .groupBy(mailRuleWorkItems.accountId);
+      .where(
+        and(
+          inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
+          notExists(
+            db
+              .select({ id: attentionItems.id })
+              .from(attentionItems)
+              .where(
+                and(
+                  eq(attentionItems.domain, "mail"),
+                  eq(attentionItems.kind, "run_summary"),
+                  eq(attentionItems.status, "open"),
+                  eq(attentionItems.relatedEntityType, "mail_account"),
+                  eq(attentionItems.relatedEntityId, mailRuleWorkItems.accountId),
+                ),
+              ),
+          ),
+        ),
+      )
+      .groupBy(mailRuleWorkItems.accountId)
+      .orderBy(asc(sql`min(${mailRuleWorkItems.updatedAt})`), asc(mailRuleWorkItems.accountId))
+      .limit(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
     for (const item of outstandingAccounts) touchedAccountIds.add(item.accountId);
     const openSummaryAccounts = await db
-      .select({ accountId: attentionItems.relatedEntityId })
+      .select({
+        accountId: attentionItems.relatedEntityId,
+        oldestUpdatedAt: sql<Date>`min(${attentionItems.updatedAt})`,
+      })
       .from(attentionItems)
       .where(
         and(
@@ -1999,9 +2039,12 @@ export function createConnectorService({
           eq(attentionItems.kind, "run_summary"),
           eq(attentionItems.status, "open"),
           eq(attentionItems.relatedEntityType, "mail_account"),
+          isNotNull(attentionItems.relatedEntityId),
         ),
       )
-      .groupBy(attentionItems.relatedEntityId);
+      .groupBy(attentionItems.relatedEntityId)
+      .orderBy(asc(sql`min(${attentionItems.updatedAt})`), asc(attentionItems.relatedEntityId))
+      .limit(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
     for (const item of openSummaryAccounts) {
       if (item.accountId) touchedAccountIds.add(item.accountId);
     }

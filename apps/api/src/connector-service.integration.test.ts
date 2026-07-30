@@ -26,7 +26,7 @@ import {
   migrateDatabase,
   users,
 } from "@personal-os/database";
-import type { MailRuleAction } from "@personal-os/domain";
+import { MAIL_RULE_EXECUTION_LIMIT_PER_RUN, type MailRuleAction } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
@@ -6498,6 +6498,84 @@ describe.sequential("connector service", () => {
     await expect(
       database.db.select().from(attentionItems).where(eq(attentionItems.id, repairedSummary.id)),
     ).resolves.toEqual([expect.objectContaining({ status: "resolved", version: 2 })]);
+  });
+
+  it("bounds Mail run-summary rediscovery while eventually repairing every account", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixtures = [];
+    for (let index = 0; index <= MAIL_RULE_EXECUTION_LIMIT_PER_RUN; index += 1) {
+      fixtures.push(
+        await createDurableMailWorkFixture(`Bounded run summary ${index}`, {
+          afterDays: 1,
+          mailboxId: null,
+          type: "archive",
+        }),
+      );
+    }
+    const accountIds = fixtures.map((fixture) => fixture.account.id);
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ completedAt: timestamp, status: "failed" })
+      .where(inArray(mailRuleWorkItems.accountId, accountIds));
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.relatedEntityId, accountIds),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toHaveLength(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.relatedEntityId, accountIds),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toHaveLength(MAIL_RULE_EXECUTION_LIMIT_PER_RUN + 1);
+
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ status: "succeeded" })
+      .where(inArray(mailRuleWorkItems.accountId, accountIds));
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.relatedEntityId, accountIds),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.relatedEntityId, accountIds),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toHaveLength(0);
   });
 
   it("reconciles provider success after rotated credentials fail to persist", async () => {

@@ -43,3 +43,16 @@ export function WorkspaceSearch({
 export function workspaceSearchFromParams(searchParams: URLSearchParams): string {
   return searchParams.get("q") ?? "";
 }
+
+export function workspaceViewPath(
+  pathname: string,
+  searchParams: URLSearchParams,
+  view?: string,
+): string {
+  const next = new URLSearchParams();
+  const search = workspaceSearchFromParams(searchParams);
+  if (search.trim()) next.set("q", search);
+  if (view) next.set("view", view);
+  const query = next.toString();
+  return query ? `${pathname}?${query}` : pathname;
+}

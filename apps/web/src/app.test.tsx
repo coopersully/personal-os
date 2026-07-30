@@ -2304,6 +2304,13 @@ describe("ilo web app", () => {
       query: "missing",
       status: "inbox",
     });
+    await browser.click(screen.getByRole("link", { name: "Next" }));
+    expect(screen.getByRole("searchbox", { name: "Search tasks" })).toHaveValue("missing");
+    expect(mocks.listTasks).toHaveBeenCalledWith({
+      completed: false,
+      query: "missing",
+      status: "next",
+    });
     tasksView.unmount();
 
     mocks.listReminders.mockImplementation(async (query) => ({
@@ -2316,6 +2323,12 @@ describe("ilo web app", () => {
     expect(await screen.findByText("No matching reminders")).toBeInTheDocument();
     expect(mocks.listReminders).toHaveBeenCalledWith({
       completed: false,
+      query: "missing",
+    });
+    await browser.click(screen.getByRole("link", { name: "Completed" }));
+    expect(screen.getByRole("searchbox", { name: "Search reminders" })).toHaveValue("missing");
+    expect(mocks.listReminders).toHaveBeenCalledWith({
+      completed: true,
       query: "missing",
     });
     remindersView.unmount();
@@ -3812,13 +3825,21 @@ describe("ilo web app", () => {
       startsAt: "2026-07-13T23:00:00.000Z",
       title: "Overnight work",
     };
-    mocks.listEvents.mockResolvedValue([allDayEvent, multiDay, overnight]);
+    const crossYear = {
+      ...event,
+      endsAt: "2027-01-01T01:00:00.000Z",
+      id: "77777777-7777-4777-8777-777777777778",
+      location: null,
+      startsAt: "2026-12-31T23:00:00.000Z",
+      title: "New year work",
+    };
+    mocks.listEvents.mockResolvedValue([allDayEvent, multiDay, overnight, crossYear]);
     mocks.getDailyBrief.mockResolvedValue({
       allDay: [allDayEvent, multiDay],
       anytime: [],
       capacity,
       generatedAt: now,
-      laterToday: [overnight],
+      laterToday: [overnight, crossYear],
       next: overnight,
       now: [],
       overdue: [],
@@ -3840,6 +3861,9 @@ describe("ilo web app", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     await browser.click(screen.getByRole("button", { name: /^11:00 PM Overnight work/ }));
     expect(screen.getByText("Jul 13, 11:00 PM – Jul 14, 1:00 AM")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    await browser.click(screen.getByRole("button", { name: /^11:00 PM New year work/ }));
+    expect(screen.getByText("Dec 31, 2026, 11:00 PM – Jan 1, 2027, 1:00 AM")).toBeInTheDocument();
   });
 
   it("reschedules writable events by drag and rolls back rejected moves", async () => {

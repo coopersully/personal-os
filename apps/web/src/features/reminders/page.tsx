@@ -14,7 +14,11 @@ import {
 } from "@/components/ui/sidebar";
 import { api, errorMessage } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
-import { WorkspaceSearch, workspaceSearchFromParams } from "../../components/workspace-search.js";
+import {
+  WorkspaceSearch,
+  workspaceSearchFromParams,
+  workspaceViewPath,
+} from "../../components/workspace-search.js";
 import { formatMaterialDateTime } from "../../lib/date-format.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
 
@@ -45,7 +49,7 @@ export function RemindersSidebar({ onNavigate }: { onNavigate: () => void }) {
                 <Link
                   aria-current={!showCompleted ? "page" : undefined}
                   onClick={onNavigate}
-                  to="/reminders"
+                  to={workspaceViewPath("/reminders", searchParams)}
                 >
                   <ListTodo aria-hidden="true" />
                   <span>Open</span>
@@ -57,7 +61,7 @@ export function RemindersSidebar({ onNavigate }: { onNavigate: () => void }) {
                 <Link
                   aria-current={showCompleted ? "page" : undefined}
                   onClick={onNavigate}
-                  to="/reminders?view=completed"
+                  to={workspaceViewPath("/reminders", searchParams, "completed")}
                 >
                   <CheckCircle2 aria-hidden="true" />
                   <span>Completed</span>

@@ -23,5 +23,8 @@ describe("ordinalSuffix", () => {
       "Monday, July 13th",
     );
     expect(formatMaterialDateTime("2026-07-13T12:05:00.000Z", "UTC")).toBe("Jul 13, 12:05 PM");
+    expect(formatMaterialDateTime("2026-07-13T12:05:00.000Z", "UTC", { includeYear: true })).toBe(
+      "Jul 13, 2026, 12:05 PM",
+    );
   });
 });

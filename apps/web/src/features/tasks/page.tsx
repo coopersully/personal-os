@@ -35,7 +35,11 @@ import {
 } from "@/components/ui/sidebar";
 import { api, errorMessage } from "../../api.js";
 import { InlineError } from "../../components/async-state.js";
-import { WorkspaceSearch, workspaceSearchFromParams } from "../../components/workspace-search.js";
+import {
+  WorkspaceSearch,
+  workspaceSearchFromParams,
+  workspaceViewPath,
+} from "../../components/workspace-search.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatMaterialDateTime } from "../../lib/date-format.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
@@ -86,7 +90,11 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
                     <Link
                       aria-current={selected ? "page" : undefined}
                       onClick={onNavigate}
-                      to={value === "inbox" ? "/tasks" : `/tasks?view=${value}`}
+                      to={workspaceViewPath(
+                        "/tasks",
+                        searchParams,
+                        value === "inbox" ? undefined : value,
+                      )}
                     >
                       <Icon aria-hidden="true" />
                       <span>{label}</span>

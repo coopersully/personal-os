@@ -11,13 +11,18 @@ export function formatOrdinalDate(date: Date, timeZone: string): string {
   return `${values.get("weekday")}, ${values.get("month")} ${day}${ordinalSuffix(day)}`;
 }
 
-export function formatMaterialDateTime(value: string, timeZone: string): string {
+export function formatMaterialDateTime(
+  value: string,
+  timeZone: string,
+  { includeYear = false }: { includeYear?: boolean } = {},
+): string {
   return new Intl.DateTimeFormat("en", {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
     month: "short",
     timeZone,
+    ...(includeYear ? { year: "numeric" } : {}),
   }).format(new Date(value));
 }
 

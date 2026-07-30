@@ -7717,7 +7717,8 @@ function formatEventRange(event: CalendarEvent, timeZone: string): string {
   if (sameLocalDate(startDay, endDay)) {
     return `${dateFormatter.format(start)} · ${formatTime(event.startsAt, timeZone)}–${formatTime(event.endsAt, timeZone)}`;
   }
-  return `${formatMaterialDateTime(event.startsAt, timeZone)} – ${formatMaterialDateTime(event.endsAt, timeZone)}`;
+  const includeYear = startDay.year !== endDay.year;
+  return `${formatMaterialDateTime(event.startsAt, timeZone, { includeYear })} – ${formatMaterialDateTime(event.endsAt, timeZone, { includeYear })}`;
 }
 const formatRelative = formatRelativeTime;
 function formatMinutes(value: number) {

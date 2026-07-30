@@ -6,6 +6,11 @@ on:
     branches: [main]
     types: [completed]
   workflow_dispatch:
+    inputs:
+      release_sha:
+        description: Existing 40-character commit SHA to redeploy; defaults to current main
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -27,8 +32,13 @@ jobs:
       - name: Select release commit
         id: release
         env:
-          RELEASE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-        run: echo "sha=${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
+          RELEASE_SHA: ${{ inputs.release_sha || github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          if [[ ! "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Release SHA must be a full lowercase commit SHA."
+            exit 1
+          fi
+          echo "sha=${RELEASE_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Publish pending commit status
         continue-on-error: true
@@ -115,6 +125,29 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
         run: |
+          image_exists() {
+            local repository_url="$1"
+            local repository_name="${repository_url##*/}"
+            aws ecr describe-images \
+              --repository-name "$repository_name" \
+              --image-ids imageTag="$RELEASE_TAG" \
+              >/dev/null 2>&1
+          }
+
+          api_exists=false
+          mcp_exists=false
+          if image_exists "$API_ECR_REPOSITORY"; then api_exists=true; fi
+          if image_exists "$MCP_ECR_REPOSITORY"; then mcp_exists=true; fi
+
+          if [ "$api_exists" = true ] && [ "$mcp_exists" = true ]; then
+            echo "Reusing existing immutable API and MCP images for ${RELEASE_TAG}."
+            exit 0
+          fi
+          if [ "$api_exists" != "$mcp_exists" ]; then
+            echo "::error::Only one immutable image exists for ${RELEASE_TAG}; refusing a partial release."
+            exit 1
+          fi
+
           docker build \
             --platform linux/amd64 \
             --target api \

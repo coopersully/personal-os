@@ -172,10 +172,10 @@ scaling or drains all API tasks:
    definition whose `api` container has `stopTimeout = 120` and
    `API_SHUTDOWN_TIMEOUT_MS = 105000`. Terraform ignores the service's live task-definition
    pointer, so registration alone does not prove any running task uses that revision.
-3. Register and deploy an immutable task definition that combines those shutdown settings with the
-   prerequisite image. The existing deploy workflow can do this by redeploying the exact
-   prerequisite commit after the infrastructure registration. Wait for the rolling service update
-   to complete and prove the active tasks actually use that task definition and image digest.
+3. Manually dispatch `Deploy hosted application` with the prerequisite commit as `release_sha`.
+   The workflow reuses that exact immutable image pair and registers a task definition combining
+   the API image with the shutdown settings. Wait for the rolling service update to complete and
+   prove the active tasks actually use that task definition and image digest.
 4. Confirm `GET /health/ready` returns
    `X-Ilo-Drain-Protocol: quiesce-v1`. Liveness, a healthy target, a present environment variable,
    or an ECS task-definition plan is not a substitute for this running-binary marker.

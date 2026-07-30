@@ -130,6 +130,10 @@ subject recorded by CloudTrail. The workflow publishes immutable
 migration-capable API through the current ECS rolling service update, waits for API health before deploying MCP,
 publishes the web build, invalidates CloudFront, and verifies all three public
 surfaces. ECS deployment circuit breakers roll back unhealthy task revisions.
+Manual dispatch accepts an optional full `release_sha` when an exact prior commit must be redeployed
+after a task-definition or configuration change. When both immutable API and MCP images already
+exist, the workflow reuses and rescans that pair; it refuses a partial pair instead of rebuilding or
+overwriting one side.
 
 The rolling API update is not proof of a stop-and-drain boundary: old and new tasks may overlap.
 Before a later serial-drain workflow is enabled, follow the prerequisite deployment and exact

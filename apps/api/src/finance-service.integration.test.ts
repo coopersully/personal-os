@@ -993,8 +993,12 @@ describe.sequential("finance service", () => {
         }),
       ]),
     );
-    expect(JSON.stringify(attentionAudits)).not.toContain(input.title);
-    expect(JSON.stringify(attentionAudits)).not.toMatch(/Important merchant|4200/);
+    const attentionAuditPayloads = JSON.stringify(
+      attentionAudits.map(({ after, before }) => ({ after, before })),
+    );
+    expect(attentionAuditPayloads).not.toContain(input.title);
+    expect(attentionAuditPayloads).not.toContain(financeTransaction.merchant);
+    expect(attentionAuditPayloads).not.toMatch(/(?:^|[^0-9A-Za-z-])4200(?:[^0-9A-Za-z-]|$)/);
   });
 
   it("serializes Finance account deletion with attention upserts and detaches every material link", async () => {

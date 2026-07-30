@@ -149,7 +149,6 @@ function fakeAws(args) {
 
   if (service === "ecs" && operation === "describe-services") {
     const query = argument(args, "--query") ?? "";
-    writeState(statePath, state);
     if (
       state.cancelDuringPostLaunchRead &&
       state.primaryTaskDefinition === "new-task-definition" &&
@@ -172,6 +171,15 @@ function fakeAws(args) {
       process.exitCode = 255;
       return;
     }
+    let primaryRolloutState = "COMPLETED";
+    if (
+      query.length === 0 &&
+      state.primaryRolloutStates?.length > 0 &&
+      state.primaryTaskDefinition !== "old-task-definition"
+    ) {
+      primaryRolloutState = state.primaryRolloutStates.shift();
+    }
+    writeState(statePath, state);
     if (query.includes("desiredCount,runningCount,pendingCount")) {
       process.stdout.write(`${state.desiredCount}\t${state.runningCount}\t${state.pendingCount}\n`);
       return;
@@ -193,7 +201,7 @@ function fakeAws(args) {
             },
             deployments: [
               {
-                rolloutState: "COMPLETED",
+                rolloutState: primaryRolloutState,
                 status: "PRIMARY",
                 taskDefinition: state.primaryTaskDefinition,
               },
@@ -644,6 +652,33 @@ if (process.argv[2] === "--fake-aws") {
   assert(
     success.state.primaryTaskDefinition === "new-task-definition",
     "Success must launch the exact new task definition.",
+  );
+  const delayedPrimary = runScenario(
+    "delayed-primary-completion",
+    baseState({ primaryRolloutStates: ["IN_PROGRESS", "COMPLETED"] }),
+  );
+  assert(
+    delayedPrimary.result.status === 0,
+    "A stable service whose primary completion is briefly delayed must succeed.",
+  );
+  assert(
+    delayedPrimary.state.primaryRolloutStates.length === 0 &&
+      delayedPrimary.state.desiredCount === 1,
+    "Deployment must wait for exact primary completion without stopping the healthy task.",
+  );
+  const stalledPrimary = runScenario(
+    "stalled-primary-completion",
+    baseState({ primaryRolloutStates: Array.from({ length: 10 }, () => "IN_PROGRESS") }),
+  );
+  assert(
+    stalledPrimary.result.status !== 0,
+    "A primary that never completes inside the bounded poll must fail.",
+  );
+  assert(
+    stalledPrimary.state.primaryRolloutStates.length === 0 &&
+      stalledPrimary.state.desiredCount === 0 &&
+      JSON.stringify(stalledPrimary.state.suspension) === JSON.stringify(allSuspended),
+    "A stalled primary must exhaust the bounded poll and return to fail-closed zero.",
   );
   const successfulReadiness = success.state.calls.findIndex((call) => call.startsWith("curl "));
   const successfulSuspension = success.state.calls.findIndex((call) =>

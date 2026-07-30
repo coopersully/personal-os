@@ -3,47 +3,18 @@ import { EmptyState } from "@personal-os/ui";
 import { useQuery } from "@tanstack/react-query";
 import { Activity, ChevronDown, Cloud, Command, Search, UserRound } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
+import { WorkspaceSearch, workspaceSearchFromParams } from "../../components/workspace-search.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 
 export function ActivityTopbarControls() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const search = activitySearchFromSearch(searchParams);
-
-  const updateSearch = (value: string) => {
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        const query = value.trim();
-        if (query) next.set("q", query);
-        else next.delete("q");
-        return next;
-      },
-      { replace: true },
-    );
-  };
-
-  return (
-    <InputGroup className="activity-topbar__search">
-      <InputGroupAddon>
-        <Search aria-hidden="true" />
-      </InputGroupAddon>
-      <InputGroupInput
-        aria-label="Search activity"
-        onChange={(event) => updateSearch(event.currentTarget.value)}
-        placeholder="Search activity"
-        type="search"
-        value={search}
-      />
-    </InputGroup>
-  );
+  return <WorkspaceSearch label="Search activity" />;
 }
 
 export function ActivityPage() {
   const [searchParams] = useSearchParams();
-  const search = activitySearchFromSearch(searchParams);
+  const search = workspaceSearchFromParams(searchParams).trim();
   const activity = useQuery({ queryFn: () => api.listActivity(100), queryKey: ["activity"] });
 
   if (activity.isPending) return <PageLoading />;
@@ -73,10 +44,6 @@ export function ActivityPage() {
       )}
     </div>
   );
-}
-
-export function activitySearchFromSearch(searchParams: URLSearchParams): string {
-  return searchParams.get("q")?.trim() ?? "";
 }
 
 export function filterActivityEvents(entries: AuditEvent[], search: string): AuditEvent[] {

@@ -270,6 +270,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
                   },
                 ],
                 messageCount: 1,
+                messagesComplete: true,
                 receivedAt,
                 // iCloud's IMAP thread identifier is not portable across mailboxes. Persist
                 // the mailbox + UID instead so flag and move actions can write through.
@@ -345,12 +346,16 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     /* v8 ignore start -- IMAP command variants are covered by connector contract tests */
     async updateMailThread(credentials, remoteThreadId, input) {
       const uidSeparator = remoteThreadId.lastIndexOf(":");
+      if (uidSeparator < 0) {
+        throw new ConnectorError("This iCloud message can no longer be updated.", 404);
+      }
       const mailboxAndValidity = remoteThreadId.slice(0, uidSeparator);
       const validitySeparator = mailboxAndValidity.lastIndexOf(":");
       const mailboxPath = mailboxAndValidity.slice(0, validitySeparator);
       const expectedUidValidity = mailboxAndValidity.slice(validitySeparator + 1);
       const uid = Number(remoteThreadId.slice(uidSeparator + 1));
       if (
+        validitySeparator < 0 ||
         !mailboxPath ||
         !/^\d+$/u.test(expectedUidValidity) ||
         !Number.isSafeInteger(uid) ||

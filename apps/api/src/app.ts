@@ -355,20 +355,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       });
     }
   });
-  app.use("*", async (_context, next) => {
-    if (!dependencies.runtimeLifecycle) {
-      await next();
-      return;
-    }
-    const request = dependencies.runtimeLifecycle.runRequest(next);
-    if (!request) {
-      throw new AppError(
-        "service_unavailable",
-        "The API is draining and is not accepting new work.",
-      );
-    }
-    await request;
-  });
   app.use("*", secureHeaders());
   app.use(
     "*",

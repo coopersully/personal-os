@@ -17,7 +17,7 @@ import { migrationsWithout } from "./test-migrations.js";
 describe.sequential("iCloud UIDVALIDITY identity migration", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
-  let migrationsBeforeUidValidity: string;
+  let migrationsBeforeUidValidity: string | undefined;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
@@ -36,9 +36,17 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
   }, 120_000);
 
   afterAll(async () => {
-    await database?.close();
-    await container?.stop();
-    await rm(migrationsBeforeUidValidity, { force: true, recursive: true });
+    try {
+      await database?.close();
+    } finally {
+      try {
+        await container?.stop();
+      } finally {
+        if (migrationsBeforeUidValidity) {
+          await rm(migrationsBeforeUidValidity, { force: true, recursive: true });
+        }
+      }
+    }
   });
 
   it("retires legacy source identity without cascading user-owned thread references", async () => {

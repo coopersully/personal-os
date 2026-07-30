@@ -111,7 +111,9 @@ current_scaling_suspension() {
     --service-namespace ecs \
     --resource-ids "$api_scaling_resource" \
     --scalable-dimension ecs:service:DesiredCount \
-    --output json ||
+    --output json \
+    --cli-connect-timeout 5 \
+    --cli-read-timeout 20 ||
     return
   api_scaling_suspension="$(
     jq -ce '
@@ -130,6 +132,7 @@ current_scaling_suspension() {
 }
 
 persist_failed_rollout_marker() {
+  recovery_registration_mode="${1:-normal}"
   if test "$api_recovery_marker_persisted" = "true"; then
     return 0
   fi
@@ -166,12 +169,22 @@ persist_failed_rollout_marker() {
     ' \
     <<<"$api_final_task_definition_json" >"$recovery_task_file"
   api_recovery_registration=""
-  if AWS_MAX_ATTEMPTS=1 capture_interruptible aws ecs register-task-definition \
+  recovery_registration_attempts=3
+  recovery_registration_connect_timeout=5
+  recovery_registration_read_timeout=20
+  if test "$recovery_registration_mode" = "signal"; then
+    recovery_registration_attempts=1
+    recovery_registration_connect_timeout=1
+    recovery_registration_read_timeout=2
+  fi
+  # RegisterTaskDefinition is not cancellable server-side. A client timeout may still leave a
+  # committed revision, so recovery always discovers and validates the latest immutable marker.
+  if AWS_MAX_ATTEMPTS="$recovery_registration_attempts" capture_interruptible aws ecs register-task-definition \
     --cli-input-json "file://${recovery_task_file}" \
     --query taskDefinition \
     --output json \
-    --cli-connect-timeout 1 \
-    --cli-read-timeout 2; then
+    --cli-connect-timeout "$recovery_registration_connect_timeout" \
+    --cli-read-timeout "$recovery_registration_read_timeout"; then
     api_recovery_registration="$api_captured_output"
   fi
   rm -f "$recovery_task_file"
@@ -241,12 +254,13 @@ clear_successful_recovery_marker() {
     ' \
     <<<"$api_final_task_definition_json" >"$cleanup_task_file"
   api_cleanup_registration=""
-  if AWS_MAX_ATTEMPTS=1 capture_interruptible aws ecs register-task-definition \
+  # Success cleanup runs outside a signal handler and needs enough time for ECS retries.
+  if AWS_MAX_ATTEMPTS=3 capture_interruptible aws ecs register-task-definition \
     --cli-input-json "file://${cleanup_task_file}" \
     --query taskDefinition \
     --output json \
-    --cli-connect-timeout 1 \
-    --cli-read-timeout 2; then
+    --cli-connect-timeout 5 \
+    --cli-read-timeout 20; then
     api_cleanup_registration="$api_captured_output"
   fi
   rm -f "$cleanup_task_file"
@@ -406,7 +420,7 @@ cancel_api_deployment() {
       --cli-read-timeout 2 \
       >/dev/null ||
       true
-    persist_failed_rollout_marker || true
+    persist_failed_rollout_marker signal || true
   elif test "$api_suspension_attempted" = "true"; then
     AWS_MAX_ATTEMPTS=1 aws application-autoscaling register-scalable-target \
       --service-namespace ecs \

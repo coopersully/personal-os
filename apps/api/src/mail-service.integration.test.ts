@@ -8,6 +8,7 @@ import {
   type DatabaseClient,
   domainProfiles,
   mailboxes,
+  mailCalendarCommitmentIntakes,
   mailDrafts,
   mailMessages,
   mailRules,
@@ -1845,6 +1846,48 @@ describe.sequential("mail service", () => {
         userId,
       },
     ]);
+    await database.db.insert(mailCalendarCommitmentIntakes).values([
+      {
+        accountId: enabledAccountId,
+        attachment: {
+          contentType: "text/calendar",
+          filename: "preview.ics",
+          id: "setup-preview-part",
+          size: 64,
+        },
+        attachmentFingerprint: "a".repeat(64),
+        evidenceKind: "calendar_attachment_metadata",
+        idempotencyKey: "b".repeat(64),
+        remoteMessageId: "setup-preview-message",
+        remotePartId: "setup-preview-part",
+        remoteThreadId: "thread-1",
+        sourceFingerprint: "c".repeat(64),
+        sourceThreadId: threadId,
+        sourceThreadRevision: statusSourceUpdatedAt,
+        userId,
+      },
+      {
+        accountId: enabledAccountId,
+        attachment: {
+          contentType: "text/calendar",
+          filename: "verified.ics",
+          id: "setup-verified-part",
+          size: 64,
+        },
+        attachmentFingerprint: "d".repeat(64),
+        authority: "server_verified",
+        evidenceKind: "verified_calendar_attachment",
+        idempotencyKey: "e".repeat(64),
+        remoteMessageId: "setup-verified-message",
+        remotePartId: "setup-verified-part",
+        remoteThreadId: "thread-1",
+        sourceFingerprint: "f".repeat(64),
+        sourceThreadId: threadId,
+        sourceThreadRevision: statusSourceUpdatedAt,
+        status: "pending",
+        userId,
+      },
+    ]);
     await expect(service.listSetupContext(userId)).resolves.toMatchObject({
       accounts: [
         {
@@ -1881,7 +1924,7 @@ describe.sequential("mail service", () => {
       ],
       commitmentIntake: {
         automaticCreationEnabled: false,
-        previewOnlyCount: 0,
+        previewOnlyCount: 1,
         serverVerifiedCount: 0,
       },
       automation: {

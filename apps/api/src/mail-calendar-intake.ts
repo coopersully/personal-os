@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import {
   auditEvents,
   type Database,
@@ -29,6 +29,10 @@ const CALENDAR_ATTACHMENT_TYPES = new Set(["application/ics", "text/calendar", "
 
 function fingerprint(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+}
+
+function privateFingerprint(value: string, privacyKey: string): string {
+  return createHmac("sha256", privacyKey).update(value).digest("hex");
 }
 
 function changedFieldNames(
@@ -91,12 +95,9 @@ function safeAuditMetadata(
 ): Record<string, unknown> | null {
   if (!intake) return null;
   return {
-    accountIdHash: fingerprint(intake.accountId),
     authority: intake.authority,
     evidenceKind: intake.evidenceKind,
     id: intake.id,
-    remoteMessageIdHash: fingerprint(intake.remoteMessageId),
-    remotePartIdHash: fingerprint(intake.remotePartId),
     status: intake.status,
   };
 }
@@ -136,6 +137,7 @@ export async function recordMailCalendarCommitmentIntakes(
   transaction: DatabaseTransaction,
   input: {
     accountId: string;
+    privacyKey: string;
     providerAccountAddressHint: string | null;
     message: MailMessageRow;
     principal: IntakePrincipal;
@@ -155,7 +157,7 @@ export async function recordMailCalendarCommitmentIntakes(
     );
   }
   const providerAccountAddressHintHash = input.providerAccountAddressHint
-    ? fingerprint(input.providerAccountAddressHint.trim().toLowerCase())
+    ? privateFingerprint(input.providerAccountAddressHint.trim().toLowerCase(), input.privacyKey)
     : null;
   const sourceFingerprint = mailCommitmentSourceFingerprint(input.message);
   const lockKey = mailCommitmentMessageLockKey(input.accountId, input.message.remoteMessageId);
@@ -363,14 +365,25 @@ export async function invalidateMailCalendarCommitmentIntakes(
     )
     .orderBy(mailCalendarCommitmentIntakes.id)
     .for("update");
+  let invalidated = 0;
   for (const existing of rows) {
+    const evidenceKind = `source_${input.reasonCode}`;
+    if (
+      existing.authority === "provider_projected_unverified" &&
+      existing.evidenceKind === evidenceKind &&
+      existing.sourceMessageId === null &&
+      existing.sourceThreadId === null &&
+      existing.status === "preview_only"
+    ) {
+      continue;
+    }
     const intake = requireDatabaseRecord(
       (
         await transaction
           .update(mailCalendarCommitmentIntakes)
           .set({
             authority: "provider_projected_unverified",
-            evidenceKind: `source_${input.reasonCode}`,
+            evidenceKind,
             sourceMessageId: null,
             sourceThreadId: null,
             status: "preview_only",
@@ -388,8 +401,9 @@ export async function invalidateMailCalendarCommitmentIntakes(
       principal: input.principal,
       requestId: input.requestId,
     });
+    invalidated += 1;
   }
-  return rows.length;
+  return invalidated;
 }
 
 export async function reconcileMissingMailCalendarCommitmentMessages(

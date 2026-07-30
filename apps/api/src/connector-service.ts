@@ -412,11 +412,11 @@ export function createConnectorService({
   async function withConnectorSyncClaim<T>(
     account: AccountRow,
     syncClaim: SyncClaim,
-    work: () => Promise<T>,
+    work: (transaction: DatabaseTransaction) => Promise<T>,
   ): Promise<T> {
     return db.transaction(async (transaction) => {
       await requireConnectorSyncClaim(transaction, account, syncClaim, "projection");
-      return work();
+      return work(transaction);
     });
   }
 
@@ -796,8 +796,8 @@ export function createConnectorService({
             continue;
           }
           throwIfQuiescing();
-          changed += await withConnectorSyncClaim(account, syncClaim, () =>
-            projectCalendarChanges(userId, calendar, result, principal, requestId),
+          changed += await withConnectorSyncClaim(account, syncClaim, (transaction) =>
+            projectCalendarChanges(transaction, userId, calendar, result, principal, requestId),
           );
         }
       }
@@ -901,6 +901,7 @@ export function createConnectorService({
   }
 
   async function projectCalendarChanges(
+    transaction: DatabaseTransaction,
     userId: string,
     calendar: CalendarRow,
     result: SyncResult["value"],
@@ -911,7 +912,7 @@ export function createConnectorService({
     const presentIds: string[] = [];
     for (const change of result.changes) {
       if (change.kind === "delete") {
-        const [before] = await db
+        const [before] = await transaction
           .select()
           .from(calendarEvents)
           .where(
@@ -923,7 +924,7 @@ export function createConnectorService({
           )
           .limit(1);
         if (before) {
-          const [after] = await db
+          const [after] = await transaction
             .update(calendarEvents)
             .set({ deletedAt: now(), status: "cancelled", syncedAt: now(), updatedAt: now() })
             .where(eq(calendarEvents.id, before.id))
@@ -931,6 +932,7 @@ export function createConnectorService({
           if (after) {
             changed += 1;
             await auditCalendarChange(
+              transaction,
               "calendar_event.deleted_by_connector",
               before,
               after,
@@ -942,7 +944,7 @@ export function createConnectorService({
         continue;
       }
       presentIds.push(change.event.remoteEventId);
-      const [before] = await db
+      const [before] = await transaction
         .select()
         .from(calendarEvents)
         .where(
@@ -955,15 +957,16 @@ export function createConnectorService({
       if (before?.remoteEtag === change.event.etag && !before.deletedAt) continue;
       const values = remoteEventValues(userId, calendar.id, calendar.provider, change.event, now());
       const [after] = before
-        ? await db
+        ? await transaction
             .update(calendarEvents)
             .set(values)
             .where(eq(calendarEvents.id, before.id))
             .returning()
-        : await db.insert(calendarEvents).values(values).returning();
+        : await transaction.insert(calendarEvents).values(values).returning();
       if (after) {
         changed += 1;
         await auditCalendarChange(
+          transaction,
           before ? "calendar_event.updated_by_connector" : "calendar_event.created_by_connector",
           before ?? null,
           after,
@@ -981,12 +984,12 @@ export function createConnectorService({
       if (presentIds.length > 0) {
         staleConditions.push(notInArray(calendarEvents.remoteEventId, presentIds));
       }
-      const stale = await db
+      const stale = await transaction
         .select()
         .from(calendarEvents)
         .where(and(...staleConditions));
       for (const before of stale) {
-        const [after] = await db
+        const [after] = await transaction
           .update(calendarEvents)
           .set({ deletedAt: now(), syncedAt: now(), updatedAt: now() })
           .where(eq(calendarEvents.id, before.id))
@@ -994,6 +997,7 @@ export function createConnectorService({
         if (after) {
           changed += 1;
           await auditCalendarChange(
+            transaction,
             "calendar_event.removed_by_full_sync",
             before,
             after,
@@ -1003,7 +1007,7 @@ export function createConnectorService({
         }
       }
     }
-    await db
+    await transaction
       .update(calendars)
       .set({ lastSyncedAt: now(), syncToken: result.nextSyncToken, updatedAt: now() })
       .where(eq(calendars.id, calendar.id));
@@ -1011,13 +1015,14 @@ export function createConnectorService({
   }
 
   async function auditCalendarChange(
+    transaction: DatabaseTransaction,
     action: string,
     before: EventRow | null,
     after: EventRow,
     principal: { actorId: string; actorType: "connector"; userId: string },
     requestId: string,
   ): Promise<void> {
-    await db.insert(auditEvents).values(
+    await transaction.insert(auditEvents).values(
       auditValues({
         action,
         after: auditSnapshot(after),
@@ -1679,6 +1684,7 @@ export function createConnectorService({
             accountId: account.id,
             message: storedMessage,
             principal,
+            privacyKey: encryptionKey,
             providerAccountAddressHint: account.email,
             recordedAt: now(),
             requestId,

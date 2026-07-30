@@ -148,13 +148,16 @@ describe("API runtime lifecycle", () => {
   it("applies the same deadline to database closure", async () => {
     vi.useFakeTimers();
     const lifecycle = createRuntimeLifecycle();
+    const closeDatabase = vi.fn(() => new Promise<void>(() => undefined));
     const shutdown = shutdownApiRuntime({
-      closeDatabase: () => new Promise(() => undefined),
+      closeDatabase,
       closeHttpServer: async () => undefined,
       lifecycle,
       stopScheduling: () => undefined,
       timeoutMs: 1_000,
     });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closeDatabase).toHaveBeenCalledOnce();
     const assertion = expect(shutdown).rejects.toThrow("1000ms (0 requests; background: none)");
     await vi.advanceTimersByTimeAsync(1_000);
     await assertion;

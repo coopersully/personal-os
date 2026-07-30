@@ -1030,7 +1030,11 @@ export function createMailService({
             .where(eq(mailRuleWorkItems.userId, userId))
             .groupBy(mailRuleWorkItems.accountId, mailRuleWorkItems.status),
           db
-            .select({ previewOnlyCount: sql<number>`count(*)::int` })
+            .select({
+              previewOnlyCount: sql<number>`count(*) filter (
+                where ${mailCalendarCommitmentIntakes.status} = 'preview_only'
+              )::int`,
+            })
             .from(mailCalendarCommitmentIntakes)
             .innerJoin(
               calendarAccounts,
@@ -1040,12 +1044,7 @@ export function createMailService({
                 eq(calendarAccounts.mailEnabled, true),
               ),
             )
-            .where(
-              and(
-                eq(mailCalendarCommitmentIntakes.userId, userId),
-                eq(mailCalendarCommitmentIntakes.status, "preview_only"),
-              ),
-            ),
+            .where(eq(mailCalendarCommitmentIntakes.userId, userId)),
         ]);
       const mailboxesByAccount = new Map<string, Mailbox[]>();
       for (const mailbox of mailboxRecords) {

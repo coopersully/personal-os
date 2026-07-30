@@ -176,13 +176,14 @@ The recent STOPPED baseline is capped at 100 before mutation. Only entries
 described with complete STOPPED evidence in that initial snapshot are historical;
 incomplete or later observations remain in the drain proof without relying on
 cross-system clock comparisons. Post-drain STOPPED inventories reconcile across
-the full five-minute ECS eventual-consistency bound and must converge before the
+a bounded window slightly longer than five minutes and must converge before the
 exact at-most-100 task set is accepted. Desired/running/pending service counts must all
 reach zero, every exact task is waited to `STOPPED`, and every API container
 must report exit code zero with no kill/timeout evidence. Count-only drain or a
 fixed sleep is insufficient. This bound follows AWS's
-[ECS eventual-consistency guidance](https://docs.aws.amazon.com/AWSJavaSDK/latest/javadoc/com/amazonaws/services/ecs/AmazonECSClient.html),
-which recommends exponential backoff that grows to five minutes.
+[ECS API eventual-consistency guidance](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html),
+which recommends repeated `DescribeTasks` calls with exponential backoff that
+grows to about five minutes.
 
 After the old tasks exit successfully, the workflow disables circuit-breaker
 rollback before launching the migration-capable task so ECS cannot restore a

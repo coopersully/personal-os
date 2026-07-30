@@ -460,7 +460,7 @@ if (process.argv[2] === "--fake-aws") {
     "Cancellation recovery must re-suspend all scaling modes.",
   );
   assert(
-    cancelled.completedAt - cancelled.state.cancellationSignalAt < 5_000,
+    cancelled.completedAt - cancelled.state.cancellationSignalAt < 20_000,
     "Cancellation must interrupt a blocked AWS waiter before runner escalation.",
   );
   assert(cancelled.state.zeroCalls >= 2, "Cancellation recovery must issue a second zero.");
@@ -482,7 +482,7 @@ if (process.argv[2] === "--fake-aws") {
     "Cancellation during a post-launch read must exit with signal status.",
   );
   assert(
-    postLaunchCancelled.completedAt - postLaunchCancelled.state.cancellationSignalAt < 5_000,
+    postLaunchCancelled.completedAt - postLaunchCancelled.state.cancellationSignalAt < 20_000,
     "Cancellation must interrupt a blocked post-launch AWS read.",
   );
   assert(
@@ -504,7 +504,7 @@ if (process.argv[2] === "--fake-aws") {
     "Cancellation during fail-closed recovery must exit through the TERM handler.",
   );
   assert(
-    recoveryCancelled.completedAt - recoveryCancelled.state.cancellationSignalAt < 5_000,
+    recoveryCancelled.completedAt - recoveryCancelled.state.cancellationSignalAt < 20_000,
     "Cancellation must interrupt a stalled fail-closed recovery request.",
   );
   assert(

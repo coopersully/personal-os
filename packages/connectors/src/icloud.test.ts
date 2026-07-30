@@ -279,6 +279,7 @@ describe("iCloud connector", () => {
     expect(result.threads[0]).toMatchObject({
       bodyText: "Hello Example User.\n\nThis is a test.",
       from: { address: "ada@example.com", name: "Ada" },
+      messagesComplete: true,
       remoteThreadId: "INBOX:777:2",
       starred: true,
       subject: "Hello from iCloud",

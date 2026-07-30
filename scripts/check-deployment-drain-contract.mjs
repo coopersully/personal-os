@@ -34,11 +34,15 @@ function requireOrder(earlier, later, description) {
   }
 }
 
-const stopTimeoutSeconds = Number(
-  compute.match(/name\s*=\s*"api"[\s\S]*?stopTimeout\s*=\s*(\d+)/)?.[1],
-);
+const apiContainerStart = compute.search(/name\s*=\s*"api"/);
+const apiContainerEnd = apiContainerStart >= 0 ? compute.indexOf("\n  }])", apiContainerStart) : -1;
+const apiContainer =
+  apiContainerStart >= 0 && apiContainerEnd >= 0
+    ? compute.slice(apiContainerStart, apiContainerEnd)
+    : "";
+const stopTimeoutSeconds = Number(apiContainer.match(/stopTimeout\s*=\s*(\d+)/)?.[1]);
 const shutdownTimeoutMs = Number(
-  compute.match(/\{\s*name\s*=\s*"API_SHUTDOWN_TIMEOUT_MS",\s*value\s*=\s*"(\d+)"\s*\}/)?.[1],
+  apiContainer.match(/\{\s*name\s*=\s*"API_SHUTDOWN_TIMEOUT_MS",\s*value\s*=\s*"(\d+)"\s*\}/)?.[1],
 );
 if (!Number.isFinite(stopTimeoutSeconds) || !Number.isFinite(shutdownTimeoutMs)) {
   throw new Error("Deployment drain contract requires explicit ECS and API shutdown bounds.");

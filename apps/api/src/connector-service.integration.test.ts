@@ -33,6 +33,7 @@ import { createAssistantService } from "./assistant-service.js";
 import { createCalendarService } from "./calendar-service.js";
 import { createConnectorService, MailProviderRejectedError } from "./connector-service.js";
 import {
+  invalidateMailCalendarCommitmentIntakes,
   mailCommitmentMessageLockKey,
   recordMailCalendarCommitmentIntakes,
 } from "./mail-calendar-intake.js";
@@ -1413,6 +1414,7 @@ describe.sequential("connector service", () => {
             actorType: "connector",
             userId: "11111111-1111-4111-8111-111111111111",
           },
+          privacyKey: encryptionKey,
           providerAccountAddressHint: account.email,
           recordedAt: timestamp,
           requestId: "cross-user-intake",
@@ -1463,6 +1465,7 @@ describe.sequential("connector service", () => {
         accountId: account.id,
         message,
         principal: connectorPrincipal,
+        privacyKey: encryptionKey,
         providerAccountAddressHint: account.email,
         recordedAt: new Date(timestamp.getTime() + 1_000),
         requestId: "same-intake-source",
@@ -1488,6 +1491,7 @@ describe.sequential("connector service", () => {
         accountId: account.id,
         message,
         principal: connectorPrincipal,
+        privacyKey: encryptionKey,
         providerAccountAddressHint: "changed-account-hint@example.com",
         recordedAt: new Date(timestamp.getTime() + 1_500),
         requestId: "changed-intake-address-hint",
@@ -1528,6 +1532,7 @@ describe.sequential("connector service", () => {
         accountId: account.id,
         message: changedMessage,
         principal: connectorPrincipal,
+        privacyKey: encryptionKey,
         providerAccountAddressHint: account.email,
         recordedAt: new Date(timestamp.getTime() + 2_000),
         requestId: "changed-intake-source",
@@ -1574,6 +1579,7 @@ describe.sequential("connector service", () => {
         accountId: account.id,
         message: ineligibleMessage,
         principal: connectorPrincipal,
+        privacyKey: encryptionKey,
         providerAccountAddressHint: account.email,
         recordedAt: new Date(timestamp.getTime() + 2_500),
         requestId: "ineligible-intake-source",
@@ -1598,6 +1604,7 @@ describe.sequential("connector service", () => {
         accountId: account.id,
         message: ineligibleMessage,
         principal: connectorPrincipal,
+        privacyKey: encryptionKey,
         providerAccountAddressHint: account.email,
         recordedAt: new Date(timestamp.getTime() + 2_750),
         requestId: "unchanged-ineligible-intake-source",
@@ -1643,6 +1650,7 @@ describe.sequential("connector service", () => {
             accountId: account.id,
             message: concurrentMessage,
             principal: connectorPrincipal,
+            privacyKey: encryptionKey,
             providerAccountAddressHint: account.email,
             recordedAt: new Date(timestamp.getTime() + 3_000),
             requestId,
@@ -1707,6 +1715,7 @@ describe.sequential("connector service", () => {
             accountId: account.id,
             message: atomicMessage,
             principal: connectorPrincipal,
+            privacyKey: encryptionKey,
             providerAccountAddressHint: account.email,
             recordedAt: new Date(timestamp.getTime() + 4_000),
             requestId: "atomic-intake",
@@ -4829,6 +4838,7 @@ describe.sequential("connector service", () => {
           actorType: "user",
           userId: capabilityUser.id,
         },
+        privacyKey: encryptionKey,
         providerAccountAddressHint: "capability@icloud.example",
         recordedAt: timestamp,
         requestId: "capability-intake",
@@ -4929,6 +4939,27 @@ describe.sequential("connector service", () => {
         status: "preview_only",
       }),
     ]);
+    await expect(
+      database.db.transaction((transaction) =>
+        invalidateMailCalendarCommitmentIntakes(transaction, {
+          accountId: connected.accountId,
+          invalidatedAt: new Date(timestamp.getTime() + 1_000),
+          principal: {
+            actorId: capabilityUser.id,
+            actorType: "user",
+            userId: capabilityUser.id,
+          },
+          reasonCode: "mail_capability_disabled",
+          requestId: "repeat-mail-capability-invalidation",
+        }),
+      ),
+    ).resolves.toBe(0);
+    await expect(
+      database.db
+        .select()
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, "repeat-mail-capability-invalidation")),
+    ).resolves.toHaveLength(0);
     const disabledMail = createMailService({
       db: database.db,
       gateway: service.mailGateway,
@@ -4968,9 +4999,6 @@ describe.sequential("connector service", () => {
       expect.arrayContaining([
         expect.objectContaining({
           action: "mail_calendar_intake.source_unavailable",
-          after: expect.objectContaining({
-            accountIdHash: expect.stringMatching(/^[0-9a-f]{64}$/),
-          }),
           requestId: "disable-mail-capability",
         }),
       ]),

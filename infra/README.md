@@ -127,9 +127,16 @@ immutable owner and repository IDs must set `github_oidc_subject` to the exact
 `repo:<owner>@<owner-id>/<repository>@<repository-id>:environment:<name>`
 subject recorded by CloudTrail. The workflow publishes immutable
 `sha-<commit>` images, registers task-definition revisions, deploys the
-migration-capable API serially, waits for API health before deploying MCP,
+migration-capable API through the current ECS rolling service update, waits for API health before deploying MCP,
 publishes the web build, invalidates CloudFront, and verifies all three public
 surfaces. ECS deployment circuit breakers roll back unhealthy task revisions.
+
+The rolling API update is not proof of a stop-and-drain boundary: old and new tasks may overlap.
+Before a later serial-drain workflow is enabled, follow the prerequisite deployment and exact
+active-task proof in [`docs/deployment.md`](../docs/deployment.md). Applying Terraform registers the
+`stopTimeout`/shutdown-environment task definition, but `ignore_changes` deliberately prevents that
+apply from moving the live service; an immutable application task definition must subsequently be
+registered and deployed, then verified on every active task.
 
 The task execution role—not the application task roles—can read the named runtime parameters. The deployment role cannot read application secrets.
 

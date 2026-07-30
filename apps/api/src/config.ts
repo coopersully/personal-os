@@ -9,6 +9,7 @@ const configSchema = z
     ALLOWED_ORIGINS: z.string().optional(),
     AUTH_RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().min(1).max(1_000).default(20),
     AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().min(1).max(3_600).default(300),
+    API_SHUTDOWN_TIMEOUT_MS: z.coerce.number().int().min(1_000).max(110_000).default(105_000),
     API_BASE_URL: z.url(),
     AGENT_SKILL_REVISION: z
       .string()
@@ -109,6 +110,7 @@ export type AppConfig = {
   authRateLimitMaxRequests?: number;
   authRateLimitWindowSeconds?: number;
   apiBaseUrl: string;
+  apiShutdownTimeoutMs: number;
   appBaseUrl: string;
   databaseUrl: string;
   emailFrom: string;
@@ -152,6 +154,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     authRateLimitMaxRequests: value.AUTH_RATE_LIMIT_MAX_REQUESTS,
     authRateLimitWindowSeconds: value.AUTH_RATE_LIMIT_WINDOW_SECONDS,
     apiBaseUrl: value.API_BASE_URL,
+    apiShutdownTimeoutMs: value.API_SHUTDOWN_TIMEOUT_MS,
     appBaseUrl: value.APP_BASE_URL,
     databaseUrl: value.DATABASE_URL,
     emailFrom: value.EMAIL_FROM,

@@ -8,6 +8,7 @@
 | `EMAIL_FROM` | Verified transactional sender, for example `ilo <noreply@example.com>` |
 | `APP_BASE_URL` | Canonical browser application URL and OAuth return destination |
 | `API_BASE_URL` | Canonical API URL advertised by OpenAPI |
+| `API_SHUTDOWN_TIMEOUT_MS` | Bounded API quiesce budget in milliseconds; production uses `105000` inside ECS `stopTimeout = 120` |
 | `ALLOWED_ORIGINS` | Comma-separated browser and Tauri origins |
 | `APP_ENCRYPTION_KEY` | Base64-encoded 32-byte key for OAuth credentials |
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID |
@@ -150,10 +151,57 @@ Drizzle records applied versions transactionally. Follow the
 migrations are append-only, and live-data changes use an expand–migrate–contract
 rollout rather than a long deploy-time backfill.
 
+## API quiesce prerequisite and drain gate
+
+The API runtime has a versioned `quiesce-v1` shutdown contract. On `SIGTERM` it stops scheduler and
+request admission, aborts connector discovery and pagination, waits for accepted HTTP/background
+work to settle, and closes PostgreSQL only after the tracked work and HTTP server have drained.
+Google HTTP calls retain their 15-second per-request timeout and also receive the quiesce signal.
+iCloud CalDAV receives the same signal through its HTTP transport, while iCloud IMAP closes its
+live socket on abort. An interrupted account sync returns durably to retryable `idle` state with an
+explicit retry marker while preserving, but never advancing, its prior successful-sync timestamp,
+so the replacement runtime can reconcile it immediately. Provider network I/O never occurs inside
+a database transaction.
+
+Deploy this contract as an independent prerequisite before introducing any workflow that suspends
+scaling or drains all API tasks:
+
+1. Merge and deploy the schema-free quiesce binary through the existing ECS rolling update. This
+   first deployment must not change the rollout to a serial drain and must not include a migration.
+2. Have an authorized operator apply the reviewed infrastructure so ECS registers an API task
+   definition whose `api` container has `stopTimeout = 120` and
+   `API_SHUTDOWN_TIMEOUT_MS = 105000`. Terraform ignores the service's live task-definition
+   pointer, so registration alone does not prove any running task uses that revision.
+3. Register and deploy an immutable task definition that combines those shutdown settings with the
+   prerequisite image. The existing deploy workflow can do this by redeploying the exact
+   prerequisite commit after the infrastructure registration. Wait for the rolling service update
+   to complete and prove the active tasks actually use that task definition and image digest.
+4. Confirm `GET /health/ready` returns
+   `X-Ilo-Drain-Protocol: quiesce-v1`. Liveness, a healthy target, a present environment variable,
+   or an ECS task-definition plan is not a substitute for this running-binary marker.
+
+A later serial-drain rollout must fail before suspending scaling unless all of the following
+production evidence is captured from fresh AWS/API reads:
+
+- `describe-services` reports exactly one deployment, with `status = PRIMARY`,
+  `rolloutState = COMPLETED`, and the expected task-definition ARN;
+- `list-tasks` followed by `describe-tasks` enumerates every exact active API task, and every task
+  uses that task definition and the one expected immutable API image digest;
+- `describe-task-definition` proves the active `api` container has `stopTimeout = 120` and
+  `API_SHUTDOWN_TIMEOUT_MS = 105000`; and
+- the public readiness response from the active service carries `quiesce-v1`.
+
+Record the exact service deployment, task ARNs, task-definition ARN, image digest, configuration,
+and marker response together. If any task is unlisted, stale, pending, on another revision/digest,
+or missing the marker, keep scaling active and stop. Only after this gate may a later workflow
+suspend scaling and begin a drain. This prerequisite supplies the application protocol; it does not
+prove production IAM authority, apply infrastructure, or perform a production drain.
+
 ## Health and logs
 
 - `GET /health/live` proves the process is running.
-- `GET /health/ready` verifies PostgreSQL connectivity.
+- `GET /health/ready` verifies PostgreSQL connectivity and returns
+  `X-Ilo-Drain-Protocol: quiesce-v1` from a protocol-bearing binary.
 - API request logs are one-line JSON with request ID, method, path, status, and duration.
 - Connector account rows expose last sync time, current sync state, and redacted failure text.
 

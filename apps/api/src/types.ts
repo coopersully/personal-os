@@ -3,6 +3,7 @@ import type { Database } from "@personal-os/database";
 import type { AccessScope, ActorType } from "@personal-os/domain";
 import type { AppConfig } from "./config.js";
 import type { EmailDelivery } from "./email-delivery.js";
+import type { RuntimeLifecycle } from "./runtime-lifecycle.js";
 
 export type Principal = {
   actorId: string;
@@ -20,6 +21,7 @@ export type AppDependencies = {
   icloud?: ICloudConnector;
   log?: (entry: RequestLog) => void;
   now?: () => Date;
+  runtimeLifecycle?: RuntimeLifecycle;
   x?: XConnector;
 };
 
@@ -32,7 +34,11 @@ export type CalendarProviderReconciliationLog = {
 export type RequestLog = {
   calendarProviderReconciliation?: CalendarProviderReconciliationLog;
   durationMs: number;
-  event: "calendar_provider_reconciliation" | "mail_rule_work_dispatch_failed" | "request";
+  event:
+    | "calendar_provider_reconciliation"
+    | "connector_recovery_failed"
+    | "mail_rule_work_dispatch_failed"
+    | "request";
   method: string;
   path: string;
   requestId: string;

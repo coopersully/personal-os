@@ -19,6 +19,7 @@ describe("API configuration", () => {
       authRateLimitMaxRequests: 20,
       authRateLimitWindowSeconds: 300,
       apiBaseUrl: "https://api.example.com",
+      apiShutdownTimeoutMs: 105_000,
       appBaseUrl: "https://app.example.com",
       databaseUrl: "postgres://localhost/personal_os",
       emailFrom: "",
@@ -137,6 +138,7 @@ describe("API configuration", () => {
         ...required,
         ALLOWED_ORIGINS:
           " https://mobile.example.com,https://app.example.com,https://desktop.example.com ",
+        API_SHUTDOWN_TIMEOUT_MS: "100000",
         EMAIL_FROM: "ilo <noreply@example.com>",
         GOOGLE_CLIENT_ID: "client",
         GOOGLE_CLIENT_SECRET: "secret",
@@ -160,6 +162,7 @@ describe("API configuration", () => {
         "https://mobile.example.com",
         "https://desktop.example.com",
       ],
+      apiShutdownTimeoutMs: 100_000,
       googleClientId: "client",
       googleClientSecret: "secret",
       authRateLimitMaxRequests: 10,

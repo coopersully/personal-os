@@ -74,7 +74,12 @@ This record specializes
   match, or removed label fails before a provider write.
 - Setup context and Agent access expose pending, in-progress, reconciliation, failed, oldest-due,
   and last-completed state. Reconciliation or terminal failure also creates redacted Mail
-  attention. No body, snippet, credential, provider error body, or token enters those summaries.
+  attention. Connector-managed run-summary create, refresh, and resolution advance the shared
+  attention version and write a redacted audit atomically with connector actor,
+  `approved_rule` policy, and background-dispatch metadata. No body, snippet, credential, provider
+  error body, or token enters those summaries or audits. Every scheduler pass rediscovers accounts
+  with outstanding work and open summaries, so a transactional audit failure is retried on a later
+  dispatch even after the work itself became terminal.
 - A person repairs authorization in **Settings → Connections**, refreshes source projection through
   **Mail → Sync**, and reviews changed rules in **Settings → Agent access → Review Mail rules**.
 - Reauthorizing the same Google Mail account with Mail scope atomically moves failed

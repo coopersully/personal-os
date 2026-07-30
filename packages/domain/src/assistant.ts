@@ -104,21 +104,28 @@ export const attentionItemSchema = z.object({
   summary: z.string().trim().min(1).max(4_000),
   title: z.string().trim().min(1).max(240),
   updatedAt: isoDateTimeSchema,
+  version: z.int().positive(),
 });
 export type AttentionItem = z.infer<typeof attentionItemSchema>;
 
-export const createAttentionItemInputSchema = attentionItemSchema.pick({
-  domain: true,
-  expiresAt: true,
-  importance: true,
-  kind: true,
-  occursAt: true,
-  relatedEntityId: true,
-  relatedEntityType: true,
-  source: true,
-  summary: true,
-  title: true,
-});
+export const createAttentionItemInputSchema = attentionItemSchema
+  .pick({
+    domain: true,
+    expiresAt: true,
+    importance: true,
+    kind: true,
+    occursAt: true,
+    relatedEntityId: true,
+    relatedEntityType: true,
+    source: true,
+    summary: true,
+    title: true,
+  })
+  .extend({
+    relatedEntityId: idSchema.nullable().default(null),
+    relatedEntityType: z.string().max(100).nullable().default(null),
+    source: materialSourceReferenceSchema.nullable().default(null),
+  });
 export type CreateAttentionItemInput = z.infer<typeof createAttentionItemInputSchema>;
 
 export const attentionItemQuerySchema = z.object({
@@ -129,6 +136,7 @@ export const attentionItemQuerySchema = z.object({
 export type AttentionItemQuery = z.infer<typeof attentionItemQuerySchema>;
 
 export const updateAttentionItemInputSchema = z.object({
+  expectedVersion: z.int().positive(),
   status: attentionItemStatusSchema,
 });
 export type UpdateAttentionItemInput = z.infer<typeof updateAttentionItemInputSchema>;

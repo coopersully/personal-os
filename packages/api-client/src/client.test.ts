@@ -222,6 +222,7 @@ const attentionItem = {
   summary: "Important mail.",
   title: "Important",
   updatedAt: now,
+  version: 1,
 };
 const automation: AutomationRoutine = {
   id,
@@ -756,6 +757,8 @@ function apiFetch() {
           },
         ],
       });
+    if (url.pathname === `/v1/finances/transactions/${accountId}/attention`)
+      return json({ item: attentionItem });
     if (url.pathname === `/v1/finances/review/${id}`)
       return json({ result: { applied: true, threshold: 0.985, transaction: financeTransaction } });
     if (url.pathname === "/v1/finances/transactions" && method === "GET")
@@ -1258,6 +1261,16 @@ describe("ilo API client", () => {
       nextCursor: "next-review-page",
     });
     await expect(
+      api.upsertFinanceAttentionItem(accountId, {
+        expiresAt: null,
+        importance: "high",
+        kind: "important",
+        occursAt: null,
+        summary: attentionItem.summary,
+        title: attentionItem.title,
+      }),
+    ).resolves.toEqual(attentionItem);
+    await expect(
       api.applyFinanceCategorizations({
         decisions: [
           {
@@ -1370,7 +1383,7 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await expect(
-      api.updateAttentionItem("mail", id, { status: "resolved" }),
+      api.updateAttentionItem("mail", id, { expectedVersion: 1, status: "resolved" }),
     ).resolves.toMatchObject({ status: "resolved" });
     await expect(
       api.listMailThreads({

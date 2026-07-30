@@ -35,7 +35,12 @@ and income-stream administration remain human-only. Permanent merchant rules
 and ambiguous-transfer confirmation also require an interactive human session.
 Finance MCP is proposal/read-only for ledger and review work: categorization
 application, recurring and alert state, merchant changes, manual transactions,
-and review resolution all require a signed-in Ilo user at the API route.
+and review resolution all require a signed-in Ilo user at the API route. A
+scoped agent may create or refresh shared attention for one owned transaction
+through the Finance-owned endpoint. That endpoint locks the transaction,
+derives its material source from the account and current transaction revision,
+deduplicates the open transaction/kind pair, and audits atomically; generic
+attention cannot supply Finance provenance.
 
 Finance guided setup reuses the shared versioned domain-profile envelope. The
 agent-editable object is the durable Finance domain profile saved through
@@ -188,13 +193,21 @@ materializes it before persistence.
 MCP annotations describe expected host UX only. All Finance read tools declare
 the four risk hints, while the API's scopes, human-session guards, adaptive
 policy, revision checks, transactions, and audit trail remain the security and
-integrity boundary. The shared result helper preserves structured API errors
+integrity boundary. The Finance attention mutation declares all four hints with
+`readOnlyHint: false`; these hints do not replace the API's ownership checks.
+The shared result helper preserves structured API errors
 and structured content. Output schemas and an internal access-token exchange
 remain shared MCP transport follow-ups rather than Finance-local contracts.
 An account referenced by the durable Finance profile cannot be deleted until
 the human removes that source context. Profile saves and account deletion lock
 the account before the profile so a concurrent save/delete cannot create a
-dangling JSON source reference.
+dangling JSON source reference. Account deletion also locks its transactions
+and resolves/detaches their Finance attention before the cascade, so concurrent
+attention upserts cannot leave stale material links. Transaction attribution
+uses `local` only for manual accounts; Plaid, PayPal, Venmo, and Zelle retain
+their provider namespace and use a provider transaction identity only when one
+exists. Categorization pages read transaction rows and their attribution from
+one repeatable-read snapshot.
 
 ## Migration policy
 

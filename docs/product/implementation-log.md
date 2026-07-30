@@ -75,6 +75,18 @@ This log records delivered vertical slices against the master plan. It does not 
 - Audited Mail MCP annotations and descriptions, preserved structured results, and added
   per-conversation partial-failure reporting for bulk provider writes.
 
+## 2026-07-29 — Shared attention ownership and concurrency
+
+- Restricted generic attention creation to unlinked notes; Mail, Calendar, Reminder, and Finance
+  material references now come only from domain-owned paths that validate ownership and derive
+  source identity server-side.
+- Added Finance transaction attention and source-linked categorization proposals without expanding
+  the agent's categorization authority.
+- Added integer attention versions and expected-version status updates so stale agents cannot
+  overwrite newer refresh, resolution, or reopening state.
+- Made delayed Mail run-summary create, refresh, and resolution emit redacted connector audits in
+  the same transaction as the attention mutation.
+
 ## 2026-07-28 — Calendar agent-guided setup and evidence proposals
 
 - Added a dedicated Calendar setup interview for source meanings, default writable destination,
@@ -132,6 +144,7 @@ This log records delivered vertical slices against the master plan. It does not 
 - Added a deployment-aware Agent access handoff to account setup and Settings:
   users can copy the remote MCP URL, install the guided-setup skill, choose a
   domain starter prompt, inspect Mail readiness, and manage connected hosts.
+
 - Made remote OAuth the primary host connection with named, plain-language
   consent and the complete supported scope set, including `mail:write`; retained
   purpose-built personal-token presets as an advanced local fallback.

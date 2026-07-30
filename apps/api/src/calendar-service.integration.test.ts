@@ -960,6 +960,7 @@ describe.sequential("Calendar commitment proposals", () => {
       kind: "upcoming",
       relatedEntityType: "calendar_event",
       status: "open",
+      version: 3,
     });
   });
 

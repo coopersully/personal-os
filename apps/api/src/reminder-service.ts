@@ -51,6 +51,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
       relatedEntityType: row.relatedEntityType,
       source: row.source,
       status: row.status,
+      version: row.version,
     };
   }
 
@@ -558,6 +559,7 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
                 eq(attentionItems.status, "open"),
               ),
             )
+            .for("update")
             .limit(1)
         )[0];
         const values = {
@@ -578,8 +580,13 @@ export function createReminderService({ db, now }: ReminderServiceOptions) {
           (existing
             ? await transaction
                 .update(attentionItems)
-                .set({ ...values, updatedAt: now() })
-                .where(eq(attentionItems.id, existing.id))
+                .set({ ...values, updatedAt: now(), version: existing.version + 1 })
+                .where(
+                  and(
+                    eq(attentionItems.id, existing.id),
+                    eq(attentionItems.version, existing.version),
+                  ),
+                )
                 .returning()
             : await transaction.insert(attentionItems).values(values).returning())[0],
           "The Reminder attention item could not be saved.",

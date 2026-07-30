@@ -264,6 +264,7 @@ function auditCalendarAttentionMetadata(
     kind: value.kind,
     relatedEntityType: value.relatedEntityType,
     status: value.status,
+    version: value.version,
   };
 }
 
@@ -283,6 +284,7 @@ function serializeCalendarAttentionItem(row: typeof attentionItems.$inferSelect)
     summary: row.summary,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),
+    version: row.version,
   };
 }
 
@@ -728,6 +730,7 @@ export function createCalendarService({
                 eq(attentionItems.status, "open"),
               ),
             )
+            .for("update")
             .limit(1)
         )[0];
         const values = {
@@ -755,8 +758,13 @@ export function createCalendarService({
           (existing
             ? await transaction
                 .update(attentionItems)
-                .set({ ...values, updatedAt })
-                .where(eq(attentionItems.id, existing.id))
+                .set({ ...values, updatedAt, version: existing.version + 1 })
+                .where(
+                  and(
+                    eq(attentionItems.id, existing.id),
+                    eq(attentionItems.version, existing.version),
+                  ),
+                )
                 .returning()
             : await transaction.insert(attentionItems).values(values).returning())[0],
           "The Calendar attention item could not be saved.",

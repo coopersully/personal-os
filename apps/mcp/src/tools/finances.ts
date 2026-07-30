@@ -1,5 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
+import { upsertFinanceAttentionItemInputSchema } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
@@ -23,6 +24,27 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Get Finance guided setup",
     },
     async () => apiResult(async () => ({ context: await api.getFinanceGuidedSetup() })),
+  );
+
+  server.registerTool(
+    "create_finance_attention_item",
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
+      description:
+        "Create or refresh one open important, upcoming, or follow-up attention item for an owned Finance transaction. Ilo locks and validates the transaction, derives its source reference, and deduplicates the same open transaction/kind pair. Repeated calls refresh the item and advance its version.",
+      inputSchema: {
+        transactionId: id,
+        ...upsertFinanceAttentionItemInputSchema.shape,
+      },
+      title: "Create Finance attention item",
+    },
+    async ({ transactionId, ...input }) =>
+      apiResult(() => api.upsertFinanceAttentionItem(transactionId, input)),
   );
 
   server.registerTool(

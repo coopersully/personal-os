@@ -7,12 +7,24 @@ export type RuntimeInFlight = {
 };
 
 export type RuntimeLifecycle = {
-  beginQuiesce: () => void;
+  beginQuiesce: (deadlineMs: number) => void;
+  deadlineMs: () => number | undefined;
   inFlight: () => RuntimeInFlight;
   runRequest: <T>(operation: () => Promise<T>) => Promise<T> | undefined;
+  signal: AbortSignal;
   startBackgroundTask: (label: string, operation: () => Promise<void>) => boolean;
   waitForIdle: () => Promise<void>;
 };
+
+export class RuntimeQuiesceError extends Error {
+  public readonly deadlineMs: number;
+
+  public constructor(deadlineMs: number) {
+    super("The API runtime is quiescing.");
+    this.name = "RuntimeQuiesceError";
+    this.deadlineMs = deadlineMs;
+  }
+}
 
 export class RuntimeDrainTimeoutError extends Error {
   public constructor(timeoutMs: number, active: RuntimeInFlight) {
@@ -33,6 +45,8 @@ export class RuntimeDrainWorkError extends Error {
 
 export function createRuntimeLifecycle(): RuntimeLifecycle {
   let accepting = true;
+  let quiesceDeadlineMs: number | undefined;
+  const quiesceController = new AbortController();
   const drainFailures = new Set<string>();
   const inFlight = new Map<Promise<unknown>, { kind: RuntimeWorkKind; label: string }>();
 
@@ -41,8 +55,8 @@ export function createRuntimeLifecycle(): RuntimeLifecycle {
     inFlight.set(work, { kind, label });
     work.then(
       () => inFlight.delete(work),
-      () => {
-        if (!accepting) drainFailures.add(label);
+      (error: unknown) => {
+        if (!accepting && error !== quiesceController.signal.reason) drainFailures.add(label);
         inFlight.delete(work);
       },
     );
@@ -50,8 +64,14 @@ export function createRuntimeLifecycle(): RuntimeLifecycle {
   }
 
   return {
-    beginQuiesce() {
+    beginQuiesce(deadlineMs) {
+      if (!accepting) return;
       accepting = false;
+      quiesceDeadlineMs = deadlineMs;
+      quiesceController.abort(new RuntimeQuiesceError(deadlineMs));
+    },
+    deadlineMs() {
+      return quiesceDeadlineMs;
     },
     inFlight() {
       let background = 0;
@@ -73,6 +93,7 @@ export function createRuntimeLifecycle(): RuntimeLifecycle {
       if (!accepting) return undefined;
       return track("request", "http-request", operation);
     },
+    signal: quiesceController.signal,
     startBackgroundTask(label, operation) {
       if (!accepting) return false;
       void track("background", label, operation).catch(() => {
@@ -90,14 +111,29 @@ export function createRuntimeLifecycle(): RuntimeLifecycle {
   };
 }
 
+export function closeNodeHttpServer(server: {
+  close: (callback: (error?: Error) => void) => unknown;
+  closeIdleConnections?: () => void;
+}): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+    server.closeIdleConnections?.();
+  });
+}
+
 export async function shutdownApiRuntime(options: {
   closeDatabase: () => Promise<void>;
   closeHttpServer: () => Promise<void>;
   lifecycle: RuntimeLifecycle;
+  now?: () => number;
   stopScheduling: () => void;
   timeoutMs: number;
 }): Promise<void> {
-  options.lifecycle.beginQuiesce();
+  const now = options.now ?? Date.now;
+  options.lifecycle.beginQuiesce(now() + options.timeoutMs);
   options.stopScheduling();
 
   let deadlineExpired = false;

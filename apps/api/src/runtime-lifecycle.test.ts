@@ -1,62 +1,95 @@
 import {
+  closeNodeHttpServer,
   createRuntimeLifecycle,
   RuntimeDrainTimeoutError,
   RuntimeDrainWorkError,
   shutdownApiRuntime,
 } from "./runtime-lifecycle.js";
 
-function deferred(): { promise: Promise<void>; resolve: () => void } {
+function deferred(): {
+  promise: Promise<void>;
+  reject: (error: unknown) => void;
+  resolve: () => void;
+} {
+  let reject: (error: unknown) => void = () => {};
   let resolve: () => void = () => {};
-  const promise = new Promise<void>((resolvePromise) => {
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    reject = rejectPromise;
     resolve = resolvePromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 describe("API runtime lifecycle", () => {
-  it("rejects new work after quiesce and waits for accepted requests and background work", async () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("closes idle HTTP connections while waiting for active connections to drain", async () => {
+    const closeIdleConnections = vi.fn();
+    const server = {
+      close: vi.fn((callback: (error?: Error) => void) => callback()),
+      closeIdleConnections,
+    };
+
+    await closeNodeHttpServer(server as never);
+
+    expect(server.close).toHaveBeenCalledOnce();
+    expect(closeIdleConnections).toHaveBeenCalledOnce();
+  });
+
+  it("propagates an HTTP server close failure", async () => {
+    const failure = new Error("server close failed");
+    const server = {
+      close: vi.fn((callback: (error?: Error) => void) => callback(failure)),
+    };
+
+    await expect(closeNodeHttpServer(server)).rejects.toBe(failure);
+  });
+
+  it("rejects new work after quiesce, publishes the deadline, and aborts accepted work", async () => {
     const lifecycle = createRuntimeLifecycle();
     const request = deferred();
     const background = deferred();
 
     const requestWork = lifecycle.runRequest(() => request.promise);
     expect(requestWork).toBeDefined();
-    expect(lifecycle.startBackgroundTask("provider-effect", () => background.promise)).toBe(true);
+    expect(
+      lifecycle.startBackgroundTask("provider-effect", async () => {
+        await background.promise;
+      }),
+    ).toBe(true);
     expect(lifecycle.inFlight()).toEqual({
       background: 1,
       backgroundLabels: ["provider-effect"],
       requests: 1,
     });
 
-    lifecycle.beginQuiesce();
+    lifecycle.beginQuiesce(12_345);
+    lifecycle.beginQuiesce(67_890);
+    expect(lifecycle.deadlineMs()).toBe(12_345);
+    expect(lifecycle.signal.aborted).toBe(true);
     expect(lifecycle.runRequest(async () => undefined)).toBeUndefined();
     expect(lifecycle.startBackgroundTask("late-claim", async () => undefined)).toBe(false);
 
-    const idle = lifecycle.waitForIdle();
-    let idleReached = false;
-    void idle.then(() => {
-      idleReached = true;
-    });
-    await Promise.resolve();
-    expect(idleReached).toBe(false);
-
-    request.resolve();
-    background.resolve();
-    await idle;
-    await requestWork;
-    expect(lifecycle.inFlight()).toEqual({
-      background: 0,
-      backgroundLabels: [],
-      requests: 0,
-    });
+    request.reject(lifecycle.signal.reason);
+    background.reject(lifecycle.signal.reason);
+    await lifecycle.waitForIdle();
+    await expect(requestWork).rejects.toBe(lifecycle.signal.reason);
   });
 
   it("closes the database only after scheduling, HTTP, and tracked work drain", async () => {
     const lifecycle = createRuntimeLifecycle();
-    const request = deferred();
     const server = deferred();
     const order: string[] = [];
-    lifecycle.runRequest(() => request.promise);
+    lifecycle.runRequest(async () => {
+      if (lifecycle.signal.aborted) throw lifecycle.signal.reason;
+      await new Promise<void>((_resolve, reject) => {
+        lifecycle.signal.addEventListener("abort", () => reject(lifecycle.signal.reason), {
+          once: true,
+        });
+      });
+    });
 
     const shutdown = shutdownApiRuntime({
       closeDatabase: async () => {
@@ -67,15 +100,16 @@ describe("API runtime lifecycle", () => {
         await server.promise;
       },
       lifecycle,
+      now: () => 10_000,
       stopScheduling: () => order.push("scheduler-stopped"),
       timeoutMs: 1_000,
     });
 
     await Promise.resolve();
     expect(order).toEqual(["scheduler-stopped", "server-close-started"]);
+    expect(lifecycle.deadlineMs()).toBe(11_000);
     expect(lifecycle.runRequest(async () => undefined)).toBeUndefined();
 
-    request.resolve();
     await Promise.resolve();
     expect(order).not.toContain("database");
     server.resolve();
@@ -88,7 +122,9 @@ describe("API runtime lifecycle", () => {
     const lifecycle = createRuntimeLifecycle();
     const providerEffect = deferred();
     const server = deferred();
-    lifecycle.startBackgroundTask("stuck-provider-effect", () => providerEffect.promise);
+    lifecycle.startBackgroundTask("stuck-provider-effect", async () => {
+      await providerEffect.promise;
+    });
     const closeDatabase = vi.fn(async () => undefined);
 
     const shutdown = shutdownApiRuntime({
@@ -107,7 +143,6 @@ describe("API runtime lifecycle", () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
     expect(closeDatabase).not.toHaveBeenCalled();
-    vi.useRealTimers();
   });
 
   it("applies the same deadline to database closure", async () => {
@@ -123,10 +158,9 @@ describe("API runtime lifecycle", () => {
     const assertion = expect(shutdown).rejects.toThrow("1000ms (0 requests; background: none)");
     await vi.advanceTimersByTimeAsync(1_000);
     await assertion;
-    vi.useRealTimers();
   });
 
-  it("fails drain and preserves the database when accepted work rejects while quiescing", async () => {
+  it("fails drain and preserves the database when non-quiesce work rejects", async () => {
     const lifecycle = createRuntimeLifecycle();
     const work = deferred();
     lifecycle.startBackgroundTask("provider-result-projection", async () => {

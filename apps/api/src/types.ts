@@ -34,7 +34,11 @@ export type CalendarProviderReconciliationLog = {
 export type RequestLog = {
   calendarProviderReconciliation?: CalendarProviderReconciliationLog;
   durationMs: number;
-  event: "calendar_provider_reconciliation" | "mail_rule_work_dispatch_failed" | "request";
+  event:
+    | "calendar_provider_reconciliation"
+    | "connector_recovery_failed"
+    | "mail_rule_work_dispatch_failed"
+    | "request";
   method: string;
   path: string;
   requestId: string;

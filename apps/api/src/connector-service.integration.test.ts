@@ -200,24 +200,34 @@ describe.sequential("connector service", () => {
   let icloud: ICloudConnector;
   let service: ReturnType<typeof createConnectorService>;
 
-  async function waitForDomainProfileLock(): Promise<boolean> {
+  async function waitForLock(queryPatterns: string[]): Promise<boolean> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const result = await database.pool.query<{ blocked: boolean }>(`
+      const result = await database.pool.query<{ blocked: boolean }>(
+        `
         SELECT EXISTS (
           SELECT 1
           FROM pg_stat_activity
           WHERE datname = current_database()
             AND wait_event_type = 'Lock'
-            AND query LIKE '%domain_profiles%'
-            AND query LIKE '%for update%'
+            ${queryPatterns.map((_, index) => `AND query LIKE $${index + 1}`).join("\n")}
         ) AS blocked
-      `);
+      `,
+        queryPatterns,
+      );
       if (result.rows[0]?.blocked) return true;
       await new Promise<void>((resolveAttempt) => {
         setTimeout(resolveAttempt, 25);
       });
     }
     return false;
+  }
+
+  async function waitForDomainProfileLock(): Promise<boolean> {
+    return waitForLock(["%domain_profiles%", "%for update%"]);
+  }
+
+  async function waitForMailRuleWorkLock(): Promise<boolean> {
+    return waitForLock(["%mail_rule_work_items%"]);
   }
 
   async function createDurableMailWorkFixture(name: string, action: MailRuleAction) {
@@ -547,6 +557,110 @@ describe.sequential("connector service", () => {
       expect.objectContaining({ changed: expect.any(Number) }),
     );
     expect(syncMail).toHaveBeenCalledOnce();
+  });
+
+  it("settles a quiesce-interrupted sync durably and allows a new runtime to retry it", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("runtime quiescing");
+    const cancellableGoogle = mockGoogle();
+    let markProviderStarted: () => void = () => {};
+    const providerStarted = new Promise<void>((resolve) => {
+      markProviderStarted = resolve;
+    });
+    const cancellableSyncMail = cancellableGoogle.syncMail;
+    if (!cancellableSyncMail) throw new Error("Google Mail sync fixture is unavailable.");
+    vi.mocked(cancellableSyncMail).mockImplementationOnce(
+      async (_currentCredentials, operation) => {
+        markProviderStarted();
+        await new Promise<void>((resolve) => {
+          operation?.signal?.addEventListener("abort", () => resolve(), {
+            once: true,
+          });
+        });
+        return {
+          credentials: rotatedCredentials,
+          value: { mailboxes: [], threads: [] },
+        };
+      },
+    );
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        email: "quiesce-retry@example.com",
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        label: "Quiesce retry",
+        lastSyncedAt: timestamp,
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "quiesce-retry",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Quiesce retry account fixture was not created.");
+    const cancellableService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: cancellableGoogle,
+      now: () => timestamp,
+      shutdown: {
+        deadlineMs: () => timestamp.getTime() + 105_000,
+        signal: controller.signal,
+      },
+    });
+
+    const sync = cancellableService.syncAccount(userId, account.id);
+    await providerStarted;
+    controller.abort(interrupted);
+    await expect(sync).rejects.toBe(interrupted);
+
+    const [settled] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(settled).toMatchObject({
+      lastSyncedAt: timestamp,
+      syncError: "Synchronization was interrupted by API shutdown and will retry.",
+      syncStatus: "idle",
+    });
+
+    const retryService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google: cancellableGoogle,
+      now: () => timestamp,
+    });
+    await expect(retryService.syncStaleAccounts()).resolves.toBeUndefined();
+    await expect(
+      database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, account.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastSyncedAt: timestamp,
+        syncError: null,
+        syncStatus: "idle",
+      }),
+    ]);
+
+    const [lateAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        email: "late-quiesce-claim@example.com",
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        label: "Late quiesce claim",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "late-quiesce-claim",
+        userId,
+      })
+      .returning();
+    if (!lateAccount) throw new Error("Late quiesce account fixture was not created.");
+    const providerCallsBeforeLateClaim = vi.mocked(cancellableSyncMail).mock.calls.length;
+    await expect(cancellableService.syncAccount(userId, lateAccount.id)).rejects.toBe(interrupted);
+    expect(vi.mocked(cancellableSyncMail)).toHaveBeenCalledTimes(providerCallsBeforeLateClaim);
+    await expect(
+      database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, lateAccount.id)),
+    ).resolves.toEqual([expect.objectContaining({ syncError: null, syncStatus: "idle" })]);
   });
 
   it("releases the sync lease when credential setup fails", async () => {
@@ -5428,6 +5542,62 @@ describe.sequential("connector service", () => {
         .from(attentionItems)
         .where(eq(attentionItems.id, existingRunSummary.id)),
     ).resolves.toEqual([{ status: "resolved" }]);
+  });
+
+  it("releases Mail work claimed while quiescing before any provider effect", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Quiesce claim", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockClear();
+    const controller = new AbortController();
+    const quiescingService = createConnectorService({
+      db: database.db,
+      encryptionKey,
+      google,
+      icloud,
+      now: () => timestamp,
+      shutdown: {
+        deadlineMs: () => timestamp.getTime() + 105_000,
+        signal: controller.signal,
+      },
+    });
+    const lockClient = await database.pool.connect();
+    const interruption = new Error("API runtime is quiescing.");
+    let dispatch: Promise<unknown> | undefined;
+    let transactionOpen = false;
+    try {
+      await lockClient.query("BEGIN");
+      transactionOpen = true;
+      await lockClient.query("LOCK TABLE mail_rule_work_items IN ACCESS EXCLUSIVE MODE");
+      dispatch = quiescingService.dispatchDueMailRuleWork();
+      await expect(waitForMailRuleWorkLock()).resolves.toBe(true);
+      controller.abort(interruption);
+      await lockClient.query("COMMIT");
+      transactionOpen = false;
+      await expect(dispatch).rejects.toBe(interruption);
+    } finally {
+      if (transactionOpen) await lockClient.query("ROLLBACK");
+      lockClient.release();
+      if (dispatch) await dispatch.catch(() => undefined);
+    }
+    expect(updateMailThread).not.toHaveBeenCalled();
+    await expect(
+      database.db.select().from(mailRuleWorkItems).where(eq(mailRuleWorkItems.id, fixture.work.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        attemptCount: 0,
+        claimId: null,
+        claimedAt: null,
+        claimMode: null,
+        status: "pending",
+      }),
+    ]);
   });
 
   it("claims at most six due conversations per scheduled Mail run", async () => {

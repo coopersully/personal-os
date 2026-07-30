@@ -4,7 +4,11 @@ import { serve } from "@hono/node-server";
 import { createDatabaseClient, migrateDatabase } from "@personal-os/database";
 import { createApp } from "./app.js";
 import { loadConfig } from "./config.js";
-import { createRuntimeLifecycle, shutdownApiRuntime } from "./runtime-lifecycle.js";
+import {
+  closeNodeHttpServer,
+  createRuntimeLifecycle,
+  shutdownApiRuntime,
+} from "./runtime-lifecycle.js";
 
 const config = loadConfig(process.env);
 const database = createDatabaseClient(config.databaseUrl);
@@ -136,13 +140,7 @@ async function shutdown(signal: NodeJS.Signals): Promise<void> {
   try {
     await shutdownApiRuntime({
       closeDatabase: database.close,
-      closeHttpServer: () =>
-        new Promise<void>((resolveClose, rejectClose) => {
-          server.close((error) => {
-            if (error) rejectClose(error);
-            else resolveClose();
-          });
-        }),
+      closeHttpServer: () => closeNodeHttpServer(server),
       lifecycle: runtimeLifecycle,
       stopScheduling: () => clearInterval(scheduler),
       timeoutMs: config.apiShutdownTimeoutMs,

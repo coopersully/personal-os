@@ -75,10 +75,12 @@ function connector(
   imap?: Record<string, unknown>,
   createSmtpTransport?: () => { close: () => void; sendMail: (input: unknown) => Promise<unknown> },
 ) {
+  const createDavClient = vi.fn(async () => client as never);
   return {
     client,
+    createDavClient,
     value: createICloudConnector({
-      createDavClient: vi.fn(async () => client as never),
+      createDavClient,
       ...(imap ? { createImapClient: vi.fn(() => imap as never) } : {}),
       ...(createSmtpTransport ? { createSmtpTransport } : {}),
     }),
@@ -444,6 +446,84 @@ describe("iCloud connector", () => {
         providerPartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
       }),
     ]);
+  });
+
+  it("closes an in-flight multi-mailbox IMAP sync when quiescing", async () => {
+    const controller = new AbortController();
+    const interrupted = new Error("runtime quiescing");
+    let rejectFetch: (error: unknown) => void = () => {};
+    let markFetchStarted: () => void = () => {};
+    const fetchStarted = new Promise<void>((resolve) => {
+      markFetchStarted = resolve;
+    });
+    const close = vi.fn(() => {
+      rejectFetch(new Error("socket closed"));
+      throw new Error("socket already destroyed");
+    });
+    const release = vi.fn();
+    const imap = {
+      close,
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        markFetchStarted();
+        await new Promise<void>((_resolve, reject) => {
+          rejectFetch = reject;
+        });
+        yield {};
+      }),
+      get mailbox() {
+        return { exists: 1, path: "INBOX", uidValidity: 777n };
+      },
+      getMailboxLock: vi.fn(async () => ({ release })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 777n, unseen: 1 },
+        },
+        {
+          flags: new Set<string>(),
+          name: "Archive",
+          path: "Archive",
+          status: { messages: 1, uidValidity: 778n, unseen: 0 },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const { value } = connector(davClient(), imap);
+    const sync = value.syncMail(credentials, {
+      deadlineMs: Date.now() + 105_000,
+      signal: controller.signal,
+    });
+    await fetchStarted;
+    expect(() => controller.abort(interrupted)).not.toThrow();
+
+    await expect(sync).rejects.toBe(interrupted);
+    expect(close).toHaveBeenCalled();
+    expect(imap.logout).not.toHaveBeenCalled();
+    expect(imap.fetch).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("passes the quiesce signal through CalDAV discovery and object fetches", async () => {
+    const controller = new AbortController();
+    const operation = {
+      deadlineMs: Date.now() + 105_000,
+      signal: controller.signal,
+    };
+    const { client, createDavClient, value } = connector();
+
+    await value.syncCalendar(credentials, calendarId, null, operation);
+
+    expect(createDavClient).toHaveBeenCalledWith(credentials, operation);
+    expect(client.fetchCalendars).toHaveBeenCalledWith({
+      fetchOptions: { signal: controller.signal },
+    });
+    expect(client.fetchCalendarObjects).toHaveBeenCalledWith({
+      calendar: expect.objectContaining({ url: calendarId }),
+      fetchOptions: { signal: controller.signal },
+    });
   });
 
   it("sends iCloud mail through the authenticated SMTP transport", async () => {

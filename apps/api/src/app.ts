@@ -184,6 +184,23 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     google,
     icloud: dependencies.icloud ?? createICloudConnector(),
     now,
+    observeRecoveryFailure: (entry) =>
+      dependencies.log?.({
+        durationMs: 0,
+        event: "connector_recovery_failed",
+        method: "SCHEDULER",
+        path: `/internal/connectors/recovery/${entry.operation}`,
+        requestId: entry.claimId,
+        status: 503,
+      }),
+    ...(dependencies.runtimeLifecycle
+      ? {
+          shutdown: {
+            deadlineMs: dependencies.runtimeLifecycle.deadlineMs,
+            signal: dependencies.runtimeLifecycle.signal,
+          },
+        }
+      : {}),
   });
   const xBookmarks = createXBookmarksService({
     db: dependencies.db,
@@ -309,6 +326,20 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     context.header("x-request-id", requestId);
     await next();
   });
+  app.use("*", async (_context, next) => {
+    if (!dependencies.runtimeLifecycle) {
+      await next();
+      return;
+    }
+    const request = dependencies.runtimeLifecycle.runRequest(next);
+    if (!request) {
+      throw new AppError(
+        "service_unavailable",
+        "The API is draining and is not accepting new work.",
+      );
+    }
+    await request;
+  });
   app.use("*", async (context, next) => {
     const startedAt = performance.now();
     try {
@@ -372,6 +403,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.get("/health/live", (context) => context.json({ status: "ok" }));
   app.get("/health/ready", async (context) => {
     await dependencies.db.execute(sql`select 1`);
+    if (dependencies.runtimeLifecycle) {
+      context.header("X-Ilo-Drain-Protocol", "quiesce-v1");
+    }
     return context.json({ status: "ready" });
   });
   app.get("/openapi.json", (context) =>

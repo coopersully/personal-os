@@ -6,6 +6,7 @@ import type {
   ICloudCredentials,
   MailSyncResult,
   NormalizedRemoteEvent,
+  ProviderOperationOptions,
   RemoteMailThreadState,
   SyncResult,
 } from "@personal-os/connectors";
@@ -74,6 +75,8 @@ import {
 
 const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
+const CONNECTOR_SYNC_INTERRUPTED_ERROR =
+  "Synchronization was interrupted by API shutdown and will retry.";
 const MAIL_RULE_WORK_CONCURRENCY = 2;
 const MAIL_RULE_WORK_CLAIM_LEASE_MS = 10 * 60_000;
 const MAIL_RULE_WORK_MAX_ATTEMPTS = 5;
@@ -288,6 +291,14 @@ type ConnectorServiceOptions = {
   google: GoogleConnector;
   icloud?: ICloudConnector;
   now: () => Date;
+  observeRecoveryFailure?: (entry: {
+    claimId: string;
+    operation: "release_mail_rule_claim";
+  }) => void;
+  shutdown?: {
+    deadlineMs: () => number | undefined;
+    signal: AbortSignal;
+  };
 };
 
 export function createConnectorService({
@@ -296,7 +307,22 @@ export function createConnectorService({
   google,
   icloud = createICloudConnector(),
   now,
+  observeRecoveryFailure,
+  shutdown,
 }: ConnectorServiceOptions) {
+  function syncOperation(): ProviderOperationOptions | undefined {
+    if (!shutdown) return undefined;
+    const deadlineMs = shutdown.deadlineMs();
+    return {
+      ...(deadlineMs === undefined ? {} : { deadlineMs }),
+      signal: shutdown.signal,
+    };
+  }
+
+  function throwIfQuiescing(): void {
+    shutdown?.signal.throwIfAborted();
+  }
+
   async function getAccount(userId: string, accountId: string): Promise<AccountRow> {
     const [account] = await db
       .select()
@@ -655,6 +681,7 @@ export function createConnectorService({
     accountId: string,
     options: { skipMail?: boolean } = {},
   ): Promise<{ changed: number }> {
+    throwIfQuiescing();
     const staleBefore = new Date(now().getTime() - CONNECTOR_SYNC_LEASE_MS);
     const syncClaimId = randomUUID();
     const [claimedAccount] = await db
@@ -703,6 +730,7 @@ export function createConnectorService({
     const requestId = `sync:${syncClaimId}`;
     const principal = { actorId: claimedAccount.id, actorType: "connector", userId } as const;
     try {
+      throwIfQuiescing();
       if (!claimedAccount.encryptedCredentials) {
         throw new AppError("not_found", "The connected account was not found.");
       }
@@ -718,8 +746,9 @@ export function createConnectorService({
       let mailCredentialsPersisted = false;
       if (account.calendarEnabled) {
         if (account.provider === "google" && googleCredentials) {
-          const remoteCalendars = await google.listCalendars(googleCredentials);
+          const remoteCalendars = await google.listCalendars(googleCredentials, syncOperation());
           googleCredentials = remoteCalendars.credentials;
+          throwIfQuiescing();
           await saveCalendars(
             account,
             remoteCalendars.value,
@@ -731,7 +760,7 @@ export function createConnectorService({
         } else if (account.provider === "icloud" && icloudCredentials) {
           await saveCalendars(
             account,
-            await icloud.listCalendars(icloudCredentials),
+            await icloud.listCalendars(icloudCredentials, syncOperation()),
             "icloud",
             principal,
             requestId,
@@ -744,6 +773,7 @@ export function createConnectorService({
           .where(and(eq(calendars.accountId, account.id), isNull(calendars.deletedAt)))
           .orderBy(asc(calendars.name));
         for (const calendar of accountCalendars) {
+          throwIfQuiescing();
           if (!calendar.remoteCalendarId) continue;
           let result: SyncResult["value"];
           if (calendar.provider === "google" && googleCredentials) {
@@ -751,6 +781,7 @@ export function createConnectorService({
               googleCredentials,
               calendar.remoteCalendarId,
               calendar.syncToken,
+              syncOperation(),
             );
             googleCredentials = remote.credentials;
             result = remote.value;
@@ -759,19 +790,22 @@ export function createConnectorService({
               icloudCredentials,
               calendar.remoteCalendarId,
               calendar.syncToken,
+              syncOperation(),
             );
           } else {
             continue;
           }
+          throwIfQuiescing();
           changed += await withConnectorSyncClaim(account, syncClaim, () =>
             projectCalendarChanges(userId, calendar, result, principal, requestId),
           );
         }
       }
+      throwIfQuiescing();
       if (account.mailEnabled && !options.skipMail) {
         let mail: MailSyncResult["value"];
         if (account.provider === "google" && googleCredentials && google.syncMail) {
-          const result = await google.syncMail(googleCredentials);
+          const result = await google.syncMail(googleCredentials, syncOperation());
           googleCredentials = await saveGoogleCredentials(
             account.id,
             result.credentials,
@@ -781,10 +815,11 @@ export function createConnectorService({
           mailCredentialsPersisted = true;
           mail = result.value;
         } else if (account.provider === "icloud" && icloudCredentials) {
-          mail = await icloud.syncMail(icloudCredentials);
+          mail = await icloud.syncMail(icloudCredentials, syncOperation());
         } else {
           throw new AppError("internal_error", "Mail credentials are unavailable.");
         }
+        throwIfQuiescing();
         const projected = await projectMail(
           account,
           mail,
@@ -797,6 +832,7 @@ export function createConnectorService({
         mailCredentialsPersisted = mailCredentialsPersisted || projected.credentials !== null;
         googleCredentials = projected.credentials ?? googleCredentials;
       }
+      throwIfQuiescing();
       const [completedAccount] = await db
         .update(calendarAccounts)
         .set({
@@ -825,13 +861,18 @@ export function createConnectorService({
       }
       return { changed };
     } catch (error) {
+      const interrupted = shutdown?.signal.aborted === true;
       try {
         await db
           .update(calendarAccounts)
           .set({
-            syncError: error instanceof Error ? error.message : "Unknown connector error",
+            syncError: interrupted
+              ? CONNECTOR_SYNC_INTERRUPTED_ERROR
+              : error instanceof Error
+                ? error.message
+                : "Unknown connector error",
             syncClaimId: null,
-            syncStatus: "error",
+            syncStatus: interrupted ? "idle" : "error",
             updatedAt: now(),
           })
           .where(
@@ -842,10 +883,20 @@ export function createConnectorService({
             ),
           );
       } catch {
+        if (interrupted) {
+          throw new AppError(
+            "service_unavailable",
+            "The interrupted connector sync could not be made retryable.",
+            {
+              accountId: claimedAccount.id,
+              recovery: "Do not close PostgreSQL; retry claim settlement or allow stale recovery.",
+            },
+          );
+        }
         // Terminal status is best-effort and must not mask a structured
         // provider partial-effect/reconciliation contract.
       }
-      throw error;
+      throw interrupted ? (shutdown?.signal.reason ?? error) : error;
     }
   }
 
@@ -1724,11 +1775,48 @@ export function createConnectorService({
     return new Date(now().getTime() + delay * 60_000);
   }
 
+  async function releaseMailRuleClaimForQuiesce(claimId: string): Promise<void> {
+    if (!shutdown?.signal.aborted) return;
+    try {
+      await db
+        .update(mailRuleWorkItems)
+        .set({
+          attemptCount: sql`greatest(${mailRuleWorkItems.attemptCount} - 1, 0)`,
+          claimId: null,
+          claimedAt: null,
+          claimMode: null,
+          status: sql`
+            CASE
+              WHEN ${mailRuleWorkItems.claimMode} = 'reconcile' THEN 'reconcile'
+              ELSE 'pending'
+            END
+          `,
+          updatedAt: now(),
+        })
+        .where(
+          and(eq(mailRuleWorkItems.claimId, claimId), eq(mailRuleWorkItems.status, "claimed")),
+        );
+    } catch {
+      observeRecoveryFailure?.({ claimId, operation: "release_mail_rule_claim" });
+      throw new AppError(
+        "service_unavailable",
+        "Mail work claimed during shutdown could not be released for a safe retry.",
+        {
+          claimId,
+          operation: "release_mail_rule_claim",
+          retryable: true,
+        },
+      );
+    }
+    shutdown.signal.throwIfAborted();
+  }
+
   async function claimDueMailRuleWork(): Promise<{
     claimed: MailRuleWorkRow[];
     maintenanceFailed: number;
     touchedAccountIds: string[];
   }> {
+    throwIfQuiescing();
     const claimId = randomUUID();
     const current = now();
     const staleBefore = new Date(current.getTime() - MAIL_RULE_WORK_CLAIM_LEASE_MS);
@@ -1881,11 +1969,13 @@ export function createConnectorService({
           AND work.attempt_count < ${MAIL_RULE_WORK_MAX_ATTEMPTS}
       `);
     });
+    await releaseMailRuleClaimForQuiesce(claimId);
     const claimed = await db
       .select()
       .from(mailRuleWorkItems)
       .where(and(eq(mailRuleWorkItems.claimId, claimId), eq(mailRuleWorkItems.status, "claimed")))
       .orderBy(asc(mailRuleWorkItems.accountId), asc(mailRuleWorkItems.remoteThreadId));
+    await releaseMailRuleClaimForQuiesce(claimId);
     for (const item of claimed) touchedAccountIds.add(item.accountId);
     return { claimed, maintenanceFailed, touchedAccountIds: [...touchedAccountIds] };
   }
@@ -3055,6 +3145,7 @@ export function createConnectorService({
 
     syncAccount,
     async syncStaleAccounts(intervalMs = 5 * 60_000): Promise<void> {
+      throwIfQuiescing();
       const threshold = new Date(now().getTime() - intervalMs);
       const staleLeaseThreshold = new Date(
         now().getTime() - Math.max(intervalMs, CONNECTOR_SYNC_LEASE_MS),
@@ -3069,6 +3160,7 @@ export function createConnectorService({
               and(
                 eq(calendarAccounts.syncStatus, "idle"),
                 or(
+                  eq(calendarAccounts.syncError, CONNECTOR_SYNC_INTERRUPTED_ERROR),
                   isNull(calendarAccounts.lastSyncedAt),
                   and(
                     eq(calendarAccounts.mailEnabled, true),

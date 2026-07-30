@@ -34,6 +34,10 @@ This record specializes
   is retained and is never treated as deletion evidence.
 - One scheduler pass claims at most six conversations and executes with two workers. Work beyond
   that bound remains pending for a later pass.
+- Run-summary maintenance independently selects at most six oldest accounts missing a summary and
+  six oldest open summaries per pass. Creating or refreshing a summary advances it out of the
+  oldest set, so later passes repair the remaining accounts without historical failures causing
+  unbounded scheduler fan-out.
 - Claims lease for ten minutes. A stale claim becomes reconciliation work because the prior
   provider effect is unknown.
 - Each work item receives at most five claimed attempts with 1, 5, 15, 60, and 360 minute backoff.
@@ -77,9 +81,11 @@ This record specializes
   attention. Connector-managed run-summary create, refresh, and resolution advance the shared
   attention version and write a redacted audit atomically with connector actor,
   `approved_rule` policy, and background-dispatch metadata. No body, snippet, credential, provider
-  error body, or token enters those summaries or audits. Every scheduler pass rediscovers accounts
-  with outstanding work and open summaries, so a transactional audit failure is retried on a later
-  dispatch even after the work itself became terminal.
+  error body, or token enters those summaries or audits. Every scheduler pass rediscovers bounded,
+  oldest-first sets of accounts missing summaries and accounts with open summaries. Accounts that
+  already have an open summary are excluded from missing-summary discovery, so repair rotates
+  without starvation and a transactional audit failure is retried on a later dispatch even after
+  the work itself became terminal.
 - A person repairs authorization in **Settings → Connections**, refreshes source projection through
   **Mail → Sync**, and reviews changed rules in **Settings → Agent access → Review Mail rules**.
 - Reauthorizing the same Google Mail account with Mail scope atomically moves failed
@@ -98,7 +104,8 @@ claim recovery, one-day Trash, 404, 429, timeout ambiguity, credential rotation 
 failure, provider-success/local-commit failure, profile drift, exact no-replay reconciliation,
 revocation during reconciliation, reauthorization repair, lifecycle fencing, redacted setup
 status, and schema claim invariants. Connector unit tests assert the dedicated Gmail minimal-read
-and Trash requests.
+and Trash requests. Integration coverage also proves bounded run-summary rediscovery and eventual
+repair and resolution when the account set exceeds one pass.
 
 These tests and local PostgreSQL integration are not proof of production Gmail authority or
 delivery. Before declaring production operation verified, use a non-destructive dedicated Google

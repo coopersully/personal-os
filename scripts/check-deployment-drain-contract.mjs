@@ -118,6 +118,11 @@ requireMatch(
 );
 requireMatch(
   workflow,
+  /aws ecs wait services-stable[\s\S]*?for api_primary_completion_delay in 0 1 2 4 8 16 30 30 30 30[\s\S]*?api_primary_rollout[\s\S]*?IN_PROGRESS[\s\S]*?api_primary_completed/,
+  "bounded exact-primary completion after the ECS stable-count waiter",
+);
+requireMatch(
+  workflow,
   /trap cleanup_api_deployment EXIT[\s\S]*?trap 'cancel_api_deployment 130' INT[\s\S]*?trap 'cancel_api_deployment 143' TERM/,
   "fail-closed cancellation and process-exit cleanup",
 );

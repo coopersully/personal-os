@@ -1041,28 +1041,54 @@ run_interruptible aws ecs update-service \
 run_interruptible aws ecs wait services-stable \
   --cluster "$ECS_CLUSTER" \
   --services "$API_SERVICE"
-capture_interruptible aws ecs describe-services \
-  --cluster "$ECS_CLUSTER" \
-  --services "$API_SERVICE" \
-  --output json
-api_service_state="$api_captured_output"
-api_primary_count="$(
-  jq -r '[.services[0].deployments[] | select(.status == "PRIMARY")] | length' \
-    <<<"$api_service_state"
-)"
-api_primary_task="$(
-  jq -r '.services[0].deployments[] | select(.status == "PRIMARY") | .taskDefinition' \
-    <<<"$api_service_state"
-)"
-api_primary_rollout="$(
-  jq -r '.services[0].deployments[] | select(.status == "PRIMARY") | .rolloutState' \
-    <<<"$api_service_state"
-)"
-if ! {
-  test "$api_primary_count" = "1" &&
-    test "$api_primary_task" = "$API_TASK_DEFINITION" &&
-    test "$api_primary_rollout" = "COMPLETED"
-}; then
+api_primary_completed=false
+# ECS's services-stable waiter can return after desired/running counts converge but
+# before the deployment control plane publishes rolloutState=COMPLETED. Keep the
+# service serial and scaling suspended while that bounded final state converges.
+for api_primary_completion_delay in 0 1 2 4 8 16 30 30 30 30; do
+  if test "$api_primary_completion_delay" != "0"; then
+    run_interruptible sleep "$api_primary_completion_delay"
+  fi
+  capture_interruptible aws ecs describe-services \
+    --cluster "$ECS_CLUSTER" \
+    --services "$API_SERVICE" \
+    --output json
+  api_service_state="$api_captured_output"
+  api_primary_count="$(
+    jq -r '[.services[0].deployments[] | select(.status == "PRIMARY")] | length' \
+      <<<"$api_service_state"
+  )"
+  api_primary_task="$(
+    jq -r '.services[0].deployments[] | select(.status == "PRIMARY") | .taskDefinition' \
+      <<<"$api_service_state"
+  )"
+  api_primary_rollout="$(
+    jq -r '.services[0].deployments[] | select(.status == "PRIMARY") | .rolloutState' \
+      <<<"$api_service_state"
+  )"
+  api_primary_counts="$(
+    jq -r '.services[0] | [.desiredCount, .runningCount, .pendingCount] | @tsv' \
+      <<<"$api_service_state"
+  )"
+  if {
+    test "$api_primary_count" = "1" &&
+      test "$api_primary_task" = "$API_TASK_DEFINITION" &&
+      test "$api_primary_rollout" = "COMPLETED" &&
+      test "$api_primary_counts" = $'1\t1\t0'
+  }; then
+    api_primary_completed=true
+    break
+  fi
+  if ! {
+    test "$api_primary_count" = "1" &&
+      test "$api_primary_task" = "$API_TASK_DEFINITION" &&
+      test "$api_primary_rollout" = "IN_PROGRESS" &&
+      test "$api_primary_counts" = $'1\t1\t0'
+  }; then
+    break
+  fi
+done
+if test "$api_primary_completed" != "true"; then
   run_interruptible aws ecs update-service \
     --cluster "$ECS_CLUSTER" \
     --service "$API_SERVICE" \

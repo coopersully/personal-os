@@ -666,6 +666,20 @@ if (process.argv[2] === "--fake-aws") {
       delayedPrimary.state.desiredCount === 1,
     "Deployment must wait for exact primary completion without stopping the healthy task.",
   );
+  const stalledPrimary = runScenario(
+    "stalled-primary-completion",
+    baseState({ primaryRolloutStates: Array.from({ length: 10 }, () => "IN_PROGRESS") }),
+  );
+  assert(
+    stalledPrimary.result.status !== 0,
+    "A primary that never completes inside the bounded poll must fail.",
+  );
+  assert(
+    stalledPrimary.state.primaryRolloutStates.length === 0 &&
+      stalledPrimary.state.desiredCount === 0 &&
+      JSON.stringify(stalledPrimary.state.suspension) === JSON.stringify(allSuspended),
+    "A stalled primary must exhaust the bounded poll and return to fail-closed zero.",
+  );
   const successfulReadiness = success.state.calls.findIndex((call) => call.startsWith("curl "));
   const successfulSuspension = success.state.calls.findIndex((call) =>
     call.startsWith("application-autoscaling register-scalable-target"),

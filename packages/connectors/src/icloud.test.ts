@@ -1,5 +1,10 @@
 import { ConnectorError } from "./google.js";
 import { createICloudConnector } from "./icloud.js";
+import {
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  MAX_MAIL_SOURCE_BYTES,
+} from "./mail-attachments.js";
 
 const credentials = {
   appSpecificPassword: "xxxx-xxxx-xxxx-xxxx",
@@ -196,6 +201,7 @@ describe("iCloud connector", () => {
         "Hello Example User.\n\nThis is a test.",
       ].join("\r\n"),
     );
+    let selectedPath = "INBOX";
     const imap = {
       connect: vi.fn(async () => undefined),
       fetch: vi.fn(async function* () {
@@ -214,13 +220,23 @@ describe("iCloud connector", () => {
           uid: 3,
         };
       }),
-      getMailboxLock: vi.fn(async () => ({ release })),
+      get mailbox() {
+        return {
+          exists: selectedPath === "INBOX" ? 3 : 0,
+          path: selectedPath,
+          uidValidity: 777n,
+        };
+      },
+      getMailboxLock: vi.fn(async (path: string) => {
+        selectedPath = path;
+        return { release };
+      }),
       list: vi.fn(async () => [
         {
           flags: new Set<string>(),
           name: "Inbox",
           path: "INBOX",
-          status: { messages: 3, unseen: 2 },
+          status: { messages: 3, uidValidity: 777n, unseen: 2 },
         },
         {
           flags: new Set<string>(),
@@ -263,19 +279,174 @@ describe("iCloud connector", () => {
     expect(result.threads[0]).toMatchObject({
       bodyText: "Hello Example User.\n\nThis is a test.",
       from: { address: "ada@example.com", name: "Ada" },
-      remoteThreadId: "INBOX:2",
+      messagesComplete: true,
+      remoteThreadId: "INBOX:777:2",
       starred: true,
       subject: "Hello from iCloud",
       to: [{ address: "user@example.com", name: "Example User" }],
       unread: true,
     });
+    expect(result.threads[0]?.messages?.[0]).toMatchObject({
+      providerRevision: "777:2",
+      remoteMessageId: "INBOX:777:2",
+    });
     expect(result.threads[1]).toMatchObject({
       from: { address: "", name: null },
-      remoteThreadId: "INBOX:3",
+      remoteThreadId: "INBOX:777:3",
       unread: false,
     });
-    expect(release).toHaveBeenCalledOnce();
+    expect(release).toHaveBeenCalledTimes(7);
     expect(imap.logout).toHaveBeenCalledOnce();
+  });
+
+  it("changes iCloud source identity when UIDVALIDITY resets and a UID is reused", async () => {
+    let uidValidity = 100n;
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        yield {
+          source: Buffer.from(
+            "From: organizer@example.com\r\nSubject: Invite\r\nContent-Type: text/calendar\r\n\r\nBEGIN:VCALENDAR",
+          ),
+          uid: 7,
+        };
+      }),
+      mailbox: {
+        exists: 1,
+        path: "INBOX",
+        get uidValidity() {
+          return uidValidity;
+        },
+      },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const { value } = connector(davClient(), imap);
+    const first = await value.syncMail(credentials);
+    uidValidity = 101n;
+    const second = await value.syncMail(credentials);
+
+    expect(first.threads[0]?.remoteThreadId).toBe("INBOX:100:7");
+    expect(first.threads[0]?.messages?.[0]).toMatchObject({
+      providerRevision: "100:7",
+      remoteMessageId: "INBOX:100:7",
+    });
+    expect(second.threads[0]?.remoteThreadId).toBe("INBOX:101:7");
+    expect(second.threads[0]?.messages?.[0]).toMatchObject({
+      providerRevision: "101:7",
+      remoteMessageId: "INBOX:101:7",
+    });
+  });
+
+  it("collapses excessive iCloud calendar MIME parts to one provider-scoped marker", async () => {
+    const calendarParts = Array.from(
+      { length: MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE + 1 },
+      (_, index) =>
+        [
+          "--calendar-parts",
+          `Content-Type: text/calendar; name="invite-${String(index)}.ics"`,
+          `Content-Disposition: attachment; filename="invite-${String(index)}.ics"`,
+          "",
+          "BEGIN:VCALENDAR",
+          "END:VCALENDAR",
+        ].join("\r\n"),
+    ).join("\r\n");
+    const source = Buffer.from(
+      [
+        "From: organizer@example.com",
+        "Subject: Excessive invitations",
+        'Content-Type: multipart/mixed; boundary="calendar-parts"',
+        "",
+        calendarParts,
+        "--calendar-parts--",
+      ].join("\r\n"),
+    );
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch: vi.fn(async function* () {
+        yield { source, uid: 9 };
+      }),
+      mailbox: { exists: 1, path: "INBOX", uidValidity: 888n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 888n },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+    const mail = await connector(davClient(), imap).value.syncMail(credentials);
+    expect(mail.threads[0]?.messages?.[0]?.attachments).toEqual([
+      expect.objectContaining({
+        ...calendarAttachmentProjectionOverflow("ignored"),
+        id: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+        providerPartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+      }),
+    ]);
+  });
+
+  it("bounds iCloud RFC822 retrieval before MIME parsing", async () => {
+    const fetch = vi.fn(async function* () {
+      yield {
+        envelope: {
+          date: new Date("2026-07-15T13:00:00.000Z"),
+          from: [{ address: "organizer@example.com", name: "Organizer" }],
+          subject: "Oversized source",
+          to: [{ address: "user@example.com", name: "User" }],
+        },
+        size: MAX_MAIL_SOURCE_BYTES + 1,
+        source: Buffer.from("truncated-untrusted-source"),
+        uid: 10,
+      };
+    });
+    const imap = {
+      connect: vi.fn(async () => undefined),
+      fetch,
+      mailbox: { exists: 1, path: "INBOX", uidValidity: 889n },
+      getMailboxLock: vi.fn(async () => ({ release: vi.fn() })),
+      list: vi.fn(async () => [
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 889n },
+        },
+      ]),
+      logout: vi.fn(async () => undefined),
+    };
+
+    const mail = await connector(davClient(), imap).value.syncMail(credentials);
+
+    expect(fetch).toHaveBeenCalledWith(
+      "1:*",
+      expect.objectContaining({
+        size: true,
+        source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 },
+      }),
+    );
+    expect(mail.threads[0]).toMatchObject({
+      bodyText: "",
+      from: { address: "organizer@example.com", name: "Organizer" },
+      subject: "Oversized source",
+      to: [{ address: "user@example.com", name: "User" }],
+    });
+    expect(mail.threads[0]?.messages?.[0]?.attachments).toEqual([
+      expect.objectContaining({
+        projectionIssue: "calendar_attachment_projection_overflow",
+        providerPartId: expect.stringMatching(/^projection-overflow:[0-9a-f]{64}$/),
+      }),
+    ]);
   });
 
   it("closes an in-flight multi-mailbox IMAP sync when quiescing", async () => {
@@ -301,19 +472,22 @@ describe("iCloud connector", () => {
         });
         yield {};
       }),
+      get mailbox() {
+        return { exists: 1, path: "INBOX", uidValidity: 777n };
+      },
       getMailboxLock: vi.fn(async () => ({ release })),
       list: vi.fn(async () => [
         {
           flags: new Set<string>(),
           name: "Inbox",
           path: "INBOX",
-          status: { messages: 1, unseen: 1 },
+          status: { messages: 1, uidValidity: 777n, unseen: 1 },
         },
         {
           flags: new Set<string>(),
           name: "Archive",
           path: "Archive",
-          status: { messages: 1, unseen: 0 },
+          status: { messages: 1, uidValidity: 778n, unseen: 0 },
         },
       ]),
       logout: vi.fn(async () => undefined),
@@ -395,8 +569,12 @@ describe("iCloud connector", () => {
 
   it("writes iCloud flags and mailbox moves through IMAP", async () => {
     const release = vi.fn();
+    let selectedUidValidity = 777n;
     const imap = {
       connect: vi.fn(async () => undefined),
+      get mailbox() {
+        return { exists: 1, path: "INBOX", uidValidity: selectedUidValidity };
+      },
       getMailboxLock: vi.fn(async () => ({ release })),
       list: vi.fn(async () => [
         { name: "Inbox", path: "INBOX" },
@@ -410,7 +588,7 @@ describe("iCloud connector", () => {
     };
     const { value } = connector(davClient(), imap);
     if (!value.updateMailThread) throw new Error("Mail updates are unavailable.");
-    await value.updateMailThread(credentials, "INBOX:42", {
+    await value.updateMailThread(credentials, "INBOX:777:42", {
       addMailboxIds: ["Trash", "STARRED"],
       removeMailboxIds: ["INBOX", "UNREAD"],
     });
@@ -422,6 +600,11 @@ describe("iCloud connector", () => {
     await expect(value.updateMailThread(credentials, "not-a-message", {})).rejects.toMatchObject({
       status: 404,
     });
+    selectedUidValidity = 778n;
+    await expect(
+      value.updateMailThread(credentials, "INBOX:777:42", { addMailboxIds: ["STARRED"] }),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it("normalizes sparse CalDAV and IMAP responses", async () => {
@@ -451,15 +634,31 @@ describe("iCloud connector", () => {
       ].join("\r\n"),
     );
     const release = vi.fn();
+    let selectedSparsePath = "Empty";
     const sparseImap = {
       connect: vi.fn(async () => undefined),
       fetch: vi.fn(async function* () {
         yield { source: raw, uid: 9 };
       }),
-      getMailboxLock: vi.fn(async () => ({ release })),
+      get mailbox() {
+        return {
+          exists: selectedSparsePath === "INBOX" ? 1 : 0,
+          path: selectedSparsePath,
+          uidValidity: 888n,
+        };
+      },
+      getMailboxLock: vi.fn(async (path: string) => {
+        selectedSparsePath = path;
+        return { release };
+      }),
       list: vi.fn(async () => [
         { flags: new Set<string>(), name: "Empty", path: "Empty" },
-        { flags: new Set<string>(), name: "Inbox", path: "INBOX", status: { messages: 1 } },
+        {
+          flags: new Set<string>(),
+          name: "Inbox",
+          path: "INBOX",
+          status: { messages: 1, uidValidity: 888n },
+        },
       ]),
       logout: vi.fn(async () => undefined),
     };
@@ -503,7 +702,17 @@ describe("iCloud connector", () => {
       "first@example.com",
       "second@example.com",
     ]);
-    expect(release).toHaveBeenCalledOnce();
+    expect(mail.threads[0]?.messages?.[0]).toMatchObject({
+      attachments: [
+        expect.objectContaining({
+          id: "INBOX:888:9:0",
+          providerPartId: "INBOX:888:9:0",
+        }),
+      ],
+      providerRevision: "888:9",
+      remoteMessageId: "INBOX:888:9",
+    });
+    expect(release).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a CalDAV object that mentions an event without containing one", async () => {
@@ -596,6 +805,7 @@ describe("iCloud connector", () => {
       getMailboxLock: vi.fn(),
       list: vi.fn(),
       logout: vi.fn(),
+      mailbox: false,
     }).value;
     await expect(connectFailure.syncMail(credentials)).rejects.toMatchObject({ status: 401 });
 

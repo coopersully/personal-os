@@ -60,6 +60,9 @@ provider-specific label names.
    message bodies. A reconciliation item means Ilo will read that exact provider thread before any
    replay because an earlier provider effect was uncertain. A failed item stopped safely and needs
    the signed-in person to review the named connection, source, profile, or rule.
+   Read `commitmentIntake` separately: current calendar-attachment metadata is preview-only,
+   `serverVerifiedCount` is zero, and `automaticCreationEnabled` is false. Do not offer or imply a
+   Mail-to-Calendar automatic rule until those server-owned values say the capability exists.
 10. Automatic rule execution currently requires an explicit Google source. Leave rules that
     include iCloud or another unsupported source disabled and explain the source capability.
 11. Recoverable Trash is the only action in its rule. Permanent deletion remains unavailable.
@@ -107,6 +110,6 @@ Repair codes describe signed-in user actions; they are not MCP tools.
 ## Keep cross-domain work bounded
 
 For mail-derived commitments, preserve the source message and require strong evidence that the user
-actually committed. Ticket, booking, and registration confirmations are stronger evidence than
-marketing announcements. Deduplicate before creating calendar or task material. Leave ambiguous
-items in review.
+actually committed. Cached prose, sender text, and calendar attachment metadata are currently
+unverified even when they resemble a ticket, booking, registration, or accepted invitation.
+Deduplicate before creating calendar or task material and leave every current intake in review.

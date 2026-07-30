@@ -163,7 +163,7 @@ describe("durable Mail rule work helpers", () => {
         mailboxId: null,
         type: "mark_read",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       mailRuleActionNeedsDurableExecution({ afterDays: 0, mailboxId: null, type: "archive" }),
     ).toBe(true);

@@ -6,6 +6,7 @@ import {
   type Database,
   domainProfiles,
   mailboxes,
+  mailCalendarCommitmentIntakes,
   mailDrafts,
   mailMessages,
   mailRules,
@@ -991,43 +992,60 @@ export function createMailService({
     },
 
     async listSetupContext(userId: string): Promise<MailSetupContext> {
-      const [accounts, mailboxRecords, workSummaries] = await Promise.all([
-        db
-          .select()
-          .from(calendarAccounts)
-          .where(and(eq(calendarAccounts.userId, userId), eq(calendarAccounts.mailEnabled, true)))
-          .orderBy(asc(calendarAccounts.createdAt)),
-        db
-          .select()
-          .from(mailboxes)
-          .where(and(eq(mailboxes.userId, userId), isNull(mailboxes.deletedAt)))
-          .orderBy(asc(mailboxes.accountId), asc(mailboxes.role), asc(mailboxes.name)),
-        db
-          .select({
-            accountId: mailRuleWorkItems.accountId,
-            count: sql<number>`count(*)::int`,
-            lastCompletedAt: sql<Date | string | null>`max(${mailRuleWorkItems.completedAt})`,
-            oldestDueAt: sql<Date | string | null>`min(
+      const [accounts, mailboxRecords, workSummaries, [commitmentIntakeSummary]] =
+        await Promise.all([
+          db
+            .select()
+            .from(calendarAccounts)
+            .where(and(eq(calendarAccounts.userId, userId), eq(calendarAccounts.mailEnabled, true)))
+            .orderBy(asc(calendarAccounts.createdAt)),
+          db
+            .select()
+            .from(mailboxes)
+            .where(and(eq(mailboxes.userId, userId), isNull(mailboxes.deletedAt)))
+            .orderBy(asc(mailboxes.accountId), asc(mailboxes.role), asc(mailboxes.name)),
+          db
+            .select({
+              accountId: mailRuleWorkItems.accountId,
+              count: sql<number>`count(*)::int`,
+              lastCompletedAt: sql<Date | string | null>`max(${mailRuleWorkItems.completedAt})`,
+              oldestDueAt: sql<Date | string | null>`min(
               case
                 when ${mailRuleWorkItems.status} in ('pending', 'claimed', 'reconcile')
                 then ${mailRuleWorkItems.dueAt}
                 else null
               end
             )`,
-            status: mailRuleWorkItems.status,
-          })
-          .from(mailRuleWorkItems)
-          .innerJoin(
-            calendarAccounts,
-            and(
-              eq(calendarAccounts.id, mailRuleWorkItems.accountId),
-              eq(calendarAccounts.userId, userId),
-              eq(calendarAccounts.mailEnabled, true),
-            ),
-          )
-          .where(eq(mailRuleWorkItems.userId, userId))
-          .groupBy(mailRuleWorkItems.accountId, mailRuleWorkItems.status),
-      ]);
+              status: mailRuleWorkItems.status,
+            })
+            .from(mailRuleWorkItems)
+            .innerJoin(
+              calendarAccounts,
+              and(
+                eq(calendarAccounts.id, mailRuleWorkItems.accountId),
+                eq(calendarAccounts.userId, userId),
+                eq(calendarAccounts.mailEnabled, true),
+              ),
+            )
+            .where(eq(mailRuleWorkItems.userId, userId))
+            .groupBy(mailRuleWorkItems.accountId, mailRuleWorkItems.status),
+          db
+            .select({
+              previewOnlyCount: sql<number>`count(*) filter (
+                where ${mailCalendarCommitmentIntakes.status} = 'preview_only'
+              )::int`,
+            })
+            .from(mailCalendarCommitmentIntakes)
+            .innerJoin(
+              calendarAccounts,
+              and(
+                eq(calendarAccounts.id, mailCalendarCommitmentIntakes.accountId),
+                eq(calendarAccounts.userId, userId),
+                eq(calendarAccounts.mailEnabled, true),
+              ),
+            )
+            .where(eq(mailCalendarCommitmentIntakes.userId, userId)),
+        ]);
       const mailboxesByAccount = new Map<string, Mailbox[]>();
       for (const mailbox of mailboxRecords) {
         const group = mailboxesByAccount.get(mailbox.accountId) ?? [];
@@ -1120,6 +1138,11 @@ export function createMailService({
           oldestDueAt: oldestDueAt?.toISOString() ?? null,
           pendingCount,
           reconciliationCount,
+        },
+        commitmentIntake: {
+          automaticCreationEnabled: false,
+          previewOnlyCount: commitmentIntakeSummary?.previewOnlyCount ?? 0,
+          serverVerifiedCount: 0,
         },
         safety: {
           delayedRetentionAutomation: true,

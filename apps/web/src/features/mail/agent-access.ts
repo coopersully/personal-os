@@ -67,10 +67,24 @@ export function mailAgentAccessReadiness({
             description: formatMailAutomationStatus(setup.data.automation),
             title: "Mail automation",
           };
+  const commitmentIntake =
+    setup.state === "loading"
+      ? loadingReadiness("Mail commitment intake", "Mail commitment intake status is loading.")
+      : setup.state === "unavailable" || setup.data.commitmentIntake === undefined
+        ? unavailableReadiness(
+            "Mail commitment intake",
+            "Mail commitment intake is unavailable, so Ilo cannot claim verified commitment evidence.",
+          )
+        : {
+            complete: setup.data.commitmentIntake.automaticCreationEnabled,
+            description: formatMailCommitmentIntake(setup.data.commitmentIntake),
+            title: "Mail commitment intake",
+          };
   return [
     material,
     preferences,
     automation,
+    commitmentIntake,
     attentionReadiness("Mail", attention),
     hostPermissionReadiness({
       hosts,
@@ -91,7 +105,7 @@ export function mailAgentAccessCapability(
     return {
       description:
         "Mail setup maps every inbox before sampling it, records important conversations as source-linked attention, and captures delayed archive or recoverable Trash preferences. Approved work is bounded, durable, and activated by the signed-in person.",
-      setupPrompt: `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Explain any pending, reconciliation, or failed automation shown in setup context. After I explicitly accept a rule summary, use review_mail_rule, then tell me to activate it myself in Ilo Settings → Agent access → Review Mail rules. Reviewed Google rules use bounded durable execution; Trash is recoverable and permanent deletion is unavailable.`,
+      setupPrompt: `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Explain any pending, reconciliation, or failed automation shown in setup context. Treat commitment intake as preview-only whenever automaticCreationEnabled is false; do not promise Mail-to-Calendar creation from cached prose or attachment metadata. After I explicitly accept a rule summary, use review_mail_rule, then tell me to activate it myself in Ilo Settings → Agent access → Review Mail rules. Reviewed Google rules use bounded durable execution; Trash is recoverable and permanent deletion is unavailable.`,
       title: "Mail profiles, previews, and approved rules",
     };
   }
@@ -126,6 +140,10 @@ function formatMailAutomationStatus(automation: MailSetupContext["automation"]):
     ? ` Last completed: ${new Date(automation.lastCompletedAt).toLocaleString()}.`
     : "";
   return `${automation.pendingCount} delayed action${automation.pendingCount === 1 ? "" : "s"} pending; ${automation.inProgressCount} in progress; ${automation.reconciliationCount} need provider reconciliation; ${automation.failedCount} stopped safely. Ilo processes at most ${automation.executionLimitPerRun} conversations per scheduled run.${oldestDue}${lastCompleted}`;
+}
+
+function formatMailCommitmentIntake(intake: MailSetupContext["commitmentIntake"]): string {
+  return `${intake.previewOnlyCount} preview-only calendar attachment candidate${intake.previewOnlyCount === 1 ? "" : "s"}; ${intake.serverVerifiedCount} server-verified. Automatic Calendar creation is not enabled; cached prose and attachment metadata cannot authorize an event.`;
 }
 
 function mailSourceSummary(accounts: MailSetupContext["accounts"]): string {

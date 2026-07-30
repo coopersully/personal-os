@@ -146,10 +146,112 @@ docker build --target mcp -t personal-os-mcp .
 ```
 
 Run only one migration-capable API instance during a breaking schema rollout.
-Drizzle records applied versions transactionally. Follow the
+The stop-and-drain workflow is not itself the bootstrap for this contract. A
+prior non-migrating rollout must already have placed every live API task on a
+task definition with a 120-second essential-container stop timeout and a binary
+whose readiness response carries the hard-coded
+`X-Ilo-Drain-Protocol: quiesce-v1` header. Before any scaling mutation,
+deployment describes the exact primary task definition and every running task
+and proves that their task definition and image agree, every API container has
+the same nonempty immutable image digest, and the task definition contains
+exactly one `API_SHUTDOWN_TIMEOUT_MS=105000` entry alongside the 120-second stop
+timeout. It then calls the live `/health/ready` endpoint and requires that exact
+protocol header.
+Legacy or mixed task sets fail before drain; lifecycle readiness must be shipped
+and verified separately before a migration-required release can use this path.
+
+After that gate, the production workflow scales the API service to zero and waits for the
+current tasks to stop before starting the new migration-capable task. It suspends ECS
+dynamic and scheduled scaling before the drain and records the exact old task
+ARNs. On `SIGTERM`, the API stops accepting new HTTP and detached/background
+claims, awaits in-flight requests and tracked provider work, closes its HTTP
+server, and only then closes PostgreSQL. The application bound is 105 seconds
+and covers database closure; a tracked request/background rejection fails the
+drain instead of being treated as idle. The essential ECS API container has a
+120-second stop timeout. Deployment reconciles running, pending, already-stopping,
+and replacement tasks observed across the transition. ECS desired status uses
+only `RUNNING`/`STOPPED`, so the `RUNNING` inventory also contains tasks whose
+last status is still `PENDING`; a mismatch with service counts fails closed.
+The recent STOPPED baseline is capped at 100 before mutation. Only entries
+described with complete STOPPED evidence in that initial snapshot are historical;
+incomplete or later observations remain in the drain proof without relying on
+cross-system clock comparisons. Post-drain STOPPED inventories reconcile across
+a bounded window slightly longer than five minutes and must converge before the
+exact at-most-100 task set is accepted. Desired/running/pending service counts must all
+reach zero, every exact task is waited to `STOPPED`, and every API container
+must report exit code zero with no kill/timeout evidence. Count-only drain or a
+fixed sleep is insufficient. This bound follows AWS's
+[ECS API eventual-consistency guidance](https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RunTask.html),
+which recommends repeated `DescribeTasks` calls with exponential backoff that
+grows to about five minutes.
+
+After the old tasks exit successfully, the workflow disables circuit-breaker
+rollback before launching the migration-capable task so ECS cannot restore a
+pre-migration binary. Rollback remains disabled until the new service is stable
+as the sole completed primary deployment on the exact registered task
+definition; only then does the workflow restore and verify the declared
+rollback-enabled configuration and the scalable target's exact pre-drain
+suspension state. Suspension attempt and service-drain attempt are separate
+phases: failure before desired-count zero restores the prior scaling state and
+preserves the healthy old service; once zeroing may have committed, errors
+re-suspend and stop at zero. Every AWS operation after suspension begins, plus
+reconciliation delays, runs as an interruptible child process so delivered
+cancellation signals can stop the child, then use single-attempt, tightly bounded
+re-suspend/zero mutations within the runner grace window.
+An abrupt runner/host loss that cannot deliver cleanup signals remains an
+external control-plane recovery case. The workflow stores the pre-drain desired
+count, exact suspension state, and a bounded set of failed post-drain task
+definition ARNs in the immutable release task definition. Zero/all-suspended is
+not sufficient recovery authority because it can be an intentional operator
+stop and successful definitions retain stale metadata. A handled post-drain
+failure therefore registers a separate immutable recovery-marker task-definition
+revision tied to the failed release. If marker persistence cannot be verified,
+the service remains stopped and deployment reports that operator recovery is
+required. A later run requires and consumes that marker, inherits the persisted
+intent, and appends the marker's failed release task definition before
+registering the retry. Fallible sibling registration runs before API
+registration, and the recovery candidate deliberately retains the marker and a
+one-run authorization until deployment succeeds. This means a runner or sibling
+failure after candidate registration cannot erase recovery authority. After the
+exact recovered primary is healthy, rollback and intended capacity are
+restored, deployment registers and verifies a marker-cleared normal-metadata
+revision before autoscaling resumes. Cleanup failure stops the service and
+publishes a new marker. Normal registration resets authorization and history.
+The unique history is
+capped at 100 entries. During retry, only stopped tasks on those exact
+post-drain definitions are treated as failed rollout evidence; every other
+recent stopped task must still pass the old-binary exit-zero/no-kill proof.
+Rollback stays disabled until the exact new primary is healthy. Only a successful retry
+starts one migration-capable task, proves it as the exact healthy primary,
+restores rollback configuration, then scales to the recorded desired count
+before restoring the exact suspension state. This keeps migrations serial even
+when intended steady-state capacity is greater than one. Missing or malformed
+recovery intent fails without starting a task. Operators must still verify
+zero/suspended state after an abrupt runner loss; because an unhandled host loss
+cannot persist the marker, that path remains manual and cannot auto-restart.
+This bounded
+downtime is required for migrations that invalidate connector source authority:
+an old process already inside provider I/O cannot honor a fence introduced by
+the new schema. Drizzle records applied versions transactionally. Follow the
 [database migration policy](engineering/database-migrations.md): published
 migrations are append-only, and live-data changes use an expand–migrate–contract
 rollout rather than a long deploy-time backfill.
+
+Before merging any change that requires this stop-and-drain path, the deploy role
+must already have verified `application-autoscaling:RegisterScalableTarget`
+authority scoped to the API scalable target, ECS service namespace, and
+`ecs:service:DesiredCount` dimension. It must also have `ecs:ListTasks` on `*`,
+which AWS requires for enumerating the exact service task ARNs later inspected
+with the existing `ecs:DescribeTasks` authority; the declared wildcard statement
+is constrained to the production cluster with `ArnEquals ecs:cluster`. Keep that
+list action isolated from ECS mutation permissions. The application workflow cannot grant either
+prerequisite to its own execution role. The role must additionally have isolated
+`application-autoscaling:DescribeScalableTargets` authority on `*` because AWS
+does not expose resource-level scoping for that read; workflow filters require
+namespace `ecs`, the exact API resource ID, and `ecs:service:DesiredCount`.
+Without all three declarations applied and verified, deployment must fail before
+drain or migration. The lifecycle-marker bootstrap is an independent deployed
+prerequisite, not evidence supplied by the migration release being launched.
 
 ## API quiesce prerequisite and drain gate
 

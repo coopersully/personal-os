@@ -38,6 +38,15 @@ describe("API runtime lifecycle", () => {
     expect(closeIdleConnections).toHaveBeenCalledOnce();
   });
 
+  it("propagates an HTTP server close failure", async () => {
+    const failure = new Error("server close failed");
+    const server = {
+      close: vi.fn((callback: (error?: Error) => void) => callback(failure)),
+    };
+
+    await expect(closeNodeHttpServer(server)).rejects.toBe(failure);
+  });
+
   it("rejects new work after quiesce, publishes the deadline, and aborts accepted work", async () => {
     const lifecycle = createRuntimeLifecycle();
     const request = deferred();
@@ -50,8 +59,14 @@ describe("API runtime lifecycle", () => {
         await background.promise;
       }),
     ).toBe(true);
+    expect(lifecycle.inFlight()).toEqual({
+      background: 1,
+      backgroundLabels: ["provider-effect"],
+      requests: 1,
+    });
 
     lifecycle.beginQuiesce(12_345);
+    lifecycle.beginQuiesce(67_890);
     expect(lifecycle.deadlineMs()).toBe(12_345);
     expect(lifecycle.signal.aborted).toBe(true);
     expect(lifecycle.runRequest(async () => undefined)).toBeUndefined();
@@ -128,6 +143,24 @@ describe("API runtime lifecycle", () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
     expect(closeDatabase).not.toHaveBeenCalled();
+  });
+
+  it("applies the same deadline to database closure", async () => {
+    vi.useFakeTimers();
+    const lifecycle = createRuntimeLifecycle();
+    const closeDatabase = vi.fn(() => new Promise<void>(() => undefined));
+    const shutdown = shutdownApiRuntime({
+      closeDatabase,
+      closeHttpServer: async () => undefined,
+      lifecycle,
+      stopScheduling: () => undefined,
+      timeoutMs: 1_000,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(closeDatabase).toHaveBeenCalledOnce();
+    const assertion = expect(shutdown).rejects.toThrow("1000ms (0 requests; background: none)");
+    await vi.advanceTimersByTimeAsync(1_000);
+    await assertion;
   });
 
   it("fails drain and preserves the database when non-quiesce work rejects", async () => {

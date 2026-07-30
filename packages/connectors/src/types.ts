@@ -96,6 +96,7 @@ export type RemoteCalendar = {
 export type RemoteMailbox = {
   id: string;
   name: string;
+  providerRevision?: string | null;
   role: MailboxRole;
   totalCount: number;
   unreadCount: number;
@@ -110,10 +111,13 @@ export type NormalizedRemoteMailThread = {
     bodyText: string;
     cc: MailAddress[];
     from: MailAddress;
+    mailboxIds?: string[];
+    providerRevision?: string | null;
     receivedAt: Date;
     remoteMessageId: string;
     to: MailAddress[];
   }>;
+  messagesComplete?: boolean;
   messageCount: number;
   receivedAt: Date;
   remoteThreadId: string;

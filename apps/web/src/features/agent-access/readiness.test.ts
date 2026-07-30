@@ -140,6 +140,12 @@ describe("agent access readiness adapters", () => {
     expect(mailAgentAccessReadiness({ ...base, setup: unavailable })[2]?.description).toContain(
       "unavailable",
     );
+    expect(
+      mailAgentAccessReadiness({
+        ...base,
+        setup: ready({ accounts: [], automation: {} } as unknown as MailSetupContext),
+      })[3]?.description,
+    ).toContain("cannot claim verified commitment evidence");
 
     const emptySetup = {
       accounts: [],
@@ -151,6 +157,11 @@ describe("agent access readiness adapters", () => {
         oldestDueAt: null,
         pendingCount: 0,
         reconciliationCount: 0,
+      },
+      commitmentIntake: {
+        automaticCreationEnabled: false,
+        previewOnlyCount: 0,
+        serverVerifiedCount: 0,
       },
     } as unknown as MailSetupContext;
     expect(mailAgentAccessReadiness({ ...base, setup: ready(emptySetup) })[0]).toMatchObject({
@@ -177,6 +188,11 @@ describe("agent access readiness adapters", () => {
         oldestDueAt: "2026-07-28T13:00:00.000Z",
         pendingCount: 1,
       },
+      commitmentIntake: {
+        automaticCreationEnabled: false,
+        previewOnlyCount: 2,
+        serverVerifiedCount: 0,
+      },
     } as MailSetupContext;
     const rows = mailAgentAccessReadiness({
       ...base,
@@ -187,6 +203,12 @@ describe("agent access readiness adapters", () => {
     expect(rows[0]?.description).toContain("one@example.com, Two +1 · 1 needs reconnect");
     expect(rows[1]?.description).toContain("1 active approved Mail rule");
     expect(rows[2]?.description).toContain("Oldest due:");
+    expect(rows[3]).toMatchObject({
+      complete: false,
+      title: "Mail commitment intake",
+    });
+    expect(rows[3]?.description).toContain("2 preview-only calendar attachment candidates");
+    expect(rows[3]?.description).toContain("Automatic Calendar creation is not enabled");
 
     expect(mailAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
     expect(mailAgentAccessCapability("profile_and_attention", "$ilo-setup").title).toContain(

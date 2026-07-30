@@ -1,5 +1,16 @@
 import { simpleParser } from "mailparser";
-import { ConnectorError, createGoogleConnector, MailSendPreAcceptanceError } from "./google.js";
+import {
+  ConnectorError,
+  createGoogleConnector,
+  MailSendPreAcceptanceError,
+  projectGmailAttachments,
+} from "./google.js";
+import {
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_ATTACHMENT_METADATA_LENGTH,
+  MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE,
+  MAX_MAIL_MIME_DEPTH,
+} from "./mail-attachments.js";
 import type { GoogleCredentials } from "./types.js";
 
 const now = new Date("2026-07-13T12:00:00.000Z");
@@ -52,6 +63,59 @@ function queued(...responses: Response[]) {
 }
 
 describe("Google Calendar connector", () => {
+  it("bounds nested Gmail MIME trees and calendar attachment metadata", () => {
+    let nested: Record<string, unknown> = {
+      body: {},
+      filename: "",
+      mimeType: "text/plain",
+      partId: "leaf",
+      parts: [],
+    };
+    for (let depth = 0; depth <= MAX_MAIL_MIME_DEPTH; depth += 1) {
+      nested = {
+        body: {},
+        filename: "",
+        mimeType: "multipart/mixed",
+        partId: `nested-${String(depth)}`,
+        parts: [nested],
+      };
+    }
+    expect(projectGmailAttachments(nested as never)).toEqual([
+      calendarAttachmentProjectionOverflow("part:projection-overflow"),
+    ]);
+
+    const excessiveCalendarParts = {
+      body: {},
+      filename: "",
+      headers: [],
+      mimeType: "multipart/mixed",
+      partId: "root",
+      parts: Array.from({ length: MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE + 1 }, (_, index) => ({
+        body: { attachmentId: `body-${String(index)}`, size: 1 },
+        filename: "",
+        headers: [],
+        mimeType: "text/calendar",
+        partId: String(index),
+        parts: [],
+      })),
+    };
+    expect(projectGmailAttachments(excessiveCalendarParts)).toEqual([
+      calendarAttachmentProjectionOverflow("part:projection-overflow"),
+    ]);
+
+    const oversizedIdentifier = {
+      body: {},
+      filename: "",
+      headers: [],
+      mimeType: "text/calendar",
+      partId: "x".repeat(MAX_MAIL_ATTACHMENT_METADATA_LENGTH + 1),
+      parts: [],
+    };
+    const overflow = projectGmailAttachments(oversizedIdentifier);
+    expect(overflow).toEqual([calendarAttachmentProjectionOverflow("part:projection-overflow")]);
+    expect(JSON.stringify(overflow)).not.toContain(oversizedIdentifier.partId);
+  });
+
   it("builds authorization and exchanges an offline code", async () => {
     const fetch = queued(
       response({ access_token: "new", expires_in: 3600, refresh_token: "offline" }),
@@ -349,6 +413,7 @@ describe("Google Calendar connector", () => {
             payload: { headers: [], mimeType: "multipart/alternative", parts: [] },
           },
           {
+            historyId: "history-2",
             id: "m2",
             internalDate: "1783958460000",
             labelIds: ["INBOX"],
@@ -367,6 +432,21 @@ describe("Google Calendar connector", () => {
                   filename: "brief.pdf",
                   headers: [],
                   mimeType: "application/pdf",
+                  partId: "2",
+                },
+                {
+                  body: { data: encoded("BEGIN:VCALENDAR"), size: 15 },
+                  filename: "",
+                  headers: [],
+                  mimeType: "text/calendar; method=REQUEST",
+                  partId: "3",
+                },
+                {
+                  body: { attachmentId: "calendar-attachment-1", size: 84 },
+                  filename: "invite.ics",
+                  headers: [],
+                  mimeType: "text/calendar",
+                  partId: "4",
                 },
               ],
             },
@@ -432,6 +512,7 @@ describe("Google Calendar connector", () => {
       bodyText: "Plain body",
       from: { address: "ada@example.com", name: "Ada Lovelace" },
       mailboxIds: ["INBOX", "UNREAD", "STARRED"],
+      messagesComplete: true,
       messageCount: 2,
       remoteThreadId: "thread/1",
       starred: true,
@@ -447,9 +528,31 @@ describe("Google Calendar connector", () => {
         contentType: "application/pdf",
         filename: "brief.pdf",
         id: "attachment-1",
+        providerAttachmentId: "attachment-1",
+        providerPartId: "2",
         size: 42,
       },
+      {
+        contentType: "text/calendar; method=REQUEST",
+        filename: "",
+        id: "part:3",
+        providerAttachmentId: null,
+        providerPartId: "3",
+        size: 15,
+      },
+      {
+        contentType: "text/calendar",
+        filename: "invite.ics",
+        id: "calendar-attachment-1",
+        providerAttachmentId: "calendar-attachment-1",
+        providerPartId: "4",
+        size: 84,
+      },
     ]);
+    expect(result.value.threads[0]?.messages?.[1]).toMatchObject({
+      mailboxIds: ["INBOX"],
+      providerRevision: "history-2",
+    });
     expect(result.value.threads[1]).toMatchObject({
       bodyText: "Fallback body",
       receivedAt: new Date(0),

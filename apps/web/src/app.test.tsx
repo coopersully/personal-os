@@ -753,6 +753,11 @@ function defaults() {
       pendingCount: 0,
       reconciliationCount: 0,
     },
+    commitmentIntake: {
+      automaticCreationEnabled: false,
+      previewOnlyCount: 0,
+      serverVerifiedCount: 0,
+    },
     safety: {
       delayedRetentionAutomation: true,
       permanentDeletion: false,
@@ -1487,10 +1492,11 @@ describe("ilo web app", () => {
         status: "in_progress" as const,
       },
     };
-    mocks.getMe.mockResolvedValue(setupUser);
-    mocks.updateAccountSetup.mockResolvedValue({
-      ...setupUser,
-      setup: { ...setupUser.setup, completedAt: now, status: "complete" },
+    let setupState = setupUser.setup;
+    mocks.getMe.mockImplementation(async () => ({ ...setupUser, setup: setupState }));
+    mocks.updateAccountSetup.mockImplementation(async () => {
+      setupState = { ...setupState, completedAt: now, status: "complete" };
+      return { ...setupUser, setup: setupState };
     });
     setup("/setup");
     const browser = userEvent.setup();
@@ -1500,13 +1506,15 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Connect an agent" }));
 
+    await waitFor(() =>
+      expect(mocks.updateAccountSetup).toHaveBeenCalledWith(
+        { action: "complete" },
+        expect.anything(),
+      ),
+    );
     expect(
       await screen.findByRole("heading", { name: "Connect an agent" }, { timeout: 3_000 }),
     ).toBeInTheDocument();
-    expect(mocks.updateAccountSetup).toHaveBeenCalledWith(
-      { action: "complete" },
-      expect.anything(),
-    );
   });
 
   it("uses the real provider flows while progressing through full setup", async () => {
@@ -1523,7 +1531,7 @@ describe("ilo web app", () => {
     };
     let setupState = setupUser.setup;
     configureFinanceWorkspace();
-    mocks.getMe.mockResolvedValue(setupUser);
+    mocks.getMe.mockImplementation(async () => ({ ...setupUser, setup: setupState }));
     mocks.isTauri.mockReturnValue(true);
     mocks.listConnectors.mockReset().mockResolvedValue([
       {
@@ -1649,7 +1657,15 @@ describe("ilo web app", () => {
       await screen.findByRole("heading", { name: "Connect the accounts you track" }),
     ).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Continue" }));
-    await browser.click(screen.getByRole("button", { name: "Open Today" }));
+    const openToday = screen.getByRole("button", { name: "Open Today" });
+    await waitFor(() => expect(openToday).toBeEnabled());
+    await browser.click(openToday);
+    await waitFor(() =>
+      expect(mocks.updateAccountSetup).toHaveBeenLastCalledWith(
+        { action: "complete" },
+        expect.anything(),
+      ),
+    );
     expect(
       await screen.findByRole("heading", { name: "Your commitments" }, { timeout: 5_000 }),
     ).toBeInTheDocument();

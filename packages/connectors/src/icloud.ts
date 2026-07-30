@@ -7,6 +7,13 @@ import nodemailer from "nodemailer";
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject } from "tsdav";
 import { ConnectorError } from "./google.js";
 import { PROVIDER_REQUEST_TIMEOUT_MS } from "./http.js";
+import {
+  boundFlatMailAttachments,
+  calendarAttachmentProjectionOverflow,
+  MAX_MAIL_MIME_PARTS_PER_MESSAGE,
+  MAX_MAIL_SOURCE_BYTES,
+  redactedProjectionOverflowPartId,
+} from "./mail-attachments.js";
 import type {
   ICloudConnector,
   ICloudCredentials,
@@ -30,6 +37,7 @@ type ImapClient = Pick<
   | "messageFlagsAdd"
   | "messageFlagsRemove"
   | "messageMove"
+  | "mailbox"
 >;
 
 type ICloudConnectorOptions = {
@@ -176,64 +184,101 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         await client.connect();
         connected = true;
         throwIfProviderOperationCancelled(operation);
-        const listed = await client.list({ statusQuery: { messages: true, unseen: true } });
+        const listed = await client.list({
+          statusQuery: { messages: true, uidValidity: true, unseen: true },
+        });
         const selectable = listed.filter((mailbox) => !mailbox.flags.has("\\Noselect"));
-        const mailboxes: RemoteMailbox[] = selectable.map((mailbox) => ({
-          id: mailbox.path,
-          name: mailbox.name,
-          role: imapMailboxRole(mailbox.specialUse, mailbox.path),
-          totalCount: mailbox.status?.messages ?? 0,
-          unreadCount: mailbox.status?.unseen ?? 0,
-        }));
+        const mailboxes: RemoteMailbox[] = [];
         const threads: NormalizedRemoteMailThread[] = [];
         for (const mailbox of selectable) {
           throwIfProviderOperationCancelled(operation);
-          const total = mailbox.status?.messages ?? 0;
-          if (total === 0) continue;
           const lock = await client.getMailboxLock(mailbox.path);
           try {
+            const selectedMailbox = client.mailbox;
+            if (!selectedMailbox || selectedMailbox.path !== mailbox.path) {
+              throw new ConnectorError(
+                `iCloud did not select the expected mailbox ${mailbox.path}.`,
+                502,
+              );
+            }
+            const mailboxRevision = selectedMailbox.uidValidity.toString();
+            const total = selectedMailbox.exists;
+            mailboxes.push({
+              id: mailbox.path,
+              name: mailbox.name,
+              providerRevision: mailboxRevision,
+              role: imapMailboxRole(mailbox.specialUse, mailbox.path),
+              totalCount: total,
+              unreadCount: mailbox.status?.unseen ?? 0,
+            });
+            if (total === 0) continue;
             const start = Math.max(1, total - 24);
             for await (const message of client.fetch(`${start}:*`, {
               envelope: true,
               flags: true,
               internalDate: true,
-              source: true,
+              size: true,
+              source: { maxLength: MAX_MAIL_SOURCE_BYTES + 1 },
               threadId: true,
               uid: true,
             })) {
               throwIfProviderOperationCancelled(operation);
               if (!message.source) continue;
-              const parsed = await simpleParser(message.source);
-              const bodyText = parsed.text?.trim() ?? "";
+              const sourceOverflow =
+                (message.size ?? message.source.length) > MAX_MAIL_SOURCE_BYTES ||
+                message.source.length > MAX_MAIL_SOURCE_BYTES;
+              const parsed = sourceOverflow ? null : await simpleParser(message.source);
+              const bodyText = parsed?.text?.trim() ?? "";
+              const overflowPartId = redactedProjectionOverflowPartId(
+                `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
+              );
+              const receivedAt =
+                parsed?.date ?? message.envelope?.date ?? new Date(message.internalDate ?? 0);
               threads.push({
                 bodyText,
-                from: mailAddress(parsed.from?.value[0]),
+                from: parsed
+                  ? mailAddress(parsed.from?.value[0])
+                  : mailAddress(message.envelope?.from?.[0]),
                 mailboxIds: [mailbox.path],
                 messages: [
                   {
-                    attachments: parsed.attachments.map((attachment, index) => ({
-                      contentType: attachment.contentType || "application/octet-stream",
-                      filename: attachment.filename || `attachment-${index + 1}`,
-                      id: attachment.cid || `${String(message.uid)}:${index}`,
-                      size: attachment.size,
-                    })),
+                    attachments:
+                      sourceOverflow ||
+                      (parsed?.attachments.length ?? 0) > MAX_MAIL_MIME_PARTS_PER_MESSAGE
+                        ? [calendarAttachmentProjectionOverflow(overflowPartId)]
+                        : boundFlatMailAttachments(
+                            (parsed?.attachments ?? []).map((attachment, index) => ({
+                              contentType: attachment.contentType || "application/octet-stream",
+                              filename: attachment.filename || `attachment-${index + 1}`,
+                              id: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}:${index}`,
+                              providerAttachmentId: null,
+                              providerPartId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}:${index}`,
+                              size: attachment.size,
+                            })),
+                            overflowPartId,
+                          ),
                     bodyText,
-                    cc: parsedAddresses(parsed.cc),
-                    from: mailAddress(parsed.from?.value[0]),
-                    receivedAt: parsed.date ?? new Date(message.internalDate ?? 0),
-                    remoteMessageId: parsed.messageId ?? `${mailbox.path}:${String(message.uid)}`,
-                    to: parsedAddresses(parsed.to),
+                    cc: parsed ? parsedAddresses(parsed.cc) : imapAddresses(message.envelope?.cc),
+                    from: parsed
+                      ? mailAddress(parsed.from?.value[0])
+                      : mailAddress(message.envelope?.from?.[0]),
+                    mailboxIds: [mailbox.path],
+                    providerRevision: `${mailboxRevision}:${String(message.uid)}`,
+                    receivedAt,
+                    remoteMessageId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
+                    to: parsed ? parsedAddresses(parsed.to) : imapAddresses(message.envelope?.to),
                   },
                 ],
                 messageCount: 1,
-                receivedAt: parsed.date ?? new Date(message.internalDate ?? 0),
+                messagesComplete: true,
+                receivedAt,
                 // iCloud's IMAP thread identifier is not portable across mailboxes. Persist
                 // the mailbox + UID instead so flag and move actions can write through.
-                remoteThreadId: `${mailbox.path}:${String(message.uid)}`,
+                remoteThreadId: `${mailbox.path}:${mailboxRevision}:${String(message.uid)}`,
                 snippet: bodyText.replace(/\s+/g, " ").slice(0, 240),
                 starred: message.flags?.has("\\Flagged") ?? false,
-                subject: parsed.subject || "(No subject)",
-                to: parsedAddresses(parsed.to),
+                subject: parsed?.subject || message.envelope?.subject || "(No subject)",
+                to: parsed ? parsedAddresses(parsed.to) : imapAddresses(message.envelope?.to),
                 unread: !(message.flags?.has("\\Seen") ?? false),
               });
             }
@@ -300,10 +345,22 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     /* v8 ignore stop */
     /* v8 ignore start -- IMAP command variants are covered by connector contract tests */
     async updateMailThread(credentials, remoteThreadId, input) {
-      const separator = remoteThreadId.lastIndexOf(":");
-      const mailboxPath = remoteThreadId.slice(0, separator);
-      const uid = Number(remoteThreadId.slice(separator + 1));
-      if (!mailboxPath || !Number.isSafeInteger(uid) || uid < 1) {
+      const uidSeparator = remoteThreadId.lastIndexOf(":");
+      if (uidSeparator < 0) {
+        throw new ConnectorError("This iCloud message can no longer be updated.", 404);
+      }
+      const mailboxAndValidity = remoteThreadId.slice(0, uidSeparator);
+      const validitySeparator = mailboxAndValidity.lastIndexOf(":");
+      const mailboxPath = mailboxAndValidity.slice(0, validitySeparator);
+      const expectedUidValidity = mailboxAndValidity.slice(validitySeparator + 1);
+      const uid = Number(remoteThreadId.slice(uidSeparator + 1));
+      if (
+        validitySeparator < 0 ||
+        !mailboxPath ||
+        !/^\d+$/u.test(expectedUidValidity) ||
+        !Number.isSafeInteger(uid) ||
+        uid < 1
+      ) {
         throw new ConnectorError("This iCloud message can no longer be updated.", 404);
       }
       const client = imapFactory(credentials);
@@ -317,6 +374,17 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         );
         const lock = await client.getMailboxLock(mailboxPath);
         try {
+          const selectedMailbox = client.mailbox;
+          if (
+            !selectedMailbox ||
+            selectedMailbox.path !== mailboxPath ||
+            selectedMailbox.uidValidity.toString() !== expectedUidValidity
+          ) {
+            throw new ConnectorError(
+              "This iCloud message source revision is no longer current.",
+              409,
+            );
+          }
           const add = new Set(input.addMailboxIds ?? []);
           const remove = new Set(input.removeMailboxIds ?? []);
           if (add.delete("STARRED"))
@@ -478,6 +546,12 @@ function parsedAddresses(value: AddressObject | AddressObject[] | undefined): Ma
   return (Array.isArray(value) ? value : [value])
     .flatMap((group) => group?.value ?? [])
     .map(mailAddress);
+}
+
+function imapAddresses(
+  value: Array<{ address?: string | undefined; name?: string | undefined }> | undefined,
+): MailAddress[] {
+  return (value ?? []).map(mailAddress);
 }
 
 function providerError(service: string, error: unknown): ConnectorError {

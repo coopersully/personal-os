@@ -104,7 +104,8 @@ function adjacentStep(
 export function SetupPage({ user }: { user: User }) {
   const queryClient = useQueryClient();
   const stageRef = useRef<HTMLElement>(null);
-  const [destination, setDestination] = useState<string | null>(null);
+  const [completionSucceeded, setCompletionSucceeded] = useState(false);
+  const [pendingDestination, setPendingDestination] = useState<string | null>(null);
   const [selectedWorkspaces, setSelectedWorkspaces] = useState<AccountSetupWorkspace[]>(
     user.setup.selectedWorkspaces,
   );
@@ -130,7 +131,8 @@ export function SetupPage({ user }: { user: User }) {
   });
   const save = useMutation({
     mutationFn: api.updateAccountSetup,
-    onSuccess: (nextUser) => {
+    onSuccess: (nextUser, mutation) => {
+      if (mutation.action !== "progress") setCompletionSucceeded(true);
       queryClient.setQueryData(["me"], nextUser);
     },
   });
@@ -157,10 +159,16 @@ export function SetupPage({ user }: { user: User }) {
   const resendVerification = useMutation({ mutationFn: api.resendEmailVerification });
   const steps = setupSteps(selectedWorkspaces, user.emailVerified);
   const stepIndex = Math.max(0, steps.indexOf(currentStep));
-  const exitSetup = () =>
-    save.mutate({ action: "dismiss" }, { onSuccess: () => setDestination("/today") });
-  const completeSetup = (redirectDestination = "/today") =>
-    save.mutate({ action: "complete" }, { onSuccess: () => setDestination(redirectDestination) });
+  const exitSetup = () => {
+    setCompletionSucceeded(false);
+    setPendingDestination("/today");
+    save.mutate({ action: "dismiss" });
+  };
+  const completeSetup = (redirectDestination = "/today") => {
+    setCompletionSucceeded(false);
+    setPendingDestination(redirectDestination);
+    save.mutate({ action: "complete" });
+  };
 
   useEffect(() => {
     if (window.scrollY !== 0) window.scrollTo({ behavior: "auto", left: 0, top: 0 });
@@ -169,7 +177,13 @@ export function SetupPage({ user }: { user: User }) {
       ?.focus({ preventScroll: true });
   }, [currentStep]);
 
-  if (destination) return <Navigate replace to={destination} />;
+  if (
+    pendingDestination &&
+    completionSucceeded &&
+    (user.setup.status === "complete" || user.setup.status === "dismissed")
+  ) {
+    return <Navigate replace to={pendingDestination} />;
+  }
 
   return (
     <main className="setup-shell">

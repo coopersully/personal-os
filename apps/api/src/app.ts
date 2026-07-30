@@ -953,7 +953,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     async dispatchDueAutomations() {
       await connectors.syncStaleAccounts();
       const mailDispatchStartedAt = Date.now();
-      await connectors.dispatchDueMailRuleWork().catch(() => {
+      await connectors.dispatchDueMailRuleWork().catch((error: unknown) => {
         dependencies.log?.({
           durationMs: Date.now() - mailDispatchStartedAt,
           event: "mail_rule_work_dispatch_failed",
@@ -962,6 +962,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
           requestId: randomUUID(),
           status: 500,
         });
+        throw error;
       });
       await automations.dispatchDue();
     },

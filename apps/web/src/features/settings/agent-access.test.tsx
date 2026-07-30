@@ -247,6 +247,11 @@ describe("agent access settings", () => {
         pendingCount: 1,
         reconciliationCount: 0,
       },
+      commitmentIntake: {
+        automaticCreationEnabled: false,
+        previewOnlyCount: 2,
+        serverVerifiedCount: 0,
+      },
       safety: {
         delayedRetentionAutomation: true,
         permanentDeletion: false,
@@ -402,6 +407,11 @@ describe("agent access settings", () => {
     expect(
       await screen.findByText(
         /3 Mail accounts · person@example.com, iCloud \+1 · 1 needs reconnect/,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /2 preview-only calendar attachment candidates; 0 server-verified.*Automatic Calendar creation is not enabled/,
       ),
     ).toBeInTheDocument();
     expect(screen.getAllByText(/Not used yet/)).toHaveLength(2);
@@ -586,6 +596,11 @@ describe("agent access settings", () => {
         oldestDueAt: null,
         pendingCount: 0,
         reconciliationCount: 0,
+      },
+      commitmentIntake: {
+        automaticCreationEnabled: false,
+        previewOnlyCount: 0,
+        serverVerifiedCount: 0,
       },
       safety: {
         delayedRetentionAutomation: true,

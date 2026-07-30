@@ -68,6 +68,11 @@ export const mailSetupContextSchema = z.object({
     pendingCount: z.int().nonnegative(),
     reconciliationCount: z.int().nonnegative(),
   }),
+  commitmentIntake: z.object({
+    automaticCreationEnabled: z.literal(false),
+    previewOnlyCount: z.int().nonnegative(),
+    serverVerifiedCount: z.literal(0),
+  }),
   safety: z.object({
     delayedRetentionAutomation: z.literal(true),
     permanentDeletion: z.literal(false),
@@ -128,9 +133,29 @@ export const mailAttachmentSchema = z.object({
   contentType: z.string(),
   filename: z.string(),
   id: z.string(),
+  projectionIssue: z.enum(["calendar_attachment_projection_overflow"]).optional(),
+  providerAttachmentId: z.string().nullable().optional(),
+  providerPartId: z.string().nullable().optional(),
   size: z.number().int().nonnegative(),
 });
 export type MailAttachment = z.infer<typeof mailAttachmentSchema>;
+
+export const MAIL_CALENDAR_PROJECTION_OVERFLOW = "calendar_attachment_projection_overflow" as const;
+// A provider message may expose multiple iTIP revisions, but normal invitations stay well
+// below this server-enforced ceiling. Larger fanout is kept as one non-executable preview.
+export const MAX_MAIL_CALENDAR_PARTS_PER_MESSAGE = 16;
+
+export function calendarAttachmentProjectionOverflow(providerPartId: string): MailAttachment {
+  return {
+    contentType: "application/x-ilo-calendar-projection-overflow",
+    filename: "",
+    id: providerPartId,
+    projectionIssue: MAIL_CALENDAR_PROJECTION_OVERFLOW,
+    providerAttachmentId: null,
+    providerPartId,
+    size: 0,
+  };
+}
 
 export const mailMessageSchema = z.object({
   attachments: z.array(mailAttachmentSchema),
@@ -143,6 +168,40 @@ export const mailMessageSchema = z.object({
   to: z.array(mailAddressSchema),
 });
 export type MailMessage = z.infer<typeof mailMessageSchema>;
+
+export const mailCalendarCommitmentIntakeSchema = z
+  .object({
+    accountId: idSchema,
+    attachment: mailAttachmentSchema,
+    providerAccountAddressHintHash: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .nullable(),
+    authority: z.enum(["provider_projected_unverified", "server_verified"]),
+    createdAt: isoDateTimeSchema,
+    evidenceKind: z.string().trim().min(1).max(100),
+    id: idSchema,
+    idempotencyKey: z.string().regex(/^[a-f0-9]{64}$/),
+    remoteMessageId: z.string().min(1),
+    remotePartId: z.string().min(1),
+    remoteThreadId: z.string().min(1),
+    sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    sourceMessageId: idSchema.nullable(),
+    sourceMessageMailboxIds: z.array(z.string()),
+    sourceMessageRevision: z.string().nullable(),
+    sourceThreadId: idSchema.nullable(),
+    sourceThreadRevision: isoDateTimeSchema,
+    status: z.enum(["preview_only", "pending", "claimed", "reconcile", "succeeded", "failed"]),
+  })
+  .refine(
+    (intake) =>
+      intake.authority !== "provider_projected_unverified" || intake.status === "preview_only",
+    {
+      message: "Unverified Mail commitment intake must remain preview-only.",
+      path: ["status"],
+    },
+  );
+export type MailCalendarCommitmentIntake = z.infer<typeof mailCalendarCommitmentIntakeSchema>;
 
 export const mailListQuerySchema = z.object({
   accountIds: z
@@ -284,8 +343,10 @@ export const mailRuleActionSchema = z
   });
 export type MailRuleAction = z.infer<typeof mailRuleActionSchema>;
 
-export function mailRuleActionNeedsDurableExecution(action: MailRuleAction): boolean {
-  return action.afterDays > 0 || action.type === "archive" || action.type === "trash";
+export function mailRuleActionNeedsDurableExecution(_action: MailRuleAction): boolean {
+  // Every approved rule effect crosses the durable provider-effect ledger before
+  // provider access. Immediate actions differ only in dueAt, never in durability.
+  return true;
 }
 
 export const mailRuleWorkStatusSchema = z.enum([

@@ -18,6 +18,7 @@ import type {
   HomeLocation,
   LegacyMailRuleAction,
   MailAddress,
+  MailAttachment,
   MailboxRole,
   MailProvider,
   MailRuleAction,
@@ -478,6 +479,8 @@ export const calendarAccounts = pgTable(
     calendarEnabled: boolean("calendar_enabled").notNull().default(true),
     mailEnabled: boolean("mail_enabled").notNull().default(false),
     syncStatus: text("sync_status").$type<"idle" | "syncing" | "error">().notNull().default("idle"),
+    syncGeneration: integer("sync_generation").notNull().default(0),
+    syncClaimId: uuid("sync_claim_id"),
     syncError: text("sync_error"),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
@@ -488,6 +491,11 @@ export const calendarAccounts = pgTable(
       table.userId,
       table.provider,
       table.providerAccountId,
+    ),
+    check("calendar_accounts_sync_generation_check", sql`${table.syncGeneration} >= 0`),
+    check(
+      "calendar_accounts_sync_claim_check",
+      sql`(${table.syncStatus} = 'syncing') = (${table.syncClaimId} IS NOT NULL)`,
     ),
   ],
 );
@@ -608,6 +616,7 @@ export const mailboxes = pgTable(
     remoteMailboxId: text("remote_mailbox_id").notNull(),
     name: text("name").notNull(),
     role: text("role").$type<MailboxRole>().notNull().default("custom"),
+    providerRevision: text("provider_revision"),
     unreadCount: integer("unread_count").notNull().default(0),
     totalCount: integer("total_count").notNull().default(0),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
@@ -663,14 +672,85 @@ export const mailMessages = pgTable(
     from: jsonb("from_address").$type<MailAddress>().notNull(),
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
-    attachments: jsonb("attachments")
-      .$type<Array<{ contentType: string; filename: string; id: string; size: number }>>()
-      .notNull()
-      .default([]),
+    attachments: jsonb("attachments").$type<MailAttachment[]>().notNull().default([]),
+    providerMailboxIds: jsonb("provider_mailbox_ids").$type<string[]>().notNull().default([]),
+    providerRevision: text("provider_revision"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
     ...timestamps,
   },
   (table) => [uniqueIndex("mail_messages_remote_idx").on(table.threadId, table.remoteMessageId)],
+);
+
+export const mailCalendarCommitmentIntakes = pgTable(
+  "mail_calendar_commitment_intakes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    sourceThreadId: uuid("source_thread_id").references(() => mailThreads.id, {
+      onDelete: "set null",
+    }),
+    sourceMessageId: uuid("source_message_id").references(() => mailMessages.id, {
+      onDelete: "set null",
+    }),
+    remoteThreadId: text("remote_thread_id").notNull(),
+    remoteMessageId: text("remote_message_id").notNull(),
+    remotePartId: text("remote_part_id").notNull(),
+    sourceThreadRevision: timestamp("source_thread_revision", { withTimezone: true }).notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    sourceMessageMailboxIds: jsonb("source_message_mailbox_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    sourceMessageRevision: text("source_message_revision"),
+    providerAccountAddressHintHash: text("provider_account_address_hint_hash"),
+    attachmentFingerprint: text("attachment_fingerprint").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    attachment: jsonb("attachment").$type<MailAttachment>().notNull(),
+    evidenceKind: text("evidence_kind").notNull(),
+    authority: text("authority")
+      .$type<"provider_projected_unverified" | "server_verified">()
+      .notNull()
+      .default("provider_projected_unverified"),
+    status: text("status")
+      .$type<"preview_only" | "pending" | "claimed" | "reconcile" | "succeeded" | "failed">()
+      .notNull()
+      .default("preview_only"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_calendar_commitment_intake_identity_idx").on(
+      table.accountId,
+      table.remoteMessageId,
+      table.remotePartId,
+    ),
+    uniqueIndex("mail_calendar_commitment_intake_idempotency_idx").on(table.idempotencyKey),
+    index("mail_calendar_commitment_intake_user_status_idx").on(table.userId, table.status),
+    check(
+      "mail_calendar_commitment_intake_source_fingerprint_check",
+      sql`${table.sourceFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.attachmentFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.idempotencyKey} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_account_address_hint_hash_check",
+      sql`${table.providerAccountAddressHintHash} IS NULL OR ${table.providerAccountAddressHintHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_authority_check",
+      sql`${table.authority} IN ('provider_projected_unverified', 'server_verified')`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_status_check",
+      sql`${table.status} IN ('preview_only', 'pending', 'claimed', 'reconcile', 'succeeded', 'failed')`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_authority_status_check",
+      sql`${table.authority} <> 'provider_projected_unverified' OR ${table.status} = 'preview_only'`,
+    ),
+  ],
 );
 
 export const mailDrafts = pgTable(

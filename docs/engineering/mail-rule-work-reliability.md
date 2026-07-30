@@ -2,7 +2,7 @@
 
 This record specializes
 [`external-boundary-reliability.md`](external-boundary-reliability.md) and
-[`connector-reliability.md`](connector-reliability.md) for delayed Google Mail rule execution.
+[`connector-reliability.md`](connector-reliability.md) for approved Google Mail rule execution.
 
 ## Capability and authority
 
@@ -29,7 +29,7 @@ This record specializes
 ## Time, paging, and capacity
 
 - `due_at` is the projected conversation `received_at` plus the accepted action's `afterDays`.
-  Immediate retention still crosses the durable handoff.
+  Every immediate or delayed action crosses the same durable handoff.
 - Sync enqueues positive matching evidence. A thread missing from Gmail's capped newest-thread page
   is retained and is never treated as deletion evidence.
 - One scheduler pass claims at most six conversations and executes with two workers. Work beyond
@@ -42,9 +42,13 @@ This record specializes
 
 ## Commit point and delivery semantics
 
-- The durable insert is the handoff; no in-memory timer or detached promise carries delivery.
-- Claiming locks candidate local thread rows with `FOR UPDATE SKIP LOCKED`, groups all due actions
-  for one provider thread under one claim, and excludes a thread with another active claim.
+- The durable insert is the handoff; enqueue and the redacted `mail.synced` handoff audit commit in
+  one transaction, and no in-memory timer or detached promise carries delivery.
+- Claiming locks candidate local thread and account rows with `FOR UPDATE SKIP LOCKED`, groups all
+  due actions for one provider thread and accepted rule revision under one claim, and excludes a
+  thread with another active claim. Connection disable/disconnect refuses while an effect is
+  claimed or while `applied`/`indeterminate` evidence remains in reconciliation or failed review,
+  so lifecycle change cannot erase accepted-effect reconciliation authority.
 - Delivery is at-least-once with exact-state reconciliation. Stable account/thread/rule/profile
   revision/action identity and a unique database index suppress duplicate enqueue while allowing a
   newly accepted profile revision to create independently authorized work. Compatible modify
@@ -52,9 +56,11 @@ This record specializes
 - Provider success precedes refreshed-credential persistence and the atomic local projection,
   work-state, and redacted audit commit. If either local step fails, the recorded provider effect
   is `applied` or `indeterminate` and the item enters reconciliation.
-- Reconciliation reads that exact Gmail thread with `format=minimal`. It marks an already-applied
-  action complete without another write, or safely applies the still-missing idempotent state
-  change.
+- Reconciliation resolves the immutable action snapshot and provider label locator before checking
+  current rule authorization, then reads that exact Gmail thread with `format=minimal`. It marks an
+  already-applied action complete without another write even if the rule was revoked. A revoked
+  rule may be observed but is never replayed; only a still-authorized, still-missing idempotent
+  state change may execute.
 
 ## Degraded behavior and recovery
 
@@ -71,16 +77,23 @@ This record specializes
   attention. No body, snippet, credential, provider error body, or token enters those summaries.
 - A person repairs authorization in **Settings → Connections**, refreshes source projection through
   **Mail → Sync**, and reviews changed rules in **Settings → Agent access → Review Mail rules**.
-  A terminal item remains historical evidence; a newly reviewed rule revision produces a distinct
-  work identity.
+- Reauthorizing the same Google Mail account with Mail scope atomically moves failed
+  `applied`/`indeterminate` evidence back to reconciliation, resets its bounded attempt budget, and
+  preserves the evidence. The scheduler then performs an exact no-replay read. Until that review
+  settles, account disconnect and Mail disable remain blocked. Legacy iCloud rows cannot use the
+  Google-only durable executor and require support/operator resolution rather than a synthetic
+  retry.
+- A terminal item with no unresolved external-effect evidence remains historical; a newly reviewed
+  rule revision produces a distinct work identity.
 
 ## Evidence and remaining production proof
 
 Automated evidence covers unique enqueue, overlapping workers, the six-conversation bound, stale
 claim recovery, one-day Trash, 404, 429, timeout ambiguity, credential rotation persistence
 failure, provider-success/local-commit failure, profile drift, exact no-replay reconciliation,
-redacted setup status, and schema claim invariants. Connector unit tests assert the dedicated Gmail
-minimal-read and Trash requests.
+revocation during reconciliation, reauthorization repair, lifecycle fencing, redacted setup
+status, and schema claim invariants. Connector unit tests assert the dedicated Gmail minimal-read
+and Trash requests.
 
 These tests and local PostgreSQL integration are not proof of production Gmail authority or
 delivery. Before declaring production operation verified, use a non-destructive dedicated Google

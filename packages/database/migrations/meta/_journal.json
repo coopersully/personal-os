@@ -316,6 +316,34 @@
       "when": 1786917600000,
       "tag": "0044_durable_mail_rule_work",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1786921200000,
+      "tag": "0045_mail_calendar_commitment_intake",
+      "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1786924800000,
+      "tag": "0046_mail_calendar_account_hint",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1786928400000,
+      "tag": "0047_icloud_uidvalidity_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1786932000000,
+      "tag": "0048_connector_sync_generation",
+      "breakpoints": true
     }
   ]
 }

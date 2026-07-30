@@ -95,6 +95,26 @@ This log records delivered vertical slices against the master plan. It does not 
   create recurrence or buffer events, or rearrange existing commitments. Durable verified intake,
   idempotent apply/repair, and Mail-to-Calendar ingestion remain integration work.
 
+## 2026-07-29 — Mail-to-Calendar intake prerequisite
+
+- Added a durable, idempotent source handoff for provider-projected calendar MIME attachment
+  metadata with exact account/message/part identity, cached-source fingerprint, and redacted audit
+  provenance.
+- All current intake remains `provider_projected_unverified` and `preview_only`; cached prose,
+  attachment metadata, caller classification, and setup preferences cannot authorize Calendar
+  creation. Mail setup explicitly reports automatic creation disabled.
+- Reserved server-owned evidence kinds and durable lifecycle states for a follow-up authenticated
+  paired-iTIP verifier and Calendar executor. Per-message provider labels/revision, explicit MIME
+  part versus attachment-body identity, and a deliberately non-authoritative OAuth account-address
+  hint preserve the Google SENT-reply verification seam; the verifier must fetch Gmail profile
+  identity. No event creation, provider write, rule preset activation, or MCP task machinery is
+  included.
+- Bound iCloud identities to mailbox UIDVALIDITY plus UID, reconcile Gmail message disappearance
+  only from explicit complete-thread responses, and fence projection with persisted connector sync
+  generations, including inline rule effects and their local/audit projection. Mailbox reset, source
+  deletion, capability transitions, and reordered old sync responses therefore demote, serialize,
+  or fail closed instead of preserving stale authority.
+
 ## 2026-07-28 — Agent-guided setup and shared assistant contracts
 
 - Added versioned domain profiles for durable preferences, source meanings, user-defined categories,

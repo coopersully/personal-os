@@ -726,7 +726,9 @@ if (process.argv[2] === "--fake-aws") {
     const secondAttempt = runScenarioInDirectory(retryDirectory, retryState, false);
     assert(
       secondAttempt.result.status === 0,
-      `A second run must recover from fail-closed state (${secondAttempt.result.stderr}).`,
+      `A second run must recover from fail-closed state (status ${
+        secondAttempt.result.status
+      }; stdout: ${secondAttempt.result.stdout}; stderr: ${secondAttempt.result.stderr}).`,
     );
     assert(
       secondAttempt.state.desiredCount === 1 &&

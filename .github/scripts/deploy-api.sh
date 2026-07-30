@@ -486,7 +486,7 @@ api_candidate_marker_count="$(
   ' <<<"$api_final_task_definition_json"
 )"
 api_candidate_failed_definition="$(
-  jq -rer '
+  jq -er '
     [.containerDefinitions[] | select(.name == "api")][0] |
     [.environment[]? | select(.name == "ILO_DEPLOYMENT_RECOVERY_MARKER") | .value][0] |
     fromjson |
@@ -510,7 +510,7 @@ if {
           >/dev/null
     }
 }; then
-  echo "::error::The authorized recovery candidate lacks its exact unconsumed failed-rollout marker."
+  echo "::error::The authorized recovery candidate lacks its exact unconsumed failed-rollout marker (marker count: ${api_candidate_marker_count}; failed definition: ${api_candidate_failed_definition:-missing}; authorized definitions: ${api_post_drain_task_definitions})."
   exit 1
 elif {
   test "$api_recovery_authorized" = "false" &&

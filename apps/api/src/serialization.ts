@@ -68,6 +68,7 @@ export function serializeAttentionItem(row: AttentionItemRow): AttentionItem {
     summary: row.summary,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),
+    version: row.version,
   };
 }
 
@@ -225,6 +226,7 @@ type AttentionItemAuditValue = {
   kind: string;
   relatedEntityType: string | null;
   status: string;
+  version: number;
 };
 
 type MailRuleAuditValue = {
@@ -331,6 +333,7 @@ export function auditAttentionItemMetadata(
     kind: value.kind,
     relatedEntityType: value.relatedEntityType,
     status: value.status,
+    version: value.version,
   };
 }
 

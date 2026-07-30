@@ -46,7 +46,21 @@ import {
   matchesMailRule,
   resolveStoredMailRule,
 } from "@personal-os/domain";
-import { and, asc, eq, gt, inArray, isNull, lt, ne, notInArray, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  eq,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  ne,
+  notExists,
+  notInArray,
+  or,
+  sql,
+} from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { requireDatabaseRecord } from "./database.js";
@@ -1083,7 +1097,7 @@ export function createConnectorService({
     if (existingAttention) {
       await transaction
         .update(attentionItems)
-        .set(attentionValues)
+        .set({ ...attentionValues, version: sql`${attentionItems.version} + 1` })
         .where(eq(attentionItems.id, existingAttention.id));
     } else {
       await transaction.insert(attentionItems).values({
@@ -1230,6 +1244,7 @@ export function createConnectorService({
           relatedEntityType: null,
           source: null,
           updatedAt: now(),
+          version: item.version + 1,
         })
         .where(eq(attentionItems.id, item.id))
         .returning();
@@ -1983,6 +1998,56 @@ export function createConnectorService({
       .orderBy(asc(mailRuleWorkItems.accountId), asc(mailRuleWorkItems.remoteThreadId));
     await releaseMailRuleClaimForQuiesce(claimId);
     for (const item of claimed) touchedAccountIds.add(item.accountId);
+    const outstandingAccounts = await db
+      .select({
+        accountId: mailRuleWorkItems.accountId,
+        oldestUpdatedAt: sql<Date>`min(${mailRuleWorkItems.updatedAt})`,
+      })
+      .from(mailRuleWorkItems)
+      .where(
+        and(
+          inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
+          notExists(
+            db
+              .select({ id: attentionItems.id })
+              .from(attentionItems)
+              .where(
+                and(
+                  eq(attentionItems.domain, "mail"),
+                  eq(attentionItems.kind, "run_summary"),
+                  eq(attentionItems.status, "open"),
+                  eq(attentionItems.relatedEntityType, "mail_account"),
+                  eq(attentionItems.relatedEntityId, mailRuleWorkItems.accountId),
+                ),
+              ),
+          ),
+        ),
+      )
+      .groupBy(mailRuleWorkItems.accountId)
+      .orderBy(asc(sql`min(${mailRuleWorkItems.updatedAt})`), asc(mailRuleWorkItems.accountId))
+      .limit(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
+    for (const item of outstandingAccounts) touchedAccountIds.add(item.accountId);
+    const openSummaryAccounts = await db
+      .select({
+        accountId: attentionItems.relatedEntityId,
+        oldestUpdatedAt: sql<Date>`min(${attentionItems.updatedAt})`,
+      })
+      .from(attentionItems)
+      .where(
+        and(
+          eq(attentionItems.domain, "mail"),
+          eq(attentionItems.kind, "run_summary"),
+          eq(attentionItems.status, "open"),
+          eq(attentionItems.relatedEntityType, "mail_account"),
+          isNotNull(attentionItems.relatedEntityId),
+        ),
+      )
+      .groupBy(attentionItems.relatedEntityId)
+      .orderBy(asc(sql`min(${attentionItems.updatedAt})`), asc(attentionItems.relatedEntityId))
+      .limit(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
+    for (const item of openSummaryAccounts) {
+      if (item.accountId) touchedAccountIds.add(item.accountId);
+    }
     return { claimed, maintenanceFailed, touchedAccountIds: [...touchedAccountIds] };
   }
 
@@ -2650,78 +2715,137 @@ export function createConnectorService({
     }
   }
 
-  async function refreshMailRuleWorkAttention(accountIds: string[]): Promise<void> {
-    for (const accountId of [...new Set(accountIds)]) {
-      const [account] = await db
-        .select({ id: calendarAccounts.id, userId: calendarAccounts.userId })
-        .from(calendarAccounts)
-        .where(eq(calendarAccounts.id, accountId))
+  async function refreshMailRuleWorkAttentionForAccount(accountId: string): Promise<void> {
+    const [account] = await db
+      .select({ id: calendarAccounts.id, userId: calendarAccounts.userId })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountId))
+      .limit(1);
+    if (!account) return;
+    const requestId = `mail-rule-work-attention:${randomUUID()}`;
+    await db.transaction(async (transaction) => {
+      await transaction.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtextextended(${`mail-rule-work:${account.id}`}, 0))`,
+      );
+      const summaries = await transaction
+        .select({
+          count: sql<number>`count(*)::int`,
+          status: mailRuleWorkItems.status,
+        })
+        .from(mailRuleWorkItems)
+        .where(
+          and(
+            eq(mailRuleWorkItems.accountId, accountId),
+            inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
+          ),
+        )
+        .groupBy(mailRuleWorkItems.status);
+      const count = (status: MailRuleWorkRow["status"]) =>
+        summaries.find((summary) => summary.status === status)?.count ?? 0;
+      const pending = count("pending") + count("claimed");
+      const reconcile = count("reconcile");
+      const failed = count("failed");
+      const [existing] = await transaction
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            eq(attentionItems.userId, account.userId),
+            eq(attentionItems.domain, "mail"),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+            eq(attentionItems.relatedEntityType, "mail_account"),
+            eq(attentionItems.relatedEntityId, account.id),
+          ),
+        )
+        .for("update")
         .limit(1);
-      if (!account) continue;
-      await db.transaction(async (transaction) => {
-        await transaction.execute(
-          sql`SELECT pg_advisory_xact_lock(hashtextextended(${`mail-rule-work:${account.id}`}, 0))`,
-        );
-        const summaries = await transaction
-          .select({
-            count: sql<number>`count(*)::int`,
-            status: mailRuleWorkItems.status,
-          })
-          .from(mailRuleWorkItems)
-          .where(
-            and(
-              eq(mailRuleWorkItems.accountId, accountId),
-              inArray(mailRuleWorkItems.status, ["pending", "claimed", "reconcile", "failed"]),
-            ),
-          )
-          .groupBy(mailRuleWorkItems.status);
-        const count = (status: MailRuleWorkRow["status"]) =>
-          summaries.find((summary) => summary.status === status)?.count ?? 0;
-        const pending = count("pending") + count("claimed");
-        const reconcile = count("reconcile");
-        const failed = count("failed");
-        const [existing] = await transaction
-          .select({ id: attentionItems.id })
-          .from(attentionItems)
-          .where(
-            and(
-              eq(attentionItems.userId, account.userId),
-              eq(attentionItems.domain, "mail"),
-              eq(attentionItems.kind, "run_summary"),
-              eq(attentionItems.status, "open"),
-              eq(attentionItems.relatedEntityType, "mail_account"),
-              eq(attentionItems.relatedEntityId, account.id),
-            ),
-          )
-          .for("update")
-          .limit(1);
-        if (pending === 0 && reconcile === 0 && failed === 0) {
-          if (existing) {
-            await transaction
-              .update(attentionItems)
-              .set({ status: "resolved", updatedAt: now() })
-              .where(eq(attentionItems.id, existing.id));
-          }
-          return;
-        }
-        const values = {
-          importance: reconcile > 0 || failed > 0 ? ("high" as const) : ("normal" as const),
-          summary: `${pending} durable Mail actions are pending; ${reconcile} require exact provider reconciliation; ${failed} stopped safely and need rule, source, or connection review.`,
-          title:
-            reconcile > 0
-              ? "Mail automation needs reconciliation"
-              : failed > 0
-                ? "Mail automation needs review"
-                : "Mail automation has pending work",
-          updatedAt: now(),
-        };
+      if (pending === 0 && reconcile === 0 && failed === 0) {
         if (existing) {
-          await transaction
+          const [resolved] = await transaction
             .update(attentionItems)
-            .set(values)
-            .where(eq(attentionItems.id, existing.id));
-        } else {
-          await transaction.insert(attentionItems).values({
+            .set({
+              status: "resolved",
+              updatedAt: now(),
+              version: existing.version + 1,
+            })
+            .where(
+              and(eq(attentionItems.id, existing.id), eq(attentionItems.version, existing.version)),
+            )
+            .returning();
+          if (!resolved) {
+            throw new AppError(
+              "conflict",
+              "The Mail run summary changed while it was being resolved.",
+            );
+          }
+          await transaction.insert(auditEvents).values(
+            auditValues({
+              action: "assistant.attention.resolved",
+              after: {
+                ...auditAttentionItemMetadata(resolved),
+                execution: "background_dispatch",
+                policy: "approved_rule",
+              },
+              before: auditAttentionItemMetadata(existing),
+              entityId: resolved.id,
+              entityType: "attention_item",
+              principal: {
+                actorId: account.id,
+                actorType: "connector",
+                userId: account.userId,
+              },
+              requestId,
+            }),
+          );
+        }
+        return;
+      }
+      const values = {
+        importance: reconcile > 0 || failed > 0 ? ("high" as const) : ("normal" as const),
+        summary: `${pending} durable Mail actions are pending; ${reconcile} require exact provider reconciliation; ${failed} stopped safely and need rule, source, or connection review.`,
+        title:
+          reconcile > 0
+            ? "Mail automation needs reconciliation"
+            : failed > 0
+              ? "Mail automation needs review"
+              : "Mail automation has pending work",
+        updatedAt: now(),
+      };
+      if (existing) {
+        const [updated] = await transaction
+          .update(attentionItems)
+          .set({ ...values, version: existing.version + 1 })
+          .where(
+            and(eq(attentionItems.id, existing.id), eq(attentionItems.version, existing.version)),
+          )
+          .returning();
+        if (!updated) {
+          throw new AppError("conflict", "The Mail run summary changed while it was being saved.");
+        }
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "assistant.attention.updated",
+            after: {
+              ...auditAttentionItemMetadata(updated),
+              execution: "background_dispatch",
+              policy: "approved_rule",
+            },
+            before: auditAttentionItemMetadata(existing),
+            entityId: updated.id,
+            entityType: "attention_item",
+            principal: {
+              actorId: account.id,
+              actorType: "connector",
+              userId: account.userId,
+            },
+            requestId,
+          }),
+        );
+      } else {
+        const [created] = await transaction
+          .insert(attentionItems)
+          .values({
             ...values,
             domain: "mail",
             kind: "run_summary",
@@ -2729,10 +2853,44 @@ export function createConnectorService({
             relatedEntityType: "mail_account",
             status: "open",
             userId: account.userId,
-          });
+          })
+          .returning();
+        if (!created) {
+          throw new AppError("internal_error", "The Mail run summary could not be created.");
         }
-      });
+        await transaction.insert(auditEvents).values(
+          auditValues({
+            action: "assistant.attention.created",
+            after: {
+              ...auditAttentionItemMetadata(created),
+              execution: "background_dispatch",
+              policy: "approved_rule",
+            },
+            before: null,
+            entityId: created.id,
+            entityType: "attention_item",
+            principal: {
+              actorId: account.id,
+              actorType: "connector",
+              userId: account.userId,
+            },
+            requestId,
+          }),
+        );
+      }
+    });
+  }
+
+  async function refreshMailRuleWorkAttention(accountIds: string[]): Promise<void> {
+    let firstError: unknown;
+    for (const accountId of [...new Set(accountIds)]) {
+      try {
+        await refreshMailRuleWorkAttentionForAccount(accountId);
+      } catch (error) {
+        firstError ??= error;
+      }
     }
+    if (firstError) throw firstError;
   }
 
   async function dispatchDueMailRuleWork(): Promise<{

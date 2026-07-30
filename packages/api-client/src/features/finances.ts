@@ -1,5 +1,6 @@
 import type {
   ApplyFinanceCategorizationsInput,
+  AttentionItem,
   CreateFinanceAccountInput,
   CreateFinanceBudgetInput,
   CreateFinanceTransactionInput,
@@ -36,6 +37,7 @@ import type {
   UpdateFinanceProfileInput,
   UpdateFinanceRecurringObligationInput,
   UpdateFinanceTransactionInput,
+  UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
 
 export type FinanceRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
@@ -301,6 +303,16 @@ export function createFinanceApi(request: FinanceRequest) {
         },
       );
       return response.transaction;
+    },
+    async upsertFinanceAttentionItem(
+      transactionId: string,
+      input: UpsertFinanceAttentionItemInput,
+    ): Promise<AttentionItem> {
+      const response = await request<{ item: AttentionItem }>(
+        `/v1/finances/transactions/${transactionId}/attention`,
+        { body: JSON.stringify(input), method: "PUT" },
+      );
+      return response.item;
     },
     async updateFinanceMerchant(
       id: string,

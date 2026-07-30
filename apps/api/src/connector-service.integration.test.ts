@@ -26,7 +26,7 @@ import {
   migrateDatabase,
   users,
 } from "@personal-os/database";
-import type { MailRuleAction } from "@personal-os/domain";
+import { MAIL_RULE_EXECUTION_LIMIT_PER_RUN, type MailRuleAction } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
 import { createAssistantService } from "./assistant-service.js";
@@ -3729,6 +3729,29 @@ describe.sequential("connector service", () => {
         remoteEventId: event.remoteEventId,
       },
     });
+
+    vi.mocked(google.createEvent).mockRejectedValueOnce(
+      new ConnectorError("Provider access was forbidden.", 403),
+    );
+    await expect(
+      service.eventGateway.create(calendar, {
+        allDay: false,
+        calendarId: calendar.id,
+        endsAt: "2026-07-13T14:00:00.000Z",
+        location: null,
+        notes: null,
+        startsAt: "2026-07-13T13:00:00.000Z",
+        timezone: "UTC",
+        title: "Forbidden provider create",
+      }),
+    ).rejects.toMatchObject({
+      code: "forbidden",
+      details: {
+        effectState: "rejected",
+        provider: "google",
+        providerStatus: 403,
+      },
+    });
   });
 
   it("reconciles incremental and full sync changes with an audit trail", async () => {
@@ -6161,6 +6184,29 @@ describe.sequential("connector service", () => {
       expect.objectContaining({
         status: "open",
         title: "Mail automation has pending work",
+        version: 2,
+      }),
+    ]);
+    await expect(
+      database.db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, existingRunSummary.id),
+            eq(auditEvents.action, "assistant.attention.updated"),
+          ),
+        ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        actorId: fixture.account.id,
+        actorType: "connector",
+        after: expect.objectContaining({
+          execution: "background_dispatch",
+          policy: "approved_rule",
+          version: 2,
+        }),
+        requestId: expect.stringMatching(/^mail-rule-work-attention:[0-9a-f-]{36}$/),
       }),
     ]);
 
@@ -6202,6 +6248,20 @@ describe.sequential("connector service", () => {
       succeeded: 1,
     });
     expect(updateMailThread).toHaveBeenCalledTimes(2);
+    await expect(
+      database.db.select().from(attentionItems).where(eq(attentionItems.id, existingRunSummary.id)),
+    ).resolves.toEqual([expect.objectContaining({ status: "resolved", version: 4 })]);
+    await expect(
+      database.db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, existingRunSummary.id),
+            eq(auditEvents.action, "assistant.attention.resolved"),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
   });
 
   it("fails provider 404 work terminally without replay", async () => {
@@ -6283,6 +6343,239 @@ describe.sequential("connector service", () => {
         title: "Mail automation needs review",
       }),
     ]);
+    const [createdRunSummary] = await database.db
+      .select()
+      .from(attentionItems)
+      .where(
+        and(
+          eq(attentionItems.relatedEntityId, fixture.account.id),
+          eq(attentionItems.kind, "run_summary"),
+        ),
+      )
+      .limit(1);
+    if (!createdRunSummary) throw new Error("Created Mail run summary was not found.");
+    await expect(
+      database.db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, createdRunSummary.id),
+            eq(auditEvents.action, "assistant.attention.created"),
+          ),
+        ),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        actorId: fixture.account.id,
+        actorType: "connector",
+        after: expect.objectContaining({
+          execution: "background_dispatch",
+          policy: "approved_rule",
+          version: 1,
+        }),
+      }),
+    ]);
+  });
+
+  it("rolls back a connector-managed run summary when its audit cannot be written", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixture = await createDurableMailWorkFixture("Atomic run summary", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const secondFixture = await createDurableMailWorkFixture("Independent run summary", {
+      afterDays: 1,
+      mailboxId: null,
+      type: "archive",
+    });
+    const updateMailThread = vi.mocked(
+      google.updateMailThread as NonNullable<GoogleConnector["updateMailThread"]>,
+    );
+    updateMailThread.mockReset();
+    updateMailThread.mockRejectedValueOnce(new ConnectorError("Not found", 404));
+    updateMailThread.mockRejectedValueOnce(new ConnectorError("Not found", 404));
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_background_attention_audit_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.request_id LIKE 'mail-rule-work-attention:%'
+          AND NEW.actor_id = '${fixture.account.id}' THEN
+          RAISE EXCEPTION 'forced background attention audit failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_background_attention_audit_for_test
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW EXECUTE FUNCTION fail_background_attention_audit_for_test();
+    `);
+    try {
+      await expect(service.dispatchDueMailRuleWork()).rejects.toThrow(
+        'Failed query: insert into "audit_events"',
+      );
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_background_attention_audit_for_test ON audit_events;
+        DROP FUNCTION IF EXISTS fail_background_attention_audit_for_test();
+      `);
+    }
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            eq(attentionItems.relatedEntityId, fixture.account.id),
+            eq(attentionItems.kind, "run_summary"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            eq(attentionItems.relatedEntityId, secondFixture.account.id),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toEqual([expect.objectContaining({ importance: "high" })]);
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    const [repairedSummary] = await database.db
+      .select()
+      .from(attentionItems)
+      .where(
+        and(
+          eq(attentionItems.relatedEntityId, fixture.account.id),
+          eq(attentionItems.kind, "run_summary"),
+          eq(attentionItems.status, "open"),
+        ),
+      );
+    if (!repairedSummary) throw new Error("The Mail run summary was not repaired.");
+    expect(repairedSummary).toMatchObject({ domain: "mail", importance: "high" });
+    await expect(
+      database.db.select().from(auditEvents).where(eq(auditEvents.entityId, repairedSummary.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        action: "assistant.attention.created",
+        actorId: fixture.account.id,
+        actorType: "connector",
+      }),
+    ]);
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ status: "succeeded" })
+      .where(eq(mailRuleWorkItems.accountId, fixture.account.id));
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_background_attention_resolution_audit_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.request_id LIKE 'mail-rule-work-attention:%' THEN
+          RAISE EXCEPTION 'forced background attention resolution audit failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_background_attention_resolution_audit_for_test
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW EXECUTE FUNCTION fail_background_attention_resolution_audit_for_test();
+    `);
+    try {
+      await expect(service.dispatchDueMailRuleWork()).rejects.toThrow(
+        'Failed query: insert into "audit_events"',
+      );
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_background_attention_resolution_audit_for_test ON audit_events;
+        DROP FUNCTION IF EXISTS fail_background_attention_resolution_audit_for_test();
+      `);
+    }
+    await expect(
+      database.db.select().from(attentionItems).where(eq(attentionItems.id, repairedSummary.id)),
+    ).resolves.toEqual([expect.objectContaining({ status: "open", version: 1 })]);
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db.select().from(attentionItems).where(eq(attentionItems.id, repairedSummary.id)),
+    ).resolves.toEqual([expect.objectContaining({ status: "resolved", version: 2 })]);
+  });
+
+  it("bounds Mail run-summary rediscovery while eventually repairing every account", async () => {
+    await database.db.delete(mailRuleWorkItems);
+    const fixtures = [];
+    for (let index = 0; index <= MAIL_RULE_EXECUTION_LIMIT_PER_RUN; index += 1) {
+      fixtures.push(
+        await createDurableMailWorkFixture(`Bounded run summary ${index}`, {
+          afterDays: 1,
+          mailboxId: null,
+          type: "archive",
+        }),
+      );
+    }
+    const accountIds = fixtures.map((fixture) => fixture.account.id);
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ completedAt: timestamp, status: "failed" })
+      .where(inArray(mailRuleWorkItems.accountId, accountIds));
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.relatedEntityId, accountIds),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toHaveLength(MAIL_RULE_EXECUTION_LIMIT_PER_RUN);
+
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.relatedEntityId, accountIds),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toHaveLength(MAIL_RULE_EXECUTION_LIMIT_PER_RUN + 1);
+
+    await database.db
+      .update(mailRuleWorkItems)
+      .set({ status: "succeeded" })
+      .where(inArray(mailRuleWorkItems.accountId, accountIds));
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.relatedEntityId, accountIds),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
+    await expect(service.dispatchDueMailRuleWork()).resolves.toMatchObject({ claimed: 0 });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            inArray(attentionItems.relatedEntityId, accountIds),
+            eq(attentionItems.kind, "run_summary"),
+            eq(attentionItems.status, "open"),
+          ),
+        ),
+    ).resolves.toHaveLength(0);
   });
 
   it("reconciles provider success after rotated credentials fail to persist", async () => {

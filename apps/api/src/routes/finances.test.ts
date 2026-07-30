@@ -6,7 +6,7 @@ import { registerFinanceRoutes } from "./finances.js";
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
-  it("keeps setup readable while all consequential Finance mutations stay human-only", async () => {
+  it("keeps setup and owned attention agent-accessible while consequential Finance mutations stay human-only", async () => {
     const app = new Hono<AppEnv>();
     const finances = {
       createAccount: vi.fn(),
@@ -21,6 +21,7 @@ describe("finance routes", () => {
       syncPlaidAccount: vi.fn(),
       updateMerchant: vi.fn(),
       updateRecurringObligation: vi.fn(),
+      upsertAttentionItem: vi.fn(async () => ({ id })),
     };
     app.use("*", async (context, next) => {
       context.set("principal", {
@@ -51,6 +52,18 @@ describe("finance routes", () => {
 
     expect((await app.request("/v1/finances/guided-setup")).status).toBe(200);
     expect((await app.request("/v1/finances/categorizations/propose")).status).toBe(200);
+    expect(
+      (
+        await app.request(`/v1/finances/transactions/${id}/attention`, {
+          body: JSON.stringify({
+            summary: "Review this transaction.",
+            title: "Finance review",
+          }),
+          headers: { "content-type": "application/json" },
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(200);
     const humanOnlyResponses = await Promise.all([
       app.request("/v1/finances/accounts", json),
       app.request(`/v1/finances/accounts/${id}`, { method: "DELETE" }),
@@ -75,6 +88,11 @@ describe("finance routes", () => {
     expect(finances.proposeCategorizations).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ limit: 50, review: "all" }),
+    );
+    expect(finances.upsertAttentionItem).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ importance: "high", kind: "important" }),
+      expect.objectContaining({ requestId: "request-1" }),
     );
     expect(finances.createAccount).not.toHaveBeenCalled();
     expect(finances.deleteAccount).not.toHaveBeenCalled();

@@ -130,6 +130,12 @@ describe("API configuration", () => {
         AGENT_SKILL_VERSION: "9.0.0",
       }),
     ).toThrow("AGENT_SKILL_SOURCE_URL must include AGENT_SKILL_REVISION");
+    expect(() =>
+      loadConfig({
+        ...formerOfficialEnvironment,
+        AGENT_SKILL_REVISION: "release-explicitly-pinned",
+      }),
+    ).toThrow("AGENT_SKILL_SOURCE_URL must include AGENT_SKILL_REVISION");
   });
 
   it("normalizes production overrides and de-duplicates origins", () => {

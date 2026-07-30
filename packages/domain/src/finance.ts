@@ -1,7 +1,11 @@
 import { z } from "zod";
-import { domainProfileSchema } from "./assistant.js";
+import {
+  attentionItemImportanceSchema,
+  attentionItemKindSchema,
+  domainProfileSchema,
+} from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
-import { agentMutationPolicies } from "./feature-contracts.js";
+import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
 export const financeProviderSchema = z.enum(["plaid", "paypal", "venmo", "zelle", "manual"]);
 export type FinanceProvider = z.infer<typeof financeProviderSchema>;
@@ -432,11 +436,24 @@ export const financeCategorizationProposalSchema = z.object({
   meetsPolicyThreshold: z.boolean(),
   policy: z.literal("preview"),
   rationale: z.string().min(1).max(1_000),
+  source: materialSourceReferenceSchema,
   suggestedCategory: financeCategorySchema.nullable(),
   threshold: z.number().min(0).max(1),
   transaction: financeTransactionSchema,
 });
 export type FinanceCategorizationProposal = z.infer<typeof financeCategorizationProposalSchema>;
+
+export const upsertFinanceAttentionItemInputSchema = z.object({
+  expiresAt: isoDateTimeSchema.nullable().default(null),
+  importance: attentionItemImportanceSchema.default("high"),
+  kind: attentionItemKindSchema
+    .extract(["important", "upcoming", "follow_up"])
+    .default("important"),
+  occursAt: isoDateTimeSchema.nullable().default(null),
+  summary: z.string().trim().min(1).max(4_000),
+  title: z.string().trim().min(1).max(240),
+});
+export type UpsertFinanceAttentionItemInput = z.infer<typeof upsertFinanceAttentionItemInputSchema>;
 
 export const financeCategorizationProposalPageSchema = z.object({
   items: z.array(financeCategorizationProposalSchema),

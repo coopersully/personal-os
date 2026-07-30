@@ -269,37 +269,13 @@ export function createAssistantService({
       context: MutationContext,
     ): Promise<AttentionItem> {
       if (
-        input.domain === "mail" &&
-        (input.source !== null ||
-          input.relatedEntityType === "mail_thread" ||
-          input.relatedEntityType === "mail_account" ||
-          input.relatedEntityType === "mail_rule")
+        input.source !== null ||
+        input.relatedEntityId !== null ||
+        input.relatedEntityType !== null
       ) {
         throw new AppError(
           "invalid_request",
-          "Mail source, account, rule, and conversation provenance is reserved for Mail-owned attention paths.",
-        );
-      }
-      if (
-        input.relatedEntityType === "calendar_event" ||
-        input.source?.sourceType === "calendar_event"
-      ) {
-        throw new AppError(
-          "invalid_request",
-          "Use the Calendar attention endpoint so Ilo can validate and derive the event source.",
-        );
-      }
-      if (
-        (input.domain === "reminders" &&
-          (input.relatedEntityId !== null ||
-            input.relatedEntityType !== null ||
-            input.source !== null)) ||
-        input.relatedEntityType === "reminder" ||
-        input.source?.sourceType === "reminder"
-      ) {
-        throw new AppError(
-          "invalid_request",
-          "Use the Reminder attention endpoint so Ilo can validate and derive the Reminder source.",
+          "Generic attention items must be unlinked. Use the owning domain endpoint for source-linked attention.",
         );
       }
       const created = await db.transaction(async (transaction) => {
@@ -354,30 +330,36 @@ export function createAssistantService({
       input: UpdateAttentionItemInput,
       context: MutationContext,
     ): Promise<AttentionItem> {
-      const [existing] = await db
-        .select()
-        .from(attentionItems)
-        .where(
-          and(
-            eq(attentionItems.id, id),
-            eq(attentionItems.userId, context.principal.userId),
-            eq(attentionItems.domain, domain),
-          ),
-        )
-        .limit(1);
-      if (!existing) throw new AppError("not_found", "The attention item was not found.");
       const updatedAt = now();
       const updated = await db.transaction(async (transaction) => {
-        const item = requireDatabaseRecord(
-          (
-            await transaction
-              .update(attentionItems)
-              .set({ status: input.status, updatedAt })
-              .where(eq(attentionItems.id, existing.id))
-              .returning()
-          )[0],
-          "The attention item could not be updated.",
-        );
+        const [existing] = await transaction
+          .select()
+          .from(attentionItems)
+          .where(
+            and(
+              eq(attentionItems.id, id),
+              eq(attentionItems.userId, context.principal.userId),
+              eq(attentionItems.domain, domain),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!existing) throw new AppError("not_found", "The attention item was not found.");
+        if (existing.version !== input.expectedVersion) {
+          throw new AppError("conflict", "The attention item changed since it was loaded.", {
+            currentVersion: existing.version,
+          });
+        }
+        const [item] = await transaction
+          .update(attentionItems)
+          .set({ status: input.status, updatedAt, version: existing.version + 1 })
+          .where(
+            and(eq(attentionItems.id, existing.id), eq(attentionItems.version, existing.version)),
+          )
+          .returning();
+        if (!item) {
+          throw new AppError("conflict", "The attention item changed while it was being updated.");
+        }
         await transaction.insert(auditEvents).values(
           auditValues({
             action: "assistant.attention.updated",

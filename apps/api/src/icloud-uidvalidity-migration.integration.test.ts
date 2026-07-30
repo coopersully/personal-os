@@ -30,7 +30,11 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
     migrationsBeforeUidValidity = await migrationsWithout(
       migrationsFolder,
       "ilo-icloud-uidvalidity-migration-",
-      ["0047_icloud_uidvalidity_identity", "0048_connector_sync_generation"],
+      [
+        "0047_icloud_uidvalidity_identity",
+        "0048_connector_sync_generation",
+        "0049_attention_item_versions",
+      ],
     );
     await migrateDatabase(database.db, migrationsBeforeUidValidity);
   }, 120_000);
@@ -106,27 +110,29 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         userId: user.id,
       })
       .returning();
-    const [attention] = await database.db
-      .insert(attentionItems)
-      .values({
-        domain: "mail",
-        importance: "normal",
-        kind: "important",
-        relatedEntityId: thread.id,
-        relatedEntityType: "mail_thread",
-        source: {
+    const attentionResult = await database.pool.query<{ id: string }>(
+      `INSERT INTO attention_items (
+         user_id, domain, kind, importance, title, summary, source,
+         related_entity_type, related_entity_id
+       )
+       VALUES ($1, 'mail', 'important', 'normal', $2, $3, $4::jsonb, 'mail_thread', $5)
+       RETURNING id`,
+      [
+        user.id,
+        "Review historical source",
+        "Historical source needs review.",
+        JSON.stringify({
           accountId,
           provider: "icloud",
           remoteId: thread.remoteThreadId,
           revision: thread.updatedAt.toISOString(),
           sourceType: "mail_thread",
-        },
-        summary: "Historical source needs review.",
-        title: "Review historical source",
-        userId: user.id,
-      })
-      .returning();
-    if (!snooze || !draft || !attention) throw new Error("Dependent fixtures were not created.");
+        }),
+        thread.id,
+      ],
+    );
+    const attentionId = attentionResult.rows[0]?.id;
+    if (!snooze || !draft || !attentionId) throw new Error("Dependent fixtures were not created.");
 
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
 
@@ -162,7 +168,7 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
     const [preservedAttention] = await database.db
       .select()
       .from(attentionItems)
-      .where(eq(attentionItems.id, attention.id));
+      .where(eq(attentionItems.id, attentionId));
 
     expect(retiredThread).toMatchObject({
       id: thread.id,

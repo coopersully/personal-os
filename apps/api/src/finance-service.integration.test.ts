@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
+  attentionItems,
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
@@ -328,6 +329,7 @@ describe.sequential("finance service", () => {
       "0046_mail_calendar_account_hint",
       "0047_icloud_uidvalidity_identity",
       "0048_connector_sync_generation",
+      "0049_attention_item_versions",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -345,6 +347,18 @@ describe.sequential("finance service", () => {
       })
       .returning();
     if (!upgradeUser) throw new Error("Finance upgrade fixture user was not created.");
+    const legacyAttentionId = crypto.randomUUID();
+    await database.pool.query(
+      `INSERT INTO attention_items (
+        id, user_id, domain, kind, importance, status, title, summary
+      ) VALUES ($1, $2, 'finances', 'important', 'normal', 'open', $3, $4)`,
+      [
+        legacyAttentionId,
+        upgradeUser.id,
+        "Legacy Finance attention",
+        "Existing attention must receive version one.",
+      ],
+    );
     const [upgradeAccount] = await database.db
       .insert(financeAccounts)
       .values({
@@ -478,6 +492,12 @@ describe.sequential("finance service", () => {
         "SELECT to_regclass('public.finance_setup_backfill_state')::text AS relation",
       ),
     ).resolves.toMatchObject({ rows: [{ relation: "finance_setup_backfill_state" }] });
+    await expect(
+      database.db
+        .select({ version: attentionItems.version })
+        .from(attentionItems)
+        .where(eq(attentionItems.id, legacyAttentionId)),
+    ).resolves.toEqual([{ version: 1 }]);
     await expect(
       database.db.select().from(domainProfiles).where(eq(domainProfiles.domain, "finances")),
     ).resolves.toEqual([
@@ -683,6 +703,387 @@ describe.sequential("finance service", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+  });
+
+  it("derives Finance attention provenance, deduplicates open items, and audits atomically", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const [attentionOwner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance Attention",
+        email: "finance-attention@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!attentionOwner) throw new Error("Finance attention user was not created.");
+    const context = {
+      principal: financeAgentPrincipal(attentionOwner.id),
+      requestId: "finance-attention",
+    };
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Attention Bank",
+        name: "Attention checking",
+        provider: "manual",
+        status: "manual",
+        userId: attentionOwner.id,
+      })
+      .returning();
+    if (!account) throw new Error("Finance attention account was not created.");
+    const [financeTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 4_200,
+        direction: "expense",
+        merchant: "Important merchant",
+        needsReview: true,
+        transactionDate: "2026-07-19",
+        userId: attentionOwner.id,
+      })
+      .returning();
+    if (!financeTransaction) throw new Error("Finance attention transaction was not created.");
+    const input = {
+      expiresAt: null,
+      importance: "high" as const,
+      kind: "important" as const,
+      occursAt: null,
+      summary: "Review the current transaction evidence.",
+      title: "Finance transaction needs review",
+    };
+    const [first, refreshed] = await Promise.all([
+      service.upsertAttentionItem(financeTransaction.id, input, context),
+      service.upsertAttentionItem(financeTransaction.id, input, context),
+    ]);
+    expect(first.id).toBe(refreshed.id);
+    expect([first.version, refreshed.version].sort()).toEqual([1, 2]);
+    expect(refreshed.source).toEqual({
+      accountId: account.id,
+      provider: "local",
+      remoteId: financeTransaction.id,
+      revision: financeTransaction.updatedAt.toISOString(),
+      sourceType: "finance_transaction",
+    });
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(eq(attentionItems.relatedEntityId, financeTransaction.id)),
+    ).resolves.toHaveLength(1);
+
+    const proposal = (
+      await service.proposeCategorizations(attentionOwner.id, {
+        limit: 50,
+        review: "needs_review",
+        sortBy: "date",
+        sortDirection: "desc",
+      })
+    ).items.find((item) => item.transaction.id === financeTransaction.id);
+    expect(proposal?.source).toEqual(refreshed.source);
+
+    let markSnapshotRead: (() => void) | undefined;
+    const snapshotRead = new Promise<void>((resolve) => {
+      markSnapshotRead = resolve;
+    });
+    let releaseSnapshot: (() => void) | undefined;
+    const snapshotRelease = new Promise<void>((resolve) => {
+      releaseSnapshot = resolve;
+    });
+    const snapshotService = createFinanceService({
+      db: database.db,
+      now: () => now,
+      onProposalSnapshotRead: async () => {
+        markSnapshotRead?.();
+        await snapshotRelease;
+      },
+    });
+    const deferredProposal = snapshotService.proposeCategorizations(attentionOwner.id, {
+      limit: 50,
+      review: "needs_review",
+      sortBy: "date",
+      sortDirection: "desc",
+    });
+    await snapshotRead;
+    const concurrentUpdatedAt = new Date("2026-07-29T18:00:00.000Z");
+    await database.db
+      .update(financeTransactions)
+      .set({ updatedAt: concurrentUpdatedAt })
+      .where(eq(financeTransactions.id, financeTransaction.id));
+    releaseSnapshot?.();
+    const deferredItem = (await deferredProposal).items.find(
+      (item) => item.transaction.id === financeTransaction.id,
+    );
+    expect(deferredItem?.source.revision).toBe(deferredItem?.transaction.updatedAt);
+    expect(deferredItem?.source.revision).not.toBe(concurrentUpdatedAt.toISOString());
+
+    const [plaidAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Attention Plaid Bank",
+        name: "Attention Plaid checking",
+        provider: "plaid",
+        status: "connected",
+        userId: attentionOwner.id,
+      })
+      .returning();
+    if (!plaidAccount) throw new Error("Finance Plaid attention account was not created.");
+    const [plaidTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: plaidAccount.id,
+        amount: 5_100,
+        direction: "expense",
+        merchant: "Plaid merchant",
+        needsReview: true,
+        transactionDate: "2026-07-20",
+        userId: attentionOwner.id,
+      })
+      .returning();
+    if (!plaidTransaction) throw new Error("Finance Plaid attention transaction was not created.");
+    const plaidAttention = await service.upsertAttentionItem(plaidTransaction.id, input, {
+      ...context,
+      requestId: "finance-plaid-attention",
+    });
+    expect(plaidAttention).toMatchObject({
+      source: {
+        accountId: plaidAccount.id,
+        provider: "plaid",
+        remoteId: null,
+        revision: plaidTransaction.updatedAt.toISOString(),
+        sourceType: "finance_transaction",
+      },
+    });
+    await service.deleteAccount(plaidAccount.id, {
+      principal: financePrincipal(attentionOwner.id),
+      requestId: "delete-plaid-attention-account",
+    });
+
+    const [paypalAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "PayPal",
+        name: "PayPal import",
+        provider: "paypal",
+        status: "manual",
+        userId: attentionOwner.id,
+      })
+      .returning();
+    if (!paypalAccount) throw new Error("Finance PayPal attention account was not created.");
+    const [paypalTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: paypalAccount.id,
+        amount: 2_300,
+        direction: "expense",
+        merchant: "Imported merchant",
+        needsReview: true,
+        providerTransactionId: "paypal-fingerprint",
+        transactionDate: "2026-07-21",
+        userId: attentionOwner.id,
+      })
+      .returning();
+    if (!paypalTransaction)
+      throw new Error("Finance PayPal attention transaction was not created.");
+    const paypalAttention = await service.upsertAttentionItem(paypalTransaction.id, input, {
+      ...context,
+      requestId: "finance-paypal-attention",
+    });
+    expect(paypalAttention).toMatchObject({
+      source: {
+        accountId: paypalAccount.id,
+        provider: "paypal",
+        remoteId: "paypal-fingerprint",
+        revision: paypalTransaction.updatedAt.toISOString(),
+        sourceType: "finance_transaction",
+      },
+    });
+    await service.deleteAccount(paypalAccount.id, {
+      principal: financePrincipal(attentionOwner.id),
+      requestId: "delete-paypal-attention-account",
+    });
+    const [detachedPayPalAttention] = await database.db
+      .select()
+      .from(attentionItems)
+      .where(eq(attentionItems.id, paypalAttention.id))
+      .limit(1);
+    expect(detachedPayPalAttention).toMatchObject({
+      relatedEntityId: null,
+      relatedEntityType: null,
+      source: null,
+      status: "resolved",
+      version: 2,
+    });
+
+    const [otherUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Other Finance",
+        email: "other-finance-attention@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!otherUser) throw new Error("Other Finance user was not created.");
+    await expect(
+      service.upsertAttentionItem(financeTransaction.id, input, {
+        principal: financeAgentPrincipal(otherUser.id),
+        requestId: "forged-finance-attention",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    try {
+      await database.pool.query(`
+        CREATE OR REPLACE FUNCTION fail_finance_attention_audit_for_test() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.request_id = 'finance-attention-audit-failure' THEN
+            RAISE EXCEPTION 'forced Finance attention audit failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER fail_finance_attention_audit_for_test
+        BEFORE INSERT ON audit_events
+        FOR EACH ROW EXECUTE FUNCTION fail_finance_attention_audit_for_test();
+      `);
+      let auditFailure: unknown;
+      try {
+        await service.upsertAttentionItem(
+          financeTransaction.id,
+          { ...input, kind: "follow_up", title: "Must roll back" },
+          { ...context, requestId: "finance-attention-audit-failure" },
+        );
+      } catch (error) {
+        auditFailure = error;
+      }
+      expect(auditFailure).toBeInstanceOf(Error);
+      expect((auditFailure as Error & { cause?: Error }).cause?.message).toContain(
+        "forced Finance attention audit failure",
+      );
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_finance_attention_audit_for_test ON audit_events;
+        DROP FUNCTION IF EXISTS fail_finance_attention_audit_for_test();
+      `);
+    }
+    await expect(
+      database.db
+        .select()
+        .from(attentionItems)
+        .where(
+          and(
+            eq(attentionItems.relatedEntityId, financeTransaction.id),
+            eq(attentionItems.kind, "follow_up"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+    const attentionAudits = await database.db
+      .select()
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, "finance-attention"));
+    expect(attentionAudits).toHaveLength(2);
+    expect(attentionAudits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          after: expect.objectContaining({
+            policy: "approved_rule",
+            source: refreshed.source,
+          }),
+        }),
+      ]),
+    );
+    const attentionAuditPayloads = JSON.stringify(
+      attentionAudits.map(({ after, before }) => ({ after, before })),
+    );
+    expect(attentionAuditPayloads).not.toContain(input.title);
+    expect(attentionAuditPayloads).not.toContain(financeTransaction.merchant);
+    expect(attentionAuditPayloads).not.toMatch(/(?:^|[^0-9A-Za-z-])4200(?:[^0-9A-Za-z-]|$)/);
+  });
+
+  it("serializes Finance account deletion with attention upserts and detaches every material link", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance Delete",
+        email: "finance-delete-attention@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Finance delete user was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Delete Bank",
+        name: "Delete checking",
+        provider: "manual",
+        status: "manual",
+        userId: owner.id,
+      })
+      .returning();
+    if (!account) throw new Error("Finance delete account was not created.");
+    const [financeTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 1_500,
+        direction: "expense",
+        merchant: "Delete merchant",
+        transactionDate: "2026-07-21",
+        userId: owner.id,
+      })
+      .returning();
+    if (!financeTransaction) throw new Error("Finance delete transaction was not created.");
+    await database.db.insert(financeTransactions).values(
+      Array.from({ length: 1_000 }, (_, index) => ({
+        accountId: account.id,
+        amount: index + 1,
+        direction: "expense" as const,
+        merchant: `Delete filler ${index}`,
+        transactionDate: "2026-07-20",
+        userId: owner.id,
+      })),
+    );
+    const input = {
+      expiresAt: null,
+      importance: "high" as const,
+      kind: "important" as const,
+      occursAt: null,
+      summary: "Review before deleting.",
+      title: "Delete-safe attention",
+    };
+    await service.upsertAttentionItem(financeTransaction.id, input, {
+      principal: financeAgentPrincipal(owner.id),
+      requestId: "finance-delete-attention-create",
+    });
+    const [deletion, concurrentUpsert] = await Promise.allSettled([
+      service.deleteAccount(account.id, {
+        principal: financePrincipal(owner.id),
+        requestId: "finance-delete-account",
+      }),
+      service.upsertAttentionItem(financeTransaction.id, input, {
+        principal: financeAgentPrincipal(owner.id),
+        requestId: "finance-delete-attention-race",
+      }),
+    ]);
+    expect(deletion.status).toBe("fulfilled");
+    if (concurrentUpsert.status === "rejected") {
+      expect(concurrentUpsert.reason).toMatchObject({ code: "not_found" });
+    }
+    const linked = await database.db
+      .select()
+      .from(attentionItems)
+      .where(eq(attentionItems.userId, owner.id));
+    expect(linked).toEqual([
+      expect.objectContaining({
+        relatedEntityId: null,
+        relatedEntityType: null,
+        source: null,
+        status: "resolved",
+      }),
+    ]);
   });
 
   it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
@@ -2160,6 +2561,19 @@ describe.sequential("finance service", () => {
       },
       context,
     );
+    await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 1,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-12",
+        direction: "transfer",
+        merchant: "12345",
+        notes: null,
+      },
+      context,
+    );
     await service.createBudget({ category: "Shopping", limit: 90, month: "2026-07" }, context);
 
     await expect(service.getBudgetStatus(integrityId, "2026-07")).resolves.toEqual([
@@ -2177,6 +2591,7 @@ describe.sequential("finance service", () => {
     await expect(service.exportData(integrityId)).resolves.toMatchObject({
       accounts: [expect.objectContaining({ id: account.id })],
       transactions: expect.arrayContaining([
+        expect.objectContaining({ merchant: "12345" }),
         expect.objectContaining({ merchant: "Store" }),
         expect.objectContaining({ merchant: "Store Refund" }),
       ]),

@@ -135,6 +135,7 @@ describe.sequential("mail service", () => {
       "0046_mail_calendar_account_hint",
       "0047_icloud_uidvalidity_identity",
       "0048_connector_sync_generation",
+      "0049_attention_item_versions",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -168,6 +169,7 @@ describe.sequential("mail service", () => {
       "0046_mail_calendar_account_hint",
       "0047_icloud_uidvalidity_identity",
       "0048_connector_sync_generation",
+      "0049_attention_item_versions",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(
@@ -2034,6 +2036,7 @@ describe.sequential("mail service", () => {
         kind: "important",
         relatedEntityType: "mail_thread",
         status: "open",
+        version: 1,
       },
       {
         domain: "mail",
@@ -2041,6 +2044,7 @@ describe.sequential("mail service", () => {
         kind: "important",
         relatedEntityType: "mail_thread",
         status: "open",
+        version: 2,
       },
       {
         domain: "mail",
@@ -2048,6 +2052,7 @@ describe.sequential("mail service", () => {
         kind: "important",
         relatedEntityType: "mail_thread",
         status: "open",
+        version: 3,
       },
     ]);
     const attentionAuditJson = JSON.stringify(attentionAudits);

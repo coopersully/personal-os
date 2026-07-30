@@ -1,4 +1,5 @@
 import {
+  closeNodeHttpServer,
   createRuntimeLifecycle,
   RuntimeDrainTimeoutError,
   RuntimeDrainWorkError,
@@ -20,6 +21,23 @@ function deferred(): {
 }
 
 describe("API runtime lifecycle", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("closes idle HTTP connections while waiting for active connections to drain", async () => {
+    const closeIdleConnections = vi.fn();
+    const server = {
+      close: vi.fn((callback: (error?: Error) => void) => callback()),
+      closeIdleConnections,
+    };
+
+    await closeNodeHttpServer(server as never);
+
+    expect(server.close).toHaveBeenCalledOnce();
+    expect(closeIdleConnections).toHaveBeenCalledOnce();
+  });
+
   it("rejects new work after quiesce, publishes the deadline, and aborts accepted work", async () => {
     const lifecycle = createRuntimeLifecycle();
     const request = deferred();
@@ -110,7 +128,6 @@ describe("API runtime lifecycle", () => {
     await vi.runAllTimersAsync();
     await Promise.resolve();
     expect(closeDatabase).not.toHaveBeenCalled();
-    vi.useRealTimers();
   });
 
   it("fails drain and preserves the database when non-quiesce work rejects", async () => {

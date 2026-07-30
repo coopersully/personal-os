@@ -186,6 +186,13 @@ export type ProviderOperationOptions = {
   signal?: AbortSignal;
 };
 
+export function throwIfProviderOperationCancelled(operation?: ProviderOperationOptions): void {
+  operation?.signal?.throwIfAborted();
+  if (operation?.deadlineMs !== undefined && Date.now() >= operation.deadlineMs) {
+    throw new DOMException("Provider operation deadline expired.", "TimeoutError");
+  }
+}
+
 export type GoogleAuthorizationService = "calendar" | "mail";
 
 export type GoogleConnector = {

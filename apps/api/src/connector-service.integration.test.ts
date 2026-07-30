@@ -194,18 +194,20 @@ describe.sequential("connector service", () => {
   let icloud: ICloudConnector;
   let service: ReturnType<typeof createConnectorService>;
 
-  async function waitForDomainProfileLock(): Promise<boolean> {
+  async function waitForLock(queryPatterns: string[]): Promise<boolean> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const result = await database.pool.query<{ blocked: boolean }>(`
+      const result = await database.pool.query<{ blocked: boolean }>(
+        `
         SELECT EXISTS (
           SELECT 1
           FROM pg_stat_activity
           WHERE datname = current_database()
             AND wait_event_type = 'Lock'
-            AND query LIKE '%domain_profiles%'
-            AND query LIKE '%for update%'
+            ${queryPatterns.map((_, index) => `AND query LIKE $${index + 1}`).join("\n")}
         ) AS blocked
-      `);
+      `,
+        queryPatterns,
+      );
       if (result.rows[0]?.blocked) return true;
       await new Promise<void>((resolveAttempt) => {
         setTimeout(resolveAttempt, 25);
@@ -214,23 +216,12 @@ describe.sequential("connector service", () => {
     return false;
   }
 
+  async function waitForDomainProfileLock(): Promise<boolean> {
+    return waitForLock(["%domain_profiles%", "%for update%"]);
+  }
+
   async function waitForMailRuleWorkLock(): Promise<boolean> {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      const result = await database.pool.query<{ blocked: boolean }>(`
-        SELECT EXISTS (
-          SELECT 1
-          FROM pg_stat_activity
-          WHERE datname = current_database()
-            AND wait_event_type = 'Lock'
-            AND query LIKE '%mail_rule_work_items%'
-        ) AS blocked
-      `);
-      if (result.rows[0]?.blocked) return true;
-      await new Promise<void>((resolveAttempt) => {
-        setTimeout(resolveAttempt, 25);
-      });
-    }
-    return false;
+    return waitForLock(["%mail_rule_work_items%"]);
   }
 
   async function createDurableMailWorkFixture(name: string, action: MailRuleAction) {
@@ -622,7 +613,7 @@ describe.sequential("connector service", () => {
       .from(calendarAccounts)
       .where(eq(calendarAccounts.id, account.id));
     expect(settled).toMatchObject({
-      lastSyncedAt: null,
+      lastSyncedAt: timestamp,
       syncError: "Synchronization was interrupted by API shutdown and will retry.",
       syncStatus: "idle",
     });
@@ -633,9 +624,16 @@ describe.sequential("connector service", () => {
       google: cancellableGoogle,
       now: () => timestamp,
     });
-    await expect(retryService.syncAccount(userId, account.id)).resolves.toEqual(
-      expect.objectContaining({ changed: expect.any(Number) }),
-    );
+    await expect(retryService.syncStaleAccounts()).resolves.toBeUndefined();
+    await expect(
+      database.db.select().from(calendarAccounts).where(eq(calendarAccounts.id, account.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        lastSyncedAt: timestamp,
+        syncError: null,
+        syncStatus: "idle",
+      }),
+    ]);
 
     const [lateAccount] = await database.db
       .insert(calendarAccounts)
@@ -4387,16 +4385,19 @@ describe.sequential("connector service", () => {
     const lockClient = await database.pool.connect();
     const interruption = new Error("API runtime is quiescing.");
     let dispatch: Promise<unknown> | undefined;
+    let transactionOpen = false;
     try {
       await lockClient.query("BEGIN");
+      transactionOpen = true;
       await lockClient.query("LOCK TABLE mail_rule_work_items IN ACCESS EXCLUSIVE MODE");
       dispatch = quiescingService.dispatchDueMailRuleWork();
       await expect(waitForMailRuleWorkLock()).resolves.toBe(true);
       controller.abort(interruption);
       await lockClient.query("COMMIT");
+      transactionOpen = false;
       await expect(dispatch).rejects.toBe(interruption);
     } finally {
-      await lockClient.query("ROLLBACK");
+      if (transactionOpen) await lockClient.query("ROLLBACK");
       lockClient.release();
       if (dispatch) await dispatch.catch(() => undefined);
     }

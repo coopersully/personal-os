@@ -111,6 +111,19 @@ export function createRuntimeLifecycle(): RuntimeLifecycle {
   };
 }
 
+export function closeNodeHttpServer(server: {
+  close: (callback: (error?: Error) => void) => unknown;
+  closeIdleConnections?: () => void;
+}): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+    server.closeIdleConnections?.();
+  });
+}
+
 export async function shutdownApiRuntime(options: {
   closeDatabase: () => Promise<void>;
   closeHttpServer: () => Promise<void>;

@@ -202,6 +202,18 @@ describe("Google Calendar connector", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
+  it("rejects an expired provider deadline before starting network work", async () => {
+    const fetch = queued(response({ items: [] }));
+
+    await expect(
+      connector(fetch).syncCalendar(fresh, "calendar", null, {
+        deadlineMs: Date.now() - 1,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({ name: "TimeoutError" });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("creates, updates, and deletes timed and all-day events", async () => {
     const fetch = queued(
       response(timedEvent),

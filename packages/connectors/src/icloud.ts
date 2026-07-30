@@ -16,7 +16,7 @@ import type {
   RemoteCalendar,
   RemoteMailbox,
 } from "./types.js";
-import { extractConferenceUrl } from "./types.js";
+import { extractConferenceUrl, throwIfProviderOperationCancelled } from "./types.js";
 
 type DavClient = Awaited<ReturnType<typeof createDAVClient>>;
 type ImapClient = Pick<
@@ -79,7 +79,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     operation?: ProviderOperationOptions,
   ): Promise<DavClient> {
     try {
-      throwIfCancelled(operation);
+      throwIfProviderOperationCancelled(operation);
       return await davFactory(credentials, operation);
     } catch (error) {
       if (operation?.signal?.aborted) throw operation.signal.reason;
@@ -92,7 +92,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     remoteCalendarId: string,
     operation?: ProviderOperationOptions,
   ): Promise<DAVCalendar> {
-    throwIfCancelled(operation);
+    throwIfProviderOperationCancelled(operation);
     const calendars = await client.fetchCalendars(fetchOptions(operation));
     const calendar = calendars.find((item) => item.url === remoteCalendarId);
     if (!calendar) throw new ConnectorError("The iCloud calendar no longer exists.", 404);
@@ -128,7 +128,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
 
     async listCalendars(credentials, operation) {
       const client = await dav(credentials, operation);
-      throwIfCancelled(operation);
+      throwIfProviderOperationCancelled(operation);
       const calendars = await client.fetchCalendars(fetchOptions(operation));
       return calendars.map(remoteCalendar);
     },
@@ -136,7 +136,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     async syncCalendar(credentials, remoteCalendarId, _syncToken, operation) {
       const client = await dav(credentials, operation);
       const calendar = await calendarByUrl(client, remoteCalendarId, operation);
-      throwIfCancelled(operation);
+      throwIfProviderOperationCancelled(operation);
       const objects = await client.fetchCalendarObjects({
         calendar,
         ...fetchOptions(operation),
@@ -160,15 +160,22 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
 
     /* v8 ignore start -- IMAP projection edge variants are covered by live provider compatibility tests */
     async syncMail(credentials, operation) {
-      throwIfCancelled(operation);
+      throwIfProviderOperationCancelled(operation);
       const client = imapFactory(credentials);
       let connected = false;
-      const abort = () => client.close();
+      const close = () => {
+        try {
+          client.close();
+        } catch {
+          // A failed or already-destroyed socket must not escape abort dispatch.
+        }
+      };
+      const abort = () => close();
       operation?.signal?.addEventListener("abort", abort, { once: true });
       try {
         await client.connect();
         connected = true;
-        throwIfCancelled(operation);
+        throwIfProviderOperationCancelled(operation);
         const listed = await client.list({ statusQuery: { messages: true, unseen: true } });
         const selectable = listed.filter((mailbox) => !mailbox.flags.has("\\Noselect"));
         const mailboxes: RemoteMailbox[] = selectable.map((mailbox) => ({
@@ -180,7 +187,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         }));
         const threads: NormalizedRemoteMailThread[] = [];
         for (const mailbox of selectable) {
-          throwIfCancelled(operation);
+          throwIfProviderOperationCancelled(operation);
           const total = mailbox.status?.messages ?? 0;
           if (total === 0) continue;
           const lock = await client.getMailboxLock(mailbox.path);
@@ -194,7 +201,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
               threadId: true,
               uid: true,
             })) {
-              throwIfCancelled(operation);
+              throwIfProviderOperationCancelled(operation);
               if (!message.source) continue;
               const parsed = await simpleParser(message.source);
               const bodyText = parsed.text?.trim() ?? "";
@@ -241,7 +248,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         /* v8 ignore next -- V8 exposes a synthetic finally branch after both paths are tested */
       } finally {
         operation?.signal?.removeEventListener("abort", abort);
-        if (operation?.signal?.aborted) client.close();
+        if (operation?.signal?.aborted) close();
         else if (connected) await client.logout();
       }
     },
@@ -485,14 +492,4 @@ function fetchOptions(operation?: ProviderOperationOptions): {
   fetchOptions?: RequestInit;
 } {
   return operation?.signal ? { fetchOptions: { signal: operation.signal } } : {};
-}
-
-function throwIfCancelled(operation?: ProviderOperationOptions): void {
-  operation?.signal?.throwIfAborted();
-  if (operation?.deadlineMs !== undefined && Date.now() >= operation.deadlineMs) {
-    throw (
-      operation.signal?.reason ??
-      new DOMException("Provider operation deadline expired.", "TimeoutError")
-    );
-  }
 }

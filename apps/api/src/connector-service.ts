@@ -70,6 +70,8 @@ import {
 
 const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
+const CONNECTOR_SYNC_INTERRUPTED_ERROR =
+  "Synchronization was interrupted by API shutdown and will retry.";
 const MAIL_RULE_WRITE_CONCURRENCY = 2;
 const MAIL_RULE_WORK_CLAIM_LEASE_MS = 10 * 60_000;
 const MAIL_RULE_WORK_MAX_ATTEMPTS = 5;
@@ -283,6 +285,10 @@ type ConnectorServiceOptions = {
   google: GoogleConnector;
   icloud?: ICloudConnector;
   now: () => Date;
+  observeRecoveryFailure?: (entry: {
+    claimId: string;
+    operation: "release_mail_rule_claim";
+  }) => void;
   shutdown?: {
     deadlineMs: () => number | undefined;
     signal: AbortSignal;
@@ -295,6 +301,7 @@ export function createConnectorService({
   google,
   icloud = createICloudConnector(),
   now,
+  observeRecoveryFailure,
   shutdown,
 }: ConnectorServiceOptions) {
   function syncOperation(): ProviderOperationOptions | undefined {
@@ -751,9 +758,8 @@ export function createConnectorService({
         await db
           .update(calendarAccounts)
           .set({
-            ...(interrupted ? { lastSyncedAt: null } : {}),
             syncError: interrupted
-              ? "Synchronization was interrupted by API shutdown and will retry."
+              ? CONNECTOR_SYNC_INTERRUPTED_ERROR
               : error instanceof Error
                 ? error.message
                 : "Unknown connector error",
@@ -2023,12 +2029,12 @@ export function createConnectorService({
         .where(
           and(eq(mailRuleWorkItems.claimId, claimId), eq(mailRuleWorkItems.status, "claimed")),
         );
-    } catch (error) {
+    } catch {
+      observeRecoveryFailure?.({ claimId, operation: "release_mail_rule_claim" });
       throw new AppError(
         "service_unavailable",
         "Mail work claimed during shutdown could not be released for a safe retry.",
         {
-          cause: error instanceof Error ? error.message : "unknown",
           claimId,
           operation: "release_mail_rule_claim",
           retryable: true,
@@ -3229,6 +3235,7 @@ export function createConnectorService({
               and(
                 eq(calendarAccounts.syncStatus, "idle"),
                 or(
+                  eq(calendarAccounts.syncError, CONNECTOR_SYNC_INTERRUPTED_ERROR),
                   isNull(calendarAccounts.lastSyncedAt),
                   and(
                     eq(calendarAccounts.mailEnabled, true),

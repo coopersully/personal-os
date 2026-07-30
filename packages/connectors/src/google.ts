@@ -16,7 +16,7 @@ import type {
   RemoteMailbox,
   SyncResult,
 } from "./types.js";
-import { extractConferenceUrl } from "./types.js";
+import { extractConferenceUrl, throwIfProviderOperationCancelled } from "./types.js";
 
 const tokenResponseSchema = z.object({
   access_token: z.string(),
@@ -190,12 +190,11 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     operation?: ProviderOperationOptions,
   ): Promise<z.infer<typeof tokenResponseSchema>> {
     requireConfiguration();
-    throwIfCancelled(operation);
+    throwIfProviderOperationCancelled(operation);
     const response = await providerFetch(request, "https://oauth2.googleapis.com/token", {
       body: parameters,
       headers: { "content-type": "application/x-www-form-urlencoded" },
       method: "POST",
-      ...(operation?.signal ? { signal: operation.signal } : {}),
     });
     return tokenResponseSchema.parse(await parseResponse(response));
   }
@@ -204,7 +203,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     credentials: GoogleCredentials,
     operation?: ProviderOperationOptions,
   ): Promise<GoogleCredentials> {
-    throwIfCancelled(operation);
+    throwIfProviderOperationCancelled(operation);
     if (new Date(credentials.expiresAt).getTime() > now().getTime() + 60_000) {
       return credentials;
     }
@@ -232,7 +231,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     init: RequestInit = {},
     operation?: ProviderOperationOptions,
   ): Promise<{ credentials: GoogleCredentials; response: Response }> {
-    throwIfCancelled(operation);
+    throwIfProviderOperationCancelled(operation);
     const currentCredentials = await validCredentials(credentials, operation);
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${currentCredentials.accessToken}`);
@@ -257,7 +256,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     let currentCredentials = credentials;
     const calendars: RemoteCalendar[] = [];
     do {
-      throwIfCancelled(operation);
+      throwIfProviderOperationCancelled(operation);
       const url = new URL("https://www.googleapis.com/calendar/v3/users/me/calendarList");
       url.searchParams.set("maxResults", "250");
       url.searchParams.set("showDeleted", "false");
@@ -295,7 +294,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     let nextSyncToken: string | undefined;
     const changes: RemoteEventChange[] = [];
     do {
-      throwIfCancelled(operation);
+      throwIfProviderOperationCancelled(operation);
       const url = new URL(
         `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(remoteCalendarId)}/events`,
       );
@@ -439,7 +438,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     },
 
     async syncMail(credentials, operation) {
-      throwIfCancelled(operation);
+      throwIfProviderOperationCancelled(operation);
       const labelResult = await authenticatedRequest(
         credentials,
         "https://gmail.googleapis.com/gmail/v1/users/me/labels",
@@ -458,7 +457,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       let pageToken: string | undefined;
       let currentCredentials = labelResult.credentials;
       do {
-        throwIfCancelled(operation);
+        throwIfProviderOperationCancelled(operation);
         const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/threads");
         url.searchParams.set("maxResults", String(100 - threadIds.length));
         if (pageToken) url.searchParams.set("pageToken", pageToken);
@@ -475,7 +474,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       } while (pageToken);
       const threadResults: Array<z.infer<typeof gmailThreadSchema>> = [];
       for (const threadId of threadIds) {
-        throwIfCancelled(operation);
+        throwIfProviderOperationCancelled(operation);
         const result = await authenticatedRequest(
           currentCredentials,
           `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
@@ -570,7 +569,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
         return await syncOnce(credentials, remoteCalendarId, syncToken, operation);
       } catch (error) {
         if (syncToken && error instanceof ConnectorError && error.status === 410) {
-          throwIfCancelled(operation);
+          throwIfProviderOperationCancelled(operation);
           const result = await syncOnce(credentials, remoteCalendarId, null, operation);
           return { ...result, value: { ...result.value, reset: true } };
         }
@@ -595,16 +594,6 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       };
     },
   };
-}
-
-function throwIfCancelled(operation?: ProviderOperationOptions): void {
-  operation?.signal?.throwIfAborted();
-  if (operation?.deadlineMs !== undefined && Date.now() >= operation.deadlineMs) {
-    throw (
-      operation.signal?.reason ??
-      new DOMException("Provider operation deadline expired.", "TimeoutError")
-    );
-  }
 }
 
 function mailboxRole(id: string): RemoteMailbox["role"] {

@@ -158,9 +158,10 @@ request admission, aborts connector discovery and pagination, waits for accepted
 work to settle, and closes PostgreSQL only after the tracked work and HTTP server have drained.
 Google HTTP calls retain their 15-second per-request timeout and also receive the quiesce signal.
 iCloud CalDAV receives the same signal through its HTTP transport, while iCloud IMAP closes its
-live socket on abort. An interrupted account sync returns durably to retryable `idle` state with no
-freshness claim, so the replacement runtime can reconcile it. Provider network I/O never occurs
-inside a database transaction.
+live socket on abort. An interrupted account sync returns durably to retryable `idle` state with an
+explicit retry marker while preserving, but never advancing, its prior successful-sync timestamp,
+so the replacement runtime can reconcile it immediately. Provider network I/O never occurs inside
+a database transaction.
 
 Deploy this contract as an independent prerequisite before introducing any workflow that suspends
 scaling or drains all API tasks:

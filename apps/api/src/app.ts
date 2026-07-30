@@ -184,6 +184,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     google,
     icloud: dependencies.icloud ?? createICloudConnector(),
     now,
+    observeRecoveryFailure: (entry) =>
+      dependencies.log?.({
+        durationMs: 0,
+        event: "connector_recovery_failed",
+        method: "SCHEDULER",
+        path: `/internal/connectors/recovery/${entry.operation}`,
+        requestId: entry.claimId,
+        status: 503,
+      }),
     ...(dependencies.runtimeLifecycle
       ? {
           shutdown: {

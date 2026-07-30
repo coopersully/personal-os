@@ -286,7 +286,10 @@ describe("iCloud connector", () => {
     const fetchStarted = new Promise<void>((resolve) => {
       markFetchStarted = resolve;
     });
-    const close = vi.fn(() => rejectFetch(new Error("socket closed")));
+    const close = vi.fn(() => {
+      rejectFetch(new Error("socket closed"));
+      throw new Error("socket already destroyed");
+    });
     const release = vi.fn();
     const imap = {
       close,
@@ -321,7 +324,7 @@ describe("iCloud connector", () => {
       signal: controller.signal,
     });
     await fetchStarted;
-    controller.abort(interrupted);
+    expect(() => controller.abort(interrupted)).not.toThrow();
 
     await expect(sync).rejects.toBe(interrupted);
     expect(close).toHaveBeenCalled();

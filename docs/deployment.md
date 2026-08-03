@@ -30,6 +30,8 @@
 | `AGENT_SKILL_REVISION` | Immutable source identifier embedded in `AGENT_SKILL_SOURCE_URL`, such as a Git commit or release digest |
 | `REGISTRATION_MODE` | Must be `invite` in production; the API refuses to boot in open mode |
 | `OWNER_EMAILS` | Comma-separated email addresses allowed to issue invitations |
+| `VITE_DESKTOP_DOWNLOAD_MACOS_URL` | Optional HTTPS URL for a signed macOS installer built against this deployment's API; omit when no such installer is published. |
+| `VITE_DESKTOP_DOWNLOAD_WINDOWS_URL` | Optional HTTPS URL for a signed 64-bit Windows installer built against this deployment's API; omit when no such installer is published. |
 | `X_CLIENT_ID` | X OAuth 2.0 client ID |
 | `X_CLIENT_SECRET` | X OAuth confidential-client secret (if configured) |
 | `X_REDIRECT_URI` | Exact registered X OAuth callback |

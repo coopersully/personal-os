@@ -44,3 +44,20 @@ The desktop renderer is built with `VITE_API_BASE_URL`. Official installers
 must point to the official HTTPS API; self-hosted builds may use their own API
 address. Keep the desktop version in `apps/desktop/src-tauri/tauri.conf.json`
 aligned with the release tag.
+
+## Installer links in Settings
+
+The hosted web build reads the optional GitHub variables
+`DESKTOP_DOWNLOAD_MACOS_URL` and `DESKTOP_DOWNLOAD_WINDOWS_URL`. Set them to
+HTTPS URLs for installers that were built with the same production
+`VITE_API_BASE_URL`; for the official release workflow, the stable paths are
+`https://github.com/coopersully/personal-os/releases/latest/download/ilo-macos.dmg`
+and
+`https://github.com/coopersully/personal-os/releases/latest/download/ilo-windows-x64-setup.exe`.
+The Settings page recommends the matching macOS or Windows installer and still
+offers the other published installer.
+
+Self-hosted deployments leave both values unset by default, so they do not
+advertise an official installer that would sign a person into the wrong
+deployment. An operator may set their own two URLs only after publishing
+installers built with that operator's `VITE_API_BASE_URL`.

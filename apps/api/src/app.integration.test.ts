@@ -3334,6 +3334,9 @@ describe.sequential("ilo API", () => {
     expect(consentPage).toContain("Connect Protocol test client");
     expect(consentPage).toContain("Read tasks");
     expect(consentPage).toContain("Connected provider credentials remain inside Ilo");
+    expect(consentPage).toContain('class="oauth-card"');
+    expect(consentPage).toContain("Requested access");
+    expect(consentPage).toContain('class="oauth-cancel"');
     const approved = await app.request("/oauth/authorize", {
       body: new URLSearchParams(Object.fromEntries(authorize.searchParams)).toString(),
       headers: {

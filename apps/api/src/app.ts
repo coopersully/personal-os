@@ -1046,25 +1046,217 @@ function oauthConsentPage({
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Authorize ${escapeHtml(clientName)} · Ilo</title>
+  <style>
+    :root {
+      color: #252524;
+      background: #f0f0ef;
+      font-family: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      align-items: center;
+      background: linear-gradient(180deg, #f7f7f6 0%, #f0f0ef 68%);
+      display: flex;
+      justify-content: center;
+      margin: 0;
+      min-height: 100vh;
+      padding: 1.5rem;
+    }
+
+    .oauth-page { width: min(100%, 30rem); }
+
+    .oauth-brand {
+      align-items: center;
+      display: flex;
+      font-size: 0.9375rem;
+      font-weight: 700;
+      gap: 0.625rem;
+      letter-spacing: -0.02em;
+      margin: 0 0 1.5rem;
+    }
+
+    .oauth-brand__mark {
+      align-items: center;
+      background: #fbfbfa;
+      border: 2px solid currentColor;
+      border-radius: 0.5625rem;
+      display: inline-flex;
+      height: 1.875rem;
+      justify-content: center;
+      width: 1.875rem;
+    }
+
+    .oauth-brand__mark::before {
+      border: 1px solid currentColor;
+      border-radius: 50%;
+      content: "";
+      height: 0.6875rem;
+      width: 0.6875rem;
+    }
+
+    .oauth-card {
+      background: #fbfbfa;
+      border: 1px solid #d7d7d4;
+      border-radius: 0.875rem;
+      box-shadow: 0 0.75rem 2.5rem #25252412;
+      overflow: hidden;
+    }
+
+    .oauth-header { padding: 1.75rem 1.75rem 1.5rem; }
+
+    .oauth-eyebrow {
+      color: #686865;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.6875rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      margin: 0 0 0.625rem;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      font-size: clamp(1.75rem, 6vw, 2.25rem);
+      letter-spacing: -0.045em;
+      line-height: 1.1;
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .oauth-intro {
+      color: #686865;
+      font-size: 0.9375rem;
+      line-height: 1.6;
+      margin: 0.875rem 0 0;
+    }
+
+    .oauth-permissions {
+      border-block: 1px solid #d7d7d4;
+      padding: 1.25rem 1.75rem;
+    }
+
+    h2 {
+      font-size: 0.8125rem;
+      letter-spacing: -0.01em;
+      margin: 0 0 0.75rem;
+    }
+
+    .oauth-permissions ul {
+      display: grid;
+      gap: 0.625rem;
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .oauth-permissions li {
+      align-items: flex-start;
+      display: flex;
+      font-size: 0.875rem;
+      gap: 0.625rem;
+      line-height: 1.45;
+    }
+
+    .oauth-permissions li::before {
+      background: #252524;
+      border-radius: 50%;
+      content: "";
+      flex: 0 0 auto;
+      height: 0.375rem;
+      margin-top: 0.4375rem;
+      width: 0.375rem;
+    }
+
+    .oauth-actions {
+      align-items: center;
+      display: flex;
+      gap: 0.75rem;
+      justify-content: flex-end;
+      padding: 1.25rem 1.75rem;
+    }
+
+    .oauth-button,
+    .oauth-cancel {
+      border-radius: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 650;
+      min-height: 2.5rem;
+      padding: 0.625rem 0.875rem;
+    }
+
+    .oauth-button {
+      background: #252524;
+      border: 1px solid #252524;
+      color: #f3f3f1;
+      cursor: pointer;
+    }
+
+    .oauth-button:hover { background: #3b3b39; border-color: #3b3b39; }
+
+    .oauth-cancel {
+      color: #686865;
+      text-decoration: none;
+    }
+
+    .oauth-cancel:hover { color: #252524; text-decoration: underline; text-underline-offset: 0.25rem; }
+
+    .oauth-button:focus-visible {
+      background: #3b3b39;
+      border-color: #a2a29e;
+    }
+
+    .oauth-cancel:focus-visible {
+      background: #e8e8e6;
+      color: #252524;
+    }
+
+    .oauth-security-note {
+      color: #686865;
+      font-size: 0.75rem;
+      line-height: 1.55;
+      margin: 1rem 0 0;
+      text-align: center;
+    }
+
+    @media (max-width: 32rem) {
+      body { align-items: flex-start; padding: 1rem; }
+      .oauth-brand { margin-bottom: 1rem; }
+      .oauth-header, .oauth-permissions, .oauth-actions { padding-inline: 1.25rem; }
+      .oauth-actions { align-items: stretch; flex-direction: column; }
+      .oauth-button, .oauth-cancel { text-align: center; width: 100%; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { scroll-behavior: auto; transition-duration: 0.01ms; }
+    }
+  </style>
 </head>
 <body>
-  <main>
-    <p>Ilo agent access</p>
-    <h1>Connect ${escapeHtml(clientName)}</h1>
-    <p>This agent host is requesting access to your Ilo account. Connected provider credentials remain inside Ilo.</p>
-    <h2>Requested permissions</h2>
-    <ul>${scopes.map((scope) => `<li>${escapeHtml(oauthScopeLabels[scope] ?? scope)}</li>`).join("")}</ul>
-    <p>You can revoke this connection at any time from Settings → Agent access.</p>
-    <form method="post">
-      ${Object.entries(fields)
-        .map(
-          ([name, value]) =>
-            `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
-        )
-        .join("")}
-      <button type="submit">Authorize ${escapeHtml(clientName)}</button>
-      <a href="${escapeHtml(cancel.toString())}">Cancel</a>
-    </form>
+  <main class="oauth-page">
+    <p class="oauth-brand"><span aria-hidden="true" class="oauth-brand__mark"></span>ilo</p>
+    <section aria-labelledby="consent-title" class="oauth-card">
+      <header class="oauth-header">
+        <p class="oauth-eyebrow">Agent access</p>
+        <h1 id="consent-title">Connect ${escapeHtml(clientName)}</h1>
+        <p class="oauth-intro">This agent host is requesting access to your Ilo account. Connected provider credentials remain inside Ilo.</p>
+      </header>
+      <section aria-labelledby="permissions-title" class="oauth-permissions">
+        <h2 id="permissions-title">Requested access</h2>
+        <ul>${scopes.map((scope) => `<li>${escapeHtml(oauthScopeLabels[scope] ?? scope)}</li>`).join("")}</ul>
+      </section>
+      <form class="oauth-actions" method="post">
+        ${Object.entries(fields)
+          .map(
+            ([name, value]) =>
+              `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`,
+          )
+          .join("")}
+        <a class="oauth-cancel" href="${escapeHtml(cancel.toString())}">Cancel</a>
+        <button class="oauth-button" type="submit">Authorize ${escapeHtml(clientName)}</button>
+      </form>
+    </section>
+    <p class="oauth-security-note">You can revoke this connection at any time from Settings &rarr; Agent access.</p>
   </main>
 </body>
 </html>`;

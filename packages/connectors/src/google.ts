@@ -1,6 +1,7 @@
 import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
 import nodemailer from "nodemailer";
 import { z } from "zod";
+import { ConnectorError, connectorHttpError } from "./failures.js";
 import { providerFetch } from "./http.js";
 import {
   calendarAttachmentProjectionOverflow,
@@ -145,16 +146,6 @@ const gmailMinimalThreadSchema = z.object({
 
 type GoogleEvent = z.infer<typeof eventSchema>;
 
-export class ConnectorError extends Error {
-  public readonly status: number;
-
-  public constructor(message: string, status: number) {
-    super(message);
-    this.name = "ConnectorError";
-    this.status = status;
-  }
-}
-
 /** A local composition or credential-refresh failure before a Mail send request begins. */
 export class MailSendPreAcceptanceError extends Error {
   public override readonly cause: unknown;
@@ -180,18 +171,18 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
 
   function requireConfiguration(): void {
     if (!options.clientId || !options.clientSecret) {
-      throw new ConnectorError("Google Calendar is not configured.", 503);
+      throw new ConnectorError({
+        category: "configuration",
+        code: "google_not_configured",
+        disposition: "operator",
+        message: "Google is not configured.",
+        status: 503,
+      });
     }
   }
 
   async function parseResponse(response: Response): Promise<unknown> {
-    if (!response.ok) {
-      const body = await response.text();
-      throw new ConnectorError(
-        `Google API request failed (${response.status}): ${body}`,
-        response.status,
-      );
-    }
+    if (!response.ok) throw await connectorHttpError(response, "google");
     return response.status === 204 ? null : response.json();
   }
 
@@ -325,7 +316,13 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       nextSyncToken = page.nextSyncToken ?? nextSyncToken;
     } while (pageToken);
     if (!nextSyncToken) {
-      throw new ConnectorError("Google Calendar did not return a synchronization token.", 502);
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "google_sync_token_missing",
+        disposition: "operator",
+        message: "Google Calendar did not return a synchronization token.",
+        status: 502,
+      });
     }
     return {
       credentials: currentCredentials,
@@ -399,7 +396,13 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
         }),
       );
       if (!token.refresh_token) {
-        throw new ConnectorError("Google did not return an offline refresh token.", 400);
+        throw new ConnectorError({
+          category: "invalid_response",
+          code: "google_refresh_token_missing",
+          disposition: "operator",
+          message: "Google did not return an offline refresh token.",
+          status: 400,
+        });
       }
       return {
         accessToken: token.access_token,
@@ -763,7 +766,13 @@ function normalizeChange(event: GoogleEvent, fallbackTimezone: string): RemoteEv
 
 function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): NormalizedRemoteEvent {
   if (!event.start || !event.end) {
-    throw new ConnectorError("Google returned an event without start or end data.", 502);
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "google_event_range_missing",
+      disposition: "operator",
+      message: "Google returned an event without start or end data.",
+      status: 502,
+    });
   }
   const allDay = Boolean(event.start.date);
   const startValue =
@@ -772,7 +781,13 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
   const startsAt = new Date(startValue);
   const endsAt = new Date(endValue);
   if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
-    throw new ConnectorError("Google returned an event with invalid dates.", 502);
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "google_event_range_invalid",
+      disposition: "operator",
+      message: "Google returned an event with invalid dates.",
+      status: 502,
+    });
   }
   return {
     allDay,

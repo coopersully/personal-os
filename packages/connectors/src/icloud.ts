@@ -5,7 +5,7 @@ import { ImapFlow } from "imapflow";
 import { type AddressObject, simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject } from "tsdav";
-import { ConnectorError } from "./google.js";
+import { classifyICloudError, ConnectorError } from "./failures.js";
 import { PROVIDER_REQUEST_TIMEOUT_MS } from "./http.js";
 import {
   boundFlatMailAttachments,
@@ -91,7 +91,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
       return await davFactory(credentials, operation);
     } catch (error) {
       if (operation?.signal?.aborted) throw operation.signal.reason;
-      throw providerError("iCloud Calendar", error);
+      throw providerError("calendar", error);
     }
   }
 
@@ -103,7 +103,15 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     throwIfProviderOperationCancelled(operation);
     const calendars = await client.fetchCalendars(fetchOptions(operation));
     const calendar = calendars.find((item) => item.url === remoteCalendarId);
-    if (!calendar) throw new ConnectorError("The iCloud calendar no longer exists.", 404);
+    if (!calendar) {
+      throw new ConnectorError({
+        category: "not_found",
+        code: "icloud_calendar_not_found",
+        disposition: "operator",
+        message: "The iCloud calendar no longer exists.",
+        status: 404,
+      });
+    }
     return calendar;
   }
 
@@ -115,7 +123,15 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
       const filename = `${uid}.ics`;
       const data = eventDocument(uid, input);
       const response = await client.createCalendarObject({ calendar, filename, iCalString: data });
-      if (!response.ok) throw new ConnectorError("iCloud rejected the new calendar event.", 502);
+      if (!response.ok) {
+        throw new ConnectorError({
+          category: "rejected",
+          code: "icloud_calendar_create_rejected",
+          disposition: "operator",
+          message: "iCloud rejected the new calendar event.",
+          status: 502,
+        });
+      }
       const remoteEventId = new URL(filename, calendar.url).toString();
       const etag = response.headers.get("etag") ?? undefined;
       return normalizeCalendarObject(
@@ -130,7 +146,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         calendarObject: { ...(etag ? { etag } : {}), url: remoteEventId },
       });
       if (!response.ok && response.status !== 404) {
-        throw new ConnectorError("iCloud rejected the calendar event deletion.", 502);
+        throw new ConnectorError({
+          category: "rejected",
+          code: "icloud_calendar_delete_rejected",
+          disposition: "operator",
+          message: "iCloud rejected the calendar event deletion.",
+          status: 502,
+        });
       }
     },
 
@@ -196,10 +218,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
           try {
             const selectedMailbox = client.mailbox;
             if (!selectedMailbox || selectedMailbox.path !== mailbox.path) {
-              throw new ConnectorError(
-                `iCloud did not select the expected mailbox ${mailbox.path}.`,
-                502,
-              );
+              throw new ConnectorError({
+                category: "invalid_response",
+                code: "icloud_mailbox_selection_invalid",
+                disposition: "retry",
+                message: "iCloud selected an unexpected mailbox.",
+                status: 502,
+              });
             }
             const mailboxRevision = selectedMailbox.uidValidity.toString();
             const total = selectedMailbox.exists;
@@ -289,7 +314,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         return { mailboxes, threads };
       } catch (error) {
         if (operation?.signal?.aborted) throw operation.signal.reason;
-        throw providerError("iCloud Mail", error);
+        throw providerError("mail", error);
         /* v8 ignore next -- V8 exposes a synthetic finally branch after both paths are tested */
       } finally {
         operation?.signal?.removeEventListener("abort", abort);
@@ -336,7 +361,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
             : {}),
         });
       } catch (error) {
-        throw providerError("iCloud Mail", error);
+        throw providerError("mail", error);
       } finally {
         transport.close();
       }
@@ -347,7 +372,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     async updateMailThread(credentials, remoteThreadId, input) {
       const uidSeparator = remoteThreadId.lastIndexOf(":");
       if (uidSeparator < 0) {
-        throw new ConnectorError("This iCloud message can no longer be updated.", 404);
+        throw new ConnectorError({
+          category: "not_found",
+          code: "icloud_message_not_found",
+          disposition: "operator",
+          message: "This iCloud message can no longer be updated.",
+          status: 404,
+        });
       }
       const mailboxAndValidity = remoteThreadId.slice(0, uidSeparator);
       const validitySeparator = mailboxAndValidity.lastIndexOf(":");
@@ -361,7 +392,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         !Number.isSafeInteger(uid) ||
         uid < 1
       ) {
-        throw new ConnectorError("This iCloud message can no longer be updated.", 404);
+        throw new ConnectorError({
+          category: "not_found",
+          code: "icloud_message_not_found",
+          disposition: "operator",
+          message: "This iCloud message can no longer be updated.",
+          status: 404,
+        });
       }
       const client = imapFactory(credentials);
       let connected = false;
@@ -380,10 +417,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
             selectedMailbox.path !== mailboxPath ||
             selectedMailbox.uidValidity.toString() !== expectedUidValidity
           ) {
-            throw new ConnectorError(
-              "This iCloud message source revision is no longer current.",
-              409,
-            );
+            throw new ConnectorError({
+              category: "rejected",
+              code: "icloud_message_revision_conflict",
+              disposition: "operator",
+              message: "This iCloud message source revision is no longer current.",
+              status: 409,
+            });
           }
           const add = new Set(input.addMailboxIds ?? []);
           const remove = new Set(input.removeMailboxIds ?? []);
@@ -403,7 +443,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
           lock.release();
         }
       } catch (error) {
-        throw providerError("iCloud Mail", error);
+        throw providerError("mail", error);
       } finally {
         if (connected) await client.logout();
       }
@@ -417,7 +457,15 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         calendar,
         objectUrls: [remoteEventId],
       });
-      if (!existing?.data) throw new ConnectorError("The iCloud event no longer exists.", 404);
+      if (!existing?.data) {
+        throw new ConnectorError({
+          category: "not_found",
+          code: "icloud_event_not_found",
+          disposition: "operator",
+          message: "The iCloud event no longer exists.",
+          status: 404,
+        });
+      }
       const data = updateEventDocument(String(existing.data), input);
       const response = await client.updateCalendarObject({
         calendarObject: {
@@ -426,7 +474,15 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
           url: remoteEventId,
         },
       });
-      if (!response.ok) throw new ConnectorError("iCloud rejected the calendar event update.", 502);
+      if (!response.ok) {
+        throw new ConnectorError({
+          category: "rejected",
+          code: "icloud_calendar_update_rejected",
+          disposition: "operator",
+          message: "iCloud rejected the calendar event update.",
+          status: 502,
+        });
+      }
       const updatedEtag = response.headers.get("etag") ?? existing.etag;
       return normalizeCalendarObject(
         { data, ...(updatedEtag ? { etag: updatedEtag } : {}), url: remoteEventId },
@@ -456,11 +512,27 @@ function normalizeCalendarObject(
 ): NormalizedRemoteEvent {
   const root = new ICAL.Component(ICAL.parse(object.data));
   const component = root.getFirstSubcomponent("vevent");
-  if (!component) throw new ConnectorError("iCloud returned an invalid calendar event.", 502);
+  if (!component) {
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "icloud_event_invalid",
+      disposition: "operator",
+      message: "iCloud returned an invalid calendar event.",
+      status: 502,
+    });
+  }
   const event = new ICAL.Event(component);
   const eventZone = event.startDate.zone;
   /* v8 ignore next -- ical.js always assigns a zone to a parsed event time */
-  if (!eventZone) throw new ConnectorError("iCloud returned an invalid event time zone.", 502);
+  if (!eventZone) {
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "icloud_event_timezone_invalid",
+      disposition: "operator",
+      message: "iCloud returned an invalid event time zone.",
+      status: 502,
+    });
+  }
   const eventTimezone = eventZone.tzid;
   const status = String(component.getFirstPropertyValue("status") ?? "confirmed").toLowerCase();
   const recurrence = component.getAllProperties("rrule").map((property) => {
@@ -502,7 +574,15 @@ function eventDocument(uid: string, input: CreateEventInput): string {
 function updateEventDocument(data: string, input: UpdateEventInput): string {
   const root = new ICAL.Component(ICAL.parse(data));
   const component = root.getFirstSubcomponent("vevent");
-  if (!component) throw new ConnectorError("The iCloud event is invalid.", 502);
+  if (!component) {
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "icloud_event_document_invalid",
+      disposition: "operator",
+      message: "The iCloud event is invalid.",
+      status: 502,
+    });
+  }
   applyEvent(new ICAL.Event(component), input);
   return root.toString();
 }
@@ -554,12 +634,8 @@ function imapAddresses(
   return (value ?? []).map(mailAddress);
 }
 
-function providerError(service: string, error: unknown): ConnectorError {
-  if (error instanceof ConnectorError) return error;
-  return new ConnectorError(
-    `${service} could not connect. Check the Apple Account email and app-specific password.`,
-    401,
-  );
+function providerError(service: "calendar" | "mail", error: unknown): ConnectorError {
+  return classifyICloudError(service, error);
 }
 
 function fetchOptions(operation?: ProviderOperationOptions): {

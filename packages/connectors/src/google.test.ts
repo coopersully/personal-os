@@ -1,6 +1,6 @@
 import { simpleParser } from "mailparser";
+import { ConnectorError } from "./failures.js";
 import {
-  ConnectorError,
   createGoogleConnector,
   MailSendPreAcceptanceError,
   projectGmailAttachments,
@@ -738,9 +738,12 @@ describe("Google Calendar connector", () => {
   it("surfaces provider, synchronization, and malformed-event failures", async () => {
     const google = connector(queued(new Response("unavailable", { status: 503 })));
     await expect(google.getProfile(fresh)).rejects.toMatchObject({
+      category: "temporary",
+      code: "google_temporary_failure",
+      disposition: "retry",
       name: "ConnectorError",
       status: 503,
-      message: expect.stringContaining("unavailable"),
+      message: "Google is temporarily unavailable.",
     });
     await expect(
       connector(queued(response({ items: [] }))).syncCalendar(fresh, "primary", null),
@@ -803,7 +806,13 @@ describe("Google Calendar connector", () => {
         allDay: false,
       }),
     ).rejects.toThrow("invalid dates");
-    const error = new ConnectorError("x", 418);
+    const error = new ConnectorError({
+      category: "rejected",
+      code: "test_rejected",
+      disposition: "operator",
+      message: "Rejected.",
+      status: 418,
+    });
     expect(error.name).toBe("ConnectorError");
     expect(error.status).toBe(418);
   });

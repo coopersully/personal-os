@@ -53,7 +53,12 @@ export function financeAgentAccessReadiness({
   const staleAccounts = setup.data.ledgerHealth.staleAccounts;
   return [
     {
-      ...(accountCount === 0 ? { action: { label: "Open Finances", to: "/finances" } } : {}),
+      ...(accountCount === 0
+        ? {
+            action: { label: "Open Finances", to: "/finances" },
+            nextStep: "Connect a Finance account",
+          }
+        : {}),
       complete: accountCount > 0,
       description: `${accountCount} Finance account${accountCount === 1 ? "" : "s"}${staleAccounts > 0 ? ` · ${staleAccounts} stale` : ""}`,
       title: "Finance material",
@@ -62,6 +67,9 @@ export function financeAgentAccessReadiness({
     {
       complete: availableWorkflows > 0,
       description: `${availableWorkflows} guidance or review workflow${availableWorkflows === 1 ? "" : "s"} available · ${setup.data.reviewSummary.count} item${setup.data.reviewSummary.count === 1 ? "" : "s"} ${setup.data.reviewSummary.count === 1 ? "needs" : "need"} signed-in review.`,
+      ...(availableWorkflows === 0
+        ? { nextStep: "Set up a Finance guidance or review workflow" }
+        : {}),
       title: "Finance workflow",
     },
     attentionReadiness("Finances", attention),

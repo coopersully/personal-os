@@ -257,6 +257,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     },
   });
   const assistant = createAssistantService({
+    appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
     now,
     profileRequiresApproval: (domain) => domain === "finances",
@@ -291,7 +292,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   });
   const agentSkillRevision = dependencies.config.agentSkillRevision ?? officialAgentSkill.revision;
   const agentSkillSourceUrl =
-    dependencies.config.agentSkillSourceUrl ?? officialAgentSkill.sourceUrl;
+    dependencies.config.agentSkillSourceUrl ??
+    new URL(officialAgentSkill.sourcePath, dependencies.config.appBaseUrl).href;
   const agentSkillVersion = dependencies.config.agentSkillVersion ?? officialAgentSkill.version;
   const agentConnectionGuide: AgentConnectionGuide = {
     domains: assistantDomains.map((domain) => ({
@@ -303,12 +305,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     mcpUrl: dependencies.config.mcpResourceUrl ?? `${dependencies.config.apiBaseUrl}/mcp`,
     skill: {
       displayName: "Ilo Guided Setup",
-      installPrompt: `Install Ilo Guided Setup v${agentSkillVersion} from ${agentSkillSourceUrl}. The published source revision is ${agentSkillRevision}. Make it available as $ilo-setup, then tell me when it is ready.`,
+      installPrompt: `Install the ilo-setup skill from ${agentSkillSourceUrl}.`,
       invocation: "$ilo-setup",
       name: "ilo-setup",
       revision: agentSkillRevision,
       setupPrompt:
-        "Use $ilo-setup to inspect my connected Ilo domains and run the shortest useful setup interview.",
+        "Set up Ilo for me. Start with get_ilo_context, then call get_ilo_setup and do the work it assigns before asking me for input.",
       sourceUrl: agentSkillSourceUrl,
       version: agentSkillVersion,
     },

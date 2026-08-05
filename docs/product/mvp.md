@@ -64,10 +64,11 @@ provider internals.
 - Versioned domain preference profiles, cross-domain attention items, source-aware multi-inbox Mail
   setup, bounded exact Mail-rule previews with drift-checked activation, durable Google Mail
   retention work with exact provider reconciliation, Finance readiness and proposal-first review
-  workflows, and an installable guided-setup skill for scoped MCP hosts.
+  workflows, and a server-owned setup plan for scoped MCP hosts.
 - A deployment-aware Agent access handoff with remote MCP OAuth, readable
-  consent, an immutable versioned skill-install request, core-domain readiness,
-  starter prompts, revocation, and advanced personal-token fallback.
+  consent, semantic setup steps, observed completion evidence, core-domain
+  readiness, an optional immutable skill reference, revocation, and advanced
+  personal-token fallback.
 - Unified agenda and calendar views.
 - Current conditions in Today, preferring transient device location after the
   browser grants permission and falling back to an account-saved place selected
@@ -127,9 +128,10 @@ The MVP is complete only when all of the following are demonstrated:
    review, and an enabled `approved_rule`. Archive and recoverable Trash cross a durable bounded
    handoff, revalidate authorization at execution time, and reconcile uncertain provider effects
    before replay; permanent deletion remains unavailable.
-7. A person can copy the deployed MCP endpoint and skill install request,
-   authorize a remote agent with visible scoped consent, start the Mail setup
-   interview, and revoke the host from Settings.
+7. A person can authorize a remote agent from the deployed MCP endpoint with
+   visible scoped consent. The host can call `get_ilo_setup`, perform the safe
+   Mail setup work it assigns, return for signed-in approval, verify completion,
+   and be revoked from Settings without requiring a separately installed skill.
 8. A Finance-scoped agent can inspect guided-setup readiness, save only a
    guidance draft, and prepare read-scoped categorization proposals. A signed-in
    person activates guidance and applies ledger/review mutations; the agent

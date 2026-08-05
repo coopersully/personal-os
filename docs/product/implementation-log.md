@@ -2,6 +2,21 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-02 — Agent-owned setup protocol
+
+- Added one authenticated, server-owned setup plan with stable semantic steps,
+  observed connection evidence, exact domain scope, required tools, approval
+  ownership, and honest current/blocked/complete state.
+- Exposed the plan through `get_ilo_setup` so a connected agent can inspect Ilo,
+  ask only unresolved questions, save a draft, preserve signed-in approval
+  boundaries, and re-read the plan after every state change.
+- Reduced Agent access to the unavoidable connection handoff plus supervised
+  agent-owned setup. Skill installation and copied procedural prompts are now
+  optional protocol details rather than required user work.
+- Published the optional compatibility reference as v0.2.0 on Ilo's immutable
+  website path and added narrow migration from the prior v0.1.0 website release
+  and recognized official GitHub sources.
+
 ## 2026-07-29 — Reproducible agent handoff and core-domain readiness
 
 - Pinned the official `ilo-setup` v0.1.0 source to one Git commit and added a

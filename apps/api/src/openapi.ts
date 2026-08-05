@@ -309,6 +309,18 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/assistant/setup-status": {
         get: { security, responses: { 200: { description: "Agent setup status" } } },
       },
+      "/v1/assistant/context": {
+        get: {
+          security,
+          responses: { 200: { description: "Authenticated Ilo agent context" } },
+        },
+      },
+      "/v1/assistant/setup-plan": {
+        get: {
+          security,
+          responses: { 200: { description: "Current server-owned agent setup plan" } },
+        },
+      },
       "/v1/assistant/connection-guide": {
         get: { security, responses: { 200: { description: "Agent connection guide" } } },
       },

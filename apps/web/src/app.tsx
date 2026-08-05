@@ -150,6 +150,18 @@ import {
 } from "@/components/auth-fields";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import {
+  EventCard,
+  EventCardAside,
+  EventCardBody,
+  EventCardContent,
+  EventCardDescription,
+  EventCardFooter,
+  EventCardIndicator,
+  EventCardPrimaryAction,
+  EventCardTime,
+  EventCardTitle,
+} from "@/components/event-card";
+import {
   Alert as ShadcnAlert,
   AlertAction as ShadcnAlertAction,
   AlertDescription as ShadcnAlertDescription,
@@ -169,7 +181,6 @@ import {
   CardAction as ShadcnCardAction,
   CardContent as ShadcnCardContent,
   CardDescription as ShadcnCardDescription,
-  CardFooter as ShadcnCardFooter,
   CardHeader as ShadcnCardHeader,
   CardTitle as ShadcnCardTitle,
 } from "@/components/ui/card";
@@ -275,6 +286,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { api, errorMessage, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { InlineError, PageLoading } from "./components/async-state.js";
+import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
   getWorkspaceCalendarEntry,
   workspaceCalendarSummary,
@@ -313,6 +325,7 @@ import {
 import { AgentAccessSettings } from "./features/settings/agent-access.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
 import { SetupPage } from "./features/setup/page.js";
+import { tasksNavigationItem } from "./features/tasks/manifest.js";
 import {
   TaskRow,
   TasksCreateButton,
@@ -381,14 +394,18 @@ type WorkspacePreview = {
   path: string;
 };
 
+const todayNavigationItem: NavigationItemDefinition = {
+  icon: PanelTop,
+  label: "Today",
+  path: "/today",
+};
+
 const planNavigationItems: NavigationItemDefinition[] = [
-  { icon: PanelTop, label: "Today", path: "/today" },
+  todayNavigationItem,
   calendarNavigationItem,
   {
-    icon: ListChecks,
+    ...tasksNavigationItem,
     items: [{ icon: ListTodo, label: "Reminders", path: "/reminders" }],
-    label: "Tasks",
-    path: "/tasks",
   },
 ];
 
@@ -403,10 +420,15 @@ const navigationGroups: NavigationGroupDefinition[] = [
   { items: [mailNavigationItem, financesNavigationItem], label: "Workspace" },
 ];
 
+const todayNavigationGroups: NavigationGroupDefinition[] = [
+  { items: [todayNavigationItem], label: "Plan" },
+  { items: lifeNavigationItems, label: "Personal" },
+];
+
 const workspaceShortcuts: WorkspaceDefinition[] = [
   { icon: PanelTop, label: "Today at a Glance", path: "/today" },
   calendarNavigationItem,
-  { icon: ListChecks, label: "Tasks", path: "/tasks" },
+  tasksNavigationItem,
   mailNavigationItem,
   financesNavigationItem,
 ];
@@ -418,7 +440,7 @@ const accountNavigationItems: NavigationItemDefinition[] = [
 ];
 
 const mobileNavigationItems: NavigationItemDefinition[] = [
-  ...planNavigationItems.flatMap((item) => [{ ...item, items: undefined }, ...(item.items ?? [])]),
+  ...planNavigationItems.flatMap(({ items, ...item }) => [item, ...(items ?? [])]),
   mailNavigationItem,
 ];
 
@@ -632,14 +654,19 @@ function CredentialsScreen() {
             to the agents you trust.
           </p>
         </div>
-        <div className="material-demo" aria-hidden="true">
-          <span className="material-demo__time">09:30</span>
-          <span className="material-demo__line" />
-          <div>
-            <b>Design review</b>
-            <small>Product calendar · 45 min</small>
-          </div>
-        </div>
+        <EventCard aria-hidden="true" className="relative z-[1] max-w-[520px]" tone="inverse">
+          <EventCardContent>
+            <EventCardTime>09:30</EventCardTime>
+            <EventCardIndicator />
+            <EventCardBody>
+              <EventCardTitle>Design review</EventCardTitle>
+              <EventCardDescription>Product calendar · 45 min</EventCardDescription>
+            </EventCardBody>
+            <EventCardAside>
+              <CalendarDays />
+            </EventCardAside>
+          </EventCardContent>
+        </EventCard>
       </section>
       <section className="auth-form-wrap">
         <form className="auth-form" onSubmit={submit}>
@@ -1097,7 +1124,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             ) : sidebarMode === "mail" ? (
               <MailFeatureSidebar onNavigate={closeMobileMenu} />
             ) : (
-              navigationGroups.map((group) => (
+              (isTodayWorkspace ? todayNavigationGroups : navigationGroups).map((group) => (
                 <ShadcnSidebarGroup key={group.label}>
                   <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
                   <ShadcnSidebarGroupContent>
@@ -1263,7 +1290,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             type="button"
           >
             <MoreHorizontal aria-hidden="true" size={19} />
-            <span>More</span>
+            <span className="nav-item__label">More</span>
           </button>
         </nav>
         {editor?.kind === "reminder" && (
@@ -1419,6 +1446,7 @@ function NavigationItem({
   onNavigate,
   path,
 }: NavigationItemDefinition & { onNavigate?: () => void }) {
+  const workspaceId = workspaceIdForPath(path);
   return (
     <NavLink
       className={({ isActive }) => `nav-item${isActive ? " nav-item--active" : ""}`}
@@ -1428,8 +1456,12 @@ function NavigationItem({
     >
       {({ isActive }) => (
         <>
-          <NavigationIcon active={isActive} fallback={Icon} label={label} size={19} />
-          <span>{label}</span>
+          {workspaceId ? (
+            <WorkspaceIcon size="sm" workspace={workspaceId} />
+          ) : (
+            <NavigationIcon active={isActive} fallback={Icon} label={label} size={19} />
+          )}
+          <span className="nav-item__label">{label}</span>
           {badge ? (
             <b aria-hidden="true" className="nav-item__badge">
               {badge}
@@ -1452,11 +1484,16 @@ function SidebarNavigationItem({
 }: NavigationItemDefinition & { isActive?: boolean; onNavigate: () => void }) {
   const location = useLocation();
   const isActive = explicitIsActive ?? location.pathname === path;
+  const workspaceId = workspaceIdForPath(path);
   return (
     <ShadcnSidebarMenuItem>
       <ShadcnSidebarMenuButton asChild className={badge ? "pr-14" : undefined} isActive={isActive}>
         <NavLink onClick={onNavigate} to={path}>
-          <NavigationIcon active={isActive} fallback={Icon} label={label} />
+          {workspaceId ? (
+            <WorkspaceIcon size="sm" workspace={workspaceId} />
+          ) : (
+            <NavigationIcon active={isActive} fallback={Icon} label={label} />
+          )}
           <span>{label}</span>
         </NavLink>
       </ShadcnSidebarMenuButton>
@@ -1669,7 +1706,7 @@ function WorkspaceSwitcher({
       .flatMap((item) => [item, ...(item.items ?? [])])
       .find((item) => item.path === pathname)?.label ??
     "Home OS";
-  const WorkspaceIcon = workspace?.icon;
+  const activeWorkspaceId = workspace ? workspaceIdForPath(workspace.path) : undefined;
   const activeIndex = Math.max(
     0,
     workspaceShortcuts.findIndex((item) => item.path === workspace?.path),
@@ -1765,7 +1802,11 @@ function WorkspaceSwitcher({
               className="sidebar__workspace-trigger w-full justify-start"
               variant="secondary"
             >
-              {WorkspaceIcon ? <WorkspaceIcon aria-hidden="true" /> : <LogoMark compact />}
+              {activeWorkspaceId ? (
+                <WorkspaceIcon size="sm" workspace={activeWorkspaceId} />
+              ) : (
+                <LogoMark compact />
+              )}
               <span>{section}</span>
               <ChevronDown aria-hidden="true" className="ml-auto" data-icon="inline-end" />
             </ShadcnButton>
@@ -1829,6 +1870,7 @@ function WorkspaceMenuItem({
 }) {
   const { icon: Icon, label, path } = item;
   const isActive = workspaceForPath(pathname)?.path === path;
+  const workspaceId = workspaceIdForPath(path);
   const summaryId = `workspace-switcher-summary-${path.slice(1)}`;
   return (
     <DropdownMenuItem asChild className="workspace-switcher__item" data-active={isActive}>
@@ -1841,7 +1883,11 @@ function WorkspaceMenuItem({
         onPointerMove={() => onPreview(item, index)}
         to={path}
       >
-        <Icon aria-hidden="true" />
+        {workspaceId ? (
+          <WorkspaceIcon size="sm" workspace={workspaceId} />
+        ) : (
+          <Icon aria-hidden="true" />
+        )}
         <span className="workspace-switcher__copy">
           <span>{label}</span>
           <small id={summaryId}>{summary}</small>
@@ -2055,7 +2101,7 @@ function TodayPage({
             {agenda.now.length > 0 ? (
               <>
                 {agenda.now.map((event) => (
-                  <EventCard
+                  <TodayEventCard
                     currentTime={currentTime}
                     event={event}
                     key={event.id}
@@ -2066,7 +2112,7 @@ function TodayPage({
                 {agenda.next ? (
                   <div className="today-moment-block__then">
                     <p className="eyebrow">Up next</p>
-                    <EventCard
+                    <TodayEventCard
                       event={agenda.next}
                       onEdit={() =>
                         setEditor({ event: agenda.next as CalendarEvent, kind: "event" })
@@ -2077,7 +2123,7 @@ function TodayPage({
                 ) : null}
               </>
             ) : agenda.next ? (
-              <EventCard
+              <TodayEventCard
                 event={agenda.next}
                 onEdit={() => setEditor({ event: agenda.next as CalendarEvent, kind: "event" })}
                 timeZone={user.planningTimezone}
@@ -2099,7 +2145,7 @@ function TodayPage({
             <div className="today-all-day">
               <p className="eyebrow">All day</p>
               {agenda.allDay.map((event) => (
-                <EventCard
+                <TodayEventCard
                   event={event}
                   key={event.id}
                   onEdit={() => setEditor({ event, kind: "event" })}
@@ -2112,7 +2158,7 @@ function TodayPage({
             agenda.laterToday
               .filter((event) => event.id !== agenda.next?.id)
               .map((event) => (
-                <EventCard
+                <TodayEventCard
                   event={event}
                   key={event.id}
                   onEdit={() => setEditor({ event, kind: "event" })}
@@ -6734,7 +6780,7 @@ function TaskGroup({
   );
 }
 
-function EventCard({
+function TodayEventCard({
   currentTime,
   event,
   onEdit,
@@ -6755,42 +6801,40 @@ function EventCard({
     ? conferenceProviderLabel(event.conferenceUrl)
     : null;
   return (
-    <ShadcnCard className="gap-0 py-0" size="sm">
-      <ShadcnCardContent className="grid grid-cols-[auto_3px_minmax(0,1fr)_auto] items-stretch gap-3 py-3">
-        <span className="self-center font-mono text-xs text-muted-foreground">
+    <EventCard>
+      <EventCardContent>
+        <EventCardTime>
           {event.allDay ? "All day" : formatTime(event.startsAt, timeZone)}
-        </span>
-        <span aria-hidden="true" className="rounded-full bg-primary" />
-        <ShadcnButton
-          aria-label={`${eventLabel}. Open details`}
-          className="h-auto min-w-0 justify-start px-0 text-left hover:bg-transparent"
-          onClick={onEdit}
-          type="button"
-          variant="ghost"
-        >
-          <span className="flex min-w-0 flex-col items-start gap-0.5">
-            <strong className="flex w-full items-center gap-1 truncate">
-              {event.title}
+        </EventCardTime>
+        <EventCardIndicator />
+        <EventCardPrimaryAction aria-label={`${eventLabel}. Open details`} onClick={onEdit}>
+          <EventCardBody>
+            <EventCardTitle>
+              <span className="truncate">{event.title}</span>
               {event.blocks.length > 0 ? (
-                <LockKeyhole aria-label="Blocks another calendar" className="shrink-0" />
+                <LockKeyhole aria-label="Blocks another calendar" />
               ) : null}
-            </strong>
-            <span className="flex max-w-full items-center gap-1 truncate text-xs text-muted-foreground">
+            </EventCardTitle>
+            <EventCardDescription>
               {event.location ? (
-                <>
+                <span className="flex min-w-0 items-center gap-1">
                   <MapPin aria-hidden="true" />
-                  {event.location}
-                </>
+                  <span className="truncate">{event.location}</span>
+                </span>
               ) : (
                 `${formatTime(event.startsAt, timeZone)}–${formatTime(event.endsAt, timeZone)}`
               )}
-            </span>
-          </span>
-        </ShadcnButton>
-        <ConnectedServiceMark provider={event.provider} />
-      </ShadcnCardContent>
+            </EventCardDescription>
+          </EventCardBody>
+        </EventCardPrimaryAction>
+        {event.provider.toLowerCase() !== "local" ? (
+          <EventCardAside>
+            <ConnectedServiceMark provider={event.provider} />
+          </EventCardAside>
+        ) : null}
+      </EventCardContent>
       {isInProgress ? (
-        <ShadcnCardFooter className="flex-wrap justify-between gap-2 px-3 py-2">
+        <EventCardFooter>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ShadcnBadge variant="outline">
               <Clock3 aria-hidden="true" data-icon="inline-start" /> In progress
@@ -6807,9 +6851,9 @@ function EventCard({
               </a>
             </ShadcnButton>
           ) : null}
-        </ShadcnCardFooter>
+        </EventCardFooter>
       ) : null}
-    </ShadcnCard>
+    </EventCard>
   );
 }
 

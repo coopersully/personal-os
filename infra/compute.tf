@@ -234,6 +234,7 @@ resource "aws_ecs_task_definition" "mcp" {
     systemControls = []
     volumesFrom    = []
     environment = [
+      { name = "APP_BASE_URL", value = "https://${local.app_domain}" },
       { name = "HOST", value = "0.0.0.0" },
       { name = "PORT", value = "8788" },
       { name = "PERSONAL_OS_API_URL", value = "https://${local.api_domain}" },
@@ -241,6 +242,7 @@ resource "aws_ecs_task_definition" "mcp" {
       { name = "MCP_RATE_LIMIT_MAX_REQUESTS", value = "120" },
       { name = "MCP_RATE_LIMIT_WINDOW_SECONDS", value = "60" },
       { name = "MCP_TRUST_PROXY", value = "true" },
+      { name = "MCP_INCLUDE_COMPATIBILITY_TOOLS", value = "false" },
       { name = "MCP_PUBLIC_URL", value = "https://${local.mcp_domain}" },
       { name = "OAUTH_AUTHORIZATION_SERVER_URL", value = "https://${local.api_domain}" },
     ]

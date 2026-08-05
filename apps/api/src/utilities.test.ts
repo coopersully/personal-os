@@ -128,6 +128,9 @@ describe("pagination, errors, and OpenAPI", () => {
   it("publishes the configured API surface", () => {
     const document = createOpenApiDocument("https://api.example.com");
     expect(document.openapi).toBe("3.1.0");
+    expect(document.paths["/v1/assistant/setup-plan"].get.responses[200].description).toBe(
+      "Current server-owned agent setup plan",
+    );
     expect(document.servers).toEqual([{ url: "https://api.example.com" }]);
     expect(Object.keys(document.paths)).toContain("/v1/connectors/{id}/sync");
     expect(document.paths["/v1/calendars/commitments/preview"]).toEqual({

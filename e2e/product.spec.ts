@@ -17,6 +17,45 @@ test("the repository QA fixture login exposes representative workspace data", as
   await expect(page.getByRole("row", { name: /Sq Unknown Popup Uncategorized/ })).toBeVisible();
 });
 
+test("agent setup is server-owned, collapsible, and served by ilo", async ({ baseURL, page }) => {
+  await page.goto("/");
+  await page.getByLabel("Email").fill("demo+full@ilo.test");
+  await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
+  await page.getByRole("button", { name: "Open ilo" }).click();
+  await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
+  await page.goto("/settings?section=agents");
+  await expect(page.getByRole("heading", { name: "Connect an agent", exact: true })).toBeVisible();
+
+  const connectTrigger = page.getByRole("button", {
+    name: /Connect an agent/,
+  });
+  const setupTrigger = page.getByRole("button", {
+    name: /Let the agent set up Ilo/,
+  });
+  const stepTriggers = [connectTrigger, setupTrigger];
+  for (const trigger of stepTriggers) {
+    const initialState = await trigger.getAttribute("aria-expanded");
+    await trigger.click();
+    await expect(trigger).toHaveAttribute(
+      "aria-expanded",
+      initialState === "true" ? "false" : "true",
+    );
+  }
+
+  if ((await setupTrigger.getAttribute("aria-expanded")) !== "true") await setupTrigger.click();
+  await page.getByRole("button", { name: "Setup protocol details" }).click();
+  const source = page.getByRole("link", { name: "View skill source" });
+  await expect(source).toHaveAttribute("href", `${baseURL}/skills/ilo-setup/v0.2.0/SKILL.md`);
+  const sourceHref = await source.getAttribute("href");
+  if (!sourceHref) throw new Error("The Ilo setup skill did not expose a source URL.");
+  const sourceResponse = await page.request.get(sourceHref);
+  expect(sourceResponse.ok()).toBe(true);
+  expect(await sourceResponse.text()).toContain("name: ilo-setup");
+  expect(
+    await page.locator("html").evaluate((element) => element.scrollWidth <= innerWidth + 1),
+  ).toBe(true);
+});
+
 test("a person and an agent share one reminder and calendar surface", async ({
   page,
 }, testInfo) => {
@@ -26,8 +65,19 @@ test("a person and an agent share one reminder and calendar surface", async ({
   const eventTitle = `Material event ${suffix}`;
   const mobile = testInfo.project.name === "mobile-chromium";
   const primaryNavigation = page.getByRole("navigation", {
-    name: mobile ? "Primary" : "Plan",
+    name: "Primary",
   });
+  const openWorkspace = async (name: "Calendar" | "Tasks") => {
+    if (mobile) {
+      await primaryNavigation.getByRole("link", { name, exact: true }).click();
+      return;
+    }
+    await page.getByRole("button", { name: "Switch workspace" }).click();
+    await page
+      .getByRole("menu", { name: "Switch workspace" })
+      .getByRole("menuitem", { name, exact: true })
+      .click();
+  };
   const returnToApp = async () => {
     if (mobile) await page.getByRole("button", { name: "Open Navigation" }).click();
     await page.getByRole("button", { name: "Switch workspace" }).click();
@@ -77,11 +127,18 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByLabel("What needs attention?").fill(reminderTitle);
   await page.getByLabel("Notes").fill("Created from the direct manipulation surface.");
   await page.getByRole("button", { name: "Create reminder" }).click();
-  await primaryNavigation.getByRole("link", { name: "Reminders" }).click();
+  if (mobile) {
+    await primaryNavigation.getByRole("link", { name: "Reminders", exact: true }).click();
+  } else {
+    await openWorkspace("Tasks");
+    await page
+      .getByRole("complementary", { name: "Tasks Sidebar" })
+      .getByRole("link", { name: "Reminders", exact: true })
+      .click();
+  }
   await expect(page.getByText(reminderTitle)).toBeVisible();
 
   await returnToApp();
-  await primaryNavigation.getByRole("link", { name: "Today" }).click();
   const planningDate = await page.locator("h1 time").getAttribute("datetime");
   if (!planningDate) throw new Error("Today heading did not expose its planning date.");
   await page.getByRole("button", { name: "Add", exact: true }).click();
@@ -93,8 +150,13 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByRole("checkbox", { name: "All day" }).check();
   await page.getByRole("button", { name: "Create event" }).click();
   await expect(page.getByText(eventTitle)).toBeVisible();
+  const todayLayout = await page.evaluate(() => ({
+    documentWidth: document.documentElement.scrollWidth,
+    viewportWidth: window.innerWidth,
+  }));
+  expect(todayLayout.documentWidth).toBeLessThanOrEqual(todayLayout.viewportWidth + 1);
 
-  await primaryNavigation.getByRole("link", { name: "Calendar" }).click();
+  await openWorkspace("Calendar");
   if (mobile) {
     await expect(
       page.getByRole("radio", { name: "Day", exact: true, checked: true }),
@@ -169,8 +231,19 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
   if (mobile) await page.getByRole("button", { name: "More" }).click();
   await settingsSidebar.getByRole("link", { name: "Agent access" }).click();
-  await expect(page.getByRole("heading", { name: "Connect an agent" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect an agent", exact: true })).toBeVisible();
+  const connectionTrigger = page.getByRole("button", { name: /Connect an agent/ });
+  if ((await connectionTrigger.getAttribute("aria-expanded")) !== "true") {
+    await connectionTrigger.click();
+  }
+  const agentSetupTrigger = page.getByRole("button", {
+    name: /Let the agent set up Ilo/,
+  });
+  if ((await agentSetupTrigger.getAttribute("aria-expanded")) !== "true") {
+    await agentSetupTrigger.click();
+  }
   await expect(page.getByRole("textbox", { name: "Ilo MCP URL" })).toHaveValue(/\/mcp$/);
+  await page.getByRole("button", { name: "Setup protocol details" }).click();
   await expect(page.getByRole("link", { name: "View skill source" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Mail", checked: true })).toBeVisible();
   await page.getByRole("button", { name: "Set up a local token" }).click();

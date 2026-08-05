@@ -25,8 +25,8 @@
 | `MCP_PUBLIC_URL` | Canonical public MCP origin, for example `https://mcp.example.com` |
 | `MCP_RESOURCE_URL` | Canonical MCP resource URI, normally `https://mcp.example.com/mcp` |
 | `MCP_INTERNAL_SECRET` | Random 32+ character secret shared only by the API and MCP containers |
-| `AGENT_SKILL_SOURCE_URL` | Public install source for the Ilo guided-setup skill. It must contain the configured immutable revision. |
-| `AGENT_SKILL_VERSION` | Semantic version advertised for the exact guided-setup artifact |
+| `AGENT_SKILL_SOURCE_URL` | Optional public source override for the Ilo setup compatibility reference. Blank derives the versioned website URL from `APP_BASE_URL`; an override must contain the configured immutable revision. |
+| `AGENT_SKILL_VERSION` | Semantic version advertised for the exact optional setup reference |
 | `AGENT_SKILL_REVISION` | Immutable source identifier embedded in `AGENT_SKILL_SOURCE_URL`, such as a Git commit or release digest |
 | `REGISTRATION_MODE` | Must be `invite` in production; the API refuses to boot in open mode |
 | `OWNER_EMAILS` | Comma-separated email addresses allowed to issue invitations |
@@ -83,15 +83,18 @@ The MCP image binds to all container interfaces, requires an ilo bearer token fo
 The public MCP endpoint publishes protected-resource metadata and directs clients to ilo's OAuth authorization server. A person signs in to ilo once and consents to the MCP client; Google, iCloud, and other connected services remain internal to that ilo account. The consent screen names the registered client and translates every requested scope into a user-facing permission. OAuth clients use dynamic registration, exact redirect-URI matching, S256 PKCE, five-minute one-time authorization codes, one-hour MCP audience-bound access tokens, and rotating refresh tokens. Do not reuse `MCP_INTERNAL_SECRET` outside the API and MCP containers, and use distinct values per environment.
 
 The authenticated connection-guide API derives its MCP URL from
-`MCP_RESOURCE_URL` and its skill install link from
-`AGENT_SKILL_SOURCE_URL`. It publishes `AGENT_SKILL_VERSION` and
-`AGENT_SKILL_REVISION` beside that link and refuses a source URL that does not
-contain its revision. The defaults identify the official `ilo-setup` v0.1.0
-directory at one Git commit rather than the mutable `main` branch. A
-self-hosted deployment must publish its own public, immutable artifact URL and
-matching version/revision as one release unit. Keep the MCP and skill addresses
-aligned with the deployed environment so Settings never teaches a host to use a
-staging, local, or changing endpoint.
+`MCP_RESOURCE_URL` and its optional skill-reference link from
+`APP_BASE_URL` plus the checked release path when `AGENT_SKILL_SOURCE_URL` is
+blank. It publishes `AGENT_SKILL_VERSION` and `AGENT_SKILL_REVISION` beside that
+link and refuses an override that does not contain its revision. The web build
+copies the repository-owned skill tree to
+`/skills/ilo-setup/v0.2.0/`, with `SKILL.md` as the advertised entrypoint. A
+self-contained release path is served read-only and cached as immutable by the
+production web edge; publishing changed bytes requires a new release path. A
+self-hosted deployment may publish its own public, immutable artifact URL and
+matching version/revision as one release unit. Keep the app, MCP, and optional
+skill override aligned with the deployed environment so Settings never teaches
+a host to use a staging, local, or changing endpoint.
 
 The checked release identity lives in
 `packages/domain/src/ilo-setup-release.json`. Runtime defaults read that
@@ -99,16 +102,17 @@ manifest, and `pnpm lint` fails if `.env.example` or Compose advertises a
 different tuple. Change the manifest and both deployment projections together
 for every release.
 
-### Upgrade from the mutable official URL
+### Upgrade from an earlier official release
 
-Older local installs may retain the former authoritative value
-`https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup` in
-`.env`. Setup and Start recognize only that exact legacy official line when
-skill version and revision are absent or already match the official release.
-They atomically replace it with the manifest release tuple before synchronizing
-worktrees. The migration is idempotent. The API applies the same narrow
-compatibility normalization so a container or production process that does not
-use the Codex lifecycle can boot during rollout.
+Older local installs may retain either former authoritative GitHub URL in
+`.env`: the mutable `main` directory, the first commit-pinned directory, or the
+Ilo-hosted v0.1.0 path. Setup and Start recognize only those exact legacy
+official values or a blank derived source paired with known legacy metadata.
+They remove the override and write the current manifest version/revision so the
+URL follows the environment's canonical `APP_BASE_URL`. The migration is
+idempotent. The API applies the same narrow compatibility normalization so a
+container or production process that does not use the Codex lifecycle can boot
+during rollout.
 
 Custom URLs, including custom URLs ending in `/main` or `/latest`, are never
 rewritten as an Ilo release. Deployments with a custom source must set all three
@@ -117,25 +121,28 @@ configuration continues to fail startup. A legacy official URL paired with
 explicit, conflicting version metadata is also preserved for validation rather
 than silently overwritten.
 
-### Guided-setup skill distribution boundary
+### Optional setup-reference distribution boundary
 
-Ilo publishes the configured artifact identity but does not fetch or install it.
-The agent host performs one public HTTPS read after the person copies the
-request. No Ilo credential crosses that boundary, and copying the request is not
-an installation commit point. A denied, unreachable, rate-limited, or malformed
-source must fail in the host before `$ilo-setup` is available; it cannot grant
-more Ilo scope or activate a profile or rule. The host owns its download
-timeout, cache, and installation error, while the deployment owner repairs the
-published artifact or rolls the guide back to a prior immutable release.
+Ilo setup is driven by the authenticated `get_ilo_setup` MCP tool. The hosted
+skill is an optional compatibility reference, not a prerequisite or completion
+signal. Ilo publishes its configured artifact identity but does not fetch or
+install it. A host may read the versioned website tree over public HTTPS without
+an Ilo credential. A denied, unreachable, rate-limited, or malformed reference
+must not block a host that can call `get_ilo_setup`; it cannot grant more Ilo
+scope or activate a profile or rule. The host owns its download timeout, cache,
+and installation error, while the deployment owner repairs the published
+artifact or advances to a new immutable release.
 
 Configuration validation proves that the guide names a source, semantic
 version, and revision and that the URL embeds the revision. For the official
-release, the Git commit URL supplies immutable source identity. A custom server
-can still return different bytes at a version-looking URL, so local tests and
-API readiness do not prove custom-host immutability, public reachability, or
-compatible-host installation. Release evidence must separately record an HTTPS
-fetch from outside the runtime and one least-privileged install/invocation in a
-supported host.
+release, the versioned website path is an append-only release artifact copied
+from the repository skill tree during the web build. A server can still return
+different bytes at a version-looking URL, so local tests and API readiness do
+not prove immutability, public reachability, or compatible-host installation.
+Release evidence must separately record an HTTPS fetch from outside the runtime
+and one least-privileged `get_ilo_setup` invocation in a supported host. A skill
+install smoke is useful compatibility evidence, but it is not required setup
+evidence.
 
 Build with the public API address compiled into the PWA:
 

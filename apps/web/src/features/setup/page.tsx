@@ -10,7 +10,6 @@ import {
   CheckCircle2,
   Cloud,
   ExternalLink,
-  ListChecks,
   Mail,
   ShieldCheck,
   Volleyball,
@@ -39,37 +38,37 @@ import {
   ItemMedia,
   ItemTitle,
 } from "@/components/ui/item";
+import {
+  WorkspaceIcon,
+  type WorkspaceId,
+  workspaceIdentities,
+} from "@/components/workspace-identity";
 import { api, errorMessage } from "../../api.js";
 import { PlaidConnectButton } from "../finances/plaid-connect.js";
 
 const workspaceOptions: Array<{
   description: string;
-  icon: typeof CalendarDays;
   label: string;
-  value: AccountSetupWorkspace;
+  value: WorkspaceId & AccountSetupWorkspace;
 }> = [
   {
     description: "See commitments across every calendar.",
-    icon: CalendarDays,
-    label: "Calendar",
+    label: workspaceIdentities.calendar.label,
     value: "calendar",
   },
   {
     description: "Capture and plan locally from the start.",
-    icon: ListChecks,
-    label: "Tasks",
+    label: workspaceIdentities.tasks.label,
     value: "tasks",
   },
   {
     description: "Bring the conversations that need attention together.",
-    icon: Mail,
-    label: "Mail",
+    label: workspaceIdentities.mail.label,
     value: "mail",
   },
   {
     description: "Track accounts, spending, and decisions.",
-    icon: Banknote,
-    label: "Finances",
+    label: workspaceIdentities.finances.label,
     value: "finances",
   },
 ];
@@ -377,9 +376,9 @@ function WorkspacesStep({
       <CheckboxCardGroup
         aria-label="Workspaces to set up"
         onValuesChange={setSelected}
-        options={workspaceOptions.map(({ icon: Icon, ...option }) => ({
+        options={workspaceOptions.map((option) => ({
           ...option,
-          icon: <Icon />,
+          icon: <WorkspaceIcon size="lg" workspace={option.value} />,
         }))}
         values={selected}
       />
@@ -936,10 +935,5 @@ function SetupFooter({
 }
 
 function workspaceLabel(workspace: AccountSetupWorkspace) {
-  return {
-    calendar: "Calendar",
-    finances: "Finances",
-    mail: "Mail",
-    tasks: "Tasks",
-  }[workspace];
+  return workspaceIdentities[workspace].label;
 }

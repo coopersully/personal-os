@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { accessScopeSchema } from "./auth.js";
 import { idSchema, isoDateTimeSchema, semanticVersionSchema } from "./common.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
@@ -172,6 +173,90 @@ export const assistantSetupStatusSchema = z.object({
   ),
 });
 export type AssistantSetupStatus = z.infer<typeof assistantSetupStatusSchema>;
+
+export const iloAgentContextSchema = z.object({
+  access: z.object({
+    grantedScopes: z.array(accessScopeSchema),
+  }),
+  generatedAt: isoDateTimeSchema,
+  identity: z.object({
+    actorType: z.enum(["agent", "user"]),
+    displayName: z.string().min(1),
+    userId: idSchema,
+  }),
+  links: z.object({
+    activity: z.url(),
+    agentAccess: z.url(),
+    approvals: z.url(),
+    recovery: z.url(),
+    today: z.url(),
+  }),
+  readiness: assistantSetupStatusSchema,
+  time: z.object({
+    timestamp: isoDateTimeSchema,
+    timezone: z.string().min(1),
+  }),
+});
+export type IloAgentContext = z.infer<typeof iloAgentContextSchema>;
+
+export const assistantSetupStepIds = [
+  "connect_agent",
+  "learn_preferences",
+  "review_guidance",
+  "complete",
+] as const;
+export const assistantSetupStepIdSchema = z.enum(assistantSetupStepIds);
+export type AssistantSetupStepId = z.infer<typeof assistantSetupStepIdSchema>;
+
+export const assistantSetupPlanQuerySchema = z.object({
+  domain: assistantDomainSchema.optional(),
+  stepId: assistantSetupStepIdSchema.optional(),
+});
+export type AssistantSetupPlanQuery = z.infer<typeof assistantSetupPlanQuerySchema>;
+
+export const assistantSetupStepSchema = z.object({
+  completionEvidence: z.array(z.string().min(1)).max(20),
+  description: z.string().min(1),
+  id: assistantSetupStepIdSchema,
+  instructions: z.array(z.string().min(1)).max(20),
+  order: z.int().positive(),
+  owner: z.enum(["agent", "ilo", "person"]),
+  requiredTools: z.array(z.string().min(1)).max(20),
+  state: z.enum(["blocked", "current", "complete"]),
+  title: z.string().min(1),
+  userAction: z.string().min(1).nullable(),
+});
+export type AssistantSetupStep = z.infer<typeof assistantSetupStepSchema>;
+
+export const assistantSetupPlanSchema = z.object({
+  access: z.object({
+    canRead: z.boolean(),
+    canWrite: z.boolean(),
+  }),
+  connection: z.object({
+    lastObservedAt: isoDateTimeSchema.nullable(),
+    observed: z.boolean(),
+  }),
+  currentStepId: assistantSetupStepIdSchema,
+  domain: assistantDomainSchema,
+  nextAction: z.string().min(1),
+  profile: z.object({
+    approvedStatus: z.literal("active").nullable(),
+    approvedVersion: z.int().positive().nullable(),
+    pendingDraftVersion: z.int().positive().nullable(),
+    status: domainProfileStatusSchema.nullable(),
+    version: z.int().positive().nullable(),
+  }),
+  progress: z.object({
+    completed: z.int().nonnegative(),
+    total: z.int().positive(),
+  }),
+  protocolVersion: z.literal("1.0"),
+  selectedStepId: assistantSetupStepIdSchema,
+  status: z.enum(["blocked", "complete", "in_progress", "needs_connection", "needs_input"]),
+  steps: z.array(assistantSetupStepSchema).min(1),
+});
+export type AssistantSetupPlan = z.infer<typeof assistantSetupPlanSchema>;
 
 export const agentDomainSupportSchema = z.object({
   domain: assistantDomainSchema,

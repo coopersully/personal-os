@@ -33,6 +33,8 @@ History (alternate view)
   client-only search index.
 - Tasks expose Inbox, Next, Scheduled, and Completed as contextual destinations. Reminders expose
   Open and Completed.
+- Reminders remains reachable from the Tasks contextual sidebar as a related commitment surface;
+  it is not duplicated in Today’s sidebar or promoted to a top-level workspace.
 - The app-frame primary action creates the current material directly. A person on Tasks gets
   **New task**; a person on Reminders gets **New reminder**.
 - Completing, reopening, creating, editing, or removing material invalidates Tasks, Reminders,

@@ -56,6 +56,10 @@ The checked-in Codex environment exposes deterministic actions backed by one lif
 - **Verify** runs mirror checks, lint, types, coverage, every production build, and E2E acceptance tests.
 - **Build** builds all applications and packages, including the native desktop bundles.
 
+Playwright uses local web `5174` and API `8797` by default. When another local project owns either
+port, set `ILO_E2E_WEB_PORT` and `ILO_E2E_API_PORT`; the Playwright client and its isolated fixture
+servers consume the same overrides.
+
 The first environment setup installs the lockfile exactly and creates `.env` with a valid local encryption key only when the file is missing. Start remains attached to its action terminal so crashes are immediately visible; use Stop from another action to shut it down. All runtime state is kept under ignored `.codex/run/` PID and log directories.
 
 Linked worktrees copy the primary `.env` on setup and start, then load a generated, ignored `.env.codex.local` with a deterministic whole-set port shift. This keeps secrets authoritative in the primary checkout while allowing the primary and linked worktrees to run with separate ports, containers, and PostgreSQL volumes.

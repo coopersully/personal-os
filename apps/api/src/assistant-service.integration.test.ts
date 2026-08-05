@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  accessTokens,
   attentionItems,
   auditEvents,
   calendarAccounts,
@@ -98,6 +99,7 @@ describe.sequential("assistant setup service", () => {
       now: () => new Date("2026-07-28T15:00:00.000Z"),
     });
     service = createAssistantService({
+      appBaseUrl: "https://app.example.com",
       db: database.db,
       now: () => new Date("2026-07-28T15:00:00.000Z"),
       profileRequiresApproval: (domain) => domain === "finances",
@@ -156,8 +158,59 @@ describe.sequential("assistant setup service", () => {
     requestId: "assistant-request",
   });
 
+  it("returns authoritative agent identity, scopes, readiness, time, and work-surface links", async () => {
+    await expect(service.getContext(context().principal)).resolves.toMatchObject({
+      access: { grantedScopes: ["calendar:read", "mail:read", "mail:write"] },
+      generatedAt: "2026-07-28T15:00:00.000Z",
+      identity: { actorType: "agent", displayName: "Setup Test", userId },
+      links: {
+        activity: "https://app.example.com/activity",
+        agentAccess: "https://app.example.com/settings?section=agents",
+        approvals: "https://app.example.com/settings?section=agents",
+        recovery: "https://app.example.com/settings?section=agents",
+        today: "https://app.example.com/today",
+      },
+      readiness: { domains: expect.any(Array) },
+      time: { timestamp: "2026-07-28T15:00:00.000Z", timezone: "UTC" },
+    });
+  });
+
   it("stores versioned domain profiles and reports scoped setup status", async () => {
     await expect(service.getProfile(userId, "mail")).resolves.toBeNull();
+    await expect(
+      service.getSetupPlan(context().principal, { domain: "mail" }),
+    ).resolves.toMatchObject({
+      connection: { observed: true },
+      currentStepId: "learn_preferences",
+      status: "in_progress",
+    });
+    const humanPrincipal = { ...context().principal, actorType: "user" as const };
+    await expect(service.getSetupPlan(humanPrincipal, { domain: "mail" })).resolves.toMatchObject({
+      connection: { observed: false },
+      currentStepId: "connect_agent",
+      status: "needs_connection",
+    });
+    await database.db.insert(accessTokens).values({
+      lastUsedAt: new Date("2026-07-28T14:00:00.000Z"),
+      name: "Observed setup host",
+      scopes: ["mail:read", "mail:write"],
+      tokenHash: "observed-setup-host",
+      userId,
+    });
+    await expect(service.getSetupPlan(humanPrincipal, { domain: "mail" })).resolves.toMatchObject({
+      access: { canRead: true, canWrite: true },
+      connection: { lastObservedAt: "2026-07-28T14:00:00.000Z", observed: true },
+      currentStepId: "learn_preferences",
+    });
+    await expect(
+      service.getSetupPlan(
+        { ...context().principal, scopes: new Set(["mail:read" as const]) },
+        { domain: "mail" },
+      ),
+    ).resolves.toMatchObject({
+      access: { canRead: true, canWrite: false },
+      status: "blocked",
+    });
     const profile = await service.upsertProfile(
       {
         categories: [
@@ -186,6 +239,16 @@ describe.sequential("assistant setup service", () => {
       context(),
     );
     expect(profile).toMatchObject({ domain: "mail", status: "draft", version: 1 });
+    await expect(
+      service.getSetupPlan(context().principal, {
+        domain: "mail",
+        stepId: "review_guidance",
+      }),
+    ).resolves.toMatchObject({
+      currentStepId: "review_guidance",
+      selectedStepId: "review_guidance",
+      status: "needs_input",
+    });
     await expect(service.getProfile(userId, "mail")).resolves.toMatchObject({
       id: profile.id,
       version: 1,
@@ -240,6 +303,13 @@ describe.sequential("assistant setup service", () => {
         context(),
       ),
     ).resolves.toMatchObject({ status: "active", version: 2 });
+    await expect(
+      service.getSetupPlan(context().principal, { domain: "mail" }),
+    ).resolves.toMatchObject({
+      currentStepId: "complete",
+      progress: { completed: 4, total: 4 },
+      status: "complete",
+    });
     const humanApproved = await service.upsertProfile(
       {
         categories: profile.categories,

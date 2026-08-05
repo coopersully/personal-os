@@ -7,6 +7,7 @@ import {
   Edit3,
   Inbox,
   ListChecks,
+  ListTodo,
   type LucideIcon,
   Plus,
   Search,
@@ -77,36 +78,55 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
   const [searchParams] = useSearchParams();
   const view = taskViewFromParams(searchParams);
   return (
-    <SidebarGroup>
-      <SidebarGroupLabel>View</SidebarGroupLabel>
-      <SidebarGroupContent>
-        <nav aria-label="Task views">
-          <SidebarMenu>
-            {taskViews.map(({ icon: Icon, label, value }) => {
-              const selected = view === value;
-              return (
-                <SidebarMenuItem key={value}>
-                  <SidebarMenuButton asChild isActive={selected}>
-                    <Link
-                      aria-current={selected ? "page" : undefined}
-                      onClick={onNavigate}
-                      to={workspaceViewPath(
-                        "/tasks",
-                        searchParams,
-                        value === "inbox" ? undefined : value,
-                      )}
-                    >
-                      <Icon aria-hidden="true" />
-                      <span>{label}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              );
-            })}
-          </SidebarMenu>
-        </nav>
-      </SidebarGroupContent>
-    </SidebarGroup>
+    <>
+      <SidebarGroup>
+        <SidebarGroupLabel>View</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <nav aria-label="Task views">
+            <SidebarMenu>
+              {taskViews.map(({ icon: Icon, label, value }) => {
+                const selected = view === value;
+                return (
+                  <SidebarMenuItem key={value}>
+                    <SidebarMenuButton asChild isActive={selected}>
+                      <Link
+                        aria-current={selected ? "page" : undefined}
+                        onClick={onNavigate}
+                        to={workspaceViewPath(
+                          "/tasks",
+                          searchParams,
+                          value === "inbox" ? undefined : value,
+                        )}
+                      >
+                        <Icon aria-hidden="true" />
+                        <span>{label}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </nav>
+        </SidebarGroupContent>
+      </SidebarGroup>
+      <SidebarGroup>
+        <SidebarGroupLabel>Related</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <nav aria-label="Related commitments">
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton asChild>
+                  <Link onClick={onNavigate} to="/reminders">
+                    <ListTodo aria-hidden="true" />
+                    <span>Reminders</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </nav>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    </>
   );
 }
 

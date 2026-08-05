@@ -5265,6 +5265,64 @@ describe("ilo web app", () => {
     expect(await screen.findByText("iCloud connection failed.")).toBeInTheDocument();
   });
 
+  it("shows safe connection health and gives each reconnect state a direct repair action", async () => {
+    mocks.listConnectors.mockResolvedValue([
+      {
+        calendarEnabled: true,
+        email: "google@example.com",
+        health: {
+          message: "Google authorization is no longer valid. Reconnect to resume syncing.",
+          nextSyncAt: null,
+          recovery: "reconnect",
+          state: "reconnect",
+        },
+        id,
+        label: "Personal Google",
+        lastSyncAttemptAt: now,
+        lastSyncedAt: now,
+        mailEnabled: true,
+        nextSyncAt: null,
+        provider: "google",
+        syncError: "raw-provider-canary",
+        syncStatus: "error",
+      },
+      {
+        calendarEnabled: true,
+        email: "person@icloud.com",
+        health: {
+          message: "iCloud authorization is no longer valid. Reconnect to resume syncing.",
+          nextSyncAt: null,
+          recovery: "reconnect",
+          state: "reconnect",
+        },
+        id: secondId,
+        label: "Personal iCloud",
+        lastSyncAttemptAt: now,
+        lastSyncedAt: now,
+        mailEnabled: true,
+        nextSyncAt: null,
+        provider: "icloud",
+        syncError: "raw-provider-canary",
+        syncStatus: "error",
+      },
+    ]);
+    setup("/settings?section=connections");
+    const browser = userEvent.setup();
+
+    const googleRow = (await screen.findByText("Personal Google")).closest('[data-slot="item"]');
+    if (!googleRow) throw new Error("Google connection row was not rendered.");
+    await browser.click(within(googleRow).getByRole("button", { name: "Reconnect" }));
+    await waitFor(() =>
+      expect(mocks.getGoogleAuthorizationUrl).toHaveBeenCalledWith({ accountId: id }),
+    );
+
+    const iCloudRow = screen.getByText("Personal iCloud").closest('[data-slot="item"]');
+    if (!iCloudRow) throw new Error("iCloud connection row was not rendered.");
+    await browser.click(within(iCloudRow).getByRole("button", { name: "Reconnect" }));
+    expect(screen.getByLabelText("Apple Account email")).toHaveValue("person@icloud.com");
+    expect(screen.queryByText("raw-provider-canary")).not.toBeInTheDocument();
+  });
+
   it("opens Google authorization in the system browser on desktop", async () => {
     const authorizationUrl = "https://accounts.google.com/o/oauth2/v2/auth?client_id=test";
     mocks.isTauri.mockReturnValue(true);

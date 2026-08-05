@@ -37,6 +37,10 @@ import {
   SidebarMenuSubItem,
 } from "../../components/ui/sidebar.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
+import {
+  ConnectionRecoveryAlert,
+  visibleConnectorRefreshInterval,
+} from "../connections/health.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
@@ -216,7 +220,7 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   const accounts = useQuery({
     queryFn: api.listConnectors,
     queryKey: ["connectors"],
-    refetchInterval: 60_000,
+    refetchInterval: visibleConnectorRefreshInterval,
   });
   const mailboxes = useQuery({
     queryFn: api.listMailboxes,
@@ -311,7 +315,7 @@ export function MailPage({ user }: { user: User }) {
   const accounts = useQuery({
     queryFn: api.listConnectors,
     queryKey: ["connectors"],
-    refetchInterval: 60_000,
+    refetchInterval: visibleConnectorRefreshInterval,
   });
   const mailboxes = useQuery({
     queryFn: api.listMailboxes,
@@ -450,6 +454,7 @@ export function MailPage({ user }: { user: User }) {
     return (
       <div className="mail-page">
         {sendRecovery}
+        <ConnectionRecoveryAlert accounts={enabled} />
         <div className="narrow-page">
           <p className="eyebrow">Mail for people and agents</p>
           <h1>Inbox</h1>
@@ -463,6 +468,7 @@ export function MailPage({ user }: { user: User }) {
   return (
     <div className="mail-page">
       {sendRecovery}
+      <ConnectionRecoveryAlert accounts={enabled} />
       {composing ? (
         <form
           className="mail-compose"

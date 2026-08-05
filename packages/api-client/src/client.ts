@@ -26,6 +26,11 @@ import type {
   WeatherLocationOption,
   WeatherSnapshot,
 } from "@personal-os/domain";
+import {
+  type ConnectedAccountHealth,
+  type ConnectorSyncStatus,
+  connectedAccountHealthSchema,
+} from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createCalendarApiClient } from "./features/calendar.js";
 import { createFinanceApi } from "./features/finances.js";
@@ -82,13 +87,16 @@ export type CalendarAccount = {
   avatarUrl?: string | null;
   calendarEnabled: boolean;
   email: string | null;
+  health: ConnectedAccountHealth;
   id: string;
   label: string;
+  lastSyncAttemptAt: string | null;
   lastSyncedAt: string | null;
   mailEnabled: boolean;
   provider: string;
+  nextSyncAt: string | null;
   syncError: string | null;
-  syncStatus: string;
+  syncStatus: ConnectorSyncStatus;
 };
 
 export type XBookmarkAccount = {
@@ -337,7 +345,10 @@ export function createApiClient(options: ClientOptions) {
 
     async listConnectors(): Promise<CalendarAccount[]> {
       const response = await request<{ accounts: CalendarAccount[] }>("/v1/connectors");
-      return response.accounts;
+      return response.accounts.map((account) => ({
+        ...account,
+        health: connectedAccountHealthSchema.parse(account.health),
+      }));
     },
 
     async listXBookmarkFolders(): Promise<XBookmarkFolder[]> {

@@ -60,6 +60,15 @@ const configSchema = z
       });
     }
     if (value.NODE_ENV !== "production") return;
+    for (const key of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] as const) {
+      if (!value[key].trim()) {
+        context.addIssue({
+          code: "custom",
+          message: `Production requires ${key}.`,
+          path: [key],
+        });
+      }
+    }
     if (!value.EMAIL_FROM) {
       context.addIssue({
         code: "custom",

@@ -304,6 +304,13 @@ import {
   calendarQueryKeys,
   calendarViewFromSearch,
 } from "./features/calendar/page.js";
+import {
+  ConnectionHealthBadge,
+  ConnectionHealthDescription,
+  ConnectionRecoveryAlert,
+  connectionHealth,
+  visibleConnectorRefreshInterval,
+} from "./features/connections/health.js";
 import { financesNavigationItem } from "./features/finances/manifest.js";
 import {
   FinanceSidebarNavigation,
@@ -2769,6 +2776,11 @@ function CalendarPage({
     queryKey: calendarQueryKeys.events(view, range.from, range.to),
   });
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: calendarQueryKeys.calendars });
+  const connectorAccounts = useQuery({
+    queryFn: api.listConnectors,
+    queryKey: ["connectors"],
+    refetchInterval: visibleConnectorRefreshInterval,
+  });
   const calendarsById = useMemo(
     () => new Map((calendars.data ?? []).map((calendar) => [calendar.id, calendar])),
     [calendars.data],
@@ -2840,6 +2852,9 @@ function CalendarPage({
   return (
     <div className="calendar-page">
       {moveEvent.isError ? <InlineError error={moveEvent.error} /> : null}
+      <ConnectionRecoveryAlert
+        accounts={(connectorAccounts.data ?? []).filter((account) => account.calendarEnabled)}
+      />
       {events.isPending ? (
         <PageLoading workspace="calendar" />
       ) : events.isError ? (
@@ -3019,7 +3034,11 @@ function CalendarTopbar({ onToday, user }: { onToday: () => void; user: User }) 
 
 function CalendarSidebar({ user }: { user: User }) {
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
-  const accounts = useQuery({ queryFn: api.listConnectors, queryKey: ["connectors"] });
+  const accounts = useQuery({
+    queryFn: api.listConnectors,
+    queryKey: ["connectors"],
+    refetchInterval: visibleConnectorRefreshInterval,
+  });
 
   return (
     <div className="calendar-sidebar">
@@ -4842,7 +4861,11 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
 
 function ConnectorsSettings() {
   const queryClient = useQueryClient();
-  const query = useQuery({ queryFn: api.listConnectors, queryKey: ["connectors"] });
+  const query = useQuery({
+    queryFn: api.listConnectors,
+    queryKey: ["connectors"],
+    refetchInterval: visibleConnectorRefreshInterval,
+  });
   const xAccount = useQuery({
     queryFn: api.getXBookmarkAccount,
     queryKey: ["x-bookmarks", "account"],
@@ -4853,6 +4876,9 @@ function ConnectorsSettings() {
     queryKey: ["x-bookmarks", "folders"],
   });
   const [showICloud, setShowICloud] = useState(false);
+  const [icloudReconnectAccount, setICloudReconnectAccount] = useState<CalendarAccount | null>(
+    null,
+  );
   const googleConnect = useMutation({
     mutationFn: async ({ accountId }: { accountId?: string }) => {
       const url = await api.getGoogleAuthorizationUrl({
@@ -4904,6 +4930,7 @@ function ConnectorsSettings() {
       }),
     onSuccess: () => {
       setShowICloud(false);
+      setICloudReconnectAccount(null);
       return Promise.all([
         queryClient.invalidateQueries({ queryKey: ["connectors"] }),
         queryClient.invalidateQueries({ queryKey: ["mailboxes"] }),
@@ -4914,11 +4941,13 @@ function ConnectorsSettings() {
   });
   const sync = useMutation({
     mutationFn: api.syncConnector,
-    onSuccess: () =>
+    onError: (error) => toast.error(errorMessage(error)),
+    onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({ queryKey: ["connectors"] }),
         invalidateMaterial(queryClient),
       ]),
+    onSuccess: () => toast.success("Connection synced."),
   });
   const disconnect = useMutation({
     mutationFn: api.deleteConnector,
@@ -4948,7 +4977,12 @@ function ConnectorsSettings() {
                 <CalendarProviderEmblem provider="google" />
                 Google
               </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setShowICloud(true)}>
+              <DropdownMenuItem
+                onSelect={() => {
+                  setICloudReconnectAccount(null);
+                  setShowICloud(true);
+                }}
+              >
                 <CalendarProviderEmblem provider="icloud" />
                 iCloud
               </DropdownMenuItem>
@@ -4968,7 +5002,6 @@ function ConnectorsSettings() {
       {syncXBookmarks.error && <SettingsError error={syncXBookmarks.error} />}
       {disconnectXBookmarks.error && <SettingsError error={disconnectXBookmarks.error} />}
       {icloudConnect.error && <SettingsError error={icloudConnect.error} />}
-      {sync.error && <SettingsError error={sync.error} />}
       {disconnect.error && <SettingsError error={disconnect.error} />}
       {showICloud ? (
         <form
@@ -4994,6 +5027,7 @@ function ConnectorsSettings() {
                 id="icloud-email"
                 name="email"
                 placeholder="name@icloud.com"
+                defaultValue={icloudReconnectAccount?.email ?? ""}
                 required
                 type="email"
               />
@@ -5040,7 +5074,14 @@ function ConnectorsSettings() {
               Create an app-specific password <ExternalLink size={13} />
             </a>
             <div>
-              <ShadcnButton onClick={() => setShowICloud(false)} type="button" variant="ghost">
+              <ShadcnButton
+                onClick={() => {
+                  setShowICloud(false);
+                  setICloudReconnectAccount(null);
+                }}
+                type="button"
+                variant="ghost"
+              >
                 Cancel
               </ShadcnButton>
               <ShadcnButton disabled={icloudConnect.isPending} type="submit">
@@ -5070,6 +5111,18 @@ function ConnectorsSettings() {
                 ? { enableMail: () => googleConnect.mutate({ accountId: account.id }) }
                 : {})}
               key={account.id}
+              {...(connectionHealth(account).state === "reconnect"
+                ? {
+                    reconnect: () => {
+                      if (account.provider === "google") {
+                        googleConnect.mutate({ accountId: account.id });
+                      } else {
+                        setICloudReconnectAccount(account);
+                        setShowICloud(true);
+                      }
+                    },
+                  }
+                : {})}
               sync={() => sync.mutate(account.id)}
               syncing={sync.isPending && sync.variables === account.id}
             />
@@ -6014,15 +6067,18 @@ function ConnectorRow({
   account,
   disconnect,
   enableMail,
+  reconnect,
   sync,
   syncing,
 }: {
   account: CalendarAccount;
   disconnect: () => void;
   enableMail?: () => void;
+  reconnect?: () => void;
   sync: () => void;
   syncing: boolean;
 }) {
+  const health = connectionHealth(account);
   return (
     <ShadcnItem className="connector-row" size="sm">
       <ShadcnItemMedia variant="default">
@@ -6037,11 +6093,7 @@ function ConnectorRow({
         <ShadcnItemTitle>{account.label}</ShadcnItemTitle>
         <ShadcnItemDescription>
           {account.email ?? "Connected account"} ·{" "}
-          {account.syncError
-            ? account.syncError
-            : account.lastSyncedAt
-              ? `Synced ${formatRelative(account.lastSyncedAt)}`
-              : "Ready to sync"}
+          <ConnectionHealthDescription health={health} lastSyncedAt={account.lastSyncedAt} />
         </ShadcnItemDescription>
         <div className="capability-badges">
           <ConnectorCapabilityBadge enabled={account.calendarEnabled} label="Calendar" />
@@ -6055,7 +6107,12 @@ function ConnectorRow({
         </div>
       </ShadcnItemContent>
       <ShadcnItemActions>
-        <ConnectorSyncBadge status={account.syncStatus} />
+        <ConnectionHealthBadge health={health} />
+        {reconnect ? (
+          <ShadcnButton onClick={reconnect} size="sm" type="button" variant="outline">
+            Reconnect
+          </ShadcnButton>
+        ) : null}
         <ShadcnButton
           aria-label={`Sync ${account.label}`}
           disabled={syncing}
@@ -6122,16 +6179,6 @@ function ConnectorCapabilityBadge({
       {badge}
     </ShadcnBadge>
   );
-}
-
-function ConnectorSyncBadge({ status }: { status: string }) {
-  if (status === "error") {
-    return <ShadcnBadge variant="destructive">Needs attention</ShadcnBadge>;
-  }
-  if (status === "syncing") {
-    return <ShadcnBadge variant="secondary">Syncing</ShadcnBadge>;
-  }
-  return <ShadcnBadge variant="secondary">Ready</ShadcnBadge>;
 }
 
 function ProfileSettings({ user }: { user: User }) {

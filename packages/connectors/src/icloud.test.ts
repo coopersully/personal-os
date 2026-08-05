@@ -1,4 +1,4 @@
-import { ConnectorError } from "./google.js";
+import { ConnectorError } from "./failures.js";
 import { createICloudConnector } from "./icloud.js";
 import {
   calendarAttachmentProjectionOverflow,
@@ -563,7 +563,11 @@ describe("iCloud connector", () => {
         subject: "Subject",
         to: [{ address: "to@example.com", name: null }],
       }),
-    ).rejects.toMatchObject({ status: 401 });
+    ).rejects.toMatchObject({
+      category: "transport",
+      disposition: "retry",
+      status: null,
+    });
     expect(failingTransport.close).toHaveBeenCalledOnce();
   });
 
@@ -807,11 +811,36 @@ describe("iCloud connector", () => {
       logout: vi.fn(),
       mailbox: false,
     }).value;
-    await expect(connectFailure.syncMail(credentials)).rejects.toMatchObject({ status: 401 });
+    await expect(connectFailure.syncMail(credentials)).rejects.toMatchObject({
+      category: "transport",
+      disposition: "retry",
+      status: null,
+    });
+
+    const authorizationFailure = connector(davClient(), {
+      connect: vi.fn(async () => {
+        throw { authenticationFailed: true };
+      }),
+      fetch: vi.fn(),
+      getMailboxLock: vi.fn(),
+      list: vi.fn(),
+      logout: vi.fn(),
+      mailbox: false,
+    }).value;
+    await expect(authorizationFailure.syncMail(credentials)).rejects.toMatchObject({
+      category: "authorization",
+      disposition: "reconnect",
+    });
 
     const connectorFailure = createICloudConnector({
       createDavClient: vi.fn(async () => {
-        throw new ConnectorError("CalDAV unavailable", 503);
+        throw new ConnectorError({
+          category: "temporary",
+          code: "icloud_calendar_temporary_failure",
+          disposition: "retry",
+          message: "iCloud Calendar is temporarily unavailable.",
+          status: 503,
+        });
       }),
     });
     await expect(connectorFailure.listCalendars(credentials)).rejects.toMatchObject({

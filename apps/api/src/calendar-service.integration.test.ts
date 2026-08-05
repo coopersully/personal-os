@@ -969,12 +969,26 @@ describe.sequential("Calendar commitment proposals", () => {
       "Gmail API request failed: private mailbox response body and provider diagnostics";
     await database.db
       .update(calendarAccounts)
-      .set({ syncError: privateProviderError, syncStatus: "error" })
+      .set({
+        nextSyncAt: new Date(timestamp.getTime() + 60_000),
+        syncError: "Google returned an unexpected response. ilo is resolving this.",
+        syncErrorCategory: "invalid_response",
+        syncErrorCode: "google_invalid_response",
+        syncFailureCount: 1,
+        syncRecovery: "operator",
+        syncStatus: "error",
+      })
       .where(eq(calendarAccounts.id, remoteAccountId));
     const listed = await service.list(userId);
     expect(JSON.stringify(listed)).not.toContain(privateProviderError);
     expect(listed.find((calendar) => calendar.accountId === remoteAccountId)?.source).toMatchObject(
       {
+        health: {
+          message: "Google returned an unexpected response. ilo is resolving this.",
+          nextSyncAt: new Date(timestamp.getTime() + 60_000).toISOString(),
+          recovery: "operator",
+          state: "service_attention",
+        },
         syncError:
           "The connected account needs attention. Synchronize Calendar or review Connections.",
         syncStatus: "error",

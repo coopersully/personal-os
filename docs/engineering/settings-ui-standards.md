@@ -38,6 +38,20 @@ An inline message needs a specific title and a next step. Never use a static ale
   installation instructions and procedural prompts are optional compatibility
   details, not required steps or a second source of setup state.
 
+## Connected-account health
+
+- Render only the structured account health state: **Ready**, **Syncing**, **Retrying
+  automatically**, **Reconnect required**, or **ilo is resolving this**. Never render a raw
+  provider exception or response.
+- A manual sync result is a toast; the durable account row remains the persistent truth. Always
+  refresh account and material queries after the attempt, including failure.
+- Show a reconnect action only for the `reconnect` state. Google restarts OAuth for that account;
+  iCloud opens the app-specific-password form with the account email already selected.
+- Retry and service-attention states explain ownership and timing without blaming credentials.
+  Mail and Calendar use a warning callout only when a person must reconnect.
+- Refresh health every 30 seconds while a relevant view is mounted and visible. Browsers never
+  initiate provider sync on a polling interval.
+
 ## Security & agent access
 
 - Start an access-token flow with a named preset and selected-scope count.

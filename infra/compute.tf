@@ -159,7 +159,6 @@ resource "aws_ecs_task_definition" "api" {
       { name = "API_SHUTDOWN_TIMEOUT_MS", value = "105000" },
       { name = "ALLOWED_ORIGINS", value = "https://${local.app_domain}" },
       { name = "EMAIL_FROM", value = var.email_from },
-      { name = "GOOGLE_CLIENT_ID", value = var.google_client_id },
       { name = "GOOGLE_REDIRECT_URI", value = "https://${local.api_domain}/v1/connectors/google/callback" },
       { name = "MCP_RESOURCE_URL", value = "https://${local.mcp_domain}/mcp" },
       { name = "OWNER_EMAILS", value = var.owner_emails },
@@ -173,6 +172,7 @@ resource "aws_ecs_task_definition" "api" {
       [
         { name = "APP_ENCRYPTION_KEY", valueFrom = local.runtime_parameter_arns.APP_ENCRYPTION_KEY },
         { name = "DATABASE_URL", valueFrom = local.runtime_parameter_arns.DATABASE_URL },
+        { name = "GOOGLE_CLIENT_ID", valueFrom = local.runtime_parameter_arns.GOOGLE_CLIENT_ID },
         { name = "GOOGLE_CLIENT_SECRET", valueFrom = local.runtime_parameter_arns.GOOGLE_CLIENT_SECRET },
         { name = "MCP_INTERNAL_SECRET", valueFrom = local.runtime_parameter_arns.MCP_INTERNAL_SECRET },
         { name = "RESEND_API_KEY", valueFrom = local.runtime_parameter_arns.RESEND_API_KEY },

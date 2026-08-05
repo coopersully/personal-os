@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { ConnectorError } from "./google.js";
+import { ConnectorError, connectorHttpError } from "./failures.js";
 import { providerFetch } from "./http.js";
 import type { XBookmark, XBookmarkFolder, XConnector, XCredentials } from "./types.js";
 
@@ -54,16 +54,19 @@ export function createXConnector(options: XConnectorOptions): XConnector {
 
   function requireConfiguration(): void {
     if (!options.clientId || !options.redirectUri) {
-      throw new ConnectorError("X Bookmarks is not configured.", 503);
+      throw new ConnectorError({
+        category: "configuration",
+        code: "x_not_configured",
+        disposition: "operator",
+        message: "X Bookmarks is not configured.",
+        status: 503,
+      });
     }
   }
 
   async function parseResponse(response: Response): Promise<unknown> {
     if (!response.ok) {
-      throw new ConnectorError(
-        `X API request failed (${response.status}): ${await response.text()}`,
-        response.status,
-      );
+      throw await connectorHttpError(response, "x");
     }
     return response.json();
   }
@@ -95,7 +98,13 @@ export function createXConnector(options: XConnectorOptions): XConnector {
   async function validCredentials(credentials: XCredentials): Promise<XCredentials> {
     if (new Date(credentials.expiresAt).getTime() > now().getTime() + 60_000) return credentials;
     if (!credentials.refreshToken)
-      throw new ConnectorError("X authorization expired; reconnect X Bookmarks.", 401);
+      throw new ConnectorError({
+        category: "authorization",
+        code: "x_refresh_token_missing",
+        disposition: "reconnect",
+        message: "X authorization expired; reconnect X Bookmarks.",
+        status: 401,
+      });
     const parameters = new URLSearchParams({
       client_id: options.clientId,
       grant_type: "refresh_token",

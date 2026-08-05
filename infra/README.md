@@ -54,6 +54,7 @@ The API task reads these SecureString parameters from `var.ssm_parameter_prefix`
 ```text
 APP_ENCRYPTION_KEY
 DATABASE_URL
+GOOGLE_CLIENT_ID
 GOOGLE_CLIENT_SECRET
 MCP_INTERNAL_SECRET
 RESEND_API_KEY
@@ -79,11 +80,16 @@ database role needs `CREATE` on the `personal_os` database plus `USAGE, CREATE`
 on the `public` schema.
 
 Set `domain_name`, `cloudflare_zone_id`, `owner_emails`, `alert_email`,
-`monthly_budget_usd`, `email_from`, and `google_client_id` in the untracked
+`monthly_budget_usd`, and `email_from` in the untracked
 `terraform.tfvars`. Reuse the account's service Cost Anomaly Detection monitor
 through `cost_anomaly_monitor_arn` to add ilo's immediate lower-threshold
 subscription. Export a scoped `CLOUDFLARE_API_TOKEN` with DNS Read and DNS
-Write access before planning or applying. Terraform derives:
+Write access before planning or applying.
+
+The Google client ID and secret both remain in SSM Parameter Store and are injected as ECS secret
+references. The API fails production startup if either parameter resolves to an empty value. Inspect
+the task definition's `secrets` names and `valueFrom` ARNs to verify wiring; never print parameter
+values or copy the client ID into `terraform.tfvars`. Terraform derives:
 
 ```text
 https://app.<domain>

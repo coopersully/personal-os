@@ -175,4 +175,48 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('ADD COLUMN "sync_claim_id" uuid');
     expect(migrationSql).toContain(`WHERE "sync_status" = 'syncing'`);
   });
+
+  it("stores typed connector health and safely backfills legacy failures", async () => {
+    const table = getTableConfig(calendarAccounts);
+    expect(table.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "sync_error_code",
+        "sync_error_category",
+        "sync_recovery",
+        "sync_failure_count",
+        "last_sync_attempt_at",
+        "next_sync_at",
+      ]),
+    );
+    expect(table.indexes.map((candidate) => candidate.config.name)).toContain(
+      "calendar_accounts_sync_due_idx",
+    );
+    expect(table.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "calendar_accounts_sync_failure_count_check",
+        "calendar_accounts_sync_recovery_check",
+      ]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0050_connector_sync_health.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('ADD COLUMN "sync_error_code" text');
+    expect(migrationSql).toContain('ADD COLUMN "sync_error_category" text');
+    expect(migrationSql).toContain('ADD COLUMN "sync_recovery" text');
+    expect(migrationSql).toContain('ADD COLUMN "sync_failure_count" integer DEFAULT 0 NOT NULL');
+    expect(migrationSql).toContain('ADD COLUMN "last_sync_attempt_at" timestamptz');
+    expect(migrationSql).toContain('ADD COLUMN "next_sync_at" timestamptz');
+    expect(migrationSql).toContain(
+      "This connection was interrupted. ilo will retry automatically.",
+    );
+    expect(migrationSql).toContain("'legacy_sync_failure'");
+    expect(migrationSql).toContain("'automatic'");
+    expect(migrationSql).toContain('"sync_failure_count" = 1');
+    expect(migrationSql).toContain('"next_sync_at" = NOW()');
+    expect(migrationSql).not.toMatch(/"sync_error_code"\s*=\s*"sync_error"/u);
+    expect(migrationSql).not.toMatch(/"sync_error_category"\s*=\s*"sync_error"/u);
+    expect(migrationSql).not.toMatch(/"sync_recovery"\s*=\s*"sync_error"/u);
+  });
 });

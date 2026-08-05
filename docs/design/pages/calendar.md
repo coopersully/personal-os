@@ -25,6 +25,9 @@ event without losing the shape of the day.
 - Hour rules align with the time axis in day and week views.
 - Current-time, selection, event, and drag states remain visually dominant over
   the hour grid.
+- A Calendar-enabled account that requires renewed authorization produces one warning callout with
+  a direct Connections link. Automatic retry and ilo-owned service repair remain non-destructive
+  freshness state and do not interrupt the calendar with credential advice.
 
 ## Agent-guided setup and proposals
 

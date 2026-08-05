@@ -111,12 +111,6 @@ variable "email_from" {
   type        = string
 }
 
-variable "google_client_id" {
-  description = "Production Google OAuth client ID. The secret remains in Parameter Store."
-  type        = string
-  default     = ""
-}
-
 variable "plaid_enabled" {
   description = "Inject the Plaid runtime secret only when the production Plaid integration is enabled."
   type        = bool

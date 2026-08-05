@@ -132,6 +132,10 @@ the pull request is a reviewer snapshot.
 - Run `pnpm verify` before requesting review unless a maintainer explicitly approves a narrower
   check.
 - Verify changed behavior with focused tests as well as the required suite.
+- For UI work, state the immediate user job and apply
+  [`docs/design/governance.md`](../design/governance.md): diagnose feedback before editing, change
+  the responsible shared/page layer, and verify realistic states, responsive priority, keyboard,
+  focus, and applicable assistive-technology behavior.
 - For every changed external dependency, complete the boundary reasoning in
   [`external-boundary-reliability.md`](external-boundary-reliability.md). Separate configuration,
   authority, reachability, bounded execution, recovery, observation, and actual verification; list
@@ -141,8 +145,8 @@ the pull request is a reviewer snapshot.
 ## Review checklist
 
 Block a pull request when it has a correctness, security, privacy, data-integrity, architecture,
-test, documentation, or operational gap. Do not approve with failing required checks or unresolved
-actionable review threads.
+accessibility, design-system contract, test, documentation, or operational gap. Do not approve
+with failing required checks or unresolved actionable review threads.
 
 For changes that cross an external boundary, reviewers must use the
 [external boundary reliability standard](external-boundary-reliability.md). Trace the complete

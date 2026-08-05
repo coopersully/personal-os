@@ -11,7 +11,7 @@ const exampleEnvironment = readFileSync(resolve(root, ".env.example"), "utf8");
 const compose = readFileSync(resolve(root, "compose.yaml"), "utf8");
 
 const expectedEnvironment = [
-  `AGENT_SKILL_SOURCE_URL=${manifest.sourceUrl}`,
+  "AGENT_SKILL_SOURCE_URL=",
   `AGENT_SKILL_VERSION=${manifest.version}`,
   `AGENT_SKILL_REVISION=${manifest.revision}`,
 ];
@@ -22,7 +22,7 @@ for (const line of expectedEnvironment) {
 }
 
 const expectedCompose = [
-  `AGENT_SKILL_SOURCE_URL: \${AGENT_SKILL_SOURCE_URL:-${manifest.sourceUrl}}`,
+  `AGENT_SKILL_SOURCE_URL: \${AGENT_SKILL_SOURCE_URL:-}`,
   `AGENT_SKILL_VERSION: \${AGENT_SKILL_VERSION:-${manifest.version}}`,
   `AGENT_SKILL_REVISION: \${AGENT_SKILL_REVISION:-${manifest.revision}}`,
 ];
@@ -33,18 +33,69 @@ for (const line of expectedCompose) {
 }
 
 const legacyEnvironment = `APP_BASE_URL=https://app.example.com
-AGENT_SKILL_SOURCE_URL=${manifest.legacySourceUrl}
+AGENT_SKILL_SOURCE_URL=${manifest.legacySourceUrls[0]}
 PORT=8788
 `;
 const migrated = migrateLegacyAgentSkillEnvironment(legacyEnvironment, manifest);
 assert.equal(migrated.changed, true);
-assert.match(migrated.content, new RegExp(`AGENT_SKILL_SOURCE_URL=${manifest.sourceUrl}`));
+assert.doesNotMatch(migrated.content, /^AGENT_SKILL_SOURCE_URL=/m);
 assert.match(migrated.content, new RegExp(`AGENT_SKILL_VERSION=${manifest.version}`));
 assert.match(migrated.content, new RegExp(`AGENT_SKILL_REVISION=${manifest.revision}`));
 assert.equal(
   migrateLegacyAgentSkillEnvironment(migrated.content, manifest).changed,
   false,
   "The legacy environment migration must be idempotent.",
+);
+const commitPinnedLegacy = `${legacyEnvironment}AGENT_SKILL_VERSION=${manifest.version}
+AGENT_SKILL_REVISION=${manifest.legacyRevisions[0]}
+`;
+const commitPinnedMigration = migrateLegacyAgentSkillEnvironment(commitPinnedLegacy, manifest);
+assert.equal(commitPinnedMigration.changed, true);
+assert.match(
+  commitPinnedMigration.content,
+  new RegExp(`AGENT_SKILL_REVISION=${manifest.revision}`),
+);
+const previousWebsiteRelease = `APP_BASE_URL=https://app.example.com
+AGENT_SKILL_SOURCE_URL=https://app.example.com${manifest.legacySourcePaths[0]}
+AGENT_SKILL_VERSION=${manifest.legacyVersions[0]}
+AGENT_SKILL_REVISION=${manifest.legacyRevisions.at(-1)}
+`;
+const previousWebsiteMigration = migrateLegacyAgentSkillEnvironment(
+  previousWebsiteRelease,
+  manifest,
+);
+assert.equal(previousWebsiteMigration.changed, true);
+assert.doesNotMatch(previousWebsiteMigration.content, /^AGENT_SKILL_SOURCE_URL=/m);
+assert.match(
+  previousWebsiteMigration.content,
+  new RegExp(`AGENT_SKILL_VERSION=${manifest.version}`),
+);
+assert.match(
+  previousWebsiteMigration.content,
+  new RegExp(`AGENT_SKILL_REVISION=${manifest.revision}`),
+);
+const previousDerivedRelease = `APP_BASE_URL=https://app.example.com
+AGENT_SKILL_SOURCE_URL=
+AGENT_SKILL_VERSION=${manifest.legacyVersions[0]}
+AGENT_SKILL_REVISION=${manifest.legacyRevisions.at(-1)}
+`;
+assert.equal(migrateLegacyAgentSkillEnvironment(previousDerivedRelease, manifest).changed, true);
+const previousImplicitRelease = `APP_BASE_URL=https://app.example.com
+AGENT_SKILL_VERSION=${manifest.legacyVersions[0]}
+AGENT_SKILL_REVISION=${manifest.legacyRevisions.at(-1)}
+`;
+assert.equal(
+  migrateLegacyAgentSkillEnvironment(previousImplicitRelease, manifest).changed,
+  true,
+  "A derived legacy release without an explicit source line must migrate.",
+);
+assert.ok(
+  manifest.sourcePath.includes(manifest.revision),
+  "The website skill path must contain the immutable release revision.",
+);
+assert.ok(
+  manifest.sourcePath.endsWith("/SKILL.md"),
+  "The website skill path must identify the installable SKILL.md entrypoint.",
 );
 const legacyWithMatchingMetadata = `${legacyEnvironment}AGENT_SKILL_VERSION=${manifest.version}
 AGENT_SKILL_REVISION=${manifest.revision}

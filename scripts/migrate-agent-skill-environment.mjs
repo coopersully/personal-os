@@ -4,24 +4,54 @@ import { fileURLToPath } from "node:url";
 
 export function migrateLegacyAgentSkillEnvironment(content, manifest) {
   const lines = content.split(/\r?\n/);
-  const sourceLine = `AGENT_SKILL_SOURCE_URL=${manifest.legacySourceUrl}`;
-  if (!lines.includes(sourceLine)) return { changed: false, content };
   const versionLine = lines.find((line) => line.startsWith("AGENT_SKILL_VERSION="));
   const revisionLine = lines.find((line) => line.startsWith("AGENT_SKILL_REVISION="));
+  const sourceLine = lines.find((line) => line.startsWith("AGENT_SKILL_SOURCE_URL="));
+  const sourceValue = sourceLine?.slice("AGENT_SKILL_SOURCE_URL=".length);
+  const metadataIsLegacy =
+    manifest.legacyVersions.some((version) => versionLine === `AGENT_SKILL_VERSION=${version}`) ||
+    manifest.legacyRevisions.some(
+      (revision) => revisionLine === `AGENT_SKILL_REVISION=${revision}`,
+    );
+  let sourceIsLegacy = sourceValue ? manifest.legacySourceUrls.includes(sourceValue) : false;
+  if (sourceValue && !sourceIsLegacy) {
+    try {
+      sourceIsLegacy = manifest.legacySourcePaths.includes(new URL(sourceValue).pathname);
+    } catch {
+      sourceIsLegacy = false;
+    }
+  }
+  if (!sourceIsLegacy && (sourceValue || !metadataIsLegacy)) {
+    return { changed: false, content };
+  }
   if (
-    (versionLine && versionLine !== `AGENT_SKILL_VERSION=${manifest.version}`) ||
-    (revisionLine && revisionLine !== `AGENT_SKILL_REVISION=${manifest.revision}`)
+    (versionLine &&
+      versionLine !== `AGENT_SKILL_VERSION=${manifest.version}` &&
+      !manifest.legacyVersions.some(
+        (version) => versionLine === `AGENT_SKILL_VERSION=${version}`,
+      )) ||
+    (revisionLine &&
+      revisionLine !== `AGENT_SKILL_REVISION=${manifest.revision}` &&
+      !manifest.legacyRevisions.some(
+        (revision) => revisionLine === `AGENT_SKILL_REVISION=${revision}`,
+      ))
   ) {
     return { changed: false, content };
   }
-  const migrated = lines.map((line) =>
-    line === sourceLine ? `AGENT_SKILL_SOURCE_URL=${manifest.sourceUrl}` : line,
-  );
+  const migrated = sourceLine ? lines.filter((line) => line !== sourceLine) : [...lines];
   const insertion = migrated.at(-1) === "" ? migrated.length - 1 : migrated.length;
   const missingMetadata = [
     ...(versionLine ? [] : [`AGENT_SKILL_VERSION=${manifest.version}`]),
     ...(revisionLine ? [] : [`AGENT_SKILL_REVISION=${manifest.revision}`]),
   ];
+  if (revisionLine && revisionLine !== `AGENT_SKILL_REVISION=${manifest.revision}`) {
+    const revisionIndex = migrated.indexOf(revisionLine);
+    migrated[revisionIndex] = `AGENT_SKILL_REVISION=${manifest.revision}`;
+  }
+  if (versionLine && versionLine !== `AGENT_SKILL_VERSION=${manifest.version}`) {
+    const versionIndex = migrated.indexOf(versionLine);
+    migrated[versionIndex] = `AGENT_SKILL_VERSION=${manifest.version}`;
+  }
   migrated.splice(insertion, 0, ...missingMetadata);
   return { changed: true, content: migrated.join("\n") };
 }

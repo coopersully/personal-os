@@ -3,6 +3,7 @@ import type {
   FinanceGuidedSetupContext,
   MailSetupContext,
   Reminder,
+  Task,
 } from "@personal-os/domain";
 import {
   calendarAgentAccessCapability,
@@ -17,6 +18,7 @@ import {
   reminderAgentAccessCapability,
   reminderAgentAccessReadiness,
 } from "../reminders/agent-access.js";
+import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
 import {
   attentionReadiness,
   type DomainSetupStatus,
@@ -226,7 +228,7 @@ describe("agent access readiness adapters", () => {
     expect(mailAgentAccessCapability("executable_rules", "$ilo-setup").title).toContain("rules");
   });
 
-  it("covers Calendar, Finance, and Reminder domain-owned variants", () => {
+  it("covers Calendar, Finance, Reminder, and Task domain-owned variants", () => {
     const shared = {
       attention: ready([]),
       hosts: ready([]),
@@ -301,5 +303,41 @@ describe("agent access readiness adapters", () => {
     expect(reminderAgentAccessCapability("executable_rules", "$ilo-setup").title).toContain(
       "rules",
     );
+
+    expect(taskAgentAccessReadiness({ ...shared, tasks: loading })[0]?.description).toContain(
+      "loading",
+    );
+    expect(taskAgentAccessReadiness({ ...shared, tasks: unavailable })[0]?.description).toContain(
+      "unavailable",
+    );
+    expect(
+      taskAgentAccessReadiness({
+        ...shared,
+        tasks: ready({ items: [], nextCursor: null }),
+      })[0],
+    ).toMatchObject({
+      action: { label: "Open Tasks", to: "/tasks" },
+      description: "No open Tasks. Local capture is available whenever you need it.",
+    });
+    expect(
+      taskAgentAccessReadiness({
+        ...shared,
+        tasks: ready({ items: [{ id: "one" } as Task], nextCursor: "next" }),
+      })[0]?.description,
+    ).toContain("1+ open Task in Ilo");
+    expect(
+      taskAgentAccessReadiness({
+        ...shared,
+        tasks: ready({ items: [{ id: "one" } as Task, { id: "two" } as Task], nextCursor: null }),
+      })[0]?.description,
+    ).toContain("2 open Tasks in Ilo");
+    expect(taskAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
+    expect(taskAgentAccessCapability("profile_and_attention", "$ilo-setup").title).toContain(
+      "bounded actions",
+    );
+    const taskRules = taskAgentAccessCapability("executable_rules", "$ilo-setup");
+    expect(taskRules.title).toContain("rules");
+    expect(taskRules.description).toContain("executable rules");
+    expect(taskRules.setupPrompt).toContain("Task-owned rules");
   });
 });

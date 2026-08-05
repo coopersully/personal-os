@@ -30,11 +30,14 @@ Check in this order:
    cross-account boundaries, and unsafe agent capability.
 3. **Architecture** — domain ownership, provider boundaries, API-client parity, thin composition
    roots, MCP statelessness, and duplicated rules.
-4. **Tests** — focused contract coverage, negative cases, responsive UI flows, migrations, and no
+4. **Experience** — immediate user job, information hierarchy, design-rule ownership, shared
+   primitives/tokens, honest states, accessibility, responsive priority, and agreement with the
+   relevant design foundation, system, governance, and page contracts.
+5. **Tests** — focused contract coverage, negative cases, responsive UI flows, migrations, and no
    weakened thresholds.
-5. **Operations and compatibility** — migration order, rollout, health, recovery, observability,
+6. **Operations and compatibility** — migration order, rollout, health, recovery, observability,
    environment contracts, and backward compatibility.
-6. **Scope and docs** — diff matches title/body/issue, excludes churn, and keeps current docs true.
+7. **Scope and docs** — diff matches title/body/issue, excludes churn, and keeps current docs true.
 
 Treat bot findings and resolved threads as signals, not proof. Verify the pushed head.
 
@@ -48,9 +51,10 @@ Report only actionable, evidence-backed findings:
 - why it matters in ilo;
 - smallest sound remediation.
 
-Block only for correctness, security/privacy, data loss, architecture, migration/rollback,
-verification, or durable-doc gaps that should not merge. Separate pre-existing issues unless this PR
-worsens or depends on them. Drop style nits without material maintenance value.
+Block only for correctness, security/privacy, data loss, architecture, accessibility, broken
+design-system contracts, migration/rollback, verification, or durable-doc gaps that should not
+merge. Separate pre-existing issues unless this PR worsens or depends on them. Drop style nits
+without material user or maintenance value.
 
 Use `::code-comment{...}` for local inline findings when supported. For a proposed GitHub review,
 show the exact inline body and target before posting.

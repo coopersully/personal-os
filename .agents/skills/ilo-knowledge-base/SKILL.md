@@ -18,6 +18,8 @@ code names, an old PR, or a historical plan when a current document exists.
 | Product model and interaction contract | `docs/product/master-design.md`, `experience-standards.md` |
 | Challenged assumptions and safety gates | `docs/product/assumptions-audit.md` |
 | Current delivery record | `docs/product/implementation-log.md` |
+| Brand and experience principles | `docs/design/foundations.md` |
+| UX refinement and design-rule governance | `docs/design/governance.md` |
 | UI system and page behavior | `docs/design/system.md`, relevant file under `docs/design/pages` |
 | Feature ownership and composition seams | `docs/engineering/feature-ownership.md` |
 | Database rollout | `docs/engineering/database-migrations.md` |

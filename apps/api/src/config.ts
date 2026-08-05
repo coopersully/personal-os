@@ -18,7 +18,10 @@ const configSchema = z
       .max(128)
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/)
       .default(officialAgentSkill.revision),
-    AGENT_SKILL_SOURCE_URL: z.url().default(officialAgentSkill.sourceUrl),
+    AGENT_SKILL_SOURCE_URL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.url().optional(),
+    ),
     AGENT_SKILL_VERSION: semanticVersionSchema.default(officialAgentSkill.version),
     APP_ENCRYPTION_KEY: z.string().min(1),
     DATABASE_URL: z.string().min(1),
@@ -45,7 +48,10 @@ const configSchema = z
     X_REDIRECT_URI: z.url(),
   })
   .superRefine((value, context) => {
-    if (!sourceIdentifiesRevision(value.AGENT_SKILL_SOURCE_URL, value.AGENT_SKILL_REVISION)) {
+    const sourceUrl =
+      value.AGENT_SKILL_SOURCE_URL ??
+      new URL(officialAgentSkill.sourcePath, value.APP_BASE_URL).href;
+    if (!sourceIdentifiesRevision(sourceUrl, value.AGENT_SKILL_REVISION)) {
       context.addIssue({
         code: "custom",
         message:
@@ -141,7 +147,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
   const value = configSchema.parse(migrateLegacyOfficialAgentSkill(environment));
   return {
     agentSkillRevision: value.AGENT_SKILL_REVISION,
-    agentSkillSourceUrl: value.AGENT_SKILL_SOURCE_URL,
+    agentSkillSourceUrl:
+      value.AGENT_SKILL_SOURCE_URL ??
+      new URL(officialAgentSkill.sourcePath, value.APP_BASE_URL).href,
     agentSkillVersion: value.AGENT_SKILL_VERSION,
     allowedOrigins: value.ALLOWED_ORIGINS
       ? [
@@ -185,25 +193,46 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
 }
 
 function migrateLegacyOfficialAgentSkill(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (environment.AGENT_SKILL_SOURCE_URL !== officialAgentSkill.legacySourceUrl) {
+  const sourceUrl = environment.AGENT_SKILL_SOURCE_URL;
+  const sourceIsLegacy =
+    !!sourceUrl &&
+    (officialAgentSkill.legacySourceUrls.includes(sourceUrl) ||
+      officialAgentSkill.legacySourcePaths.includes(urlPathname(sourceUrl) ?? ""));
+  const metadataIsLegacy =
+    (!!environment.AGENT_SKILL_VERSION &&
+      officialAgentSkill.legacyVersions.includes(environment.AGENT_SKILL_VERSION)) ||
+    (!!environment.AGENT_SKILL_REVISION &&
+      officialAgentSkill.legacyRevisions.includes(environment.AGENT_SKILL_REVISION));
+  if ((!sourceIsLegacy && !!sourceUrl) || (!sourceUrl && !metadataIsLegacy)) {
     return environment;
   }
   if (
     environment.AGENT_SKILL_VERSION &&
-    environment.AGENT_SKILL_VERSION !== officialAgentSkill.version
+    environment.AGENT_SKILL_VERSION !== officialAgentSkill.version &&
+    !officialAgentSkill.legacyVersions.includes(environment.AGENT_SKILL_VERSION)
   ) {
     return environment;
   }
   if (
     environment.AGENT_SKILL_REVISION &&
-    environment.AGENT_SKILL_REVISION !== officialAgentSkill.revision
+    environment.AGENT_SKILL_REVISION !== officialAgentSkill.revision &&
+    !officialAgentSkill.legacyRevisions.includes(environment.AGENT_SKILL_REVISION)
   ) {
     return environment;
   }
-  return {
+  const migrated: NodeJS.ProcessEnv = {
     ...environment,
     AGENT_SKILL_REVISION: officialAgentSkill.revision,
-    AGENT_SKILL_SOURCE_URL: officialAgentSkill.sourceUrl,
     AGENT_SKILL_VERSION: officialAgentSkill.version,
   };
+  delete migrated.AGENT_SKILL_SOURCE_URL;
+  return migrated;
+}
+
+function urlPathname(value: string): string | null {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return null;
+  }
 }

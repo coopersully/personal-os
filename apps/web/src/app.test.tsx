@@ -228,6 +228,7 @@ const mocks = vi.hoisted(() => ({
   getDailyBrief: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
+  getIloSetup: vi.fn(),
   getDomainProfile: vi.fn(),
   getWeather: vi.fn(),
   searchWeatherLocations: vi.fn(),
@@ -718,6 +719,38 @@ function defaults() {
         pendingDraftVersion: null,
         profileStatus: null,
         profileVersion: null,
+      },
+    ],
+  });
+  mocks.getIloSetup.mockResolvedValue({
+    access: { canRead: false, canWrite: false },
+    connection: { lastObservedAt: null, observed: false },
+    currentStepId: "connect_agent",
+    domain: "mail",
+    nextAction: "Connect an MCP-compatible host to Ilo.",
+    profile: {
+      approvedStatus: null,
+      approvedVersion: null,
+      pendingDraftVersion: null,
+      status: null,
+      version: null,
+    },
+    progress: { completed: 0, total: 4 },
+    protocolVersion: "1.0",
+    selectedStepId: "connect_agent",
+    status: "needs_connection",
+    steps: [
+      {
+        completionEvidence: [],
+        description: "Authorize one MCP host.",
+        id: "connect_agent",
+        instructions: [],
+        order: 1,
+        owner: "person",
+        requiredTools: [],
+        state: "current",
+        title: "Connect an agent",
+        userAction: "Connect an MCP-compatible agent host to Ilo.",
       },
     ],
   });
@@ -1925,10 +1958,14 @@ describe("ilo web app", () => {
     const sidebar = screen.getByRole("complementary", { name: "Application Sidebar" });
 
     expect(sidebar).toHaveAttribute("data-state", "expanded");
-    expect(screen.getByRole("navigation", { name: "Plan" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Personal" })).toBeInTheDocument();
-    expect(screen.getByRole("navigation", { name: "Workspace" })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("link", { name: "Reminders" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("navigation", { name: "Plan" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("navigation", { name: "Personal" })).toBeInTheDocument();
+    expect(
+      within(sidebar).queryByRole("navigation", { name: "Workspace" }),
+    ).not.toBeInTheDocument();
+    for (const destination of ["Calendar", "Tasks", "Reminders", "Mail", "Finances"]) {
+      expect(within(sidebar).queryByRole("link", { name: destination })).not.toBeInTheDocument();
+    }
     expect(screen.queryByRole("link", { name: /^Automations$/ })).not.toBeInTheDocument();
     const todayLink = within(sidebar).getByRole("link", { name: "Today" });
     const goalsLink = within(sidebar).getByRole("link", { name: "Goals" });
@@ -1949,12 +1986,24 @@ describe("ilo web app", () => {
     expect(
       workspaceMenu.querySelector('[data-slot="dropdown-menu-separator"]'),
     ).toBeInTheDocument();
+    for (const [label, workspace] of [
+      ["Calendar", "calendar"],
+      ["Tasks", "tasks"],
+      ["Mail", "mail"],
+      ["Finances", "finances"],
+    ] as const) {
+      expect(
+        within(workspaceMenu)
+          .getByRole("menuitem", { name: label })
+          .querySelector(`[data-workspace="${workspace}"]`),
+      ).not.toBeNull();
+    }
     expect(within(workspaceMenu).getByRole("menuitem", { name: "Finances" })).toBeInTheDocument();
     await browser.click(within(workspaceMenu).getByRole("menuitem", { name: "Finances" }));
     expect(await screen.findByText("Spent this month")).toBeInTheDocument();
-    expect(within(sidebar).getByRole("button", { name: "Switch workspace" })).toHaveTextContent(
-      "Finances",
-    );
+    const financesSwitcher = within(sidebar).getByRole("button", { name: "Switch workspace" });
+    expect(financesSwitcher).toHaveTextContent("Finances");
+    expect(financesSwitcher.querySelector('[data-workspace="finances"]')).not.toBeNull();
     expect(screen.getByRole("button", { name: "Account menu" })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Account menu" }));
     const accountMenu = screen.getByRole("menu", { name: "Account menu" });

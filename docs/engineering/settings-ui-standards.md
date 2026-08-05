@@ -27,6 +27,16 @@ An inline message needs a specific title and a next step. Never use a static ale
 - Put infrequent tuning, verbose scope checklists, and historical records in a labelled `Collapsible`.
 - Do not render an action that cannot work on the current platform. Show an informational capability callout only when the user can still complete useful preparatory work.
 - Do not render restricted navigation or settings to users without the corresponding capability. Redirect a deep link to a safe, available settings section.
+- Setup sequences use labelled disclosures with a persistent status summary.
+  Derive completion from durable or externally observed product state; never
+  use a manual checkbox for a step that the product can verify. State the
+  evidence boundary when the product can observe a successful check-in but
+  cannot inspect a third-party host directly.
+- After an agent has authenticated, the server-owned setup plan determines the
+  current, blocked, and complete step. Ask the person only for unavoidable
+  connection, unresolved preferences, and consequential approval. Skill
+  installation instructions and procedural prompts are optional compatibility
+  details, not required steps or a second source of setup state.
 
 ## Security & agent access
 

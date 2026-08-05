@@ -788,6 +788,45 @@ function apiFetch() {
         },
       });
     if (url.pathname.endsWith("/sync")) return json({ result: { changed: 3 } });
+    if (url.pathname === "/v1/assistant/setup-plan")
+      return json({
+        plan: {
+          access: { canRead: true, canWrite: true },
+          connection: { lastObservedAt: now, observed: true },
+          currentStepId: "learn_preferences",
+          domain: "mail",
+          nextAction: "Inspect Mail and save a draft.",
+          profile: {
+            approvedStatus: null,
+            approvedVersion: null,
+            pendingDraftVersion: null,
+            status: null,
+            version: null,
+          },
+          progress: { completed: 1, total: 4 },
+          protocolVersion: "1.0",
+          selectedStepId: url.searchParams.get("stepId") ?? "learn_preferences",
+          status: "in_progress",
+          steps: [],
+        },
+      });
+    if (url.pathname === "/v1/assistant/context")
+      return json({
+        context: {
+          access: { grantedScopes: ["mail:read", "mail:write"] },
+          generatedAt: now,
+          identity: { actorType: "agent", displayName: "Test", userId: id },
+          links: {
+            activity: "https://app.example.com/activity",
+            agentAccess: "https://app.example.com/settings?section=agents",
+            approvals: "https://app.example.com/settings?section=agents",
+            recovery: "https://app.example.com/settings?section=agents",
+            today: "https://app.example.com/today",
+          },
+          readiness: { domains: [] },
+          time: { timestamp: now, timezone: "UTC" },
+        },
+      });
     if (url.pathname === "/v1/assistant/setup-status")
       return json({
         setup: {
@@ -1347,6 +1386,19 @@ describe("ilo API client", () => {
     await expect(api.getMailSetupContext()).resolves.toMatchObject({ accounts: [] });
     await expect(api.getAssistantSetupStatus()).resolves.toMatchObject({
       domains: [expect.objectContaining({ domain: "mail" })],
+    });
+    await expect(api.getIloContext()).resolves.toMatchObject({
+      access: { grantedScopes: ["mail:read", "mail:write"] },
+      identity: { actorType: "agent", displayName: "Test" },
+      links: { today: "https://app.example.com/today" },
+      time: { timezone: "UTC" },
+    });
+    await expect(
+      api.getIloSetup({ domain: "mail", stepId: "learn_preferences" }),
+    ).resolves.toMatchObject({
+      currentStepId: "learn_preferences",
+      domain: "mail",
+      selectedStepId: "learn_preferences",
     });
     await expect(api.getAgentConnectionGuide()).resolves.toMatchObject({
       mcpUrl: "https://mcp.example.com/mcp",

@@ -13,7 +13,7 @@ describe("API configuration", () => {
   it("applies development defaults", () => {
     expect(loadConfig(required)).toEqual({
       agentSkillRevision: officialAgentSkill.revision,
-      agentSkillSourceUrl: officialAgentSkill.sourceUrl,
+      agentSkillSourceUrl: `https://app.example.com${officialAgentSkill.sourcePath}`,
       agentSkillVersion: officialAgentSkill.version,
       allowedOrigins: ["https://app.example.com"],
       authRateLimitMaxRequests: 20,
@@ -98,7 +98,7 @@ describe("API configuration", () => {
   it("migrates only the former official full environment to the immutable release", () => {
     const formerOfficialEnvironment = {
       ...required,
-      AGENT_SKILL_SOURCE_URL: officialAgentSkill.legacySourceUrl,
+      AGENT_SKILL_SOURCE_URL: officialAgentSkill.legacySourceUrls[0],
       ALLOWED_ORIGINS: "https://app.example.com",
       AUTH_RATE_LIMIT_MAX_REQUESTS: "20",
       AUTH_RATE_LIMIT_WINDOW_SECONDS: "300",
@@ -115,7 +115,55 @@ describe("API configuration", () => {
     };
     expect(loadConfig(formerOfficialEnvironment)).toMatchObject({
       agentSkillRevision: officialAgentSkill.revision,
-      agentSkillSourceUrl: officialAgentSkill.sourceUrl,
+      agentSkillSourceUrl: `https://app.example.com${officialAgentSkill.sourcePath}`,
+      agentSkillVersion: officialAgentSkill.version,
+    });
+    expect(
+      loadConfig({
+        ...formerOfficialEnvironment,
+        AGENT_SKILL_REVISION: officialAgentSkill.legacyRevisions.at(-1),
+        AGENT_SKILL_SOURCE_URL: `https://app.example.com${officialAgentSkill.legacySourcePaths[0]}`,
+        AGENT_SKILL_VERSION: officialAgentSkill.legacyVersions[0],
+      }),
+    ).toMatchObject({
+      agentSkillRevision: officialAgentSkill.revision,
+      agentSkillSourceUrl: `https://app.example.com${officialAgentSkill.sourcePath}`,
+      agentSkillVersion: officialAgentSkill.version,
+    });
+    expect(
+      loadConfig({
+        ...formerOfficialEnvironment,
+        AGENT_SKILL_REVISION: officialAgentSkill.legacyRevisions.at(-1),
+        AGENT_SKILL_SOURCE_URL: "",
+        AGENT_SKILL_VERSION: officialAgentSkill.legacyVersions[0],
+      }),
+    ).toMatchObject({
+      agentSkillRevision: officialAgentSkill.revision,
+      agentSkillSourceUrl: `https://app.example.com${officialAgentSkill.sourcePath}`,
+      agentSkillVersion: officialAgentSkill.version,
+    });
+    expect(
+      loadConfig({
+        ...formerOfficialEnvironment,
+        AGENT_SKILL_REVISION: officialAgentSkill.legacyRevisions.at(-1),
+        AGENT_SKILL_SOURCE_URL: undefined,
+        AGENT_SKILL_VERSION: officialAgentSkill.legacyVersions[0],
+      }),
+    ).toMatchObject({
+      agentSkillRevision: officialAgentSkill.revision,
+      agentSkillSourceUrl: `https://app.example.com${officialAgentSkill.sourcePath}`,
+      agentSkillVersion: officialAgentSkill.version,
+    });
+    expect(
+      loadConfig({
+        ...formerOfficialEnvironment,
+        AGENT_SKILL_REVISION: officialAgentSkill.legacyRevisions[0],
+        AGENT_SKILL_SOURCE_URL: officialAgentSkill.legacySourceUrls[1],
+        AGENT_SKILL_VERSION: officialAgentSkill.version,
+      }),
+    ).toMatchObject({
+      agentSkillRevision: officialAgentSkill.revision,
+      agentSkillSourceUrl: `https://app.example.com${officialAgentSkill.sourcePath}`,
       agentSkillVersion: officialAgentSkill.version,
     });
     expect(() =>

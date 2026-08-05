@@ -5,13 +5,74 @@ mail, finance, provider, or audit rules of its own.
 
 ## Transports
 
-- `apps/mcp/dist/stdio.js` for local MCP hosts. Configure `PERSONAL_OS_API_URL`, `PERSONAL_OS_TOKEN`, and optionally `PERSONAL_OS_TIMEZONE`.
-- `apps/mcp/dist/http.js` for Streamable HTTP. Send `Authorization: Bearer pos_…`; optionally send `X-Personal-OS-Timezone`.
+- `apps/mcp/dist/stdio.js` for local MCP hosts. Configure `PERSONAL_OS_API_URL`,
+  `PERSONAL_OS_TOKEN`, and optionally `PERSONAL_OS_TIMEZONE` and `APP_BASE_URL`.
+- `apps/mcp/dist/http.js` for Streamable HTTP. Send `Authorization: Bearer pos_…`; optionally
+  send `X-Personal-OS-Timezone`. `/mcp/readonly` exposes the same server with every mutation
+  removed from discovery.
 
-The HTTP server is stateless: it creates an isolated MCP server and transport for each request and
-uses the caller's audience-bound Ilo access token against the Ilo API. It never accepts or forwards
-provider credentials. Replacing this same-service bearer handoff with an internal credential
-exchange is a bounded shared-MCP follow-up; Finance does not invent a domain-local token path.
+The HTTP server uses the MCP TypeScript v2 per-request factory. Modern July 2026 requests and the
+stateless 2025 compatibility path are built from the same server definition. Before constructing
+that definition, the adapter validates the audience-bound Ilo token through
+`GET /v1/assistant/context`. The returned user identity, scopes, planning time zone, setup
+readiness, and Ilo links determine the request's discovery surface. Provider credentials never
+enter the MCP process.
+
+`APP_BASE_URL` is required in deployed API and MCP containers. The MCP container uses it for
+server/tool icons, structured recovery links, its MCP App CSP, and protected-resource
+documentation. Compose and Terraform set the same first-party origin used by the web app.
+
+## Architecture and progressive disclosure
+
+`apps/mcp/src/server.ts` is a composition root only. Feature files own input schemas and API calls;
+`tool-catalog.ts` owns the domain, workflow stage, policy, read/write posture, scope requirements,
+and visual-entrypoint status of every tool; `tool-surface.ts` enforces that catalog uniformly.
+Adding a tool without a catalog record fails while the server is being constructed.
+
+Discovery follows these rules:
+
+1. `get_ilo_context` and `get_ilo_setup` remain available after authentication so an agent can
+   orient itself and repair setup. The legacy `get_agent_setup_status` alias is omitted from normal
+   discovery; a bounded compatibility host can opt in through the server construction option while
+   it migrates.
+2. A domain tool is advertised only when the token has one of its required scopes.
+3. A read-only server never advertises mutation tools, even when the token itself has write scopes.
+4. Every advertised tool has all four annotation hints, a shared output schema, an Ilo icon, and
+   metadata identifying its domain, policy, and workflow stage.
+5. The API rechecks scope, ownership, policy, revisions, and provider capability. Discovery and
+   annotations improve agent behavior but never grant authority.
+
+The workflow stages are `context`, `inspect`, `prepare`, `commit`, `verify`, and `recover`.
+Preview tools are read-only `prepare` operations. Direct changes use `approve_each`; installed
+routines use `approved_rule`; normal reads use `read_only`. `get_ilo_context` returns the tools
+actually available on that connection together with the safe workflow and links back to Today,
+activity, Agent access, approvals, and recovery.
+
+Every tool result keeps its feature payload under `result` (or its structured `error`/empty `ok`)
+and adds `_ilo` with the domain, stage, policy, read-only state, and first-party links. Text content
+remains available for clients that do not consume structured output.
+
+## Resources, prompts, and visual work surface
+
+The primary resource namespace is `ilo://`:
+
+- `ilo://context/self` provides authenticated identity, readiness, scopes, and available tools.
+- `ilo://setup/{domain}/{step}` provides one server-owned setup step.
+- `ilo://guidance/{domain}` provides active or draft domain guidance. Drafts are explicitly
+  non-operative.
+- `ui://ilo/work-surface` is a self-contained `text/html;profile=mcp-app` view for context,
+  previews, approvals, and verification results. Selected entry tools link to it through standard
+  `_meta.ui.resourceUri` metadata; all tools retain text and structured fallbacks.
+
+`personal-os://agenda/today` and `personal-os://brief/daily` remain readable compatibility
+resources. New clients should begin with `get_ilo_context` or `ilo://context/self`.
+
+The server publishes task-oriented prompts for setup, daily planning, Mail triage, Calendar
+commitment preparation, overdue Reminder review, Finance review, and a weekly review. Prompts
+compose existing tools and approval boundaries; they do not embed new authority or business
+rules. MCP Tasks are intentionally not advertised yet: current long-lived Mail and Finance work
+has durable API-owned lifecycle state, but no shared MCP task handle contract. Exposing protocol
+Tasks before that contract exists would create a misleading in-memory completion surface.
 
 ## Tools
 
@@ -25,7 +86,12 @@ partial-effect reporting remain deterministic API behavior.
 
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
 
-- `get_agent_setup_status` discovers accessible domains and existing profile state.
+- `get_ilo_setup` is the authoritative setup entrypoint. Call it immediately after connection and
+  after every draft save, signed-in approval, or capability change. It returns the actual current
+  semantic step, selected step context, observed evidence, scoped authority, domain instructions,
+  required tools, approval owner, and next action. Reading a step never mutates or advances setup.
+- `get_agent_setup_status` remains a compatibility view of accessible domains and profile state;
+  it is not the procedural setup source of truth.
 - `get_domain_profile` and `save_domain_profile` read and maintain durable domain preferences,
   source meanings, categories, and instructions.
 - `list_attention_items`, `create_attention_item`, and `update_attention_item` use the same shape
@@ -155,9 +221,9 @@ Tool annotations are host UX hints, not authorization. API scopes, policy,
 revision checks, database invariants, and audit records enforce Finance safety.
 Every Finance read tool declares all four annotation hints explicitly. The
 shared API result helper supplies `structuredContent` and preserves structured
-API failures. Finance does not add domain-local `outputSchema` declarations
-while combined API responses lack a shared MCP schema convention; capability
-negotiation and output schemas are a bounded shared-MCP follow-up. OAuth uses
+API failures. The shared MCP registration surface adds the same output envelope
+and Ilo workflow metadata used by every other domain; Finance does not create a
+domain-local result convention. OAuth uses
 the MCP resource indicator, scopes remain least-privilege read/write grants,
 and provider tokens never cross the MCP boundary.
 
@@ -189,7 +255,28 @@ millisecond precision; a purely local event changed twice inside the same millis
 remaining race. A future monotonic per-event revision, used instead of or alongside `updatedAt`,
 would eliminate that local race. Connected projections also compare the provider ETag.
 
-The fixed `personal-os://agenda/today` resource merges open reminders due through the current local day with that day's selected-calendar events.
+The compatibility `personal-os://agenda/today` resource merges open reminders due through the
+current local day with that day's selected-calendar events.
+
+## External-boundary record
+
+| Concern | MCP answer |
+| --- | --- |
+| Capability and owner | MCP translates protocol operations to the authenticated Ilo API. Domain services and the API own behavior and authorization. |
+| Configuration and authority | `MCP_PUBLIC_URL`, `APP_BASE_URL`, `PERSONAL_OS_API_URL`, `MCP_INTERNAL_SECRET`, the bearer token audience, and returned scopes must agree. |
+| Transport | Public HTTPS Streamable HTTP terminates at `/mcp`; local hosts use stdio. The MCP-to-API hop is HTTPS in production and carries no provider credential. |
+| Time and capacity | Requests use the existing API/provider deadlines and MCP fixed-window rate limit. Large or delayed provider work must already cross an API-owned durable handoff. |
+| Commit point | A tool succeeds only for the durable API state represented by its response. MCP has no independent commit state. |
+| Delivery semantics | Mutations inherit API optimistic revisions, idempotency, reconciliation, partial-effect, and recoverable-trash behavior. Annotations are not replay authority. |
+| Degraded behavior | Authentication fails before protocol dispatch. API errors preserve code, safe details, request ID, status, and recovery metadata in the result envelope. |
+| Recovery and observation | `_ilo.links`, API activity, feature recovery screens, and redacted request IDs lead the person or agent to the owning repair surface. |
+| Evidence | Catalog coverage and scoped-discovery tests, API route/service tests, type checks, builds, Compose/Terraform agreement, E2E, and a post-deploy authenticated read-only smoke. |
+
+A green mock can still miss a production mismatch among the public MCP audience, internal API
+secret, deployed `APP_BASE_URL`, OAuth metadata, proxy Origin/Host policy, or the protocol client
+era. Deployment verification must therefore perform a least-privilege authenticated
+`get_ilo_context` call from a real MCP client and confirm that the returned links and scopes match
+the intended account without invoking a provider mutation.
 
 Tool annotations are host hints, not authorization. Read-only cached Mail tools are closed-world;
 provider writes and sending are open-world. Rule activation is intentionally absent from MCP
@@ -214,20 +301,23 @@ do not replay the request, not that Ilo can reconcile a missing audit record.
 
 ## Authorization
 
-Open **Settings → Agent access** for the current deployment's MCP URL, the
-install request for the versioned `ilo-setup` skill, its immutable source
-revision, and a domain-specific starter prompt. A new account can go directly
-there from the Ready step. The handoff works with Claude, Codex, and other
-compatible MCP hosts, but Ilo does not claim to install into a host: the person
-copies the connection URL and prompts into the host they already use.
+Open **Settings → Agent access** for the current deployment's MCP URL. A new
+account can go directly there from the Ready step. The person completes that
+one unavoidable connection handoff; after authentication, the host calls
+`get_ilo_setup` and Ilo supplies the current domain context and next work. A
+separate skill install or copied procedural prompt is not required.
 
-The connection guide reports one artifact identity as `version`, `revision`,
-and `sourceUrl`. The official URL is pinned to the reported Git commit.
-Self-hosted deployments supply all three values and the API rejects a source URL
-that does not embed its configured revision. The official tuple is sourced from
-the checked release manifest; deployment projections are verified by the
-repository lint contract. The one-time legacy official `main` URL migration is
-documented in [deployment](deployment.md#upgrade-from-the-mutable-official-url).
+For compatibility with skill-aware hosts, the connection guide also reports one
+optional artifact identity as `version`, `revision`, and `sourceUrl`. By default
+the API derives the official URL from `APP_BASE_URL` and the checked, versioned
+skill path. The web build publishes `SKILL.md`, its agent metadata, and relative
+references at that path. The skill defers to the authenticated setup plan and
+cannot grant scope or approve behavior. Self-hosted deployments may supply a
+different public source, but the API rejects one that does not embed its
+configured revision. The official tuple is sourced from the checked release
+manifest; deployment projections are verified by the repository lint contract.
+Legacy release migration is documented in
+[deployment](deployment.md#upgrade-from-an-earlier-official-release).
 
 Domain support is explicit. A missing or `unsupported` guide entry is not a
 profile-only fallback, and hosts must not infer executable behavior from a

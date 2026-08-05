@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
 import {
   calendarBlockRevisionMapSchema,
@@ -28,7 +28,7 @@ export function registerCalendarListTools(server: McpServer, api: PersonalOsApiC
       },
       description:
         "List Calendar destinations and source fidelity: provider/account identity, remote calendar identity, writable/selected state, time zone, sync status, freshness timestamp, and source error. Call this before choosing a destination.",
-      inputSchema: {},
+      inputSchema: z.object({}),
       title: "List calendars",
     },
     async () => apiResult(() => api.listCalendars()),
@@ -48,12 +48,12 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "List the unified Calendar projection for an explicit time window. Results retain calendar/source identity and provider revision; use list_calendars to interpret capability and freshness.",
-      inputSchema: {
+      inputSchema: z.object({
         calendarIds: z.array(id).optional(),
         from: isoDateTime,
         query: z.string().max(200).optional(),
         to: isoDateTime,
-      },
+      }),
       title: "List calendar events",
     },
     async (input) => apiResult(() => api.listEvents(input)),
@@ -69,7 +69,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Read one current Calendar event with its updatedAt mutation revision, provider source revision, and every linked block's independent updatedAt revision. Read immediately before a guarded mutation.",
-      inputSchema: { id },
+      inputSchema: z.object({ id }),
       title: "Get calendar event",
     },
     async (input) => apiResult(() => api.getEvent(input.id)),
@@ -85,7 +85,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Create one event only from the user's direct instruction on a writable destination. This can write to an external provider; it never authorizes inference from mail or other sourced material. For ticket, booking, registration, or accepted-commitment evidence, use preview_calendar_commitment and leave creation to an interactive user action.",
-      inputSchema: {
+      inputSchema: z.object({
         allDay: z.boolean().default(false),
         calendarId: id,
         endsAt: isoDateTime,
@@ -97,7 +97,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         visibility: visibility
           .default("default")
           .describe("Event visibility at the destination calendar."),
-      },
+      }),
       title: "Create calendar event",
     },
     async (input) => apiResult(() => api.createEvent(input)),
@@ -113,7 +113,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Update an event after the user has specified the exact change. Connected writes can update an external provider and may notify existing attendees under provider semantics. Never silently move or resize a hard/non-flexible commitment.",
-      inputSchema: {
+      inputSchema: z.object({
         allDay: z.boolean().optional(),
         endsAt: isoDateTime.optional(),
         expectedBlockUpdatedAtById: calendarBlockRevisionMapSchema.describe(
@@ -131,7 +131,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         visibility: visibility
           .optional()
           .describe("Replacement visibility; this can change disclosure to calendar viewers."),
-      },
+      }),
       title: "Update calendar event",
     },
     async ({ id: eventId, ...input }) => apiResult(() => api.updateEvent(eventId, input)),
@@ -147,14 +147,14 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Link an event to an opaque Busy block or a detailed mirror on another writable calendar. This writes to the destination provider. Default to Busy unless the user explicitly permits details; the source event is never moved.",
-      inputSchema: {
+      inputSchema: z.object({
         calendarId: id.describe("Destination calendar identifier"),
         expectedUpdatedAt: isoDateTime.describe(
           "The source event updatedAt returned by get_event.",
         ),
         id: id.describe("Source event identifier"),
         mode: z.enum(["busy", "details"]).default("busy"),
-      },
+      }),
       title: "Block event on another calendar",
     },
     async ({ id: eventId, ...input }) => apiResult(() => api.createEventBlock(eventId, input)),
@@ -170,7 +170,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Switch a linked provider block between private Busy and included details. Including details can disclose title, notes, and location to the destination account.",
-      inputSchema: {
+      inputSchema: z.object({
         blockId: id.describe("Linked block event identifier"),
         expectedBlockUpdatedAt: isoDateTime.describe(
           "The linked block updatedAt returned by get_event.",
@@ -180,7 +180,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         ),
         id: id.describe("Source event identifier"),
         mode: z.enum(["busy", "details"]),
-      },
+      }),
       title: "Change event block privacy",
     },
     async ({ blockId, id: eventId, ...input }) =>
@@ -196,7 +196,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
         readOnlyHint: false,
       },
       description: "Remove one linked destination block without deleting the source event.",
-      inputSchema: {
+      inputSchema: z.object({
         blockId: id.describe("Linked block event identifier"),
         expectedBlockUpdatedAt: isoDateTime.describe(
           "The linked block updatedAt returned by get_event.",
@@ -205,7 +205,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
           "The source event updatedAt returned by get_event.",
         ),
         id: id.describe("Source event identifier"),
-      },
+      }),
       title: "Unblock event calendar",
     },
     async ({ blockId, id: eventId, ...input }) =>
@@ -222,13 +222,13 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Move an event and all linked blocks to recoverable trash locally and at connected providers. Requires the source and exact independent block revisions from get_event, and returns the deleted revisions required by restore_event. Provider deletion can cancel an attendee-facing event.",
-      inputSchema: {
+      inputSchema: z.object({
         expectedBlockUpdatedAtById: calendarBlockRevisionMapSchema.describe(
           "Exact eventId-to-updatedAt map for every linked block.",
         ),
         expectedUpdatedAt: isoDateTime.describe("The source event updatedAt from get_event."),
         id,
-      },
+      }),
       title: "Delete calendar event",
     },
     async ({ id: eventId, ...input }) => apiResult(() => api.trashEvent(eventId, input)),
@@ -244,11 +244,11 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Restore one trashed event and its linked blocks using the exact source and block updatedAt revisions returned by delete_event. Connected restoration creates provider events and is not safe to replay blindly.",
-      inputSchema: {
+      inputSchema: z.object({
         expectedBlockUpdatedAtById: calendarBlockRevisionMapSchema,
         expectedUpdatedAt: isoDateTime,
         id,
-      },
+      }),
       title: "Restore calendar event",
     },
     async ({ id: eventId, ...input }) => apiResult(() => api.restoreEvent(eventId, input)),
@@ -264,10 +264,10 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Create or refresh one open important, upcoming, or follow-up item for an owned Calendar event. Ilo locks and validates the event, derives provider provenance and current revision, deduplicates the open event/kind pair, and never copies event notes.",
-      inputSchema: {
+      inputSchema: z.object({
         ...upsertCalendarAttentionItemInputSchema.shape,
         eventId: id,
-      },
+      }),
       title: "Create Calendar attention item",
     },
     async ({ eventId, ...input }) =>
@@ -285,7 +285,7 @@ export function registerCalendarEventTools(server: McpServer, api: PersonalOsApi
       },
       description:
         "Preview one exact Calendar candidate from caller-supplied commitment evidence. The API checks destination capability, projection freshness, exact duplicates, profile alignment, and requested policy without writing an event. Caller-supplied evidence remains unverified and can never authorize approved_rule. This is the Calendar-owned intake shape for a later durable integration; do not scan Mail here.",
-      inputSchema: previewCalendarCommitmentInputSchema.shape,
+      inputSchema: previewCalendarCommitmentInputSchema,
       title: "Preview evidence-based Calendar commitment",
     },
     async (input) => apiResult(() => api.previewCalendarCommitment(input)),

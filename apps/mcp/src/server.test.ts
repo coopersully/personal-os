@@ -1,5 +1,4 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import type {
   AutomationRoutine,
@@ -12,7 +11,9 @@ import type {
   Reminder,
   Task,
 } from "@personal-os/domain";
+import { accessScopeSchema } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "./server.js";
+import { availableToolNames } from "./tool-catalog.js";
 
 const now = "2026-07-13T12:00:00.000Z";
 const id = "11111111-1111-4111-8111-111111111111";
@@ -227,6 +228,25 @@ const automationRun: AutomationRun = {
 
 function mockApi() {
   return {
+    getIloSetup: vi.fn(async () => ({
+      access: { canRead: true, canWrite: true },
+      connection: { lastObservedAt: now, observed: true },
+      currentStepId: "learn_preferences" as const,
+      domain: "mail" as const,
+      nextAction: "Inspect Mail and save a draft.",
+      profile: {
+        approvedStatus: null,
+        approvedVersion: null,
+        pendingDraftVersion: null,
+        status: null,
+        version: null,
+      },
+      progress: { completed: 1, total: 4 },
+      protocolVersion: "1.0" as const,
+      selectedStepId: "learn_preferences" as const,
+      status: "in_progress" as const,
+      steps: [],
+    })),
     getAssistantSetupStatus: vi.fn(async () => ({
       domains: [
         {
@@ -240,6 +260,20 @@ function mockApi() {
           profileVersion: 1,
         },
       ],
+    })),
+    getIloContext: vi.fn(async () => ({
+      access: { grantedScopes: ["tasks:read", "tasks:write"] },
+      generatedAt: now,
+      identity: { actorType: "agent" as const, displayName: "Ilo test", userId: id },
+      links: {
+        activity: "https://app.example.com/activity",
+        agentAccess: "https://app.example.com/settings?section=agents",
+        approvals: "https://app.example.com/settings?section=agents",
+        recovery: "https://app.example.com/settings?section=agents",
+        today: "https://app.example.com/today",
+      },
+      readiness: { domains: [] },
+      time: { timestamp: now, timezone: "America/New_York" },
     })),
     getDomainProfile: vi.fn(async () => domainProfile),
     getFinanceGuidedSetup: vi.fn(async () => ({
@@ -606,78 +640,36 @@ describe("ilo MCP server", () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
     const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual([
-      "get_agent_setup_status",
-      "get_domain_profile",
-      "save_domain_profile",
-      "list_attention_items",
-      "create_attention_item",
-      "update_attention_item",
-      "get_finance_guided_setup",
-      "create_finance_attention_item",
-      "get_finance_wealth_summary",
-      "get_finance_cashflow",
-      "get_finance_ledger_health",
-      "list_finance_transactions",
-      "get_finance_categories",
-      "get_finance_budget_status",
-      "list_finance_merchants",
-      "get_finance_review_queue",
-      "propose_finance_categorizations",
-      "get_finance_overview",
-      "list_reminders",
-      "get_reminder",
-      "preview_overdue_reminder_deferral",
-      "create_reminder",
-      "create_reminder_attention_item",
-      "update_reminder",
-      "complete_reminder",
-      "delete_reminder",
-      "restore_reminder",
-      "list_x_bookmarks",
-      "sync_x_bookmarks",
-      "list_tasks",
-      "create_task",
-      "update_task",
-      "complete_task",
-      "delete_task",
-      "list_calendars",
-      "list_mailboxes",
-      "get_mail_setup_context",
-      "list_mail",
-      "read_mail",
-      "update_mail",
-      "bulk_update_mail",
-      "snooze_mail",
-      "create_mail_draft",
-      "send_mail",
-      "create_mail_attention_item",
-      "list_mail_rules",
-      "preview_mail_rule",
-      "review_mail_rule",
-      "create_mail_rule",
-      "update_mail_rule",
-      "list_events",
-      "get_event",
-      "create_event",
-      "update_event",
-      "block_event",
-      "set_event_block_privacy",
-      "unblock_event",
-      "delete_event",
-      "restore_event",
-      "create_calendar_attention_item",
-      "preview_calendar_commitment",
-      "list_goals",
-      "create_goal",
-      "update_goal",
-      "list_motives",
-      "create_motive",
-      "list_activity",
-      "get_daily_brief",
-      "list_automations",
-      "run_automation",
-    ]);
+    expect(new Set(tools.tools.map((tool) => tool.name))).toEqual(
+      new Set(availableToolNames(new Set(accessScopeSchema.options), false)),
+    );
+    for (const tool of tools.tools) {
+      expect(tool.outputSchema).toMatchObject({
+        properties: { _ilo: expect.any(Object) },
+        required: ["_ilo"],
+        type: "object",
+      });
+      expect(tool.annotations).toEqual({
+        destructiveHint: expect.any(Boolean),
+        idempotentHint: expect.any(Boolean),
+        openWorldHint: expect.any(Boolean),
+        readOnlyHint: expect.any(Boolean),
+      });
+      expect(tool._meta).toMatchObject({
+        "ilo/domain": expect.any(String),
+        "ilo/policy": expect.any(String),
+        "ilo/stage": expect.any(String),
+      });
+    }
+    expect(tools.tools.find((tool) => tool.name === "run_automation")?.annotations).toMatchObject({
+      idempotentHint: false,
+      readOnlyHint: false,
+    });
+    expect(tools.tools.find((tool) => tool.name === "sync_x_bookmarks")?.annotations).toMatchObject(
+      {
+        readOnlyHint: false,
+      },
+    );
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
@@ -727,6 +719,7 @@ describe("ilo MCP server", () => {
     });
     for (const tool of tools.tools.filter((candidate) =>
       [
+        "get_ilo_setup",
         "get_agent_setup_status",
         "get_domain_profile",
         "save_domain_profile",
@@ -937,7 +930,10 @@ describe("ilo MCP server", () => {
       ]),
     );
 
-    await client.callTool({ name: "get_agent_setup_status", arguments: {} });
+    await client.callTool({
+      name: "get_ilo_setup",
+      arguments: { domain: "mail", stepId: "learn_preferences" },
+    });
     await client.callTool({ name: "get_domain_profile", arguments: { domain: "mail" } });
     await client.callTool({
       name: "save_domain_profile",
@@ -1088,7 +1084,7 @@ describe("ilo MCP server", () => {
       name: "delete_reminder",
       arguments: { expectedUpdatedAt: now, id },
     });
-    expect(deletedReminder.structuredContent).toEqual({ result: reminder });
+    expect(deletedReminder.structuredContent).toMatchObject({ result: reminder });
     await client.callTool({
       name: "restore_reminder",
       arguments: { expectedUpdatedAt: now, id },
@@ -1109,7 +1105,7 @@ describe("ilo MCP server", () => {
     });
     await client.callTool({ name: "complete_task", arguments: { id } });
     const deletedTask = await client.callTool({ name: "delete_task", arguments: { id } });
-    expect(deletedTask.structuredContent).toEqual({ ok: true });
+    expect(deletedTask.structuredContent).toMatchObject({ ok: true });
     await client.callTool({ name: "list_calendars", arguments: {} });
     await client.callTool({ name: "list_mailboxes", arguments: {} });
     await client.callTool({ name: "get_mail_setup_context", arguments: {} });
@@ -1239,7 +1235,7 @@ describe("ilo MCP server", () => {
       name: "delete_event",
       arguments: { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now, id },
     });
-    expect(deletedEvent.structuredContent).toEqual({
+    expect(deletedEvent.structuredContent).toMatchObject({
       result: { blockUpdatedAtById: {}, eventId: id, updatedAt: now },
     });
     await client.callTool({
@@ -1393,7 +1389,40 @@ describe("ilo MCP server", () => {
     });
 
     const resources = await client.listResources();
-    expect(resources.resources).toHaveLength(2);
+    expect(resources.resources.map((resource) => resource.uri)).toEqual([
+      "personal-os://agenda/today",
+      "personal-os://brief/daily",
+      "ilo://context/self",
+      "ui://ilo/work-surface",
+    ]);
+    const templates = await client.listResourceTemplates();
+    expect(templates.resourceTemplates.map((template) => template.uriTemplate)).toEqual([
+      "ilo://setup/{domain}/{step}",
+      "ilo://guidance/{domain}",
+    ]);
+    const prompts = await client.listPrompts();
+    expect(prompts.prompts.map((prompt) => prompt.name)).toEqual([
+      "set_up_ilo",
+      "plan_today",
+      "triage_mail",
+      "prepare_calendar_commitment",
+      "review_overdue_reminders",
+      "review_finances",
+      "weekly_review",
+    ]);
+    const workSurface = await client.readResource({ uri: "ui://ilo/work-surface" });
+    expect(workSurface.contents[0]).toMatchObject({
+      _meta: { ui: { prefersBorder: true } },
+      mimeType: "text/html;profile=mcp-app",
+      uri: "ui://ilo/work-surface",
+    });
+    const workSurfaceContent = workSurface.contents[0];
+    expect(workSurfaceContent && "text" in workSurfaceContent && workSurfaceContent.text).toContain(
+      "ui/initialize",
+    );
+    expect(workSurfaceContent && "text" in workSurfaceContent && workSurfaceContent.text).toContain(
+      "ui/notifications/tool-result",
+    );
     const agenda = await client.readResource({ uri: "personal-os://agenda/today" });
     const agendaContent = agenda.contents[0];
     expect(agendaContent && "text" in agendaContent).toBe(true);
@@ -1440,6 +1469,52 @@ describe("ilo MCP server", () => {
     await client.close();
     await server.close();
     vi.useRealTimers();
+  });
+
+  it("filters discovery by scopes and read-only posture while keeping typed Ilo metadata", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      appBaseUrl: "https://app.example.com",
+      readOnly: true,
+      scopes: new Set(["tasks:read", "tasks:write"]),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const tools = await client.listTools();
+    const names = tools.tools.map((tool) => tool.name);
+    expect(names).toContain("get_ilo_context");
+    expect(names).toContain("list_tasks");
+    expect(names).not.toContain("get_daily_brief");
+    expect(names).not.toContain("create_task");
+    expect(names).not.toContain("list_mail");
+    expect(tools.tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "get_ilo_context")).toMatchObject({
+      _meta: { ui: { resourceUri: "ui://ilo/work-surface" } },
+      outputSchema: { type: "object" },
+    });
+
+    const context = await client.callTool({ arguments: {}, name: "get_ilo_context" });
+    expect(context.structuredContent).toMatchObject({
+      _ilo: {
+        domain: "assistant",
+        links: { today: "https://app.example.com/today" },
+        policy: "read_only",
+        stage: "context",
+      },
+      result: {
+        mcp: {
+          availableTools: expect.arrayContaining(["get_ilo_context", "list_tasks"]),
+          readOnly: true,
+        },
+      },
+    });
+
+    await client.close();
+    await server.close();
   });
 
   it("uses the hardened Mail send schema for normalization and header injection rejection", async () => {

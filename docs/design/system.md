@@ -11,6 +11,11 @@ The visual character is soft neutral paper, soft charcoal, modest elevation, and
 monochrome primary scale. It is not a generic dashboard, a collection of
 unrelated cards, or an AI chat surface.
 
+Read [`foundations.md`](foundations.md) for the brand and experience principles
+that govern this expression, and [`governance.md`](governance.md) for the method
+used to diagnose feedback and admit new rules. This document owns the reusable
+interface contract, not the complete design rationale.
+
 ## Working principles
 
 1. **Start with the material.** Design against the actual records, states,
@@ -32,6 +37,18 @@ unrelated cards, or an AI chat surface.
 7. **Turn review feedback into a system rule.** A repeated visual observation
    is evidence of a missing constraint. Capture the underlying rule, its
    intended component, and its acceptance check—not merely the local patch.
+
+## Decision ownership
+
+Diagnose a visible issue from user outcome through information hierarchy,
+pattern, primitive, token, composition, and defect. Fix the earliest stable
+layer responsible for the failure; do not automatically choose either the most
+global or the most local layer. Use the full diagnosis ladder and rule-maturity
+model in [`governance.md`](governance.md).
+
+New cross-product rules must name the user or system cost, scope, shared owner,
+applicable states, and verification. A single preference remains a trial or a
+page-specific decision until evidence establishes a wider contract.
 
 These principles draw on Ryo Lu’s argument for keeping builders close to the
 material and its feedback, rather than becoming passive approvers of opaque AI
@@ -102,6 +119,65 @@ Rules:
   state. Existing accounts are material rows, and the action launches the same
   production connection used elsewhere in the product.
 
+### Readiness overviews and diagnostic disclosure
+
+When four or more comparable checks answer one readiness question, do not make
+the checks a dashboard grid. Use the shared `ReadinessPanel`, composed from
+`Item`, `Badge`, `Progress`, and `Dialog`, as the default bounded overview:
+
+- identify the affected product or object with its established icon and label;
+- show one honest aggregate state: **Checking**, **Unavailable**, **Needs
+  attention**, or **Ready**;
+- after every required read settles, pair a visible **N of N checks ready** label
+  with a determinate progress bar. Never show a percentage or progress bar for
+  loading, unavailable, or partial evidence;
+- promote the highest-priority actionable unresolved check as **Next step** and
+  place it on the first row in place of the normal description. When no user
+  action can resolve the first failed diagnostic, label it **Current
+  constraint** instead of inventing a next step. Clamp this focus to one line;
+- keep the closed overview to exactly two compact rows: identity, status, and
+  focus on row one; completed-check count, progress, and **View checks** on row
+  two. Never add a focus callout, nested `Item`, recovery action, or any other
+  third row. Working per-check actions belong inside the evidence dialog;
+- keep **View checks** beside the progress bar so evidence access does not add a
+  separate row. Open the complete vertical `ItemGroup` in a labelled dialog;
+  reviewing evidence must never expand or change the height of the overview;
+- keep loading, unavailable, incomplete, empty, and complete distinct. A
+  partial read never becomes a successful zero or a confident readiness score.
+
+Keep product selection outside the overview. A small mutually exclusive set
+uses one icon-labelled control family; selection changes which overview is
+shown. When setup phase helps selection, each option may add one stable phase:
+**Checking**, **Not set up**, **Needs review**, **Set up**, or **Unavailable**.
+Setup phase is not readiness progress and must not use a percentage. Product
+identity comes from the established icon, label, and material, not a feature
+color. This pattern is established for Agent access and should be reused only
+when several checks genuinely support one decision.
+
+### Event summary cards
+
+Use the shared compound `EventCard` for an event presented as a summary in a
+moment, sequence, preview, or related-material surface. It composes the Shadcn
+`Card` and exposes stable time, indicator, primary action, body, title,
+description, aside, and footer slots.
+
+- Preserve the anatomy when details vary. Omit an unused slot instead of
+  recreating a smaller event card for one surface.
+- The primary action opens event detail and owns the title/description. Keep
+  independent actions such as **Join meeting** in the aside or footer so the
+  card never contains nested interactive controls.
+- Put source identity, state, and supporting actions in their named slots. They
+  must not displace or merge with the event title.
+- Keep the time label atomic and the card inline-size contained. Long titles
+  truncate within the body slot; they must never widen the page or compromise
+  adjacent navigation hit targets.
+- Use the default semantic surface in the application and the documented
+  inverse tone on a true inverse surface. Do not introduce page-specific event
+  colors or restyle slot typography from a consumer.
+- A calendar grid event is not an event summary card. Its position and size
+  encode schedule information, so day/week/month blocks retain their compact
+  spatial pattern while sharing the same event data and semantic tokens.
+
 ### Guided setup
 
 Use a guided setup only when several dependencies must be established before a
@@ -168,18 +244,19 @@ live, time-sensitive density.
 
 ## Tokens and composition
 
-Use the semantic tokens in `apps/web/src/styles.css`; do not introduce feature
-colors, raw color utilities, or a second spacing scale.
+Use the semantic tokens in `apps/web/src/styles.css`; do not introduce raw color
+utilities, page-local feature colors, or a second spacing scale. The four
+approved workspace identity palettes are the only feature-level exception.
 
 | Concern | Contract |
 | --- | --- |
 | Type | Plus Jakarta Sans is UI text. DM Mono is only compact time, date, count, identifier, or source metadata. |
 | Text | Default UI text is 14 px. Secondary metadata is 12 px or smaller only when it is not required to complete the primary task. |
-| Spacing | Use the shared 4 px rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. |
+| Spacing | Use a 4 px base rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. Repeated relationships need a shared role; legacy off-scale values are not precedent. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
-| Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. |
+| Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. Workspace color is high-chroma, identity-only, and stays inside `WorkspaceIcon`. |
 | Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
-| Navigation | Active navigation keeps the same geometry as inactive navigation and uses the solid form of its icon; inactive items use the outline form. |
+| Navigation | Active navigation keeps the same geometry as inactive navigation. Ordinary destinations use solid/outline icon weight for state; framed workspace icons keep stable geometry and rely on the navigation surface for selection. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
 
 ### Motion, loading, and perceived performance
@@ -226,6 +303,10 @@ durations page by page.
   switcher or its first navigation group. Internal destinations never carry an
   external-link glyph; reserve that affordance for actions that actually open
   a new browsing context.
+- Represent Calendar, Tasks, Mail, and Finances as whole workspaces with the
+  shared `WorkspaceIcon`. Its registry owns label, route, and glyph; theme
+  blocks own its semantic accent tokens. Do not reproduce workspace maps or
+  palette values in a page. Use unframed functional icons below workspace level.
 - When a shared moving selection surface already makes keyboard focus
   unmistakable, do not add a duplicate per-item treatment. Focus must remain at
   least as clear as hover and current-page selection.
@@ -297,6 +378,17 @@ carry visual explanation; helper copy must earn its place; unavailable actions
 are not offered; and permanent alerts are reserved for persistent, actionable
 conditions.
 
+### Agent-owned setup invariant
+
+Once an agent has authenticated, the product must stop treating the person as
+an instruction transport. A server-owned plan exposes the current semantic
+step, observed evidence, exact authority, required tools, and approval boundary.
+The agent performs discovery and draft work, then re-reads the plan after every
+state change. The person sees and performs only connection, unresolved choices,
+and consequential approval. Hosted skills, copied prompts, and documentation
+may explain the protocol, but they never become required setup steps or a
+parallel source of completion state.
+
 ### Theme equivalence contract
 
 Light and dark are two calibrated expressions of the same interface—not a
@@ -331,23 +423,26 @@ an explicit setting, and contrast coverage for every primary role. Do not set
 
 Agents changing UI follow this sequence before writing code:
 
-1. Read this document, the relevant page specification in `docs/design/pages`,
-   `apps/web/src/features/README.md`, and the domain ownership guide.
+1. Read `foundations.md`, `governance.md`, this document, the relevant page
+   specification in `docs/design/pages`, `apps/web/src/features/README.md`, and
+   the domain ownership guide.
 2. State the page’s immediate user job in the PR/change description. If it cannot
    be stated in one sentence, split the work or choose an explicit sub-flow.
-3. Classify each visible group as one of the block types above. Reuse an existing
+3. For refinement work, record the symptom, conditions, user/system cost,
+   root-cause layer, proposed invariant or hypothesis, owner, and verification.
+4. Classify each visible group as one of the block types above. Reuse an existing
    block; introduce a new block only with a name, purpose, default visibility,
    state behavior, and documentation update.
-4. Compose existing shadcn primitives. Use `Card` with its header/content/footer
+5. Compose existing shadcn primitives. Use `Card` with its header/content/footer
    anatomy, `Item` for repeated material rows, `Alert` for callouts,
    `Collapsible` for history/detail, and Sonner only for transient results.
-5. Implement all applicable states: loading, empty, unavailable, stale or
+6. Implement all applicable states: loading, empty, unavailable, stale or
    reconnectable provider data, permission/capability restriction, mutation
    pending/failure, and success feedback.
-6. Verify keyboard navigation, focus treatment, text truncation, 320 px narrow
+7. Verify keyboard navigation, focus treatment, text truncation, 320 px narrow
    layout, and the normal desktop layout. Test the public behavior, not markup
    internals.
-7. Capture the implementation decision in the page spec when it establishes a
+8. Capture the implementation decision in the page spec when it establishes a
    reusable rule. If the implementation contradicts the spec, update one before
    handoff—never leave them divergent.
 

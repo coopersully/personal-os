@@ -42,7 +42,25 @@ describe("assistant setup routes", () => {
     const app = new Hono<AppEnv>();
     const assistant = {
       createAttentionItem: vi.fn(async () => item),
+      getContext: vi.fn(async () => ({
+        access: { grantedScopes: ["mail:read", "mail:write"] },
+        generatedAt: now,
+        identity: { actorType: "agent" as const, displayName: "Ilo test", userId: id },
+        links: {
+          activity: "https://app.example.com/activity",
+          agentAccess: "https://app.example.com/settings?section=agents",
+          approvals: "https://app.example.com/settings?section=agents",
+          recovery: "https://app.example.com/settings?section=agents",
+          today: "https://app.example.com/today",
+        },
+        readiness: { domains: [] },
+        time: { timestamp: now, timezone: "America/New_York" },
+      })),
       getProfile: vi.fn(async () => profile),
+      getSetupPlan: vi.fn(async () => ({
+        currentStepId: "learn_preferences" as const,
+        domain: "mail" as const,
+      })),
       getSetupStatus: vi.fn(async () => ({ domains: [] })),
       listAttentionItems: vi.fn(async () => [item]),
       updateAttentionItem: vi.fn(async () => ({ ...item, status: "resolved" as const })),
@@ -86,7 +104,15 @@ describe("assistant setup routes", () => {
     const json = { headers: { "content-type": "application/json" } };
 
     expect((await app.request("/v1/assistant/connection-guide")).status).toBe(200);
+    expect((await app.request("/v1/assistant/context")).status).toBe(200);
     expect((await app.request("/v1/assistant/setup-status")).status).toBe(200);
+    expect(
+      (await app.request("/v1/assistant/setup-plan?domain=mail&stepId=learn_preferences")).status,
+    ).toBe(200);
+    expect(assistant.getSetupPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ actorType: "agent", userId: id }),
+      { domain: "mail", stepId: "learn_preferences" },
+    );
     expect((await app.request("/v1/assistant/profiles/mail")).status).toBe(200);
     expect(
       (
@@ -140,6 +166,10 @@ describe("assistant setup routes", () => {
     expect(assistant.upsertProfile).toHaveBeenCalledWith(
       expect.objectContaining({ domain: "mail" }),
       expect.objectContaining({ requestId: "request-1" }),
+    );
+    expect(assistant.getSetupPlan).toHaveBeenCalledWith(
+      expect.objectContaining({ actorType: "agent" }),
+      { domain: "mail", stepId: "learn_preferences" },
     );
   });
 });

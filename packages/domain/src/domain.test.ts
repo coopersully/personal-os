@@ -7,6 +7,8 @@ import {
   agentMutationPolicies,
   apiErrorSchema,
   applyFinanceCategorizationsInputSchema,
+  assistantSetupPlanQuerySchema,
+  assistantSetupPlanSchema,
   automationRoutineSchema,
   automationRunSchema,
   bulkUpdateMailInputSchema,
@@ -157,6 +159,43 @@ describe("domain schemas", () => {
         },
       }),
     ).toMatchObject({ domains: [{ domain: "mail", support: "executable_rules" }] });
+    expect(
+      assistantSetupPlanQuerySchema.parse({ domain: "mail", stepId: "learn_preferences" }),
+    ).toEqual({ domain: "mail", stepId: "learn_preferences" });
+    expect(
+      assistantSetupPlanSchema.parse({
+        access: { canRead: true, canWrite: true },
+        connection: { lastObservedAt: "2026-07-28T12:00:00.000Z", observed: true },
+        currentStepId: "learn_preferences",
+        domain: "mail",
+        nextAction: "Inspect Mail and save a draft.",
+        profile: {
+          approvedStatus: null,
+          approvedVersion: null,
+          pendingDraftVersion: null,
+          status: null,
+          version: null,
+        },
+        progress: { completed: 1, total: 4 },
+        protocolVersion: "1.0",
+        selectedStepId: "learn_preferences",
+        status: "in_progress",
+        steps: [
+          {
+            completionEvidence: [],
+            description: "Inspect existing material.",
+            id: "learn_preferences",
+            instructions: ["Read the current profile."],
+            order: 2,
+            owner: "agent",
+            requiredTools: ["get_domain_profile"],
+            state: "current",
+            title: "Learn Mail preferences",
+            userAction: null,
+          },
+        ],
+      }),
+    ).toMatchObject({ currentStepId: "learn_preferences", protocolVersion: "1.0" });
     expect(semanticVersionSchema.parse("1.2.3-rc.1+build.7")).toBe("1.2.3-rc.1+build.7");
     expect(() => semanticVersionSchema.parse("1.2.3-01")).toThrow();
     expect(

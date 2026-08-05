@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { attentionItemImportanceSchema, attentionItemKindSchema } from "./assistant.js";
 import { idSchema, isoDateTimeSchema, timeZoneSchema } from "./common.js";
-import { connectorSyncStatusSchema } from "./connection.js";
+import { connectedAccountHealthSchema, connectorSyncStatusSchema } from "./connection.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
 export const calendarTimeZoneSchema = timeZoneSchema.refine((value) => {
@@ -30,6 +30,7 @@ export const calendarSchema = z.object({
   source: z
     .object({
       accountLabel: z.string().min(1),
+      health: connectedAccountHealthSchema,
       remoteCalendarId: z.string().nullable(),
       syncError: z.string().nullable(),
       syncStatus: connectorSyncStatusSchema,

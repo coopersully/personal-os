@@ -88,6 +88,13 @@ export type PersonalOsApp = Hono<AppEnv> & {
     userRowsScanned: number;
   }>;
   dispatchDueAutomations: () => Promise<void>;
+  syncDueConnectors: () => Promise<{
+    attempted: number;
+    failed: number;
+    recovered: number;
+    skipped: number;
+    succeeded: number;
+  }>;
   syncDueFinances: () => Promise<{ failed: number; reasons: string[]; synced: number }>;
 };
 
@@ -184,6 +191,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     google,
     icloud: dependencies.icloud ?? createICloudConnector(),
     now,
+    ...(dependencies.log ? { log: dependencies.log } : {}),
     observeRecoveryFailure: (entry) =>
       dependencies.log?.({
         durationMs: 0,
@@ -953,7 +961,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       return finances.backfillSetupIntegrity();
     },
     async dispatchDueAutomations() {
-      await connectors.syncStaleAccounts();
       const mailDispatchStartedAt = Date.now();
       await connectors.dispatchDueMailRuleWork().catch((error: unknown) => {
         dependencies.log?.({
@@ -967,6 +974,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         throw error;
       });
       await automations.dispatchDue();
+    },
+    async syncDueConnectors() {
+      return connectors.syncDueAccounts();
     },
     async syncDueFinances() {
       return finances.syncDuePlaidAccounts();

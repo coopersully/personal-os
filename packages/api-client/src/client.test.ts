@@ -600,10 +600,20 @@ function apiFetch() {
       return json({
         accounts: [
           {
+            calendarEnabled: true,
+            health: {
+              message: null,
+              nextSyncAt: "2026-07-13T12:05:00.000Z",
+              recovery: null,
+              state: "ready",
+            },
             id,
             provider: "google",
             label: "Google",
             email: "test@example.com",
+            lastSyncAttemptAt: "2026-07-13T12:00:00.000Z",
+            mailEnabled: true,
+            nextSyncAt: "2026-07-13T12:05:00.000Z",
             syncStatus: "idle",
             syncError: null,
             lastSyncedAt: null,
@@ -1358,7 +1368,16 @@ describe("ilo API client", () => {
     await expect(api.updateAutomation(id, { enabled: false })).resolves.toEqual(automation);
     await expect(api.listAutomationRuns(id)).resolves.toEqual([automationRun]);
     await expect(api.runAutomation(id, true)).resolves.toEqual(automationRun);
-    await expect(api.listConnectors()).resolves.toHaveLength(1);
+    await expect(api.listConnectors()).resolves.toEqual([
+      expect.objectContaining({
+        health: {
+          message: null,
+          nextSyncAt: "2026-07-13T12:05:00.000Z",
+          recovery: null,
+          state: "ready",
+        },
+      }),
+    ]);
     await expect(api.getGoogleAuthorizationUrl()).resolves.toContain("accounts.google.com");
     await expect(
       api.getGoogleAuthorizationUrl({

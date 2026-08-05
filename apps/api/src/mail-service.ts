@@ -52,6 +52,7 @@ import {
 } from "./connector-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { enqueueDurableMailRuleWork } from "./mail-rule-work.js";
 import {
   auditAttentionItemMetadata,
@@ -1129,10 +1130,13 @@ export function createMailService({
           },
           automaticRuleExecution: account.provider === "google",
           email: account.email,
+          health: connectionHealthForAccount(account),
           label: account.label,
+          lastSyncAttemptAt: account.lastSyncAttemptAt?.toISOString() ?? null,
           lastSyncedAt: account.lastSyncedAt?.toISOString() ?? null,
           mailboxes: mailboxesByAccount.get(account.id) ?? [],
           provider: account.provider as "google" | "icloud",
+          nextSyncAt: account.nextSyncAt?.toISOString() ?? null,
           syncError: account.syncError,
           syncStatus: account.syncStatus,
         })),

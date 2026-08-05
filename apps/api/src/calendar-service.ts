@@ -53,6 +53,7 @@ import {
 import type { ConnectedEventGateway } from "./connector-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { auditSnapshot, serializeCalendar, serializeEvent } from "./serialization.js";
 import type { Principal } from "./types.js";
 
@@ -353,6 +354,7 @@ function serializeCalendarSource(
     ...serializeCalendar(calendar),
     source: {
       accountLabel: account.label,
+      health: connectionHealthForAccount(account),
       remoteCalendarId: calendar.remoteCalendarId,
       syncError: account.syncError
         ? "The connected account needs attention. Synchronize Calendar or review Connections."

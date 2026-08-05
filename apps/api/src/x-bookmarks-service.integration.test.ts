@@ -122,7 +122,13 @@ describe.sequential("X Bookmarks service", () => {
     await service.completeAuthorization(state, "code");
     await expect(service.sync(userId)).rejects.toThrow("Choose an X bookmark folder first");
     vi.mocked(x.listBookmarkFolders).mockRejectedValueOnce(
-      new ConnectorError("X is unavailable", 503),
+      new ConnectorError({
+        category: "temporary",
+        code: "x_temporary_failure",
+        disposition: "retry",
+        message: "X is unavailable",
+        status: 503,
+      }),
     );
     await expect(service.folders(userId)).rejects.toThrow("X is unavailable");
     await expect(service.getAccount(userId)).resolves.toMatchObject({
@@ -137,7 +143,13 @@ describe.sequential("X Bookmarks service", () => {
     });
     await service.selectFolder(userId, "folder-calendar");
     vi.mocked(x.listFolderBookmarks).mockRejectedValueOnce(
-      new ConnectorError("X needs reauthorization", 401),
+      new ConnectorError({
+        category: "authorization",
+        code: "x_authorization_failed",
+        disposition: "reconnect",
+        message: "X needs reauthorization",
+        status: 401,
+      }),
     );
     await expect(service.sync(userId)).rejects.toThrow("X needs reauthorization");
     await service.disconnect(userId);

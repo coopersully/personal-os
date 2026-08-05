@@ -830,6 +830,23 @@ if (process.argv[2] === "--fake-aws") {
     migrationLaunchCalls.length === 1 && migrationLaunchCalls[0].includes("--desired-count 1"),
     "Recovery must launch exactly one migration-capable API task.",
   );
+  const recoveryMigrationLaunch = scaleRecovery.state.calls.findIndex(
+    (call) =>
+      call.startsWith("ecs update-service") &&
+      call.includes("--task-definition new-task-definition"),
+  );
+  const firstRecoveryScalingRegistration = scaleRecovery.state.calls.findIndex((call) =>
+    call.startsWith("application-autoscaling register-scalable-target"),
+  );
+  const firstRecoveryServiceWait = scaleRecovery.state.calls.findIndex((call) =>
+    call.startsWith("ecs wait services-stable"),
+  );
+  assert(
+    recoveryMigrationLaunch >= 0 &&
+      firstRecoveryScalingRegistration > recoveryMigrationLaunch &&
+      firstRecoveryServiceWait > recoveryMigrationLaunch,
+    `A zero/all-suspended recovery must not mutate scaling or await generic service stability before the corrected API launches; scaling can enforce min capacity, while ECS retains the failed deployment and never satisfies the waiter at zero (launch ${recoveryMigrationLaunch}, scaling ${firstRecoveryScalingRegistration}, wait ${firstRecoveryServiceWait}; nearby calls: ${scaleRecovery.state.calls.slice(Math.max(0, firstRecoveryServiceWait - 2), firstRecoveryServiceWait + 2).join(" | ")}).`,
+  );
   const restoreScaleCall = scaleRecovery.state.calls.findIndex(
     (call) =>
       call.startsWith("ecs update-service") &&

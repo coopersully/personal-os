@@ -237,6 +237,7 @@ jobs:
               --query taskDefinition \
               --output json
           )"
+          node .github/scripts/check-runtime-task-definition.mjs <<<"$api_latest_definition"
           api_previous_restore_state="$(
             jq -r '
               .containerDefinitions[]

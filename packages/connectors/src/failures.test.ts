@@ -40,6 +40,65 @@ describe("connector failure boundary", () => {
     expect(error.message).not.toContain("provider-authored secret");
   });
 
+  it("uses only allowlisted Google OAuth error codes as positive recovery evidence", async () => {
+    const revokedGrant = await connectorHttpError(
+      new Response(
+        JSON.stringify({
+          error: "invalid_grant",
+          error_description: "raw provider detail with a private token",
+        }),
+        { headers: { "content-type": "application/json" }, status: 400 },
+      ),
+      "google",
+    );
+    expect(revokedGrant).toMatchObject({
+      category: "authorization",
+      code: "google_authorization_failed",
+      disposition: "reconnect",
+      message: "Google authorization is no longer valid.",
+      status: 400,
+    });
+    expect(JSON.stringify(revokedGrant)).not.toContain("raw provider detail");
+
+    const invalidClient = await connectorHttpError(
+      new Response(JSON.stringify({ error: "invalid_client", detail: "private" }), {
+        headers: { "content-type": "application/json" },
+        status: 400,
+      }),
+      "google",
+    );
+    expect(invalidClient).toMatchObject({
+      category: "configuration",
+      code: "google_configuration_invalid",
+      disposition: "operator",
+      message: "Google is not configured correctly.",
+      status: 400,
+    });
+    expect(JSON.stringify(invalidClient)).not.toContain("private");
+  });
+
+  it.each([
+    "not-json",
+    JSON.stringify({ error: "provider_invented_code", detail: "private" }),
+    JSON.stringify({ error: { code: "invalid_grant" } }),
+    JSON.stringify({ error: "invalid_grant", padding: "x".repeat(8_192) }),
+  ])("fails closed for untrusted or oversized Google OAuth bodies", async (body) => {
+    const error = await connectorHttpError(
+      new Response(body, { headers: { "content-type": "application/json" }, status: 400 }),
+      "google",
+    );
+
+    expect(error).toMatchObject({
+      category: "rejected",
+      code: "google_request_rejected",
+      disposition: "operator",
+      message: "Google rejected the request.",
+      status: 400,
+    });
+    expect(JSON.stringify(error)).not.toContain("provider_invented_code");
+    expect(JSON.stringify(error)).not.toContain("padding");
+  });
+
   it("honors only a bounded Retry-After value", async () => {
     const bounded = await connectorHttpError(
       new Response("rate limited", { headers: { "retry-after": "120" }, status: 429 }),

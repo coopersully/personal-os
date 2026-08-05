@@ -49,7 +49,7 @@ Do not use the account root identity for routine applies. Create a named adminis
 
 ## Runtime configuration before the first deployment
 
-The API task reads these SecureString parameters from `var.ssm_parameter_prefix`:
+The API task reads these parameters from `var.ssm_parameter_prefix` through ECS secret references:
 
 ```text
 APP_ENCRYPTION_KEY
@@ -65,6 +65,9 @@ Before the first task starts, create every required parameter under the configur
 is ready and `plaid_enabled = true`; `PLAID_CLIENT_ID` is also read from
 Parameter Store in that mode. When `x_enabled = true`, add `X_CLIENT_ID` and
 `X_CLIENT_SECRET`. Disabled connectors inject no connector credentials.
+Credential and encryption values must be `SecureString`; public client identifiers may remain
+`String`. The ECS `secrets` projection keeps both kinds out of the plain task environment and makes
+the execution role—not the deployment workflow—responsible for runtime retrieval.
 
 The RDS instance creates its master password in Secrets Manager without putting it in Terraform state. During bootstrap, use that value only to create a production `DATABASE_URL` parameter (or preferably create a least-privilege database role first, then store that role's URL). Never place a database password in `terraform.tfvars`, GitHub variables, task definitions, or the repository.
 
@@ -140,6 +143,13 @@ Manual dispatch accepts an optional full `release_sha` when an exact prior commi
 after a task-definition or configuration change. When both immutable API and MCP images already
 exist, the workflow reuses and rescans that pair; it refuses a partial pair instead of rebuilding or
 overwriting one side.
+
+Before it inspects live API deployment state or performs any drain mutation, the workflow validates
+the latest API task definition. `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` must each be present
+exactly once as SSM-backed ECS secret references, and `GOOGLE_CLIENT_ID` must not remain in the plain
+environment list. A stale task definition stops the release before healthy tasks are touched. Apply
+the reviewed Terraform configuration, inspect only the reference names/ARNs, and retry the same
+immutable `release_sha`; never work around this gate by copying credential values into the workflow.
 
 The rolling API update is not proof of a stop-and-drain boundary: old and new tasks may overlap.
 Before a later serial-drain workflow is enabled, follow the prerequisite deployment and exact

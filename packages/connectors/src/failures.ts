@@ -41,9 +41,34 @@ export async function connectorHttpError(
   provider: "google" | "x",
 ): Promise<ConnectorError> {
   const retryAfterMs = retryAfter(response.headers.get("retry-after"));
-  await response.body?.cancel().catch(() => undefined);
+  const googleOAuthError = provider === "google" ? await readGoogleOAuthErrorCode(response) : null;
+  if (provider !== "google" || googleOAuthError === null) {
+    await response.body?.cancel().catch(() => undefined);
+  }
   const label = provider === "google" ? "Google" : "X";
   const prefix = provider === "google" ? "google" : "x";
+  if (googleOAuthError === "invalid_grant") {
+    return new ConnectorError({
+      category: "authorization",
+      code: "google_authorization_failed",
+      disposition: "reconnect",
+      message: "Google authorization is no longer valid.",
+      status: response.status,
+    });
+  }
+  if (
+    googleOAuthError === "invalid_client" ||
+    googleOAuthError === "unauthorized_client" ||
+    googleOAuthError === "redirect_uri_mismatch"
+  ) {
+    return new ConnectorError({
+      category: "configuration",
+      code: "google_configuration_invalid",
+      disposition: "operator",
+      message: "Google is not configured correctly.",
+      status: response.status,
+    });
+  }
   if (response.status === 401 || response.status === 403) {
     return new ConnectorError({
       category: "authorization",
@@ -130,6 +155,60 @@ export function classifyICloudError(service: "calendar" | "mail", error: unknown
 }
 
 const MAX_RETRY_AFTER_MS = 86_400_000;
+const MAX_PROVIDER_ERROR_BODY_BYTES = 4_096;
+
+type GoogleOAuthErrorCode =
+  | "invalid_client"
+  | "invalid_grant"
+  | "redirect_uri_mismatch"
+  | "unauthorized_client";
+
+async function readGoogleOAuthErrorCode(response: Response): Promise<GoogleOAuthErrorCode | null> {
+  if (
+    response.status !== 400 ||
+    !response.headers.get("content-type")?.toLowerCase().includes("application/json") ||
+    !response.body
+  ) {
+    return null;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let serialized = "";
+  let bytes = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_PROVIDER_ERROR_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      serialized += decoder.decode(chunk.value, { stream: true });
+    }
+    serialized += decoder.decode();
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(serialized) as unknown;
+    const error = objectDetails(parsed)?.error;
+    if (
+      error === "invalid_client" ||
+      error === "invalid_grant" ||
+      error === "redirect_uri_mismatch" ||
+      error === "unauthorized_client"
+    ) {
+      return error;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
 
 function retryAfter(value: string | null): number | null {
   if (!value) return null;

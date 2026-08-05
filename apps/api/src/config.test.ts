@@ -264,9 +264,7 @@ describe("API configuration", () => {
       OWNER_EMAILS: "owner@example.com",
       RESEND_API_KEY: "resend-key",
     };
-    expect(() => loadConfig({ ...production, GOOGLE_CLIENT_ID: "" })).toThrow(
-      "GOOGLE_CLIENT_ID",
-    );
+    expect(() => loadConfig({ ...production, GOOGLE_CLIENT_ID: "" })).toThrow("GOOGLE_CLIENT_ID");
     expect(() => loadConfig({ ...production, GOOGLE_CLIENT_SECRET: "" })).toThrow(
       "GOOGLE_CLIENT_SECRET",
     );

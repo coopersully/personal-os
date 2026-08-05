@@ -27,9 +27,9 @@ import type {
   WeatherSnapshot,
 } from "@personal-os/domain";
 import {
-  connectedAccountHealthSchema,
   type ConnectedAccountHealth,
   type ConnectorSyncStatus,
+  connectedAccountHealthSchema,
 } from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createCalendarApiClient } from "./features/calendar.js";

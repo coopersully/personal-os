@@ -50,9 +50,9 @@ import {
   MailProviderRejectedError,
   mailProviderPartialEffectError,
 } from "./connector-service.js";
+import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
-import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { enqueueDurableMailRuleWork } from "./mail-rule-work.js";
 import {
   auditAttentionItemMetadata,

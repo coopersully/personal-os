@@ -65,11 +65,11 @@ import {
 import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import {
+  type ConnectorSyncFailure,
   classifyConnectorSyncFailure,
   connectionHealthForAccount,
   connectorRetryAt,
   connectorSyncAppError,
-  type ConnectorSyncFailure,
 } from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
@@ -3412,9 +3412,7 @@ export function createConnectorService({
     },
 
     syncAccount,
-    async syncDueAccounts(
-      options: { concurrency?: number; limit?: number } = {},
-    ): Promise<{
+    async syncDueAccounts(options: { concurrency?: number; limit?: number } = {}): Promise<{
       attempted: number;
       failed: number;
       recovered: number;
@@ -3436,10 +3434,7 @@ export function createConnectorService({
         .where(
           and(
             ne(calendarAccounts.provider, "local"),
-            or(
-              eq(calendarAccounts.calendarEnabled, true),
-              eq(calendarAccounts.mailEnabled, true),
-            ),
+            or(eq(calendarAccounts.calendarEnabled, true), eq(calendarAccounts.mailEnabled, true)),
             or(
               and(
                 ne(calendarAccounts.syncStatus, "syncing"),

@@ -84,7 +84,9 @@ requireApplicationEgress(587, "iCloud Mail SMTP submission");
 requireSsmRuntimeKey("GOOGLE_CLIENT_ID");
 requireSsmRuntimeKey("GOOGLE_CLIENT_SECRET");
 if (/name\s*=\s*"GOOGLE_CLIENT_ID"\s*,\s*value\s*=/.test(compute)) {
-  throw new Error("Production Google client ID must not be emitted as a plain ECS environment value.");
+  throw new Error(
+    "Production Google client ID must not be emitted as a plain ECS environment value.",
+  );
 }
 requireTerraformContract(
   operations,

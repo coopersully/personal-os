@@ -90,10 +90,7 @@ export async function connectorHttpError(
   });
 }
 
-export function classifyICloudError(
-  service: "calendar" | "mail",
-  error: unknown,
-): ConnectorError {
+export function classifyICloudError(service: "calendar" | "mail", error: unknown): ConnectorError {
   if (error instanceof ConnectorError) return error;
   const details = objectDetails(error);
   const code = typeof details?.code === "string" ? details.code.toUpperCase() : null;

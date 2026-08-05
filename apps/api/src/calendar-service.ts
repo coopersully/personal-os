@@ -51,9 +51,9 @@ import {
   createCalendarProviderEffectLedger,
 } from "./calendar-provider-effects.js";
 import type { ConnectedEventGateway } from "./connector-service.js";
+import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
-import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { auditSnapshot, serializeCalendar, serializeEvent } from "./serialization.js";
 import type { Principal } from "./types.js";
 

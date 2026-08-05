@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyICloudError, connectorHttpError } from "./failures.js";
+import { ConnectorError, classifyICloudError, connectorHttpError } from "./failures.js";
 
 describe("connector failure boundary", () => {
   it.each([
@@ -30,18 +30,15 @@ describe("connector failure boundary", () => {
     [408, "temporary", "retry", "google_temporary_failure"],
     [429, "rate_limited", "retry", "google_rate_limited"],
     [500, "temporary", "retry", "google_temporary_failure"],
-  ] as const)(
-    "classifies Google status %i without provider-authored text",
-    async (status, category, disposition, code) => {
-      const error = await connectorHttpError(
-        new Response("provider-authored secret", { status }),
-        "google",
-      );
+  ] as const)("classifies Google status %i without provider-authored text", async (status, category, disposition, code) => {
+    const error = await connectorHttpError(
+      new Response("provider-authored secret", { status }),
+      "google",
+    );
 
-      expect(error).toMatchObject({ category, code, disposition, status });
-      expect(error.message).not.toContain("provider-authored secret");
-    },
-  );
+    expect(error).toMatchObject({ category, code, disposition, status });
+    expect(error.message).not.toContain("provider-authored secret");
+  });
 
   it("honors only a bounded Retry-After value", async () => {
     const bounded = await connectorHttpError(
@@ -74,6 +71,42 @@ describe("connector failure boundary", () => {
       category: "transport",
       code: "icloud_mail_transport_failure",
       disposition: "retry",
+    });
+  });
+
+  it("classifies alternate safe provider and iCloud evidence", async () => {
+    await expect(
+      connectorHttpError(new Response(null, { status: 400 }), "x"),
+    ).resolves.toMatchObject({
+      category: "rejected",
+      code: "x_request_rejected",
+      message: "X rejected the request.",
+    });
+    await expect(
+      connectorHttpError(
+        new Response(null, { headers: { "retry-after": "not-a-date" }, status: 429 }),
+        "x",
+      ),
+    ).resolves.toMatchObject({ retryAfterMs: null });
+
+    const existing = new ConnectorError({
+      category: "configuration",
+      code: "existing",
+      disposition: "operator",
+      message: "Safe boundary message",
+    });
+    expect(classifyICloudError("mail", existing)).toBe(existing);
+    expect(classifyICloudError("mail", { code: "EAUTH", statusCode: 403 })).toMatchObject({
+      category: "authorization",
+      status: 403,
+    });
+    expect(classifyICloudError("calendar", { status: 502 })).toMatchObject({
+      category: "transport",
+      status: 502,
+    });
+    expect(classifyICloudError("mail", null)).toMatchObject({
+      category: "transport",
+      status: null,
     });
   });
 });

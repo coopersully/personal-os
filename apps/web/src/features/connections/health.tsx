@@ -1,11 +1,6 @@
 import type { ConnectedAccountHealth } from "@personal-os/domain";
 import { AlertTriangle, RefreshCw } from "lucide-react";
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from "../../components/ui/alert.js";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 

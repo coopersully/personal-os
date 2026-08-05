@@ -37,11 +37,8 @@ import {
   SidebarMenuSubItem,
 } from "../../components/ui/sidebar.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
-import {
-  ConnectionRecoveryAlert,
-  visibleConnectorRefreshInterval,
-} from "../connections/health.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
+import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
 const googleMailboxNames: Record<string, string> = {

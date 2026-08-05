@@ -87,10 +87,7 @@ describe("connector sync health policy", () => {
   });
 
   it("creates a safe structured application error", () => {
-    const failure = classifyConnectorSyncFailure(
-      new Error("raw-provider-canary"),
-      "icloud",
-    );
+    const failure = classifyConnectorSyncFailure(new Error("raw-provider-canary"), "icloud");
     const error = connectorSyncAppError(failure, accountId, "icloud", now);
     expect(error).toMatchObject({
       code: "service_unavailable",
@@ -103,5 +100,46 @@ describe("connector sync health policy", () => {
       },
     });
     expect(JSON.stringify(error)).not.toContain("raw-provider-canary");
+  });
+
+  it("maps provider-specific operator and rate-limit messages safely", () => {
+    const notFound = classifyConnectorSyncFailure(
+      new ConnectorError({
+        category: "not_found",
+        code: "icloud_resource_not_found",
+        disposition: "operator",
+        message: "raw-provider-canary",
+      }),
+      "icloud",
+    );
+    expect(notFound.message).toBe(
+      "iCloud could not find a connected resource. ilo is resolving this.",
+    );
+
+    const rejected = classifyConnectorSyncFailure(
+      new ConnectorError({
+        category: "rejected",
+        code: "google_request_rejected",
+        disposition: "operator",
+        message: "raw-provider-canary",
+      }),
+      "google",
+    );
+    expect(rejected.message).toBe("Google returned an unexpected response. ilo is resolving this.");
+
+    const rateLimited = classifyConnectorSyncFailure(
+      new ConnectorError({
+        category: "rate_limited",
+        code: "google_rate_limited",
+        disposition: "retry",
+        message: "raw-provider-canary",
+      }),
+      "google",
+    );
+    expect(rateLimited.message).toContain("retry automatically");
+    expect(connectorSyncAppError(rateLimited, accountId, "google", null)).toMatchObject({
+      code: "rate_limited",
+      details: { nextSyncAt: null },
+    });
   });
 });

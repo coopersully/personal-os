@@ -5310,14 +5310,18 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
 
     const googleRow = (await screen.findByText("Personal Google")).closest('[data-slot="item"]');
-    if (!googleRow) throw new Error("Google connection row was not rendered.");
+    if (!(googleRow instanceof HTMLElement)) {
+      throw new Error("Google connection row was not rendered.");
+    }
     await browser.click(within(googleRow).getByRole("button", { name: "Reconnect" }));
     await waitFor(() =>
       expect(mocks.getGoogleAuthorizationUrl).toHaveBeenCalledWith({ accountId: id }),
     );
 
     const iCloudRow = screen.getByText("Personal iCloud").closest('[data-slot="item"]');
-    if (!iCloudRow) throw new Error("iCloud connection row was not rendered.");
+    if (!(iCloudRow instanceof HTMLElement)) {
+      throw new Error("iCloud connection row was not rendered.");
+    }
     await browser.click(within(iCloudRow).getByRole("button", { name: "Reconnect" }));
     expect(screen.getByLabelText("Apple Account email")).toHaveValue("person@icloud.com");
     expect(screen.queryByText("raw-provider-canary")).not.toBeInTheDocument();

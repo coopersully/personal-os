@@ -890,9 +890,13 @@ describe.sequential("connector service", () => {
       now: () => timestamp,
     });
 
-    await expect(
-      schedulerService.syncDueAccounts({ concurrency: 2, limit: 10 }),
-    ).resolves.toEqual({ attempted: 4, failed: 0, recovered: 1, skipped: 0, succeeded: 4 });
+    await expect(schedulerService.syncDueAccounts({ concurrency: 2, limit: 10 })).resolves.toEqual({
+      attempted: 4,
+      failed: 0,
+      recovered: 1,
+      skipped: 0,
+      succeeded: 4,
+    });
     expect(schedulerGoogle.listCalendars).toHaveBeenCalledTimes(2);
     expect(schedulerSyncMail).toHaveBeenCalledTimes(2);
     expect(maxObservedConcurrency).toBeLessThanOrEqual(2);

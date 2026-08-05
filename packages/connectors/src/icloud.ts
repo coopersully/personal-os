@@ -5,7 +5,7 @@ import { ImapFlow } from "imapflow";
 import { type AddressObject, simpleParser } from "mailparser";
 import nodemailer from "nodemailer";
 import { createDAVClient, type DAVCalendar, type DAVCalendarObject } from "tsdav";
-import { classifyICloudError, ConnectorError } from "./failures.js";
+import { ConnectorError, classifyICloudError } from "./failures.js";
 import { PROVIDER_REQUEST_TIMEOUT_MS } from "./http.js";
 import {
   boundFlatMailAttachments,

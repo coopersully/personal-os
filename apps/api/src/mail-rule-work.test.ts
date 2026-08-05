@@ -153,11 +153,7 @@ describe("durable Mail rule work helpers", () => {
       disposition: "failed",
       effect: "rejected",
     });
-    for (const error of [
-      connectorError(408),
-      connectorError(500),
-      new Error("secret"),
-    ]) {
+    for (const error of [connectorError(408), connectorError(500), new Error("secret")]) {
       expect(classifyMailRuleProviderFailure(error)).toMatchObject({
         code: "provider_effect_indeterminate",
         disposition: "reconcile",

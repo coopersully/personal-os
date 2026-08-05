@@ -56,12 +56,11 @@ export function connectorRetryAt(input: {
   retryAfterMs: number | null;
 }): Date {
   const baseDelayMs = retryDelayMs(input.failureCount);
-  const jitterMs = Math.floor(baseDelayMs * stableRatio(`${input.accountId}:${input.failureCount}`));
-  const policyDelayMs = baseDelayMs + jitterMs;
-  const providerDelayMs = Math.min(
-    Math.max(input.retryAfterMs ?? 0, 0),
-    24 * 60 * 60_000,
+  const jitterMs = Math.floor(
+    baseDelayMs * stableRatio(`${input.accountId}:${input.failureCount}`),
   );
+  const policyDelayMs = baseDelayMs + jitterMs;
+  const providerDelayMs = Math.min(Math.max(input.retryAfterMs ?? 0, 0), 24 * 60 * 60_000);
   return new Date(input.now.getTime() + Math.max(policyDelayMs, providerDelayMs));
 }
 

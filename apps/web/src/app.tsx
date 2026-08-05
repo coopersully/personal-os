@@ -305,10 +305,10 @@ import {
   calendarViewFromSearch,
 } from "./features/calendar/page.js";
 import {
-  connectionHealth,
   ConnectionHealthBadge,
   ConnectionHealthDescription,
   ConnectionRecoveryAlert,
+  connectionHealth,
   visibleConnectorRefreshInterval,
 } from "./features/connections/health.js";
 import { financesNavigationItem } from "./features/finances/manifest.js";

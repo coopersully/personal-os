@@ -18,6 +18,7 @@ import {
   calendarProviderSchema,
   calendarSchema,
   connectICloudInputSchema,
+  connectedAccountHealthSchema,
   connectorCapabilities,
   createAccessTokenInputSchema,
   createAttentionItemInputSchema,
@@ -1208,5 +1209,29 @@ describe("time-zone ranges", () => {
       from: "2026-03-08T05:00:00.000Z",
       to: "2026-03-09T04:00:00.000Z",
     });
+  });
+});
+
+describe("connected account health", () => {
+  it("parses retrying account health with automatic recovery", () => {
+    expect(
+      connectedAccountHealthSchema.parse({
+        message: "Google is temporarily unavailable. ilo will retry automatically.",
+        nextSyncAt: "2026-08-05T20:05:00.000Z",
+        recovery: "automatic",
+        state: "retrying",
+      }),
+    ).toMatchObject({ state: "retrying", recovery: "automatic" });
+  });
+
+  it("rejects provider-sized health messages", () => {
+    expect(
+      connectedAccountHealthSchema.safeParse({
+        message: "x".repeat(301),
+        nextSyncAt: null,
+        recovery: "operator",
+        state: "service_attention",
+      }).success,
+    ).toBe(false);
   });
 });

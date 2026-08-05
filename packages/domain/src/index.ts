@@ -3,6 +3,7 @@ export * from "./auth.js";
 export * from "./automation.js";
 export * from "./calendar.js";
 export * from "./common.js";
+export * from "./connection.js";
 export * from "./feature-contracts.js";
 export * from "./finance.js";
 export * from "./goals.js";

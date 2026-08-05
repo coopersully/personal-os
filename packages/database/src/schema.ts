@@ -12,6 +12,9 @@ import type {
   AutomationRunStatus,
   AutomationTemplate,
   CalendarProvider,
+  ConnectorFailureCategory,
+  ConnectorSyncRecovery,
+  ConnectorSyncStatus,
   DomainProfile,
   FinanceProvider,
   GoogleConnectionService,
@@ -480,24 +483,42 @@ export const calendarAccounts = pgTable(
     encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>(),
     calendarEnabled: boolean("calendar_enabled").notNull().default(true),
     mailEnabled: boolean("mail_enabled").notNull().default(false),
-    syncStatus: text("sync_status").$type<"idle" | "syncing" | "error">().notNull().default("idle"),
+    syncStatus: text("sync_status").$type<ConnectorSyncStatus>().notNull().default("idle"),
     syncGeneration: integer("sync_generation").notNull().default(0),
     syncClaimId: uuid("sync_claim_id"),
     syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("calendar_accounts_user_idx").on(table.userId),
+    index("calendar_accounts_sync_due_idx").on(table.syncStatus, table.nextSyncAt),
     uniqueIndex("calendar_accounts_remote_idx").on(
       table.userId,
       table.provider,
       table.providerAccountId,
     ),
     check("calendar_accounts_sync_generation_check", sql`${table.syncGeneration} >= 0`),
+    check("calendar_accounts_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
     check(
       "calendar_accounts_sync_claim_check",
       sql`(${table.syncStatus} = 'syncing') = (${table.syncClaimId} IS NOT NULL)`,
+    ),
+    check(
+      "calendar_accounts_sync_recovery_check",
+      sql`(
+        ${table.provider} = 'local'
+        OR
+        (${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('automatic', 'operator', 'reconnect'))
+      )`,
     ),
   ],
 );

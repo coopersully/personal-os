@@ -175,7 +175,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
         category: "configuration",
         code: "google_not_configured",
         disposition: "operator",
-        message: "Google is not configured.",
+        message: "Google Calendar is not configured.",
         status: 503,
       });
     }

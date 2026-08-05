@@ -545,6 +545,68 @@ resource "aws_cloudwatch_metric_alarm" "api_log_5xx" {
   depends_on = [aws_cloudwatch_log_metric_filter.api_5xx]
 }
 
+resource "aws_cloudwatch_log_metric_filter" "connector_sync_failure" {
+  name           = "${local.name}-connector-sync-failure"
+  pattern        = "{ $.event = \"connector_sync_failed\" }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorSyncFailureCount"
+    namespace = "ilo/Connectors"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_configuration_failure" {
+  name           = "${local.name}-connector-configuration-failure"
+  pattern        = "{ $.event = \"connector_sync_failed\" && $.category = \"configuration\" }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorConfigurationFailureCount"
+    namespace = "ilo/Connectors"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_configuration_failure" {
+  alarm_name          = "${local.name}-connector-configuration-failure"
+  alarm_description   = "A connector failed because production provider configuration needs operator repair."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorConfigurationFailureCount"
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+
+  depends_on = [aws_cloudwatch_log_metric_filter.connector_configuration_failure]
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_sync_failure_volume" {
+  alarm_name          = "${local.name}-connector-sync-failure-volume"
+  alarm_description   = "At least five connector synchronizations failed within fifteen minutes."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorSyncFailureCount"
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 5
+  period              = 900
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = local.alarm_actions
+  ok_actions    = local.alarm_actions
+
+  depends_on = [aws_cloudwatch_log_metric_filter.connector_sync_failure]
+}
+
 resource "aws_appautoscaling_target" "ecs" {
   for_each = local.ecs_services
 
@@ -673,6 +735,8 @@ resource "aws_cloudwatch_dashboard" "operations" {
               aws_cloudwatch_metric_alarm.rds_storage_low.arn,
               aws_cloudwatch_metric_alarm.rds_memory_low.arn,
               aws_cloudwatch_metric_alarm.cloudfront_5xx.arn,
+              aws_cloudwatch_metric_alarm.connector_configuration_failure.arn,
+              aws_cloudwatch_metric_alarm.connector_sync_failure_volume.arn,
             ],
           )
         }

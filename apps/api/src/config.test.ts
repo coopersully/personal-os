@@ -252,4 +252,23 @@ describe("API configuration", () => {
     ).toThrow("Production registration must remain invite-only.");
     expect(() => loadConfig({})).toThrow();
   });
+
+  it("fails production startup when either Google credential is empty", () => {
+    const production = {
+      ...required,
+      EMAIL_FROM: "ilo <noreply@example.com>",
+      GOOGLE_CLIENT_ID: "client",
+      GOOGLE_CLIENT_SECRET: "secret",
+      MCP_INTERNAL_SECRET: "mcp-internal-secret-that-is-long-enough",
+      NODE_ENV: "production",
+      OWNER_EMAILS: "owner@example.com",
+      RESEND_API_KEY: "resend-key",
+    };
+    expect(() => loadConfig({ ...production, GOOGLE_CLIENT_ID: "" })).toThrow(
+      "GOOGLE_CLIENT_ID",
+    );
+    expect(() => loadConfig({ ...production, GOOGLE_CLIENT_SECRET: "" })).toThrow(
+      "GOOGLE_CLIENT_SECRET",
+    );
+  });
 });

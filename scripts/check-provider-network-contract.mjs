@@ -3,7 +3,9 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const compute = readFileSync(resolve(root, "infra/compute.tf"), "utf8");
+const locals = readFileSync(resolve(root, "infra/locals.tf"), "utf8");
 const network = readFileSync(resolve(root, "infra/network.tf"), "utf8");
+const operations = readFileSync(resolve(root, "infra/operations.tf"), "utf8");
 const providerHttp = readFileSync(resolve(root, "packages/connectors/src/http.ts"), "utf8");
 const icloud = readFileSync(resolve(root, "packages/connectors/src/icloud.ts"), "utf8");
 
@@ -26,6 +28,25 @@ function requireApplicationEgress(port, description) {
     throw new Error(
       `Provider network contract requires application TCP egress ${port} (${description}).`,
     );
+  }
+}
+
+function requireSsmRuntimeKey(name) {
+  if (!new RegExp(`"${name}"`).test(locals)) {
+    throw new Error(`Provider runtime contract requires ${name} in Parameter Store.`);
+  }
+  if (
+    !new RegExp(
+      `name\\s*=\\s*"${name}"\\s*,\\s*valueFrom\\s*=\\s*local\\.runtime_parameter_arns\\.${name}`,
+    ).test(compute)
+  ) {
+    throw new Error(`Provider runtime contract requires an ECS secret reference for ${name}.`);
+  }
+}
+
+function requireTerraformContract(source, pattern, description) {
+  if (!pattern.test(source)) {
+    throw new Error(`Provider operations contract is missing ${description}.`);
   }
 }
 
@@ -60,5 +81,20 @@ if (!/host:\s*"smtp\.mail\.me\.com"[\s\S]*?port:\s*587/.test(icloud)) {
 
 requireApplicationEgress(993, "iCloud Mail IMAP over TLS");
 requireApplicationEgress(587, "iCloud Mail SMTP submission");
+requireSsmRuntimeKey("GOOGLE_CLIENT_ID");
+requireSsmRuntimeKey("GOOGLE_CLIENT_SECRET");
+if (/name\s*=\s*"GOOGLE_CLIENT_ID"\s*,\s*value\s*=/.test(compute)) {
+  throw new Error("Production Google client ID must not be emitted as a plain ECS environment value.");
+}
+requireTerraformContract(
+  operations,
+  /pattern\s*=\s*"\{ \$\.event = \\"connector_sync_failed\\" \}"/,
+  "the connector sync failure metric",
+);
+requireTerraformContract(
+  operations,
+  /\$\.category = \\"configuration\\"/,
+  "the connector configuration failure metric",
+);
 
 console.log("Provider timeout and network contract passed.");

@@ -11,8 +11,8 @@
 | `API_SHUTDOWN_TIMEOUT_MS` | Bounded API quiesce budget in milliseconds; production uses `105000` inside ECS `stopTimeout = 120` |
 | `ALLOWED_ORIGINS` | Comma-separated browser and Tauri origins |
 | `APP_ENCRYPTION_KEY` | Base64-encoded 32-byte key for OAuth credentials |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID; required in production and injected from Parameter Store |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret; required in production and injected from Parameter Store |
 | `GOOGLE_REDIRECT_URI` | Exact registered Google OAuth callback |
 | `RESEND_API_KEY` | Resend API key used only for account verification and password recovery email |
 | `AUTH_RATE_LIMIT_MAX_REQUESTS` | Maximum register/login/recovery attempts per source and endpoint window (default: `20`) |
@@ -37,6 +37,16 @@
 Generate the encryption key outside the repository and store it in the deployment platform's secret manager. Rotating it requires reauthorizing currently connected accounts.
 
 Hosted deployments should set both `EMAIL_FROM` and `RESEND_API_KEY`. Without them, development safely suppresses transactional email, but users cannot complete email verification or recover a password.
+
+Production also refuses to start without both Google OAuth values. Store them under the configured
+SSM prefix as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; ECS injects both through task-definition
+secret references. Do not duplicate the client ID in Terraform variables or task environment
+values. Verify the references without printing either value:
+
+```bash
+aws ecs describe-task-definition --task-definition personal-os-prod-api \
+  --query 'taskDefinition.containerDefinitions[].secrets[?name==`GOOGLE_CLIENT_ID` || name==`GOOGLE_CLIENT_SECRET`].[name,valueFrom]'
+```
 
 Production requires invite-only sign-up and refuses to start in open mode or
 without at least one `OWNER_EMAILS` address. An owner signs in, opens Settings →

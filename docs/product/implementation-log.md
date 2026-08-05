@@ -2,6 +2,22 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-05 — Actionable connected-account health
+
+- Replaced raw Google/X response handling and blanket iCloud credential errors with a whitelisted,
+  provider-neutral failure contract. Only positive authorization evidence asks a person to
+  reconnect; unknown/provider transport text is never persisted or returned.
+- Added durable failure category, recovery owner, attempt count, last-attempt time, and next-due
+  time. Existing external-account errors migrate to safe automatic recovery without copying legacy
+  text.
+- Scheduled Calendar-only and Mail-enabled accounts every five minutes with bounded concurrency,
+  fenced stale-claim recovery, 1/5/15/60-minute backoff, structured redacted observations, and
+  CloudWatch failure/configuration alarms.
+- Added Ready, Syncing, Retrying automatically, Reconnect required, and ilo-owned service-attention
+  states to Connections, plus direct Google/iCloud reconnect actions and Mail/Calendar callouts.
+- Made SSM Parameter Store authoritative for both Google OAuth values and made production startup
+  fail closed when either is absent.
+
 ## 2026-08-02 — Agent-owned setup protocol
 
 - Added one authenticated, server-owned setup plan with stable semantic steps,

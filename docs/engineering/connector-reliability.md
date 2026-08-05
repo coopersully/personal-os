@@ -25,14 +25,30 @@ A connection endpoint or OAuth callback may:
 
 It must not wait for source discovery, provider pagination, an initial full sync, projection, a
 backfill, or retries. Those operations start only after the account is durable. Fire-and-forget work
-must catch its rejection; the sync service records `syncing`, `idle`, or `error`, and a redacted
-failure message on the account.
+must catch its rejection; the sync service records an execution status plus typed, safe recovery
+state before returning an error.
 
 An app-password connector can only validate credentials by contacting the provider. It therefore
 persists a pending account first and performs verification as the first asynchronous sync. A failed
-verification keeps the account and its actionable error available for manual retry or reconnect.
-The stale-sync scheduler recovers an interrupted pending bootstrap without repeatedly retrying an
-account already in `error`.
+verification keeps the account available for scheduled repair. Only positive provider
+authentication evidence becomes `reconnect`; socket, TLS, timeout, and unknown Apple failures stay
+automatic retries.
+
+## Durable health and scheduling
+
+Every non-local Calendar/Mail account stores a safe failure code/category, recovery owner,
+consecutive failure count, last attempt, and next due time. `sync_error` is short ilo-authored copy;
+provider response bodies and unknown exception messages never populate it.
+
+- A successful account is scheduled again five minutes after completion.
+- Automatic and operator-owned failures retry after one, five, fifteen, then sixty minutes with
+  deterministic jitter. Provider `Retry-After` can lengthen that delay up to 24 hours.
+- Reconnect failures have no next due time and resume only after authorization is repaired.
+- Shutdown interruption becomes due immediately. A claim older than the thirty-minute lease can be
+  recovered by another scheduler pass.
+- Each one-minute scheduler pass selects Calendar-only and/or Mail-enabled due accounts, caps the
+  batch, and uses a fixed worker pool. Claim generation and claim ID fencing prevent duplicate
+  projection when scheduler passes overlap.
 
 ## Provider transport inventory
 
@@ -48,6 +64,12 @@ request. `scripts/check-provider-network-contract.mjs`, run by `pnpm lint`, chec
 timeouts remain below the edge timeout and that iCloud's declared ports exist in the application
 security group.
 
+Production injects both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from SSM Parameter Store as
+ECS secret references, and API boot validation rejects an empty value. CloudWatch converts only the
+safe `connector_sync_failed` event/category fields into aggregate failure and configuration-failure
+metrics. Configuration failures alarm immediately; five failures within fifteen minutes trigger a
+sustained-volume alarm. Neither metric uses account identity, email, or provider text.
+
 ## Implementation rules
 
 - Use `providerFetch` for outbound HTTP unless a provider SDK exposes no fetch hook. Configure that
@@ -55,16 +77,22 @@ security group.
 - Keep one provider request bounded even when a later background workflow paginates over many
   requests.
 - Persist refreshed OAuth credentials after provider calls that may rotate them.
-- Record provider failure on the durable account before rethrowing from sync or discovery.
+- Classify provider failures before persistence or public response. Google/X HTTP handling may use
+  status and bounded `Retry-After`, but must discard the response body.
+- Record only the safe classified failure on the durable account before returning a structured
+  `AppError` from sync.
 - Do not log authorization codes, tokens, app-specific passwords, encrypted credentials, or raw
   provider payloads.
+- Emit `connector_sync_failed` and `connector_sync_recovered` with stable IDs, category, recovery,
+  timing, and status only. Never add account email or provider message dimensions.
 - Treat local mocks as behavior tests, not production-connectivity evidence.
 
 ## Required tests and review
 
 For a changed connection flow, test that provider discovery and sync have not run when the
 connection method returns, then invoke the sync path explicitly and verify its projection. Exercise
-a provider failure and verify that the durable account remains with `syncStatus = error`. For a
+a provider failure and verify that the durable account remains with `syncStatus = error`, typed
+recovery, and no raw canary. For a
 callback that needs an unavoidable provider exchange, use a deferred bootstrap provider response
 to prove the browser redirect does not wait for discovery.
 
@@ -75,6 +103,8 @@ Before approval, answer all of these from the boundary record and diff:
 - Does production egress allow every protocol and port referenced by the connector?
 - Does asynchronous work report success or failure durably and have a retry path?
 - Do focused tests cover the response boundary and the degraded provider path?
+- Do Calendar-only, Mail-only, automatic retry, reconnect, and stale-claim fixtures prove bounded
+  due selection and overlapping scheduler safety?
 - Which non-destructive production-equivalent check proves the exact granted capability, rather
   than only the presence of a credential?
 - Do deployment and architecture docs describe any changed durable behavior?

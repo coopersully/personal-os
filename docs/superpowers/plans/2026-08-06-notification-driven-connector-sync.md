@@ -311,48 +311,48 @@ git commit -m "feat: synchronize Gmail incrementally"
   `GoogleConnector`.
 - Produces `renewDueSubscriptions({ concurrency, limit })`.
 
-- [ ] **Step 1: Write failing provider tests**
+- [x] **Step 1: Write failing provider tests**
 
 Assert exact Gmail topic request and parsed history/expiration; Calendar watch request channel ID,
 webhook URL, token, expiration; channel stop request; token refresh persistence; bounded provider
 errors; and absence of raw response bodies. Include malformed/missing expiration fixtures.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `pnpm vitest run packages/connectors/src/google.test.ts`
 
 Expected: FAIL because watch methods do not exist.
 
-- [ ] **Step 3: Implement provider watch methods**
+- [x] **Step 3: Implement provider watch methods**
 
 All methods use the existing authenticated request/timeout/error boundary and return rotated
 credentials. Gmail requires `gmail.modify`; Calendar watches require their existing Calendar
 scopes. Calendar tokens are caller-generated and never logged.
 
-- [ ] **Step 4: Write failing renewal lifecycle tests**
+- [x] **Step 4: Write failing renewal lifecycle tests**
 
 Cover initial registration after connection, Gmail renewal at most twenty-four hours after success
 and before provider expiry, Calendar replacement overlap, verified new-channel activation before old
 stop, failed renewal backoff, expired subscription recovery, reconnect suppression, bounded
 concurrency, and two schedulers claiming once.
 
-- [ ] **Step 5: Run renewal tests and verify RED**
+- [x] **Step 5: Run renewal tests and verify RED**
 
 Run: `pnpm vitest run apps/api/src/connector-notification-service.integration.test.ts`
 
 Expected: FAIL on missing renewal behavior.
 
-- [ ] **Step 6: Implement durable renewal claims**
+- [x] **Step 6: Implement durable renewal claims**
 
 Use subscription lease ID/expiry and the connector retry schedule. Store remote IDs/cursors and
 expiration, hash Calendar verification tokens, encrypt the raw token needed only for replacement
 validation, and persist rotated Google credentials under an account generation-safe update.
 
-- [ ] **Step 7: Run and verify GREEN**
+- [x] **Step 7: Run and verify GREEN**
 
 Run both commands from Steps 2 and 5. Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/connectors apps/api/src/connector-notification-service.ts apps/api/src/connector-notification-service.integration.test.ts

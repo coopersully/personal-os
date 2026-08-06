@@ -143,6 +143,14 @@ const gmailHistoryResponseSchema = z.object({
   historyId: z.string().min(1),
   nextPageToken: z.string().optional(),
 });
+const gmailWatchResponseSchema = z.object({
+  expiration: z.string().regex(/^\d+$/u),
+  historyId: z.string().min(1),
+});
+const calendarWatchResponseSchema = z.object({
+  expiration: z.string().regex(/^\d+$/u),
+  resourceId: z.string().min(1),
+});
 const gmailHeaderSchema = z.object({ name: z.string(), value: z.string() });
 const gmailPartSchema = z.object({
   body: z
@@ -459,6 +467,48 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     };
   }
 
+  function providerExpiration(value: string): string {
+    const milliseconds = Number(value);
+    const date = new Date(milliseconds);
+    if (!Number.isSafeInteger(milliseconds) || Number.isNaN(date.getTime())) {
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "google_watch_expiration_invalid",
+        disposition: "operator",
+        message: "Google returned an invalid notification expiration.",
+        status: 502,
+      });
+    }
+    return date.toISOString();
+  }
+
+  async function watchCalendar(
+    credentials: GoogleCredentials,
+    url: string,
+    channel: { address: string; id: string; token: string },
+    operation?: ProviderOperationOptions,
+  ) {
+    const result = await authenticatedRequest(
+      credentials,
+      url,
+      {
+        body: JSON.stringify({
+          address: channel.address,
+          id: channel.id,
+          token: channel.token,
+          type: "web_hook",
+        }),
+        method: "POST",
+      },
+      operation,
+    );
+    const watch = calendarWatchResponseSchema.parse(await parseResponse(result.response));
+    return {
+      credentials: result.credentials,
+      value: { expiresAt: providerExpiration(watch.expiration), resourceId: watch.resourceId },
+    };
+  }
+
   return {
     authorizationUrl(
       state: string,
@@ -564,6 +614,52 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     },
 
     listCalendars,
+
+    async watchGmail(credentials, topicName, operation) {
+      const result = await authenticatedRequest(
+        credentials,
+        "https://gmail.googleapis.com/gmail/v1/users/me/watch",
+        { body: JSON.stringify({ topicName }), method: "POST" },
+        operation,
+      );
+      const watch = gmailWatchResponseSchema.parse(await parseResponse(result.response));
+      return {
+        credentials: result.credentials,
+        value: {
+          expiresAt: providerExpiration(watch.expiration),
+          historyId: watch.historyId,
+        },
+      };
+    },
+
+    async watchCalendarList(credentials, channel, operation) {
+      return watchCalendar(
+        credentials,
+        "https://www.googleapis.com/calendar/v3/users/me/calendarList/watch",
+        channel,
+        operation,
+      );
+    },
+
+    async watchCalendarEvents(credentials, remoteCalendarId, channel, operation) {
+      return watchCalendar(
+        credentials,
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(remoteCalendarId)}/events/watch`,
+        channel,
+        operation,
+      );
+    },
+
+    async stopCalendarWatch(credentials, channelId, resourceId, operation) {
+      const result = await authenticatedRequest(
+        credentials,
+        "https://www.googleapis.com/calendar/v3/channels/stop",
+        { body: JSON.stringify({ id: channelId, resourceId }), method: "POST" },
+        operation,
+      );
+      await parseResponse(result.response);
+      return result.credentials;
+    },
 
     async getMailThreadState(credentials, remoteThreadId) {
       const result = await authenticatedRequest(

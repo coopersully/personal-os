@@ -985,6 +985,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await automations.dispatchDue();
     },
     async syncDueConnectors() {
+      await connectors.renewSubscriptions();
       const triggered = await connectors.dispatchTriggeredSyncs();
       const scheduled = await connectors.syncDueAccounts();
       return {

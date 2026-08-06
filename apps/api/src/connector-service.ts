@@ -316,6 +316,8 @@ type ConnectorServiceOptions = {
   db: Database;
   encryptionKey: string;
   google: GoogleConnector;
+  googleCalendarWebhookUrl?: string;
+  googleGmailTopicName?: string;
   googleRedirectUri?: string;
   icloud?: ICloudConnector;
   log?: (entry: RequestLog) => void;
@@ -334,6 +336,8 @@ export function createConnectorService({
   db,
   encryptionKey,
   google,
+  googleCalendarWebhookUrl,
+  googleGmailTopicName,
   googleRedirectUri = "https://api.ilo.invalid/v1/connectors/google/callback",
   icloud = createICloudConnector(),
   log,
@@ -342,7 +346,14 @@ export function createConnectorService({
   shutdown,
 }: ConnectorServiceOptions) {
   const authorization = createConnectorAuthorizationService({ db, encryptionKey, now });
-  const notifications = createConnectorNotificationService({ db, now });
+  const notifications = createConnectorNotificationService({
+    db,
+    encryptionKey,
+    google,
+    now,
+    ...(googleCalendarWebhookUrl ? { calendarWebhookUrl: googleCalendarWebhookUrl } : {}),
+    ...(googleGmailTopicName ? { gmailTopicName: googleGmailTopicName } : {}),
+  });
   function syncOperation(): ProviderOperationOptions | undefined {
     if (!shutdown) return undefined;
     const deadlineMs = shutdown.deadlineMs();
@@ -3561,6 +3572,10 @@ export function createConnectorService({
       reason: "initial" | "notification" | "reconciliation" | "manual" | "retry" | "recovery",
     ) {
       return notifications.enqueue(accountId, reason);
+    },
+
+    renewSubscriptions(options: { concurrency?: number; limit?: number } = {}) {
+      return notifications.renewDueSubscriptions(options);
     },
 
     syncAccount,

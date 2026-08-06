@@ -713,6 +713,100 @@ describe("Google Calendar connector", () => {
     expect(String(fetch.mock.calls[3]?.[0])).not.toContain("startHistoryId=");
   });
 
+  it("registers Gmail and Calendar watches and stops Calendar channels", async () => {
+    const fetch = queued(
+      response({ expiration: "1783972800000", historyId: "gmail-history" }),
+      response({
+        expiration: "1783976400000",
+        id: "calendar-list-channel",
+        resourceId: "calendar-list-resource",
+      }),
+      response({
+        expiration: "1783980000000",
+        id: "events-channel",
+        resourceId: "events-resource",
+      }),
+      response({}, 204),
+    );
+    const google = connector(fetch);
+    if (
+      !google.watchGmail ||
+      !google.watchCalendarList ||
+      !google.watchCalendarEvents ||
+      !google.stopCalendarWatch
+    ) {
+      throw new Error("Google watch capabilities are missing.");
+    }
+
+    await expect(
+      google.watchGmail(fresh, "projects/ilo/topics/gmail-notifications"),
+    ).resolves.toMatchObject({
+      credentials: fresh,
+      value: { expiresAt: "2026-07-13T20:00:00.000Z", historyId: "gmail-history" },
+    });
+    const channel = {
+      address: "https://api.example.com/v1/connectors/google/calendar/notifications",
+      id: "calendar-list-channel",
+      token: "opaque-verification-token",
+    };
+    await expect(google.watchCalendarList(fresh, channel)).resolves.toMatchObject({
+      value: { expiresAt: "2026-07-13T21:00:00.000Z", resourceId: "calendar-list-resource" },
+    });
+    await expect(
+      google.watchCalendarEvents(fresh, "calendar/primary", {
+        ...channel,
+        id: "events-channel",
+      }),
+    ).resolves.toMatchObject({
+      value: { expiresAt: "2026-07-13T22:00:00.000Z", resourceId: "events-resource" },
+    });
+    await expect(
+      google.stopCalendarWatch(fresh, "events-channel", "events-resource"),
+    ).resolves.toEqual(fresh);
+
+    expect(JSON.parse(String(fetch.mock.calls[0]?.[1]?.body))).toEqual({
+      topicName: "projects/ilo/topics/gmail-notifications",
+    });
+    expect(String(fetch.mock.calls[1]?.[0]).endsWith("/users/me/calendarList/watch")).toBe(true);
+    expect(JSON.parse(String(fetch.mock.calls[1]?.[1]?.body))).toEqual({
+      address: channel.address,
+      id: channel.id,
+      token: channel.token,
+      type: "web_hook",
+    });
+    expect(String(fetch.mock.calls[2]?.[0])).toContain(
+      "/calendars/calendar%2Fprimary/events/watch",
+    );
+    expect(JSON.parse(String(fetch.mock.calls[3]?.[1]?.body))).toEqual({
+      id: "events-channel",
+      resourceId: "events-resource",
+    });
+  });
+
+  it("persists refreshed credentials from watch registration and rejects malformed expiry", async () => {
+    const refresh = response({
+      access_token: "watch-access",
+      expires_in: 3600,
+      scope: fresh.scope,
+    });
+    const google = connector(
+      queued(
+        refresh,
+        response({ expiration: "1783972800000", historyId: "gmail-history" }),
+        response({ expiration: "not-a-timestamp", historyId: "gmail-history" }),
+      ),
+    );
+    if (!google.watchGmail) throw new Error("Gmail watch capability is missing.");
+    await expect(
+      google.watchGmail(expired, "projects/ilo/topics/gmail-notifications"),
+    ).resolves.toMatchObject({
+      credentials: { accessToken: "watch-access", refreshToken: fresh.refreshToken },
+    });
+    await expect(
+      google.watchGmail(fresh, "projects/ilo/topics/gmail-notifications"),
+    ).rejects.toBeDefined();
+  });
+
   it("caps a Gmail synchronization at one hundred conversations", async () => {
     const threadIds = Array.from({ length: 100 }, (_, index) => ({ id: `thread-${index}` }));
     let activeThreadRequests = 0;

@@ -1,22 +1,37 @@
 import { resolve } from "node:path";
+import type { GoogleConnector, GoogleCredentials } from "@personal-os/connectors";
+import { ConnectorError } from "@personal-os/connectors";
 import {
   calendarAccounts,
+  calendars,
+  connectorSubscriptions,
   connectorSyncTriggers,
   createDatabaseClient,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createConnectorNotificationService } from "./connector-notification-service.js";
+import { encryptJson } from "./security.js";
 
 const timestamp = new Date("2026-08-06T12:00:00.000Z");
+const encryptionKey = Buffer.alloc(32, 13).toString("base64");
+const credentials: GoogleCredentials = {
+  accessToken: "access",
+  expiresAt: "2026-08-06T13:00:00.000Z",
+  refreshToken: "refresh",
+  scope:
+    "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar.events",
+  tokenType: "Bearer",
+};
 
 describe.sequential("connector notification service", () => {
   let container: StartedPostgreSqlContainer;
   let database: ReturnType<typeof createDatabaseClient>;
   let accountId: string;
   let service: ReturnType<typeof createConnectorNotificationService>;
+  let google: GoogleConnector;
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
@@ -40,6 +55,7 @@ describe.sequential("connector notification service", () => {
       .insert(calendarAccounts)
       .values({
         calendarEnabled: true,
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
         label: "Google",
         mailEnabled: true,
         provider: "google",
@@ -49,7 +65,44 @@ describe.sequential("connector notification service", () => {
       .returning();
     if (!account) throw new Error("Notification account was not created.");
     accountId = account.id;
-    service = createConnectorNotificationService({ db: database.db, now: () => timestamp });
+    await database.db.insert(calendars).values({
+      accountId,
+      isSelected: true,
+      name: "Primary",
+      provider: "google",
+      remoteCalendarId: "remote-primary",
+      timezone: "UTC",
+      userId: user.id,
+    });
+    google = {
+      watchGmail: vi.fn(async (value) => ({
+        credentials: value,
+        value: { expiresAt: "2026-08-13T12:00:00.000Z", historyId: "history-1" },
+      })),
+      watchCalendarList: vi.fn(async (value, channel) => ({
+        credentials: value,
+        value: {
+          expiresAt: "2026-08-07T12:00:00.000Z",
+          resourceId: `resource-${channel.id}`,
+        },
+      })),
+      watchCalendarEvents: vi.fn(async (value, _calendarId, channel) => ({
+        credentials: value,
+        value: {
+          expiresAt: "2026-08-07T12:00:00.000Z",
+          resourceId: `resource-${channel.id}`,
+        },
+      })),
+      stopCalendarWatch: vi.fn(async (value) => value),
+    } as unknown as GoogleConnector;
+    service = createConnectorNotificationService({
+      calendarWebhookUrl: "https://api.example.com/v1/connectors/google/calendar/notifications",
+      db: database.db,
+      encryptionKey,
+      gmailTopicName: "projects/ilo/topics/gmail-notifications",
+      google,
+      now: () => timestamp,
+    });
   }, 120_000);
 
   afterAll(async () => {
@@ -59,6 +112,129 @@ describe.sequential("connector notification service", () => {
 
   beforeEach(async () => {
     await database.db.delete(connectorSyncTriggers);
+    await database.db.delete(connectorSubscriptions);
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(credentials, encryptionKey),
+        syncError: null,
+        syncErrorCategory: null,
+        syncErrorCode: null,
+        syncFailureCount: 0,
+        syncRecovery: null,
+      })
+      .where(eq(calendarAccounts.id, accountId));
+    vi.clearAllMocks();
+  });
+
+  it("registers and renews one durable watch per enabled Google resource", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+
+    await expect(service.renewDueSubscriptions({ concurrency: 2 })).resolves.toEqual({
+      attempted: 3,
+      failed: 0,
+      skipped: 0,
+      succeeded: 3,
+    });
+    expect(google.watchGmail).toHaveBeenCalledOnce();
+    expect(google.watchCalendarList).toHaveBeenCalledOnce();
+    expect(google.watchCalendarEvents).toHaveBeenCalledOnce();
+    const subscriptions = await database.db
+      .select()
+      .from(connectorSubscriptions)
+      .orderBy(connectorSubscriptions.kind);
+    expect(subscriptions).toEqual([
+      expect.objectContaining({
+        kind: "gmail_mailbox",
+        providerCursor: "history-1",
+        renewAfter: new Date("2026-08-07T12:00:00.000Z"),
+        status: "active",
+      }),
+      expect.objectContaining({
+        kind: "google_calendar_events",
+        remoteResourceId: expect.stringMatching(/^resource-/),
+        status: "active",
+        verificationTokenHash: expect.any(String),
+      }),
+      expect.objectContaining({
+        kind: "google_calendar_list",
+        remoteResourceId: expect.stringMatching(/^resource-/),
+        status: "active",
+        verificationTokenHash: expect.any(String),
+      }),
+    ]);
+
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ renewAfter: timestamp })
+      .where(
+        inArray(connectorSubscriptions.kind, ["google_calendar_events", "google_calendar_list"]),
+      );
+    await expect(service.renewDueSubscriptions()).resolves.toMatchObject({
+      attempted: 2,
+      succeeded: 2,
+    });
+    expect(google.stopCalendarWatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("claims renewal once across schedulers, backs off safely, and suppresses reconnects", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    const watchGmail = google.watchGmail;
+    if (!watchGmail) throw new Error("Gmail watch fixture is missing.");
+    vi.mocked(watchGmail).mockRejectedValueOnce(
+      new ConnectorError({
+        category: "temporary",
+        code: "google_temporary_failure",
+        disposition: "retry",
+        message: "Google is temporarily unavailable.",
+        status: 503,
+      }),
+    );
+    const second = createConnectorNotificationService({
+      calendarWebhookUrl: "https://api.example.com/v1/connectors/google/calendar/notifications",
+      db: database.db,
+      encryptionKey,
+      gmailTopicName: "projects/ilo/topics/gmail-notifications",
+      google,
+      now: () => timestamp,
+    });
+    const [firstResult, secondResult] = await Promise.all([
+      service.renewDueSubscriptions({ limit: 10 }),
+      second.renewDueSubscriptions({ limit: 10 }),
+    ]);
+    expect(firstResult.attempted + secondResult.attempted).toBe(3);
+    expect(firstResult.failed + secondResult.failed).toBe(1);
+    const [failed] = await database.db
+      .select()
+      .from(connectorSubscriptions)
+      .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
+    expect(failed).toMatchObject({
+      failureCount: 1,
+      nextAttemptAt: new Date("2026-08-06T12:01:00.000Z"),
+      safeFailureCode: "google_temporary_failure",
+      status: "failed",
+    });
+
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        syncError: "Reconnect this account to resume syncing.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "provider_authorization_required",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+      })
+      .where(eq(calendarAccounts.id, accountId));
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ nextAttemptAt: timestamp, status: "failed" })
+      .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
+    await expect(service.renewDueSubscriptions()).resolves.toMatchObject({ skipped: 1 });
+    const [stopped] = await database.db
+      .select()
+      .from(connectorSubscriptions)
+      .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
+    expect(stopped?.status).toBe("stopped");
   });
 
   it("coalesces bursts with bounded count and reason priority", async () => {

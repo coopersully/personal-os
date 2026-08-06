@@ -167,6 +167,22 @@ export type MailSyncResult = CredentialResult<{
   threads: NormalizedRemoteMailThread[];
 }>;
 
+export type GmailWatch = {
+  expiresAt: string;
+  historyId: string;
+};
+
+export type GoogleCalendarWatch = {
+  expiresAt: string;
+  resourceId: string;
+};
+
+export type GoogleCalendarWatchChannel = {
+  address: string;
+  id: string;
+  token: string;
+};
+
 export type RemoteMailThreadState = {
   mailboxIds: string[];
   remoteThreadId: string;
@@ -248,6 +264,12 @@ export type GoogleConnector = {
     credentials: GoogleCredentials,
     remoteThreadId: string,
   ) => Promise<GoogleCredentials>;
+  stopCalendarWatch?: (
+    credentials: GoogleCredentials,
+    channelId: string,
+    resourceId: string,
+    operation?: ProviderOperationOptions,
+  ) => Promise<GoogleCredentials>;
   syncCalendar: (
     credentials: GoogleCredentials,
     remoteCalendarId: string,
@@ -261,6 +283,22 @@ export type GoogleConnector = {
     etag: string | null,
     input: UpdateEventInput,
   ) => Promise<CredentialResult<NormalizedRemoteEvent>>;
+  watchCalendarEvents?: (
+    credentials: GoogleCredentials,
+    remoteCalendarId: string,
+    channel: GoogleCalendarWatchChannel,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GoogleCalendarWatch>>;
+  watchCalendarList?: (
+    credentials: GoogleCredentials,
+    channel: GoogleCalendarWatchChannel,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GoogleCalendarWatch>>;
+  watchGmail?: (
+    credentials: GoogleCredentials,
+    topicName: string,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GmailWatch>>;
 };
 
 export type ICloudConnector = {

@@ -117,4 +117,97 @@ describe.sequential("connector notification service", () => {
         .where(eq(connectorSyncTriggers.accountId, accountId)),
     ).resolves.toEqual([]);
   });
+
+  it("dispatches successful triggers and releases failed work for retry", async () => {
+    const [existingAccount] = await database.db
+      .select({ userId: calendarAccounts.userId })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountId));
+    if (!existingAccount) throw new Error("Notification account was not found.");
+    const [retryAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        label: "Retry Google",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "notification-google-retry",
+        userId: existingAccount.userId,
+      })
+      .returning();
+    if (!retryAccount) throw new Error("Retry notification account was not created.");
+
+    try {
+      await service.enqueue(accountId, "notification");
+      await service.enqueue(retryAccount.id, "notification");
+      const syncAccount = vi.fn(async (_userId: string, candidateAccountId: string) => {
+        if (candidateAccountId === retryAccount.id) throw new Error("temporary provider failure");
+      });
+
+      await expect(
+        service.dispatchTriggeredSyncs(syncAccount, { concurrency: 99, limit: 999 }),
+      ).resolves.toEqual({ attempted: 2, failed: 1, succeeded: 1 });
+      expect(syncAccount).toHaveBeenCalledTimes(2);
+      const remaining = await database.db.select().from(connectorSyncTriggers);
+      expect(remaining).toEqual([
+        expect.objectContaining({
+          accountId: retryAccount.id,
+          availableAt: new Date("2026-08-06T12:01:00.000Z"),
+          claimId: null,
+        }),
+      ]);
+    } finally {
+      await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, retryAccount.id));
+    }
+  });
+
+  it("drops reconnect triggers without calling the provider", async () => {
+    const [existingAccount] = await database.db
+      .select({ userId: calendarAccounts.userId })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountId));
+    if (!existingAccount) throw new Error("Notification account was not found.");
+    const [reconnectAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        label: "Reconnect Google",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "notification-google-reconnect",
+        syncError: "Reconnect this account to resume syncing.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "provider_authorization_required",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncStatus: "error",
+        userId: existingAccount.userId,
+      })
+      .returning();
+    if (!reconnectAccount) throw new Error("Reconnect notification account was not created.");
+
+    try {
+      await service.enqueue(reconnectAccount.id, "notification");
+      const syncAccount = vi.fn();
+      await expect(service.dispatchTriggeredSyncs(syncAccount)).resolves.toEqual({
+        attempted: 1,
+        failed: 0,
+        succeeded: 0,
+      });
+      expect(syncAccount).not.toHaveBeenCalled();
+      await expect(database.db.select().from(connectorSyncTriggers)).resolves.toEqual([]);
+    } finally {
+      await database.db
+        .delete(calendarAccounts)
+        .where(eq(calendarAccounts.id, reconnectAccount.id));
+    }
+  });
+
+  it("returns an empty dispatch result when no triggers are due", async () => {
+    await expect(service.dispatchTriggeredSyncs(vi.fn())).resolves.toEqual({
+      attempted: 0,
+      failed: 0,
+      succeeded: 0,
+    });
+  });
 });

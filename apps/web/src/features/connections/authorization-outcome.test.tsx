@@ -78,4 +78,44 @@ describe("connection authorization outcome", () => {
     await userEvent.click(screen.getByRole("button", { name: "Connect an account" }));
     expect(onRetry).toHaveBeenCalledWith(null);
   });
+
+  it("labels a non-retryable X failure without exposing provider details", async () => {
+    const { onRetry } = setup({
+      accountId: null,
+      provider: "x",
+      retryable: false,
+      status: "failed",
+    });
+
+    expect(await screen.findByText("X couldn't connect")).toBeInTheDocument();
+    expect(
+      screen.getByText("Your existing connection was not changed. Start again to finish securely."),
+    ).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(onRetry).toHaveBeenCalledWith("x");
+  });
+
+  it("turns a failed outcome lookup into one safe restart action", async () => {
+    const onRetry = vi.fn();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter
+          initialEntries={[`/settings?section=connections&connection_attempt=${attemptId}`]}
+        >
+          <ConnectionAuthorizationOutcome
+            loadAttempt={vi.fn(async () => {
+              throw new Error("raw-provider-canary");
+            })}
+            onRetry={onRetry}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByText("Restart the connection")).toBeInTheDocument();
+    expect(screen.queryByText(/raw-provider-canary/u)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Connect an account" }));
+    expect(onRetry).toHaveBeenCalledWith(null);
+  });
 });

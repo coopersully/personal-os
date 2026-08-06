@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import {
   createDatabaseClient,
+  type Database,
   type DatabaseClient,
   migrateDatabase,
   oauthStates,
@@ -14,6 +15,30 @@ import { decryptJson, hashToken } from "./security.js";
 
 const encryptionKey = Buffer.alloc(32, 19).toString("base64");
 const initialNow = new Date("2026-08-06T12:00:00.000Z");
+
+function scriptedAuthorizationDatabase(options: {
+  selects?: unknown[][];
+  updates?: unknown[][];
+}): Database {
+  const selects = [...(options.selects ?? [])];
+  const updates = [...(options.updates ?? [])];
+  return {
+    select: () => ({
+      from: () => ({
+        where: () => ({
+          limit: async () => selects.shift() ?? [],
+        }),
+      }),
+    }),
+    update: () => ({
+      set: () => ({
+        where: () => ({
+          returning: async () => updates.shift() ?? [],
+        }),
+      }),
+    }),
+  } as unknown as Database;
+}
 
 describe.sequential("connector authorization attempt service", () => {
   let container: StartedPostgreSqlContainer;
@@ -191,6 +216,225 @@ describe.sequential("connector authorization attempt service", () => {
       code: "not_found",
     });
     now = new Date("2026-08-07T12:00:01.000Z");
+    await expect(service().publicOutcome(ownerId, created.attemptId)).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
+  it("maps active X attempts and retryable failures to the public contract", async () => {
+    const created = await service().create({
+      provider: "x",
+      redirectUri: "https://api.example.com/v1/x-bookmarks/callback",
+      requestedServices: null,
+      returnPath: "/settings?section=connections",
+      targetAccountId: null,
+      userId: ownerId,
+    });
+
+    expect(await service().publicOutcome(ownerId, created.attemptId)).toEqual({
+      accountId: null,
+      provider: "x",
+      retryable: false,
+      status: "pending",
+    });
+    expect(await service().consume("x", created.state, "callback-request")).toMatchObject({
+      kind: "ready",
+    });
+    expect(await service().publicOutcome(ownerId, created.attemptId)).toMatchObject({
+      provider: "x",
+      status: "pending",
+    });
+    await service().close({
+      accountId: null,
+      attemptId: created.attemptId,
+      outcomeCode: "provider_transport_failure",
+      status: "failed",
+    });
+    expect(await service().publicOutcome(ownerId, created.attemptId)).toEqual({
+      accountId: null,
+      provider: "x",
+      retryable: true,
+      status: "failed",
+    });
+  });
+
+  it("fails closed when a pending attempt has lost its verifier", async () => {
+    const created = await service().create({
+      provider: "google",
+      redirectUri: "https://api.example.com/v1/connectors/google/callback",
+      requestedServices: ["calendar"],
+      returnPath: "/settings?section=connections",
+      targetAccountId: null,
+      userId: ownerId,
+    });
+    await database.db
+      .update(oauthStates)
+      .set({ encryptedVerifier: null })
+      .where(eq(oauthStates.id, created.attemptId));
+
+    expect(await service().consume("google", created.state, "callback-request")).toMatchObject({
+      kind: "closed",
+      attempt: {
+        outcomeCode: "authorization_verifier_missing",
+        status: "failed",
+      },
+    });
+  });
+
+  it("distinguishes invalid, active, and closed callback replays", async () => {
+    expect(await service().consume("google", "oauth_unknown", "unknown-request")).toEqual({
+      kind: "invalid",
+    });
+
+    const created = await service().create({
+      provider: "google",
+      redirectUri: "https://api.example.com/v1/connectors/google/callback",
+      requestedServices: ["calendar"],
+      returnPath: "/settings?section=connections",
+      targetAccountId: null,
+      userId: ownerId,
+    });
+    expect(await service().consume("google", created.state, "first-request")).toMatchObject({
+      kind: "ready",
+    });
+    expect(await service().consume("google", created.state, "active-replay")).toMatchObject({
+      kind: "processing",
+    });
+    await service().close({
+      accountId: null,
+      attemptId: created.attemptId,
+      outcomeCode: "authorization_denied",
+      status: "cancelled",
+    });
+    expect(await service().consume("google", created.state, "closed-replay")).toMatchObject({
+      kind: "closed",
+      attempt: { status: "cancelled" },
+    });
+    await expect(
+      service().close({
+        accountId: null,
+        attemptId: created.attemptId,
+        outcomeCode: "authorization_denied",
+        status: "cancelled",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("resolves expiry and processing races from the latest durable state", async () => {
+    const expiredPending = {
+      consumedAt: null,
+      expiresAt: new Date("2026-08-06T11:59:00.000Z"),
+      id: "11111111-1111-4111-8111-111111111111",
+      status: "pending",
+    };
+    const concurrentlyClosed = { ...expiredPending, status: "failed" };
+    const closedExpiry = createConnectorAuthorizationService({
+      db: scriptedAuthorizationDatabase({
+        selects: [[expiredPending], [concurrentlyClosed]],
+        updates: [[], []],
+      }),
+      encryptionKey,
+      now: () => initialNow,
+    });
+    await expect(closedExpiry.consume("google", "oauth_state", "request-id")).resolves.toEqual({
+      attempt: concurrentlyClosed,
+      kind: "closed",
+    });
+
+    const removedExpiry = createConnectorAuthorizationService({
+      db: scriptedAuthorizationDatabase({
+        selects: [[expiredPending], []],
+        updates: [[], []],
+      }),
+      encryptionKey,
+      now: () => initialNow,
+    });
+    await expect(removedExpiry.consume("google", "oauth_state", "request-id")).resolves.toEqual({
+      kind: "invalid",
+    });
+
+    const processing = {
+      consumedAt: initialNow,
+      expiresAt: new Date("2026-08-06T12:30:00.000Z"),
+      id: "22222222-2222-4222-8222-222222222222",
+      status: "processing",
+    };
+    const closedProcessing = { ...processing, status: "cancelled" };
+    const changedProcessing = createConnectorAuthorizationService({
+      db: scriptedAuthorizationDatabase({
+        selects: [[processing], [closedProcessing]],
+        updates: [[]],
+      }),
+      encryptionKey,
+      now: () => initialNow,
+    });
+    await expect(changedProcessing.consume("google", "oauth_state", "request-id")).resolves.toEqual(
+      { attempt: closedProcessing, kind: "closed" },
+    );
+
+    const removedProcessing = createConnectorAuthorizationService({
+      db: scriptedAuthorizationDatabase({
+        selects: [[processing], []],
+        updates: [[]],
+      }),
+      encryptionKey,
+      now: () => initialNow,
+    });
+    await expect(removedProcessing.consume("google", "oauth_state", "request-id")).resolves.toEqual(
+      { kind: "invalid" },
+    );
+  });
+
+  it("fails safely when attempt persistence returns no record", async () => {
+    const failedInsert = {
+      insert: () => ({
+        values: () => ({
+          returning: async () => [],
+        }),
+      }),
+    } as unknown as Database;
+    const authorization = createConnectorAuthorizationService({
+      db: failedInsert,
+      encryptionKey,
+      now: () => initialNow,
+    });
+
+    await expect(
+      authorization.create({
+        provider: "google",
+        redirectUri: "https://api.example.com/v1/connectors/google/callback",
+        requestedServices: ["calendar"],
+        returnPath: "/settings?section=connections",
+        targetAccountId: null,
+        userId: ownerId,
+      }),
+    ).rejects.toMatchObject({ code: "internal_error" });
+  });
+
+  it("hides a completed outcome after its independent visibility deadline", async () => {
+    const created = await service().create({
+      provider: "google",
+      redirectUri: "https://api.example.com/v1/connectors/google/callback",
+      requestedServices: ["calendar"],
+      returnPath: "/settings?section=connections",
+      targetAccountId: null,
+      userId: ownerId,
+    });
+    expect(await service().consume("google", created.state, "callback-request")).toMatchObject({
+      kind: "ready",
+    });
+    await service().close({
+      accountId: null,
+      attemptId: created.attemptId,
+      outcomeCode: "authorization_denied",
+      status: "cancelled",
+    });
+    await database.db
+      .update(oauthStates)
+      .set({ createdAt: new Date("2026-08-07T11:00:00.000Z") })
+      .where(eq(oauthStates.id, created.attemptId));
+    now = new Date("2026-08-07T12:00:01.000Z");
+
     await expect(service().publicOutcome(ownerId, created.attemptId)).rejects.toMatchObject({
       code: "not_found",
     });

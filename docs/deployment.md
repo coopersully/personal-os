@@ -340,6 +340,13 @@ and never reads or prints parameter values.
 - API request logs are one-line JSON with request ID, method, path, status, and duration.
 - Connector account rows expose last sync time, current sync state, and redacted failure text.
 
+The exact public `/health/live` and `/health/ready` paths are excluded from only the AWS managed IP
+reputation rule. Deployment and Route 53 health probes can originate from shared infrastructure
+that appears on that managed list, so applying the reputation block to those intentionally public,
+unauthenticated paths can prevent a healthy release from proving readiness. The shared edge rate
+limit and managed bad-input protection still apply. Do not broaden this exception to other paths
+or use it as evidence that an authenticated application route is reachable.
+
 Forward `X-Request-Id` from the edge when present. Do not log authorization headers, cookies, OAuth codes, encrypted credentials, or raw provider payloads.
 
 The existence of connector alarms in Terraform is not evidence that they are active in production.

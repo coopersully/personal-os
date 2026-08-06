@@ -6,6 +6,7 @@ import {
   domainProfileApprovals,
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
+  oauthStates,
 } from "./schema.js";
 
 describe("database schema contracts", () => {
@@ -218,5 +219,38 @@ describe("database schema contracts", () => {
     expect(migrationSql).not.toMatch(/"sync_error_code"\s*=\s*"sync_error"/u);
     expect(migrationSql).not.toMatch(/"sync_error_category"\s*=\s*"sync_error"/u);
     expect(migrationSql).not.toMatch(/"sync_recovery"\s*=\s*"sync_error"/u);
+  });
+
+  it("keeps connector authorization attempt lifecycle aligned with its migration", async () => {
+    const table = getTableConfig(oauthStates);
+    expect(table.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "status",
+        "outcome_code",
+        "connected_account_id",
+        "redirect_uri",
+        "completed_at",
+        "request_id",
+      ]),
+    );
+    expect(table.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining(["oauth_states_status_expiry_idx", "oauth_states_user_created_idx"]),
+    );
+    expect(table.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining(["oauth_states_status_check", "oauth_states_lifecycle_check"]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0051_connector_authorization_attempts.sql",
+      ),
+      "utf8",
+    );
+    expect(migrationSql).toContain('ADD COLUMN "status" text DEFAULT \'pending\' NOT NULL');
+    expect(migrationSql).toContain('"outcome_code" = \'legacy_consumed\'');
+    expect(migrationSql).toContain('"completed_at" = "consumed_at"');
+    expect(migrationSql).toContain('CREATE INDEX "oauth_states_status_expiry_idx"');
+    expect(migrationSql).toContain('CREATE INDEX "oauth_states_user_created_idx"');
   });
 });

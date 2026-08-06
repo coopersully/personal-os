@@ -450,6 +450,23 @@ export const oauthStates = pgTable(
     tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    status: text("status")
+      .$type<
+        | "pending"
+        | "processing"
+        | "connected"
+        | "cancelled"
+        | "expired"
+        | "permission_incomplete"
+        | "failed"
+      >()
+      .notNull()
+      .default("pending"),
+    outcomeCode: text("outcome_code"),
+    connectedAccountId: uuid("connected_account_id"),
+    redirectUri: text("redirect_uri"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    requestId: text("request_id"),
     targetAccountId: uuid("target_account_id"),
     requestedServices: jsonb("requested_services").$type<GoogleConnectionService[]>(),
     returnPath: text("return_path"),
@@ -458,6 +475,20 @@ export const oauthStates = pgTable(
   (table) => [
     uniqueIndex("oauth_states_token_hash_idx").on(table.tokenHash),
     index("oauth_states_user_idx").on(table.userId),
+    index("oauth_states_status_expiry_idx").on(table.status, table.expiresAt),
+    index("oauth_states_user_created_idx").on(table.userId, table.createdAt),
+    check(
+      "oauth_states_status_check",
+      sql`${table.status} IN ('pending', 'processing', 'connected', 'cancelled', 'expired', 'permission_incomplete', 'failed')`,
+    ),
+    check(
+      "oauth_states_lifecycle_check",
+      sql`(
+        (${table.status} = 'pending' AND ${table.consumedAt} IS NULL AND ${table.completedAt} IS NULL)
+        OR (${table.status} = 'processing' AND ${table.consumedAt} IS NOT NULL AND ${table.completedAt} IS NULL)
+        OR (${table.status} IN ('connected', 'cancelled', 'expired', 'permission_incomplete', 'failed') AND ${table.consumedAt} IS NOT NULL AND ${table.completedAt} IS NOT NULL)
+      )`,
+    ),
   ],
 );
 

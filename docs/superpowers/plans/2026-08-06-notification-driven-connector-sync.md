@@ -438,30 +438,30 @@ git commit -m "feat: receive authenticated Gmail notifications"
 - Adds `googleCalendarPushEnabled` and `googleCalendarWebhookUrl`.
 - `POST /v1/connectors/google/calendar/notifications` returns `204` after trigger commit.
 
-- [ ] **Step 1: Write failing config/webhook tests**
+- [x] **Step 1: Write failing config/webhook tests**
 
 Cover exact webhook HTTPS URL validation, required `X-Goog-Channel-ID`, resource ID/state/message
 number, constant-time token comparison, unknown/stopped/expired channel, initial `sync`, duplicate
 message, renewal overlap, malformed/oversized headers, durable-write failure, and privacy canaries.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `pnpm vitest run apps/api/src/config.test.ts apps/api/src/app.integration.test.ts`
 
 Expected: FAIL because Calendar notification ingress is absent.
 
-- [ ] **Step 3: Implement verified header-only ingress**
+- [x] **Step 3: Implement verified header-only ingress**
 
 Load subscription by opaque channel ID, compare resource ID and hashed token, update verification
 and delivery timestamps, enqueue account work for `exists`/`not_exists`, activate a renewing channel
 on `sync`, and acknowledge. Never parse provider content because Calendar notifications have no
 resource body.
 
-- [ ] **Step 4: Update OpenAPI and run GREEN**
+- [x] **Step 4: Update OpenAPI and run GREEN**
 
 Run the command from Step 2. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/src/config.ts apps/api/src/config.test.ts apps/api/src/app.ts apps/api/src/app.integration.test.ts apps/api/src/openapi.ts

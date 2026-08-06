@@ -228,6 +228,16 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           },
         },
       },
+      "/v1/connectors/google/calendar/notifications": {
+        post: {
+          responses: {
+            204: { description: "Verified Calendar change signal durably accepted" },
+            400: { description: "Malformed notification headers" },
+            404: { description: "Notification route or channel unavailable" },
+            503: { description: "Durable acknowledgement unavailable; provider should retry" },
+          },
+        },
+      },
       "/v1/connectors/authorization-attempts/{id}": {
         get: {
           security,

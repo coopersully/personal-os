@@ -119,6 +119,13 @@ const gmailPushDataSchema = z.object({
   emailAddress: z.email().max(320),
   historyId: z.string().regex(/^\d+$/u).max(64),
 });
+const calendarNotificationHeadersSchema = z.object({
+  channelId: z.string().uuid(),
+  messageNumber: z.string().regex(/^\d+$/u).max(64),
+  resourceId: z.string().min(1).max(512),
+  resourceState: z.enum(["exists", "not_exists", "sync"]),
+  token: z.string().min(32).max(512),
+});
 const oauthAuthorizeSchema = z.object({
   client_id: z.string().min(1),
   code_challenge: z.string().min(43).max(128),
@@ -202,6 +209,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
     google,
+    ...(dependencies.config.googleCalendarPushEnabled &&
+    dependencies.config.googleCalendarWebhookUrl
+      ? { googleCalendarWebhookUrl: dependencies.config.googleCalendarWebhookUrl }
+      : {}),
     ...(dependencies.config.googleGmailPushEnabled && dependencies.config.googleGmailPubsubTopic
       ? { googleGmailTopicName: dependencies.config.googleGmailPubsubTopic }
       : {}),
@@ -532,6 +543,25 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     }
     try {
       const result = await connectors.receiveGmailNotification(data.emailAddress, data.historyId);
+      return context.body(null, result === "accepted" ? 204 : 404);
+    } catch {
+      return context.body(null, 503);
+    }
+  });
+  app.post("/v1/connectors/google/calendar/notifications", async (context) => {
+    if (!dependencies.config.googleCalendarPushEnabled) return context.body(null, 404);
+    const contentLength = Number(context.req.header("content-length") ?? "0");
+    if (Number.isFinite(contentLength) && contentLength > 0) return context.body(null, 413);
+    const parsed = calendarNotificationHeadersSchema.safeParse({
+      channelId: context.req.header("x-goog-channel-id"),
+      messageNumber: context.req.header("x-goog-message-number"),
+      resourceId: context.req.header("x-goog-resource-id"),
+      resourceState: context.req.header("x-goog-resource-state"),
+      token: context.req.header("x-goog-channel-token"),
+    });
+    if (!parsed.success) return context.body(null, 400);
+    try {
+      const result = await connectors.receiveCalendarNotification(parsed.data);
       return context.body(null, result === "accepted" ? 204 : 404);
     } catch {
       return context.body(null, 503);

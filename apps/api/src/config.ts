@@ -28,6 +28,8 @@ const configSchema = z
     EMAIL_FROM: z.string().default(""),
     GOOGLE_CLIENT_ID: z.string().default(""),
     GOOGLE_CLIENT_SECRET: z.string().default(""),
+    GOOGLE_CALENDAR_PUSH_ENABLED: z.enum(["true", "false"]).default("false"),
+    GOOGLE_CALENDAR_WEBHOOK_URL: z.string().default(""),
     GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION: z.string().default(""),
     GOOGLE_GMAIL_PUBSUB_TOPIC: z.string().default(""),
     GOOGLE_GMAIL_PUSH_AUDIENCE: z.string().default(""),
@@ -86,6 +88,28 @@ const configSchema = z
           code: "custom",
           message: "GOOGLE_GMAIL_PUSH_AUDIENCE must be an HTTPS URL.",
           path: ["GOOGLE_GMAIL_PUSH_AUDIENCE"],
+        });
+      }
+    }
+    if (value.GOOGLE_CALENDAR_PUSH_ENABLED === "true") {
+      try {
+        const url = new URL(value.GOOGLE_CALENDAR_WEBHOOK_URL);
+        const api = new URL(value.API_BASE_URL);
+        if (
+          url.protocol !== "https:" ||
+          url.origin !== api.origin ||
+          url.pathname !== "/v1/connectors/google/calendar/notifications" ||
+          url.search ||
+          url.hash
+        ) {
+          throw new Error();
+        }
+      } catch {
+        context.addIssue({
+          code: "custom",
+          message:
+            "GOOGLE_CALENDAR_WEBHOOK_URL must be the exact HTTPS Calendar notification route on API_BASE_URL.",
+          path: ["GOOGLE_CALENDAR_WEBHOOK_URL"],
         });
       }
     }
@@ -162,6 +186,8 @@ export type AppConfig = {
   encryptionKey: string;
   googleClientId: string;
   googleClientSecret: string;
+  googleCalendarPushEnabled?: boolean;
+  googleCalendarWebhookUrl?: string;
   googleGmailPubsubSubscription?: string;
   googleGmailPubsubTopic?: string;
   googleGmailPushAudience?: string;
@@ -213,6 +239,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     encryptionKey: value.APP_ENCRYPTION_KEY,
     googleClientId: value.GOOGLE_CLIENT_ID,
     googleClientSecret: value.GOOGLE_CLIENT_SECRET,
+    googleCalendarPushEnabled: value.GOOGLE_CALENDAR_PUSH_ENABLED === "true",
+    googleCalendarWebhookUrl: value.GOOGLE_CALENDAR_WEBHOOK_URL,
     googleGmailPubsubSubscription: value.GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION,
     googleGmailPubsubTopic: value.GOOGLE_GMAIL_PUBSUB_TOPIC,
     googleGmailPushAudience: value.GOOGLE_GMAIL_PUSH_AUDIENCE,

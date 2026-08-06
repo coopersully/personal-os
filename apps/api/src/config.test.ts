@@ -26,6 +26,8 @@ describe("API configuration", () => {
       encryptionKey: "secret",
       googleClientId: "",
       googleClientSecret: "",
+      googleCalendarPushEnabled: false,
+      googleCalendarWebhookUrl: "",
       googleGmailPubsubSubscription: "",
       googleGmailPubsubTopic: "",
       googleGmailPushAudience: "",
@@ -72,6 +74,28 @@ describe("API configuration", () => {
     ).toMatchObject({
       googleGmailPushEnabled: true,
       googleGmailPushServiceAccount: "pubsub@example.iam.gserviceaccount.com",
+    });
+  });
+
+  it("requires the exact public Calendar webhook URL when Calendar push is enabled", () => {
+    expect(() =>
+      loadConfig({
+        ...required,
+        GOOGLE_CALENDAR_PUSH_ENABLED: "true",
+        GOOGLE_CALENDAR_WEBHOOK_URL: "https://attacker.example.com/calendar",
+      }),
+    ).toThrow("exact HTTPS Calendar notification route");
+    expect(
+      loadConfig({
+        ...required,
+        GOOGLE_CALENDAR_PUSH_ENABLED: "true",
+        GOOGLE_CALENDAR_WEBHOOK_URL:
+          "https://api.example.com/v1/connectors/google/calendar/notifications",
+      }),
+    ).toMatchObject({
+      googleCalendarPushEnabled: true,
+      googleCalendarWebhookUrl:
+        "https://api.example.com/v1/connectors/google/calendar/notifications",
     });
   });
 

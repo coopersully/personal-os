@@ -135,6 +135,9 @@ describe.sequential("ilo API", () => {
         encryptionKey: Buffer.alloc(32, 1).toString("base64"),
         googleClientId: "",
         googleClientSecret: "",
+        googleCalendarPushEnabled: true,
+        googleCalendarWebhookUrl:
+          "https://api.example.com/v1/connectors/google/calendar/notifications",
         googleGmailPubsubSubscription: "projects/ilo/subscriptions/gmail-push",
         googleGmailPubsubTopic: "projects/ilo/topics/gmail-push",
         googleGmailPushAudience: "https://api.example.com/v1/connectors/google/gmail/notifications",
@@ -303,6 +306,78 @@ describe.sequential("ilo API", () => {
     }
     expect(JSON.stringify(logs.mock.calls)).not.toContain("push-mailbox@example.com");
     expect(JSON.stringify(logs.mock.calls)).not.toContain("valid-pubsub-token");
+    await database.db.delete(users).where(eq(users.id, pushUser.id));
+  });
+
+  it("verifies Calendar channel headers and coalesces only new provider signals", async () => {
+    const [pushUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Calendar Push",
+        email: "calendar-push-user@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!pushUser) throw new Error("Calendar push user was not created.");
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        label: "Calendar Push",
+        mailEnabled: false,
+        provider: "google",
+        providerAccountId: "calendar-push-account",
+        userId: pushUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Calendar push account was not created.");
+    const channelId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const channelToken = "opaque-calendar-verification-token-123456";
+    await database.db.insert(connectorSubscriptions).values({
+      accountId: account.id,
+      channelId,
+      kind: "google_calendar_list",
+      provider: "google",
+      remoteResourceId: "calendar-list-resource",
+      status: "active",
+      verificationTokenHash: createHash("sha256").update(channelToken).digest("hex"),
+    });
+    const headers = {
+      "x-goog-channel-id": channelId,
+      "x-goog-channel-token": channelToken,
+      "x-goog-message-number": "1",
+      "x-goog-resource-id": "calendar-list-resource",
+      "x-goog-resource-state": "exists",
+    };
+    logs.mockClear();
+
+    const accepted = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers,
+      method: "POST",
+    });
+    expect(accepted.status).toBe(204);
+    const duplicate = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers,
+      method: "POST",
+    });
+    expect(duplicate.status).toBe(204);
+    await expect(
+      database.db
+        .select({ notificationCount: connectorSyncTriggers.notificationCount })
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([{ notificationCount: 1 }]);
+    const rejected = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers: { ...headers, "x-goog-channel-token": `${channelToken}-wrong` },
+      method: "POST",
+    });
+    expect(rejected.status).toBe(404);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain(channelToken);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("calendar-list-resource");
     await database.db.delete(users).where(eq(users.id, pushUser.id));
   });
 

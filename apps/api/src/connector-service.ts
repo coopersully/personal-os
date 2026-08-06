@@ -3582,6 +3582,16 @@ export function createConnectorService({
       return notifications.receiveGmailNotification(mailboxIdentity, historyId);
     },
 
+    receiveCalendarNotification(input: {
+      channelId: string;
+      messageNumber: string;
+      resourceId: string;
+      resourceState: "exists" | "not_exists" | "sync";
+      token: string;
+    }) {
+      return notifications.receiveCalendarNotification(input);
+    },
+
     syncAccount,
     async syncDueAccounts(options: { concurrency?: number; limit?: number } = {}): Promise<{
       attempted: number;

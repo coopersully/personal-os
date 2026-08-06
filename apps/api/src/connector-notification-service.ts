@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { GoogleConnector, GoogleCredentials } from "@personal-os/connectors";
 import { ConnectorError } from "@personal-os/connectors";
 import {
@@ -397,6 +397,57 @@ export function createConnectorNotificationService({
           })
           .where(eq(connectorSubscriptions.id, subscription.id));
         if (isNewer) {
+          await this.enqueue(subscription.accountId, "notification", now(), transaction);
+        }
+        return "accepted";
+      });
+    },
+
+    async receiveCalendarNotification(input: {
+      channelId: string;
+      messageNumber: string;
+      resourceId: string;
+      resourceState: "exists" | "not_exists" | "sync";
+      token: string;
+    }): Promise<"accepted" | "unknown"> {
+      const tokenHash = createHash("sha256").update(input.token).digest();
+      return db.transaction(async (transaction) => {
+        const [subscription] = await transaction
+          .select()
+          .from(connectorSubscriptions)
+          .where(
+            and(
+              eq(connectorSubscriptions.channelId, input.channelId),
+              inArray(connectorSubscriptions.kind, [
+                "google_calendar_list",
+                "google_calendar_events",
+              ]),
+              inArray(connectorSubscriptions.status, ["active", "renewing"]),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        const expectedHash = subscription?.verificationTokenHash;
+        const verified =
+          subscription?.remoteResourceId === input.resourceId &&
+          typeof expectedHash === "string" &&
+          /^[a-f0-9]{64}$/u.test(expectedHash) &&
+          timingSafeEqual(Buffer.from(expectedHash, "hex"), tokenHash);
+        if (!subscription || !verified) return "unknown";
+        const current = subscription.providerCursor;
+        const isNewer =
+          current === null ||
+          (/^\d+$/u.test(current) && BigInt(input.messageNumber) > BigInt(current));
+        await transaction
+          .update(connectorSubscriptions)
+          .set({
+            ...(isNewer ? { providerCursor: input.messageNumber } : {}),
+            lastNotificationAt: now(),
+            ...(input.resourceState === "sync" ? { lastVerifiedAt: now(), status: "active" } : {}),
+            updatedAt: now(),
+          })
+          .where(eq(connectorSubscriptions.id, subscription.id));
+        if (isNewer && input.resourceState !== "sync") {
           await this.enqueue(subscription.accountId, "notification", now(), transaction);
         }
         return "accepted";

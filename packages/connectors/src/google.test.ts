@@ -209,9 +209,7 @@ describe("Google Calendar connector", () => {
       ),
     ).toEqual(["mail"]);
     expect(
-      googleGrantedServices(
-        credentialsWith("https://www.googleapis.com/auth/gmail.send"),
-      ),
+      googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/gmail.send")),
     ).toEqual([]);
     expect(googleGrantedServices(credentialsWith(""))).toEqual([]);
   });

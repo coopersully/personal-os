@@ -30,8 +30,8 @@ import type {
 import {
   type ConnectedAccountHealth,
   type ConnectorSyncStatus,
-  connectorAuthorizationOutcomeSchema,
   connectedAccountHealthSchema,
+  connectorAuthorizationOutcomeSchema,
 } from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createCalendarApiClient } from "./features/calendar.js";
@@ -284,9 +284,7 @@ export function createApiClient(options: ClientOptions) {
       return response.url;
     },
 
-    async getConnectorAuthorizationAttempt(
-      id: string,
-    ): Promise<ConnectorAuthorizationOutcome> {
+    async getConnectorAuthorizationAttempt(id: string): Promise<ConnectorAuthorizationOutcome> {
       const response = await request<{ attempt: unknown }>(
         `/v1/connectors/authorization-attempts/${encodeURIComponent(id)}`,
       );

@@ -142,16 +142,6 @@ const agentDomainSupport = {
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
-  const startBackgroundTask = (label: string, operation: () => Promise<void>): boolean => {
-    if (dependencies.runtimeLifecycle) {
-      return dependencies.runtimeLifecycle.startBackgroundTask(label, operation);
-    }
-    void operation().catch(() => {
-      // Detached connector bootstrap failures are persisted by the connector
-      // service and retried by the scheduler.
-    });
-    return true;
-  };
   const authRateLimiter = createFixedWindowRateLimiter({
     maxRequests: dependencies.config.authRateLimitMaxRequests ?? 20,
     now: () => now().getTime(),

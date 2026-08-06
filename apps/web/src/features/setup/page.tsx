@@ -512,10 +512,7 @@ function GoogleStep({
         </h1>
         <p>Choose what each account contributes. Add as many as you use.</p>
       </div>
-      <ConnectionAuthorizationOutcome
-        onConnected={onConnected}
-        onRetry={() => connect.mutate()}
-      />
+      <ConnectionAuthorizationOutcome onConnected={onConnected} onRetry={() => connect.mutate()} />
       <ConnectedAccounts accounts={accounts} />
       <Card>
         <CardHeader>

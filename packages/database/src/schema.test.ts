@@ -39,7 +39,7 @@ describe("database schema contracts", () => {
       "utf8",
     );
     expect(migrationSql).toContain("NULLS NOT DISTINCT");
-    expect(migrationSql).toContain('ON DELETE cascade');
+    expect(migrationSql).toContain("ON DELETE cascade");
     expect(migrationSql).toContain('"notification_count" BETWEEN 1 AND 1000000');
   });
 
@@ -280,8 +280,8 @@ describe("database schema contracts", () => {
       ),
       "utf8",
     );
-    expect(migrationSql).toContain('ADD COLUMN "status" text DEFAULT \'pending\' NOT NULL');
-    expect(migrationSql).toContain('"outcome_code" = \'legacy_consumed\'');
+    expect(migrationSql).toContain("ADD COLUMN \"status\" text DEFAULT 'pending' NOT NULL");
+    expect(migrationSql).toContain("\"outcome_code\" = 'legacy_consumed'");
     expect(migrationSql).toContain('"completed_at" = "consumed_at"');
     expect(migrationSql).toContain('CREATE INDEX "oauth_states_status_expiry_idx"');
     expect(migrationSql).toContain('CREATE INDEX "oauth_states_user_created_idx"');

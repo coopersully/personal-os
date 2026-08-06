@@ -2,9 +2,7 @@ import { z } from "zod";
 import { isoDateTimeSchema } from "./common.js";
 
 export const connectorAuthorizationProviderSchema = z.enum(["google", "x"]);
-export type ConnectorAuthorizationProvider = z.infer<
-  typeof connectorAuthorizationProviderSchema
->;
+export type ConnectorAuthorizationProvider = z.infer<typeof connectorAuthorizationProviderSchema>;
 
 export const connectorAuthorizationStatusSchema = z.enum([
   "pending",

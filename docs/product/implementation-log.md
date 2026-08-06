@@ -2,6 +2,21 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-06 — Recoverable connector authorization and durable initial sync
+
+- Replaced raw Google/X callback errors with no-store `303` redirects and owner-only, allowlisted
+  authorization outcomes. Settings and Setup now show one plain-language result and one recovery
+  action without provider payloads, codes, scopes, or identities.
+- Added S256 PKCE for Google, durable thirty-minute authorization attempts, idempotent replay,
+  issuer validation, exact granted-capability checks, and fail-closed partial consent that leaves
+  existing accounts unchanged.
+- Moved Google and iCloud initial synchronization onto coalesced database triggers. The one-minute
+  scheduler drains those triggers through the existing fenced sync engine, while successful
+  accounts retain the five-minute reconciliation backstop and bounded retry policy.
+- Confirmed the production SSM Google client ID matches the authorized OAuth client and the client
+  secret remains a secure runtime parameter. Provider push remains an optional latency layer; it is
+  not required for correctness and must not be enabled without external watch/identity evidence.
+
 ## 2026-08-05 — Actionable connected-account health
 
 - Replaced raw Google/X response handling and blanket iCloud credential errors with a whitelisted,

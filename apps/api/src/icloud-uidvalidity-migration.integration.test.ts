@@ -67,7 +67,10 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
       })
       .returning();
     if (!user) throw new Error("Migration user was not created.");
-    const legacyStates = await database.pool.query<{ consumed_at: Date | null; token_hash: string }>(
+    const legacyStates = await database.pool.query<{
+      consumed_at: Date | null;
+      token_hash: string;
+    }>(
       `INSERT INTO oauth_states (user_id, provider, token_hash, expires_at, consumed_at, return_path)
        VALUES
          ($1, 'google', 'pending-state-hash', NOW() + INTERVAL '30 minutes', NULL, '/setup'),

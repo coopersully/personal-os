@@ -1093,10 +1093,7 @@ export const connectorSubscriptions = pgTable(
     ),
     uniqueIndex("connector_subscriptions_channel_idx").on(table.channelId),
     index("connector_subscriptions_due_idx").on(table.status, table.nextAttemptAt),
-    check(
-      "connector_subscriptions_provider_check",
-      sql`${table.provider} IN ('google', 'icloud')`,
-    ),
+    check("connector_subscriptions_provider_check", sql`${table.provider} IN ('google', 'icloud')`),
     check(
       "connector_subscriptions_kind_check",
       sql`${table.kind} IN ('gmail_mailbox', 'google_calendar_list', 'google_calendar_events', 'icloud_mail_idle')`,

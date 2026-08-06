@@ -62,9 +62,7 @@ describe("connection authorization outcome", () => {
     setup({ accountId: attemptId, provider: "google", retryable: false, status: "connected" });
     await screen.findByText("Google is connected");
     await waitFor(() =>
-      expect(screen.getByLabelText("location")).toHaveTextContent(
-        "/settings?section=connections",
-      ),
+      expect(screen.getByLabelText("location")).toHaveTextContent("/settings?section=connections"),
     );
   });
 

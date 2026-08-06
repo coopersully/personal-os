@@ -3056,9 +3056,7 @@ export function createConnectorService({
     };
   }
 
-  const safeReturnPath = (
-    value: string | null,
-  ): "/setup" | "/settings?section=connections" =>
+  const safeReturnPath = (value: string | null): "/setup" | "/settings?section=connections" =>
     value === "/setup" || value === "/settings?section=connections"
       ? value
       : "/settings?section=connections";

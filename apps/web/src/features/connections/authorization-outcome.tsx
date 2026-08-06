@@ -7,12 +7,7 @@ import { CheckCircle2, CircleAlert, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
-import {
-  Alert,
-  AlertAction,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
 type Props = {
@@ -87,7 +82,10 @@ export function ConnectionAuthorizationOutcome({
   );
   const query = useQuery({
     enabled: Boolean(attemptId),
-    queryFn: () => loadAttempt(attemptId!),
+    queryFn: () => {
+      if (!attemptId) throw new Error("The connection attempt is unavailable.");
+      return loadAttempt(attemptId);
+    },
     queryKey: ["connector-authorization-attempt", attemptId],
     refetchInterval: (state) => (state.state.data?.status === "pending" ? 1_000 : false),
   });

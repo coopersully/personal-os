@@ -630,8 +630,7 @@ export function googleGrantedServices(
   const calendarEvents =
     fullCalendar || scopes.has("https://www.googleapis.com/auth/calendar.events");
   const fullMail = scopes.has("https://mail.google.com/");
-  const mailManage =
-    fullMail || scopes.has("https://www.googleapis.com/auth/gmail.modify");
+  const mailManage = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.modify");
   const mailSend = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.send");
   return [
     ...(calendarList && calendarEvents ? (["calendar"] as const) : []),

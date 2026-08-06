@@ -5342,9 +5342,7 @@ describe("ilo web app", () => {
       retryable: false,
       status: "connected",
     });
-    const view = setup(
-      `/settings?section=connections&connection_attempt=${id}`,
-    );
+    const view = setup(`/settings?section=connections&connection_attempt=${id}`);
 
     expect(await screen.findByText("Google is connected")).toBeInTheDocument();
     expect(screen.getAllByRole("alert")).toHaveLength(1);

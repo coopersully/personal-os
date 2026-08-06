@@ -149,7 +149,6 @@ import {
   TextField,
 } from "@/components/auth-fields";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
-import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
 import {
   EventCard,
   EventCardAside,
@@ -284,6 +283,7 @@ import {
   ToggleGroupItem as ShadcnToggleGroupItem,
 } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
 import { api, errorMessage, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { InlineError, PageLoading } from "./components/async-state.js";

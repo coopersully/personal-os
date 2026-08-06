@@ -24,9 +24,26 @@ A connection endpoint or OAuth callback may:
 5. respond or redirect.
 
 It must not wait for source discovery, provider pagination, an initial full sync, projection, a
-backfill, or retries. Those operations start only after the account is durable. Fire-and-forget work
-must catch its rejection; the sync service records an execution status plus typed, safe recovery
-state before returning an error.
+backfill, or retries. Those operations start only after the account and its initial durable sync
+trigger commit together. Connector callbacks do not launch in-memory fire-and-forget sync work.
+
+## Browser authorization outcomes
+
+Google and X authorization starts use a random hashed state and S256 PKCE. The encrypted verifier,
+exact redirect URI, selected capabilities, safe return path, and thirty-minute expiry live in one
+durable attempt row before the browser leaves ilo. A callback claims that attempt atomically and is
+idempotent under provider or browser replay.
+
+Every callback branch returns a `303` to an allowlisted ilo path with cache disabled, a no-referrer
+policy, and either an opaque attempt UUID or the fixed `restart_required` result. Provider error
+text, response bodies, codes, scopes, identities, state, and PKCE material never enter a redirect,
+public response, account description, or log. Authenticated clients can read only the provider,
+status, retryability, and connected account UUID for their own attempt for twenty-four hours.
+
+Google enables a selected capability only when the token response contains every authority needed
+for that capability. Partial consent closes as `permission_incomplete` without creating, changing,
+or downgrading an account. Successful account persistence, cleared health, immediate sync
+eligibility, closed authorization outcome, and initial trigger share one transaction.
 
 An app-password connector can only validate credentials by contacting the provider. It therefore
 persists a pending account first and performs verification as the first asynchronous sync. A failed
@@ -49,6 +66,11 @@ provider response bodies and unknown exception messages never populate it.
 - Each one-minute scheduler pass selects Calendar-only and/or Mail-enabled due accounts, caps the
   batch, and uses a fixed worker pool. Claim generation and claim ID fencing prevent duplicate
   projection when scheduler passes overlap.
+- Initial connections and low-latency change signals coalesce by account in
+  `connector_sync_triggers`. The scheduler drains claimed triggers through the same fenced sync
+  engine before ordinary due-account reconciliation. A trigger arriving during a sync survives
+  completion; failed work is released for retry. The five-minute schedule remains authoritative if
+  every change signal is delayed or absent.
 
 ## Provider transport inventory
 

@@ -1,9 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  calendarAccounts,
-  type Database,
-  connectorSyncTriggers,
-} from "@personal-os/database";
+import { calendarAccounts, connectorSyncTriggers, type Database } from "@personal-os/database";
 import type { ConnectorSyncTriggerReason } from "@personal-os/domain";
 import { and, asc, eq, isNull, lte, or, sql } from "drizzle-orm";
 
@@ -34,9 +30,7 @@ END`;
 
 export function createConnectorNotificationService({ db, now }: Options) {
   return {
-    async claimDueTriggers(
-      options: { limit?: number } = {},
-    ): Promise<ClaimedConnectorTrigger[]> {
+    async claimDueTriggers(options: { limit?: number } = {}): Promise<ClaimedConnectorTrigger[]> {
       const claimedAt = now();
       const limit = Math.max(1, Math.min(options.limit ?? 25, 100));
       return db.transaction(async (transaction) => {

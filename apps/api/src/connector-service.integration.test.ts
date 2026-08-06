@@ -3640,8 +3640,9 @@ describe.sequential("connector service", () => {
       returnPath: "/settings?section=connections",
       status: "cancelled",
     });
+    if (!denied.attemptId) throw new Error("Denied attempt ID is missing.");
     expect(
-      await database.db.select().from(oauthStates).where(eq(oauthStates.id, denied.attemptId!)),
+      await database.db.select().from(oauthStates).where(eq(oauthStates.id, denied.attemptId)),
     ).toEqual([
       expect.objectContaining({
         connectedAccountId: null,
@@ -3682,10 +3683,11 @@ describe.sequential("connector service", () => {
       state: incompleteState,
     });
     expect(incomplete.status).toBe("permission_incomplete");
+    if (!incomplete.attemptId) throw new Error("Incomplete attempt ID is missing.");
     const [attempt] = await database.db
       .select()
       .from(oauthStates)
-      .where(eq(oauthStates.id, incomplete.attemptId!));
+      .where(eq(oauthStates.id, incomplete.attemptId));
     expect(JSON.stringify(attempt)).not.toContain("RAW_PROVIDER_CANARY");
     expect(JSON.stringify(attempt)).not.toContain("private-canary@example.com");
     expect(JSON.stringify(attempt)).not.toContain("RAW_CODE_CANARY");

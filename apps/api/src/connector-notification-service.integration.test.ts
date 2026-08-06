@@ -111,7 +111,10 @@ describe.sequential("connector notification service", () => {
     if (!claim) throw new Error("Notification trigger was not claimed.");
     await service.completeTrigger(claim);
     await expect(
-      database.db.select().from(connectorSyncTriggers).where(eq(connectorSyncTriggers.accountId, accountId)),
+      database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, accountId)),
     ).resolves.toEqual([]);
   });
 });

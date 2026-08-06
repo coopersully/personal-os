@@ -3117,9 +3117,7 @@ describe.sequential("ilo API", () => {
     expect(`${callbackLocation.origin}${callbackLocation.pathname}`).toBe(
       "https://app.production.example.com/setup",
     );
-    expect(callbackLocation.searchParams.get("connection_attempt")).toMatch(
-      /^[0-9a-f-]{36}$/,
-    );
+    expect(callbackLocation.searchParams.get("connection_attempt")).toMatch(/^[0-9a-f-]{36}$/);
     expect(callback.headers.get("cache-control")).toBe("no-store");
     expect(callback.headers.get("pragma")).toBe("no-cache");
     expect(callback.headers.get("referrer-policy")).toBe("no-referrer");

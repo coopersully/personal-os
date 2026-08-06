@@ -97,9 +97,10 @@ describe.sequential("connector authorization attempt service", () => {
     });
     expect(JSON.stringify(stored)).not.toContain(created.state);
     expect(JSON.stringify(stored)).not.toContain(created.codeVerifier);
-    expect(
-      decryptJson<{ codeVerifier: string }>(stored?.encryptedVerifier!, encryptionKey),
-    ).toEqual({ codeVerifier: created.codeVerifier });
+    if (!stored?.encryptedVerifier) throw new Error("Encrypted PKCE verifier was not stored.");
+    expect(decryptJson<{ codeVerifier: string }>(stored.encryptedVerifier, encryptionKey)).toEqual({
+      codeVerifier: created.codeVerifier,
+    });
     expect(created.codeChallenge).toBe(
       createHash("sha256").update(created.codeVerifier).digest("base64url"),
     );
@@ -124,7 +125,7 @@ describe.sequential("connector authorization attempt service", () => {
     expect(results.filter((result) => result.kind === "ready")).toHaveLength(1);
     expect(results.filter((result) => result.kind === "processing")).toHaveLength(1);
     const ready = results.find((result) => result.kind === "ready");
-    if (!ready || ready.kind !== "ready") throw new Error("No attempt consumer won the claim.");
+    if (ready?.kind !== "ready") throw new Error("No attempt consumer won the claim.");
     expect(ready.codeVerifier).toBe(created.codeVerifier);
   });
 
@@ -154,11 +155,7 @@ describe.sequential("connector authorization attempt service", () => {
       kind: "ready",
     });
     now = new Date("2026-08-06T12:03:00.000Z");
-    const staleResult = await service().consume(
-      "google",
-      interrupted.state,
-      "recovery-request",
-    );
+    const staleResult = await service().consume("google", interrupted.state, "recovery-request");
     expect(staleResult).toMatchObject({
       kind: "closed",
       attempt: { outcomeCode: "authorization_interrupted", status: "failed" },

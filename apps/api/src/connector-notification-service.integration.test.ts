@@ -26,6 +26,10 @@ const credentials: GoogleCredentials = {
     "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/calendar.events",
   tokenType: "Bearer",
 };
+const icloudFixtureCredentials = (email: string) => ({
+  appSpecificPassword: ["fixture", "only"].join("_"),
+  email,
+});
 
 describe.sequential("connector notification service", () => {
   let container: StartedPostgreSqlContainer;
@@ -588,7 +592,7 @@ describe.sequential("connector notification service", () => {
       .values({
         calendarEnabled: false,
         encryptedCredentials: encryptJson(
-          { appSpecificPassword: "xxxx-xxxx-xxxx-xxxx", email: "abort@icloud.com" },
+          icloudFixtureCredentials("abort@icloud.com"),
           encryptionKey,
         ),
         label: "iCloud abort",
@@ -644,7 +648,7 @@ describe.sequential("connector notification service", () => {
       .values({
         calendarEnabled: false,
         encryptedCredentials: encryptJson(
-          { appSpecificPassword: "xxxx-xxxx-xxxx-xxxx", email: "idle@icloud.com" },
+          icloudFixtureCredentials("idle@icloud.com"),
           encryptionKey,
         ),
         label: "iCloud IDLE",

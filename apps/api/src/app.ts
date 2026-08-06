@@ -287,6 +287,30 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     context.header("X-Content-Type-Options", "nosniff");
     return context.redirect(location.toString(), 303);
   }
+  async function completeConnectorCallback(
+    context: Context<AppEnv>,
+    provider: "google" | "x",
+    operation: () => Promise<{
+      attemptId: string | null;
+      returnPath: "/setup" | "/settings?section=connections";
+    }>,
+  ): Promise<Response> {
+    try {
+      const result = await operation();
+      return connectorCallbackRedirect(context, result.returnPath, result.attemptId);
+    } catch {
+      dependencies.log?.({
+        durationMs: 0,
+        event: "connector_authorization_callback_failed",
+        method: "GET",
+        path: context.req.path,
+        provider,
+        requestId: context.get("requestId"),
+        status: 503,
+      });
+      return connectorCallbackRedirect(context, "/settings?section=connections", null);
+    }
+  }
   const calendar = createCalendarService({
     connectedEvents: connectors.eventGateway,
     db: dependencies.db,
@@ -520,14 +544,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       return connectorCallbackRedirect(context, "/settings?section=connections", null);
     }
     const query = parsed.data;
-    const result = await connectors.handleGoogleAuthorizationCallback({
-      ...(query.code ? { code: query.code } : {}),
-      ...(query.error ? { error: query.error } : {}),
-      ...(query.iss ? { issuer: query.iss } : {}),
-      requestId: context.get("requestId"),
-      state: query.state,
-    });
-    return connectorCallbackRedirect(context, result.returnPath, result.attemptId);
+    return completeConnectorCallback(context, "google", () =>
+      connectors.handleGoogleAuthorizationCallback({
+        ...(query.code ? { code: query.code } : {}),
+        ...(query.error ? { error: query.error } : {}),
+        ...(query.iss ? { issuer: query.iss } : {}),
+        requestId: context.get("requestId"),
+        state: query.state,
+      }),
+    );
   });
   app.post("/v1/connectors/google/gmail/notifications", async (context) => {
     if (
@@ -617,13 +642,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       return connectorCallbackRedirect(context, "/settings?section=connections", null);
     }
     const query = parsed.data;
-    const result = await xBookmarks.handleAuthorizationCallback({
-      ...(query.code ? { code: query.code } : {}),
-      ...(query.error ? { error: query.error } : {}),
-      requestId: context.get("requestId"),
-      state: query.state,
-    });
-    return connectorCallbackRedirect(context, result.returnPath, result.attemptId);
+    return completeConnectorCallback(context, "x", () =>
+      xBookmarks.handleAuthorizationCallback({
+        ...(query.code ? { code: query.code } : {}),
+        ...(query.error ? { error: query.error } : {}),
+        requestId: context.get("requestId"),
+        state: query.state,
+      }),
+    );
   });
 
   const oauthSession = async (context: Context<AppEnv>) => {

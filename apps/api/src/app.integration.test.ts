@@ -197,6 +197,63 @@ describe.sequential("ilo API", () => {
     return response.status === 204 ? null : response.json();
   }
 
+  it("returns every connector callback to ilo when persistence fails unexpectedly", async () => {
+    const callbackLogs = vi.fn();
+    const failingDatabase = new Proxy(database.db, {
+      get(target, property, receiver) {
+        if (property === "update") {
+          return () => {
+            throw new Error("raw-provider-canary");
+          };
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const callbackApp = createApp({
+      config: appConfig,
+      db: failingDatabase,
+      log: callbackLogs,
+      x: xConnector,
+    });
+
+    for (const path of [
+      "/v1/connectors/google/callback?state=unavailable&code=google-code",
+      "/v1/x-bookmarks/callback?state=unavailable&code=x-code",
+    ]) {
+      const response = await callbackApp.request(path);
+      expect(response.status).toBe(303);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("pragma")).toBe("no-cache");
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      const location = new URL(String(response.headers.get("location")));
+      expect(location.origin).toBe("https://app.example.com");
+      expect(location.pathname).toBe("/settings");
+      expect(location.searchParams.get("section")).toBe("connections");
+      expect(location.searchParams.get("connection_result")).toBe("restart_required");
+      expect(await response.text()).not.toContain("raw-provider-canary");
+    }
+    expect(
+      callbackLogs.mock.calls
+        .map(([entry]) => entry)
+        .filter(({ event }) => event === "connector_authorization_callback_failed"),
+    ).toEqual([
+      expect.objectContaining({
+        event: "connector_authorization_callback_failed",
+        path: "/v1/connectors/google/callback",
+        provider: "google",
+        status: 503,
+      }),
+      expect.objectContaining({
+        event: "connector_authorization_callback_failed",
+        path: "/v1/x-bookmarks/callback",
+        provider: "x",
+        status: 503,
+      }),
+    ]);
+    expect(JSON.stringify(callbackLogs.mock.calls)).not.toContain("raw-provider-canary");
+  });
+
   it("authenticates Gmail push and acknowledges only after durable coalescing", async () => {
     const [pushUser] = await database.db
       .insert(users)

@@ -50,6 +50,7 @@ export type RequestLog = {
   durationMs: number;
   event:
     | "calendar_provider_reconciliation"
+    | "connector_authorization_callback_failed"
     | "connector_notification_received"
     | "connector_subscription_expired"
     | "connector_subscription_failed"
@@ -67,7 +68,7 @@ export type RequestLog = {
   nextSyncAt?: string | null;
   notificationDisposition?: "accepted" | "duplicate" | "rejected" | undefined;
   path: string;
-  provider?: Extract<CalendarProvider, "google" | "icloud">;
+  provider?: Extract<CalendarProvider, "google" | "icloud"> | "x";
   renewalLagMs?: number | undefined;
   requestId: string;
   status: number;

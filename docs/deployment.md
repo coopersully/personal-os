@@ -364,6 +364,28 @@ The application security group must allow the transports used by enabled connect
 
 Register the exact public `GOOGLE_REDIRECT_URI` in Google Cloud. Request Calendar read/write and user email scopes. OAuth state is random, user-bound, one-time-use, and expires after ten minutes. Use separate OAuth clients and encryption keys for development and production.
 
+Treat a working client ID and secret as configuration evidence, not proof that Google OAuth is
+ready for people outside the development team. Before enabling Google connections in production:
+
+- use a dedicated production Google Cloud project and OAuth client, set the consent screen to
+  **In production**, and configure support/developer contacts plus verified application, privacy,
+  and terms URLs on owned domains;
+- reconcile the consent-screen scope inventory with the exact scopes requested by the API, then
+  obtain Google's approval for every sensitive or restricted scope;
+- when Gmail restricted-scope data is accessed or stored by ilo's servers, complete Google's
+  required security assessment and assign an owner and renewal date for its annual recurrence;
+- retain non-secret evidence of the production project, publishing status, approved scopes,
+  verification decision, assessment status, owner, and renewal date in the release record; and
+- prove with an account that is not a configured test user that the standard Google consent screen
+  appears without a **Google hasn't verified this app** warning, the callback returns to ilo, and
+  both Mail and Calendar reach **Ready**.
+
+An unverified-app click-through is useful only for explicitly authorized development/test access.
+It is a production release blocker, even when the client credentials, callback, and connector sync
+all work. Follow Google's current [OAuth app verification
+requirements](https://support.google.com/cloud/answer/13464321) and [restricted-scope production
+readiness guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
+
 The OAuth callback persists the authorized account and returns to the browser before initial
 Calendar discovery and provider synchronization complete. Initial sync continues asynchronously;
 provider failures remain visible on the connector account and can be retried manually. Keep the

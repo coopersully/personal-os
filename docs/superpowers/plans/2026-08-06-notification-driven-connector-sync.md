@@ -543,20 +543,20 @@ git commit -m "feat: add bounded iCloud Mail change signals"
   WebDAV sync token when the calendar advertises `syncCollection`; unsupported servers retain the
   current bounded ctag/ETag full reconciliation.
 
-- [ ] **Step 1: Write failing connector tests**
+- [x] **Step 1: Write failing connector tests**
 
 Cover advertised `syncCollection`, initial empty-token report, subsequent opaque token, changed
 object fetch, removed resource mapping to delete, truncated response continuation, invalid token
 full fallback, unsupported-report ctag fallback, and provider timeout/authorization classification.
 Assert the client never interprets or logs token contents.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `pnpm vitest run packages/connectors/src/icloud.test.ts`
 
 Expected: FAIL because iCloud currently ignores `syncToken` and always performs full fetch.
 
-- [ ] **Step 3: Implement capability-discovered incremental sync**
+- [x] **Step 3: Implement capability-discovered incremental sync**
 
 Use the existing tsdav client's `supportedReportSet` and `syncCollection` methods. Request only
 resource href and ETag metadata, fetch changed objects through bounded multiget/object calls,
@@ -564,19 +564,19 @@ translate definitive removed hrefs to `RemoteEventChange` deletes, and return th
 opaque sync token. When the report is unsupported or the token is invalid, run the current bounded
 full path with `reset = true` and its ctag fallback token.
 
-- [ ] **Step 4: Add claim/projection regression coverage**
+- [x] **Step 4: Add claim/projection regression coverage**
 
 Prove the existing Calendar projection stores the new token only under its fenced claim, replays
 duplicate changes idempotently, and performs a controlled reset without deleting a calendar or
 account.
 
-- [ ] **Step 5: Run and verify GREEN**
+- [x] **Step 5: Run and verify GREEN**
 
 Run: `pnpm vitest run packages/connectors/src/icloud.test.ts apps/api/src/connector-service.integration.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/connectors/src/icloud.ts packages/connectors/src/icloud.test.ts packages/connectors/src/types.ts apps/api/src/connector-service.integration.test.ts

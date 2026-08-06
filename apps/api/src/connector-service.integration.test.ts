@@ -4504,6 +4504,117 @@ describe.sequential("connector service", () => {
     });
   });
 
+  it("persists iCloud collection tokens only inside the active sync claim", async () => {
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        email: "calendar-fence@icloud.example",
+        encryptedCredentials: encryptJson(
+          {
+            appSpecificPassword: "app-password",
+            email: "calendar-fence@icloud.example",
+          },
+          encryptionKey,
+        ),
+        label: "iCloud Calendar fence",
+        mailEnabled: false,
+        provider: "icloud",
+        providerAccountId: "calendar-fence@icloud.example",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("iCloud calendar fence account was not created.");
+    const [calendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: account.id,
+        name: "iCloud Calendar",
+        provider: "icloud",
+        remoteCalendarId: "icloud-primary",
+        syncToken: "opaque-old-token",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!calendar) throw new Error("iCloud calendar fence source was not created.");
+    await database.db.insert(calendarEvents).values({
+      calendarId: calendar.id,
+      endsAt: new Date("2026-07-13T14:00:00.000Z"),
+      provider: "icloud",
+      remoteEtag: "etag-stale",
+      remoteEventId: "icloud-stale",
+      startsAt: new Date("2026-07-13T13:00:00.000Z"),
+      timezone: "UTC",
+      title: "Stale iCloud event",
+      userId,
+    });
+    const projected = remoteEvent("icloud-projected", "etag-projected");
+    vi.mocked(icloud.syncCalendar).mockResolvedValueOnce({
+      changes: [
+        { event: projected, kind: "upsert" },
+        { event: projected, kind: "upsert" },
+      ],
+      nextSyncToken: "opaque-next-token",
+      reset: true,
+    });
+
+    await expect(service.syncAccount(userId, account.id)).resolves.toEqual({ changed: 2 });
+    await expect(
+      database.db
+        .select({ syncToken: calendars.syncToken })
+        .from(calendars)
+        .where(eq(calendars.id, calendar.id)),
+    ).resolves.toEqual([{ syncToken: "opaque-next-token" }]);
+    await expect(
+      database.db
+        .select({ remoteEventId: calendarEvents.remoteEventId })
+        .from(calendarEvents)
+        .where(
+          and(
+            eq(calendarEvents.calendarId, calendar.id),
+            eq(calendarEvents.remoteEventId, "icloud-projected"),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
+
+    const replacementClaimId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    vi.mocked(icloud.syncCalendar).mockImplementationOnce(async () => {
+      await database.db
+        .update(calendarAccounts)
+        .set({ syncClaimId: replacementClaimId })
+        .where(eq(calendarAccounts.id, account.id));
+      return {
+        changes: [{ event: remoteEvent("must-not-project", "etag-new"), kind: "upsert" }],
+        nextSyncToken: "must-not-persist",
+        reset: false,
+      };
+    });
+
+    await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("superseded"),
+    });
+    await expect(
+      database.db
+        .select({ syncToken: calendars.syncToken })
+        .from(calendars)
+        .where(eq(calendars.id, calendar.id)),
+    ).resolves.toEqual([{ syncToken: "opaque-next-token" }]);
+    await expect(
+      database.db
+        .select({ id: calendarEvents.id })
+        .from(calendarEvents)
+        .where(eq(calendarEvents.remoteEventId, "must-not-project")),
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.db
+        .select({ syncClaimId: calendarAccounts.syncClaimId })
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, account.id)),
+    ).resolves.toEqual([{ syncClaimId: replacementClaimId }]);
+  });
+
   it("records an unavailable optional mail connector as a synchronization error", async () => {
     const [account] = await database.db
       .select()

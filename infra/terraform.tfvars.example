@@ -16,3 +16,12 @@ email_from        = "ilo <noreply@example.com>"
 plaid_enabled     = false
 plaid_environment = "sandbox"
 x_enabled         = false
+
+# Keep low-latency modes disabled until the production evidence checklist is complete.
+google_gmail_push_enabled          = false
+google_calendar_push_enabled       = false
+icloud_mail_idle_enabled           = false
+icloud_mail_idle_concurrency       = 5
+# google_gmail_pubsub_topic          = "projects/example/topics/ilo-gmail"
+# google_gmail_pubsub_subscription   = "projects/example/subscriptions/ilo-gmail-push"
+# google_gmail_push_service_account  = "ilo-gmail-push@example.iam.gserviceaccount.com"

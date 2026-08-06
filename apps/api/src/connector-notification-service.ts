@@ -13,9 +13,10 @@ import {
   connectorSyncTriggers,
   type Database,
 } from "@personal-os/database";
-import type { ConnectorSyncTriggerReason } from "@personal-os/domain";
+import type { ConnectorSubscriptionKind, ConnectorSyncTriggerReason } from "@personal-os/domain";
 import { and, asc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { decryptJson, encryptJson } from "./security.js";
+import type { RequestLog } from "./types.js";
 
 const TRIGGER_CLAIM_LEASE_MS = 5 * 60_000;
 
@@ -24,6 +25,7 @@ export type ClaimedConnectorTrigger = {
   claimId: string;
   notificationCount: number;
   observedAt: Date;
+  queuedAt: Date;
   reason: ConnectorSyncTriggerReason;
 };
 
@@ -36,6 +38,7 @@ type Options = {
   icloud?: ICloudConnector;
   icloudMailIdleConcurrency?: number;
   icloudMailIdleEnabled?: boolean;
+  log?: (entry: RequestLog) => void;
   now: () => Date;
 };
 type NotificationDatabase = Pick<Database, "insert">;
@@ -58,8 +61,48 @@ export function createConnectorNotificationService({
   icloud,
   icloudMailIdleConcurrency = 5,
   icloudMailIdleEnabled = false,
+  log,
   now,
 }: Options) {
+  function observe(input: {
+    ageMs?: number;
+    code?: string;
+    durationMs?: number;
+    event: Extract<
+      RequestLog["event"],
+      | "connector_notification_received"
+      | "connector_subscription_expired"
+      | "connector_subscription_failed"
+      | "connector_subscription_renewed"
+      | "connector_trigger_dispatched"
+    >;
+    notificationDisposition?: "accepted" | "duplicate" | "rejected";
+    provider: "google" | "icloud";
+    renewalLagMs?: number;
+    status: number;
+    subscriptionKind?: ConnectorSubscriptionKind;
+    triggerReason?: ConnectorSyncTriggerReason;
+  }): void {
+    log?.({
+      ...(input.ageMs === undefined ? {} : { ageMs: Math.max(0, input.ageMs) }),
+      ...(input.code ? { code: input.code } : {}),
+      durationMs: Math.max(0, input.durationMs ?? 0),
+      event: input.event,
+      method: "CONNECTOR",
+      ...(input.notificationDisposition
+        ? { notificationDisposition: input.notificationDisposition }
+        : {}),
+      path: "/internal/connectors/notifications",
+      provider: input.provider,
+      ...(input.renewalLagMs === undefined
+        ? {}
+        : { renewalLagMs: Math.max(0, input.renewalLagMs) }),
+      requestId: randomUUID(),
+      status: input.status,
+      ...(input.subscriptionKind ? { subscriptionKind: input.subscriptionKind } : {}),
+      ...(input.triggerReason ? { triggerReason: input.triggerReason } : {}),
+    });
+  }
   async function persistGoogleCredentials(
     accountId: string,
     incoming: GoogleCredentials,
@@ -303,7 +346,16 @@ export function createConnectorNotificationService({
                 ),
               );
             if (input.signal?.aborted) result.skipped += 1;
-            else result.failed += 1;
+            else {
+              result.failed += 1;
+              observe({
+                code: error instanceof ConnectorError ? error.code : "icloud_idle_session_failed",
+                event: "connector_subscription_failed",
+                provider: "icloud",
+                status: 503,
+                subscriptionKind: subscription.kind,
+              });
+            }
           }
         }),
       );
@@ -388,6 +440,7 @@ export function createConnectorNotificationService({
           const subscription = claims[cursor];
           cursor += 1;
           if (!subscription) continue;
+          const operationStartedAt = Date.now();
           const [account] = await db
             .select()
             .from(calendarAccounts)
@@ -413,6 +466,14 @@ export function createConnectorNotificationService({
             continue;
           }
           try {
+            if (subscription.expiresAt && subscription.expiresAt <= selectedAt) {
+              observe({
+                event: "connector_subscription_expired",
+                provider: "google",
+                status: 503,
+                subscriptionKind: subscription.kind,
+              });
+            }
             let currentCredentials = decryptJson<GoogleCredentials>(
               account.encryptedCredentials,
               encryptionKey,
@@ -468,7 +529,7 @@ export function createConnectorNotificationService({
             const renewAfter = new Date(
               Math.min(selectedAt.getTime() + 24 * 60 * 60_000, expiration.getTime() - 60 * 60_000),
             );
-            await db
+            const [persisted] = await db
               .update(connectorSubscriptions)
               .set({
                 channelId,
@@ -496,7 +557,22 @@ export function createConnectorNotificationService({
                   eq(connectorSubscriptions.id, subscription.id),
                   eq(connectorSubscriptions.leaseClaimId, subscription.claimId),
                 ),
-              );
+              )
+              .returning({ id: connectorSubscriptions.id });
+            if (!persisted) {
+              if (
+                channelId &&
+                remoteResourceId &&
+                google.stopCalendarWatch &&
+                subscription.kind !== "gmail_mailbox"
+              ) {
+                await google
+                  .stopCalendarWatch(currentCredentials, channelId, remoteResourceId)
+                  .catch(() => undefined);
+              }
+              result.skipped += 1;
+              continue;
+            }
             if (
               subscription.kind !== "gmail_mailbox" &&
               subscription.channelId &&
@@ -512,11 +588,21 @@ export function createConnectorNotificationService({
                 .catch(() => undefined);
             }
             result.succeeded += 1;
+            observe({
+              durationMs: Date.now() - operationStartedAt,
+              event: "connector_subscription_renewed",
+              provider: "google",
+              renewalLagMs: subscription.renewAfter
+                ? selectedAt.getTime() - subscription.renewAfter.getTime()
+                : 0,
+              status: 200,
+              subscriptionKind: subscription.kind,
+            });
           } catch (error) {
             const failureCount = subscription.failureCount + 1;
             const safeFailureCode =
               error instanceof ConnectorError ? error.code : "connector_subscription_failed";
-            await db
+            const [failed] = await db
               .update(connectorSubscriptions)
               .set({
                 failureCount,
@@ -532,8 +618,21 @@ export function createConnectorNotificationService({
                   eq(connectorSubscriptions.id, subscription.id),
                   eq(connectorSubscriptions.leaseClaimId, subscription.claimId),
                 ),
-              );
+              )
+              .returning({ id: connectorSubscriptions.id });
+            if (!failed) {
+              result.skipped += 1;
+              continue;
+            }
             result.failed += 1;
+            observe({
+              code: safeFailureCode,
+              durationMs: Date.now() - operationStartedAt,
+              event: "connector_subscription_failed",
+              provider: "google",
+              status: error instanceof ConnectorError ? (error.status ?? 503) : 503,
+              subscriptionKind: subscription.kind,
+            });
           }
         }
       };
@@ -546,12 +645,21 @@ export function createConnectorNotificationService({
     async receiveGmailNotification(
       mailboxIdentity: string,
       historyId: string,
-    ): Promise<"accepted" | "unknown"> {
-      if (!encryptionKey) return "unknown";
+    ): Promise<"accepted" | "duplicate" | "unknown"> {
+      if (!encryptionKey) {
+        observe({
+          event: "connector_notification_received",
+          notificationDisposition: "rejected",
+          provider: "google",
+          status: 404,
+          subscriptionKind: "gmail_mailbox",
+        });
+        return "unknown";
+      }
       const remoteIdentityHash = createHmac("sha256", Buffer.from(encryptionKey, "base64"))
         .update(mailboxIdentity.trim().toLowerCase())
         .digest("hex");
-      return db.transaction(async (transaction) => {
+      const outcome = await db.transaction(async (transaction) => {
         const [subscription] = await transaction
           .select()
           .from(connectorSubscriptions)
@@ -564,7 +672,7 @@ export function createConnectorNotificationService({
           )
           .for("update")
           .limit(1);
-        if (!subscription) return "unknown";
+        if (!subscription) return "unknown" as const;
         const current = subscription.providerCursor;
         const isNewer =
           current === null ||
@@ -582,8 +690,16 @@ export function createConnectorNotificationService({
         if (isNewer) {
           await this.enqueue(subscription.accountId, "notification", now(), transaction);
         }
-        return "accepted";
+        return isNewer ? ("accepted" as const) : ("duplicate" as const);
       });
+      observe({
+        event: "connector_notification_received",
+        notificationDisposition: outcome === "unknown" ? "rejected" : outcome,
+        provider: "google",
+        status: outcome === "unknown" ? 404 : 204,
+        subscriptionKind: "gmail_mailbox",
+      });
+      return outcome;
     },
 
     async receiveCalendarNotification(input: {
@@ -592,9 +708,9 @@ export function createConnectorNotificationService({
       resourceId: string;
       resourceState: "exists" | "not_exists" | "sync";
       token: string;
-    }): Promise<"accepted" | "unknown"> {
+    }): Promise<"accepted" | "duplicate" | "unknown"> {
       const tokenHash = createHash("sha256").update(input.token).digest();
-      return db.transaction(async (transaction) => {
+      const outcome = await db.transaction(async (transaction) => {
         const [subscription] = await transaction
           .select()
           .from(connectorSubscriptions)
@@ -616,7 +732,7 @@ export function createConnectorNotificationService({
           typeof expectedHash === "string" &&
           /^[a-f0-9]{64}$/u.test(expectedHash) &&
           timingSafeEqual(Buffer.from(expectedHash, "hex"), tokenHash);
-        if (!subscription || !verified) return "unknown";
+        if (!subscription || !verified) return "unknown" as const;
         const current = subscription.providerCursor;
         const isNewer =
           current === null ||
@@ -633,8 +749,15 @@ export function createConnectorNotificationService({
         if (isNewer && input.resourceState !== "sync") {
           await this.enqueue(subscription.accountId, "notification", now(), transaction);
         }
-        return "accepted";
+        return isNewer ? ("accepted" as const) : ("duplicate" as const);
       });
+      observe({
+        event: "connector_notification_received",
+        notificationDisposition: outcome === "unknown" ? "rejected" : outcome,
+        provider: "google",
+        status: outcome === "unknown" ? 404 : 204,
+      });
+      return outcome;
     },
 
     async claimDueTriggers(options: { limit?: number } = {}): Promise<ClaimedConnectorTrigger[]> {
@@ -674,6 +797,7 @@ export function createConnectorNotificationService({
               claimId,
               notificationCount: claimed.notificationCount,
               observedAt: claimed.lastTriggeredAt,
+              queuedAt: claimed.firstTriggeredAt,
               reason: claimed.reason,
             });
           }
@@ -727,6 +851,7 @@ export function createConnectorNotificationService({
           if (!claim) continue;
           const [account] = await db
             .select({
+              provider: calendarAccounts.provider,
               syncRecovery: calendarAccounts.syncRecovery,
               userId: calendarAccounts.userId,
             })
@@ -737,6 +862,13 @@ export function createConnectorNotificationService({
             await this.completeTrigger(claim);
             continue;
           }
+          observe({
+            ageMs: now().getTime() - claim.queuedAt.getTime(),
+            event: "connector_trigger_dispatched",
+            provider: account.provider === "icloud" ? "icloud" : "google",
+            status: 200,
+            triggerReason: claim.reason,
+          });
           try {
             await syncAccount(account.userId, claim.accountId);
             await this.completeTrigger(claim);

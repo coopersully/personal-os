@@ -355,6 +355,7 @@ export function createConnectorService({
     encryptionKey,
     google,
     icloud,
+    ...(log ? { log } : {}),
     now,
     ...(googleCalendarWebhookUrl ? { calendarWebhookUrl: googleCalendarWebhookUrl } : {}),
     ...(googleGmailTopicName ? { gmailTopicName: googleGmailTopicName } : {}),
@@ -935,6 +936,20 @@ export function createConnectorService({
           "The connector synchronization claim was superseded before completion.",
         );
       }
+      log?.({
+        accountId: claimedAccount.id,
+        durationMs: Date.now() - startedAt,
+        event: "connector_sync_completed",
+        freshnessAgeMs: Math.max(
+          0,
+          completedAt.getTime() - (claimedAccount.lastSyncedAt?.getTime() ?? attemptedAt.getTime()),
+        ),
+        method: "CONNECTOR",
+        path: "/internal/connectors/sync",
+        provider: claimedAccount.provider === "icloud" ? "icloud" : "google",
+        requestId,
+        status: 200,
+      });
       if (claimedAccount.syncFailureCount > 0) {
         log?.({
           accountId: claimedAccount.id,

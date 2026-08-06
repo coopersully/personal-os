@@ -162,6 +162,22 @@ const agentDomainSupport = {
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
+  const observeRejectedNotification = (
+    requestId: string,
+    status: number,
+    subscriptionKind?: "gmail_mailbox",
+  ) =>
+    dependencies.log?.({
+      durationMs: 0,
+      event: "connector_notification_received",
+      method: "POST",
+      notificationDisposition: "rejected",
+      path: "/v1/connectors/google/notifications",
+      provider: "google",
+      requestId,
+      status,
+      ...(subscriptionKind ? { subscriptionKind } : {}),
+    });
   const authRateLimiter = createFixedWindowRateLimiter({
     maxRequests: dependencies.config.authRateLimitMaxRequests ?? 20,
     now: () => now().getTime(),
@@ -523,40 +539,59 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     }
     const authorizationHeader = context.req.header("authorization") ?? "";
     const match = /^Bearer ([A-Za-z0-9._~-]+)$/u.exec(authorizationHeader);
-    if (!match?.[1]) return context.body(null, 401);
+    if (!match?.[1]) {
+      observeRejectedNotification(context.get("requestId"), 401, "gmail_mailbox");
+      return context.body(null, 401);
+    }
     try {
       await verifyGooglePubSubToken(match[1]);
     } catch {
+      observeRejectedNotification(context.get("requestId"), 401, "gmail_mailbox");
       return context.body(null, 401);
     }
     const contentLength = Number(context.req.header("content-length") ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > 32_768) return context.body(null, 413);
+    if (Number.isFinite(contentLength) && contentLength > 32_768) {
+      observeRejectedNotification(context.get("requestId"), 413, "gmail_mailbox");
+      return context.body(null, 413);
+    }
     const raw = await context.req.text();
-    if (Buffer.byteLength(raw) > 32_768) return context.body(null, 413);
+    if (Buffer.byteLength(raw) > 32_768) {
+      observeRejectedNotification(context.get("requestId"), 413, "gmail_mailbox");
+      return context.body(null, 413);
+    }
     let envelope: z.infer<typeof gmailPushEnvelopeSchema>;
     let data: z.infer<typeof gmailPushDataSchema>;
     try {
       envelope = gmailPushEnvelopeSchema.parse(JSON.parse(raw));
       if (envelope.subscription !== dependencies.config.googleGmailPubsubSubscription) {
+        observeRejectedNotification(context.get("requestId"), 404, "gmail_mailbox");
         return context.body(null, 404);
       }
       const decoded = Buffer.from(envelope.message.data, "base64");
-      if (decoded.length > 8_192) return context.body(null, 413);
+      if (decoded.length > 8_192) {
+        observeRejectedNotification(context.get("requestId"), 413, "gmail_mailbox");
+        return context.body(null, 413);
+      }
       data = gmailPushDataSchema.parse(JSON.parse(decoded.toString("utf8")));
     } catch {
+      observeRejectedNotification(context.get("requestId"), 400, "gmail_mailbox");
       return context.body(null, 400);
     }
     try {
       const result = await connectors.receiveGmailNotification(data.emailAddress, data.historyId);
-      return context.body(null, result === "accepted" ? 204 : 404);
+      return context.body(null, result === "unknown" ? 404 : 204);
     } catch {
+      observeRejectedNotification(context.get("requestId"), 503, "gmail_mailbox");
       return context.body(null, 503);
     }
   });
   app.post("/v1/connectors/google/calendar/notifications", async (context) => {
     if (!dependencies.config.googleCalendarPushEnabled) return context.body(null, 404);
     const contentLength = Number(context.req.header("content-length") ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > 0) return context.body(null, 413);
+    if (Number.isFinite(contentLength) && contentLength > 0) {
+      observeRejectedNotification(context.get("requestId"), 413);
+      return context.body(null, 413);
+    }
     const parsed = calendarNotificationHeadersSchema.safeParse({
       channelId: context.req.header("x-goog-channel-id"),
       messageNumber: context.req.header("x-goog-message-number"),
@@ -564,11 +599,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       resourceState: context.req.header("x-goog-resource-state"),
       token: context.req.header("x-goog-channel-token"),
     });
-    if (!parsed.success) return context.body(null, 400);
+    if (!parsed.success) {
+      observeRejectedNotification(context.get("requestId"), 400);
+      return context.body(null, 400);
+    }
     try {
       const result = await connectors.receiveCalendarNotification(parsed.data);
-      return context.body(null, result === "accepted" ? 204 : 404);
+      return context.body(null, result === "unknown" ? 404 : 204);
     } catch {
+      observeRejectedNotification(context.get("requestId"), 503);
       return context.body(null, 503);
     }
   });

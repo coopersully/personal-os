@@ -17,6 +17,21 @@ This log records delivered vertical slices against the master plan. It does not 
   secret remains a secure runtime parameter. Provider push remains an optional latency layer; it is
   not required for correctness and must not be enabled without external watch/identity evidence.
 
+## 2026-08-06 — Notification-driven connector convergence
+
+- Added incremental Gmail history and capability-discovered iCloud CalDAV collection sync, with
+  bounded pagination/multiget, explicit deletion evidence, opaque cursor fencing, and controlled
+  full-reset fallback when a provider cursor is invalid or unsupported.
+- Added durable Gmail and Calendar watch renewal, authenticated/deduplicated public notifications,
+  and bounded iCloud IMAP IDLE change signals. Every signal coalesces into the same fenced sync
+  engine; five-minute reconciliation remains authoritative.
+- Added independent disabled-by-default production gates, exact-path WAF rate boundaries, privacy-
+  bounded operational events, and alarms for subscription health, renewal lag, rejected delivery,
+  trigger age, and sync freshness.
+- Kept Gmail/Calendar push disabled pending non-secret evidence of the external GCP topic IAM,
+  subscription OIDC authority/audience, Google publishing/verification, and production-equivalent
+  delivery/reconciliation/renewal checks. Repository configuration alone is not marked as proof.
+
 ## 2026-08-05 — Actionable connected-account health
 
 - Replaced raw Google/X response handling and blanket iCloud credential errors with a whitelisted,

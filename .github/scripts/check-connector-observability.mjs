@@ -61,7 +61,11 @@ function validateFilter(filters, expected) {
     "ilo/Connectors",
     `filter-metric-namespace:${expected.name}`,
   );
-  sameValue(transformation.metricValue, "1", `filter-metric-value:${expected.name}`);
+  sameValue(
+    transformation.metricValue,
+    expected.metricValue ?? "1",
+    `filter-metric-value:${expected.name}`,
+  );
   if (Object.keys(transformation.dimensions ?? {}).length !== 0) {
     fail(`filter-metric-dimensions:${expected.name}`);
   }
@@ -82,7 +86,7 @@ function validateAlarm(alarms, expected) {
     MetricName: expected.metricName,
     Namespace: "ilo/Connectors",
     Period: expected.period,
-    Statistic: "Sum",
+    Statistic: expected.statistic ?? "Sum",
     Threshold: expected.threshold,
     TreatMissingData: "notBreaching",
   })) {
@@ -127,6 +131,46 @@ try {
       name: `${cluster}-connector-configuration-failure`,
       pattern: '{ $.event = "connector_sync_failed" && $.category = "configuration" }',
     },
+    {
+      logGroup,
+      metricName: "ConnectorSubscriptionFailureCount",
+      name: `${cluster}-connector-subscription-failure`,
+      pattern: '{ $.event = "connector_subscription_failed" }',
+    },
+    {
+      logGroup,
+      metricName: "ConnectorSubscriptionExpiredCount",
+      name: `${cluster}-connector-subscription-expired`,
+      pattern: '{ $.event = "connector_subscription_expired" }',
+    },
+    {
+      logGroup,
+      metricName: "ConnectorRenewalLagMs",
+      metricValue: "$.renewalLagMs",
+      name: `${cluster}-connector-renewal-lag`,
+      pattern: '{ $.event = "connector_subscription_renewed" && $.renewalLagMs = * }',
+    },
+    {
+      logGroup,
+      metricName: "ConnectorNotificationRejectedCount",
+      name: `${cluster}-connector-notification-rejected`,
+      pattern:
+        '{ $.event = "connector_notification_received" && $.notificationDisposition = "rejected" }',
+    },
+    {
+      logGroup,
+      metricName: "ConnectorTriggerAgeMs",
+      metricValue: "$.ageMs",
+      name: `${cluster}-connector-trigger-age`,
+      pattern: '{ $.event = "connector_trigger_dispatched" && $.ageMs = * }',
+    },
+    {
+      logGroup,
+      metricName: "ConnectorSyncFreshnessAgeMs",
+      metricValue: "$.freshnessAgeMs",
+      name: `${cluster}-connector-sync-freshness-age`,
+      pattern: '{ $.event = "connector_sync_completed" && $.freshnessAgeMs = * }',
+    },
   ];
   const expectedAlarms = [
     {
@@ -140,6 +184,45 @@ try {
       name: `${cluster}-connector-sync-failure-volume`,
       period: 900,
       threshold: 5,
+    },
+    {
+      metricName: "ConnectorSubscriptionFailureCount",
+      name: `${cluster}-connector-subscription-failure`,
+      period: 300,
+      threshold: 1,
+    },
+    {
+      metricName: "ConnectorSubscriptionExpiredCount",
+      name: `${cluster}-connector-subscription-expired`,
+      period: 300,
+      threshold: 1,
+    },
+    {
+      metricName: "ConnectorRenewalLagMs",
+      name: `${cluster}-connector-renewal-lag`,
+      period: 300,
+      statistic: "Maximum",
+      threshold: 300000,
+    },
+    {
+      metricName: "ConnectorNotificationRejectedCount",
+      name: `${cluster}-connector-notification-rejected`,
+      period: 300,
+      threshold: 20,
+    },
+    {
+      metricName: "ConnectorTriggerAgeMs",
+      name: `${cluster}-connector-trigger-age`,
+      period: 300,
+      statistic: "Maximum",
+      threshold: 300000,
+    },
+    {
+      metricName: "ConnectorSyncFreshnessAgeMs",
+      name: `${cluster}-connector-sync-freshness`,
+      period: 300,
+      statistic: "Maximum",
+      threshold: 600000,
     },
   ];
 

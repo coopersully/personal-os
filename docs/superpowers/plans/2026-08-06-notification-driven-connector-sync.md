@@ -605,13 +605,13 @@ git commit -m "feat: synchronize iCloud calendars incrementally"
 - Adds independent Terraform/config gates for Gmail push, Calendar push, and iCloud IDLE.
 - Adds structured subscription/notification events and CloudWatch renewal/trigger alarms.
 
-- [ ] **Step 1: Write failing static contract fixtures**
+- [x] **Step 1: Write failing static contract fixtures**
 
 Mutate each enabled gate to remove one required runtime value, audience, WAF route, ingress policy,
 metric, or alarm. The checker must fail every mutation. Add event privacy tests proving the allowed
 key set and rejecting identity/token/body canaries.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `node scripts/check-provider-network-contract.mjs`
 
@@ -619,29 +619,29 @@ Run: `node scripts/check-connector-observability-contract.mjs`
 
 Expected: at least one command fails because notification infrastructure is not declared.
 
-- [ ] **Step 3: Add independent runtime gates**
+- [x] **Step 3: Add independent runtime gates**
 
 Disabled gates emit no incomplete variables. Enabled Gmail injects topic/audience/service account;
 Calendar injects exact public webhook URL; iCloud injects listener enable/concurrency. Keep provider
 credentials in Parameter Store and non-secret identifiers in plain environment values.
 
-- [ ] **Step 4: Add narrowly scoped ingress and observation**
+- [x] **Step 4: Add narrowly scoped ingress and observation**
 
 WAF permits the two exact webhook paths under their authentication/rate bounds, not a provider-wide
 IP bypass. Metrics cover subscription failure/expiry, renewal lag, rejected notifications, trigger
 age, and sync freshness. Alerts exclude duplicates and expected stopped subscriptions.
 
-- [ ] **Step 5: Document the GCP provisioning evidence gap honestly**
+- [x] **Step 5: Document the GCP provisioning evidence gap honestly**
 
 Record the required Pub/Sub topic, Gmail publisher grant, push subscription OIDC identity/audience,
 Google project verification, and production validation commands. Do not mark Gmail push configured
 until the external Google Cloud resources and authority are actually evidenced.
 
-- [ ] **Step 6: Run and verify GREEN**
+- [x] **Step 6: Run and verify GREEN**
 
 Run the commands from Step 2 plus `terraform -chdir=infra validate`. Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add infra scripts .github/scripts apps/api/src/types.ts docs

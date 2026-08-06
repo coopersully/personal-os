@@ -72,6 +72,13 @@ provider response bodies and unknown exception messages never populate it.
   completion; failed work is released for retry. The five-minute schedule remains authoritative if
   every change signal is delayed or absent.
 
+Google Mail uses Gmail history IDs and Google Calendar uses opaque sync tokens. iCloud Calendar
+uses WebDAV `sync-collection` only when the collection advertises it; invalid/unsupported tokens
+fall back to a controlled full reconciliation. Provider cursors are opaque, bounded, and committed
+inside the same fenced projection transaction as their changes. Gmail and Calendar watches renew
+durably before expiry. iCloud IMAP IDLE sessions are bounded change signals only; they never replace
+the authoritative five-minute reconciliation.
+
 ## Provider transport inventory
 
 | Capability | Host or class | Protocol | Production egress |
@@ -87,10 +94,16 @@ timeouts remain below the edge timeout and that iCloud's declared ports exist in
 security group.
 
 Production injects both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from SSM Parameter Store as
-ECS secret references, and API boot validation rejects an empty value. CloudWatch converts only the
-safe `connector_sync_failed` event/category fields into aggregate failure and configuration-failure
-metrics. Configuration failures alarm immediately; five failures within fifteen minutes trigger a
-sustained-volume alarm. Neither metric uses account identity, email, or provider text.
+ECS secret references, and API boot validation rejects an empty value. Gmail push, Calendar push,
+and iCloud IDLE have independent disabled-by-default Terraform gates; a disabled gate emits none of
+its incomplete runtime values. WAF applies a separate rate boundary to only the two exact Google
+webhook paths and does not bypass managed rules by provider IP.
+
+CloudWatch converts only allowlisted structured fields into aggregate connector metrics. It covers
+sync/configuration failures, active subscription failures and expiry, renewal lag, rejected (not
+duplicate) notifications, durable trigger age, and successful-sync freshness. Stopped
+subscriptions and duplicate deliveries do not alert. Metrics have no account, email, remote
+resource, token, notification-body, or provider-error dimensions.
 
 ## Implementation rules
 
@@ -105,8 +118,9 @@ sustained-volume alarm. Neither metric uses account identity, email, or provider
   `AppError` from sync.
 - Do not log authorization codes, tokens, app-specific passwords, encrypted credentials, or raw
   provider payloads.
-- Emit `connector_sync_failed` and `connector_sync_recovered` with stable IDs, category, recovery,
-  timing, and status only. Never add account email or provider message dimensions.
+- Emit connector sync/subscription/notification/trigger events through the allowlisted request-log
+  shape with safe category/code, timing, and status only. Never add account email, mailbox identity,
+  channel/resource ID, provider token/message/body, or provider text dimensions.
 - Treat local mocks as behavior tests, not production-connectivity evidence.
 
 ## Required tests and review

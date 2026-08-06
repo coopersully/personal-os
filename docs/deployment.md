@@ -14,6 +14,15 @@
 | `GOOGLE_CLIENT_ID` | Google OAuth client ID; required in production and injected from Parameter Store |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth client secret; required in production and injected from Parameter Store |
 | `GOOGLE_REDIRECT_URI` | Exact registered Google OAuth callback |
+| `GOOGLE_GMAIL_PUSH_ENABLED` | Independent Gmail push gate; defaults off and fails closed unless every Pub/Sub value below is present |
+| `GOOGLE_GMAIL_PUBSUB_TOPIC` | Fully qualified Gmail watch topic (`projects/.../topics/...`) |
+| `GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION` | Exact push subscription expected in each envelope (`projects/.../subscriptions/...`) |
+| `GOOGLE_GMAIL_PUSH_AUDIENCE` | Exact HTTPS Gmail notification endpoint used as the Pub/Sub OIDC audience |
+| `GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT` | Exact service-account email allowed to sign Pub/Sub pushes |
+| `GOOGLE_CALENDAR_PUSH_ENABLED` | Independent Calendar watch gate; defaults off |
+| `GOOGLE_CALENDAR_WEBHOOK_URL` | Exact API Calendar notification endpoint; no query or fragment |
+| `ICLOUD_MAIL_IDLE_ENABLED` | Independent bounded IMAP IDLE signal gate; defaults off |
+| `ICLOUD_MAIL_IDLE_CONCURRENCY` | Per-task IDLE concurrency, from 1 through 25 (default: 5) |
 | `RESEND_API_KEY` | Resend API key used only for account verification and password recovery email |
 | `AUTH_RATE_LIMIT_MAX_REQUESTS` | Maximum register/login/recovery attempts per source and endpoint window (default: `20`) |
 | `AUTH_RATE_LIMIT_WINDOW_SECONDS` | Auth request rate-limit window in seconds (default: `300`) |
@@ -347,6 +356,11 @@ unauthenticated paths can prevent a healthy release from proving readiness. The 
 limit and managed bad-input protection still apply. Do not broaden this exception to other paths
 or use it as evidence that an authenticated application route is reachable.
 
+When either Google push mode is enabled, WAF gives only the two exact notification paths a distinct
+high-volume IP rate boundary and removes them from the lower shared rate rule. Managed bad-input and
+IP-reputation rules still apply, and application-level OIDC/channel-token authentication remains
+mandatory. There is no Google IP allowlist or provider-wide bypass.
+
 Forward `X-Request-Id` from the edge when present. Do not log authorization headers, cookies, OAuth codes, encrypted credentials, or raw provider payloads.
 
 The existence of connector alarms in Terraform is not evidence that they are active in production.
@@ -411,6 +425,37 @@ provider failures remain visible on the connector account and can be retried man
 callback itself below the public edge timeout instead of extending the timeout to cover provider
 bootstrap work.
 
+#### Gmail and Calendar low-latency signals
+
+Keep `google_gmail_push_enabled` and `google_calendar_push_enabled` false until their independent
+production evidence is complete. Gmail requires all of the following in the same production Google
+Cloud project:
+
+1. a Pub/Sub topic with `gmail-api-push@system.gserviceaccount.com` granted only
+   `roles/pubsub.publisher` on that topic;
+2. a push subscription targeting the exact
+   `https://api.<domain>/v1/connectors/google/gmail/notifications` endpoint;
+3. Pub/Sub authenticated push configured with one dedicated service account, permission for the
+   Pub/Sub service agent to mint its OIDC token, and the exact endpoint URL as audience;
+4. the qualified topic, subscription, audience, and service-account identity entered as Terraform
+   inputs/non-secret runtime values; and
+5. OAuth publishing, restricted-scope verification, and any required Gmail security assessment
+   completed for the same project.
+
+Calendar push requires the exact public Calendar notification URL and successful watch creation for
+the calendar list plus every selected calendar. Google does not sign Calendar webhook bodies, so ilo
+accepts only an exact durable channel ID, resource ID, hashed random channel token, and strictly newer
+message number. Both webhook handlers acknowledge only after their coalesced trigger commits.
+
+Before enabling either gate, record non-secret command/output evidence for topic IAM, subscription
+push/OIDC configuration, expected audience/service-account identity, the deployed task environment
+names, TLS reachability, one controlled change converging through a notification trigger, one
+dropped signal converging through five-minute reconciliation, renewal before expiry, and redacted
+CloudWatch events. Never record OAuth tokens, channel tokens, mailbox addresses, payloads, or secret
+values. At the time of this implementation, repository/AWS declarations are complete but the live
+GCP resources and authority have not yet been evidenced; therefore both production push gates must
+remain disabled.
+
 ### Apple iCloud
 
 iCloud uses the person's Apple Account email and an app-specific password. Calendar traffic uses
@@ -419,6 +464,12 @@ CalDAV over HTTPS; Mail reads use IMAP over TLS on port 993 and sends use SMTP s
 and Mail sync run asynchronously. Invalid credentials or unavailable Apple services leave the
 account visible with an error so the person can retry or reconnect without holding the original
 request open.
+
+When `icloud_mail_idle_enabled` is true, each claimed account receives a bounded 25-minute IMAP IDLE
+session subject to the configured per-task concurrency. IDLE events only enqueue durable work;
+transport failure retries the listener without changing account health, while positive Apple
+authentication rejection requests reconnect. Prove listener renewal, shutdown closure, a controlled
+Mail change, and scheduled fallback before enabling this gate in production.
 
 ### X Bookmarks
 

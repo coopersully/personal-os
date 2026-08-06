@@ -38,6 +38,15 @@ output "operations_dashboard_name" {
   value = aws_cloudwatch_dashboard.operations.dashboard_name
 }
 
+output "connector_notification_modes" {
+  description = "Declared low-latency connector gates. True is configuration intent, not provider-delivery evidence."
+  value = {
+    google_calendar_push = var.google_calendar_push_enabled
+    google_gmail_push    = var.google_gmail_push_enabled
+    icloud_mail_idle     = var.icloud_mail_idle_enabled
+  }
+}
+
 output "audit_bucket_name" {
   value = aws_s3_bucket.audit.id
 }

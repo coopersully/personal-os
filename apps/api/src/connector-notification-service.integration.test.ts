@@ -14,6 +14,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { eq, inArray } from "drizzle-orm";
 import { createConnectorNotificationService } from "./connector-notification-service.js";
 import { encryptJson } from "./security.js";
+import type { RequestLog } from "./types.js";
 
 const timestamp = new Date("2026-08-06T12:00:00.000Z");
 const encryptionKey = Buffer.alloc(32, 13).toString("base64");
@@ -32,6 +33,7 @@ describe.sequential("connector notification service", () => {
   let accountId: string;
   let service: ReturnType<typeof createConnectorNotificationService>;
   let google: GoogleConnector;
+  const logs: RequestLog[] = [];
 
   beforeAll(async () => {
     container = await new PostgreSqlContainer("postgres:17.5-alpine")
@@ -101,6 +103,7 @@ describe.sequential("connector notification service", () => {
       encryptionKey,
       gmailTopicName: "projects/ilo/topics/gmail-notifications",
       google,
+      log: (entry) => logs.push(entry),
       now: () => timestamp,
     });
   }, 120_000);
@@ -125,6 +128,7 @@ describe.sequential("connector notification service", () => {
       })
       .where(eq(calendarAccounts.id, accountId));
     vi.clearAllMocks();
+    logs.length = 0;
   });
 
   it("registers and renews one durable watch per enabled Google resource", async () => {
@@ -491,5 +495,57 @@ describe.sequential("connector notification service", () => {
       failed: 0,
       succeeded: 0,
     });
+  });
+
+  it("emits only bounded connector-operation fields without provider identities or bodies", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    const watchGmail = google.watchGmail;
+    if (!watchGmail) throw new Error("Gmail watch fixture is missing.");
+    vi.mocked(watchGmail).mockRejectedValueOnce(
+      new Error("RAW_PROVIDER_BODY token=secret identity=private@example.com"),
+    );
+    await service.renewDueSubscriptions();
+    await service.receiveGmailNotification("private@example.com", "999999999999");
+    await service.enqueue(accountId, "notification", new Date(timestamp.getTime() - 60_000));
+    await service.dispatchTriggeredSyncs(async () => undefined);
+
+    const allowedKeys = new Set([
+      "ageMs",
+      "code",
+      "durationMs",
+      "event",
+      "method",
+      "notificationDisposition",
+      "path",
+      "provider",
+      "renewalLagMs",
+      "requestId",
+      "status",
+      "subscriptionKind",
+      "triggerReason",
+    ]);
+    expect(logs.length).toBeGreaterThan(0);
+    for (const entry of logs) {
+      expect(Object.keys(entry).every((key) => allowedKeys.has(key))).toBe(true);
+    }
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "connector_subscription_failed",
+          event: "connector_subscription_failed",
+        }),
+        expect.objectContaining({
+          event: "connector_notification_received",
+          notificationDisposition: "rejected",
+        }),
+        expect.objectContaining({
+          ageMs: 60_000,
+          event: "connector_trigger_dispatched",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(logs)).not.toMatch(
+      /RAW_PROVIDER_BODY|token=secret|private@example\.com|999999999999/u,
+    );
   });
 });

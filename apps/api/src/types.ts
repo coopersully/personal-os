@@ -5,7 +5,9 @@ import type {
   ActorType,
   CalendarProvider,
   ConnectorFailureCategory,
+  ConnectorSubscriptionKind,
   ConnectorSyncRecovery,
+  ConnectorSyncTriggerReason,
 } from "@personal-os/domain";
 import type { AppConfig } from "./config.js";
 import type { EmailDelivery } from "./email-delivery.js";
@@ -40,6 +42,7 @@ export type CalendarProviderReconciliationLog = {
 
 export type RequestLog = {
   accountId?: string;
+  ageMs?: number;
   calendarProviderReconciliation?: CalendarProviderReconciliationLog;
   category?: ConnectorFailureCategory;
   code?: string;
@@ -47,18 +50,29 @@ export type RequestLog = {
   durationMs: number;
   event:
     | "calendar_provider_reconciliation"
+    | "connector_notification_received"
+    | "connector_subscription_expired"
+    | "connector_subscription_failed"
+    | "connector_subscription_renewed"
+    | "connector_sync_completed"
     | "connector_sync_failed"
     | "connector_sync_recovered"
+    | "connector_trigger_dispatched"
     | "connector_recovery_failed"
     | "mail_rule_work_dispatch_failed"
     | "request";
   failureCount?: number;
+  freshnessAgeMs?: number;
   method: string;
   nextSyncAt?: string | null;
+  notificationDisposition?: "accepted" | "duplicate" | "rejected";
   path: string;
   provider?: Extract<CalendarProvider, "google" | "icloud">;
+  renewalLagMs?: number;
   requestId: string;
   status: number;
+  subscriptionKind?: ConnectorSubscriptionKind;
+  triggerReason?: ConnectorSyncTriggerReason;
 };
 
 export type AppVariables = {

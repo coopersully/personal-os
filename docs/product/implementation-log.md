@@ -17,6 +17,17 @@ This log records delivered vertical slices against the master plan. It does not 
   states to Connections, plus direct Google/iCloud reconnect actions and Mail/Calendar callouts.
 - Made SSM Parameter Store authoritative for both Google OAuth values and made production startup
   fail closed when either is absent.
+- Hardened production deployment preflight and recovery so a rollout validates and pins the exact
+  task definition whose unique Google secret references were inspected, proves a complete API drain
+  before recovery, and cannot launch a stale or ambiguously configured candidate.
+- Proved the hardened release on production task definition revision 64: API, MCP, web, secret
+  references, execution-role authority, rollback, autoscaling, and iCloud scheduled sync were
+  healthy. Existing Google grants were truthfully classified as revoked and reached Google's
+  reconnect boundary without exposing raw provider responses.
+- Kept Google availability incomplete for general users after live reconnect exposed Google's
+  unverified-app warning. Provider publishing, restricted-scope verification, and the Gmail
+  security-assessment gate are tracked in [issue #84](https://github.com/coopersully/personal-os/issues/84)
+  and remain production release requirements rather than being inferred from valid credentials.
 
 ## 2026-08-02 — Agent-owned setup protocol
 

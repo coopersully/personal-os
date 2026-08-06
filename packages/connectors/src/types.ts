@@ -160,7 +160,10 @@ export type SyncResult = CredentialResult<{
 }>;
 
 export type MailSyncResult = CredentialResult<{
+  deletedThreadIds: string[];
   mailboxes: RemoteMailbox[];
+  nextSyncToken: string | null;
+  reset: boolean;
   threads: NormalizedRemoteMailThread[];
 }>;
 
@@ -238,6 +241,7 @@ export type GoogleConnector = {
   ) => Promise<GoogleCredentials>;
   syncMail?: (
     credentials: GoogleCredentials,
+    syncToken: string | null,
     operation?: ProviderOperationOptions,
   ) => Promise<MailSyncResult>;
   trashMailThread?: (
@@ -288,6 +292,7 @@ export type ICloudConnector = {
   ) => Promise<SyncResult["value"]>;
   syncMail: (
     credentials: ICloudCredentials,
+    syncToken: string | null,
     operation?: ProviderOperationOptions,
   ) => Promise<MailSyncResult["value"]>;
   updateEvent: (

@@ -455,6 +455,12 @@ describe("Google Calendar connector", () => {
           { id: "Label_1", name: "Projects", type: "USER" },
         ],
       }),
+      response({
+        emailAddress: "user@example.com",
+        historyId: "history-full",
+        messagesTotal: 4,
+        threadsTotal: 4,
+      }),
       response({ threads: [{ id: "thread/1" }, { id: "thread-2" }], nextPageToken: "next" }),
       response({ threads: [{ id: "thread-3" }, { id: "thread-4" }] }),
       response({
@@ -551,7 +557,12 @@ describe("Google Calendar connector", () => {
     );
     const syncMail = connector(fetch).syncMail;
     if (!syncMail) throw new Error("Google Mail connector is missing.");
-    const result = await syncMail(fresh);
+    const result = await syncMail(fresh, null);
+    expect(result.value).toMatchObject({
+      deletedThreadIds: [],
+      nextSyncToken: "history-full",
+      reset: true,
+    });
     expect(result.value.mailboxes.map((mailbox) => mailbox.role)).toEqual([
       "inbox",
       "sent",
@@ -617,7 +628,89 @@ describe("Google Calendar connector", () => {
       from: { address: "anonymous@example.com", name: null },
       receivedAt: new Date(0),
     });
-    expect(String(fetch.mock.calls[2]?.[0])).toContain("pageToken=next");
+    expect(String(fetch.mock.calls[3]?.[0])).toContain("pageToken=next");
+  });
+
+  it("uses Gmail history incrementally and records only definitively missing threads", async () => {
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith("/labels")) return response({ labels: [] });
+      if (url.pathname.endsWith("/history")) {
+        if (url.searchParams.get("pageToken") === "next") {
+          return response({
+            history: [
+              {
+                id: "105",
+                messagesDeleted: [{ message: { id: "message-gone", threadId: "thread-gone" } }],
+                labelsRemoved: [{ message: { id: "message-2", threadId: "thread-2" } }],
+              },
+            ],
+            historyId: "105",
+          });
+        }
+        return response({
+          history: [
+            {
+              id: "102",
+              messagesAdded: [{ message: { id: "message-1", threadId: "thread-1" } }],
+              labelsAdded: [{ message: { id: "message-2", threadId: "thread-2" } }],
+            },
+          ],
+          historyId: "102",
+          nextPageToken: "next",
+        });
+      }
+      if (url.pathname.endsWith("/thread-gone")) return response({ error: "gone" }, 404);
+      const id = url.pathname.split("/").at(-1);
+      return response({
+        id,
+        messages: [{ id: `message-${id}`, payload: { headers: [], mimeType: "text/plain" } }],
+      });
+    });
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Google Mail connector is missing.");
+
+    const result = await syncMail(fresh, "100");
+
+    expect(result.value).toMatchObject({
+      deletedThreadIds: ["thread-gone"],
+      nextSyncToken: "105",
+      reset: false,
+    });
+    expect(result.value.threads.map((thread) => thread.remoteThreadId)).toEqual([
+      "thread-1",
+      "thread-2",
+    ]);
+    const historyCalls = fetch.mock.calls.filter(([input]) => String(input).includes("/history"));
+    expect(String(historyCalls[0]?.[0])).toContain("startHistoryId=100");
+    expect(String(historyCalls[1]?.[0])).toContain("pageToken=next");
+  });
+
+  it("falls back to a bounded full Gmail sync when the history cursor expires", async () => {
+    const fetch = queued(
+      response({ labels: [] }),
+      response({ error: "history expired" }, 404),
+      response({
+        emailAddress: "user@example.com",
+        historyId: "history-reset",
+        messagesTotal: 0,
+        threadsTotal: 0,
+      }),
+      response({ threads: [] }),
+    );
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Google Mail connector is missing.");
+
+    await expect(syncMail(fresh, "expired-history")).resolves.toMatchObject({
+      value: {
+        deletedThreadIds: [],
+        nextSyncToken: "history-reset",
+        reset: true,
+        threads: [],
+      },
+    });
+    expect(String(fetch.mock.calls[1]?.[0])).toContain("startHistoryId=expired-history");
+    expect(String(fetch.mock.calls[3]?.[0])).not.toContain("startHistoryId=");
   });
 
   it("caps a Gmail synchronization at one hundred conversations", async () => {
@@ -627,6 +720,14 @@ describe("Google Calendar connector", () => {
     const fetch = vi.fn(async (input: string | URL | Request) => {
       const url = new URL(String(input));
       if (url.pathname.endsWith("/labels")) return response({ labels: [] });
+      if (url.pathname.endsWith("/profile")) {
+        return response({
+          emailAddress: "user@example.com",
+          historyId: "history-100",
+          messagesTotal: 100,
+          threadsTotal: 100,
+        });
+      }
       if (url.pathname.endsWith("/threads")) {
         return response({ nextPageToken: "ignored", threads: threadIds });
       }
@@ -641,9 +742,10 @@ describe("Google Calendar connector", () => {
     });
     const syncMail = connector(fetch).syncMail;
     if (!syncMail) throw new Error("Google Mail connector is missing.");
-    const result = await syncMail(fresh);
+    const result = await syncMail(fresh, null);
     expect(result.value.threads).toHaveLength(100);
-    expect(fetch).toHaveBeenCalledTimes(102);
+    expect(result.value.nextSyncToken).toBe("history-100");
+    expect(fetch).toHaveBeenCalledTimes(103);
     expect(maximumThreadRequests).toBe(1);
   });
 

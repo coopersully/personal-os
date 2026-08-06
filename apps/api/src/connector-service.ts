@@ -847,7 +847,11 @@ export function createConnectorService({
       if (account.mailEnabled && !options.skipMail) {
         let mail: MailSyncResult["value"];
         if (account.provider === "google" && googleCredentials && google.syncMail) {
-          const result = await google.syncMail(googleCredentials, syncOperation());
+          const result = await google.syncMail(
+            googleCredentials,
+            account.mailSyncToken,
+            syncOperation(),
+          );
           googleCredentials = await saveGoogleCredentials(
             account.id,
             result.credentials,
@@ -857,7 +861,7 @@ export function createConnectorService({
           mailCredentialsPersisted = true;
           mail = result.value;
         } else if (account.provider === "icloud" && icloudCredentials) {
-          mail = await icloud.syncMail(icloudCredentials, syncOperation());
+          mail = await icloud.syncMail(icloudCredentials, account.mailSyncToken, syncOperation());
         } else {
           throw new ConnectorError({
             category: "configuration",
@@ -1719,6 +1723,19 @@ export function createConnectorService({
         .set({ deletedAt: now(), updatedAt: now() })
         .where(and(...staleMailboxConditions));
 
+      if (value.deletedThreadIds.length > 0) {
+        await transaction
+          .update(mailThreads)
+          .set({ deletedAt: now(), updatedAt: now() })
+          .where(
+            and(
+              eq(mailThreads.accountId, account.id),
+              inArray(mailThreads.remoteThreadId, value.deletedThreadIds),
+              isNull(mailThreads.deletedAt),
+            ),
+          );
+      }
+
       for (const thread of value.threads) {
         const [storedThread] = await transaction
           .insert(mailThreads)
@@ -1816,6 +1833,17 @@ export function createConnectorService({
           });
         }
       }
+      await transaction
+        .update(calendarAccounts)
+        .set({ mailSyncToken: value.nextSyncToken, updatedAt: now() })
+        .where(
+          and(
+            eq(calendarAccounts.id, account.id),
+            eq(calendarAccounts.userId, account.userId),
+            eq(calendarAccounts.syncGeneration, syncClaim.generation),
+            eq(calendarAccounts.syncClaimId, syncClaim.id),
+          ),
+        );
       return true;
     });
     if (!sourceProjectionApplied) {

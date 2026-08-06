@@ -56,9 +56,12 @@ describe.sequential("ilo API", () => {
     listCalendars: vi.fn(async () => []),
     syncCalendar: vi.fn(),
     syncMail: vi.fn(async () => ({
+      deletedThreadIds: [],
       mailboxes: [
         { id: "INBOX", name: "Inbox", role: "inbox" as const, totalCount: 1, unreadCount: 1 },
       ],
+      nextSyncToken: null,
+      reset: true,
       threads: [
         {
           bodyText: "Integration mail body",

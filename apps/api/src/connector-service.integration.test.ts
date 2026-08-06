@@ -163,7 +163,13 @@ function mockGoogle(): GoogleConnector {
     })),
     syncMail: vi.fn(async (value) => ({
       credentials: value,
-      value: { mailboxes: [], threads: [] },
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        nextSyncToken: "mail-history",
+        reset: false,
+        threads: [],
+      },
     })),
     sendMail: vi.fn(async () => rotatedCredentials),
     trashMailThread: vi.fn(async () => rotatedCredentials),
@@ -197,9 +203,12 @@ function mockICloud(): ICloudConnector {
       reset: true,
     })),
     syncMail: vi.fn(async () => ({
+      deletedThreadIds: [],
       mailboxes: [
         { id: "INBOX", name: "Inbox", role: "inbox" as const, totalCount: 1, unreadCount: 1 },
       ],
+      nextSyncToken: null,
+      reset: true,
       threads: [
         {
           bodyText: "Hello from iCloud",
@@ -448,7 +457,10 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials: mailCredentials,
       value: {
+        deletedThreadIds: [],
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
+        nextSyncToken: "mail-history-upgraded",
+        reset: true,
         threads: [
           {
             bodyText: "Google body",
@@ -553,6 +565,97 @@ describe.sequential("connector service", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it("advances Gmail history and applies only explicit deletions under the sync claim", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Google account fixture is missing.");
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+        mailEnabled: true,
+        mailSyncToken: "history-before",
+        syncStatus: "idle",
+      })
+      .where(eq(calendarAccounts.id, account.id));
+    await database.db.insert(mailThreads).values([
+      {
+        accountId: account.id,
+        bodyText: "Delete this thread",
+        from: { address: "deleted@example.com", name: null },
+        provider: "google",
+        receivedAt: timestamp,
+        remoteMailboxIds: ["INBOX"],
+        remoteThreadId: "explicitly-deleted-thread",
+        snippet: "Delete this thread",
+        starred: false,
+        subject: "Deleted",
+        to: [],
+        unread: false,
+        userId,
+      },
+      {
+        accountId: account.id,
+        bodyText: "Retain this thread",
+        from: { address: "retained@example.com", name: null },
+        provider: "google",
+        receivedAt: timestamp,
+        remoteMailboxIds: ["INBOX"],
+        remoteThreadId: "unobserved-retained-thread",
+        snippet: "Retain this thread",
+        starred: false,
+        subject: "Retained",
+        to: [],
+        unread: false,
+        userId,
+      },
+    ]);
+    const syncMail = google.syncMail;
+    if (!syncMail) throw new Error("Google Mail fixture is missing.");
+    vi.mocked(syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        deletedThreadIds: ["explicitly-deleted-thread"],
+        mailboxes: [],
+        nextSyncToken: "history-after",
+        reset: false,
+        threads: [],
+      },
+    });
+
+    await service.syncAccount(userId, account.id);
+
+    expect(syncMail).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accessToken: expect.any(String) }),
+      "history-before",
+      undefined,
+    );
+    const [updatedAccount] = await database.db
+      .select({ mailSyncToken: calendarAccounts.mailSyncToken })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(updatedAccount?.mailSyncToken).toBe("history-after");
+    const storedThreads = await database.db
+      .select({ deletedAt: mailThreads.deletedAt, remoteThreadId: mailThreads.remoteThreadId })
+      .from(mailThreads)
+      .where(
+        inArray(mailThreads.remoteThreadId, [
+          "explicitly-deleted-thread",
+          "unobserved-retained-thread",
+        ]),
+      )
+      .orderBy(asc(mailThreads.remoteThreadId));
+    expect(storedThreads).toEqual([
+      { deletedAt: timestamp, remoteThreadId: "explicitly-deleted-thread" },
+      { deletedAt: null, remoteThreadId: "unobserved-retained-thread" },
+    ]);
+  });
+
   it("claims one sync lease and rejects a concurrent sync for the same account", async () => {
     const [account] = await database.db
       .select()
@@ -579,7 +682,13 @@ describe.sequential("connector service", () => {
       await syncCanFinish;
       return {
         credentials: currentCredentials,
-        value: { mailboxes: [], threads: [] },
+        value: {
+          deletedThreadIds: [],
+          mailboxes: [],
+          nextSyncToken: null,
+          reset: false,
+          threads: [],
+        },
       };
     });
 
@@ -607,7 +716,7 @@ describe.sequential("connector service", () => {
     const cancellableSyncMail = cancellableGoogle.syncMail;
     if (!cancellableSyncMail) throw new Error("Google Mail sync fixture is unavailable.");
     vi.mocked(cancellableSyncMail).mockImplementationOnce(
-      async (_currentCredentials, operation) => {
+      async (_currentCredentials, _syncToken, operation) => {
         markProviderStarted();
         await new Promise<void>((resolve) => {
           operation?.signal?.addEventListener("abort", () => resolve(), {
@@ -616,7 +725,13 @@ describe.sequential("connector service", () => {
         });
         return {
           credentials: rotatedCredentials,
-          value: { mailboxes: [], threads: [] },
+          value: {
+            deletedThreadIds: [],
+            mailboxes: [],
+            nextSyncToken: null,
+            reset: false,
+            threads: [],
+          },
         };
       },
     );
@@ -817,7 +932,16 @@ describe.sequential("connector service", () => {
     if (!schedulerSyncMail) throw new Error("Scheduler Mail fixture is unavailable.");
     vi.mocked(schedulerSyncMail).mockImplementation(async (value) => {
       await boundedProviderCall();
-      return { credentials: value, value: { mailboxes: [], threads: [] } };
+      return {
+        credentials: value,
+        value: {
+          deletedThreadIds: [],
+          mailboxes: [],
+          nextSyncToken: null,
+          reset: false,
+          threads: [],
+        },
+      };
     });
     const schedulerLogs: unknown[] = [];
     const encryptedCredentials = encryptJson(credentials, encryptionKey);
@@ -1442,7 +1566,10 @@ describe.sequential("connector service", () => {
     const syncMail = google.syncMail;
     if (!syncMail) throw new Error("Google Mail sync is unavailable.");
     const completeMailValue: MailSyncResult["value"] = {
+      deletedThreadIds: [],
       mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
+      nextSyncToken: "complete-mail-history",
+      reset: false,
       threads: [
         {
           bodyText: "Body",
@@ -2084,6 +2211,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 7, unreadCount: 7 }],
         threads,
       },
@@ -2158,6 +2288,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2440,6 +2573,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2587,6 +2723,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2651,6 +2790,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2715,6 +2857,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2846,6 +2991,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 3, unreadCount: 3 }],
         threads,
       },
@@ -2902,6 +3050,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2973,6 +3124,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -3049,6 +3203,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -3193,7 +3350,13 @@ describe.sequential("connector service", () => {
     vi.mocked(updateMailThread).mockClear();
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
-      value: { mailboxes: [], threads: [] },
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        nextSyncToken: null,
+        reset: false,
+        threads: [],
+      },
     });
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
     expect(updateMailThread).not.toHaveBeenCalled();
@@ -3222,7 +3385,13 @@ describe.sequential("connector service", () => {
       .returning({ id: mailRules.id, name: mailRules.name });
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
-      value: { mailboxes: [], threads: [] },
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        nextSyncToken: null,
+        reset: false,
+        threads: [],
+      },
     });
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
 
@@ -3270,7 +3439,13 @@ describe.sequential("connector service", () => {
       .returning({ id: mailRules.id, name: mailRules.name });
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
-      value: { mailboxes: [], threads: [] },
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        nextSyncToken: null,
+        reset: false,
+        threads: [],
+      },
     });
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
 
@@ -3327,6 +3502,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [
           { id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 },
           {
@@ -5483,6 +5661,7 @@ describe.sequential("connector service", () => {
     );
 
     const restoredMail = {
+      deletedThreadIds: [],
       mailboxes: [
         {
           id: "INBOX",
@@ -5493,6 +5672,8 @@ describe.sequential("connector service", () => {
           unreadCount: 0,
         },
       ],
+      nextSyncToken: null,
+      reset: true,
       threads: [
         {
           bodyText: "BEGIN:VCALENDAR",

@@ -39,19 +39,19 @@
 - Produces Drizzle tables `connectorSubscriptions` and `connectorSyncTriggers` plus
   `calendarAccounts.mailSyncToken`.
 
-- [ ] **Step 1: Write failing domain/schema/migration tests**
+- [x] **Step 1: Write failing domain/schema/migration tests**
 
 Assert literal enum members and migration preservation from `0051`. Insert duplicate trigger rows
 for one account and prove the primary key prevents two durable work records. Assert account deletion
 cascades subscriptions/triggers and user deletion still cascades through the account.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `pnpm vitest run packages/domain/src/domain.test.ts packages/database/src/schema.test.ts apps/api/src/icloud-uidvalidity-migration.integration.test.ts`
 
 Expected: FAIL because the contracts, tables, column, and migration are absent.
 
-- [ ] **Step 3: Add exact domain enums**
+- [x] **Step 3: Add exact domain enums**
 
 ```ts
 export const connectorSubscriptionKindSchema = z.enum([
@@ -78,7 +78,7 @@ export const connectorSyncTriggerReasonSchema = z.enum([
 ]);
 ```
 
-- [ ] **Step 4: Add exact Drizzle storage**
+- [x] **Step 4: Add exact Drizzle storage**
 
 `connectorSubscriptions` has these exact fields:
 
@@ -128,7 +128,7 @@ updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(
 Checks enforce `1 <= notification_count <= 1000000`, `first_triggered_at <= last_triggered_at`, and
 claim-ID/expiry pairing.
 
-- [ ] **Step 5: Add additive migration `0052`**
+- [x] **Step 5: Add additive migration `0052`**
 
 Use explicit `CREATE TABLE`, check constraints for every enum/count/claim invariant, FKs with
 `ON DELETE CASCADE`, unique indexes described in Step 4, and:
@@ -139,11 +139,11 @@ ALTER TABLE "calendar_accounts" ADD COLUMN "mail_sync_token" text;
 
 Append journal index `52`; do not rewrite snapshots or older migrations.
 
-- [ ] **Step 6: Run and verify GREEN**
+- [x] **Step 6: Run and verify GREEN**
 
 Run the command from Step 2. Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/domain packages/database apps/api/src/icloud-uidvalidity-migration.integration.test.ts
@@ -171,45 +171,45 @@ releaseTrigger(claim, availableAt): Promise<void>;
 dispatchTriggeredSyncs(options?): Promise<{ attempted: number; failed: number; succeeded: number }>;
 ```
 
-- [ ] **Step 1: Write failing repository integration tests**
+- [x] **Step 1: Write failing repository integration tests**
 
 Cover first insert, burst coalescing, saturating count, reason priority, concurrent enqueue, bounded
 claim with `SKIP LOCKED`, stale claim recovery, trigger arriving during a sync, success deletion,
 failure release, reconnect account suppression, and process restart. The key mutation each test
 catches is deleting a newer trigger with an older sync claim.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `pnpm vitest run apps/api/src/connector-notification-service.integration.test.ts`
 
 Expected: FAIL because the notification service does not exist.
 
-- [ ] **Step 3: Implement atomic coalescing**
+- [x] **Step 3: Implement atomic coalescing**
 
 Use one `INSERT ... ON CONFLICT(account_id) DO UPDATE` that preserves earliest first-trigger,
 advances last-trigger, chooses reason by the literal priority
 `notification > initial > manual > recovery > retry > reconciliation`, and caps count at `1000000`.
 
-- [ ] **Step 4: Implement claim/complete semantics**
+- [x] **Step 4: Implement claim/complete semantics**
 
 Claims use a UUID and five-minute lease. Completion deletes only when `last_triggered_at <=` the
 claim's observed timestamp; otherwise it clears the claim and leaves the newer work available now.
 Release clears the claim and sets bounded retry availability.
 
-- [ ] **Step 5: Dispatch triggers before ordinary reconciliation**
+- [x] **Step 5: Dispatch triggers before ordinary reconciliation**
 
 Call existing `syncAccount`; never duplicate projection logic. `syncDueConnectors` first drains a
 bounded trigger batch, then calls the existing due-account scheduler with the remaining capacity.
 Keep the one-minute durable scheduler. An in-process wake signal may invoke the dispatcher early,
 but it is an optimization and has no durability role.
 
-- [ ] **Step 6: Run service and scheduler tests and verify GREEN**
+- [x] **Step 6: Run service and scheduler tests and verify GREEN**
 
 Run: `pnpm vitest run apps/api/src/connector-notification-service.integration.test.ts apps/api/src/connector-service.integration.test.ts`
 
 Expected: PASS, including the existing five-minute reconciliation tests.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/api/src/connector-notification-service.ts apps/api/src/connector-notification-service.integration.test.ts apps/api/src/connector-service.ts apps/api/src/connector-service.integration.test.ts apps/api/src/app.ts apps/api/src/main.ts
@@ -240,57 +240,57 @@ type MailSyncResult = CredentialResult<{
 }>;
 ```
 
-- [ ] **Step 1: Write failing Google connector tests**
+- [x] **Step 1: Write failing Google connector tests**
 
 Cover full sync obtaining a Gmail profile `historyId`, incremental `users.history.list`
 pagination, message-added/deleted/label-added/label-removed histories, deduplicated affected thread
 fetch, disappeared thread deletion, malformed history, provider `404` invalid cursor full-reset
 fallback, and bounded pages/threads. Derive expected thread IDs literally.
 
-- [ ] **Step 2: Run Google test and verify RED**
+- [x] **Step 2: Run Google test and verify RED**
 
 Run: `pnpm vitest run packages/connectors/src/google.test.ts`
 
 Expected: FAIL on the old `syncMail` contract.
 
-- [ ] **Step 3: Implement bounded Gmail full and incremental paths**
+- [x] **Step 3: Implement bounded Gmail full and incremental paths**
 
 Full sync retains the current 100-thread bound and returns the profile history ID. Incremental sync
 uses the stored history token, accumulates affected thread IDs across bounded pages, fetches each
 current thread once, emits explicit deleted thread IDs for definitive `404`, and returns the latest
 history ID. Provider cursor invalidation calls the full path with `reset = true`.
 
-- [ ] **Step 4: Adapt iCloud to the provider-neutral result**
+- [x] **Step 4: Adapt iCloud to the provider-neutral result**
 
 iCloud ignores the incoming token in this task and returns its existing mailboxes/threads with
 `deletedThreadIds: []`, `nextSyncToken: null`, and `reset: true`. This preserves current behavior
 without inventing IMAP history semantics.
 
-- [ ] **Step 5: Write failing projection tests**
+- [x] **Step 5: Write failing projection tests**
 
 Assert `calendar_accounts.mail_sync_token` advances only in the same fenced transaction that
 projects mail; explicit deleted thread IDs set `deletedAt`; invalid cursor reset never deletes
 unobserved older threads from the bounded full window; a superseded claim cannot advance the token.
 
-- [ ] **Step 6: Run projection tests and verify RED**
+- [x] **Step 6: Run projection tests and verify RED**
 
 Run: `pnpm vitest run apps/api/src/connector-service.integration.test.ts packages/connectors/src/icloud.test.ts`
 
 Expected: FAIL on missing token/deletion behavior.
 
-- [ ] **Step 7: Implement fenced projection changes**
+- [x] **Step 7: Implement fenced projection changes**
 
 Pass `account.mailSyncToken` into the connector. Within `projectMail`, mark only explicit
 `deletedThreadIds`, then update `mailSyncToken` under the existing generation/claim guard. Never
 infer deletion from absence in a bounded result.
 
-- [ ] **Step 8: Run all focused tests and verify GREEN**
+- [x] **Step 8: Run all focused tests and verify GREEN**
 
 Run: `pnpm vitest run packages/connectors/src/google.test.ts packages/connectors/src/icloud.test.ts apps/api/src/connector-service.integration.test.ts`
 
 Expected: PASS.
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add packages/connectors apps/api/src/connector-service.ts apps/api/src/connector-service.integration.test.ts

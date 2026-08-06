@@ -112,6 +112,37 @@ const gmailThreadListResponseSchema = z.object({
   nextPageToken: z.string().optional(),
   threads: z.array(z.object({ id: z.string() })).default([]),
 });
+const gmailProfileSchema = z.object({
+  historyId: z.string().min(1),
+});
+const gmailHistoryMessageSchema = z.object({
+  id: z.string(),
+  threadId: z.string(),
+});
+const gmailHistoryRecordSchema = z.object({
+  id: z.string(),
+  labelsAdded: z
+    .array(z.object({ message: gmailHistoryMessageSchema }))
+    .max(1_000)
+    .default([]),
+  labelsRemoved: z
+    .array(z.object({ message: gmailHistoryMessageSchema }))
+    .max(1_000)
+    .default([]),
+  messagesAdded: z
+    .array(z.object({ message: gmailHistoryMessageSchema }))
+    .max(1_000)
+    .default([]),
+  messagesDeleted: z
+    .array(z.object({ message: gmailHistoryMessageSchema }))
+    .max(1_000)
+    .default([]),
+});
+const gmailHistoryResponseSchema = z.object({
+  history: z.array(gmailHistoryRecordSchema).max(1_000).default([]),
+  historyId: z.string().min(1),
+  nextPageToken: z.string().optional(),
+});
 const gmailHeaderSchema = z.object({ name: z.string(), value: z.string() });
 const gmailPartSchema = z.object({
   body: z
@@ -164,6 +195,9 @@ type GoogleConnectorOptions = {
   now?: () => Date;
   redirectUri: string;
 };
+
+const MAX_GMAIL_HISTORY_PAGES = 10;
+const MAX_GMAIL_SYNC_THREADS = 100;
 
 export function createGoogleConnector(options: GoogleConnectorOptions): GoogleConnector {
   const request = options.fetch ?? globalThis.fetch;
@@ -330,6 +364,101 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     };
   }
 
+  async function listMailboxes(
+    credentials: GoogleCredentials,
+    operation?: ProviderOperationOptions,
+  ): Promise<CredentialResult<RemoteMailbox[]>> {
+    const result = await authenticatedRequest(
+      credentials,
+      "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+      {},
+      operation,
+    );
+    const page = labelListResponseSchema.parse(await parseResponse(result.response));
+    return {
+      credentials: result.credentials,
+      value: page.labels.map((label) => ({
+        id: label.id,
+        name: label.name,
+        role: mailboxRole(label.id),
+        totalCount: label.messagesTotal,
+        unreadCount: label.messagesUnread,
+      })),
+    };
+  }
+
+  async function fetchMailThread(
+    credentials: GoogleCredentials,
+    threadId: string,
+    operation?: ProviderOperationOptions,
+  ): Promise<CredentialResult<NormalizedRemoteMailThread | null>> {
+    const result = await authenticatedRequest(
+      credentials,
+      `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
+      {},
+      operation,
+    );
+    if (result.response.status === 404) {
+      await result.response.body?.cancel().catch(() => undefined);
+      return { credentials: result.credentials, value: null };
+    }
+    return {
+      credentials: result.credentials,
+      value: normalizeMailThread(gmailThreadSchema.parse(await parseResponse(result.response))),
+    };
+  }
+
+  async function fullMailSync(
+    credentials: GoogleCredentials,
+    mailboxes: RemoteMailbox[],
+    operation?: ProviderOperationOptions,
+  ) {
+    const profileResult = await authenticatedRequest(
+      credentials,
+      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+      {},
+      operation,
+    );
+    const profile = gmailProfileSchema.parse(await parseResponse(profileResult.response));
+    const threadIds: string[] = [];
+    let pageToken: string | undefined;
+    let currentCredentials = profileResult.credentials;
+    do {
+      throwIfProviderOperationCancelled(operation);
+      const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/threads");
+      url.searchParams.set("maxResults", String(MAX_GMAIL_SYNC_THREADS - threadIds.length));
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+      const result = await authenticatedRequest(currentCredentials, url.toString(), {}, operation);
+      currentCredentials = result.credentials;
+      const page = gmailThreadListResponseSchema.parse(await parseResponse(result.response));
+      threadIds.push(
+        ...page.threads
+          .slice(0, MAX_GMAIL_SYNC_THREADS - threadIds.length)
+          .map((thread) => thread.id),
+      );
+      pageToken = threadIds.length < MAX_GMAIL_SYNC_THREADS ? page.nextPageToken : undefined;
+    } while (pageToken);
+    const threads: NormalizedRemoteMailThread[] = [];
+    const deletedThreadIds: string[] = [];
+    for (const threadId of threadIds) {
+      throwIfProviderOperationCancelled(operation);
+      const result = await fetchMailThread(currentCredentials, threadId, operation);
+      currentCredentials = result.credentials;
+      if (result.value) threads.push(result.value);
+      else deletedThreadIds.push(threadId);
+    }
+    return {
+      credentials: currentCredentials,
+      value: {
+        deletedThreadIds,
+        mailboxes,
+        nextSyncToken: profile.historyId,
+        reset: true,
+        threads,
+      },
+    };
+  }
+
   return {
     authorizationUrl(
       state: string,
@@ -454,29 +583,24 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       };
     },
 
-    async syncMail(credentials, operation) {
+    async syncMail(credentials, syncToken, operation) {
       throwIfProviderOperationCancelled(operation);
-      const labelResult = await authenticatedRequest(
-        credentials,
-        "https://gmail.googleapis.com/gmail/v1/users/me/labels",
-        {},
-        operation,
-      );
-      const labelPage = labelListResponseSchema.parse(await parseResponse(labelResult.response));
-      const mailboxes: RemoteMailbox[] = labelPage.labels.map((label) => ({
-        id: label.id,
-        name: label.name,
-        role: mailboxRole(label.id),
-        totalCount: label.messagesTotal,
-        unreadCount: label.messagesUnread,
-      }));
-      const threadIds: string[] = [];
+      const mailboxResult = await listMailboxes(credentials, operation);
+      if (!syncToken) {
+        return fullMailSync(mailboxResult.credentials, mailboxResult.value, operation);
+      }
+
+      const threadIds = new Set<string>();
       let pageToken: string | undefined;
-      let currentCredentials = labelResult.credentials;
+      let currentCredentials = mailboxResult.credentials;
+      let nextSyncToken = syncToken;
+      let pageCount = 0;
       do {
         throwIfProviderOperationCancelled(operation);
-        const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/threads");
-        url.searchParams.set("maxResults", String(100 - threadIds.length));
+        pageCount += 1;
+        const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
+        url.searchParams.set("maxResults", "500");
+        url.searchParams.set("startHistoryId", syncToken);
         if (pageToken) url.searchParams.set("pageToken", pageToken);
         const result = await authenticatedRequest(
           currentCredentials,
@@ -485,30 +609,48 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           operation,
         );
         currentCredentials = result.credentials;
-        const page = gmailThreadListResponseSchema.parse(await parseResponse(result.response));
-        threadIds.push(...page.threads.map((thread) => thread.id));
-        pageToken = threadIds.length < 100 ? page.nextPageToken : undefined;
+        if (result.response.status === 404) {
+          await result.response.body?.cancel().catch(() => undefined);
+          return fullMailSync(currentCredentials, mailboxResult.value, operation);
+        }
+        const page = gmailHistoryResponseSchema.parse(await parseResponse(result.response));
+        for (const history of page.history) {
+          for (const change of [
+            ...history.messagesAdded,
+            ...history.messagesDeleted,
+            ...history.labelsAdded,
+            ...history.labelsRemoved,
+          ]) {
+            threadIds.add(change.message.threadId);
+            if (threadIds.size > MAX_GMAIL_SYNC_THREADS) {
+              return fullMailSync(currentCredentials, mailboxResult.value, operation);
+            }
+          }
+        }
+        nextSyncToken = page.historyId;
+        pageToken = page.nextPageToken;
+        if (pageToken && pageCount >= MAX_GMAIL_HISTORY_PAGES) {
+          return fullMailSync(currentCredentials, mailboxResult.value, operation);
+        }
       } while (pageToken);
       const threads: NormalizedRemoteMailThread[] = [];
+      const deletedThreadIds: string[] = [];
       for (const threadId of threadIds) {
         throwIfProviderOperationCancelled(operation);
-        const result = await authenticatedRequest(
-          currentCredentials,
-          `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
-          {},
-          operation,
-        );
+        const result = await fetchMailThread(currentCredentials, threadId, operation);
         currentCredentials = result.credentials;
-        // Normalize and release each full provider response before requesting the
-        // next thread. Attachment traversal applies its per-message bounds here,
-        // so the sync never retains up to 100 raw MIME trees at once.
-        threads.push(
-          normalizeMailThread(gmailThreadSchema.parse(await parseResponse(result.response))),
-        );
+        if (result.value) threads.push(result.value);
+        else deletedThreadIds.push(threadId);
       }
       return {
         credentials: currentCredentials,
-        value: { mailboxes, threads },
+        value: {
+          deletedThreadIds,
+          mailboxes: mailboxResult.value,
+          nextSyncToken,
+          reset: false,
+          threads,
+        },
       };
     },
 

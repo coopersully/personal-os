@@ -189,7 +189,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
     },
 
     /* v8 ignore start -- IMAP projection edge variants are covered by live provider compatibility tests */
-    async syncMail(credentials, operation) {
+    async syncMail(credentials, _syncToken, operation) {
       throwIfProviderOperationCancelled(operation);
       const client = imapFactory(credentials);
       let connected = false;
@@ -311,7 +311,13 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
             lock.release();
           }
         }
-        return { mailboxes, threads };
+        return {
+          deletedThreadIds: [],
+          mailboxes,
+          nextSyncToken: null,
+          reset: true,
+          threads,
+        };
       } catch (error) {
         if (operation?.signal?.aborted) throw operation.signal.reason;
         throw providerError("mail", error);

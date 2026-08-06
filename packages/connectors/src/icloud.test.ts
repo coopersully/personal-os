@@ -265,7 +265,7 @@ describe("iCloud connector", () => {
       logout: vi.fn(async () => undefined),
     };
     const { value } = connector(davClient(), imap);
-    const result = await value.syncMail(credentials);
+    const result = await value.syncMail(credentials, null);
     expect(result.mailboxes.map((mailbox) => mailbox.role)).toEqual([
       "inbox",
       "sent",
@@ -330,9 +330,9 @@ describe("iCloud connector", () => {
       logout: vi.fn(async () => undefined),
     };
     const { value } = connector(davClient(), imap);
-    const first = await value.syncMail(credentials);
+    const first = await value.syncMail(credentials, null);
     uidValidity = 101n;
-    const second = await value.syncMail(credentials);
+    const second = await value.syncMail(credentials, null);
 
     expect(first.threads[0]?.remoteThreadId).toBe("INBOX:100:7");
     expect(first.threads[0]?.messages?.[0]).toMatchObject({
@@ -386,7 +386,7 @@ describe("iCloud connector", () => {
       ]),
       logout: vi.fn(async () => undefined),
     };
-    const mail = await connector(davClient(), imap).value.syncMail(credentials);
+    const mail = await connector(davClient(), imap).value.syncMail(credentials, null);
     expect(mail.threads[0]?.messages?.[0]?.attachments).toEqual([
       expect.objectContaining({
         ...calendarAttachmentProjectionOverflow("ignored"),
@@ -426,7 +426,7 @@ describe("iCloud connector", () => {
       logout: vi.fn(async () => undefined),
     };
 
-    const mail = await connector(davClient(), imap).value.syncMail(credentials);
+    const mail = await connector(davClient(), imap).value.syncMail(credentials, null);
 
     expect(fetch).toHaveBeenCalledWith(
       "1:*",
@@ -493,7 +493,7 @@ describe("iCloud connector", () => {
       logout: vi.fn(async () => undefined),
     };
     const { value } = connector(davClient(), imap);
-    const sync = value.syncMail(credentials, {
+    const sync = value.syncMail(credentials, null, {
       deadlineMs: Date.now() + 105_000,
       signal: controller.signal,
     });
@@ -689,7 +689,7 @@ describe("iCloud connector", () => {
       }),
     ).resolves.toMatchObject({ etag: null, timezone: "UTC" });
 
-    const mail = await value.syncMail(credentials);
+    const mail = await value.syncMail(credentials, null);
     expect(mail.mailboxes).toEqual([
       expect.objectContaining({ totalCount: 0, unreadCount: 0 }),
       expect.objectContaining({ totalCount: 1, unreadCount: 0 }),
@@ -811,7 +811,7 @@ describe("iCloud connector", () => {
       logout: vi.fn(),
       mailbox: false,
     }).value;
-    await expect(connectFailure.syncMail(credentials)).rejects.toMatchObject({
+    await expect(connectFailure.syncMail(credentials, null)).rejects.toMatchObject({
       category: "transport",
       disposition: "retry",
       status: null,
@@ -827,7 +827,7 @@ describe("iCloud connector", () => {
       logout: vi.fn(),
       mailbox: false,
     }).value;
-    await expect(authorizationFailure.syncMail(credentials)).rejects.toMatchObject({
+    await expect(authorizationFailure.syncMail(credentials, null)).rejects.toMatchObject({
       category: "authorization",
       disposition: "reconnect",
     });

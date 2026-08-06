@@ -484,46 +484,46 @@ git commit -m "feat: receive verified Calendar notifications"
 - `ICloudConnector.listenForMailChanges(credentials, onChange, operation): Promise<void>`.
 - Adds `icloudMailIdleEnabled` and `icloudMailIdleConcurrency` (default disabled and `5`).
 
-- [ ] **Step 1: Write failing connector tests**
+- [x] **Step 1: Write failing connector tests**
 
 With a faithful ImapFlow double, cover connect, INBOX select, exists/expunge/flags change signal,
 notification coalescing, periodic IDLE exit/re-entry, abort, server close, reconnect classification,
 and positive authentication rejection. Assert transport loss is retryable and never reconnect-owned.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `pnpm vitest run packages/connectors/src/icloud.test.ts`
 
 Expected: FAIL because the listener interface is absent.
 
-- [ ] **Step 3: Implement the bounded connector listener**
+- [x] **Step 3: Implement the bounded connector listener**
 
 Use ImapFlow events only as signals. Never normalize/project inside the listener. Close on abort,
 bound each session to twenty-five minutes, and let the supervisor reconnect with jitter.
 
-- [ ] **Step 4: Write failing supervisor/lease tests**
+- [x] **Step 4: Write failing supervisor/lease tests**
 
 Cover disabled mode, concurrency cap, per-account database lease, two ECS supervisors, stale lease,
 graceful shutdown, trigger enqueue, listener failure backoff, reconnect-required suppression, and
 polling continuation while no listener slot is available.
 
-- [ ] **Step 5: Run and verify RED**
+- [x] **Step 5: Run and verify RED**
 
 Run: `pnpm vitest run apps/api/src/connector-notification-service.integration.test.ts apps/api/src/config.test.ts`
 
 Expected: FAIL on missing supervisor/config behavior.
 
-- [ ] **Step 6: Implement supervisor and main lifecycle**
+- [x] **Step 6: Implement supervisor and main lifecycle**
 
 Claim at most configured active subscriptions with five-minute renewable leases. Start listeners
 under the API shutdown signal; each change calls only `enqueue`. Never alter `nextSyncAt` or account
 health because a listener failed.
 
-- [ ] **Step 7: Run and verify GREEN**
+- [x] **Step 7: Run and verify GREEN**
 
 Run both commands from Steps 2 and 5. Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/connectors apps/api/src/config.ts apps/api/src/config.test.ts apps/api/src/connector-notification-service.ts apps/api/src/connector-notification-service.integration.test.ts apps/api/src/main.ts

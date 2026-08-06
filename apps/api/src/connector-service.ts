@@ -320,6 +320,8 @@ type ConnectorServiceOptions = {
   googleGmailTopicName?: string;
   googleRedirectUri?: string;
   icloud?: ICloudConnector;
+  icloudMailIdleConcurrency?: number;
+  icloudMailIdleEnabled?: boolean;
   log?: (entry: RequestLog) => void;
   now: () => Date;
   observeRecoveryFailure?: (entry: {
@@ -340,6 +342,8 @@ export function createConnectorService({
   googleGmailTopicName,
   googleRedirectUri = "https://api.ilo.invalid/v1/connectors/google/callback",
   icloud = createICloudConnector(),
+  icloudMailIdleConcurrency,
+  icloudMailIdleEnabled,
   log,
   now,
   observeRecoveryFailure,
@@ -350,9 +354,12 @@ export function createConnectorService({
     db,
     encryptionKey,
     google,
+    icloud,
     now,
     ...(googleCalendarWebhookUrl ? { calendarWebhookUrl: googleCalendarWebhookUrl } : {}),
     ...(googleGmailTopicName ? { gmailTopicName: googleGmailTopicName } : {}),
+    ...(icloudMailIdleConcurrency ? { icloudMailIdleConcurrency } : {}),
+    ...(icloudMailIdleEnabled ? { icloudMailIdleEnabled } : {}),
   });
   function syncOperation(): ProviderOperationOptions | undefined {
     if (!shutdown) return undefined;
@@ -3590,6 +3597,12 @@ export function createConnectorService({
       token: string;
     }) {
       return notifications.receiveCalendarNotification(input);
+    },
+
+    runICloudIdlePass() {
+      return notifications.runICloudIdlePass(
+        shutdown?.signal ? { signal: shutdown.signal } : undefined,
+      );
     },
 
     syncAccount,

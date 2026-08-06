@@ -36,6 +36,8 @@ const configSchema = z
     GOOGLE_GMAIL_PUSH_ENABLED: z.enum(["true", "false"]).default("false"),
     GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT: z.string().default(""),
     GOOGLE_REDIRECT_URI: z.url(),
+    ICLOUD_MAIL_IDLE_CONCURRENCY: z.coerce.number().int().min(1).max(25).default(5),
+    ICLOUD_MAIL_IDLE_ENABLED: z.enum(["true", "false"]).default("false"),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     MCP_RESOURCE_URL: z.url().optional(),
     MCP_INTERNAL_SECRET: z.string().min(32).optional(),
@@ -194,6 +196,8 @@ export type AppConfig = {
   googleGmailPushEnabled?: boolean;
   googleGmailPushServiceAccount?: string;
   googleRedirectUri: string;
+  icloudMailIdleConcurrency?: number;
+  icloudMailIdleEnabled?: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
   mcpResourceUrl?: string;
   mcpInternalSecret?: string;
@@ -247,6 +251,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     googleGmailPushEnabled: value.GOOGLE_GMAIL_PUSH_ENABLED === "true",
     googleGmailPushServiceAccount: value.GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT,
     googleRedirectUri: value.GOOGLE_REDIRECT_URI,
+    icloudMailIdleConcurrency: value.ICLOUD_MAIL_IDLE_CONCURRENCY,
+    icloudMailIdleEnabled: value.ICLOUD_MAIL_IDLE_ENABLED === "true",
     logLevel: value.LOG_LEVEL,
     mcpResourceUrl: value.MCP_RESOURCE_URL ?? `${value.API_BASE_URL}/mcp`,
     ...(value.MCP_INTERNAL_SECRET ? { mcpInternalSecret: value.MCP_INTERNAL_SECRET } : {}),

@@ -1,5 +1,10 @@
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { GoogleConnector, GoogleCredentials } from "@personal-os/connectors";
+import type {
+  GoogleConnector,
+  GoogleCredentials,
+  ICloudConnector,
+  ICloudCredentials,
+} from "@personal-os/connectors";
 import { ConnectorError } from "@personal-os/connectors";
 import {
   calendarAccounts,
@@ -28,6 +33,9 @@ type Options = {
   encryptionKey?: string;
   gmailTopicName?: string;
   google?: GoogleConnector;
+  icloud?: ICloudConnector;
+  icloudMailIdleConcurrency?: number;
+  icloudMailIdleEnabled?: boolean;
   now: () => Date;
 };
 type NotificationDatabase = Pick<Database, "insert">;
@@ -47,6 +55,9 @@ export function createConnectorNotificationService({
   encryptionKey,
   gmailTopicName,
   google,
+  icloud,
+  icloudMailIdleConcurrency = 5,
+  icloudMailIdleEnabled = false,
   now,
 }: Options) {
   async function persistGoogleCredentials(
@@ -125,6 +136,178 @@ export function createConnectorNotificationService({
       }
       if (values.length === 0) return;
       await db.insert(connectorSubscriptions).values(values).onConflictDoNothing();
+    },
+
+    async ensureICloudMailSubscription(accountId: string): Promise<void> {
+      if (!icloudMailIdleEnabled) return;
+      const [account] = await db
+        .select({ mailEnabled: calendarAccounts.mailEnabled, provider: calendarAccounts.provider })
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, accountId))
+        .limit(1);
+      if (account?.provider !== "icloud" || !account.mailEnabled) return;
+      await db
+        .insert(connectorSubscriptions)
+        .values({
+          accountId,
+          kind: "icloud_mail_idle",
+          nextAttemptAt: now(),
+          provider: "icloud",
+        })
+        .onConflictDoNothing();
+    },
+
+    async runICloudIdlePass(input: { signal?: AbortSignal } = {}): Promise<{
+      claimed: number;
+      failed: number;
+      skipped: number;
+      succeeded: number;
+    }> {
+      if (!icloudMailIdleEnabled || !icloud?.listenForMailChanges || !encryptionKey) {
+        return { claimed: 0, failed: 0, skipped: 0, succeeded: 0 };
+      }
+      const accounts = await db
+        .select({ id: calendarAccounts.id })
+        .from(calendarAccounts)
+        .where(and(eq(calendarAccounts.provider, "icloud"), eq(calendarAccounts.mailEnabled, true)))
+        .limit(100);
+      for (const account of accounts) await this.ensureICloudMailSubscription(account.id);
+      const claimedAt = now();
+      const limit = Math.max(1, Math.min(icloudMailIdleConcurrency, 25));
+      const claims = await db.transaction(async (transaction) => {
+        const due = await transaction
+          .select()
+          .from(connectorSubscriptions)
+          .where(
+            and(
+              eq(connectorSubscriptions.kind, "icloud_mail_idle"),
+              inArray(connectorSubscriptions.status, ["pending", "active", "failed"]),
+              or(
+                isNull(connectorSubscriptions.nextAttemptAt),
+                lte(connectorSubscriptions.nextAttemptAt, claimedAt),
+              ),
+              or(
+                isNull(connectorSubscriptions.leaseClaimId),
+                lte(connectorSubscriptions.leaseExpiresAt, claimedAt),
+              ),
+            ),
+          )
+          .orderBy(asc(connectorSubscriptions.nextAttemptAt), asc(connectorSubscriptions.updatedAt))
+          .limit(limit)
+          .for("update", { skipLocked: true });
+        const claimed = [];
+        for (const subscription of due) {
+          const claimId = randomUUID();
+          const [row] = await transaction
+            .update(connectorSubscriptions)
+            .set({
+              leaseClaimId: claimId,
+              leaseExpiresAt: new Date(claimedAt.getTime() + 30 * 60_000),
+              status: "active",
+              updatedAt: claimedAt,
+            })
+            .where(eq(connectorSubscriptions.id, subscription.id))
+            .returning();
+          if (row) claimed.push({ ...row, claimId });
+        }
+        return claimed;
+      });
+      const result = { claimed: claims.length, failed: 0, skipped: 0, succeeded: 0 };
+      await Promise.all(
+        claims.map(async (subscription) => {
+          const [account] = await db
+            .select()
+            .from(calendarAccounts)
+            .where(eq(calendarAccounts.id, subscription.accountId))
+            .limit(1);
+          if (!account?.encryptedCredentials || account.syncRecovery === "reconnect") {
+            await db
+              .update(connectorSubscriptions)
+              .set({
+                leaseClaimId: null,
+                leaseExpiresAt: null,
+                nextAttemptAt: null,
+                status: "stopped",
+                updatedAt: now(),
+              })
+              .where(
+                and(
+                  eq(connectorSubscriptions.id, subscription.id),
+                  eq(connectorSubscriptions.leaseClaimId, subscription.claimId),
+                ),
+              );
+            result.skipped += 1;
+            return;
+          }
+          try {
+            const credentials = decryptJson<ICloudCredentials>(
+              account.encryptedCredentials,
+              encryptionKey,
+            );
+            await icloud.listenForMailChanges?.(
+              credentials,
+              () => this.enqueue(account.id, "notification"),
+              input.signal ? { signal: input.signal } : undefined,
+            );
+            await db
+              .update(connectorSubscriptions)
+              .set({
+                failureCount: 0,
+                leaseClaimId: null,
+                leaseExpiresAt: null,
+                nextAttemptAt: new Date(now().getTime() + 5_000),
+                safeFailureCode: null,
+                status: "active",
+                updatedAt: now(),
+              })
+              .where(
+                and(
+                  eq(connectorSubscriptions.id, subscription.id),
+                  eq(connectorSubscriptions.leaseClaimId, subscription.claimId),
+                ),
+              );
+            result.succeeded += 1;
+          } catch (error) {
+            const failureCount = subscription.failureCount + 1;
+            if (error instanceof ConnectorError && error.disposition === "reconnect") {
+              await db
+                .update(calendarAccounts)
+                .set({
+                  nextSyncAt: null,
+                  syncError: "Reconnect this iCloud account to resume syncing.",
+                  syncErrorCategory: "authorization",
+                  syncErrorCode: error.code,
+                  syncFailureCount: sql`${calendarAccounts.syncFailureCount} + 1`,
+                  syncRecovery: "reconnect",
+                  syncStatus: "error",
+                  updatedAt: now(),
+                })
+                .where(eq(calendarAccounts.id, account.id));
+            }
+            await db
+              .update(connectorSubscriptions)
+              .set({
+                failureCount,
+                leaseClaimId: null,
+                leaseExpiresAt: null,
+                nextAttemptAt: input.signal?.aborted ? now() : retryAt(failureCount),
+                safeFailureCode:
+                  error instanceof ConnectorError ? error.code : "icloud_idle_session_failed",
+                status: input.signal?.aborted ? "active" : "failed",
+                updatedAt: now(),
+              })
+              .where(
+                and(
+                  eq(connectorSubscriptions.id, subscription.id),
+                  eq(connectorSubscriptions.leaseClaimId, subscription.claimId),
+                ),
+              );
+            if (input.signal?.aborted) result.skipped += 1;
+            else result.failed += 1;
+          }
+        }),
+      );
+      return result;
     },
 
     async renewDueSubscriptions(

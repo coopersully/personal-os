@@ -89,6 +89,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
     userRowsScanned: number;
   }>;
   dispatchDueAutomations: () => Promise<void>;
+  superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
     attempted: number;
     failed: number;
@@ -218,6 +219,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       : {}),
     googleRedirectUri: dependencies.config.googleRedirectUri,
     icloud: dependencies.icloud ?? createICloudConnector(),
+    ...(dependencies.config.icloudMailIdleConcurrency
+      ? { icloudMailIdleConcurrency: dependencies.config.icloudMailIdleConcurrency }
+      : {}),
+    ...(dependencies.config.icloudMailIdleEnabled ? { icloudMailIdleEnabled: true } : {}),
     now,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     observeRecoveryFailure: (entry) =>
@@ -1090,6 +1095,28 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         skipped: scheduled.skipped,
         succeeded: triggered.succeeded + scheduled.succeeded,
       };
+    },
+    async superviseICloudMail() {
+      if (!dependencies.config.icloudMailIdleEnabled) return;
+      const signal = dependencies.runtimeLifecycle?.signal;
+      if (!signal) {
+        await connectors.runICloudIdlePass();
+        return;
+      }
+      while (!signal?.aborted) {
+        await connectors.runICloudIdlePass();
+        await new Promise<void>((resolveDelay) => {
+          const timeout = setTimeout(resolveDelay, 5_000);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timeout);
+              resolveDelay();
+            },
+            { once: true },
+          );
+        });
+      }
     },
     async syncDueFinances() {
       return finances.syncDuePlaidAccounts();

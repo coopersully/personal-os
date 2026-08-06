@@ -32,12 +32,16 @@ type ImapClient = Pick<
   | "close"
   | "fetch"
   | "getMailboxLock"
+  | "idle"
   | "list"
   | "logout"
+  | "mailboxOpen"
   | "messageFlagsAdd"
   | "messageFlagsRemove"
   | "messageMove"
   | "mailbox"
+  | "on"
+  | "removeListener"
 >;
 
 type ICloudConnectorOptions = {
@@ -116,6 +120,61 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
   }
 
   return {
+    async listenForMailChanges(credentials, onChange, operation) {
+      throwIfProviderOperationCancelled(operation);
+      const client = imapFactory(credentials);
+      let connected = false;
+      let closed = false;
+      let settleEvent: (() => void) | undefined;
+      let rejectEvent: ((error: Error) => void) | undefined;
+      const eventEnd = new Promise<void>((resolveEvent, reject) => {
+        settleEvent = resolveEvent;
+        rejectEvent = reject;
+      });
+      const signalChange = () => {
+        void Promise.resolve(onChange()).catch(() => undefined);
+      };
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        try {
+          client.close();
+        } catch {
+          // Closing an already-failed IDLE socket is best effort.
+        }
+        settleEvent?.();
+      };
+      const providerClosed = () => settleEvent?.();
+      const providerFailed = (error: Error) => rejectEvent?.(error);
+      const abort = () => close();
+      const sessionTimeout = setTimeout(close, 25 * 60_000);
+      operation?.signal?.addEventListener("abort", abort, { once: true });
+      client.on("exists", signalChange);
+      client.on("expunge", signalChange);
+      client.on("flags", signalChange);
+      client.on("close", providerClosed);
+      client.on("error", providerFailed);
+      try {
+        await client.connect();
+        connected = true;
+        throwIfProviderOperationCancelled(operation);
+        await client.mailboxOpen("INBOX");
+        await Promise.race([client.idle().then(() => undefined), eventEnd]);
+      } catch (error) {
+        if (!operation?.signal?.aborted) throw providerError("mail", error);
+      } finally {
+        clearTimeout(sessionTimeout);
+        operation?.signal?.removeEventListener("abort", abort);
+        client.removeListener("exists", signalChange);
+        client.removeListener("expunge", signalChange);
+        client.removeListener("flags", signalChange);
+        client.removeListener("close", providerClosed);
+        client.removeListener("error", providerFailed);
+        if (operation?.signal?.aborted || closed) close();
+        else if (connected) await client.logout();
+      }
+    },
+
     async createEvent(credentials, remoteCalendarId, input) {
       const client = await dav(credentials);
       const calendar = await calendarByUrl(client, remoteCalendarId);

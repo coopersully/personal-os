@@ -316,6 +316,11 @@ export type ICloudConnector = {
     credentials: ICloudCredentials,
     operation?: ProviderOperationOptions,
   ) => Promise<RemoteCalendar[]>;
+  listenForMailChanges?: (
+    credentials: ICloudCredentials,
+    onChange: () => Promise<void> | void,
+    operation?: ProviderOperationOptions,
+  ) => Promise<void>;
   sendMail?: (credentials: ICloudCredentials, input: SendRemoteMailInput) => Promise<void>;
   updateMailThread?: (
     credentials: ICloudCredentials,

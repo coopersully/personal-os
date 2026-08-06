@@ -34,6 +34,8 @@ describe("API configuration", () => {
       googleGmailPushEnabled: false,
       googleGmailPushServiceAccount: "",
       googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
+      icloudMailIdleConcurrency: 5,
+      icloudMailIdleEnabled: false,
       logLevel: "info",
       mcpResourceUrl: "https://api.example.com/mcp",
       port: 8788,

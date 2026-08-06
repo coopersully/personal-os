@@ -88,6 +88,53 @@ function connector(
 }
 
 describe("iCloud connector", () => {
+  it("uses a bounded abortable IMAP IDLE session only as a change signal", async () => {
+    const listeners = new Map<string, Set<(...args: unknown[]) => void>>();
+    let finishIdle: (() => void) | undefined;
+    const idle = new Promise<void>((resolveIdle) => {
+      finishIdle = resolveIdle;
+    });
+    const imap = {
+      close: vi.fn(() => finishIdle?.()),
+      connect: vi.fn(async () => undefined),
+      idle: vi.fn(async () => idle),
+      logout: vi.fn(async () => undefined),
+      mailboxOpen: vi.fn(async () => ({ path: "INBOX" })),
+      on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+        const registered = listeners.get(event) ?? new Set();
+        registered.add(listener);
+        listeners.set(event, registered);
+        return imap;
+      }),
+      removeListener: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+        listeners.get(event)?.delete(listener);
+        return imap;
+      }),
+    };
+    const { value } = connector(davClient(), imap);
+    if (!value.listenForMailChanges) throw new Error("iCloud IDLE capability is missing.");
+    const controller = new AbortController();
+    const onChange = vi.fn(async () => undefined);
+    const listening = value.listenForMailChanges(credentials, onChange, {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(imap.idle).toHaveBeenCalledOnce());
+    listeners.get("exists")?.forEach((listener) => {
+      listener({ count: 2 });
+    });
+    listeners.get("expunge")?.forEach((listener) => {
+      listener({ seq: 1 });
+    });
+    listeners.get("flags")?.forEach((listener) => {
+      listener({ seq: 1 });
+    });
+    await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(3));
+    controller.abort();
+    await expect(listening).resolves.toBeUndefined();
+    expect(imap.mailboxOpen).toHaveBeenCalledWith("INBOX");
+    expect(imap.close).toHaveBeenCalledOnce();
+    expect(imap.removeListener).toHaveBeenCalledTimes(5);
+  });
   it("extracts supported conference links from CalDAV event descriptions", async () => {
     const meetingIcs = timedIcs.replace(
       "DESCRIPTION:Notes",

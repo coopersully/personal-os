@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import type { GoogleConnector, GoogleCredentials } from "@personal-os/connectors";
+import type { GoogleConnector, GoogleCredentials, ICloudConnector } from "@personal-os/connectors";
 import { ConnectorError } from "@personal-os/connectors";
 import {
   calendarAccounts,
@@ -235,6 +235,112 @@ describe.sequential("connector notification service", () => {
       .from(connectorSubscriptions)
       .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
     expect(stopped?.status).toBe("stopped");
+  });
+
+  it("leases one bounded iCloud IDLE listener and leaves polling healthy on listener failure", async () => {
+    const [owner] = await database.db
+      .select({ userId: calendarAccounts.userId })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountId));
+    if (!owner) throw new Error("Notification owner was not found.");
+    const [icloudAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        encryptedCredentials: encryptJson(
+          { appSpecificPassword: "xxxx-xxxx-xxxx-xxxx", email: "idle@icloud.com" },
+          encryptionKey,
+        ),
+        label: "iCloud IDLE",
+        mailEnabled: true,
+        provider: "icloud",
+        providerAccountId: "idle@icloud.com",
+        userId: owner.userId,
+      })
+      .returning();
+    if (!icloudAccount) throw new Error("iCloud IDLE account was not created.");
+    let entered: (() => void) | undefined;
+    const started = new Promise<void>((resolveStarted) => {
+      entered = resolveStarted;
+    });
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolveHeld) => {
+      release = resolveHeld;
+    });
+    const listenForMailChanges = vi.fn(async (_credentials, onChange) => {
+      entered?.();
+      await onChange();
+      await held;
+    });
+    const icloud = { listenForMailChanges } as unknown as ICloudConnector;
+    const idleService = createConnectorNotificationService({
+      db: database.db,
+      encryptionKey,
+      icloud,
+      icloudMailIdleConcurrency: 1,
+      icloudMailIdleEnabled: true,
+      now: () => timestamp,
+    });
+    const secondIdleService = createConnectorNotificationService({
+      db: database.db,
+      encryptionKey,
+      icloud,
+      icloudMailIdleConcurrency: 1,
+      icloudMailIdleEnabled: true,
+      now: () => timestamp,
+    });
+    const firstPass = idleService.runICloudIdlePass();
+    await started;
+    await expect(secondIdleService.runICloudIdlePass()).resolves.toEqual({
+      claimed: 0,
+      failed: 0,
+      skipped: 0,
+      succeeded: 0,
+    });
+    release?.();
+    await expect(firstPass).resolves.toMatchObject({ claimed: 1, succeeded: 1 });
+    expect(listenForMailChanges).toHaveBeenCalledOnce();
+    await expect(
+      database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, icloudAccount.id)),
+    ).resolves.toEqual([expect.objectContaining({ reason: "notification" })]);
+
+    vi.mocked(listenForMailChanges).mockRejectedValueOnce(new Error("socket closed"));
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(connectorSubscriptions.accountId, icloudAccount.id));
+    await expect(idleService.runICloudIdlePass()).resolves.toMatchObject({ failed: 1 });
+    const [healthyAccount] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, icloudAccount.id));
+    expect(healthyAccount).toMatchObject({ syncError: null, syncRecovery: null });
+    vi.mocked(listenForMailChanges).mockRejectedValueOnce(
+      new ConnectorError({
+        category: "authorization",
+        code: "icloud_mail_authorization_failed",
+        disposition: "reconnect",
+        message: "iCloud Mail authorization is no longer valid.",
+        status: 401,
+      }),
+    );
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(connectorSubscriptions.accountId, icloudAccount.id));
+    await expect(idleService.runICloudIdlePass()).resolves.toMatchObject({ failed: 1 });
+    const [reconnectAccount] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, icloudAccount.id));
+    expect(reconnectAccount).toMatchObject({
+      syncError: "Reconnect this iCloud account to resume syncing.",
+      syncRecovery: "reconnect",
+    });
+    await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, icloudAccount.id));
   });
 
   it("coalesces bursts with bounded count and reason priority", async () => {

@@ -218,6 +218,16 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       "/v1/connectors/google/callback": {
         get: { responses: { 303: { description: "Safe Google authorization outcome redirect" } } },
       },
+      "/v1/connectors/google/gmail/notifications": {
+        post: {
+          responses: {
+            204: { description: "Authenticated Gmail change signal durably accepted" },
+            401: { description: "Pub/Sub identity rejected" },
+            404: { description: "Notification route or subscription unavailable" },
+            503: { description: "Durable acknowledgement unavailable; provider should retry" },
+          },
+        },
+      },
       "/v1/connectors/authorization-attempts/{id}": {
         get: {
           security,

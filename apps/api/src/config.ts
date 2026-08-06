@@ -28,6 +28,11 @@ const configSchema = z
     EMAIL_FROM: z.string().default(""),
     GOOGLE_CLIENT_ID: z.string().default(""),
     GOOGLE_CLIENT_SECRET: z.string().default(""),
+    GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION: z.string().default(""),
+    GOOGLE_GMAIL_PUBSUB_TOPIC: z.string().default(""),
+    GOOGLE_GMAIL_PUSH_AUDIENCE: z.string().default(""),
+    GOOGLE_GMAIL_PUSH_ENABLED: z.enum(["true", "false"]).default("false"),
+    GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT: z.string().default(""),
     GOOGLE_REDIRECT_URI: z.url(),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     MCP_RESOURCE_URL: z.url().optional(),
@@ -58,6 +63,31 @@ const configSchema = z
           "AGENT_SKILL_SOURCE_URL must include AGENT_SKILL_REVISION so the guide identifies a release instead of a generic latest endpoint.",
         path: ["AGENT_SKILL_SOURCE_URL"],
       });
+    }
+    if (value.GOOGLE_GMAIL_PUSH_ENABLED === "true") {
+      for (const key of [
+        "GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION",
+        "GOOGLE_GMAIL_PUBSUB_TOPIC",
+        "GOOGLE_GMAIL_PUSH_AUDIENCE",
+        "GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT",
+      ] as const) {
+        if (!value[key].trim()) {
+          context.addIssue({
+            code: "custom",
+            message: `${key} is required when Gmail push is enabled.`,
+            path: [key],
+          });
+        }
+      }
+      try {
+        if (new URL(value.GOOGLE_GMAIL_PUSH_AUDIENCE).protocol !== "https:") throw new Error();
+      } catch {
+        context.addIssue({
+          code: "custom",
+          message: "GOOGLE_GMAIL_PUSH_AUDIENCE must be an HTTPS URL.",
+          path: ["GOOGLE_GMAIL_PUSH_AUDIENCE"],
+        });
+      }
     }
     if (value.NODE_ENV !== "production") return;
     for (const key of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] as const) {
@@ -132,6 +162,11 @@ export type AppConfig = {
   encryptionKey: string;
   googleClientId: string;
   googleClientSecret: string;
+  googleGmailPubsubSubscription?: string;
+  googleGmailPubsubTopic?: string;
+  googleGmailPushAudience?: string;
+  googleGmailPushEnabled?: boolean;
+  googleGmailPushServiceAccount?: string;
   googleRedirectUri: string;
   logLevel: "debug" | "info" | "warn" | "error";
   mcpResourceUrl?: string;
@@ -178,6 +213,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     encryptionKey: value.APP_ENCRYPTION_KEY,
     googleClientId: value.GOOGLE_CLIENT_ID,
     googleClientSecret: value.GOOGLE_CLIENT_SECRET,
+    googleGmailPubsubSubscription: value.GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION,
+    googleGmailPubsubTopic: value.GOOGLE_GMAIL_PUBSUB_TOPIC,
+    googleGmailPushAudience: value.GOOGLE_GMAIL_PUSH_AUDIENCE,
+    googleGmailPushEnabled: value.GOOGLE_GMAIL_PUSH_ENABLED === "true",
+    googleGmailPushServiceAccount: value.GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT,
     googleRedirectUri: value.GOOGLE_REDIRECT_URI,
     logLevel: value.LOG_LEVEL,
     mcpResourceUrl: value.MCP_RESOURCE_URL ?? `${value.API_BASE_URL}/mcp`,

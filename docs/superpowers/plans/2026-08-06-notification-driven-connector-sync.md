@@ -377,24 +377,24 @@ git commit -m "feat: renew Google connector watches"
   `googleGmailPushAudience`, `googleGmailPushServiceAccount`.
 - `POST /v1/connectors/google/gmail/notifications` returns `204` only after durable trigger commit.
 
-- [ ] **Step 1: Write failing OIDC verification tests**
+- [x] **Step 1: Write failing OIDC verification tests**
 
 Using local ES256 test keys/JWKS, cover valid signature, exact `aud`, exact service-account email,
 `email_verified`, issuer, expiry, missing bearer token, algorithm confusion, and remote-JWKS timeout.
 Assert authentication errors reveal no account/subscription existence.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 Run: `pnpm vitest run apps/api/src/google-pubsub-auth.test.ts`
 
 Expected: FAIL because verifier and `jose` dependency are absent.
 
-- [ ] **Step 3: Add `jose` and implement verifier**
+- [x] **Step 3: Add `jose` and implement verifier**
 
 Use `createRemoteJWKSet` with Google's documented JWKS, `jwtVerify`, exact issuer/audience, and
 constant expected service-account email. Inject the JWKS verifier in tests; do not call the network.
 
-- [ ] **Step 4: Write failing config and webhook tests**
+- [x] **Step 4: Write failing config and webhook tests**
 
 Config must fail closed in production when Gmail push is enabled with any missing value. Webhook
 tests cover bounded JSON/base64 decoding, expected Pub/Sub subscription, mailbox-identity hash,
@@ -402,23 +402,23 @@ unknown account, duplicate/stale history ID, burst coalescing, malformed payload
 failure, and privacy canaries. Provider retryable server failure returns `503`; invalid/spoofed
 delivery returns generic `404` or `401` without account detail.
 
-- [ ] **Step 5: Run and verify RED**
+- [x] **Step 5: Run and verify RED**
 
 Run: `pnpm vitest run apps/api/src/config.test.ts apps/api/src/app.integration.test.ts`
 
 Expected: FAIL on missing config/route.
 
-- [ ] **Step 6: Implement bounded webhook route**
+- [x] **Step 6: Implement bounded webhook route**
 
 Authenticate before body processing, cap request bytes, parse the Pub/Sub envelope with Zod, HMAC
 the normalized mailbox identity using the application privacy key, find the active subscription,
 advance only safe cursor metadata, enqueue one notification trigger, then return `204`.
 
-- [ ] **Step 7: Update OpenAPI and run GREEN**
+- [x] **Step 7: Update OpenAPI and run GREEN**
 
 Run the commands from Steps 2 and 5. Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/api/package.json pnpm-lock.yaml apps/api/src/google-pubsub-auth.ts apps/api/src/google-pubsub-auth.test.ts apps/api/src/config.ts apps/api/src/config.test.ts apps/api/src/app.ts apps/api/src/app.integration.test.ts apps/api/src/openapi.ts

@@ -3578,6 +3578,10 @@ export function createConnectorService({
       return notifications.renewDueSubscriptions(options);
     },
 
+    receiveGmailNotification(mailboxIdentity: string, historyId: string) {
+      return notifications.receiveGmailNotification(mailboxIdentity, historyId);
+    },
+
     syncAccount,
     async syncDueAccounts(options: { concurrency?: number; limit?: number } = {}): Promise<{
       attempted: number;

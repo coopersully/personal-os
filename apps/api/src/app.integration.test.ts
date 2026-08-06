@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   GoogleConnector,
@@ -12,6 +12,8 @@ import {
   automationRuns,
   calendarAccounts,
   calendarEvents,
+  connectorSubscriptions,
+  connectorSyncTriggers,
   createDatabaseClient,
   type DatabaseClient,
   domainProfiles,
@@ -133,6 +135,11 @@ describe.sequential("ilo API", () => {
         encryptionKey: Buffer.alloc(32, 1).toString("base64"),
         googleClientId: "",
         googleClientSecret: "",
+        googleGmailPubsubSubscription: "projects/ilo/subscriptions/gmail-push",
+        googleGmailPubsubTopic: "projects/ilo/topics/gmail-push",
+        googleGmailPushAudience: "https://api.example.com/v1/connectors/google/gmail/notifications",
+        googleGmailPushEnabled: true,
+        googleGmailPushServiceAccount: "pubsub@example.iam.gserviceaccount.com",
         googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
         logLevel: "info",
         port: 8787,
@@ -155,6 +162,7 @@ describe.sequential("ilo API", () => {
       log: logs,
       now: () => new Date("2026-07-13T12:00:00.000Z"),
       runtimeLifecycle: createRuntimeLifecycle(),
+      verifyGooglePubSubToken: vi.fn(async () => ({ subject: "pubsub-push" })),
       x: xConnector,
     });
   }, 120_000);
@@ -182,6 +190,121 @@ describe.sequential("ilo API", () => {
   async function payload(response: Response) {
     return response.status === 204 ? null : response.json();
   }
+
+  it("authenticates Gmail push and acknowledges only after durable coalescing", async () => {
+    const [pushUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Gmail Push",
+        email: "gmail-push-user@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!pushUser) throw new Error("Gmail push user was not created.");
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        email: "push-mailbox@example.com",
+        label: "Push Mailbox",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "gmail-push-account",
+        userId: pushUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Gmail push account was not created.");
+    const privacyKey = Buffer.alloc(32, 1).toString("base64");
+    await database.db.insert(connectorSubscriptions).values({
+      accountId: account.id,
+      kind: "gmail_mailbox",
+      provider: "google",
+      providerCursor: "100",
+      remoteIdentityHash: createHmac("sha256", Buffer.from(privacyKey, "base64"))
+        .update("push-mailbox@example.com")
+        .digest("hex"),
+      status: "active",
+    });
+    const envelope = (emailAddress: string, historyId: string) => ({
+      message: {
+        data: Buffer.from(JSON.stringify({ emailAddress, historyId })).toString("base64"),
+        messageId: `message-${historyId}`,
+      },
+      subscription: "projects/ilo/subscriptions/gmail-push",
+    });
+    logs.mockClear();
+
+    const accepted = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "101"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(accepted.status).toBe(204);
+    expect(await accepted.text()).toBe("");
+    await expect(
+      database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([expect.objectContaining({ notificationCount: 1, reason: "notification" })]);
+    const duplicate = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "101"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(duplicate.status).toBe(204);
+    await expect(
+      database.db
+        .select({ notificationCount: connectorSyncTriggers.notificationCount })
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([{ notificationCount: 1 }]);
+    const unknown = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("unknown@example.com", "102"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(unknown.status).toBe(404);
+    const unauthorized = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "102"),
+      headers: { authorization: "invalid" },
+    });
+    expect(unauthorized.status).toBe(401);
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_gmail_trigger_for_test() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced Gmail trigger failure';
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_gmail_trigger_for_test
+      BEFORE UPDATE ON connector_sync_triggers
+      FOR EACH ROW EXECUTE FUNCTION fail_gmail_trigger_for_test();
+    `);
+    try {
+      const unavailable = await request("/v1/connectors/google/gmail/notifications", {
+        auth: "none",
+        body: envelope("push-mailbox@example.com", "102"),
+        headers: { authorization: "Bearer valid-pubsub-token" },
+      });
+      expect(unavailable.status).toBe(503);
+      await expect(
+        database.db
+          .select({ providerCursor: connectorSubscriptions.providerCursor })
+          .from(connectorSubscriptions)
+          .where(eq(connectorSubscriptions.accountId, account.id)),
+      ).resolves.toEqual([{ providerCursor: "101" }]);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_gmail_trigger_for_test ON connector_sync_triggers;
+        DROP FUNCTION IF EXISTS fail_gmail_trigger_for_test();
+      `);
+    }
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("push-mailbox@example.com");
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("valid-pubsub-token");
+    await database.db.delete(users).where(eq(users.id, pushUser.id));
+  });
 
   it("runs the Finance maintenance entry points", async () => {
     await expect(app.backfillFinanceCashflowInsights()).resolves.toEqual({ processed: 0 });

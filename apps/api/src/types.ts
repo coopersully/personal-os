@@ -28,6 +28,7 @@ export type AppDependencies = {
   log?: (entry: RequestLog) => void;
   now?: () => Date;
   runtimeLifecycle?: RuntimeLifecycle;
+  verifyGooglePubSubToken?: (token: string) => Promise<{ subject: string | null }>;
   x?: XConnector;
 };
 

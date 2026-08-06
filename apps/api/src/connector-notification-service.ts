@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
 import type { GoogleConnector, GoogleCredentials } from "@personal-os/connectors";
 import { ConnectorError } from "@personal-os/connectors";
 import {
@@ -296,6 +296,11 @@ export function createConnectorNotificationService({
                 leaseExpiresAt: null,
                 nextAttemptAt: null,
                 providerCursor,
+                remoteIdentityHash: account.email
+                  ? createHmac("sha256", Buffer.from(encryptionKey, "base64"))
+                      .update(account.email.trim().toLowerCase())
+                      .digest("hex")
+                  : null,
                 remoteResourceId,
                 renewAfter,
                 safeFailureCode: null,
@@ -353,6 +358,49 @@ export function createConnectorNotificationService({
         Array.from({ length: Math.min(concurrency, claims.length) }, async () => worker()),
       );
       return result;
+    },
+
+    async receiveGmailNotification(
+      mailboxIdentity: string,
+      historyId: string,
+    ): Promise<"accepted" | "unknown"> {
+      if (!encryptionKey) return "unknown";
+      const remoteIdentityHash = createHmac("sha256", Buffer.from(encryptionKey, "base64"))
+        .update(mailboxIdentity.trim().toLowerCase())
+        .digest("hex");
+      return db.transaction(async (transaction) => {
+        const [subscription] = await transaction
+          .select()
+          .from(connectorSubscriptions)
+          .where(
+            and(
+              eq(connectorSubscriptions.kind, "gmail_mailbox"),
+              eq(connectorSubscriptions.remoteIdentityHash, remoteIdentityHash),
+              inArray(connectorSubscriptions.status, ["active", "renewing"]),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!subscription) return "unknown";
+        const current = subscription.providerCursor;
+        const isNewer =
+          current === null ||
+          (/^\d+$/u.test(current) &&
+            /^\d+$/u.test(historyId) &&
+            BigInt(historyId) > BigInt(current));
+        await transaction
+          .update(connectorSubscriptions)
+          .set({
+            ...(isNewer ? { providerCursor: historyId } : {}),
+            lastNotificationAt: now(),
+            updatedAt: now(),
+          })
+          .where(eq(connectorSubscriptions.id, subscription.id));
+        if (isNewer) {
+          await this.enqueue(subscription.accountId, "notification", now(), transaction);
+        }
+        return "accepted";
+      });
     },
 
     async claimDueTriggers(options: { limit?: number } = {}): Promise<ClaimedConnectorTrigger[]> {

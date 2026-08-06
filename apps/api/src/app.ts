@@ -44,6 +44,7 @@ import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createFinanceService } from "./finance-service.js";
 import { createGoalsService } from "./goals-service.js";
+import { createGooglePubSubAuth } from "./google-pubsub-auth.js";
 import { createMailService } from "./mail-service.js";
 import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
@@ -106,6 +107,17 @@ const googleCallbackSchema = z.object({
   error: z.string().min(1).optional(),
   iss: z.string().min(1).optional(),
   state: z.string().min(1),
+});
+const gmailPushEnvelopeSchema = z.object({
+  message: z.object({
+    data: z.string().min(1).max(16_384),
+    messageId: z.string().min(1).max(256),
+  }),
+  subscription: z.string().min(1).max(512),
+});
+const gmailPushDataSchema = z.object({
+  emailAddress: z.email().max(320),
+  historyId: z.string().regex(/^\d+$/u).max(64),
 });
 const oauthAuthorizeSchema = z.object({
   client_id: z.string().min(1),
@@ -176,10 +188,23 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       now,
       redirectUri: dependencies.config.googleRedirectUri,
     });
+  const verifyGooglePubSubToken =
+    dependencies.verifyGooglePubSubToken ??
+    (dependencies.config.googleGmailPushEnabled &&
+    dependencies.config.googleGmailPushAudience &&
+    dependencies.config.googleGmailPushServiceAccount
+      ? createGooglePubSubAuth({
+          audience: dependencies.config.googleGmailPushAudience,
+          serviceAccount: dependencies.config.googleGmailPushServiceAccount,
+        })
+      : null);
   const connectors = createConnectorService({
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
     google,
+    ...(dependencies.config.googleGmailPushEnabled && dependencies.config.googleGmailPubsubTopic
+      ? { googleGmailTopicName: dependencies.config.googleGmailPubsubTopic }
+      : {}),
     googleRedirectUri: dependencies.config.googleRedirectUri,
     icloud: dependencies.icloud ?? createICloudConnector(),
     now,
@@ -471,6 +496,46 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       state: query.state,
     });
     return connectorCallbackRedirect(context, result.returnPath, result.attemptId);
+  });
+  app.post("/v1/connectors/google/gmail/notifications", async (context) => {
+    if (
+      !dependencies.config.googleGmailPushEnabled ||
+      !verifyGooglePubSubToken ||
+      !dependencies.config.googleGmailPubsubSubscription
+    ) {
+      return context.body(null, 404);
+    }
+    const authorizationHeader = context.req.header("authorization") ?? "";
+    const match = /^Bearer ([A-Za-z0-9._~-]+)$/u.exec(authorizationHeader);
+    if (!match?.[1]) return context.body(null, 401);
+    try {
+      await verifyGooglePubSubToken(match[1]);
+    } catch {
+      return context.body(null, 401);
+    }
+    const contentLength = Number(context.req.header("content-length") ?? "0");
+    if (Number.isFinite(contentLength) && contentLength > 32_768) return context.body(null, 413);
+    const raw = await context.req.text();
+    if (Buffer.byteLength(raw) > 32_768) return context.body(null, 413);
+    let envelope: z.infer<typeof gmailPushEnvelopeSchema>;
+    let data: z.infer<typeof gmailPushDataSchema>;
+    try {
+      envelope = gmailPushEnvelopeSchema.parse(JSON.parse(raw));
+      if (envelope.subscription !== dependencies.config.googleGmailPubsubSubscription) {
+        return context.body(null, 404);
+      }
+      const decoded = Buffer.from(envelope.message.data, "base64");
+      if (decoded.length > 8_192) return context.body(null, 413);
+      data = gmailPushDataSchema.parse(JSON.parse(decoded.toString("utf8")));
+    } catch {
+      return context.body(null, 400);
+    }
+    try {
+      const result = await connectors.receiveGmailNotification(data.emailAddress, data.historyId);
+      return context.body(null, result === "accepted" ? 204 : 404);
+    } catch {
+      return context.body(null, 503);
+    }
   });
   app.get("/v1/x-bookmarks/callback", async (context) => {
     const parsed = xCallbackSchema.safeParse(context.req.query());

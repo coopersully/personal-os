@@ -342,6 +342,15 @@ and never reads or prints parameter values.
 
 Forward `X-Request-Id` from the edge when present. Do not log authorization headers, cookies, OAuth codes, encrypted credentials, or raw provider payloads.
 
+The existence of connector alarms in Terraform is not evidence that they are active in production.
+Before publishing images, the production deploy reads the live API log group and fails closed unless
+the exact connector failure/configuration metric filters and alarms are present with their expected
+patterns, transformations, thresholds, periods, missing-data behavior, and notification actions.
+The hourly production-health workflow repeats the same read-only check so later infrastructure drift
+uses the existing production-health incident path. If this preflight fails, apply and review the
+production Terraform before retrying the application deploy; do not bypass the check or infer
+coverage from a successful API health request.
+
 ## Connector configuration
 
 Production's public load balancer has a 60-second idle timeout. Individual provider network calls

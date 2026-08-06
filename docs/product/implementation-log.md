@@ -28,6 +28,11 @@ This log records delivered vertical slices against the master plan. It does not 
   unverified-app warning. Provider publishing, restricted-scope verification, and the Gmail
   security-assessment gate are tracked in [issue #84](https://github.com/coopersully/personal-os/issues/84)
   and remain production release requirements rather than being inferred from valid credentials.
+- Closed the infrastructure-evidence gap found during rollout: production deploy and hourly health
+  now fail closed unless the exact live connector failure/configuration filters and alarms match
+  their redacted patterns, metrics, thresholds, periods, missing-data policy, and notification
+  routes. A separate inline policy gives the deployment role only read access to metric-filter
+  metadata without coupling its apply to task-definition or edge-resource changes.
 
 ## 2026-08-02 — Agent-owned setup protocol
 

@@ -196,3 +196,17 @@ resource "aws_iam_role_policy" "github_deploy" {
   role   = aws_iam_role.github_deploy.id
   policy = data.aws_iam_policy_document.github_deploy.json
 }
+
+data "aws_iam_policy_document" "github_connector_observability" {
+  statement {
+    sid       = "ReadConnectorMetricFilters"
+    actions   = ["logs:DescribeMetricFilters"]
+    resources = ["arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name}-api:*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_connector_observability" {
+  name   = "${local.name}-connector-observability-read"
+  role   = aws_iam_role.github_deploy.id
+  policy = data.aws_iam_policy_document.github_connector_observability.json
+}

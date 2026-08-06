@@ -172,11 +172,12 @@ async function readGoogleOAuthErrorCode(response: Response): Promise<GoogleOAuth
     return null;
   }
 
-  const reader = response.body.getReader();
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   const decoder = new TextDecoder();
   let serialized = "";
   let bytes = 0;
   try {
+    reader = response.body.getReader();
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
@@ -189,7 +190,7 @@ async function readGoogleOAuthErrorCode(response: Response): Promise<GoogleOAuth
     }
     serialized += decoder.decode();
   } catch {
-    await reader.cancel().catch(() => undefined);
+    await reader?.cancel().catch(() => undefined);
     return null;
   }
 

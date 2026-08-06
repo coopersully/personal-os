@@ -105,6 +105,37 @@ for (const invalidDefinition of [
       },
     ],
   },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      validRuntimeTaskDefinition.containerDefinitions[0],
+      structuredClone(validRuntimeTaskDefinition.containerDefinitions[0]),
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        secrets: [
+          ...validRuntimeTaskDefinition.containerDefinitions[0].secrets,
+          structuredClone(validRuntimeTaskDefinition.containerDefinitions[0].secrets[0]),
+        ],
+      },
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        secrets: [
+          ...validRuntimeTaskDefinition.containerDefinitions[0].secrets,
+          structuredClone(validRuntimeTaskDefinition.containerDefinitions[0].secrets[1]),
+        ],
+      },
+    ],
+  },
 ]) {
   const invalidRuntimeCheck = checkRuntimeTaskDefinition(invalidDefinition);
   if (invalidRuntimeCheck.status === 0) {
@@ -207,6 +238,11 @@ requireMatch(
 );
 requireMatch(
   workflow,
+  /api_suspended_desired=[\s\S]*?desiredCount[\s\S]*?api_suspended_running=[\s\S]*?runningCount[\s\S]*?api_suspended_pending=[\s\S]*?pendingCount[\s\S]*?test "\$api_recovery_entry" = "true"[\s\S]*?test "\$api_suspended_desired" = "0"[\s\S]*?test "\$api_suspended_running" = "0"[\s\S]*?test "\$api_suspended_pending" = "0"/,
+  "a second exact zero-state proof immediately before a recovery candidate can launch",
+);
+requireMatch(
+  workflow,
   /api_service_drain_attempted=true[\s\S]*?if test "\$api_recovery_entry" != "true"; then[\s\S]*?aws ecs update-service[\s\S]*?--desired-count 0[\s\S]*?aws ecs wait services-stable[\s\S]*?fi[\s\S]*?api_counts=/,
   "direct zero-state verification during failed-deployment recovery without an unsatisfiable generic stability wait",
 );
@@ -257,8 +293,8 @@ requireMatch(
 );
 requireMatch(
   workflowSource,
-  /api_latest_definition="\$\([\s\S]*?describe-task-definition[\s\S]*?\)"[\s\S]*?node \.github\/scripts\/check-runtime-task-definition\.mjs <<<"\$api_latest_definition"[\s\S]*?api_live_service="\$\(/,
-  "Google runtime wiring validation before any API deployment-state inspection or mutation",
+  /api_latest_definition="\$\([\s\S]*?describe-task-definition[\s\S]*?\)"[\s\S]*?api_latest_definition_arn="\$\([\s\S]*?\.taskDefinitionArn[\s\S]*?\)"[\s\S]*?node \.github\/scripts\/check-runtime-task-definition\.mjs <<<"\$api_latest_definition"[\s\S]*?register_task \\\n+ {12}"\$API_SERVICE" \\\n+ {12}api[\s\S]*?api_task_definition \\\n+ {12}"\$api_latest_definition_arn"/,
+  "Google runtime wiring validation bound to the exact API revision later cloned",
 );
 requireMatch(
   workflow,

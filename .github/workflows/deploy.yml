@@ -237,6 +237,10 @@ jobs:
               --query taskDefinition \
               --output json
           )"
+          api_latest_definition_arn="$(
+            jq -er '.taskDefinitionArn | select(type == "string" and length > 0)' \
+              <<<"$api_latest_definition"
+          )"
           node .github/scripts/check-runtime-task-definition.mjs <<<"$api_latest_definition"
           api_previous_restore_state="$(
             jq -r '
@@ -251,9 +255,6 @@ jobs:
               | select(.name == "api")
               | [.environment[]? | select(.name == "ILO_DEPLOYMENT_RECOVERY_MARKER") | .value][0] // ""
             ' <<<"$api_latest_definition"
-          )"
-          api_latest_definition_arn="$(
-            jq -r '.taskDefinitionArn // ""' <<<"$api_latest_definition"
           )"
           api_live_service="$(
             aws ecs describe-services \
@@ -354,12 +355,13 @@ jobs:
             local container="$2"
             local image="$3"
             local output_name="$4"
+            local source_definition="${5:-$family}"
             local task_file
             local registered_arn
             task_file="$(mktemp)"
 
             aws ecs describe-task-definition \
-              --task-definition "$family" \
+              --task-definition "$source_definition" \
               --output json |
               jq \
                 --arg container "$container" \
@@ -420,7 +422,8 @@ jobs:
             "$API_SERVICE" \
             api \
             "${API_ECR_REPOSITORY}:${RELEASE_TAG}" \
-            api_task_definition
+            api_task_definition \
+            "$api_latest_definition_arn"
 
       - name: Deploy migration-capable API serially
         env:

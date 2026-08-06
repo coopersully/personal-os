@@ -60,21 +60,23 @@ describe("connector failure boundary", () => {
     });
     expect(JSON.stringify(revokedGrant)).not.toContain("raw provider detail");
 
-    const invalidClient = await connectorHttpError(
-      new Response(JSON.stringify({ error: "invalid_client", detail: "private" }), {
-        headers: { "content-type": "application/json" },
+    for (const oauthCode of ["invalid_client", "unauthorized_client", "redirect_uri_mismatch"]) {
+      const invalidConfiguration = await connectorHttpError(
+        new Response(JSON.stringify({ error: oauthCode, detail: "private" }), {
+          headers: { "content-type": "application/json" },
+          status: 400,
+        }),
+        "google",
+      );
+      expect(invalidConfiguration).toMatchObject({
+        category: "configuration",
+        code: "google_configuration_invalid",
+        disposition: "operator",
+        message: "Google is not configured correctly.",
         status: 400,
-      }),
-      "google",
-    );
-    expect(invalidClient).toMatchObject({
-      category: "configuration",
-      code: "google_configuration_invalid",
-      disposition: "operator",
-      message: "Google is not configured correctly.",
-      status: 400,
-    });
-    expect(JSON.stringify(invalidClient)).not.toContain("private");
+      });
+      expect(JSON.stringify(invalidConfiguration)).not.toContain("private");
+    }
   });
 
   it.each([
@@ -97,6 +99,24 @@ describe("connector failure boundary", () => {
     });
     expect(JSON.stringify(error)).not.toContain("provider_invented_code");
     expect(JSON.stringify(error)).not.toContain("padding");
+  });
+
+  it("fails closed when another reader has locked a Google response body", async () => {
+    const response = new Response(JSON.stringify({ error: "invalid_grant" }), {
+      headers: { "content-type": "application/json" },
+      status: 400,
+    });
+    const reader = response.body?.getReader();
+
+    const error = await connectorHttpError(response, "google");
+
+    expect(error).toMatchObject({
+      category: "rejected",
+      code: "google_request_rejected",
+      disposition: "operator",
+      status: 400,
+    });
+    await reader?.cancel();
   });
 
   it("honors only a bounded Retry-After value", async () => {

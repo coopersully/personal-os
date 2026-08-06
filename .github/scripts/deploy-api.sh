@@ -852,12 +852,26 @@ capture_interruptible aws ecs describe-services \
   --services "$API_SERVICE" \
   --output json
 api_suspended_service_state="$api_captured_output"
+api_suspended_desired="$(
+  jq -r '.services[0].desiredCount' <<<"$api_suspended_service_state"
+)"
 api_suspended_running="$(
   jq -r '.services[0].runningCount' <<<"$api_suspended_service_state"
 )"
 api_suspended_pending="$(
   jq -r '.services[0].pendingCount' <<<"$api_suspended_service_state"
 )"
+if {
+  test "$api_recovery_entry" = "true" &&
+    ! {
+      test "$api_suspended_desired" = "0" &&
+        test "$api_suspended_running" = "0" &&
+        test "$api_suspended_pending" = "0"
+    }
+}; then
+  echo "::error::The API left its proven zero state before recovery drain capture; refusing to launch the candidate."
+  false
+fi
 if test "$api_suspended_pending" != "0"; then
   echo "::error::The API service gained pending work before exact drain capture."
   false

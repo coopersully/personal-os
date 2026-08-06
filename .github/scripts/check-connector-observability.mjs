@@ -14,7 +14,7 @@ function awsJson(args, resultKey) {
   const result = spawnSync("aws", [...args, "--output", "json"], {
     encoding: "utf8",
     maxBuffer: 4 * 1024 * 1024,
-    timeout: 5_000,
+    timeout: 30_000,
   });
   if (result.signal !== null || result.status !== 0) fail("aws-read-failed");
 

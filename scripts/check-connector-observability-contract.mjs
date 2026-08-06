@@ -118,6 +118,9 @@ if (state.failOperation === operation) {
 if (state.hangOperation === operation) {
   setInterval(() => {}, 60_000);
 }
+if (state.delayAllOperations || state.delayOperation === operation) {
+  await new Promise((resolve) => setTimeout(resolve, state.delayMs));
+}
 if (operation === "logs describe-metric-filters") {
   process.stdout.write(JSON.stringify({ metricFilters: state.metricFilters }));
 } else if (operation === "cloudwatch describe-alarms") {
@@ -134,7 +137,7 @@ if (operation === "logs describe-metric-filters") {
     writeFileSync(statePath, JSON.stringify(state));
     return spawnSync("node", [checker], {
       encoding: "utf8",
-      timeout: 6_500,
+      timeout: 61_500,
       env: {
         ...process.env,
         ECS_CLUSTER: "personal-os-prod",
@@ -147,6 +150,31 @@ if (operation === "logs describe-metric-filters") {
   const valid = run(validState);
   if (valid.status !== 0 || !valid.stdout.includes("preflight passed")) {
     throw new Error(`Valid connector observability must pass: ${valid.stderr || valid.stdout}`);
+  }
+
+  const delayed = run({
+    ...validState,
+    delayMs: 7_000,
+    delayOperation: "logs describe-metric-filters",
+  });
+  if (delayed.status !== 0 || !delayed.stdout.includes("preflight passed")) {
+    throw new Error(
+      `A slow but responsive AWS read must remain within the operator budget: ${delayed.stderr || delayed.stdout}`,
+    );
+  }
+
+  const sequentiallyDelayed = run({
+    ...validState,
+    delayAllOperations: true,
+    delayMs: 16_000,
+  });
+  if (
+    sequentiallyDelayed.status !== 0 ||
+    !sequentiallyDelayed.stdout.includes("preflight passed")
+  ) {
+    throw new Error(
+      `Two slow but responsive AWS reads must fit the enclosing harness budget: ${sequentiallyDelayed.stderr || sequentiallyDelayed.stdout}`,
+    );
   }
 
   const invalidStates = [

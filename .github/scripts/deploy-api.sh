@@ -822,32 +822,56 @@ api_iac_deployment_configuration="$(
 # Stop and drain the old binary before the new task runs migrations.
 # Connector lifecycle migrations invalidate cached authority and cannot
 # safely coexist with a pre-fence process that is still in provider I/O.
-api_suspension_attempted=true
-run_interruptible aws application-autoscaling register-scalable-target \
-  --service-namespace ecs \
-  --resource-id "$api_scaling_resource" \
-  --scalable-dimension ecs:service:DesiredCount \
-  --suspended-state "$api_all_suspended_state" \
-  >/dev/null
-current_scaling_suspension
+if test "$api_recovery_entry" = "true"; then
+  # RegisterScalableTarget may enforce MinCapacity even when the request also
+  # carries an all-suspended state. Recovery already entered from a proven
+  # zero/all-suspended posture, so mutating the target here could restart the
+  # failed primary before the corrected migration-capable definition launches.
+  current_scaling_suspension
+else
+  api_suspension_attempted=true
+  run_interruptible aws application-autoscaling register-scalable-target \
+    --service-namespace ecs \
+    --resource-id "$api_scaling_resource" \
+    --scalable-dimension ecs:service:DesiredCount \
+    --suspended-state "$api_all_suspended_state" \
+    >/dev/null
+  current_scaling_suspension
+fi
 if test "$api_scaling_suspension" != "$api_all_suspended_state"; then
   echo "::error::Could not prove all API scaling modes are suspended before drain."
   false
 fi
-run_interruptible aws ecs wait services-stable \
-  --cluster "$ECS_CLUSTER" \
-  --services "$API_SERVICE"
+if test "$api_recovery_entry" != "true"; then
+  run_interruptible aws ecs wait services-stable \
+    --cluster "$ECS_CLUSTER" \
+    --services "$API_SERVICE"
+fi
 capture_interruptible aws ecs describe-services \
   --cluster "$ECS_CLUSTER" \
   --services "$API_SERVICE" \
   --output json
 api_suspended_service_state="$api_captured_output"
+api_suspended_desired="$(
+  jq -r '.services[0].desiredCount' <<<"$api_suspended_service_state"
+)"
 api_suspended_running="$(
   jq -r '.services[0].runningCount' <<<"$api_suspended_service_state"
 )"
 api_suspended_pending="$(
   jq -r '.services[0].pendingCount' <<<"$api_suspended_service_state"
 )"
+if {
+  test "$api_recovery_entry" = "true" &&
+    ! {
+      test "$api_suspended_desired" = "0" &&
+        test "$api_suspended_running" = "0" &&
+        test "$api_suspended_pending" = "0"
+    }
+}; then
+  echo "::error::The API left its proven zero state before recovery drain capture; refusing to launch the candidate."
+  false
+fi
 if test "$api_suspended_pending" != "0"; then
   echo "::error::The API service gained pending work before exact drain capture."
   false
@@ -909,14 +933,16 @@ if test "$api_pre_drain_task_count" -gt 100; then
 fi
 
 api_service_drain_attempted=true
-run_interruptible aws ecs update-service \
-  --cluster "$ECS_CLUSTER" \
-  --service "$API_SERVICE" \
-  --desired-count 0 \
-  >/dev/null
-run_interruptible aws ecs wait services-stable \
-  --cluster "$ECS_CLUSTER" \
-  --services "$API_SERVICE"
+if test "$api_recovery_entry" != "true"; then
+  run_interruptible aws ecs update-service \
+    --cluster "$ECS_CLUSTER" \
+    --service "$API_SERVICE" \
+    --desired-count 0 \
+    >/dev/null
+  run_interruptible aws ecs wait services-stable \
+    --cluster "$ECS_CLUSTER" \
+    --services "$API_SERVICE"
+fi
 capture_interruptible aws ecs describe-services \
   --cluster "$ECS_CLUSTER" \
   --services "$API_SERVICE" \

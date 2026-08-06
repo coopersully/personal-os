@@ -234,6 +234,14 @@ exact recovered primary is healthy, rollback and intended capacity are
 restored, deployment registers and verifies a marker-cleared normal-metadata
 revision before autoscaling resumes. Cleanup failure stops the service and
 publishes a new marker. Normal registration resets authorization and history.
+Recovery treats its already-proven zero/all-suspended control-plane state as
+read-only until the corrected API task is launched. It must not call
+`RegisterScalableTarget` again at that boundary: Application Auto Scaling can
+enforce the target's minimum capacity even when the same request asks to suspend
+all scaling, which would restart the failed primary. It also verifies direct
+`desired/running/pending = 0/0/0` counts instead of waiting for generic ECS
+service stability; ECS deliberately retains the failed deployment record, so
+the generic waiter cannot converge while the service is correctly stopped.
 The unique history is
 capped at 100 entries. During retry, only stopped tasks on those exact
 post-drain definitions are treated as failed rollout evidence; every other
@@ -302,6 +310,8 @@ scaling or drains all API tasks:
 A later serial-drain rollout must fail before suspending scaling unless all of the following
 production evidence is captured from fresh AWS/API reads:
 
+- the latest API task definition passes the runtime-configuration preflight: both Google credentials
+  are unique SSM-backed ECS secret references and no plain `GOOGLE_CLIENT_ID` entry exists;
 - `describe-services` reports exactly one deployment, with `status = PRIMARY`,
   `rolloutState = COMPLETED`, and the expected task-definition ARN;
 - `list-tasks` followed by `describe-tasks` enumerates every exact active API task, and every task
@@ -315,6 +325,12 @@ and marker response together. If any task is unlisted, stale, pending, on anothe
 or missing the marker, keep scaling active and stop. Only after this gate may a later workflow
 suspend scaling and begin a drain. This prerequisite supplies the application protocol; it does not
 prove production IAM authority, apply infrastructure, or perform a production drain.
+
+When the runtime preflight fails, apply the reviewed Terraform configuration first. The application
+deployment intentionally clones the latest task-definition configuration; merging Terraform source
+does not apply it. Retry the same full `release_sha` after the task execution role and latest task
+definition contain the expected SSM references. The preflight reports only safe configuration names
+and never reads or prints parameter values.
 
 ## Health and logs
 

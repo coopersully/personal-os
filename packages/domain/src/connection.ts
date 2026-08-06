@@ -1,6 +1,29 @@
 import { z } from "zod";
 import { isoDateTimeSchema } from "./common.js";
 
+export const connectorAuthorizationProviderSchema = z.enum(["google", "x"]);
+export type ConnectorAuthorizationProvider = z.infer<
+  typeof connectorAuthorizationProviderSchema
+>;
+
+export const connectorAuthorizationStatusSchema = z.enum([
+  "pending",
+  "connected",
+  "cancelled",
+  "expired",
+  "permission_incomplete",
+  "failed",
+]);
+export type ConnectorAuthorizationStatus = z.infer<typeof connectorAuthorizationStatusSchema>;
+
+export const connectorAuthorizationOutcomeSchema = z.object({
+  accountId: z.uuid().nullable(),
+  provider: connectorAuthorizationProviderSchema,
+  retryable: z.boolean(),
+  status: connectorAuthorizationStatusSchema,
+});
+export type ConnectorAuthorizationOutcome = z.infer<typeof connectorAuthorizationOutcomeSchema>;
+
 export const connectorSyncStatusSchema = z.enum(["idle", "syncing", "error"]);
 export type ConnectorSyncStatus = z.infer<typeof connectorSyncStatusSchema>;
 

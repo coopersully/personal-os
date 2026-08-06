@@ -109,7 +109,7 @@ export function createXBookmarksService({
       await db
         .update(xBookmarkAccounts)
         .set({
-          syncError: error instanceof Error ? error.message : "Unknown X folder discovery error",
+          syncError: safeXSyncError(error),
           syncStatus: "error",
           updatedAt: now(),
         })
@@ -215,10 +215,9 @@ export function createXBookmarksService({
       );
       return { changed };
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown X sync error";
       await db
         .update(xBookmarkAccounts)
-        .set({ syncError: message, syncStatus: "error", updatedAt: now() })
+        .set({ syncError: safeXSyncError(error), syncStatus: "error", updatedAt: now() })
         .where(eq(xBookmarkAccounts.id, account.id));
       throw connectorError(error);
     }
@@ -437,4 +436,11 @@ function connectorError(error: unknown): Error {
   return error instanceof Error
     ? error
     : new AppError("internal_error", "Unknown X connector error.");
+}
+
+function safeXSyncError(error: unknown): string {
+  if (error instanceof ConnectorError && error.disposition === "reconnect") {
+    return "X authorization is no longer valid. Reconnect to resume syncing.";
+  }
+  return "X is temporarily unavailable. ilo will retry automatically.";
 }

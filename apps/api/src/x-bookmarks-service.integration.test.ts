@@ -132,13 +132,13 @@ describe.sequential("X Bookmarks service", () => {
     );
     await expect(service.folders(userId)).rejects.toThrow("X is unavailable");
     await expect(service.getAccount(userId)).resolves.toMatchObject({
-      syncError: "X is unavailable",
+      syncError: "X is temporarily unavailable. ilo will retry automatically.",
       syncStatus: "error",
     });
     vi.mocked(x.listBookmarkFolders).mockRejectedValueOnce("opaque provider failure");
     await expect(service.folders(userId)).rejects.toMatchObject({ code: "internal_error" });
     await expect(service.getAccount(userId)).resolves.toMatchObject({
-      syncError: "Unknown X folder discovery error",
+      syncError: "X is temporarily unavailable. ilo will retry automatically.",
       syncStatus: "error",
     });
     await service.selectFolder(userId, "folder-calendar");

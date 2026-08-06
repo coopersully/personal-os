@@ -365,6 +365,13 @@
       "when": 1786942800000,
       "tag": "0051_connector_authorization_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786946400000,
+      "tag": "0052_connector_notifications",
+      "breakpoints": true
     }
   ]
 }

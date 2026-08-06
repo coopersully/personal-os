@@ -13,6 +13,7 @@ import {
   calendarAccounts,
   calendarEvents,
   calendars,
+  connectorSyncTriggers,
   createDatabaseClient,
   type DatabaseClient,
   domainProfiles,
@@ -3830,6 +3831,27 @@ describe.sequential("connector service", () => {
       name: "Renamed Primary",
       timezone: "America/Chicago",
     });
+  });
+
+  it("drains durable low-latency triggers through the fenced sync engine", async () => {
+    await database.db.delete(connectorSyncTriggers);
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Triggered sync account is missing.");
+    await service.enqueueSyncTrigger(account.id, "notification");
+    await expect(service.dispatchTriggeredSyncs({ concurrency: 1, limit: 1 })).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      succeeded: 1,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([]);
   });
 
   it("rotates credentials through remote event create, update, and delete operations", async () => {

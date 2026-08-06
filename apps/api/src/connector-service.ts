@@ -65,6 +65,7 @@ import {
 import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
 import { createConnectorAuthorizationService } from "./connector-authorization-service.js";
+import { createConnectorNotificationService } from "./connector-notification-service.js";
 import {
   type ConnectorSyncFailure,
   classifyConnectorSyncFailure,
@@ -341,6 +342,7 @@ export function createConnectorService({
   shutdown,
 }: ConnectorServiceOptions) {
   const authorization = createConnectorAuthorizationService({ db, encryptionKey, now });
+  const notifications = createConnectorNotificationService({ db, now });
   function syncOperation(): ProviderOperationOptions | undefined {
     if (!shutdown) return undefined;
     const deadlineMs = shutdown.deadlineMs();
@@ -3267,6 +3269,7 @@ export function createConnectorService({
           },
           transaction,
         );
+        await notifications.enqueue(updatedAccount.id, "initial", now(), transaction);
       });
       return { attemptId: consumed.attempt.id, returnPath, status: "connected" };
     } catch (error) {
@@ -3375,7 +3378,7 @@ export function createConnectorService({
         if (existing.calendarEnabled && !input.calendar) {
           await disableCalendarAccount(transaction, existing, requestId);
         }
-        return requireDatabaseRecord(
+        const updatedAccount = requireDatabaseRecord(
           (
             await transaction
               .update(calendarAccounts)
@@ -3383,9 +3386,14 @@ export function createConnectorService({
                 calendarEnabled: input.calendar,
                 encryptedCredentials: encryptJson(icloudCredentials, encryptionKey),
                 mailEnabled: input.mail,
+                nextSyncAt: now(),
                 syncClaimId: null,
                 syncError: null,
+                syncErrorCategory: null,
+                syncErrorCode: null,
+                syncFailureCount: 0,
                 syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+                syncRecovery: null,
                 syncStatus: "idle",
                 updatedAt: now(),
               })
@@ -3394,6 +3402,8 @@ export function createConnectorService({
           )[0],
           "The iCloud account could not be saved.",
         );
+        await notifications.enqueue(updatedAccount.id, "initial", now(), transaction);
+        return updatedAccount;
       });
       return { accountId: account.id, email: account.email, userId };
     },
@@ -3514,6 +3524,17 @@ export function createConnectorService({
         throw error;
       }
       return url;
+    },
+
+    dispatchTriggeredSyncs(options: { concurrency?: number; limit?: number } = {}) {
+      return notifications.dispatchTriggeredSyncs(syncAccount, options);
+    },
+
+    enqueueSyncTrigger(
+      accountId: string,
+      reason: "initial" | "notification" | "reconciliation" | "manual" | "retry" | "recovery",
+    ) {
+      return notifications.enqueue(accountId, reason);
     },
 
     syncAccount,

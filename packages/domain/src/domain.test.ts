@@ -1271,3 +1271,35 @@ describe("connector authorization outcomes", () => {
     ).toBe(false);
   });
 });
+
+describe("connector notification contracts", () => {
+  it("keeps subscription lifecycle and trigger reasons closed", async () => {
+    const {
+      connectorSubscriptionKindSchema,
+      connectorSubscriptionStatusSchema,
+      connectorSyncTriggerReasonSchema,
+    } = await import("./connection.js");
+    expect(connectorSubscriptionKindSchema.options).toEqual([
+      "gmail_mailbox",
+      "google_calendar_list",
+      "google_calendar_events",
+      "icloud_mail_idle",
+    ]);
+    expect(connectorSubscriptionStatusSchema.options).toEqual([
+      "pending",
+      "active",
+      "renewing",
+      "expired",
+      "failed",
+      "stopped",
+    ]);
+    expect(connectorSyncTriggerReasonSchema.options).toEqual([
+      "initial",
+      "notification",
+      "reconciliation",
+      "manual",
+      "retry",
+      "recovery",
+    ]);
+  });
+});

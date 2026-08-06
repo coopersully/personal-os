@@ -2667,6 +2667,10 @@ describe.sequential("ilo API", () => {
       }),
     );
     expect(icloudConnection.account.email).toBe("test@icloud.com");
+    await expect(app.syncDueConnectors()).resolves.toMatchObject({
+      attempted: 1,
+      succeeded: 1,
+    });
     await vi.waitFor(async () => {
       const connectorPayload = await payload(await request("/v1/connectors"));
       expect(connectorPayload.accounts).toEqual([

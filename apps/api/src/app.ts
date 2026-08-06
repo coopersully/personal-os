@@ -775,9 +775,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await parseBody(context, connectICloudInputSchema),
       context.get("requestId"),
     );
-    startBackgroundTask("icloud-connector-initial-sync", async () => {
-      await connectors.syncAccount(result.userId, result.accountId);
-    });
     return context.json({ account: { accountId: result.accountId, email: result.email } }, 201);
   });
   app.post("/v1/connectors/:id/sync", async (context) =>
@@ -998,7 +995,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await automations.dispatchDue();
     },
     async syncDueConnectors() {
-      return connectors.syncDueAccounts();
+      const triggered = await connectors.dispatchTriggeredSyncs();
+      const scheduled = await connectors.syncDueAccounts();
+      return {
+        attempted: triggered.attempted + scheduled.attempted,
+        failed: triggered.failed + scheduled.failed,
+        recovered: scheduled.recovered,
+        skipped: scheduled.skipped,
+        succeeded: triggered.succeeded + scheduled.succeeded,
+      };
     },
     async syncDueFinances() {
       return finances.syncDuePlaidAccounts();

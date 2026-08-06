@@ -24,6 +24,34 @@ export const connectorAuthorizationOutcomeSchema = z.object({
 });
 export type ConnectorAuthorizationOutcome = z.infer<typeof connectorAuthorizationOutcomeSchema>;
 
+export const connectorSubscriptionKindSchema = z.enum([
+  "gmail_mailbox",
+  "google_calendar_list",
+  "google_calendar_events",
+  "icloud_mail_idle",
+]);
+export type ConnectorSubscriptionKind = z.infer<typeof connectorSubscriptionKindSchema>;
+
+export const connectorSubscriptionStatusSchema = z.enum([
+  "pending",
+  "active",
+  "renewing",
+  "expired",
+  "failed",
+  "stopped",
+]);
+export type ConnectorSubscriptionStatus = z.infer<typeof connectorSubscriptionStatusSchema>;
+
+export const connectorSyncTriggerReasonSchema = z.enum([
+  "initial",
+  "notification",
+  "reconciliation",
+  "manual",
+  "retry",
+  "recovery",
+]);
+export type ConnectorSyncTriggerReason = z.infer<typeof connectorSyncTriggerReasonSchema>;
+
 export const connectorSyncStatusSchema = z.enum(["idle", "syncing", "error"]);
 export type ConnectorSyncStatus = z.infer<typeof connectorSyncStatusSchema>;
 

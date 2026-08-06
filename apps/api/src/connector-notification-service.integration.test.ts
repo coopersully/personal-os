@@ -13,7 +13,7 @@ import {
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq, inArray } from "drizzle-orm";
 import { createConnectorNotificationService } from "./connector-notification-service.js";
-import { encryptJson } from "./security.js";
+import { decryptJson, encryptJson } from "./security.js";
 import type { RequestLog } from "./types.js";
 
 const timestamp = new Date("2026-08-06T12:00:00.000Z");
@@ -57,6 +57,7 @@ describe.sequential("connector notification service", () => {
       .insert(calendarAccounts)
       .values({
         calendarEnabled: true,
+        email: "notification@example.com",
         encryptedCredentials: encryptJson(credentials, encryptionKey),
         label: "Google",
         mailEnabled: true,
@@ -79,7 +80,7 @@ describe.sequential("connector notification service", () => {
     google = {
       watchGmail: vi.fn(async (value) => ({
         credentials: value,
-        value: { expiresAt: "2026-08-13T12:00:00.000Z", historyId: "history-1" },
+        value: { expiresAt: "2026-08-13T12:00:00.000Z", historyId: "100" },
       })),
       watchCalendarList: vi.fn(async (value, channel) => ({
         credentials: value,
@@ -150,7 +151,7 @@ describe.sequential("connector notification service", () => {
     expect(subscriptions).toEqual([
       expect.objectContaining({
         kind: "gmail_mailbox",
-        providerCursor: "history-1",
+        providerCursor: "100",
         renewAfter: new Date("2026-08-07T12:00:00.000Z"),
         status: "active",
       }),
@@ -170,7 +171,7 @@ describe.sequential("connector notification service", () => {
 
     await database.db
       .update(connectorSubscriptions)
-      .set({ renewAfter: timestamp })
+      .set({ expiresAt: timestamp, renewAfter: timestamp })
       .where(
         inArray(connectorSubscriptions.kind, ["google_calendar_events", "google_calendar_list"]),
       );
@@ -179,6 +180,11 @@ describe.sequential("connector notification service", () => {
       succeeded: 2,
     });
     expect(google.stopCalendarWatch).toHaveBeenCalledTimes(2);
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "connector_subscription_expired" }),
+      ]),
+    );
   });
 
   it("claims renewal once across schedulers, backs off safely, and suppresses reconnects", async () => {
@@ -239,6 +245,392 @@ describe.sequential("connector notification service", () => {
       .from(connectorSubscriptions)
       .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
     expect(stopped?.status).toBe("stopped");
+  });
+
+  it("acknowledges newer Gmail history once and classifies replay as an expected duplicate", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    await service.renewDueSubscriptions();
+
+    await expect(service.receiveGmailNotification("notification@example.com", "101")).resolves.toBe(
+      "accepted",
+    );
+    await expect(service.receiveGmailNotification("notification@example.com", "101")).resolves.toBe(
+      "duplicate",
+    );
+    await expect(
+      database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, accountId)),
+    ).resolves.toHaveLength(1);
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ notificationDisposition: "accepted" }),
+        expect.objectContaining({ notificationDisposition: "duplicate" }),
+      ]),
+    );
+  });
+
+  it("stops an unpersisted replacement Calendar watch when its renewal lease is superseded", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    const future = new Date(timestamp.getTime() + 60_000);
+    await database.db.update(connectorSubscriptions).set({ nextAttemptAt: future });
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(connectorSubscriptions.kind, "google_calendar_list"));
+    const watchCalendarList = google.watchCalendarList;
+    if (!watchCalendarList) throw new Error("Calendar list watch fixture is missing.");
+    vi.mocked(watchCalendarList).mockImplementationOnce(async (value, channel) => {
+      await database.db
+        .update(connectorSubscriptions)
+        .set({ leaseClaimId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" })
+        .where(eq(connectorSubscriptions.kind, "google_calendar_list"));
+      return {
+        credentials: value,
+        value: {
+          expiresAt: "2026-08-07T12:00:00.000Z",
+          resourceId: `replacement-${channel.id}`,
+        },
+      };
+    });
+
+    await expect(service.renewDueSubscriptions({ limit: 1 })).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      skipped: 1,
+      succeeded: 0,
+    });
+    expect(google.stopCalendarWatch).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(String),
+      expect.stringMatching(/^replacement-/),
+    );
+    expect(logs).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "connector_subscription_renewed" }),
+      ]),
+    );
+  });
+
+  it("does not report a provider failure after the renewal lease has moved", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    const future = new Date(timestamp.getTime() + 60_000);
+    await database.db.update(connectorSubscriptions).set({ nextAttemptAt: future });
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
+    const watchGmail = google.watchGmail;
+    if (!watchGmail) throw new Error("Gmail watch fixture is missing.");
+    vi.mocked(watchGmail).mockImplementationOnce(async () => {
+      await database.db
+        .update(connectorSubscriptions)
+        .set({ leaseClaimId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee" })
+        .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
+      throw new Error("provider failed after lease handoff");
+    });
+
+    await expect(service.renewDueSubscriptions({ limit: 1 })).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      skipped: 1,
+      succeeded: 0,
+    });
+    expect(logs).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ event: "connector_subscription_failed" })]),
+    );
+  });
+
+  it("keeps disabled notification modes inert and rejects unverifiable Gmail signals", async () => {
+    const inert = createConnectorNotificationService({
+      db: database.db,
+      log: (entry) => logs.push(entry),
+      now: () => timestamp,
+    });
+
+    await inert.ensureGoogleSubscriptions(accountId);
+    await inert.ensureICloudMailSubscription(accountId);
+    await expect(inert.renewDueSubscriptions()).resolves.toEqual({
+      attempted: 0,
+      failed: 0,
+      skipped: 0,
+      succeeded: 0,
+    });
+    await expect(inert.runICloudIdlePass()).resolves.toEqual({
+      claimed: 0,
+      failed: 0,
+      skipped: 0,
+      succeeded: 0,
+    });
+    await expect(inert.receiveGmailNotification("notification@example.com", "101")).resolves.toBe(
+      "unknown",
+    );
+    await expect(database.db.select().from(connectorSubscriptions)).resolves.toEqual([]);
+    expect(logs).toEqual([
+      expect.objectContaining({
+        event: "connector_notification_received",
+        notificationDisposition: "rejected",
+      }),
+    ]);
+
+    const configuredIdle = createConnectorNotificationService({
+      db: database.db,
+      encryptionKey,
+      icloud: { listenForMailChanges: vi.fn() } as unknown as ICloudConnector,
+      icloudMailIdleEnabled: true,
+      now: () => timestamp,
+    });
+    await configuredIdle.ensureICloudMailSubscription(accountId);
+    await expect(database.db.select().from(connectorSubscriptions)).resolves.toEqual([]);
+  });
+
+  it("does not replace fresher stored Google credentials during watch renewal", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    const future = new Date(timestamp.getTime() + 60_000);
+    await database.db.update(connectorSubscriptions).set({ nextAttemptAt: future });
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
+    const watchGmail = google.watchGmail;
+    if (!watchGmail) throw new Error("Gmail watch fixture is missing.");
+    vi.mocked(watchGmail).mockImplementationOnce(async (value) => ({
+      credentials: { ...value, expiresAt: "2026-08-06T12:30:00.000Z" },
+      value: { expiresAt: "2026-08-13T12:00:00.000Z", historyId: "100" },
+    }));
+
+    await expect(service.renewDueSubscriptions({ limit: 1 })).resolves.toMatchObject({
+      succeeded: 1,
+    });
+    const [account] = await database.db
+      .select({ encryptedCredentials: calendarAccounts.encryptedCredentials })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountId));
+    if (!account?.encryptedCredentials) throw new Error("Google credentials were not persisted.");
+    expect(
+      decryptJson<GoogleCredentials>(account.encryptedCredentials, encryptionKey).expiresAt,
+    ).toBe(credentials.expiresAt);
+  });
+
+  it("records bounded failures when configured Google watch capabilities are unavailable", async () => {
+    const unavailable = createConnectorNotificationService({
+      calendarWebhookUrl: "https://api.example.com/v1/connectors/google/calendar/notifications",
+      db: database.db,
+      encryptionKey,
+      gmailTopicName: "projects/ilo/topics/gmail-notifications",
+      google: {} as GoogleConnector,
+      now: () => timestamp,
+    });
+    await unavailable.ensureGoogleSubscriptions(accountId);
+
+    await expect(unavailable.renewDueSubscriptions()).resolves.toEqual({
+      attempted: 3,
+      failed: 3,
+      skipped: 0,
+      succeeded: 0,
+    });
+    await expect(
+      database.db
+        .select({ safeFailureCode: connectorSubscriptions.safeFailureCode })
+        .from(connectorSubscriptions),
+    ).resolves.toEqual([
+      { safeFailureCode: "connector_subscription_failed" },
+      { safeFailureCode: "connector_subscription_failed" },
+      { safeFailureCode: "connector_subscription_failed" },
+    ]);
+  });
+
+  it("uses safe retry status when a provider failure has no HTTP status", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    const future = new Date(timestamp.getTime() + 60_000);
+    await database.db.update(connectorSubscriptions).set({ nextAttemptAt: future });
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(connectorSubscriptions.kind, "gmail_mailbox"));
+    const watchGmail = google.watchGmail;
+    if (!watchGmail) throw new Error("Gmail watch fixture is missing.");
+    vi.mocked(watchGmail).mockRejectedValueOnce(
+      new ConnectorError({
+        category: "temporary",
+        code: "google_watch_unavailable",
+        disposition: "retry",
+        message: "Google is temporarily unavailable.",
+      }),
+    );
+
+    await expect(service.renewDueSubscriptions({ limit: 1 })).resolves.toMatchObject({ failed: 1 });
+    expect(logs).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "google_watch_unavailable",
+          event: "connector_subscription_failed",
+          status: 503,
+        }),
+      ]),
+    );
+  });
+
+  it("fails a Calendar watch safely when its selected provider resource disappears", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    const future = new Date(timestamp.getTime() + 60_000);
+    await database.db.update(connectorSubscriptions).set({ nextAttemptAt: future });
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ nextAttemptAt: timestamp })
+      .where(eq(connectorSubscriptions.kind, "google_calendar_events"));
+    await database.db
+      .update(calendars)
+      .set({ remoteCalendarId: "" })
+      .where(eq(calendars.accountId, accountId));
+
+    try {
+      await expect(service.renewDueSubscriptions({ limit: 1 })).resolves.toMatchObject({
+        failed: 1,
+      });
+    } finally {
+      await database.db
+        .update(calendars)
+        .set({ remoteCalendarId: "remote-primary" })
+        .where(eq(calendars.accountId, accountId));
+    }
+  });
+
+  it("accepts Calendar channel verification without scheduling a redundant sync", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    await service.renewDueSubscriptions();
+    const watchCalendarList = google.watchCalendarList;
+    if (!watchCalendarList) throw new Error("Calendar list watch fixture is missing.");
+    const channel = vi.mocked(watchCalendarList).mock.calls[0]?.[1];
+    const [subscription] = await database.db
+      .select()
+      .from(connectorSubscriptions)
+      .where(eq(connectorSubscriptions.kind, "google_calendar_list"));
+    if (!channel || !subscription?.channelId || !subscription.remoteResourceId) {
+      throw new Error("Calendar watch fixture was not persisted.");
+    }
+
+    await expect(
+      service.receiveCalendarNotification({
+        channelId: subscription.channelId,
+        messageNumber: "1",
+        resourceId: subscription.remoteResourceId,
+        resourceState: "sync",
+        token: channel.token,
+      }),
+    ).resolves.toBe("accepted");
+    await expect(database.db.select().from(connectorSyncTriggers)).resolves.toEqual([]);
+  });
+
+  it("stops an iCloud IDLE subscription that cannot decrypt account credentials", async () => {
+    const [owner] = await database.db
+      .select({ userId: calendarAccounts.userId })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountId));
+    if (!owner) throw new Error("Notification owner was not found.");
+    const [icloudAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        label: "iCloud without credentials",
+        mailEnabled: true,
+        provider: "icloud",
+        providerAccountId: "missing-credentials@icloud.com",
+        userId: owner.userId,
+      })
+      .returning();
+    if (!icloudAccount) throw new Error("iCloud account was not created.");
+    const idle = createConnectorNotificationService({
+      db: database.db,
+      encryptionKey,
+      icloud: { listenForMailChanges: vi.fn() } as unknown as ICloudConnector,
+      icloudMailIdleEnabled: true,
+      now: () => timestamp,
+    });
+
+    try {
+      await service.ensureGoogleSubscriptions(icloudAccount.id);
+      await database.db
+        .update(calendarAccounts)
+        .set({ mailEnabled: false })
+        .where(eq(calendarAccounts.id, icloudAccount.id));
+      await idle.ensureICloudMailSubscription(icloudAccount.id);
+      await database.db
+        .update(calendarAccounts)
+        .set({ mailEnabled: true })
+        .where(eq(calendarAccounts.id, icloudAccount.id));
+      await expect(idle.runICloudIdlePass()).resolves.toEqual({
+        claimed: 1,
+        failed: 0,
+        skipped: 1,
+        succeeded: 0,
+      });
+      await expect(
+        database.db
+          .select({ status: connectorSubscriptions.status })
+          .from(connectorSubscriptions)
+          .where(eq(connectorSubscriptions.accountId, icloudAccount.id)),
+      ).resolves.toEqual([{ status: "stopped" }]);
+    } finally {
+      await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, icloudAccount.id));
+    }
+  });
+
+  it("releases an aborted iCloud IDLE lease without recording a provider failure", async () => {
+    const [owner] = await database.db
+      .select({ userId: calendarAccounts.userId })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountId));
+    if (!owner) throw new Error("Notification owner was not found.");
+    const [icloudAccount] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        encryptedCredentials: encryptJson(
+          { appSpecificPassword: "xxxx-xxxx-xxxx-xxxx", email: "abort@icloud.com" },
+          encryptionKey,
+        ),
+        label: "iCloud abort",
+        mailEnabled: true,
+        provider: "icloud",
+        providerAccountId: "abort@icloud.com",
+        userId: owner.userId,
+      })
+      .returning();
+    if (!icloudAccount) throw new Error("iCloud account was not created.");
+    const controller = new AbortController();
+    controller.abort(new Error("scheduled shutdown"));
+    const listenForMailChanges = vi.fn(async () => {
+      throw controller.signal.reason;
+    });
+    const idle = createConnectorNotificationService({
+      db: database.db,
+      encryptionKey,
+      icloud: { listenForMailChanges } as unknown as ICloudConnector,
+      icloudMailIdleEnabled: true,
+      log: (entry) => logs.push(entry),
+      now: () => timestamp,
+    });
+
+    try {
+      await expect(idle.runICloudIdlePass({ signal: controller.signal })).resolves.toEqual({
+        claimed: 1,
+        failed: 0,
+        skipped: 1,
+        succeeded: 0,
+      });
+      expect(listenForMailChanges).toHaveBeenCalledWith(expect.any(Object), expect.any(Function), {
+        signal: controller.signal,
+      });
+      expect(logs).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ event: "connector_subscription_failed" }),
+        ]),
+      );
+    } finally {
+      await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, icloudAccount.id));
+    }
   });
 
   it("leases one bounded iCloud IDLE listener and leaves polling healthy on listener failure", async () => {

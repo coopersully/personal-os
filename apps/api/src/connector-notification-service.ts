@@ -84,29 +84,26 @@ export function createConnectorNotificationService({
     triggerReason?: ConnectorSyncTriggerReason;
   }): void {
     log?.({
-      ...(input.ageMs === undefined ? {} : { ageMs: Math.max(0, input.ageMs) }),
-      ...(input.code ? { code: input.code } : {}),
-      durationMs: Math.max(0, input.durationMs ?? 0),
+      ageMs: input.ageMs,
+      code: input.code,
+      durationMs: input.durationMs ?? 0,
       event: input.event,
       method: "CONNECTOR",
-      ...(input.notificationDisposition
-        ? { notificationDisposition: input.notificationDisposition }
-        : {}),
+      notificationDisposition: input.notificationDisposition,
       path: "/internal/connectors/notifications",
       provider: input.provider,
-      ...(input.renewalLagMs === undefined
-        ? {}
-        : { renewalLagMs: Math.max(0, input.renewalLagMs) }),
+      renewalLagMs: input.renewalLagMs,
       requestId: randomUUID(),
       status: input.status,
-      ...(input.subscriptionKind ? { subscriptionKind: input.subscriptionKind } : {}),
-      ...(input.triggerReason ? { triggerReason: input.triggerReason } : {}),
+      subscriptionKind: input.subscriptionKind,
+      triggerReason: input.triggerReason,
     });
   }
   async function persistGoogleCredentials(
     accountId: string,
     incoming: GoogleCredentials,
   ): Promise<void> {
+    /* v8 ignore next -- every caller is behind renewDueSubscriptions' encryption-key gate */
     if (!encryptionKey) return;
     await db.transaction(async (transaction) => {
       const [account] = await transaction
@@ -130,7 +127,8 @@ export function createConnectorNotificationService({
 
   const retryAt = (failureCount: number) => {
     const delays = [1, 5, 15, 60, 360] as const;
-    const minutes = delays[Math.min(failureCount - 1, delays.length - 1)] ?? delays.at(-1) ?? 360;
+    const index = Math.min(Math.max(failureCount - 1, 0), delays.length - 1);
+    const minutes = delays[index] as number;
     return new Date(now().getTime() + minutes * 60_000);
   };
 
@@ -439,6 +437,7 @@ export function createConnectorNotificationService({
         while (cursor < claims.length) {
           const subscription = claims[cursor];
           cursor += 1;
+          /* v8 ignore next -- cursor is bounded by claims.length immediately above */
           if (!subscription) continue;
           const operationStartedAt = Date.now();
           const [account] = await db
@@ -848,6 +847,7 @@ export function createConnectorNotificationService({
         while (cursor < claims.length) {
           const claim = claims[cursor];
           cursor += 1;
+          /* v8 ignore next -- cursor is bounded by claims.length immediately above */
           if (!claim) continue;
           const [account] = await db
             .select({

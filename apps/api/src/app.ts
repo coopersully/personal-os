@@ -176,7 +176,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       provider: "google",
       requestId,
       status,
-      ...(subscriptionKind ? { subscriptionKind } : {}),
+      subscriptionKind,
     });
   const authRateLimiter = createFixedWindowRateLimiter({
     maxRequests: dependencies.config.authRateLimitMaxRequests ?? 20,

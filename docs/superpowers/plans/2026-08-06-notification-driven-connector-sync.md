@@ -656,7 +656,7 @@ git commit -m "chore: harden connector notification operations"
 **Interfaces:**
 - No new interface; this task proves delivery, fallback, privacy, and capacity contracts.
 
-- [ ] **Step 1: Run focused notification suites**
+- [x] **Step 1: Run focused notification suites**
 
 Run:
 
@@ -666,32 +666,37 @@ pnpm vitest run packages/connectors/src/google.test.ts packages/connectors/src/i
 
 Expected: PASS with zero failures.
 
-- [ ] **Step 2: Run infrastructure contracts**
+- [x] **Step 2: Run infrastructure contracts**
 
 Run: `pnpm lint`
 
 Expected: PASS, including provider-network and connector-observability mutation fixtures.
 
-- [ ] **Step 3: Run full verification**
+- [x] **Step 3: Run full verification**
 
 Run: `pnpm verify`
 
 Expected: PASS for environment checks, lint, typecheck, coverage, builds, and desktop/mobile E2E.
 
-- [ ] **Step 4: Review the boundary matrix and privacy canaries**
+- [x] **Step 4: Review the boundary matrix and privacy canaries**
 
 Confirm every webhook acknowledges after durable enqueue; no provider sync occurs in ingress; every
 notification mode can be disabled without affecting five-minute sync; no raw identity/token/body
 appears in logs, metrics, safe errors, API, audit, or UI.
 
-- [ ] **Step 5: Record production-equivalent evidence before enabling gates**
+- [x] **Step 5: Record production-equivalent evidence before enabling gates**
 
 For each provider mode, record configured authority, TLS reachability, watch/listener registration,
 one controlled change converging through a trigger, one dropped/disabled signal converging through
 reconciliation, renewal before expiry, and redacted observation. Leave any gate disabled when its
 external evidence is incomplete.
 
-- [ ] **Step 6: Route any failure back to its owning task**
+Acceptance result: Google Pub/Sub publisher authority, push OIDC delivery, Calendar channel
+delivery, and live renewal remain externally unevidenced, so both Google push gates remain disabled.
+Five-minute reconciliation remains authoritative. The independent iCloud IDLE gate also remains
+disabled until its production listener lifecycle is evidenced.
+
+- [x] **Step 6: Route any failure back to its owning task**
 
 Do not patch forward from the acceptance task. Reopen the first failing task, repeat its failing
 test/minimal implementation/green cycle, and rerun this acceptance task from Step 1.

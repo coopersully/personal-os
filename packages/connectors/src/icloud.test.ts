@@ -368,6 +368,144 @@ describe("iCloud connector", () => {
     );
   });
 
+  it("fails closed or reconciles fully for malformed and incomplete collection reports", async () => {
+    const report = (
+      overrides: Record<string, unknown> = {},
+      token: string | null = "opaque-next",
+    ) => ({
+      href: `${calendarId}event-1.ics`,
+      ok: true,
+      ...(token ? { raw: { multistatus: { syncToken: token } } } : {}),
+      status: 200,
+      statusText: "OK",
+      ...overrides,
+    });
+    const expectFullReconciliation = async (client: ReturnType<typeof davClient>) => {
+      await expect(
+        connector(client).value.syncCalendar(credentials, calendarId, "opaque-current"),
+      ).resolves.toMatchObject({ nextSyncToken: "ctag-1", reset: true });
+      expect(client.fetchCalendarObjects).toHaveBeenCalledWith(
+        expect.not.objectContaining({ objectUrls: expect.anything() }),
+      );
+    };
+
+    const rejected = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [
+        report({ ok: false, status: 500, statusText: "provider body" }),
+      ]),
+    });
+    await expect(
+      connector(rejected).value.syncCalendar(credentials, calendarId, "opaque-current"),
+    ).rejects.toMatchObject({
+      category: "temporary",
+      code: "icloud_calendar_sync_rejected",
+      disposition: "retry",
+      message: "iCloud Calendar could not synchronize this calendar.",
+    });
+
+    const missingHref = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [report({ href: undefined })]),
+    });
+    await expect(
+      connector(missingHref).value.syncCalendar(credentials, calendarId, "opaque-current"),
+    ).resolves.toEqual({ changes: [], nextSyncToken: "opaque-next", reset: false });
+
+    await expectFullReconciliation(
+      davClient({
+        supportedReportSet: vi.fn(async () => ["syncCollection"]),
+        syncCollection: vi.fn(async () => [report({ href: "https://attacker.example/event.ics" })]),
+      }),
+    );
+    await expectFullReconciliation(
+      davClient({
+        supportedReportSet: vi.fn(async () => ["syncCollection"]),
+        syncCollection: vi.fn(async () => [report({}, null)]),
+      }),
+    );
+    await expectFullReconciliation(
+      davClient({
+        supportedReportSet: vi.fn(async () => ["SYNC-COLLECTION"]),
+        syncCollection: vi.fn(async () => [report({ ok: false, status: 507 }, "opaque-current")]),
+      }),
+    );
+
+    const unexpectedObject = davClient({
+      fetchCalendarObjects: vi.fn(async ({ objectUrls }: { objectUrls?: string[] }) =>
+        objectUrls
+          ? [{ data: timedIcs, url: "https://attacker.example/event.ics" }]
+          : [{ data: timedIcs, url: `${calendarId}event-1.ics` }],
+      ),
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [report()]),
+    });
+    await expectFullReconciliation(unexpectedObject);
+
+    const missingObject = davClient({
+      fetchCalendarObjects: vi.fn(async ({ objectUrls }: { objectUrls?: string[] }) =>
+        objectUrls ? [] : [{ data: timedIcs, url: `${calendarId}event-1.ics` }],
+      ),
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => [report()]),
+    });
+    await expectFullReconciliation(missingObject);
+  });
+
+  it("bounds oversized and perpetually truncated collection reports", async () => {
+    const oversized = Array.from({ length: 501 }, (_, index) => ({
+      href: `${calendarId}event-${index}.ics`,
+      ok: true,
+      raw: { multistatus: { syncToken: "oversized-next" } },
+      status: 200,
+      statusText: "OK",
+    }));
+    const oversizedClient = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => oversized),
+    });
+    await expect(
+      connector(oversizedClient).value.syncCalendar(credentials, calendarId, "opaque-current"),
+    ).resolves.toMatchObject({ reset: true });
+
+    let page = 0;
+    const truncatedClient = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => {
+        page += 1;
+        return [
+          {
+            ok: false,
+            raw: { multistatus: { syncToken: `page-${page}` } },
+            status: 507,
+            statusText: "Insufficient Storage",
+          },
+        ];
+      }),
+    });
+    await expect(
+      connector(truncatedClient).value.syncCalendar(credentials, calendarId, "opaque-current"),
+    ).resolves.toMatchObject({ nextSyncToken: "ctag-1", reset: true });
+    expect(truncatedClient.syncCollection).toHaveBeenCalledTimes(10);
+  });
+
+  it("preserves an explicit cancellation reason during collection sync", async () => {
+    const controller = new AbortController();
+    const reason = new Error("scheduled shutdown");
+    const client = davClient({
+      supportedReportSet: vi.fn(async () => ["syncCollection"]),
+      syncCollection: vi.fn(async () => {
+        controller.abort(reason);
+        throw new Error("socket closed");
+      }),
+    });
+    await expect(
+      connector(client).value.syncCalendar(credentials, calendarId, "opaque-current", {
+        signal: controller.signal,
+      }),
+    ).rejects.toBe(reason);
+  });
+
   it("classifies WebDAV collection authorization failures without exposing provider details", async () => {
     const client = davClient({
       supportedReportSet: vi.fn(async () => ["syncCollection"]),

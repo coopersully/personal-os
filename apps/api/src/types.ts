@@ -42,10 +42,10 @@ export type CalendarProviderReconciliationLog = {
 
 export type RequestLog = {
   accountId?: string;
-  ageMs?: number;
+  ageMs?: number | undefined;
   calendarProviderReconciliation?: CalendarProviderReconciliationLog;
   category?: ConnectorFailureCategory;
-  code?: string;
+  code?: string | undefined;
   disposition?: ConnectorSyncRecovery;
   durationMs: number;
   event:
@@ -65,14 +65,14 @@ export type RequestLog = {
   freshnessAgeMs?: number;
   method: string;
   nextSyncAt?: string | null;
-  notificationDisposition?: "accepted" | "duplicate" | "rejected";
+  notificationDisposition?: "accepted" | "duplicate" | "rejected" | undefined;
   path: string;
   provider?: Extract<CalendarProvider, "google" | "icloud">;
-  renewalLagMs?: number;
+  renewalLagMs?: number | undefined;
   requestId: string;
   status: number;
-  subscriptionKind?: ConnectorSubscriptionKind;
-  triggerReason?: ConnectorSyncTriggerReason;
+  subscriptionKind?: ConnectorSubscriptionKind | undefined;
+  triggerReason?: ConnectorSyncTriggerReason | undefined;
 };
 
 export type AppVariables = {

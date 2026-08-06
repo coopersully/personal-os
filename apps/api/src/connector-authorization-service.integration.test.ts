@@ -258,6 +258,38 @@ describe.sequential("connector authorization attempt service", () => {
     });
   });
 
+  it("closes an abandoned processing lease while the owner polls its outcome", async () => {
+    const created = await service().create({
+      provider: "google",
+      redirectUri: "https://api.example.com/v1/connectors/google/callback",
+      requestedServices: ["calendar", "mail"],
+      returnPath: "/settings?section=connections",
+      targetAccountId: null,
+      userId: ownerId,
+    });
+    expect(await service().consume("google", created.state, "callback-request")).toMatchObject({
+      kind: "ready",
+    });
+
+    now = new Date("2026-08-06T12:02:01.000Z");
+    expect(await service().publicOutcome(ownerId, created.attemptId)).toEqual({
+      accountId: null,
+      provider: "google",
+      retryable: true,
+      status: "failed",
+    });
+
+    const [stored] = await database.db
+      .select()
+      .from(oauthStates)
+      .where(eq(oauthStates.id, created.attemptId));
+    expect(stored).toMatchObject({
+      completedAt: now,
+      outcomeCode: "authorization_interrupted",
+      status: "failed",
+    });
+  });
+
   it("fails closed when a pending attempt has lost its verifier", async () => {
     const created = await service().create({
       provider: "google",

@@ -567,7 +567,11 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       return result.credentials;
     },
 
-    async exchangeCode(code: string, codeVerifier: string): Promise<GoogleCredentials> {
+    async exchangeCode(
+      code: string,
+      codeVerifier: string,
+      redirectUri = options.redirectUri,
+    ): Promise<GoogleCredentials> {
       const token = await exchangeToken(
         new URLSearchParams({
           client_id: options.clientId,
@@ -575,7 +579,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           code,
           code_verifier: codeVerifier,
           grant_type: "authorization_code",
-          redirect_uri: options.redirectUri,
+          redirect_uri: redirectUri,
         }),
       );
       if (!token.refresh_token) {

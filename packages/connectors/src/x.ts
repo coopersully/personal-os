@@ -137,14 +137,14 @@ export function createXConnector(options: XConnectorOptions): XConnector {
       }).toString();
       return url.toString();
     },
-    async exchangeCode(code, codeVerifier) {
+    async exchangeCode(code, codeVerifier, redirectUri = options.redirectUri) {
       return exchange(
         new URLSearchParams({
           client_id: options.clientId,
           code,
           code_verifier: codeVerifier,
           grant_type: "authorization_code",
-          redirect_uri: options.redirectUri,
+          redirect_uri: redirectUri,
         }),
       );
     },

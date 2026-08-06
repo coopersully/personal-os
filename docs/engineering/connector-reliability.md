@@ -32,7 +32,12 @@ trigger commit together. Connector callbacks do not launch in-memory fire-and-fo
 Google and X authorization starts use a random hashed state and S256 PKCE. The encrypted verifier,
 exact redirect URI, selected capabilities, safe return path, and thirty-minute expiry live in one
 durable attempt row before the browser leaves ilo. A callback claims that attempt atomically and is
-idempotent under provider or browser replay.
+idempotent under provider or browser replay. An authenticated outcome read atomically closes a
+processing claim that outlives its two-minute provider window, so process loss becomes a retryable
+failure instead of leaving the browser pending indefinitely.
+
+Token exchange uses the redirect URI stored with that authorization attempt. An in-flight callback
+therefore remains valid while a rolling deployment changes the configured URI for new attempts.
 
 Every callback branch returns a `303` to an allowlisted ilo path with cache disabled, a no-referrer
 policy, and either an opaque attempt UUID or the fixed `restart_required` result. Provider error
@@ -44,6 +49,9 @@ Google enables a selected capability only when the token response contains every
 for that capability. Partial consent closes as `permission_incomplete` without creating, changing,
 or downgrading an account. Successful account persistence, cleared health, immediate sync
 eligibility, closed authorization outcome, and initial trigger share one transaction.
+
+Enabled notification configuration fails startup unless Gmail's OIDC audience and Calendar's
+webhook URL are the exact HTTPS notification routes on the configured API origin.
 
 An app-password connector can only validate credentials by contacting the provider. It therefore
 persists a pending account first and performs verification as the first asynchronous sync. A failed
@@ -73,11 +81,12 @@ provider response bodies and unknown exception messages never populate it.
   every change signal is delayed or absent.
 
 Google Mail uses Gmail history IDs and Google Calendar uses opaque sync tokens. iCloud Calendar
-uses WebDAV `sync-collection` only when the collection advertises it; invalid/unsupported tokens
-fall back to a controlled full reconciliation. Provider cursors are opaque, bounded, and committed
-inside the same fenced projection transaction as their changes. Gmail and Calendar watches renew
-durably before expiry. iCloud IMAP IDLE sessions are bounded change signals only; they never replace
-the authoritative five-minute reconciliation.
+uses WebDAV `sync-collection` only when the collection advertises it; an invalid opaque token
+restarts one bounded tokenless collection sync so the replacement token remains incremental, while
+unsupported or malformed reports fall back to a controlled full reconciliation. Provider cursors
+are opaque, bounded, and committed inside the same fenced projection transaction as their changes.
+Gmail and Calendar watches renew durably before expiry. iCloud IMAP IDLE sessions are bounded
+change signals only; they never replace the authoritative five-minute reconciliation.
 
 ## Provider transport inventory
 

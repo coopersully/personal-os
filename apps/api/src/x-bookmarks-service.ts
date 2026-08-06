@@ -275,7 +275,11 @@ export function createXBookmarksService({
     }
     if (!input.code) return close("failed", "authorization_code_missing");
     try {
-      let value = await x.exchangeCode(input.code, consumed.codeVerifier);
+      let value = await x.exchangeCode(
+        input.code,
+        consumed.codeVerifier,
+        consumed.attempt.redirectUri ?? xRedirectUri,
+      );
       const profile = await x.getProfile(value);
       value = profile.credentials;
       await db.transaction(async (transaction) => {

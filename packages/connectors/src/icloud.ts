@@ -244,107 +244,119 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
           return await fullCalendarSync(client, calendar, operation);
         }
 
-        const changedResources = new Map<string, "changed" | "deleted">();
-        let requestToken = syncToken ?? undefined;
-        let nextSyncToken: string | null = null;
-        let completed = false;
-        for (let page = 0; page < MAX_CALDAV_SYNC_PAGES; page += 1) {
-          throwIfProviderOperationCancelled(operation);
-          const responses = await client.syncCollection({
-            props: { "d:getetag": {} },
-            syncLevel: 1,
-            ...(requestToken ? { syncToken: requestToken } : {}),
-            url: calendar.url,
-            ...fetchOptions(operation),
-          });
-          if (responses.some((response) => response.status === 409 || response.status === 410)) {
-            return await fullCalendarSync(client, calendar, operation);
-          }
-          let truncated = false;
-          for (const response of responses) {
-            if (response.status === 507) {
-              truncated = true;
-              continue;
+        async function syncCollection(
+          activeSyncToken: string | null,
+        ): Promise<{ changes: RemoteEventChange[]; nextSyncToken: string; reset: boolean }> {
+          const changedResources = new Map<string, "changed" | "deleted">();
+          let requestToken = activeSyncToken ?? undefined;
+          let nextSyncToken: string | null = null;
+          let completed = false;
+          for (let page = 0; page < MAX_CALDAV_SYNC_PAGES; page += 1) {
+            throwIfProviderOperationCancelled(operation);
+            const responses = await client.syncCollection({
+              props: { "d:getetag": {} },
+              syncLevel: 1,
+              ...(requestToken ? { syncToken: requestToken } : {}),
+              url: calendar.url,
+              ...fetchOptions(operation),
+            });
+            if (responses.some((response) => response.status === 409 || response.status === 410)) {
+              return activeSyncToken
+                ? syncCollection(null)
+                : fullCalendarSync(client, calendar, operation);
             }
-            if (response.status === 401 || response.status === 403) {
-              throw providerError("calendar", { status: response.status });
+            let truncated = false;
+            for (const response of responses) {
+              if (response.status === 507) {
+                truncated = true;
+                continue;
+              }
+              if (response.status === 401 || response.status === 403) {
+                throw providerError("calendar", { status: response.status });
+              }
+              if (response.status !== 404 && !response.ok) {
+                throw new ConnectorError({
+                  category: response.status >= 500 ? "temporary" : "invalid_response",
+                  code: "icloud_calendar_sync_rejected",
+                  disposition: response.status >= 500 ? "retry" : "operator",
+                  message: "iCloud Calendar could not synchronize this calendar.",
+                  status: response.status,
+                });
+              }
+              if (!response.href) continue;
+              const objectUrl = safeCalendarObjectUrl(response.href, calendar.url);
+              if (!objectUrl) {
+                return await fullCalendarSync(client, calendar, operation);
+              }
+              changedResources.set(objectUrl, response.status === 404 ? "deleted" : "changed");
+              if (changedResources.size > MAX_CALDAV_SYNC_RESOURCES) {
+                return await fullCalendarSync(client, calendar, operation);
+              }
             }
-            if (response.status !== 404 && !response.ok) {
-              throw new ConnectorError({
-                category: response.status >= 500 ? "temporary" : "invalid_response",
-                code: "icloud_calendar_sync_rejected",
-                disposition: response.status >= 500 ? "retry" : "operator",
-                message: "iCloud Calendar could not synchronize this calendar.",
-                status: response.status,
-              });
-            }
-            if (!response.href) continue;
-            const objectUrl = safeCalendarObjectUrl(response.href, calendar.url);
-            if (!objectUrl) {
+
+            const responseToken = collectionSyncToken(responses);
+            if (!responseToken) {
               return await fullCalendarSync(client, calendar, operation);
             }
-            changedResources.set(objectUrl, response.status === 404 ? "deleted" : "changed");
-            if (changedResources.size > MAX_CALDAV_SYNC_RESOURCES) {
+
+            nextSyncToken = responseToken;
+            if (!truncated) {
+              completed = true;
+              break;
+            }
+            if (responseToken === requestToken) {
+              return await fullCalendarSync(client, calendar, operation);
+            }
+            requestToken = responseToken;
+          }
+          if (!completed || !nextSyncToken) {
+            return await fullCalendarSync(client, calendar, operation);
+          }
+
+          const changedUrls = [...changedResources]
+            .filter(([, state]) => state === "changed")
+            .map(([url]) => url);
+          const objects: DAVCalendarObject[] = [];
+          for (
+            let offset = 0;
+            offset < changedUrls.length;
+            offset += MAX_CALDAV_MULTIGET_RESOURCES
+          ) {
+            throwIfProviderOperationCancelled(operation);
+            const objectUrls = changedUrls.slice(offset, offset + MAX_CALDAV_MULTIGET_RESOURCES);
+            const expectedUrls = new Set(objectUrls);
+            const fetched = await client.fetchCalendarObjects({
+              calendar,
+              objectUrls,
+              ...fetchOptions(operation),
+            });
+            for (const object of fetched) {
+              const objectUrl = safeCalendarObjectUrl(object.url, calendar.url);
+              if (!objectUrl || !expectedUrls.has(objectUrl)) {
+                return await fullCalendarSync(client, calendar, operation);
+              }
+              objects.push({ ...object, url: objectUrl });
+              expectedUrls.delete(objectUrl);
+            }
+            if (expectedUrls.size > 0) {
               return await fullCalendarSync(client, calendar, operation);
             }
           }
-
-          const responseToken = collectionSyncToken(responses);
-          if (!responseToken) {
-            return await fullCalendarSync(client, calendar, operation);
+          const changes: RemoteEventChange[] = objects
+            .filter((object): object is DAVCalendarObject & { data: string } =>
+              Boolean(typeof object.data === "string" && object.data.includes("BEGIN:VEVENT")),
+            )
+            .map((object) => ({
+              event: normalizeCalendarObject(object, calendar.timezone ?? "UTC"),
+              kind: "upsert" as const,
+            }));
+          for (const [remoteEventId, state] of changedResources) {
+            if (state === "deleted") changes.push({ kind: "delete", remoteEventId });
           }
-
-          nextSyncToken = responseToken;
-          if (!truncated) {
-            completed = true;
-            break;
-          }
-          if (responseToken === requestToken) {
-            return await fullCalendarSync(client, calendar, operation);
-          }
-          requestToken = responseToken;
-        }
-        if (!completed || !nextSyncToken) {
-          return await fullCalendarSync(client, calendar, operation);
+          return { changes, nextSyncToken, reset: activeSyncToken === null };
         }
 
-        const changedUrls = [...changedResources]
-          .filter(([, state]) => state === "changed")
-          .map(([url]) => url);
-        const objects: DAVCalendarObject[] = [];
-        for (let offset = 0; offset < changedUrls.length; offset += MAX_CALDAV_MULTIGET_RESOURCES) {
-          throwIfProviderOperationCancelled(operation);
-          const objectUrls = changedUrls.slice(offset, offset + MAX_CALDAV_MULTIGET_RESOURCES);
-          const expectedUrls = new Set(objectUrls);
-          const fetched = await client.fetchCalendarObjects({
-            calendar,
-            objectUrls,
-            ...fetchOptions(operation),
-          });
-          for (const object of fetched) {
-            const objectUrl = safeCalendarObjectUrl(object.url, calendar.url);
-            if (!objectUrl || !expectedUrls.has(objectUrl)) {
-              return await fullCalendarSync(client, calendar, operation);
-            }
-            objects.push({ ...object, url: objectUrl });
-            expectedUrls.delete(objectUrl);
-          }
-          if (expectedUrls.size > 0) {
-            return await fullCalendarSync(client, calendar, operation);
-          }
-        }
-        const changes: RemoteEventChange[] = objects
-          .filter((object): object is DAVCalendarObject & { data: string } =>
-            Boolean(typeof object.data === "string" && object.data.includes("BEGIN:VEVENT")),
-          )
-          .map((object) => ({
-            event: normalizeCalendarObject(object, calendar.timezone ?? "UTC"),
-            kind: "upsert" as const,
-          }));
-        for (const [remoteEventId, state] of changedResources) {
-          if (state === "deleted") changes.push({ kind: "delete", remoteEventId });
-        }
-        return { changes, nextSyncToken, reset: syncToken === null };
+        return await syncCollection(syncToken);
       } catch (error) {
         if (operation?.signal?.aborted) throw operation.signal.reason;
         throw providerError("calendar", error);

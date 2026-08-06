@@ -84,11 +84,22 @@ const configSchema = z
         }
       }
       try {
-        if (new URL(value.GOOGLE_GMAIL_PUSH_AUDIENCE).protocol !== "https:") throw new Error();
+        const url = new URL(value.GOOGLE_GMAIL_PUSH_AUDIENCE);
+        const api = new URL(value.API_BASE_URL);
+        if (
+          url.protocol !== "https:" ||
+          url.origin !== api.origin ||
+          url.pathname !== "/v1/connectors/google/gmail/notifications" ||
+          url.search ||
+          url.hash
+        ) {
+          throw new Error();
+        }
       } catch {
         context.addIssue({
           code: "custom",
-          message: "GOOGLE_GMAIL_PUSH_AUDIENCE must be an HTTPS URL.",
+          message:
+            "GOOGLE_GMAIL_PUSH_AUDIENCE must be the exact HTTPS Gmail notification route on API_BASE_URL.",
           path: ["GOOGLE_GMAIL_PUSH_AUDIENCE"],
         });
       }

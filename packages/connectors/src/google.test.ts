@@ -134,7 +134,9 @@ describe("Google Calendar connector", () => {
     expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.toString()).not.toContain("pkce-verifier");
-    await expect(google.exchangeCode("code", "pkce-verifier")).resolves.toEqual({
+    await expect(
+      google.exchangeCode("code", "pkce-verifier", "https://original.example.com/callback"),
+    ).resolves.toEqual({
       accessToken: "new",
       expiresAt: "2026-07-13T13:00:00.000Z",
       refreshToken: "offline",
@@ -144,6 +146,9 @@ describe("Google Calendar connector", () => {
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://oauth2.googleapis.com/token");
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain("grant_type=authorization_code");
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain("code_verifier=pkce-verifier");
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain(
+      "redirect_uri=https%3A%2F%2Foriginal.example.com%2Fcallback",
+    );
 
     expect(() => connector(fetch, false).authorizationUrl("state", "challenge")).toThrow(
       "not configured",

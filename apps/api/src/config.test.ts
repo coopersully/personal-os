@@ -77,6 +77,16 @@ describe("API configuration", () => {
       googleGmailPushEnabled: true,
       googleGmailPushServiceAccount: "pubsub@example.iam.gserviceaccount.com",
     });
+    expect(() =>
+      loadConfig({
+        ...required,
+        GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION: "projects/ilo/subscriptions/gmail-push",
+        GOOGLE_GMAIL_PUBSUB_TOPIC: "projects/ilo/topics/gmail-push",
+        GOOGLE_GMAIL_PUSH_AUDIENCE: "https://attacker.example.com/gmail",
+        GOOGLE_GMAIL_PUSH_ENABLED: "true",
+        GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT: "pubsub@example.iam.gserviceaccount.com",
+      }),
+    ).toThrow("exact HTTPS Gmail notification route");
   });
 
   it("requires the exact public Calendar webhook URL when Calendar push is enabled", () => {

@@ -43,12 +43,17 @@ describe("X Bookmarks connector", () => {
     expect(url.searchParams.get("state")).toBe("state");
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
     expect(url.searchParams.get("scope")).toContain("bookmark.read");
-    await expect(x.exchangeCode("code", "verifier")).resolves.toMatchObject({
+    await expect(
+      x.exchangeCode("code", "verifier", "https://original.example.com/callback"),
+    ).resolves.toMatchObject({
       accessToken: "new",
       expiresAt: "2026-07-20T13:00:00.000Z",
       refreshToken: "offline",
     });
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain("code_verifier=verifier");
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain(
+      "redirect_uri=https%3A%2F%2Foriginal.example.com%2Fcallback",
+    );
     expect(() => connector(fetch, false).authorizationUrl("state", "verifier")).toThrow(
       "not configured",
     );

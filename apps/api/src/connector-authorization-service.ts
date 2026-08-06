@@ -218,7 +218,7 @@ export function createConnectorAuthorizationService({
 
     async publicOutcome(userId: string, attemptId: string): Promise<ConnectorAuthorizationOutcome> {
       const visibleAfter = new Date(now().getTime() - AUTHORIZATION_ATTEMPT_VISIBILITY_MS);
-      const [attempt] = await db
+      let [attempt] = await db
         .select()
         .from(oauthStates)
         .where(
@@ -231,6 +231,40 @@ export function createConnectorAuthorizationService({
         .limit(1);
       if (!attempt || (attempt.completedAt && attempt.completedAt <= visibleAfter)) {
         throw new AppError("not_found", "The authorization attempt was not found.");
+      }
+      if (attempt.status === "processing" && attempt.consumedAt) {
+        const staleBefore = new Date(now().getTime() - AUTHORIZATION_PROCESSING_LEASE_MS);
+        if (attempt.consumedAt < staleBefore) {
+          const [interrupted] = await db
+            .update(oauthStates)
+            .set({
+              completedAt: now(),
+              outcomeCode: "authorization_interrupted",
+              status: "failed",
+            })
+            .where(
+              and(
+                eq(oauthStates.id, attempt.id),
+                eq(oauthStates.userId, userId),
+                eq(oauthStates.status, "processing"),
+                lt(oauthStates.consumedAt, staleBefore),
+              ),
+            )
+            .returning();
+          if (interrupted) {
+            attempt = interrupted;
+          } else {
+            const [current] = await db
+              .select()
+              .from(oauthStates)
+              .where(and(eq(oauthStates.id, attempt.id), eq(oauthStates.userId, userId)))
+              .limit(1);
+            if (!current) {
+              throw new AppError("not_found", "The authorization attempt was not found.");
+            }
+            attempt = current;
+          }
+        }
       }
       const status =
         attempt.status === "pending" || attempt.status === "processing"

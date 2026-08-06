@@ -350,21 +350,38 @@ describe("iCloud connector", () => {
     );
   });
 
-  it("falls back to bounded full CalDAV reconciliation when a collection token is invalid", async () => {
+  it("restarts collection sync once when Apple invalidates its opaque token", async () => {
+    const syncCollection = vi
+      .fn()
+      .mockResolvedValueOnce([{ ok: false, status: 409, statusText: "Conflict" }])
+      .mockResolvedValueOnce([
+        {
+          href: `${calendarId}event-1.ics`,
+          ok: true,
+          raw: { multistatus: { syncToken: "opaque-recovered-token" } },
+          status: 200,
+          statusText: "OK",
+        },
+      ]);
     const client = davClient({
       supportedReportSet: vi.fn(async () => ["syncCollection"]),
-      syncCollection: vi.fn(async () => [{ ok: false, status: 409, statusText: "Conflict" }]),
+      syncCollection,
     });
     const { value } = connector(client);
 
     await expect(
       value.syncCalendar(credentials, calendarId, "expired-token"),
     ).resolves.toMatchObject({
-      nextSyncToken: "ctag-1",
+      nextSyncToken: "opaque-recovered-token",
       reset: true,
     });
-    expect(client.fetchCalendarObjects).toHaveBeenCalledWith(
-      expect.not.objectContaining({ objectUrls: expect.anything() }),
+    expect(syncCollection).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ syncToken: "expired-token" }),
+    );
+    expect(syncCollection).toHaveBeenNthCalledWith(
+      2,
+      expect.not.objectContaining({ syncToken: expect.anything() }),
     );
   });
 

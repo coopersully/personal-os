@@ -3183,7 +3183,11 @@ export function createConnectorService({
     if (!input.code) return close("failed", "authorization_code_missing");
 
     try {
-      let googleCredentials = await google.exchangeCode(input.code, consumed.codeVerifier);
+      let googleCredentials = await google.exchangeCode(
+        input.code,
+        consumed.codeVerifier,
+        consumed.attempt.redirectUri ?? googleRedirectUri,
+      );
       const profileResult = await google.getProfile(googleCredentials);
       googleCredentials = profileResult.credentials;
       const requestedServices = consumed.attempt.requestedServices ?? ["calendar", "mail"];

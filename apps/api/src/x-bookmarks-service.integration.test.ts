@@ -93,6 +93,11 @@ describe.sequential("X Bookmarks service", () => {
     expect(x.listBookmarkFolders).not.toHaveBeenCalled();
     await expect(service.completeAuthorization(state, "code")).resolves.toEqual(connected);
     expect(x.exchangeCode).toHaveBeenCalledTimes(1);
+    expect(x.exchangeCode).toHaveBeenCalledWith(
+      "code",
+      expect.stringMatching(/^pkce_/),
+      "https://api.ilo.invalid/v1/x-bookmarks/callback",
+    );
     expect(await service.folders(userId)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "Calendar", remoteFolderId: "folder-calendar" }),

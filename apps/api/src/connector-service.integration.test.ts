@@ -3937,7 +3937,11 @@ describe.sequential("connector service", () => {
     const connected = await service.completeGoogleAuthorization(String(state), "code-1");
     expect(connected.email).toBe("person@example.com");
     expect(connected.returnPath).toBe("/settings?section=connections");
-    expect(google.exchangeCode).toHaveBeenCalledWith("code-1", expect.stringMatching(/^pkce_/));
+    expect(google.exchangeCode).toHaveBeenCalledWith(
+      "code-1",
+      expect.stringMatching(/^pkce_/),
+      "https://api.ilo.invalid/v1/connectors/google/callback",
+    );
     await expect(service.completeGoogleAuthorization(String(state), "code-again")).resolves.toEqual(
       connected,
     );

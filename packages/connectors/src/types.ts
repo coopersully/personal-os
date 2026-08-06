@@ -236,7 +236,11 @@ export type GoogleConnector = {
     remoteEventId: string,
     etag: string | null,
   ) => Promise<GoogleCredentials>;
-  exchangeCode: (code: string, codeVerifier: string) => Promise<GoogleCredentials>;
+  exchangeCode: (
+    code: string,
+    codeVerifier: string,
+    redirectUri?: string,
+  ) => Promise<GoogleCredentials>;
   getProfile: (credentials: GoogleCredentials) => Promise<CredentialResult<ProviderProfile>>;
   getMailThreadState?: (
     credentials: GoogleCredentials,
@@ -349,7 +353,7 @@ export type ICloudConnector = {
 
 export type XConnector = {
   authorizationUrl: (state: string, codeVerifier: string) => string;
-  exchangeCode: (code: string, codeVerifier: string) => Promise<XCredentials>;
+  exchangeCode: (code: string, codeVerifier: string, redirectUri?: string) => Promise<XCredentials>;
   getProfile: (credentials: XCredentials) => Promise<CredentialResult<XProfile>>;
   listBookmarkFolders: (
     credentials: XCredentials,

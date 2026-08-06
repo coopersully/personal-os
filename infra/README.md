@@ -47,6 +47,18 @@ terraform apply
 
 Do not use the account root identity for routine applies. Create a named administrator/deployer profile first. The bootstrap apply is the only deliberately manual foundation step.
 
+The application deployment workflow does not run a broad Terraform apply. Infrastructure changes
+must cross a separately reviewed production plan so unrelated drift, replacements, and destructive
+actions remain visible before mutation. A successful `terraform validate`, application deploy, or
+public health request is not proof that the corresponding operational resources are live.
+
+Production deploy therefore performs read-only preflights for infrastructure contracts the release
+depends on. Connector releases require the exact live connector log metric filters and CloudWatch
+alarms before any image is published, and the hourly production-health workflow repeats that check.
+If the preflight fails, review the full production plan, apply only the intended infrastructure
+changes, and rerun the deployment. Never bypass the preflight or apply an unreviewed broad plan to
+repair one missing resource.
+
 ## Runtime configuration before the first deployment
 
 The API task reads these parameters from `var.ssm_parameter_prefix` through ECS secret references:

@@ -230,6 +230,7 @@ const mocks = vi.hoisted(() => ({
   getAssistantSetupStatus: vi.fn(),
   getIloSetup: vi.fn(),
   getDomainProfile: vi.fn(),
+  getConnectorAuthorizationAttempt: vi.fn(),
   getWeather: vi.fn(),
   searchWeatherLocations: vi.fn(),
   getGoogleAuthorizationUrl: vi.fn(),
@@ -889,6 +890,12 @@ function defaults() {
   mocks.deleteCalendar.mockResolvedValue(undefined);
   mocks.setCalendarSelected.mockResolvedValue(calendar);
   mocks.getGoogleAuthorizationUrl.mockResolvedValue("/settings?google=started");
+  mocks.getConnectorAuthorizationAttempt.mockResolvedValue({
+    accountId: id,
+    provider: "google",
+    retryable: false,
+    status: "connected",
+  });
   mocks.getXBookmarkAuthorizationUrl.mockResolvedValue("https://x.com/i/oauth2/authorize");
   mocks.getPinterestWallpaperSettings.mockResolvedValue({
     backgroundColor: "#ffffff",
@@ -5325,6 +5332,25 @@ describe("ilo web app", () => {
     await browser.click(within(iCloudRow).getByRole("button", { name: "Reconnect" }));
     expect(screen.getByLabelText("Apple Account email")).toHaveValue("person@icloud.com");
     expect(screen.queryByText("raw-provider-canary")).not.toBeInTheDocument();
+  });
+
+  it("shows one safe callback outcome and removes callback state from the URL", async () => {
+    mocks.getConnectorAuthorizationAttempt.mockResolvedValue({
+      accountId: id,
+      provider: "google",
+      providerMessage: "raw-provider-canary",
+      retryable: false,
+      status: "connected",
+    });
+    const view = setup(
+      `/settings?section=connections&connection_attempt=${id}`,
+    );
+
+    expect(await screen.findByText("Google is connected")).toBeInTheDocument();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    expect(screen.queryByText("raw-provider-canary")).not.toBeInTheDocument();
+    await waitFor(() => expect(view.location.value).toBe("/settings?section=connections"));
+    expect(mocks.getConnectorAuthorizationAttempt).toHaveBeenCalledWith(id);
   });
 
   it("opens Google authorization in the system browser on desktop", async () => {

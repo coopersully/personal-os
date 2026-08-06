@@ -24,6 +24,7 @@ import {
   mailRuleWorkItems,
   mailThreads,
   migrateDatabase,
+  oauthStates,
   users,
 } from "@personal-os/database";
 import { MAIL_RULE_EXECUTION_LIMIT_PER_RUN, type MailRuleAction } from "@personal-os/domain";
@@ -43,11 +44,20 @@ import { decryptJson, encryptJson } from "./security.js";
 
 const timestamp = new Date("2026-07-13T12:00:00.000Z");
 const encryptionKey = Buffer.alloc(32, 7).toString("base64");
+const googleCalendarScope = [
+  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
+].join(" ");
+const googleCalendarAndMailScope = [
+  googleCalendarScope,
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.send",
+].join(" ");
 const credentials: GoogleCredentials = {
   accessToken: "access-1",
   expiresAt: "2026-07-13T13:00:00.000Z",
   refreshToken: "refresh-1",
-  scope: "calendar",
+  scope: googleCalendarScope,
   tokenType: "Bearer",
 };
 const rotatedCredentials: GoogleCredentials = {
@@ -394,7 +404,10 @@ describe.sequential("connector service", () => {
       icloud,
       now: () => timestamp,
     });
-    const initialUrl = await service.startGoogleAuthorization(userId);
+    const initialUrl = await service.startGoogleAuthorization(userId, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar"],
+    });
     await service.completeGoogleAuthorization(
       String(new URL(initialUrl).searchParams.get("state")),
       "bootstrap-code",
@@ -418,7 +431,7 @@ describe.sequential("connector service", () => {
     if (!account) throw new Error("Google account fixture is missing.");
     const mailCredentials = {
       ...credentials,
-      scope: "https://www.googleapis.com/auth/gmail.readonly",
+      scope: googleCalendarAndMailScope,
     };
     vi.mocked(google.exchangeCode).mockResolvedValueOnce(mailCredentials);
     vi.mocked(google.getProfile).mockResolvedValueOnce({
@@ -459,6 +472,7 @@ describe.sequential("connector service", () => {
     });
     expect(google.authorizationUrl).toHaveBeenLastCalledWith(
       expect.stringMatching(/^oauth_/),
+      expect.any(String),
       account.email,
       ["calendar", "mail"],
     );
@@ -2272,7 +2286,8 @@ describe.sequential("connector service", () => {
     ).resolves.toHaveLength(1);
     const reauthorizedCredentials = {
       ...credentials,
-      scope: "https://www.googleapis.com/auth/gmail.modify",
+      scope:
+        "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
     };
     vi.mocked(google.exchangeCode).mockResolvedValueOnce(reauthorizedCredentials);
     vi.mocked(google.getProfile).mockResolvedValueOnce({
@@ -3610,32 +3625,154 @@ describe.sequential("connector service", () => {
     });
   });
 
+  it("closes Google callbacks with safe outcomes and never enables ungranted services", async () => {
+    const deniedUrl = await service.startGoogleAuthorization(userId);
+    const deniedState = String(new URL(deniedUrl).searchParams.get("state"));
+    const denied = await service.handleGoogleAuthorizationCallback({
+      error: "access_denied",
+      issuer: "https://accounts.google.com",
+      requestId: "request-denied",
+      state: deniedState,
+    });
+    expect(denied).toEqual({
+      attemptId: expect.any(String),
+      returnPath: "/settings?section=connections",
+      status: "cancelled",
+    });
+    expect(
+      await database.db.select().from(oauthStates).where(eq(oauthStates.id, denied.attemptId!)),
+    ).toEqual([
+      expect.objectContaining({
+        connectedAccountId: null,
+        outcomeCode: "authorization_cancelled",
+        status: "cancelled",
+      }),
+    ]);
+
+    const [accountBefore] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!accountBefore) throw new Error("Google account fixture is missing.");
+    const incompleteCredentials = {
+      ...credentials,
+      accessToken: "<html>RAW_PROVIDER_CANARY</html>",
+      scope: `${googleCalendarScope} https://www.googleapis.com/auth/gmail.send`,
+    };
+    vi.mocked(google.exchangeCode).mockResolvedValueOnce(incompleteCredentials);
+    vi.mocked(google.getProfile).mockResolvedValueOnce({
+      credentials: incompleteCredentials,
+      value: {
+        email: "private-canary@example.com",
+        id: "google-person",
+        name: "RAW_PROVIDER_CANARY",
+      },
+    });
+    const incompleteUrl = await service.startGoogleAuthorization(userId, {
+      accountId: accountBefore.id,
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
+    const incompleteState = String(new URL(incompleteUrl).searchParams.get("state"));
+    const incomplete = await service.handleGoogleAuthorizationCallback({
+      code: "RAW_CODE_CANARY",
+      issuer: "https://accounts.google.com",
+      requestId: "request-incomplete",
+      state: incompleteState,
+    });
+    expect(incomplete.status).toBe("permission_incomplete");
+    const [attempt] = await database.db
+      .select()
+      .from(oauthStates)
+      .where(eq(oauthStates.id, incomplete.attemptId!));
+    expect(JSON.stringify(attempt)).not.toContain("RAW_PROVIDER_CANARY");
+    expect(JSON.stringify(attempt)).not.toContain("private-canary@example.com");
+    expect(JSON.stringify(attempt)).not.toContain("RAW_CODE_CANARY");
+    const [accountAfter] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountBefore.id));
+    expect(accountAfter).toEqual(accountBefore);
+
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        nextSyncAt: new Date("2026-07-14T12:00:00.000Z"),
+        syncError: "Reconnect required.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "authorization_revoked",
+        syncFailureCount: 2,
+        syncRecovery: "reconnect",
+        syncStatus: "error",
+      })
+      .where(eq(calendarAccounts.id, accountBefore.id));
+    const completeCredentials = { ...credentials, scope: googleCalendarAndMailScope };
+    vi.mocked(google.exchangeCode).mockResolvedValueOnce(completeCredentials);
+    vi.mocked(google.getProfile).mockResolvedValueOnce({
+      credentials: completeCredentials,
+      value: { email: "person@example.com", id: "google-person", name: "Google Person" },
+    });
+    const successUrl = await service.startGoogleAuthorization(userId, {
+      accountId: accountBefore.id,
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
+    const success = await service.handleGoogleAuthorizationCallback({
+      code: "success-code",
+      issuer: "https://accounts.google.com",
+      requestId: "request-success",
+      state: String(new URL(successUrl).searchParams.get("state")),
+    });
+    expect(success.status).toBe("connected");
+    const [healthyAccount] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountBefore.id));
+    expect(healthyAccount).toMatchObject({
+      calendarEnabled: true,
+      mailEnabled: true,
+      nextSyncAt: timestamp,
+      syncClaimId: null,
+      syncError: null,
+      syncErrorCategory: null,
+      syncErrorCode: null,
+      syncFailureCount: 0,
+      syncRecovery: null,
+      syncStatus: "idle",
+    });
+  });
+
   it("completes OAuth, updates an existing connection, and validates one-time state", async () => {
     await expect(service.completeGoogleAuthorization("invalid", "code")).rejects.toMatchObject({
       code: "invalid_request",
     });
 
-    const authorizationUrl = await service.startGoogleAuthorization(userId);
+    const authorizationUrl = await service.startGoogleAuthorization(userId, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar"],
+    });
     const state = new URL(authorizationUrl).searchParams.get("state");
     expect(state).toMatch(/^oauth_/);
     const connected = await service.completeGoogleAuthorization(String(state), "code-1");
     expect(connected.email).toBe("person@example.com");
     expect(connected.returnPath).toBe("/settings?section=connections");
-    expect(google.exchangeCode).toHaveBeenCalledWith("code-1");
-    await expect(
-      service.completeGoogleAuthorization(String(state), "code-again"),
-    ).rejects.toMatchObject({ code: "invalid_request" });
-    const concurrentAuthorizationUrl = await service.startGoogleAuthorization(userId);
+    expect(google.exchangeCode).toHaveBeenCalledWith("code-1", expect.stringMatching(/^pkce_/));
+    await expect(service.completeGoogleAuthorization(String(state), "code-again")).resolves.toEqual(
+      connected,
+    );
+    const concurrentAuthorizationUrl = await service.startGoogleAuthorization(userId, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar"],
+    });
     const concurrentState = String(new URL(concurrentAuthorizationUrl).searchParams.get("state"));
     const exchangeCountBeforeRace = vi.mocked(google.exchangeCode).mock.calls.length;
     const concurrentResults = await Promise.allSettled([
       service.completeGoogleAuthorization(concurrentState, "concurrent-code-1"),
       service.completeGoogleAuthorization(concurrentState, "concurrent-code-2"),
     ]);
-    expect(concurrentResults.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(concurrentResults.filter((result) => result.status === "rejected")).toEqual([
-      expect.objectContaining({ reason: expect.objectContaining({ code: "invalid_request" }) }),
-    ]);
+    expect(
+      concurrentResults.filter((result) => result.status === "fulfilled").length,
+    ).toBeGreaterThanOrEqual(1);
     expect(vi.mocked(google.exchangeCode).mock.calls).toHaveLength(exchangeCountBeforeRace + 1);
 
     expect(
@@ -3672,7 +3809,10 @@ describe.sequential("connector service", () => {
         },
       ],
     });
-    const secondUrl = await service.startGoogleAuthorization(userId);
+    const secondUrl = await service.startGoogleAuthorization(userId, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar"],
+    });
     const secondState = new URL(secondUrl).searchParams.get("state");
     const reconnected = await service.completeGoogleAuthorization(String(secondState), "code-2");
     await service.syncAccount(userId, reconnected.accountId);
@@ -5580,7 +5720,10 @@ describe.sequential("connector service", () => {
         name: "Calendar Capability",
       },
     });
-    const url = await service.startGoogleAuthorization(profileUser.id);
+    const url = await service.startGoogleAuthorization(profileUser.id, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar"],
+    });
     await service.completeGoogleAuthorization(
       String(new URL(url).searchParams.get("state")),
       "calendar-capability-code",

@@ -333,6 +333,7 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
   return {
     authorizationUrl(
       state: string,
+      codeChallenge: string,
       loginHint?: string,
       services: GoogleAuthorizationService[] = ["calendar", "mail"],
     ): string {
@@ -354,6 +355,8 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       url.search = new URLSearchParams({
         access_type: "offline",
         client_id: options.clientId,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
         include_granted_scopes: "true",
         prompt: "consent",
         redirect_uri: options.redirectUri,
@@ -385,12 +388,13 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       return result.credentials;
     },
 
-    async exchangeCode(code: string): Promise<GoogleCredentials> {
+    async exchangeCode(code: string, codeVerifier: string): Promise<GoogleCredentials> {
       const token = await exchangeToken(
         new URLSearchParams({
           client_id: options.clientId,
           client_secret: options.clientSecret,
           code,
+          code_verifier: codeVerifier,
           grant_type: "authorization_code",
           redirect_uri: options.redirectUri,
         }),
@@ -612,6 +616,27 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       };
     },
   };
+}
+
+export function googleGrantedServices(
+  credentials: GoogleCredentials,
+): GoogleAuthorizationService[] {
+  const scopes = new Set(credentials.scope.split(/\s+/).filter(Boolean));
+  const fullCalendar = scopes.has("https://www.googleapis.com/auth/calendar");
+  const calendarList =
+    fullCalendar ||
+    scopes.has("https://www.googleapis.com/auth/calendar.readonly") ||
+    scopes.has("https://www.googleapis.com/auth/calendar.calendarlist.readonly");
+  const calendarEvents =
+    fullCalendar || scopes.has("https://www.googleapis.com/auth/calendar.events");
+  const fullMail = scopes.has("https://mail.google.com/");
+  const mailManage =
+    fullMail || scopes.has("https://www.googleapis.com/auth/gmail.modify");
+  const mailSend = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.send");
+  return [
+    ...(calendarList && calendarEvents ? (["calendar"] as const) : []),
+    ...(mailManage && mailSend ? (["mail"] as const) : []),
+  ];
 }
 
 function mailboxRole(id: string): RemoteMailbox["role"] {

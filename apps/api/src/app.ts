@@ -104,6 +104,7 @@ const runAutomationInputSchema = z.object({ dryRun: z.boolean().default(false) }
 const googleCallbackSchema = z.object({
   code: z.string().min(1).optional(),
   error: z.string().min(1).optional(),
+  iss: z.string().min(1).optional(),
   state: z.string().min(1),
 });
 const oauthAuthorizeSchema = z.object({
@@ -189,6 +190,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
     google,
+    googleRedirectUri: dependencies.config.googleRedirectUri,
     icloud: dependencies.icloud ?? createICloudConnector(),
     now,
     ...(dependencies.log ? { log: dependencies.log } : {}),
@@ -214,6 +216,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
     now,
+    xRedirectUri: dependencies.config.xRedirectUri,
     x:
       dependencies.x ??
       createXConnector({
@@ -223,6 +226,20 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         redirectUri: dependencies.config.xRedirectUri,
       }),
   });
+  function connectorCallbackRedirect(
+    context: Context<AppEnv>,
+    returnPath: "/setup" | "/settings?section=connections",
+    attemptId: string | null,
+  ): Response {
+    const location = new URL(returnPath, dependencies.config.appBaseUrl);
+    if (attemptId) location.searchParams.set("connection_attempt", attemptId);
+    else location.searchParams.set("connection_result", "restart_required");
+    context.header("Cache-Control", "no-store");
+    context.header("Pragma", "no-cache");
+    context.header("Referrer-Policy", "no-referrer");
+    context.header("X-Content-Type-Options", "nosniff");
+    return context.redirect(location.toString(), 303);
+  }
   const calendar = createCalendarService({
     connectedEvents: connectors.eventGateway,
     db: dependencies.db,
@@ -451,36 +468,33 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     return context.json({ user: await auth.verifyEmail(input.token) });
   });
   app.get("/v1/connectors/google/callback", async (context) => {
-    const query = googleCallbackSchema.parse(context.req.query());
-    if (query.error || !query.code) {
-      throw new AppError(
-        "invalid_request",
-        query.error
-          ? `Google authorization failed: ${query.error}`
-          : "Google did not return an authorization code.",
-      );
+    const parsed = googleCallbackSchema.safeParse(context.req.query());
+    if (!parsed.success) {
+      return connectorCallbackRedirect(context, "/settings?section=connections", null);
     }
-    const result = await connectors.completeGoogleAuthorization(query.state, query.code);
-    startBackgroundTask("google-connector-initial-sync", async () => {
-      await connectors.syncAccount(result.userId, result.accountId);
+    const query = parsed.data;
+    const result = await connectors.handleGoogleAuthorizationCallback({
+      ...(query.code ? { code: query.code } : {}),
+      ...(query.error ? { error: query.error } : {}),
+      ...(query.iss ? { issuer: query.iss } : {}),
+      requestId: context.get("requestId"),
+      state: query.state,
     });
-    const separator = result.returnPath.includes("?") ? "&" : "?";
-    return context.redirect(
-      `${dependencies.config.appBaseUrl}${result.returnPath}${separator}google=connected`,
-    );
+    return connectorCallbackRedirect(context, result.returnPath, result.attemptId);
   });
   app.get("/v1/x-bookmarks/callback", async (context) => {
-    const query = xCallbackSchema.parse(context.req.query());
-    if (query.error || !query.code) {
-      throw new AppError(
-        "invalid_request",
-        query.error
-          ? `X authorization failed: ${query.error}`
-          : "X did not return an authorization code.",
-      );
+    const parsed = xCallbackSchema.safeParse(context.req.query());
+    if (!parsed.success) {
+      return connectorCallbackRedirect(context, "/settings?section=connections", null);
     }
-    await xBookmarks.completeAuthorization(query.state, query.code);
-    return context.redirect(`${dependencies.config.appBaseUrl}/settings/connectors?x=connected`);
+    const query = parsed.data;
+    const result = await xBookmarks.handleAuthorizationCallback({
+      ...(query.code ? { code: query.code } : {}),
+      ...(query.error ? { error: query.error } : {}),
+      requestId: context.get("requestId"),
+      state: query.state,
+    });
+    return connectorCallbackRedirect(context, result.returnPath, result.attemptId);
   });
 
   const oauthSession = async (context: Context<AppEnv>) => {
@@ -734,6 +748,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   app.get("/v1/connectors", async (context) =>
     context.json({ accounts: await connectors.listAccounts(context.get("principal").userId) }),
+  );
+  app.get("/v1/connectors/authorization-attempts/:id", async (context) =>
+    context.json({
+      attempt: await connectors.authorizationOutcome(
+        context.get("principal").userId,
+        context.req.param("id"),
+      ),
+    }),
   );
   app.post("/v1/connectors/google/start", async (context) => {
     const input = startGoogleAuthorizationInputSchema.parse({

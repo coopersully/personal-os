@@ -216,7 +216,13 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: { security, responses: { 200: { description: "Google authorization URL" } } },
       },
       "/v1/connectors/google/callback": {
-        get: { responses: { 302: { description: "Google authorization completed" } } },
+        get: { responses: { 303: { description: "Safe Google authorization outcome redirect" } } },
+      },
+      "/v1/connectors/authorization-attempts/{id}": {
+        get: {
+          security,
+          responses: { 200: { description: "Safe connector authorization outcome" } },
+        },
       },
       "/v1/connectors/icloud": {
         post: { security, responses: { 201: { description: "iCloud connected" } } },
@@ -231,7 +237,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: { security, responses: { 200: { description: "X authorization URL" } } },
       },
       "/v1/x-bookmarks/callback": {
-        get: { responses: { 302: { description: "X authorization completed" } } },
+        get: { responses: { 303: { description: "Safe X authorization outcome redirect" } } },
       },
       "/v1/x-bookmarks/account": {
         delete: { security, responses: { 204: { description: "X connection removed" } } },

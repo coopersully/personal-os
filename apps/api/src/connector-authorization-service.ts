@@ -17,6 +17,7 @@ const AUTHORIZATION_PROCESSING_LEASE_MS = 2 * 60_000;
 
 type AuthorizationAttemptRow = typeof oauthStates.$inferSelect;
 type ClosedAuthorizationStatus = Exclude<ConnectorAuthorizationStatus, "pending">;
+type AuthorizationDatabase = Pick<Database, "update">;
 
 type CreateAuthorizationAttemptInput = {
   provider: ConnectorAuthorizationProvider;
@@ -66,9 +67,10 @@ export function createConnectorAuthorizationService({
   async function closeProcessingAttempt(
     attemptId: string,
     input: Omit<CloseAuthorizationAttemptInput, "attemptId">,
+    executor: AuthorizationDatabase = db,
   ): Promise<AuthorizationAttemptRow> {
     const completedAt = now();
-    const [attempt] = await db
+    const [attempt] = await executor
       .update(oauthStates)
       .set({
         completedAt,
@@ -85,8 +87,11 @@ export function createConnectorAuthorizationService({
   }
 
   return {
-    async close(input: CloseAuthorizationAttemptInput): Promise<void> {
-      await closeProcessingAttempt(input.attemptId, input);
+    async close(
+      input: CloseAuthorizationAttemptInput,
+      executor: AuthorizationDatabase = db,
+    ): Promise<void> {
+      await closeProcessingAttempt(input.attemptId, input, executor);
     },
 
     async consume(

@@ -2,6 +2,7 @@ import { simpleParser } from "mailparser";
 import { ConnectorError } from "./failures.js";
 import {
   createGoogleConnector,
+  googleGrantedServices,
   MailSendPreAcceptanceError,
   projectGmailAttachments,
 } from "./google.js";
@@ -121,14 +122,19 @@ describe("Google Calendar connector", () => {
       response({ access_token: "new", expires_in: 3600, refresh_token: "offline" }),
     );
     const google = connector(fetch);
-    const url = new URL(google.authorizationUrl("state-value", "test@example.com"));
+    const url = new URL(
+      google.authorizationUrl("state-value", "pkce-challenge", "test@example.com"),
+    );
     expect(url.origin).toBe("https://accounts.google.com");
     expect(url.searchParams.get("state")).toBe("state-value");
     expect(url.searchParams.get("scope")).toContain("calendar.events");
     expect(url.searchParams.get("scope")).toContain("gmail.modify");
     expect(url.searchParams.get("scope")).toContain("gmail.send");
     expect(url.searchParams.get("login_hint")).toBe("test@example.com");
-    await expect(google.exchangeCode("code")).resolves.toEqual({
+    expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge");
+    expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+    expect(url.toString()).not.toContain("pkce-verifier");
+    await expect(google.exchangeCode("code", "pkce-verifier")).resolves.toEqual({
       accessToken: "new",
       expiresAt: "2026-07-13T13:00:00.000Z",
       refreshToken: "offline",
@@ -137,20 +143,26 @@ describe("Google Calendar connector", () => {
     });
     expect(String(fetch.mock.calls[0]?.[0])).toBe("https://oauth2.googleapis.com/token");
     expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain("grant_type=authorization_code");
+    expect(String(fetch.mock.calls[0]?.[1]?.body)).toContain("code_verifier=pkce-verifier");
 
-    expect(() => connector(fetch, false).authorizationUrl("state")).toThrow("not configured");
+    expect(() => connector(fetch, false).authorizationUrl("state", "challenge")).toThrow(
+      "not configured",
+    );
     await expect(
-      connector(queued(response({ access_token: "new", expires_in: 3600 }))).exchangeCode("code"),
+      connector(queued(response({ access_token: "new", expires_in: 3600 }))).exchangeCode(
+        "code",
+        "verifier",
+      ),
     ).rejects.toMatchObject({ name: "ConnectorError", status: 400 });
   });
 
   it("requests only the Google services selected during setup", () => {
     const google = connector(queued());
     const calendarScopes = new URL(
-      google.authorizationUrl("calendar-state", undefined, ["calendar"]),
+      google.authorizationUrl("calendar-state", "calendar-challenge", undefined, ["calendar"]),
     ).searchParams.get("scope");
     const mailScopes = new URL(
-      google.authorizationUrl("mail-state", undefined, ["mail"]),
+      google.authorizationUrl("mail-state", "mail-challenge", undefined, ["mail"]),
     ).searchParams.get("scope");
 
     expect(calendarScopes).toContain("calendar.events");
@@ -158,6 +170,50 @@ describe("Google Calendar connector", () => {
     expect(mailScopes).toContain("gmail.modify");
     expect(mailScopes).toContain("gmail.send");
     expect(mailScopes).not.toContain("calendar.events");
+  });
+
+  it("derives enabled services only from the complete granted scope set", () => {
+    const credentialsWith = (scope: string): GoogleCredentials => ({ ...fresh, scope });
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          [
+            "openid",
+            "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+            "https://www.googleapis.com/auth/calendar.events",
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/gmail.send",
+          ].join(" "),
+        ),
+      ),
+    ).toEqual(["calendar", "mail"]);
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/gmail.modify",
+        ),
+      ),
+    ).toEqual([]);
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+        ),
+      ),
+    ).toEqual(["calendar"]);
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
+        ),
+      ),
+    ).toEqual(["mail"]);
+    expect(
+      googleGrantedServices(
+        credentialsWith("https://www.googleapis.com/auth/gmail.send"),
+      ),
+    ).toEqual([]);
+    expect(googleGrantedServices(credentialsWith(""))).toEqual([]);
   });
 
   it("refreshes credentials and reads a paginated profile and calendar list", async () => {

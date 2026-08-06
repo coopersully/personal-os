@@ -2586,18 +2586,20 @@ describe.sequential("ilo API", () => {
       `/v1/x-bookmarks/callback?state=${encodeURIComponent(xState)}&code=x-code`,
       { auth: "none" },
     );
-    expect(xCallback.status).toBe(302);
-    expect(xCallback.headers.get("location")).toBe(
-      "https://app.example.com/settings/connectors?x=connected",
+    expect(xCallback.status).toBe(303);
+    const xCallbackLocation = new URL(String(xCallback.headers.get("location")));
+    expect(`${xCallbackLocation.pathname}?${xCallbackLocation.searchParams.get("section")}`).toBe(
+      "/settings?connections",
     );
-    expect((await request("/v1/x-bookmarks/callback?state=x", { auth: "none" })).status).toBe(400);
+    expect(xCallbackLocation.searchParams.get("connection_attempt")).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await request("/v1/x-bookmarks/callback?state=x", { auth: "none" })).status).toBe(303);
     expect(
       (
         await request("/v1/x-bookmarks/callback?state=x&error=access_denied", {
           auth: "none",
         })
       ).status,
-    ).toBe(400);
+    ).toBe(303);
     expect((await payload(await request("/v1/x-bookmarks/folders"))).folders).toMatchObject([
       { name: "Calendar", remoteFolderId: "x-folder" },
     ]);
@@ -2704,7 +2706,7 @@ describe.sequential("ilo API", () => {
       "Google Calendar is not configured.",
     );
     expect((await request("/v1/connectors/google/callback?state=x", { auth: "none" })).status).toBe(
-      400,
+      303,
     );
     expect(
       (
@@ -2712,7 +2714,7 @@ describe.sequential("ilo API", () => {
           auth: "none",
         })
       ).status,
-    ).toBe(400);
+    ).toBe(303);
 
     const audit = (await payload(await request("/v1/audit?limit=100", { auth: "agent" }))).events;
     expect(
@@ -3028,7 +3030,8 @@ describe.sequential("ilo API", () => {
       accessToken: "access",
       expiresAt: "2099-01-01T00:00:00.000Z",
       refreshToken: "refresh",
-      scope: "calendar",
+      scope:
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events",
       tokenType: "Bearer",
     };
     const googleConnector: GoogleConnector = {
@@ -3105,10 +3108,43 @@ describe.sequential("ilo API", () => {
         String(new URL(googleUrl).searchParams.get("state")),
       )}&code=authorization-code`,
     );
-    expect(callback.status).toBe(302);
-    expect(callback.headers.get("location")).toBe(
-      "https://app.production.example.com/setup?google=connected",
+    expect(callback.status).toBe(303);
+    const callbackLocation = new URL(String(callback.headers.get("location")));
+    expect(`${callbackLocation.origin}${callbackLocation.pathname}`).toBe(
+      "https://app.production.example.com/setup",
     );
+    expect(callbackLocation.searchParams.get("connection_attempt")).toMatch(
+      /^[0-9a-f-]{36}$/,
+    );
+    expect(callback.headers.get("cache-control")).toBe("no-store");
+    expect(callback.headers.get("pragma")).toBe("no-cache");
+    expect(callback.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(callback.headers.get("x-content-type-options")).toBe("nosniff");
+    const attemptId = String(callbackLocation.searchParams.get("connection_attempt"));
+    const anonymousAttempt = await productionApp.request(
+      `/v1/connectors/authorization-attempts/${attemptId}`,
+    );
+    expect(anonymousAttempt.status).toBe(401);
+    const attemptResponse = await productionApp.request(
+      `/v1/connectors/authorization-attempts/${attemptId}`,
+      { headers: { authorization: `Session ${productionSession}` } },
+    );
+    expect(await attemptResponse.json()).toEqual({
+      attempt: {
+        accountId: expect.any(String),
+        provider: "google",
+        retryable: false,
+        status: "connected",
+      },
+    });
+    const malformedCallback = await productionApp.request(
+      "/v1/connectors/google/callback?error=RAW_PROVIDER_CANARY",
+    );
+    expect(malformedCallback.status).toBe(303);
+    expect(malformedCallback.headers.get("location")).toBe(
+      "https://app.production.example.com/settings?section=connections&connection_result=restart_required",
+    );
+    expect(await malformedCallback.text()).not.toContain("RAW_PROVIDER_CANARY");
     const connectedAccounts = await productionApp.request("/v1/connectors", {
       headers: { authorization: `Session ${productionSession}` },
     });

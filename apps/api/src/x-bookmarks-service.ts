@@ -13,13 +13,13 @@ import {
   xBookmarkFolders,
   xBookmarks,
 } from "@personal-os/database";
-import { and, asc, desc, eq, gt, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull } from "drizzle-orm";
 import { auditValues } from "./audit.js";
+import { createConnectorAuthorizationService } from "./connector-authorization-service.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
-import { decryptJson, encryptJson, generateToken, hashToken } from "./security.js";
+import { decryptJson, encryptJson } from "./security.js";
 
-const OAUTH_STATE_TTL_MS = 30 * 60_000;
 type Account = typeof xBookmarkAccounts.$inferSelect;
 
 type Options = {
@@ -27,6 +27,7 @@ type Options = {
   encryptionKey: string;
   now: () => Date;
   x: XConnector;
+  xRedirectUri?: string;
 };
 
 function publicAccount(account: Account) {
@@ -42,7 +43,14 @@ function publicAccount(account: Account) {
   };
 }
 
-export function createXBookmarksService({ db, encryptionKey, now, x }: Options) {
+export function createXBookmarksService({
+  db,
+  encryptionKey,
+  now,
+  x,
+  xRedirectUri = "https://api.ilo.invalid/v1/x-bookmarks/callback",
+}: Options) {
+  const authorization = createConnectorAuthorizationService({ db, encryptionKey, now });
   function credentials(account: Account): XCredentials {
     return decryptJson<XCredentials>(account.encryptedCredentials, encryptionKey);
   }
@@ -216,41 +224,72 @@ export function createXBookmarksService({ db, encryptionKey, now, x }: Options) 
     }
   }
 
-  return {
-    async completeAuthorization(state: string, code: string) {
-      const [oauth] = await db
-        .select()
-        .from(oauthStates)
-        .where(
-          and(
-            eq(oauthStates.tokenHash, hashToken(state)),
-            eq(oauthStates.provider, "x"),
-            isNull(oauthStates.consumedAt),
-            gt(oauthStates.expiresAt, now()),
-          ),
-        )
-        .limit(1);
-      if (!oauth?.encryptedVerifier)
-        throw new AppError("invalid_request", "The X authorization state is invalid or expired.");
-      await db.update(oauthStates).set({ consumedAt: now() }).where(eq(oauthStates.id, oauth.id));
-      try {
-        let value = await x.exchangeCode(
-          code,
-          decryptJson<{ codeVerifier: string }>(oauth.encryptedVerifier, encryptionKey)
-            .codeVerifier,
-        );
-        const profile = await x.getProfile(value);
-        value = profile.credentials;
+  async function handleAuthorizationCallback(input: {
+    code?: string;
+    error?: string;
+    requestId: string;
+    state: string;
+  }): Promise<{
+    attemptId: string | null;
+    returnPath: "/settings?section=connections";
+    status: "pending" | "connected" | "cancelled" | "expired" | "failed";
+  }> {
+    const consumed = await authorization.consume("x", input.state, input.requestId);
+    if (consumed.kind === "invalid") {
+      return {
+        attemptId: null,
+        returnPath: "/settings?section=connections",
+        status: "failed",
+      };
+    }
+    const result = (status: "pending" | "connected" | "cancelled" | "expired" | "failed") => ({
+      attemptId: consumed.attempt.id,
+      returnPath: "/settings?section=connections" as const,
+      status,
+    });
+    if (consumed.kind === "expired") return result("expired");
+    if (consumed.kind === "processing") return result("pending");
+    if (consumed.kind === "closed") {
+      return result(
+        consumed.attempt.status === "connected" ||
+          consumed.attempt.status === "cancelled" ||
+          consumed.attempt.status === "expired"
+          ? consumed.attempt.status
+          : consumed.attempt.status === "processing" || consumed.attempt.status === "pending"
+            ? "pending"
+            : "failed",
+      );
+    }
+    const close = async (status: "cancelled" | "failed", outcomeCode: string) => {
+      await authorization.close({
+        accountId: null,
+        attemptId: consumed.attempt.id,
+        outcomeCode,
+        status,
+      });
+      return result(status);
+    };
+    if (input.error) {
+      return input.error === "access_denied"
+        ? close("cancelled", "authorization_cancelled")
+        : close("failed", "provider_authorization_failed");
+    }
+    if (!input.code) return close("failed", "authorization_code_missing");
+    try {
+      let value = await x.exchangeCode(input.code, consumed.codeVerifier);
+      const profile = await x.getProfile(value);
+      value = profile.credentials;
+      await db.transaction(async (transaction) => {
         const account = requireDatabaseRecord(
           (
-            await db
+            await transaction
               .insert(xBookmarkAccounts)
               .values({
                 displayName: profile.value.name,
                 encryptedCredentials: encryptJson(value, encryptionKey),
                 providerAccountId: profile.value.id,
                 username: profile.value.username,
-                userId: oauth.userId,
+                userId: consumed.attempt.userId,
               })
               .onConflictDoUpdate({
                 set: {
@@ -266,11 +305,52 @@ export function createXBookmarksService({ db, encryptionKey, now, x }: Options) 
           )[0],
           "The X account could not be saved.",
         );
-        return publicAccount(account);
-      } catch (error) {
-        throw connectorError(error);
+        await authorization.close(
+          {
+            accountId: account.id,
+            attemptId: consumed.attempt.id,
+            outcomeCode: "connected",
+            status: "connected",
+          },
+          transaction,
+        );
+      });
+      return result("connected");
+    } catch (error) {
+      const outcomeCode =
+        error instanceof ConnectorError &&
+        (error.category === "temporary" || error.category === "transport")
+          ? "provider_temporarily_unavailable"
+          : "authorization_failed";
+      try {
+        return await close("failed", outcomeCode);
+      } catch {
+        return result("failed");
       }
+    }
+  }
+
+  return {
+    async completeAuthorization(state: string, code: string) {
+      const callback = await handleAuthorizationCallback({
+        code,
+        requestId: randomUUID(),
+        state,
+      });
+      if (callback.status !== "connected" || !callback.attemptId) {
+        throw new AppError("invalid_request", "The X authorization could not be completed.");
+      }
+      const [attempt] = await db
+        .select()
+        .from(oauthStates)
+        .where(eq(oauthStates.id, callback.attemptId))
+        .limit(1);
+      if (!attempt?.connectedAccountId) {
+        throw new AppError("invalid_request", "The X authorization could not be completed.");
+      }
+      return publicAccount(await accountFor(attempt.userId));
     },
+    handleAuthorizationCallback,
     async disconnect(userId: string) {
       const account = await accountFor(userId);
       await db.delete(xBookmarkAccounts).where(eq(xBookmarkAccounts.id, account.id));
@@ -329,18 +409,16 @@ export function createXBookmarksService({ db, encryptionKey, now, x }: Options) 
       return sync(userId);
     },
     async startAuthorization(userId: string) {
-      const state = generateToken("oauth");
-      const codeVerifier = generateToken("pkce");
+      const attempt = await authorization.create({
+        provider: "x",
+        redirectUri: xRedirectUri,
+        requestedServices: null,
+        returnPath: "/settings?section=connections",
+        targetAccountId: null,
+        userId,
+      });
       try {
-        const url = x.authorizationUrl(state, codeVerifier);
-        await db.insert(oauthStates).values({
-          encryptedVerifier: encryptJson({ codeVerifier }, encryptionKey),
-          expiresAt: new Date(now().getTime() + OAUTH_STATE_TTL_MS),
-          provider: "x",
-          tokenHash: hashToken(state),
-          userId,
-        });
-        return url;
+        return x.authorizationUrl(attempt.state, attempt.codeVerifier);
       } catch (error) {
         throw connectorError(error);
       }

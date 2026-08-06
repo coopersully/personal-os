@@ -13,6 +13,7 @@ import type {
 import {
   ConnectorError,
   createICloudConnector,
+  googleGrantedServices,
   MailSendPreAcceptanceError,
 } from "@personal-os/connectors";
 import {
@@ -50,7 +51,6 @@ import {
   and,
   asc,
   eq,
-  gt,
   inArray,
   isNotNull,
   isNull,
@@ -64,6 +64,7 @@ import {
 } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
+import { createConnectorAuthorizationService } from "./connector-authorization-service.js";
 import {
   type ConnectorSyncFailure,
   classifyConnectorSyncFailure,
@@ -87,7 +88,7 @@ import {
   mailRuleActionIsApplied,
   strongestMailRuleProviderEffect,
 } from "./mail-rule-work.js";
-import { decryptJson, encryptJson, generateToken, hashToken } from "./security.js";
+import { decryptJson, encryptJson } from "./security.js";
 import {
   auditAttentionItemMetadata,
   auditDomainProfileMetadata,
@@ -96,7 +97,6 @@ import {
 } from "./serialization.js";
 import type { RequestLog } from "./types.js";
 
-const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
 const CONNECTOR_SYNC_INTERRUPTED_ERROR =
   "Synchronization was interrupted. ilo will retry automatically.";
@@ -315,6 +315,7 @@ type ConnectorServiceOptions = {
   db: Database;
   encryptionKey: string;
   google: GoogleConnector;
+  googleRedirectUri?: string;
   icloud?: ICloudConnector;
   log?: (entry: RequestLog) => void;
   now: () => Date;
@@ -332,12 +333,14 @@ export function createConnectorService({
   db,
   encryptionKey,
   google,
+  googleRedirectUri = "https://api.ilo.invalid/v1/connectors/google/callback",
   icloud = createICloudConnector(),
   log,
   now,
   observeRecoveryFailure,
   shutdown,
 }: ConnectorServiceOptions) {
+  const authorization = createConnectorAuthorizationService({ db, encryptionKey, now });
   function syncOperation(): ProviderOperationOptions | undefined {
     if (!shutdown) return undefined;
     const deadlineMs = shutdown.deadlineMs();
@@ -3051,57 +3054,109 @@ export function createConnectorService({
     };
   }
 
-  return {
-    async completeGoogleAuthorization(state: string, code: string) {
-      const [oauthState] = await db
-        .update(oauthStates)
-        .set({ consumedAt: now() })
-        .where(
-          and(
-            eq(oauthStates.tokenHash, hashToken(state)),
-            eq(oauthStates.provider, "google"),
-            isNull(oauthStates.consumedAt),
-            gt(oauthStates.expiresAt, now()),
-          ),
-        )
-        .returning();
-      if (!oauthState) {
-        throw new AppError(
-          "invalid_request",
-          "The Google authorization state is invalid or expired.",
-        );
-      }
-      let googleCredentials = await google.exchangeCode(code);
+  const safeReturnPath = (
+    value: string | null,
+  ): "/setup" | "/settings?section=connections" =>
+    value === "/setup" || value === "/settings?section=connections"
+      ? value
+      : "/settings?section=connections";
+
+  async function handleGoogleAuthorizationCallback(input: {
+    code?: string;
+    error?: string;
+    issuer?: string;
+    requestId: string;
+    state: string;
+  }): Promise<{
+    attemptId: string | null;
+    returnPath: "/setup" | "/settings?section=connections";
+    status: "pending" | "connected" | "cancelled" | "expired" | "permission_incomplete" | "failed";
+  }> {
+    const consumed = await authorization.consume("google", input.state, input.requestId);
+    if (consumed.kind === "invalid") {
+      return {
+        attemptId: null,
+        returnPath: "/settings?section=connections",
+        status: "failed",
+      };
+    }
+    const returnPath = safeReturnPath(consumed.attempt.returnPath);
+    if (consumed.kind === "expired") {
+      return { attemptId: consumed.attempt.id, returnPath, status: "expired" };
+    }
+    if (consumed.kind === "processing") {
+      return { attemptId: consumed.attempt.id, returnPath, status: "pending" };
+    }
+    if (consumed.kind === "closed") {
+      return {
+        attemptId: consumed.attempt.id,
+        returnPath,
+        status:
+          consumed.attempt.status === "processing" || consumed.attempt.status === "pending"
+            ? "pending"
+            : consumed.attempt.status,
+      };
+    }
+
+    const close = async (
+      status: "cancelled" | "permission_incomplete" | "failed",
+      outcomeCode: string,
+    ) => {
+      await authorization.close({
+        accountId: null,
+        attemptId: consumed.attempt.id,
+        outcomeCode,
+        status,
+      });
+      return { attemptId: consumed.attempt.id, returnPath, status };
+    };
+
+    if (input.issuer && input.issuer !== "https://accounts.google.com") {
+      return close("failed", "authorization_issuer_invalid");
+    }
+    if (input.error) {
+      return input.error === "access_denied"
+        ? close("cancelled", "authorization_cancelled")
+        : close("failed", "provider_authorization_failed");
+    }
+    if (!input.code) return close("failed", "authorization_code_missing");
+
+    try {
+      let googleCredentials = await google.exchangeCode(input.code, consumed.codeVerifier);
       const profileResult = await google.getProfile(googleCredentials);
       googleCredentials = profileResult.credentials;
-      const requestedServices = oauthState.requestedServices ?? ["calendar", "mail"];
-      const target = oauthState.targetAccountId
-        ? await getAccount(oauthState.userId, oauthState.targetAccountId)
-        : null;
-      if (target) {
-        if (
-          target.provider !== "google" ||
-          (target.providerAccountId && target.providerAccountId !== profileResult.value.id)
-        ) {
-          throw new AppError("invalid_request", "Authorize the same Google account you selected.");
-        }
+      const requestedServices = consumed.attempt.requestedServices ?? ["calendar", "mail"];
+      const grantedServices = googleGrantedServices(googleCredentials);
+      if (requestedServices.some((service) => !grantedServices.includes(service))) {
+        return close("permission_incomplete", "required_permission_missing");
       }
-      const account = await db.transaction(async (transaction) => {
+      const target = consumed.attempt.targetAccountId
+        ? await getAccount(consumed.attempt.userId, consumed.attempt.targetAccountId)
+        : null;
+      if (
+        target &&
+        (target.provider !== "google" ||
+          (target.providerAccountId && target.providerAccountId !== profileResult.value.id))
+      ) {
+        return close("failed", "account_mismatch");
+      }
+
+      await db.transaction(async (transaction) => {
         const requestedCalendar = requestedServices.includes("calendar");
-        const requestedMail =
-          requestedServices.includes("mail") && hasGoogleMailScope(googleCredentials);
+        const requestedMail = requestedServices.includes("mail");
         await transaction
           .insert(calendarAccounts)
           .values({
-            calendarEnabled: requestedCalendar,
             avatarUrl: profileResult.value.pictureUrl,
+            calendarEnabled: requestedCalendar,
             email: profileResult.value.email,
             encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
             label: profileResult.value.name ?? profileResult.value.email,
             mailEnabled: requestedMail,
+            nextSyncAt: now(),
             provider: "google",
             providerAccountId: profileResult.value.id,
-            userId: oauthState.userId,
+            userId: consumed.attempt.userId,
           })
           .onConflictDoNothing({
             target: [
@@ -3117,7 +3172,7 @@ export function createConnectorService({
               .from(calendarAccounts)
               .where(
                 and(
-                  eq(calendarAccounts.userId, oauthState.userId),
+                  eq(calendarAccounts.userId, consumed.attempt.userId),
                   eq(calendarAccounts.provider, "google"),
                   eq(calendarAccounts.providerAccountId, profileResult.value.id),
                 ),
@@ -3133,22 +3188,25 @@ export function createConnectorService({
             "The selected Google account changed while authorization was completing.",
           );
         }
-        const calendarEnabled = lockedMatchedAccount.calendarEnabled || requestedCalendar;
-        const mailEnabled = lockedMatchedAccount.mailEnabled || requestedMail;
         const updatedAccount = requireDatabaseRecord(
           (
             await transaction
               .update(calendarAccounts)
               .set({
                 avatarUrl: profileResult.value.pictureUrl,
-                calendarEnabled,
+                calendarEnabled: lockedMatchedAccount.calendarEnabled || requestedCalendar,
                 email: profileResult.value.email,
                 encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
                 label: profileResult.value.name ?? profileResult.value.email,
-                mailEnabled,
+                mailEnabled: lockedMatchedAccount.mailEnabled || requestedMail,
+                nextSyncAt: now(),
                 syncClaimId: null,
                 syncError: null,
+                syncErrorCategory: null,
+                syncErrorCode: null,
+                syncFailureCount: 0,
                 syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+                syncRecovery: null,
                 syncStatus: "idle",
                 updatedAt: now(),
               })
@@ -3191,27 +3249,71 @@ export function createConnectorService({
                 entityId: updatedAccount.id,
                 entityType: "mail_account",
                 principal: {
-                  actorId: oauthState.userId,
+                  actorId: consumed.attempt.userId,
                   actorType: "user",
-                  userId: oauthState.userId,
+                  userId: consumed.attempt.userId,
                 },
-                requestId: randomUUID(),
+                requestId: input.requestId,
               }),
             );
           }
         }
-        return updatedAccount;
+        await authorization.close(
+          {
+            accountId: updatedAccount.id,
+            attemptId: consumed.attempt.id,
+            outcomeCode: "connected",
+            status: "connected",
+          },
+          transaction,
+        );
       });
+      return { attemptId: consumed.attempt.id, returnPath, status: "connected" };
+    } catch (error) {
+      const outcomeCode =
+        error instanceof ConnectorError &&
+        (error.category === "temporary" || error.category === "transport")
+          ? "provider_temporarily_unavailable"
+          : "authorization_failed";
+      try {
+        return await close("failed", outcomeCode);
+      } catch {
+        return { attemptId: consumed.attempt.id, returnPath, status: "failed" };
+      }
+    }
+  }
+
+  return {
+    async completeGoogleAuthorization(state: string, code: string) {
+      const result = await handleGoogleAuthorizationCallback({
+        code,
+        requestId: randomUUID(),
+        state,
+      });
+      if (result.status !== "connected" || !result.attemptId) {
+        throw new AppError("invalid_request", "Google authorization could not be completed.");
+      }
+      const [attempt] = await db
+        .select()
+        .from(oauthStates)
+        .where(eq(oauthStates.id, result.attemptId))
+        .limit(1);
+      if (!attempt?.connectedAccountId) {
+        throw new AppError("invalid_request", "Google authorization could not be completed.");
+      }
+      const account = await getAccount(attempt.userId, attempt.connectedAccountId);
       return {
         accountId: account.id,
         email: account.email,
-        returnPath:
-          oauthState.returnPath === "/setup" ||
-          oauthState.returnPath === "/settings?section=connections"
-            ? oauthState.returnPath
-            : "/settings?section=connections",
-        userId: oauthState.userId,
+        returnPath: result.returnPath,
+        userId: attempt.userId,
       };
+    },
+
+    handleGoogleAuthorizationCallback,
+
+    authorizationOutcome(userId: string, attemptId: string) {
+      return authorization.publicOutcome(userId, attemptId);
     },
 
     async connectICloud(
@@ -3389,25 +3491,28 @@ export function createConnectorService({
       if (target && target.provider !== "google") {
         throw new AppError("invalid_request", "Only Google accounts use Google authorization.");
       }
-      const state = generateToken("oauth");
+      const attempt = await authorization.create({
+        provider: "google",
+        redirectUri: googleRedirectUri,
+        requestedServices: input.services,
+        returnPath: input.returnTo,
+        targetAccountId: target?.id ?? null,
+        userId,
+      });
       let url: string;
       try {
-        url = google.authorizationUrl(state, target?.email ?? undefined, input.services);
+        url = google.authorizationUrl(
+          attempt.state,
+          attempt.codeChallenge,
+          target?.email ?? undefined,
+          input.services,
+        );
       } catch (error) {
         if (error instanceof ConnectorError) {
           throw new AppError("service_unavailable", error.message);
         }
         throw error;
       }
-      await db.insert(oauthStates).values({
-        expiresAt: new Date(now().getTime() + GOOGLE_OAUTH_STATE_TTL_MS),
-        provider: "google",
-        requestedServices: input.services,
-        returnPath: input.returnTo,
-        targetAccountId: target?.id,
-        tokenHash: hashToken(state),
-        userId,
-      });
       return url;
     },
 
@@ -3598,15 +3703,6 @@ export function createConnectorService({
       });
     });
   }
-}
-
-function hasGoogleMailScope(credentials: GoogleCredentials): boolean {
-  const scopes = new Set(credentials.scope.split(/\s+/));
-  return [
-    "https://mail.google.com/",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-  ].some((scope) => scopes.has(scope));
 }
 
 function remoteEventValues(

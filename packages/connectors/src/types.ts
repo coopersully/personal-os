@@ -202,6 +202,7 @@ export type GoogleAuthorizationService = "calendar" | "mail";
 export type GoogleConnector = {
   authorizationUrl: (
     state: string,
+    codeChallenge: string,
     loginHint?: string,
     services?: GoogleAuthorizationService[],
   ) => string;
@@ -216,7 +217,7 @@ export type GoogleConnector = {
     remoteEventId: string,
     etag: string | null,
   ) => Promise<GoogleCredentials>;
-  exchangeCode: (code: string) => Promise<GoogleCredentials>;
+  exchangeCode: (code: string, codeVerifier: string) => Promise<GoogleCredentials>;
   getProfile: (credentials: GoogleCredentials) => Promise<CredentialResult<ProviderProfile>>;
   getMailThreadState?: (
     credentials: GoogleCredentials,

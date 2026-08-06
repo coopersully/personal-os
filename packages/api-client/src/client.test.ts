@@ -498,6 +498,18 @@ function apiFetch() {
     if (url.pathname.endsWith("/runs")) return json({ run: automationRun }, 201);
     if (url.pathname === "/v1/connectors/google/start")
       return json({ url: "https://accounts.google.com/o/oauth2/v2/auth" });
+    if (url.pathname === `/v1/connectors/authorization-attempts/${id}`)
+      return json({
+        attempt: {
+          accountId,
+          code: "RAW_CODE_CANARY",
+          provider: "google",
+          providerMessage: "RAW_PROVIDER_CANARY",
+          retryable: false,
+          scope: "RAW_SCOPE_CANARY",
+          status: "connected",
+        },
+      });
     if (url.pathname === "/v1/x-bookmarks/connect/start")
       return json({ url: "https://x.com/i/oauth2/authorize" });
     if (url.pathname === "/v1/x-bookmarks/account" && method === "GET")
@@ -1378,6 +1390,12 @@ describe("ilo API client", () => {
         },
       }),
     ]);
+    await expect(api.getConnectorAuthorizationAttempt(id)).resolves.toEqual({
+      accountId,
+      provider: "google",
+      retryable: false,
+      status: "connected",
+    });
     await expect(api.getGoogleAuthorizationUrl()).resolves.toContain("accounts.google.com");
     await expect(
       api.getGoogleAuthorizationUrl({

@@ -356,7 +356,10 @@ patterns, transformations, thresholds, periods, missing-data behavior, and notif
 The hourly production-health workflow repeats the same read-only check so later infrastructure drift
 uses the existing production-health incident path. If this preflight fails, apply and review the
 production Terraform before retrying the application deploy; do not bypass the check or infer
-coverage from a successful API health request.
+coverage from a successful API health request. Each AWS inventory read has a 30-second deadline,
+which tolerates cold GitHub-runner credential and CLI startup while keeping both sequential reads
+well inside the hourly health job's five-minute budget. A timeout fails closed with the same safe,
+provider-output-free operator message as another AWS read failure.
 
 ## Connector configuration
 

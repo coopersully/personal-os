@@ -272,4 +272,3 @@ Each feature gate can be disabled without data migration or loss of scheduled sy
   errors, APIs, or UI.
 - Focused tests, infrastructure contract checks, production-equivalent webhook evidence, and the
   repository verification gate pass.
-

@@ -44,8 +44,6 @@ export function generateInvitationCode(): string {
 
 export function hashToken(token: string): string {
   // codeql[js/insufficient-password-hash]
-
-  // These are 256-bit random opaque credentials, not user-chosen passwords; fast lookup hashing is intentional.
   return createHash("sha256").update(token).digest("hex");
 }
 

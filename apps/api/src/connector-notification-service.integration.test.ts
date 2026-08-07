@@ -333,11 +333,9 @@ describe.sequential("connector notification service", () => {
       })
       .where(eq(calendarAccounts.id, accountId));
     await service.ensureGoogleSubscriptions(accountId);
-    expect(
-      (await database.db.select().from(connectorSubscriptions)).every(
-        (subscription) => subscription.status === "stopped",
-      ),
-    ).toBe(true);
+    const stopped = await database.db.select().from(connectorSubscriptions);
+    expect(stopped.length).toBeGreaterThan(0);
+    expect(stopped.every((subscription) => subscription.status === "stopped")).toBe(true);
 
     await database.db
       .update(calendarAccounts)
@@ -352,11 +350,9 @@ describe.sequential("connector notification service", () => {
       })
       .where(eq(calendarAccounts.id, accountId));
     await service.ensureGoogleSubscriptions(accountId);
-    expect(
-      (await database.db.select().from(connectorSubscriptions)).every(
-        (subscription) => subscription.status === "pending",
-      ),
-    ).toBe(true);
+    const pending = await database.db.select().from(connectorSubscriptions);
+    expect(pending.length).toBeGreaterThan(0);
+    expect(pending.every((subscription) => subscription.status === "pending")).toBe(true);
   });
 
   it("stops an unpersisted replacement Calendar watch when its renewal lease is superseded", async () => {

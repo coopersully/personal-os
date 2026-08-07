@@ -40,6 +40,11 @@ An inline message needs a specific title and a next step. Never use a static ale
 
 ## Connected-account health
 
+- Browser authorization returns render one allowlisted outcome alert from an authenticated attempt
+  lookup. Remove only `connection_attempt` and `connection_result` from the URL after lookup, keep
+  the active Settings section, and offer at most one recovery action. Cancellation, expiry,
+  incomplete permission, provider failure, and unknown state never render provider text or a JSON
+  response.
 - Render only the structured account health state: **Ready**, **Syncing**, **Retrying
   automatically**, **Reconnect required**, or **ilo is resolving this**. Never render a raw
   provider exception or response.
@@ -51,6 +56,8 @@ An inline message needs a specific title and a next step. Never use a static ale
   Mail and Calendar use a warning callout only when a person must reconnect.
 - Refresh health every 30 seconds while a relevant view is mounted and visible. Browsers never
   initiate provider sync on a polling interval.
+- X follows the same rule: persisted and displayed synchronization failures use ilo-authored copy,
+  never an exception message from the provider or SDK.
 
 ## Security & agent access
 

@@ -19,6 +19,7 @@ import {
   calendarSchema,
   connectedAccountHealthSchema,
   connectICloudInputSchema,
+  connectorAuthorizationOutcomeSchema,
   connectorCapabilities,
   createAccessTokenInputSchema,
   createAttentionItemInputSchema,
@@ -1233,5 +1234,72 @@ describe("connected account health", () => {
         state: "service_attention",
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("connector authorization outcomes", () => {
+  it("keeps only the provider-neutral browser outcome", () => {
+    expect(
+      connectorAuthorizationOutcomeSchema.parse({
+        accountId: null,
+        code: "authorization-code-canary",
+        email: "person@example.com",
+        provider: "google",
+        providerMessage: "provider-message-canary",
+        requestId: "request-canary",
+        retryable: true,
+        scope: "scope-canary",
+        state: "state-canary",
+        status: "failed",
+      }),
+    ).toEqual({
+      accountId: null,
+      provider: "google",
+      retryable: true,
+      status: "failed",
+    });
+  });
+
+  it("rejects identities outside the closed connector outcome contract", () => {
+    expect(
+      connectorAuthorizationOutcomeSchema.safeParse({
+        accountId: "not-a-uuid",
+        provider: "icloud",
+        retryable: false,
+        status: "connected",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("connector notification contracts", () => {
+  it("keeps subscription lifecycle and trigger reasons closed", async () => {
+    const {
+      connectorSubscriptionKindSchema,
+      connectorSubscriptionStatusSchema,
+      connectorSyncTriggerReasonSchema,
+    } = await import("./connection.js");
+    expect(connectorSubscriptionKindSchema.options).toEqual([
+      "gmail_mailbox",
+      "google_calendar_list",
+      "google_calendar_events",
+      "icloud_mail_idle",
+    ]);
+    expect(connectorSubscriptionStatusSchema.options).toEqual([
+      "pending",
+      "active",
+      "renewing",
+      "expired",
+      "failed",
+      "stopped",
+    ]);
+    expect(connectorSyncTriggerReasonSchema.options).toEqual([
+      "initial",
+      "notification",
+      "reconciliation",
+      "manual",
+      "retry",
+      "recovery",
+    ]);
   });
 });

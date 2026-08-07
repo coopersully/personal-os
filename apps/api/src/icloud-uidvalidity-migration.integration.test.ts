@@ -35,6 +35,9 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0048_connector_sync_generation",
         "0049_attention_item_versions",
         "0050_connector_sync_health",
+        "0051_connector_authorization_attempts",
+        "0052_connector_notifications",
+        "0053_oauth_states_expiry_index",
       ],
     );
     await migrateDatabase(database.db, migrationsBeforeUidValidity);
@@ -65,6 +68,18 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
       })
       .returning();
     if (!user) throw new Error("Migration user was not created.");
+    const legacyStates = await database.pool.query<{
+      consumed_at: Date | null;
+      token_hash: string;
+    }>(
+      `INSERT INTO oauth_states (user_id, provider, token_hash, expires_at, consumed_at, return_path)
+       VALUES
+         ($1, 'google', 'pending-state-hash', NOW() + INTERVAL '30 minutes', NULL, '/setup'),
+         ($1, 'x', 'consumed-state-hash', NOW() + INTERVAL '30 minutes', NOW(), '/settings?section=connections')
+       RETURNING token_hash, consumed_at`,
+      [user.id],
+    );
+    expect(legacyStates.rows).toHaveLength(2);
     const accountResult = await database.pool.query<{ id: string }>(
       `INSERT INTO calendar_accounts (
          user_id, provider, label, provider_account_id, email
@@ -136,6 +151,39 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
     if (!snooze || !draft || !attentionId) throw new Error("Dependent fixtures were not created.");
 
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
+
+    const migratedStates = await database.pool.query<{
+      completed_at: Date | null;
+      consumed_at: Date | null;
+      outcome_code: string | null;
+      return_path: string | null;
+      status: string;
+      token_hash: string;
+    }>(
+      `SELECT token_hash, consumed_at, completed_at, outcome_code, return_path, status
+       FROM oauth_states
+       WHERE user_id = $1
+       ORDER BY token_hash`,
+      [user.id],
+    );
+    expect(migratedStates.rows).toEqual([
+      expect.objectContaining({
+        completed_at: expect.any(Date),
+        consumed_at: expect.any(Date),
+        outcome_code: "legacy_consumed",
+        return_path: "/settings?section=connections",
+        status: "failed",
+        token_hash: "consumed-state-hash",
+      }),
+      {
+        completed_at: null,
+        consumed_at: null,
+        outcome_code: null,
+        return_path: "/setup",
+        status: "pending",
+        token_hash: "pending-state-hash",
+      },
+    ]);
 
     const [newEpochThread] = await database.db
       .insert(mailThreads)

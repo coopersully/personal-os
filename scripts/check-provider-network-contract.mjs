@@ -6,6 +6,9 @@ const compute = readFileSync(resolve(root, "infra/compute.tf"), "utf8");
 const locals = readFileSync(resolve(root, "infra/locals.tf"), "utf8");
 const network = readFileSync(resolve(root, "infra/network.tf"), "utf8");
 const operations = readFileSync(resolve(root, "infra/operations.tf"), "utf8");
+const variables = readFileSync(resolve(root, "infra/variables.tf"), "utf8");
+const waf = readFileSync(resolve(root, "infra/waf.tf"), "utf8");
+const config = readFileSync(resolve(root, "apps/api/src/config.ts"), "utf8");
 const providerHttp = readFileSync(resolve(root, "packages/connectors/src/http.ts"), "utf8");
 const icloud = readFileSync(resolve(root, "packages/connectors/src/icloud.ts"), "utf8");
 
@@ -98,5 +101,112 @@ requireTerraformContract(
   /\$\.category = \\"configuration\\"/,
   "the connector configuration failure metric",
 );
+function validateNotificationContract(sources) {
+  requireTerraformContract(
+    sources.variables,
+    /variable "google_gmail_push_enabled"[\s\S]*?default\s*=\s*false/,
+    "an independently disabled Gmail push gate",
+  );
+  requireTerraformContract(
+    sources.variables,
+    /variable "google_calendar_push_enabled"[\s\S]*?default\s*=\s*false/,
+    "an independently disabled Calendar push gate",
+  );
+  requireTerraformContract(
+    sources.variables,
+    /variable "icloud_mail_idle_enabled"[\s\S]*?default\s*=\s*false/,
+    "an independently disabled iCloud IDLE gate",
+  );
+  requireTerraformContract(
+    sources.variables,
+    /check "gmail_push_configuration"[\s\S]*?google_gmail_pubsub_topic[\s\S]*?google_gmail_pubsub_subscription[\s\S]*?google_gmail_push_service_account/,
+    "fail-closed Gmail Terraform values",
+  );
+  for (const [gate, names] of [
+    [
+      "google_gmail_push_enabled",
+      [
+        "GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION",
+        "GOOGLE_GMAIL_PUBSUB_TOPIC",
+        "GOOGLE_GMAIL_PUSH_AUDIENCE",
+        "GOOGLE_GMAIL_PUSH_ENABLED",
+        "GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT",
+      ],
+    ],
+    [
+      "google_calendar_push_enabled",
+      ["GOOGLE_CALENDAR_PUSH_ENABLED", "GOOGLE_CALENDAR_WEBHOOK_URL"],
+    ],
+    ["icloud_mail_idle_enabled", ["ICLOUD_MAIL_IDLE_CONCURRENCY", "ICLOUD_MAIL_IDLE_ENABLED"]],
+  ]) {
+    const gatedBlock = sources.compute.match(
+      new RegExp(`var\\.${gate} \\? \\[([\\s\\S]*?)\\] : \\[\\]`),
+    )?.[1];
+    if (!gatedBlock) throw new Error(`Provider operations contract is missing the ${gate} block.`);
+    for (const name of names) {
+      requireTerraformContract(
+        gatedBlock,
+        new RegExp(`name\\s*=\\s*"${name}"`),
+        `the gated ${name} runtime value`,
+      );
+    }
+  }
+  for (const path of [
+    "/v1/connectors/google/gmail/notifications",
+    "/v1/connectors/google/calendar/notifications",
+  ]) {
+    requireTerraformContract(
+      sources.waf,
+      new RegExp(`regex_string\\s*=\\s*"\\^${path}\\$"`),
+      `the exact ${path} WAF path`,
+    );
+  }
+  requireTerraformContract(
+    sources.waf,
+    /name\s*=\s*"connector-webhook-rate-limit"[\s\S]*?action\s*\{\s*block[\s\S]*?scope_down_statement[\s\S]*?regex_pattern_set_reference_statement/,
+    "a bounded exact-path webhook ingress policy",
+  );
+  requireTerraformContract(
+    sources.waf,
+    /name\s*=\s*"connector-webhook-rate-limit"[\s\S]*?limit\s*=\s*var\.connector_webhook_rate_limit/,
+    "the dedicated connector webhook rate limit",
+  );
+  requireTerraformContract(
+    sources.config,
+    /GOOGLE_GMAIL_PUSH_ENABLED[\s\S]*?GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION[\s\S]*?GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT/,
+    "the fail-closed Gmail push runtime validation",
+  );
+}
+
+const notificationSources = { compute, config, variables, waf };
+validateNotificationContract(notificationSources);
+const mutations = [
+  ["variables", 'variable "google_gmail_push_enabled"'],
+  ["variables", 'variable "google_calendar_push_enabled"'],
+  ["variables", 'variable "icloud_mail_idle_enabled"'],
+  ["variables", 'check "gmail_push_configuration"'],
+  ["compute", 'name = "GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION"'],
+  ["compute", 'name = "GOOGLE_GMAIL_PUBSUB_TOPIC"'],
+  ["compute", 'name = "GOOGLE_GMAIL_PUSH_AUDIENCE"'],
+  ["compute", 'name = "GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT"'],
+  ["compute", 'name = "GOOGLE_CALENDAR_WEBHOOK_URL"'],
+  ["compute", 'name = "ICLOUD_MAIL_IDLE_CONCURRENCY"'],
+  ["waf", "^/v1/connectors/google/gmail/notifications$"],
+  ["waf", "^/v1/connectors/google/calendar/notifications$"],
+  ["waf", 'name     = "connector-webhook-rate-limit"'],
+  ["waf", "limit              = var.connector_webhook_rate_limit"],
+];
+for (const [sourceName, target] of mutations) {
+  const source = notificationSources[sourceName];
+  const mutated = source.replace(target, "MUTATED_CONTRACT_VALUE");
+  if (mutated === source) throw new Error(`Mutation fixture could not find ${target}.`);
+  let rejected = false;
+  try {
+    validateNotificationContract({ ...notificationSources, [sourceName]: mutated });
+  } catch {
+    rejected = true;
+  }
+  if (!rejected) throw new Error(`Provider notification mutation was not rejected: ${target}.`);
+}
 
 console.log("Provider timeout and network contract passed.");

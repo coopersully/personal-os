@@ -54,6 +54,9 @@ runtimeLifecycle.startBackgroundTask("startup-connector-sync", async () => {
     throw new Error("Startup connector sync failed.");
   });
 });
+runtimeLifecycle.startBackgroundTask("icloud-mail-idle-supervisor", () =>
+  app.superviseICloudMail(),
+);
 runtimeLifecycle.startBackgroundTask("startup-automation-dispatch", async () => {
   await app.dispatchDueAutomations().catch((error: unknown) => {
     process.stderr.write(`[personal-os] scheduled automation dispatch failed: ${String(error)}\n`);

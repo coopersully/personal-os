@@ -24,9 +24,34 @@ A connection endpoint or OAuth callback may:
 5. respond or redirect.
 
 It must not wait for source discovery, provider pagination, an initial full sync, projection, a
-backfill, or retries. Those operations start only after the account is durable. Fire-and-forget work
-must catch its rejection; the sync service records an execution status plus typed, safe recovery
-state before returning an error.
+backfill, or retries. Those operations start only after the account and its initial durable sync
+trigger commit together. Connector callbacks do not launch in-memory fire-and-forget sync work.
+
+## Browser authorization outcomes
+
+Google and X authorization starts use a random hashed state and S256 PKCE. The encrypted verifier,
+exact redirect URI, selected capabilities, safe return path, and thirty-minute expiry live in one
+durable attempt row before the browser leaves ilo. A callback claims that attempt atomically and is
+idempotent under provider or browser replay. An authenticated outcome read atomically closes a
+processing claim that outlives its two-minute provider window, so process loss becomes a retryable
+failure instead of leaving the browser pending indefinitely.
+
+Token exchange uses the redirect URI stored with that authorization attempt. An in-flight callback
+therefore remains valid while a rolling deployment changes the configured URI for new attempts.
+
+Every callback branch returns a `303` to an allowlisted ilo path with cache disabled, a no-referrer
+policy, and either an opaque attempt UUID or the fixed `restart_required` result. Provider error
+text, response bodies, codes, scopes, identities, state, and PKCE material never enter a redirect,
+public response, account description, or log. Authenticated clients can read only the provider,
+status, retryability, and connected account UUID for their own attempt for twenty-four hours.
+
+Google enables a selected capability only when the token response contains every authority needed
+for that capability. Partial consent closes as `permission_incomplete` without creating, changing,
+or downgrading an account. Successful account persistence, cleared health, immediate sync
+eligibility, closed authorization outcome, and initial trigger share one transaction.
+
+Enabled notification configuration fails startup unless Gmail's OIDC audience and Calendar's
+webhook URL are the exact HTTPS notification routes on the configured API origin.
 
 An app-password connector can only validate credentials by contacting the provider. It therefore
 persists a pending account first and performs verification as the first asynchronous sync. A failed
@@ -49,6 +74,19 @@ provider response bodies and unknown exception messages never populate it.
 - Each one-minute scheduler pass selects Calendar-only and/or Mail-enabled due accounts, caps the
   batch, and uses a fixed worker pool. Claim generation and claim ID fencing prevent duplicate
   projection when scheduler passes overlap.
+- Initial connections and low-latency change signals coalesce by account in
+  `connector_sync_triggers`. The scheduler drains claimed triggers through the same fenced sync
+  engine before ordinary due-account reconciliation. A trigger arriving during a sync survives
+  completion; failed work is released for retry. The five-minute schedule remains authoritative if
+  every change signal is delayed or absent.
+
+Google Mail uses Gmail history IDs and Google Calendar uses opaque sync tokens. iCloud Calendar
+uses WebDAV `sync-collection` only when the collection advertises it; an invalid opaque token
+restarts one bounded tokenless collection sync so the replacement token remains incremental, while
+unsupported or malformed reports fall back to a controlled full reconciliation. Provider cursors
+are opaque, bounded, and committed inside the same fenced projection transaction as their changes.
+Gmail and Calendar watches renew durably before expiry. iCloud IMAP IDLE sessions are bounded
+change signals only; they never replace the authoritative five-minute reconciliation.
 
 ## Provider transport inventory
 
@@ -65,10 +103,16 @@ timeouts remain below the edge timeout and that iCloud's declared ports exist in
 security group.
 
 Production injects both `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from SSM Parameter Store as
-ECS secret references, and API boot validation rejects an empty value. CloudWatch converts only the
-safe `connector_sync_failed` event/category fields into aggregate failure and configuration-failure
-metrics. Configuration failures alarm immediately; five failures within fifteen minutes trigger a
-sustained-volume alarm. Neither metric uses account identity, email, or provider text.
+ECS secret references, and API boot validation rejects an empty value. Gmail push, Calendar push,
+and iCloud IDLE have independent disabled-by-default Terraform gates; a disabled gate emits none of
+its incomplete runtime values. WAF applies a separate rate boundary to only the two exact Google
+webhook paths and does not bypass managed rules by provider IP.
+
+CloudWatch converts only allowlisted structured fields into aggregate connector metrics. It covers
+sync/configuration failures, active subscription failures and expiry, renewal lag, rejected (not
+duplicate) notifications, durable trigger age, and successful-sync freshness. Stopped
+subscriptions and duplicate deliveries do not alert. Metrics have no account, email, remote
+resource, token, notification-body, or provider-error dimensions.
 
 ## Implementation rules
 
@@ -83,8 +127,9 @@ sustained-volume alarm. Neither metric uses account identity, email, or provider
   `AppError` from sync.
 - Do not log authorization codes, tokens, app-specific passwords, encrypted credentials, or raw
   provider payloads.
-- Emit `connector_sync_failed` and `connector_sync_recovered` with stable IDs, category, recovery,
-  timing, and status only. Never add account email or provider message dimensions.
+- Emit connector sync/subscription/notification/trigger events through the allowlisted request-log
+  shape with safe category/code, timing, and status only. Never add account email, mailbox identity,
+  channel/resource ID, provider token/message/body, or provider text dimensions.
 - Treat local mocks as behavior tests, not production-connectivity evidence.
 
 ## Required tests and review

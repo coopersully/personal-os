@@ -4,6 +4,7 @@ import type {
   AutomationRun,
   ConfirmEmailVerificationInput,
   ConnectICloudInput,
+  ConnectorAuthorizationOutcome,
   CreateAccessTokenInput,
   CreateAutomationRoutineInput,
   CreateInvitationInput,
@@ -30,6 +31,7 @@ import {
   type ConnectedAccountHealth,
   type ConnectorSyncStatus,
   connectedAccountHealthSchema,
+  connectorAuthorizationOutcomeSchema,
 } from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createCalendarApiClient } from "./features/calendar.js";
@@ -280,6 +282,13 @@ export function createApiClient(options: ClientOptions) {
         },
       );
       return response.url;
+    },
+
+    async getConnectorAuthorizationAttempt(id: string): Promise<ConnectorAuthorizationOutcome> {
+      const response = await request<{ attempt: unknown }>(
+        `/v1/connectors/authorization-attempts/${encodeURIComponent(id)}`,
+      );
+      return connectorAuthorizationOutcomeSchema.parse(response.attempt);
     },
 
     async getXBookmarkAuthorizationUrl(): Promise<string> {

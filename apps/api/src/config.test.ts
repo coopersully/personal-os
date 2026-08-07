@@ -26,7 +26,16 @@ describe("API configuration", () => {
       encryptionKey: "secret",
       googleClientId: "",
       googleClientSecret: "",
+      googleCalendarPushEnabled: false,
+      googleCalendarWebhookUrl: "",
+      googleGmailPubsubSubscription: "",
+      googleGmailPubsubTopic: "",
+      googleGmailPushAudience: "",
+      googleGmailPushEnabled: false,
+      googleGmailPushServiceAccount: "",
       googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
+      icloudMailIdleConcurrency: 5,
+      icloudMailIdleEnabled: false,
       logLevel: "info",
       mcpResourceUrl: "https://api.example.com/mcp",
       port: 8788,
@@ -48,6 +57,58 @@ describe("API configuration", () => {
 
   it("allows an explicitly empty local email sender outside production", () => {
     expect(loadConfig({ ...required, EMAIL_FROM: "" }).emailFrom).toBe("");
+  });
+
+  it("fails closed unless enabled Gmail push configuration is complete", () => {
+    expect(() => loadConfig({ ...required, GOOGLE_GMAIL_PUSH_ENABLED: "true" })).toThrow(
+      "GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION is required",
+    );
+    expect(
+      loadConfig({
+        ...required,
+        GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION: "projects/ilo/subscriptions/gmail-push",
+        GOOGLE_GMAIL_PUBSUB_TOPIC: "projects/ilo/topics/gmail-push",
+        GOOGLE_GMAIL_PUSH_AUDIENCE:
+          "https://api.example.com/v1/connectors/google/gmail/notifications",
+        GOOGLE_GMAIL_PUSH_ENABLED: "true",
+        GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT: "pubsub@example.iam.gserviceaccount.com",
+      }),
+    ).toMatchObject({
+      googleGmailPushEnabled: true,
+      googleGmailPushServiceAccount: "pubsub@example.iam.gserviceaccount.com",
+    });
+    expect(() =>
+      loadConfig({
+        ...required,
+        GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION: "projects/ilo/subscriptions/gmail-push",
+        GOOGLE_GMAIL_PUBSUB_TOPIC: "projects/ilo/topics/gmail-push",
+        GOOGLE_GMAIL_PUSH_AUDIENCE: "https://attacker.example.com/gmail",
+        GOOGLE_GMAIL_PUSH_ENABLED: "true",
+        GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT: "pubsub@example.iam.gserviceaccount.com",
+      }),
+    ).toThrow("exact HTTPS Gmail notification route");
+  });
+
+  it("requires the exact public Calendar webhook URL when Calendar push is enabled", () => {
+    expect(() =>
+      loadConfig({
+        ...required,
+        GOOGLE_CALENDAR_PUSH_ENABLED: "true",
+        GOOGLE_CALENDAR_WEBHOOK_URL: "https://attacker.example.com/calendar",
+      }),
+    ).toThrow("exact HTTPS Calendar notification route");
+    expect(
+      loadConfig({
+        ...required,
+        GOOGLE_CALENDAR_PUSH_ENABLED: "true",
+        GOOGLE_CALENDAR_WEBHOOK_URL:
+          "https://api.example.com/v1/connectors/google/calendar/notifications",
+      }),
+    ).toMatchObject({
+      googleCalendarPushEnabled: true,
+      googleCalendarWebhookUrl:
+        "https://api.example.com/v1/connectors/google/calendar/notifications",
+    });
   });
 
   it("requires a custom skill source to carry the advertised immutable revision", () => {

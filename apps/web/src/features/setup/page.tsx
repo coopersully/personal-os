@@ -44,6 +44,7 @@ import {
   workspaceIdentities,
 } from "@/components/workspace-identity";
 import { api, errorMessage } from "../../api.js";
+import { ConnectionAuthorizationOutcome } from "../connections/authorization-outcome.js";
 import { PlaidConnectButton } from "../finances/plaid-connect.js";
 
 const workspaceOptions: Array<{
@@ -257,6 +258,7 @@ export function SetupPage({ user }: { user: User }) {
             accounts={connectors.data?.filter((account) => account.provider === "google") ?? []}
             back={() => progress(adjacentStep("google", selectedWorkspaces, true, -1))}
             continueSetup={() => progress(adjacentStep("google", selectedWorkspaces, true, 1))}
+            onConnected={() => void connectors.refetch()}
             pending={save.isPending}
             selectedWorkspaces={selectedWorkspaces}
           />
@@ -466,6 +468,7 @@ function GoogleStep({
   accounts,
   back,
   continueSetup,
+  onConnected,
   pending,
   selectedWorkspaces,
 }: {
@@ -478,6 +481,7 @@ function GoogleStep({
   }>;
   back: () => void;
   continueSetup: () => void;
+  onConnected: () => void;
   pending: boolean;
   selectedWorkspaces: AccountSetupWorkspace[];
 }) {
@@ -508,6 +512,7 @@ function GoogleStep({
         </h1>
         <p>Choose what each account contributes. Add as many as you use.</p>
       </div>
+      <ConnectionAuthorizationOutcome onConnected={onConnected} onRetry={() => connect.mutate()} />
       <ConnectedAccounts accounts={accounts} />
       <Card>
         <CardHeader>

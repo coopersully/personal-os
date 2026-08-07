@@ -9,6 +9,8 @@ const deploy = readFileSync(resolve(root, ".github/workflows/deploy.yml"), "utf8
 const health = readFileSync(resolve(root, ".github/workflows/production-health.yml"), "utf8");
 const iam = readFileSync(resolve(root, "infra/iam.tf"), "utf8");
 const packageJson = readFileSync(resolve(root, "package.json"), "utf8");
+const operations = readFileSync(resolve(root, "infra/operations.tf"), "utf8");
+const requestLogTypes = readFileSync(resolve(root, "apps/api/src/types.ts"), "utf8");
 
 function requireMatch(source, pattern, description) {
   if (!pattern.test(source)) {
@@ -36,6 +38,26 @@ requireMatch(
   /node scripts\/check-connector-observability-contract\.mjs/,
   "deterministic validation in the repository lint gate",
 );
+for (const metric of [
+  "ConnectorSubscriptionFailureCount",
+  "ConnectorSubscriptionExpiredCount",
+  "ConnectorRenewalLagMs",
+  "ConnectorNotificationRejectedCount",
+  "ConnectorTriggerAgeMs",
+  "ConnectorSyncFreshnessAgeMs",
+]) {
+  requireMatch(operations, new RegExp(metric), `the ${metric} metric`);
+}
+for (const event of [
+  "connector_notification_received",
+  "connector_subscription_expired",
+  "connector_subscription_failed",
+  "connector_subscription_renewed",
+  "connector_trigger_dispatched",
+  "connector_sync_completed",
+]) {
+  requireMatch(requestLogTypes, new RegExp(event), `the privacy-bounded ${event} event`);
+}
 
 const validState = {
   metricFilters: [
@@ -63,6 +85,79 @@ const validState = {
         },
       ],
     },
+    {
+      filterName: "personal-os-prod-connector-subscription-failure",
+      filterPattern: '{ $.event = "connector_subscription_failed" }',
+      logGroupName: "/ecs/personal-os-prod-api",
+      metricTransformations: [
+        {
+          metricName: "ConnectorSubscriptionFailureCount",
+          metricNamespace: "ilo/Connectors",
+          metricValue: "1",
+        },
+      ],
+    },
+    {
+      filterName: "personal-os-prod-connector-subscription-expired",
+      filterPattern: '{ $.event = "connector_subscription_expired" }',
+      logGroupName: "/ecs/personal-os-prod-api",
+      metricTransformations: [
+        {
+          metricName: "ConnectorSubscriptionExpiredCount",
+          metricNamespace: "ilo/Connectors",
+          metricValue: "1",
+        },
+      ],
+    },
+    {
+      filterName: "personal-os-prod-connector-renewal-lag",
+      filterPattern: '{ $.event = "connector_subscription_renewed" && $.renewalLagMs = * }',
+      logGroupName: "/ecs/personal-os-prod-api",
+      metricTransformations: [
+        {
+          metricName: "ConnectorRenewalLagMs",
+          metricNamespace: "ilo/Connectors",
+          metricValue: "$.renewalLagMs",
+        },
+      ],
+    },
+    {
+      filterName: "personal-os-prod-connector-notification-rejected",
+      filterPattern:
+        '{ $.event = "connector_notification_received" && $.notificationDisposition = "rejected" }',
+      logGroupName: "/ecs/personal-os-prod-api",
+      metricTransformations: [
+        {
+          metricName: "ConnectorNotificationRejectedCount",
+          metricNamespace: "ilo/Connectors",
+          metricValue: "1",
+        },
+      ],
+    },
+    {
+      filterName: "personal-os-prod-connector-trigger-age",
+      filterPattern: '{ $.event = "connector_trigger_dispatched" && $.ageMs = * }',
+      logGroupName: "/ecs/personal-os-prod-api",
+      metricTransformations: [
+        {
+          metricName: "ConnectorTriggerAgeMs",
+          metricNamespace: "ilo/Connectors",
+          metricValue: "$.ageMs",
+        },
+      ],
+    },
+    {
+      filterName: "personal-os-prod-connector-sync-freshness-age",
+      filterPattern: '{ $.event = "connector_sync_completed" && $.freshnessAgeMs = * }',
+      logGroupName: "/ecs/personal-os-prod-api",
+      metricTransformations: [
+        {
+          metricName: "ConnectorSyncFreshnessAgeMs",
+          metricNamespace: "ilo/Connectors",
+          metricValue: "$.freshnessAgeMs",
+        },
+      ],
+    },
   ],
   MetricAlarms: [
     {
@@ -78,6 +173,96 @@ const validState = {
       Period: 300,
       Statistic: "Sum",
       Threshold: 1,
+      TreatMissingData: "notBreaching",
+    },
+    {
+      ActionsEnabled: true,
+      AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      AlarmName: "personal-os-prod-connector-subscription-failure",
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 1,
+      EvaluationPeriods: 1,
+      MetricName: "ConnectorSubscriptionFailureCount",
+      Namespace: "ilo/Connectors",
+      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      Period: 300,
+      Statistic: "Sum",
+      Threshold: 1,
+      TreatMissingData: "notBreaching",
+    },
+    {
+      ActionsEnabled: true,
+      AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      AlarmName: "personal-os-prod-connector-subscription-expired",
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 1,
+      EvaluationPeriods: 1,
+      MetricName: "ConnectorSubscriptionExpiredCount",
+      Namespace: "ilo/Connectors",
+      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      Period: 300,
+      Statistic: "Sum",
+      Threshold: 1,
+      TreatMissingData: "notBreaching",
+    },
+    {
+      ActionsEnabled: true,
+      AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      AlarmName: "personal-os-prod-connector-renewal-lag",
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 1,
+      EvaluationPeriods: 1,
+      MetricName: "ConnectorRenewalLagMs",
+      Namespace: "ilo/Connectors",
+      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      Period: 300,
+      Statistic: "Maximum",
+      Threshold: 300000,
+      TreatMissingData: "notBreaching",
+    },
+    {
+      ActionsEnabled: true,
+      AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      AlarmName: "personal-os-prod-connector-notification-rejected",
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 1,
+      EvaluationPeriods: 1,
+      MetricName: "ConnectorNotificationRejectedCount",
+      Namespace: "ilo/Connectors",
+      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      Period: 300,
+      Statistic: "Sum",
+      Threshold: 20,
+      TreatMissingData: "notBreaching",
+    },
+    {
+      ActionsEnabled: true,
+      AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      AlarmName: "personal-os-prod-connector-trigger-age",
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 1,
+      EvaluationPeriods: 1,
+      MetricName: "ConnectorTriggerAgeMs",
+      Namespace: "ilo/Connectors",
+      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      Period: 300,
+      Statistic: "Maximum",
+      Threshold: 300000,
+      TreatMissingData: "notBreaching",
+    },
+    {
+      ActionsEnabled: true,
+      AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      AlarmName: "personal-os-prod-connector-sync-freshness",
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 1,
+      EvaluationPeriods: 1,
+      MetricName: "ConnectorSyncFreshnessAgeMs",
+      Namespace: "ilo/Connectors",
+      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      Period: 300,
+      Statistic: "Maximum",
+      Threshold: 600000,
       TreatMissingData: "notBreaching",
     },
     {
@@ -178,6 +363,24 @@ if (operation === "logs describe-metric-filters") {
   }
 
   const invalidStates = [
+    ...validState.metricFilters.map((removed) => ({
+      label: `missing filter ${removed.filterName}`,
+      state: {
+        ...validState,
+        metricFilters: validState.metricFilters.filter(
+          (filter) => filter.filterName !== removed.filterName,
+        ),
+      },
+    })),
+    ...validState.MetricAlarms.map((removed) => ({
+      label: `missing alarm ${removed.AlarmName}`,
+      state: {
+        ...validState,
+        MetricAlarms: validState.MetricAlarms.filter(
+          (alarm) => alarm.AlarmName !== removed.AlarmName,
+        ),
+      },
+    })),
     {
       label: "missing filter",
       state: { ...validState, metricFilters: validState.metricFilters.slice(1) },

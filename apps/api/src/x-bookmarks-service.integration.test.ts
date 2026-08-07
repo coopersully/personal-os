@@ -85,13 +85,18 @@ describe.sequential("X Bookmarks service", () => {
   it("authorizes once, persists folders, syncs the chosen folder, and exposes attributed bookmarks", async () => {
     const url = await service.startAuthorization(userId);
     const state = String(new URL(url).searchParams.get("state"));
-    expect(await service.completeAuthorization(state, "code")).toMatchObject({
+    const connected = await service.completeAuthorization(state, "code");
+    expect(connected).toMatchObject({
       username: "example_user",
       selectedFolderId: null,
     });
     expect(x.listBookmarkFolders).not.toHaveBeenCalled();
-    await expect(service.completeAuthorization(state, "code")).rejects.toThrow(
-      "invalid or expired",
+    await expect(service.completeAuthorization(state, "code")).resolves.toEqual(connected);
+    expect(x.exchangeCode).toHaveBeenCalledTimes(1);
+    expect(x.exchangeCode).toHaveBeenCalledWith(
+      "code",
+      expect.stringMatching(/^pkce_/),
+      "https://api.ilo.invalid/v1/x-bookmarks/callback",
     );
     expect(await service.folders(userId)).toEqual(
       expect.arrayContaining([
@@ -132,13 +137,13 @@ describe.sequential("X Bookmarks service", () => {
     );
     await expect(service.folders(userId)).rejects.toThrow("X is unavailable");
     await expect(service.getAccount(userId)).resolves.toMatchObject({
-      syncError: "X is unavailable",
+      syncError: "X is temporarily unavailable. ilo will retry automatically.",
       syncStatus: "error",
     });
     vi.mocked(x.listBookmarkFolders).mockRejectedValueOnce("opaque provider failure");
     await expect(service.folders(userId)).rejects.toMatchObject({ code: "internal_error" });
     await expect(service.getAccount(userId)).resolves.toMatchObject({
-      syncError: "Unknown X folder discovery error",
+      syncError: "X is temporarily unavailable. ilo will retry automatically.",
       syncStatus: "error",
     });
     await service.selectFolder(userId, "folder-calendar");

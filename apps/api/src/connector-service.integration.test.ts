@@ -13,6 +13,7 @@ import {
   calendarAccounts,
   calendarEvents,
   calendars,
+  connectorSyncTriggers,
   createDatabaseClient,
   type DatabaseClient,
   domainProfiles,
@@ -24,6 +25,7 @@ import {
   mailRuleWorkItems,
   mailThreads,
   migrateDatabase,
+  oauthStates,
   users,
 } from "@personal-os/database";
 import { MAIL_RULE_EXECUTION_LIMIT_PER_RUN, type MailRuleAction } from "@personal-os/domain";
@@ -43,11 +45,20 @@ import { decryptJson, encryptJson } from "./security.js";
 
 const timestamp = new Date("2026-07-13T12:00:00.000Z");
 const encryptionKey = Buffer.alloc(32, 7).toString("base64");
+const googleCalendarScope = [
+  "https://www.googleapis.com/auth/calendar.calendarlist.readonly",
+  "https://www.googleapis.com/auth/calendar.events",
+].join(" ");
+const googleCalendarAndMailScope = [
+  googleCalendarScope,
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.send",
+].join(" ");
 const credentials: GoogleCredentials = {
   accessToken: "access-1",
   expiresAt: "2026-07-13T13:00:00.000Z",
   refreshToken: "refresh-1",
-  scope: "calendar",
+  scope: googleCalendarScope,
   tokenType: "Bearer",
 };
 const rotatedCredentials: GoogleCredentials = {
@@ -152,7 +163,13 @@ function mockGoogle(): GoogleConnector {
     })),
     syncMail: vi.fn(async (value) => ({
       credentials: value,
-      value: { mailboxes: [], threads: [] },
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        nextSyncToken: "mail-history",
+        reset: false,
+        threads: [],
+      },
     })),
     sendMail: vi.fn(async () => rotatedCredentials),
     trashMailThread: vi.fn(async () => rotatedCredentials),
@@ -186,9 +203,12 @@ function mockICloud(): ICloudConnector {
       reset: true,
     })),
     syncMail: vi.fn(async () => ({
+      deletedThreadIds: [],
       mailboxes: [
         { id: "INBOX", name: "Inbox", role: "inbox" as const, totalCount: 1, unreadCount: 1 },
       ],
+      nextSyncToken: null,
+      reset: true,
       threads: [
         {
           bodyText: "Hello from iCloud",
@@ -394,7 +414,10 @@ describe.sequential("connector service", () => {
       icloud,
       now: () => timestamp,
     });
-    const initialUrl = await service.startGoogleAuthorization(userId);
+    const initialUrl = await service.startGoogleAuthorization(userId, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar"],
+    });
     await service.completeGoogleAuthorization(
       String(new URL(initialUrl).searchParams.get("state")),
       "bootstrap-code",
@@ -418,7 +441,7 @@ describe.sequential("connector service", () => {
     if (!account) throw new Error("Google account fixture is missing.");
     const mailCredentials = {
       ...credentials,
-      scope: "https://www.googleapis.com/auth/gmail.readonly",
+      scope: googleCalendarAndMailScope,
     };
     vi.mocked(google.exchangeCode).mockResolvedValueOnce(mailCredentials);
     vi.mocked(google.getProfile).mockResolvedValueOnce({
@@ -434,7 +457,10 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials: mailCredentials,
       value: {
+        deletedThreadIds: [],
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
+        nextSyncToken: "mail-history-upgraded",
+        reset: true,
         threads: [
           {
             bodyText: "Google body",
@@ -459,6 +485,7 @@ describe.sequential("connector service", () => {
     });
     expect(google.authorizationUrl).toHaveBeenLastCalledWith(
       expect.stringMatching(/^oauth_/),
+      expect.any(String),
       account.email,
       ["calendar", "mail"],
     );
@@ -538,6 +565,97 @@ describe.sequential("connector service", () => {
     ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
+  it("advances Gmail history and applies only explicit deletions under the sync claim", async () => {
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Google account fixture is missing.");
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        encryptedCredentials: encryptJson(
+          { ...credentials, scope: googleCalendarAndMailScope },
+          encryptionKey,
+        ),
+        mailEnabled: true,
+        mailSyncToken: "history-before",
+        syncStatus: "idle",
+      })
+      .where(eq(calendarAccounts.id, account.id));
+    await database.db.insert(mailThreads).values([
+      {
+        accountId: account.id,
+        bodyText: "Delete this thread",
+        from: { address: "deleted@example.com", name: null },
+        provider: "google",
+        receivedAt: timestamp,
+        remoteMailboxIds: ["INBOX"],
+        remoteThreadId: "explicitly-deleted-thread",
+        snippet: "Delete this thread",
+        starred: false,
+        subject: "Deleted",
+        to: [],
+        unread: false,
+        userId,
+      },
+      {
+        accountId: account.id,
+        bodyText: "Retain this thread",
+        from: { address: "retained@example.com", name: null },
+        provider: "google",
+        receivedAt: timestamp,
+        remoteMailboxIds: ["INBOX"],
+        remoteThreadId: "unobserved-retained-thread",
+        snippet: "Retain this thread",
+        starred: false,
+        subject: "Retained",
+        to: [],
+        unread: false,
+        userId,
+      },
+    ]);
+    const syncMail = google.syncMail;
+    if (!syncMail) throw new Error("Google Mail fixture is missing.");
+    vi.mocked(syncMail).mockResolvedValueOnce({
+      credentials,
+      value: {
+        deletedThreadIds: ["explicitly-deleted-thread"],
+        mailboxes: [],
+        nextSyncToken: "history-after",
+        reset: false,
+        threads: [],
+      },
+    });
+
+    await service.syncAccount(userId, account.id);
+
+    expect(syncMail).toHaveBeenLastCalledWith(
+      expect.objectContaining({ accessToken: expect.any(String) }),
+      "history-before",
+      undefined,
+    );
+    const [updatedAccount] = await database.db
+      .select({ mailSyncToken: calendarAccounts.mailSyncToken })
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, account.id));
+    expect(updatedAccount?.mailSyncToken).toBe("history-after");
+    const storedThreads = await database.db
+      .select({ deletedAt: mailThreads.deletedAt, remoteThreadId: mailThreads.remoteThreadId })
+      .from(mailThreads)
+      .where(
+        inArray(mailThreads.remoteThreadId, [
+          "explicitly-deleted-thread",
+          "unobserved-retained-thread",
+        ]),
+      )
+      .orderBy(asc(mailThreads.remoteThreadId));
+    expect(storedThreads).toEqual([
+      { deletedAt: timestamp, remoteThreadId: "explicitly-deleted-thread" },
+      { deletedAt: null, remoteThreadId: "unobserved-retained-thread" },
+    ]);
+  });
+
   it("claims one sync lease and rejects a concurrent sync for the same account", async () => {
     const [account] = await database.db
       .select()
@@ -564,7 +682,13 @@ describe.sequential("connector service", () => {
       await syncCanFinish;
       return {
         credentials: currentCredentials,
-        value: { mailboxes: [], threads: [] },
+        value: {
+          deletedThreadIds: [],
+          mailboxes: [],
+          nextSyncToken: null,
+          reset: false,
+          threads: [],
+        },
       };
     });
 
@@ -592,7 +716,7 @@ describe.sequential("connector service", () => {
     const cancellableSyncMail = cancellableGoogle.syncMail;
     if (!cancellableSyncMail) throw new Error("Google Mail sync fixture is unavailable.");
     vi.mocked(cancellableSyncMail).mockImplementationOnce(
-      async (_currentCredentials, operation) => {
+      async (_currentCredentials, _syncToken, operation) => {
         markProviderStarted();
         await new Promise<void>((resolve) => {
           operation?.signal?.addEventListener("abort", () => resolve(), {
@@ -601,7 +725,13 @@ describe.sequential("connector service", () => {
         });
         return {
           credentials: rotatedCredentials,
-          value: { mailboxes: [], threads: [] },
+          value: {
+            deletedThreadIds: [],
+            mailboxes: [],
+            nextSyncToken: null,
+            reset: false,
+            threads: [],
+          },
         };
       },
     );
@@ -802,7 +932,16 @@ describe.sequential("connector service", () => {
     if (!schedulerSyncMail) throw new Error("Scheduler Mail fixture is unavailable.");
     vi.mocked(schedulerSyncMail).mockImplementation(async (value) => {
       await boundedProviderCall();
-      return { credentials: value, value: { mailboxes: [], threads: [] } };
+      return {
+        credentials: value,
+        value: {
+          deletedThreadIds: [],
+          mailboxes: [],
+          nextSyncToken: null,
+          reset: false,
+          threads: [],
+        },
+      };
     });
     const schedulerLogs: unknown[] = [];
     const encryptedCredentials = encryptJson(credentials, encryptionKey);
@@ -1427,7 +1566,10 @@ describe.sequential("connector service", () => {
     const syncMail = google.syncMail;
     if (!syncMail) throw new Error("Google Mail sync is unavailable.");
     const completeMailValue: MailSyncResult["value"] = {
+      deletedThreadIds: [],
       mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
+      nextSyncToken: "complete-mail-history",
+      reset: false,
       threads: [
         {
           bodyText: "Body",
@@ -2069,6 +2211,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 7, unreadCount: 7 }],
         threads,
       },
@@ -2143,6 +2288,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2272,7 +2420,8 @@ describe.sequential("connector service", () => {
     ).resolves.toHaveLength(1);
     const reauthorizedCredentials = {
       ...credentials,
-      scope: "https://www.googleapis.com/auth/gmail.modify",
+      scope:
+        "https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/gmail.send",
     };
     vi.mocked(google.exchangeCode).mockResolvedValueOnce(reauthorizedCredentials);
     vi.mocked(google.getProfile).mockResolvedValueOnce({
@@ -2424,6 +2573,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2571,6 +2723,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2635,6 +2790,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2699,6 +2857,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2830,6 +2991,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 3, unreadCount: 3 }],
         threads,
       },
@@ -2886,6 +3050,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -2957,6 +3124,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -3033,6 +3203,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [{ id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 }],
         threads: [
           {
@@ -3177,7 +3350,13 @@ describe.sequential("connector service", () => {
     vi.mocked(updateMailThread).mockClear();
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
-      value: { mailboxes: [], threads: [] },
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        nextSyncToken: null,
+        reset: false,
+        threads: [],
+      },
     });
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
     expect(updateMailThread).not.toHaveBeenCalled();
@@ -3206,7 +3385,13 @@ describe.sequential("connector service", () => {
       .returning({ id: mailRules.id, name: mailRules.name });
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
-      value: { mailboxes: [], threads: [] },
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        nextSyncToken: null,
+        reset: false,
+        threads: [],
+      },
     });
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
 
@@ -3254,7 +3439,13 @@ describe.sequential("connector service", () => {
       .returning({ id: mailRules.id, name: mailRules.name });
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
-      value: { mailboxes: [], threads: [] },
+      value: {
+        deletedThreadIds: [],
+        mailboxes: [],
+        nextSyncToken: null,
+        reset: false,
+        threads: [],
+      },
     });
     await expect(service.syncAccount(userId, account.id)).resolves.toMatchObject({ changed: 0 });
 
@@ -3311,6 +3502,9 @@ describe.sequential("connector service", () => {
     vi.mocked(syncMail).mockResolvedValueOnce({
       credentials,
       value: {
+        deletedThreadIds: [],
+        nextSyncToken: null,
+        reset: false,
         mailboxes: [
           { id: "INBOX", name: "Inbox", role: "inbox", totalCount: 1, unreadCount: 1 },
           {
@@ -3610,32 +3804,166 @@ describe.sequential("connector service", () => {
     });
   });
 
+  it("closes Google callbacks with safe outcomes and never enables ungranted services", async () => {
+    const deniedUrl = await service.startGoogleAuthorization(userId);
+    const deniedState = String(new URL(deniedUrl).searchParams.get("state"));
+    const denied = await service.handleGoogleAuthorizationCallback({
+      error: "access_denied",
+      issuer: "https://accounts.google.com",
+      requestId: "request-denied",
+      state: deniedState,
+    });
+    expect(denied).toEqual({
+      attemptId: expect.any(String),
+      returnPath: "/settings?section=connections",
+      status: "cancelled",
+    });
+    if (!denied.attemptId) throw new Error("Denied attempt ID is missing.");
+    expect(
+      await database.db.select().from(oauthStates).where(eq(oauthStates.id, denied.attemptId)),
+    ).toEqual([
+      expect.objectContaining({
+        connectedAccountId: null,
+        outcomeCode: "authorization_cancelled",
+        status: "cancelled",
+      }),
+    ]);
+
+    const [accountBefore] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!accountBefore) throw new Error("Google account fixture is missing.");
+    const incompleteCredentials = {
+      ...credentials,
+      accessToken: "<html>RAW_PROVIDER_CANARY</html>",
+      scope: `${googleCalendarScope} https://www.googleapis.com/auth/gmail.send`,
+    };
+    vi.mocked(google.exchangeCode).mockResolvedValueOnce(incompleteCredentials);
+    vi.mocked(google.getProfile).mockResolvedValueOnce({
+      credentials: incompleteCredentials,
+      value: {
+        email: "private-canary@example.com",
+        id: "google-person",
+        name: "RAW_PROVIDER_CANARY",
+      },
+    });
+    const incompleteUrl = await service.startGoogleAuthorization(userId, {
+      accountId: accountBefore.id,
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
+    const incompleteState = String(new URL(incompleteUrl).searchParams.get("state"));
+    const incomplete = await service.handleGoogleAuthorizationCallback({
+      code: "RAW_CODE_CANARY",
+      issuer: "https://accounts.google.com",
+      requestId: "request-incomplete",
+      state: incompleteState,
+    });
+    expect(incomplete.status).toBe("permission_incomplete");
+    if (!incomplete.attemptId) throw new Error("Incomplete attempt ID is missing.");
+    const [attempt] = await database.db
+      .select()
+      .from(oauthStates)
+      .where(eq(oauthStates.id, incomplete.attemptId));
+    expect(JSON.stringify(attempt)).not.toContain("RAW_PROVIDER_CANARY");
+    expect(JSON.stringify(attempt)).not.toContain("private-canary@example.com");
+    expect(JSON.stringify(attempt)).not.toContain("RAW_CODE_CANARY");
+    const [accountAfter] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountBefore.id));
+    expect(accountAfter).toEqual(accountBefore);
+
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        nextSyncAt: new Date("2026-07-14T12:00:00.000Z"),
+        syncError: "Reconnect required.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "authorization_revoked",
+        syncFailureCount: 2,
+        syncRecovery: "reconnect",
+        syncStatus: "error",
+      })
+      .where(eq(calendarAccounts.id, accountBefore.id));
+    const completeCredentials = { ...credentials, scope: googleCalendarAndMailScope };
+    vi.mocked(google.exchangeCode).mockResolvedValueOnce(completeCredentials);
+    vi.mocked(google.getProfile).mockResolvedValueOnce({
+      credentials: completeCredentials,
+      value: { email: "person@example.com", id: "google-person", name: "Google Person" },
+    });
+    const successUrl = await service.startGoogleAuthorization(userId, {
+      accountId: accountBefore.id,
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
+    const success = await service.handleGoogleAuthorizationCallback({
+      code: "success-code",
+      issuer: "https://accounts.google.com",
+      requestId: "request-success",
+      state: String(new URL(successUrl).searchParams.get("state")),
+    });
+    expect(success.status).toBe("connected");
+    const [healthyAccount] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.id, accountBefore.id));
+    expect(healthyAccount).toMatchObject({
+      calendarEnabled: true,
+      mailEnabled: true,
+      nextSyncAt: timestamp,
+      syncClaimId: null,
+      syncError: null,
+      syncErrorCategory: null,
+      syncErrorCode: null,
+      syncFailureCount: 0,
+      syncRecovery: null,
+      syncStatus: "idle",
+    });
+  });
+
   it("completes OAuth, updates an existing connection, and validates one-time state", async () => {
+    const completeCredentials = { ...credentials, scope: googleCalendarAndMailScope };
+    vi.mocked(google.exchangeCode).mockResolvedValue(completeCredentials);
+    vi.mocked(google.getProfile).mockResolvedValue({
+      credentials: completeCredentials,
+      value: { email: "person@example.com", id: "google-person", name: null },
+    });
     await expect(service.completeGoogleAuthorization("invalid", "code")).rejects.toMatchObject({
       code: "invalid_request",
     });
 
-    const authorizationUrl = await service.startGoogleAuthorization(userId);
+    const authorizationUrl = await service.startGoogleAuthorization(userId, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
     const state = new URL(authorizationUrl).searchParams.get("state");
     expect(state).toMatch(/^oauth_/);
     const connected = await service.completeGoogleAuthorization(String(state), "code-1");
     expect(connected.email).toBe("person@example.com");
     expect(connected.returnPath).toBe("/settings?section=connections");
-    expect(google.exchangeCode).toHaveBeenCalledWith("code-1");
-    await expect(
-      service.completeGoogleAuthorization(String(state), "code-again"),
-    ).rejects.toMatchObject({ code: "invalid_request" });
-    const concurrentAuthorizationUrl = await service.startGoogleAuthorization(userId);
+    expect(google.exchangeCode).toHaveBeenCalledWith(
+      "code-1",
+      expect.stringMatching(/^pkce_/),
+      "https://api.ilo.invalid/v1/connectors/google/callback",
+    );
+    await expect(service.completeGoogleAuthorization(String(state), "code-again")).resolves.toEqual(
+      connected,
+    );
+    const concurrentAuthorizationUrl = await service.startGoogleAuthorization(userId, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
     const concurrentState = String(new URL(concurrentAuthorizationUrl).searchParams.get("state"));
     const exchangeCountBeforeRace = vi.mocked(google.exchangeCode).mock.calls.length;
     const concurrentResults = await Promise.allSettled([
       service.completeGoogleAuthorization(concurrentState, "concurrent-code-1"),
       service.completeGoogleAuthorization(concurrentState, "concurrent-code-2"),
     ]);
-    expect(concurrentResults.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(concurrentResults.filter((result) => result.status === "rejected")).toEqual([
-      expect.objectContaining({ reason: expect.objectContaining({ code: "invalid_request" }) }),
-    ]);
+    expect(
+      concurrentResults.filter((result) => result.status === "fulfilled").length,
+    ).toBeGreaterThanOrEqual(1);
     expect(vi.mocked(google.exchangeCode).mock.calls).toHaveLength(exchangeCountBeforeRace + 1);
 
     expect(
@@ -3650,7 +3978,7 @@ describe.sequential("connector service", () => {
     );
 
     vi.mocked(google.getProfile).mockResolvedValueOnce({
-      credentials,
+      credentials: completeCredentials,
       value: {
         email: "renamed@example.com",
         id: "google-person",
@@ -3658,7 +3986,7 @@ describe.sequential("connector service", () => {
       },
     });
     vi.mocked(google.listCalendars).mockResolvedValueOnce({
-      credentials,
+      credentials: completeCredentials,
       value: [
         {
           accessRole: "owner",
@@ -3672,7 +4000,10 @@ describe.sequential("connector service", () => {
         },
       ],
     });
-    const secondUrl = await service.startGoogleAuthorization(userId);
+    const secondUrl = await service.startGoogleAuthorization(userId, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
     const secondState = new URL(secondUrl).searchParams.get("state");
     const reconnected = await service.completeGoogleAuthorization(String(secondState), "code-2");
     await service.syncAccount(userId, reconnected.accountId);
@@ -3690,6 +4021,27 @@ describe.sequential("connector service", () => {
       name: "Renamed Primary",
       timezone: "America/Chicago",
     });
+  });
+
+  it("drains durable low-latency triggers through the fenced sync engine", async () => {
+    await database.db.delete(connectorSyncTriggers);
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.providerAccountId, "google-person"));
+    if (!account) throw new Error("Triggered sync account is missing.");
+    await service.enqueueSyncTrigger(account.id, "notification");
+    await expect(service.dispatchTriggeredSyncs({ concurrency: 1, limit: 1 })).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      succeeded: 1,
+    });
+    await expect(
+      database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([]);
   });
 
   it("rotates credentials through remote event create, update, and delete operations", async () => {
@@ -4160,6 +4512,117 @@ describe.sequential("connector service", () => {
       syncRecovery: null,
       syncStatus: "idle",
     });
+  });
+
+  it("persists iCloud collection tokens only inside the active sync claim", async () => {
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        email: "calendar-fence@icloud.example",
+        encryptedCredentials: encryptJson(
+          {
+            appSpecificPassword: "app-password",
+            email: "calendar-fence@icloud.example",
+          },
+          encryptionKey,
+        ),
+        label: "iCloud Calendar fence",
+        mailEnabled: false,
+        provider: "icloud",
+        providerAccountId: "calendar-fence@icloud.example",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("iCloud calendar fence account was not created.");
+    const [calendar] = await database.db
+      .insert(calendars)
+      .values({
+        accountId: account.id,
+        name: "iCloud Calendar",
+        provider: "icloud",
+        remoteCalendarId: "icloud-primary",
+        syncToken: "opaque-old-token",
+        timezone: "UTC",
+        userId,
+      })
+      .returning();
+    if (!calendar) throw new Error("iCloud calendar fence source was not created.");
+    await database.db.insert(calendarEvents).values({
+      calendarId: calendar.id,
+      endsAt: new Date("2026-07-13T14:00:00.000Z"),
+      provider: "icloud",
+      remoteEtag: "etag-stale",
+      remoteEventId: "icloud-stale",
+      startsAt: new Date("2026-07-13T13:00:00.000Z"),
+      timezone: "UTC",
+      title: "Stale iCloud event",
+      userId,
+    });
+    const projected = remoteEvent("icloud-projected", "etag-projected");
+    vi.mocked(icloud.syncCalendar).mockResolvedValueOnce({
+      changes: [
+        { event: projected, kind: "upsert" },
+        { event: projected, kind: "upsert" },
+      ],
+      nextSyncToken: "opaque-next-token",
+      reset: true,
+    });
+
+    await expect(service.syncAccount(userId, account.id)).resolves.toEqual({ changed: 2 });
+    await expect(
+      database.db
+        .select({ syncToken: calendars.syncToken })
+        .from(calendars)
+        .where(eq(calendars.id, calendar.id)),
+    ).resolves.toEqual([{ syncToken: "opaque-next-token" }]);
+    await expect(
+      database.db
+        .select({ remoteEventId: calendarEvents.remoteEventId })
+        .from(calendarEvents)
+        .where(
+          and(
+            eq(calendarEvents.calendarId, calendar.id),
+            eq(calendarEvents.remoteEventId, "icloud-projected"),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
+
+    const replacementClaimId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    vi.mocked(icloud.syncCalendar).mockImplementationOnce(async () => {
+      await database.db
+        .update(calendarAccounts)
+        .set({ syncClaimId: replacementClaimId })
+        .where(eq(calendarAccounts.id, account.id));
+      return {
+        changes: [{ event: remoteEvent("must-not-project", "etag-new"), kind: "upsert" }],
+        nextSyncToken: "must-not-persist",
+        reset: false,
+      };
+    });
+
+    await expect(service.syncAccount(userId, account.id)).rejects.toMatchObject({
+      code: "conflict",
+      message: expect.stringContaining("superseded"),
+    });
+    await expect(
+      database.db
+        .select({ syncToken: calendars.syncToken })
+        .from(calendars)
+        .where(eq(calendars.id, calendar.id)),
+    ).resolves.toEqual([{ syncToken: "opaque-next-token" }]);
+    await expect(
+      database.db
+        .select({ id: calendarEvents.id })
+        .from(calendarEvents)
+        .where(eq(calendarEvents.remoteEventId, "must-not-project")),
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.db
+        .select({ syncClaimId: calendarAccounts.syncClaimId })
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, account.id)),
+    ).resolves.toEqual([{ syncClaimId: replacementClaimId }]);
   });
 
   it("records an unavailable optional mail connector as a synchronization error", async () => {
@@ -5319,6 +5782,7 @@ describe.sequential("connector service", () => {
     );
 
     const restoredMail = {
+      deletedThreadIds: [],
       mailboxes: [
         {
           id: "INBOX",
@@ -5329,6 +5793,8 @@ describe.sequential("connector service", () => {
           unreadCount: 0,
         },
       ],
+      nextSyncToken: null,
+      reset: true,
       threads: [
         {
           bodyText: "BEGIN:VCALENDAR",
@@ -5580,7 +6046,10 @@ describe.sequential("connector service", () => {
         name: "Calendar Capability",
       },
     });
-    const url = await service.startGoogleAuthorization(profileUser.id);
+    const url = await service.startGoogleAuthorization(profileUser.id, {
+      returnTo: "/settings?section=connections",
+      services: ["calendar"],
+    });
     await service.completeGoogleAuthorization(
       String(new URL(url).searchParams.get("state")),
       "calendar-capability-code",

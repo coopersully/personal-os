@@ -216,7 +216,33 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: { security, responses: { 200: { description: "Google authorization URL" } } },
       },
       "/v1/connectors/google/callback": {
-        get: { responses: { 302: { description: "Google authorization completed" } } },
+        get: { responses: { 303: { description: "Safe Google authorization outcome redirect" } } },
+      },
+      "/v1/connectors/google/gmail/notifications": {
+        post: {
+          responses: {
+            204: { description: "Authenticated Gmail change signal durably accepted" },
+            401: { description: "Pub/Sub identity rejected" },
+            404: { description: "Notification route or subscription unavailable" },
+            503: { description: "Durable acknowledgement unavailable; provider should retry" },
+          },
+        },
+      },
+      "/v1/connectors/google/calendar/notifications": {
+        post: {
+          responses: {
+            204: { description: "Verified Calendar change signal durably accepted" },
+            400: { description: "Malformed notification headers" },
+            404: { description: "Notification route or channel unavailable" },
+            503: { description: "Durable acknowledgement unavailable; provider should retry" },
+          },
+        },
+      },
+      "/v1/connectors/authorization-attempts/{id}": {
+        get: {
+          security,
+          responses: { 200: { description: "Safe connector authorization outcome" } },
+        },
       },
       "/v1/connectors/icloud": {
         post: { security, responses: { 201: { description: "iCloud connected" } } },
@@ -231,7 +257,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         post: { security, responses: { 200: { description: "X authorization URL" } } },
       },
       "/v1/x-bookmarks/callback": {
-        get: { responses: { 302: { description: "X authorization completed" } } },
+        get: { responses: { 303: { description: "Safe X authorization outcome redirect" } } },
       },
       "/v1/x-bookmarks/account": {
         delete: { security, responses: { 204: { description: "X connection removed" } } },

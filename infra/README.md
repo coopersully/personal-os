@@ -118,6 +118,19 @@ Register the derived Google callback URL before enabling Google connections:
 https://api.<domain>/v1/connectors/google/callback
 ```
 
+Low-latency connector modes are independent Terraform gates and default off:
+
+- `google_gmail_push_enabled` requires a qualified Pub/Sub topic, subscription, and dedicated push
+  service-account identity. Terraform derives the exact HTTPS OIDC audience.
+- `google_calendar_push_enabled` derives the exact Calendar notification URL.
+- `icloud_mail_idle_enabled` injects only its enable flag and bounded concurrency.
+
+Disabled gates emit none of their optional environment values. These inputs are non-secret
+identifiers; OAuth client credentials remain SSM-backed ECS secrets. Applying the AWS declaration
+does not create or prove the external GCP topic, publisher grant, subscription, OIDC authority,
+Google verification, or delivery. Keep a gate disabled until the evidence checklist in
+[`docs/deployment.md`](../docs/deployment.md) is complete.
+
 ## First release and continuous deployment
 
 The initial Terraform apply deliberately creates ECS services at desired count `0`, with a non-existent `bootstrap` image tag. That prevents an empty foundation apply from starting a task with no real release image.
@@ -189,6 +202,12 @@ CloudWatch alarms cover public HTTPS health, ECS CPU/memory, unhealthy targets,
 CloudFront 5xx rate. The `personal-os-prod-operations` dashboard collects the
 primary service and database signals. Alarms send both failure and recovery
 notifications.
+
+Connector alarms additionally cover safe aggregate sync/configuration failures, live subscription
+failure/expiry, renewal lag, rejected notifications, durable-trigger age, and sync freshness.
+Expected duplicate notifications and intentionally stopped subscriptions are excluded. The live
+deploy/health preflight validates the exact filters, transformations, thresholds, missing-data
+policy, and operations-topic routes before treating this declaration as active evidence.
 
 GitHub records a `production/ilo` commit status for each protected `main`
 release. Failed CI or deployment opens one deduplicated production incident;

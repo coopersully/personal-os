@@ -44,6 +44,7 @@ import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createFinanceService } from "./finance-service.js";
 import { createGoalsService } from "./goals-service.js";
+import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { createMailService } from "./mail-service.js";
 import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
@@ -88,6 +89,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
     userRowsScanned: number;
   }>;
   dispatchDueAutomations: () => Promise<void>;
+  superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
     attempted: number;
     failed: number;
@@ -104,8 +106,51 @@ const runAutomationInputSchema = z.object({ dryRun: z.boolean().default(false) }
 const googleCallbackSchema = z.object({
   code: z.string().min(1).optional(),
   error: z.string().min(1).optional(),
+  iss: z.string().min(1).optional(),
   state: z.string().min(1),
 });
+const gmailPushEnvelopeSchema = z.object({
+  message: z.object({
+    data: z.string().min(1).max(16_384),
+    messageId: z.string().min(1).max(256),
+  }),
+  subscription: z.string().min(1).max(512),
+});
+const gmailPushDataSchema = z.object({
+  emailAddress: z.email().max(320),
+  historyId: z.string().regex(/^\d+$/u).max(64),
+});
+const calendarNotificationHeadersSchema = z.object({
+  channelId: z.string().uuid(),
+  messageNumber: z.string().regex(/^\d+$/u).max(64),
+  resourceId: z.string().min(1).max(512),
+  resourceState: z.enum(["exists", "not_exists", "sync"]),
+  token: z.string().min(32).max(512),
+});
+const GMAIL_PUSH_BODY_LIMIT_BYTES = 32_768;
+
+async function readBoundedRequestBody(request: Request, limit: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let value = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        return null;
+      }
+      value += decoder.decode(chunk.value, { stream: true });
+    }
+    return value + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
 const oauthAuthorizeSchema = z.object({
   client_id: z.string().min(1),
   code_challenge: z.string().min(43).max(128),
@@ -141,16 +186,22 @@ const agentDomainSupport = {
 export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const app = new Hono<AppEnv>();
   const now = dependencies.now ?? (() => new Date());
-  const startBackgroundTask = (label: string, operation: () => Promise<void>): boolean => {
-    if (dependencies.runtimeLifecycle) {
-      return dependencies.runtimeLifecycle.startBackgroundTask(label, operation);
-    }
-    void operation().catch(() => {
-      // Detached connector bootstrap failures are persisted by the connector
-      // service and retried by the scheduler.
+  const observeRejectedNotification = (
+    requestId: string,
+    status: number,
+    subscriptionKind?: "gmail_mailbox",
+  ) =>
+    dependencies.log?.({
+      durationMs: 0,
+      event: "connector_notification_received",
+      method: "POST",
+      notificationDisposition: "rejected",
+      path: "/v1/connectors/google/notifications",
+      provider: "google",
+      requestId,
+      status,
+      subscriptionKind,
     });
-    return true;
-  };
   const authRateLimiter = createFixedWindowRateLimiter({
     maxRequests: dependencies.config.authRateLimitMaxRequests ?? 20,
     now: () => now().getTime(),
@@ -185,11 +236,33 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       now,
       redirectUri: dependencies.config.googleRedirectUri,
     });
+  const verifyGooglePubSubToken =
+    dependencies.verifyGooglePubSubToken ??
+    (dependencies.config.googleGmailPushEnabled &&
+    dependencies.config.googleGmailPushAudience &&
+    dependencies.config.googleGmailPushServiceAccount
+      ? createGooglePubSubAuth({
+          audience: dependencies.config.googleGmailPushAudience,
+          serviceAccount: dependencies.config.googleGmailPushServiceAccount,
+        })
+      : null);
   const connectors = createConnectorService({
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
     google,
+    ...(dependencies.config.googleCalendarPushEnabled &&
+    dependencies.config.googleCalendarWebhookUrl
+      ? { googleCalendarWebhookUrl: dependencies.config.googleCalendarWebhookUrl }
+      : {}),
+    ...(dependencies.config.googleGmailPushEnabled && dependencies.config.googleGmailPubsubTopic
+      ? { googleGmailTopicName: dependencies.config.googleGmailPubsubTopic }
+      : {}),
+    googleRedirectUri: dependencies.config.googleRedirectUri,
     icloud: dependencies.icloud ?? createICloudConnector(),
+    ...(dependencies.config.icloudMailIdleConcurrency
+      ? { icloudMailIdleConcurrency: dependencies.config.icloudMailIdleConcurrency }
+      : {}),
+    ...(dependencies.config.icloudMailIdleEnabled ? { icloudMailIdleEnabled: true } : {}),
     now,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     observeRecoveryFailure: (entry) =>
@@ -214,6 +287,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
     now,
+    xRedirectUri: dependencies.config.xRedirectUri,
     x:
       dependencies.x ??
       createXConnector({
@@ -223,6 +297,44 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         redirectUri: dependencies.config.xRedirectUri,
       }),
   });
+  function connectorCallbackRedirect(
+    context: Context<AppEnv>,
+    returnPath: "/setup" | "/settings?section=connections",
+    attemptId: string | null,
+  ): Response {
+    const location = new URL(returnPath, dependencies.config.appBaseUrl);
+    if (attemptId) location.searchParams.set("connection_attempt", attemptId);
+    else location.searchParams.set("connection_result", "restart_required");
+    context.header("Cache-Control", "no-store");
+    context.header("Pragma", "no-cache");
+    context.header("Referrer-Policy", "no-referrer");
+    context.header("X-Content-Type-Options", "nosniff");
+    return context.redirect(location.toString(), 303);
+  }
+  async function completeConnectorCallback(
+    context: Context<AppEnv>,
+    provider: "google" | "x",
+    operation: () => Promise<{
+      attemptId: string | null;
+      returnPath: "/setup" | "/settings?section=connections";
+    }>,
+  ): Promise<Response> {
+    try {
+      const result = await operation();
+      return connectorCallbackRedirect(context, result.returnPath, result.attemptId);
+    } catch {
+      dependencies.log?.({
+        durationMs: 0,
+        event: "connector_authorization_callback_failed",
+        method: "GET",
+        path: context.req.path,
+        provider,
+        requestId: context.get("requestId"),
+        status: 503,
+      });
+      return connectorCallbackRedirect(context, "/settings?section=connections", null);
+    }
+  }
   const calendar = createCalendarService({
     connectedEvents: connectors.eventGateway,
     db: dependencies.db,
@@ -451,36 +563,118 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     return context.json({ user: await auth.verifyEmail(input.token) });
   });
   app.get("/v1/connectors/google/callback", async (context) => {
-    const query = googleCallbackSchema.parse(context.req.query());
-    if (query.error || !query.code) {
-      throw new AppError(
-        "invalid_request",
-        query.error
-          ? `Google authorization failed: ${query.error}`
-          : "Google did not return an authorization code.",
-      );
+    const parsed = googleCallbackSchema.safeParse(context.req.query());
+    if (!parsed.success) {
+      return connectorCallbackRedirect(context, "/settings?section=connections", null);
     }
-    const result = await connectors.completeGoogleAuthorization(query.state, query.code);
-    startBackgroundTask("google-connector-initial-sync", async () => {
-      await connectors.syncAccount(result.userId, result.accountId);
-    });
-    const separator = result.returnPath.includes("?") ? "&" : "?";
-    return context.redirect(
-      `${dependencies.config.appBaseUrl}${result.returnPath}${separator}google=connected`,
+    const query = parsed.data;
+    return completeConnectorCallback(context, "google", () =>
+      connectors.handleGoogleAuthorizationCallback({
+        ...(query.code ? { code: query.code } : {}),
+        ...(query.error ? { error: query.error } : {}),
+        ...(query.iss ? { issuer: query.iss } : {}),
+        requestId: context.get("requestId"),
+        state: query.state,
+      }),
     );
   });
-  app.get("/v1/x-bookmarks/callback", async (context) => {
-    const query = xCallbackSchema.parse(context.req.query());
-    if (query.error || !query.code) {
-      throw new AppError(
-        "invalid_request",
-        query.error
-          ? `X authorization failed: ${query.error}`
-          : "X did not return an authorization code.",
-      );
+  app.post("/v1/connectors/google/gmail/notifications", async (context) => {
+    if (
+      !dependencies.config.googleGmailPushEnabled ||
+      !verifyGooglePubSubToken ||
+      !dependencies.config.googleGmailPubsubSubscription
+    ) {
+      return context.body(null, 404);
     }
-    await xBookmarks.completeAuthorization(query.state, query.code);
-    return context.redirect(`${dependencies.config.appBaseUrl}/settings/connectors?x=connected`);
+    const authorizationHeader = context.req.header("authorization") ?? "";
+    const match = /^Bearer ([A-Za-z0-9._~-]+)$/u.exec(authorizationHeader);
+    if (!match?.[1]) {
+      observeRejectedNotification(context.get("requestId"), 401, "gmail_mailbox");
+      return context.body(null, 401);
+    }
+    try {
+      await verifyGooglePubSubToken(match[1]);
+    } catch (error) {
+      const status = error instanceof GooglePubSubAuthError && error.retryable ? 503 : 401;
+      observeRejectedNotification(context.get("requestId"), status, "gmail_mailbox");
+      return context.body(null, status);
+    }
+    const contentLength = Number(context.req.header("content-length") ?? "0");
+    if (Number.isFinite(contentLength) && contentLength > GMAIL_PUSH_BODY_LIMIT_BYTES) {
+      observeRejectedNotification(context.get("requestId"), 413, "gmail_mailbox");
+      return context.body(null, 413);
+    }
+    const raw = await readBoundedRequestBody(context.req.raw, GMAIL_PUSH_BODY_LIMIT_BYTES);
+    if (raw === null) {
+      observeRejectedNotification(context.get("requestId"), 413, "gmail_mailbox");
+      return context.body(null, 413);
+    }
+    let envelope: z.infer<typeof gmailPushEnvelopeSchema>;
+    let data: z.infer<typeof gmailPushDataSchema>;
+    try {
+      envelope = gmailPushEnvelopeSchema.parse(JSON.parse(raw));
+      if (envelope.subscription !== dependencies.config.googleGmailPubsubSubscription) {
+        observeRejectedNotification(context.get("requestId"), 404, "gmail_mailbox");
+        return context.body(null, 404);
+      }
+      const decoded = Buffer.from(envelope.message.data, "base64");
+      if (decoded.length > 8_192) {
+        observeRejectedNotification(context.get("requestId"), 413, "gmail_mailbox");
+        return context.body(null, 413);
+      }
+      data = gmailPushDataSchema.parse(JSON.parse(decoded.toString("utf8")));
+    } catch {
+      observeRejectedNotification(context.get("requestId"), 400, "gmail_mailbox");
+      return context.body(null, 400);
+    }
+    try {
+      const result = await connectors.receiveGmailNotification(data.emailAddress, data.historyId);
+      return context.body(null, result === "unknown" ? 404 : 204);
+    } catch {
+      observeRejectedNotification(context.get("requestId"), 503, "gmail_mailbox");
+      return context.body(null, 503);
+    }
+  });
+  app.post("/v1/connectors/google/calendar/notifications", async (context) => {
+    if (!dependencies.config.googleCalendarPushEnabled) return context.body(null, 404);
+    const contentLength = Number(context.req.header("content-length") ?? "0");
+    if (Number.isFinite(contentLength) && contentLength > 0) {
+      observeRejectedNotification(context.get("requestId"), 413);
+      return context.body(null, 413);
+    }
+    const parsed = calendarNotificationHeadersSchema.safeParse({
+      channelId: context.req.header("x-goog-channel-id"),
+      messageNumber: context.req.header("x-goog-message-number"),
+      resourceId: context.req.header("x-goog-resource-id"),
+      resourceState: context.req.header("x-goog-resource-state"),
+      token: context.req.header("x-goog-channel-token"),
+    });
+    if (!parsed.success) {
+      observeRejectedNotification(context.get("requestId"), 400);
+      return context.body(null, 400);
+    }
+    try {
+      const result = await connectors.receiveCalendarNotification(parsed.data);
+      return context.body(null, result === "unknown" ? 404 : 204);
+    } catch {
+      observeRejectedNotification(context.get("requestId"), 503);
+      return context.body(null, 503);
+    }
+  });
+  app.get("/v1/x-bookmarks/callback", async (context) => {
+    const parsed = xCallbackSchema.safeParse(context.req.query());
+    if (!parsed.success) {
+      return connectorCallbackRedirect(context, "/settings?section=connections", null);
+    }
+    const query = parsed.data;
+    return completeConnectorCallback(context, "x", () =>
+      xBookmarks.handleAuthorizationCallback({
+        ...(query.code ? { code: query.code } : {}),
+        ...(query.error ? { error: query.error } : {}),
+        requestId: context.get("requestId"),
+        state: query.state,
+      }),
+    );
   });
 
   const oauthSession = async (context: Context<AppEnv>) => {
@@ -735,6 +929,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.get("/v1/connectors", async (context) =>
     context.json({ accounts: await connectors.listAccounts(context.get("principal").userId) }),
   );
+  app.get("/v1/connectors/authorization-attempts/:id", async (context) =>
+    context.json({
+      attempt: await connectors.authorizationOutcome(
+        context.get("principal").userId,
+        context.req.param("id"),
+      ),
+    }),
+  );
   app.post("/v1/connectors/google/start", async (context) => {
     const input = startGoogleAuthorizationInputSchema.parse({
       ...(context.req.query("accountId") ? { accountId: context.req.query("accountId") } : {}),
@@ -753,9 +955,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await parseBody(context, connectICloudInputSchema),
       context.get("requestId"),
     );
-    startBackgroundTask("icloud-connector-initial-sync", async () => {
-      await connectors.syncAccount(result.userId, result.accountId);
-    });
     return context.json({ account: { accountId: result.accountId, email: result.email } }, 201);
   });
   app.post("/v1/connectors/:id/sync", async (context) =>
@@ -976,7 +1175,54 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await automations.dispatchDue();
     },
     async syncDueConnectors() {
-      return connectors.syncDueAccounts();
+      await connectors.purgeExpiredAuthorizationAttempts();
+      await connectors.renewSubscriptions();
+      const triggered = await connectors.dispatchTriggeredSyncs();
+      const scheduled = await connectors.syncDueAccounts();
+      return {
+        attempted: triggered.attempted + scheduled.attempted,
+        failed: triggered.failed + scheduled.failed,
+        recovered: scheduled.recovered,
+        skipped: scheduled.skipped,
+        succeeded: triggered.succeeded + scheduled.succeeded,
+      };
+    },
+    async superviseICloudMail() {
+      if (!dependencies.config.icloudMailIdleEnabled) return;
+      const signal = dependencies.runtimeLifecycle?.signal;
+      if (!signal) {
+        await connectors.runICloudIdlePass();
+        return;
+      }
+      while (!signal?.aborted) {
+        const startedAt = Date.now();
+        try {
+          await connectors.runICloudIdlePass();
+        } catch {
+          dependencies.log?.({
+            code: "icloud_idle_supervisor_failed",
+            durationMs: Date.now() - startedAt,
+            event: "connector_subscription_failed",
+            method: "SCHEDULER",
+            path: "/internal/connectors/icloud/mail-idle",
+            provider: "icloud",
+            requestId: randomUUID(),
+            status: 503,
+            subscriptionKind: "icloud_mail_idle",
+          });
+        }
+        await new Promise<void>((resolveDelay) => {
+          const timeout = setTimeout(resolveDelay, 5_000);
+          signal?.addEventListener(
+            "abort",
+            () => {
+              clearTimeout(timeout);
+              resolveDelay();
+            },
+            { once: true },
+          );
+        });
+      }
     },
     async syncDueFinances() {
       return finances.syncDuePlaidAccounts();

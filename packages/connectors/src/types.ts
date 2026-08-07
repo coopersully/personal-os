@@ -160,9 +160,28 @@ export type SyncResult = CredentialResult<{
 }>;
 
 export type MailSyncResult = CredentialResult<{
+  deletedThreadIds: string[];
   mailboxes: RemoteMailbox[];
+  nextSyncToken: string | null;
+  reset: boolean;
   threads: NormalizedRemoteMailThread[];
 }>;
+
+export type GmailWatch = {
+  expiresAt: string;
+  historyId: string;
+};
+
+export type GoogleCalendarWatch = {
+  expiresAt: string;
+  resourceId: string;
+};
+
+export type GoogleCalendarWatchChannel = {
+  address: string;
+  id: string;
+  token: string;
+};
 
 export type RemoteMailThreadState = {
   mailboxIds: string[];
@@ -202,6 +221,7 @@ export type GoogleAuthorizationService = "calendar" | "mail";
 export type GoogleConnector = {
   authorizationUrl: (
     state: string,
+    codeChallenge: string,
     loginHint?: string,
     services?: GoogleAuthorizationService[],
   ) => string;
@@ -216,7 +236,11 @@ export type GoogleConnector = {
     remoteEventId: string,
     etag: string | null,
   ) => Promise<GoogleCredentials>;
-  exchangeCode: (code: string) => Promise<GoogleCredentials>;
+  exchangeCode: (
+    code: string,
+    codeVerifier: string,
+    redirectUri?: string,
+  ) => Promise<GoogleCredentials>;
   getProfile: (credentials: GoogleCredentials) => Promise<CredentialResult<ProviderProfile>>;
   getMailThreadState?: (
     credentials: GoogleCredentials,
@@ -237,11 +261,18 @@ export type GoogleConnector = {
   ) => Promise<GoogleCredentials>;
   syncMail?: (
     credentials: GoogleCredentials,
+    syncToken: string | null,
     operation?: ProviderOperationOptions,
   ) => Promise<MailSyncResult>;
   trashMailThread?: (
     credentials: GoogleCredentials,
     remoteThreadId: string,
+  ) => Promise<GoogleCredentials>;
+  stopCalendarWatch?: (
+    credentials: GoogleCredentials,
+    channelId: string,
+    resourceId: string,
+    operation?: ProviderOperationOptions,
   ) => Promise<GoogleCredentials>;
   syncCalendar: (
     credentials: GoogleCredentials,
@@ -256,6 +287,22 @@ export type GoogleConnector = {
     etag: string | null,
     input: UpdateEventInput,
   ) => Promise<CredentialResult<NormalizedRemoteEvent>>;
+  watchCalendarEvents?: (
+    credentials: GoogleCredentials,
+    remoteCalendarId: string,
+    channel: GoogleCalendarWatchChannel,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GoogleCalendarWatch>>;
+  watchCalendarList?: (
+    credentials: GoogleCredentials,
+    channel: GoogleCalendarWatchChannel,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GoogleCalendarWatch>>;
+  watchGmail?: (
+    credentials: GoogleCredentials,
+    topicName: string,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GmailWatch>>;
 };
 
 export type ICloudConnector = {
@@ -273,6 +320,11 @@ export type ICloudConnector = {
     credentials: ICloudCredentials,
     operation?: ProviderOperationOptions,
   ) => Promise<RemoteCalendar[]>;
+  listenForMailChanges?: (
+    credentials: ICloudCredentials,
+    onChange: () => Promise<void> | void,
+    operation?: ProviderOperationOptions,
+  ) => Promise<void>;
   sendMail?: (credentials: ICloudCredentials, input: SendRemoteMailInput) => Promise<void>;
   updateMailThread?: (
     credentials: ICloudCredentials,
@@ -287,6 +339,7 @@ export type ICloudConnector = {
   ) => Promise<SyncResult["value"]>;
   syncMail: (
     credentials: ICloudCredentials,
+    syncToken: string | null,
     operation?: ProviderOperationOptions,
   ) => Promise<MailSyncResult["value"]>;
   updateEvent: (
@@ -299,8 +352,8 @@ export type ICloudConnector = {
 };
 
 export type XConnector = {
-  authorizationUrl: (state: string, codeVerifier: string) => string;
-  exchangeCode: (code: string, codeVerifier: string) => Promise<XCredentials>;
+  authorizationUrl: (state: string, codeChallenge: string) => string;
+  exchangeCode: (code: string, codeVerifier: string, redirectUri?: string) => Promise<XCredentials>;
   getProfile: (credentials: XCredentials) => Promise<CredentialResult<XProfile>>;
   listBookmarkFolders: (
     credentials: XCredentials,

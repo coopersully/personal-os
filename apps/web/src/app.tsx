@@ -283,6 +283,7 @@ import {
   ToggleGroupItem as ShadcnToggleGroupItem,
 } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { ConnectionAuthorizationOutcome } from "@/features/connections/authorization-outcome";
 import { api, errorMessage, isUnauthorized } from "./api.js";
 import { scrollTimelineToMinute } from "./calendar-timeline.js";
 import { InlineError, PageLoading } from "./components/async-state.js";
@@ -4876,6 +4877,7 @@ function ConnectorsSettings() {
     queryKey: ["x-bookmarks", "folders"],
   });
   const [showICloud, setShowICloud] = useState(false);
+  const [connectMenuOpen, setConnectMenuOpen] = useState(false);
   const [icloudReconnectAccount, setICloudReconnectAccount] = useState<CalendarAccount | null>(
     null,
   );
@@ -4960,7 +4962,7 @@ function ConnectorsSettings() {
   return (
     <SettingsSection
       action={
-        <DropdownMenu>
+        <DropdownMenu onOpenChange={setConnectMenuOpen} open={connectMenuOpen}>
           <DropdownMenuTrigger asChild>
             <ShadcnButton>
               <Plus aria-hidden="true" data-icon="inline-start" /> Connect
@@ -4996,6 +4998,23 @@ function ConnectorsSettings() {
       description="One account can expose Calendar, Mail, or both. Providers remain authoritative."
       title="Connections"
     >
+      <ConnectionAuthorizationOutcome
+        onConnected={() => {
+          void Promise.all([
+            queryClient.invalidateQueries({ queryKey: ["connectors"] }),
+            queryClient.invalidateQueries({ queryKey: ["x-bookmarks", "account"] }),
+            queryClient.invalidateQueries({ queryKey: ["x-bookmarks", "folders"] }),
+            queryClient.invalidateQueries({ queryKey: ["mailboxes"] }),
+            queryClient.invalidateQueries({ queryKey: ["mail-threads"] }),
+            invalidateMaterial(queryClient),
+          ]);
+        }}
+        onRetry={(provider) => {
+          if (provider === "google") googleConnect.mutate({});
+          else if (provider === "x") xConnect.mutate();
+          else setConnectMenuOpen(true);
+        }}
+      />
       {googleConnect.error && <SettingsError error={googleConnect.error} />}
       {xConnect.error && <SettingsError error={xConnect.error} />}
       {selectXFolder.error && <SettingsError error={selectXFolder.error} />}
@@ -5161,7 +5180,7 @@ function XBookmarksConnectorRow({
         <ShadcnItemTitle>{account.displayName ?? `@${account.username}`}</ShadcnItemTitle>
         <ShadcnItemDescription>
           {account.syncError
-            ? account.syncError
+            ? "X bookmarks need attention. Try syncing again or reconnect X."
             : account.lastSyncedAt
               ? `Synced ${formatRelative(account.lastSyncedAt)}`
               : "Select the bookmark folder to sync"}
@@ -5187,7 +5206,11 @@ function XBookmarksConnectorRow({
       </ShadcnItemContent>
       <ShadcnItemActions>
         <ShadcnBadge variant={account.syncStatus === "error" ? "destructive" : "secondary"}>
-          {account.syncStatus}
+          {account.syncStatus === "error"
+            ? "Needs attention"
+            : account.syncStatus === "syncing"
+              ? "Syncing"
+              : "Ready"}
         </ShadcnBadge>
         <ShadcnButton
           aria-label={`Sync X bookmarks for ${account.username}`}

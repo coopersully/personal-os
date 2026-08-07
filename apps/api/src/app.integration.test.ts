@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, hkdfSync } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   GoogleConnector,
@@ -12,6 +12,8 @@ import {
   automationRuns,
   calendarAccounts,
   calendarEvents,
+  connectorSubscriptions,
+  connectorSyncTriggers,
   createDatabaseClient,
   type DatabaseClient,
   domainProfiles,
@@ -27,6 +29,7 @@ import { createApp, type PersonalOsApp } from "./app.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
 import type { EmailMessage } from "./email-delivery.js";
+import { GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
 import { createRuntimeLifecycle } from "./runtime-lifecycle.js";
 import { verifyPassword } from "./security.js";
@@ -45,10 +48,12 @@ describe.sequential("ilo API", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
   let app: PersonalOsApp;
+  let appConfig: Parameters<typeof createApp>[0]["config"];
   let sessionToken = "";
   let agentToken = "";
   const logs = vi.fn();
   const weatherFetch = vi.fn();
+  const verifyGooglePubSubToken = vi.fn(async () => ({ subject: "pubsub-push" }));
   const deliveredEmails: EmailMessage[] = [];
   const icloudConnector: ICloudConnector = {
     createEvent: vi.fn(),
@@ -56,9 +61,12 @@ describe.sequential("ilo API", () => {
     listCalendars: vi.fn(async () => []),
     syncCalendar: vi.fn(),
     syncMail: vi.fn(async () => ({
+      deletedThreadIds: [],
       mailboxes: [
         { id: "INBOX", name: "Inbox", role: "inbox" as const, totalCount: 1, unreadCount: 1 },
       ],
+      nextSyncToken: null,
+      reset: true,
       threads: [
         {
           bodyText: "Integration mail body",
@@ -119,32 +127,41 @@ describe.sequential("ilo API", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
+    appConfig = {
+      allowedOrigins: ["https://app.example.com"],
+      apiBaseUrl: "https://api.example.com",
+      apiShutdownTimeoutMs: 105_000,
+      appBaseUrl: "https://app.example.com",
+      databaseUrl: container.getConnectionUri(),
+      emailFrom: "",
+      encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+      googleClientId: "",
+      googleClientSecret: "",
+      googleCalendarPushEnabled: true,
+      googleCalendarWebhookUrl:
+        "https://api.example.com/v1/connectors/google/calendar/notifications",
+      googleGmailPubsubSubscription: "projects/ilo/subscriptions/gmail-push",
+      googleGmailPubsubTopic: "projects/ilo/topics/gmail-push",
+      googleGmailPushAudience: "https://api.example.com/v1/connectors/google/gmail/notifications",
+      googleGmailPushEnabled: true,
+      googleGmailPushServiceAccount: "pubsub@example.iam.gserviceaccount.com",
+      googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
+      logLevel: "info",
+      port: 8787,
+      plaidClientId: "",
+      plaidEnvironment: "sandbox",
+      plaidSecret: "",
+      production: false,
+      resendApiKey: "",
+      sessionCookieName: "personal_os_session",
+      sessionTtlDays: 30,
+      trustProxy: true,
+      xClientId: "",
+      xClientSecret: "",
+      xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
+    };
     app = createApp({
-      config: {
-        allowedOrigins: ["https://app.example.com"],
-        apiBaseUrl: "https://api.example.com",
-        apiShutdownTimeoutMs: 105_000,
-        appBaseUrl: "https://app.example.com",
-        databaseUrl: container.getConnectionUri(),
-        emailFrom: "",
-        encryptionKey: Buffer.alloc(32, 1).toString("base64"),
-        googleClientId: "",
-        googleClientSecret: "",
-        googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
-        logLevel: "info",
-        port: 8787,
-        plaidClientId: "",
-        plaidEnvironment: "sandbox",
-        plaidSecret: "",
-        production: false,
-        resendApiKey: "",
-        sessionCookieName: "personal_os_session",
-        sessionTtlDays: 30,
-        trustProxy: true,
-        xClientId: "",
-        xClientSecret: "",
-        xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
-      },
+      config: appConfig,
       db: database.db,
       fetch: weatherFetch,
       email: { send: async (message) => void deliveredEmails.push(message) },
@@ -152,6 +169,7 @@ describe.sequential("ilo API", () => {
       log: logs,
       now: () => new Date("2026-07-13T12:00:00.000Z"),
       runtimeLifecycle: createRuntimeLifecycle(),
+      verifyGooglePubSubToken,
       x: xConnector,
     });
   }, 120_000);
@@ -179,6 +197,420 @@ describe.sequential("ilo API", () => {
   async function payload(response: Response) {
     return response.status === 204 ? null : response.json();
   }
+
+  it("returns every connector callback to ilo when persistence fails unexpectedly", async () => {
+    const callbackLogs = vi.fn();
+    const failingDatabase = new Proxy(database.db, {
+      get(target, property, receiver) {
+        if (property === "update") {
+          return () => {
+            throw new Error("raw-provider-canary");
+          };
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const callbackApp = createApp({
+      config: appConfig,
+      db: failingDatabase,
+      log: callbackLogs,
+      x: xConnector,
+    });
+
+    for (const path of [
+      "/v1/connectors/google/callback?state=unavailable&code=google-code",
+      "/v1/x-bookmarks/callback?state=unavailable&code=x-code",
+    ]) {
+      const response = await callbackApp.request(path);
+      expect(response.status).toBe(303);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("pragma")).toBe("no-cache");
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      const location = new URL(String(response.headers.get("location")));
+      expect(location.origin).toBe("https://app.example.com");
+      expect(location.pathname).toBe("/settings");
+      expect(location.searchParams.get("section")).toBe("connections");
+      expect(location.searchParams.get("connection_result")).toBe("restart_required");
+      expect(await response.text()).not.toContain("raw-provider-canary");
+    }
+    expect(
+      callbackLogs.mock.calls
+        .map(([entry]) => entry)
+        .filter(({ event }) => event === "connector_authorization_callback_failed"),
+    ).toEqual([
+      expect.objectContaining({
+        event: "connector_authorization_callback_failed",
+        path: "/v1/connectors/google/callback",
+        provider: "google",
+        status: 503,
+      }),
+      expect.objectContaining({
+        event: "connector_authorization_callback_failed",
+        path: "/v1/x-bookmarks/callback",
+        provider: "x",
+        status: 503,
+      }),
+    ]);
+    expect(JSON.stringify(callbackLogs.mock.calls)).not.toContain("raw-provider-canary");
+  });
+
+  it("authenticates Gmail push and acknowledges only after durable coalescing", async () => {
+    const [pushUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Gmail Push",
+        email: "gmail-push-user@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!pushUser) throw new Error("Gmail push user was not created.");
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        email: "push-mailbox@example.com",
+        label: "Push Mailbox",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "gmail-push-account",
+        userId: pushUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Gmail push account was not created.");
+    const privacyKey = Buffer.alloc(32, 1).toString("base64");
+    await database.db.insert(connectorSubscriptions).values({
+      accountId: account.id,
+      kind: "gmail_mailbox",
+      provider: "google",
+      providerCursor: "100",
+      remoteIdentityHash: createHmac(
+        "sha256",
+        Buffer.from(
+          hkdfSync(
+            "sha256",
+            Buffer.from(privacyKey, "base64"),
+            Buffer.alloc(0),
+            "ilo/connector-notification/remote-identity/v1",
+            32,
+          ),
+        ),
+      )
+        .update("push-mailbox@example.com")
+        .digest("hex"),
+      status: "active",
+    });
+    const envelope = (emailAddress: string, historyId: string) => ({
+      message: {
+        data: Buffer.from(JSON.stringify({ emailAddress, historyId })).toString("base64"),
+        messageId: `message-${historyId}`,
+      },
+      subscription: "projects/ilo/subscriptions/gmail-push",
+    });
+    logs.mockClear();
+
+    const accepted = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "101"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(accepted.status).toBe(204);
+    expect(await accepted.text()).toBe("");
+    await expect(
+      database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([expect.objectContaining({ notificationCount: 1, reason: "notification" })]);
+    const duplicate = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "101"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(duplicate.status).toBe(204);
+    await expect(
+      database.db
+        .select({ notificationCount: connectorSyncTriggers.notificationCount })
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([{ notificationCount: 1 }]);
+    const unknown = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("unknown@example.com", "102"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(unknown.status).toBe(404);
+    const unauthorized = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "102"),
+      headers: { authorization: "invalid" },
+    });
+    expect(unauthorized.status).toBe(401);
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_gmail_trigger_for_test() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced Gmail trigger failure';
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_gmail_trigger_for_test
+      BEFORE UPDATE ON connector_sync_triggers
+      FOR EACH ROW EXECUTE FUNCTION fail_gmail_trigger_for_test();
+    `);
+    try {
+      const unavailable = await request("/v1/connectors/google/gmail/notifications", {
+        auth: "none",
+        body: envelope("push-mailbox@example.com", "102"),
+        headers: { authorization: "Bearer valid-pubsub-token" },
+      });
+      expect(unavailable.status).toBe(503);
+      await expect(
+        database.db
+          .select({ providerCursor: connectorSubscriptions.providerCursor })
+          .from(connectorSubscriptions)
+          .where(eq(connectorSubscriptions.accountId, account.id)),
+      ).resolves.toEqual([{ providerCursor: "101" }]);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_gmail_trigger_for_test ON connector_sync_triggers;
+        DROP FUNCTION IF EXISTS fail_gmail_trigger_for_test();
+      `);
+    }
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("push-mailbox@example.com");
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("valid-pubsub-token");
+    await database.db.delete(users).where(eq(users.id, pushUser.id));
+  });
+
+  it("rejects malformed or oversized Gmail push requests without exposing their contents", async () => {
+    const path = "/v1/connectors/google/gmail/notifications";
+    const headers = { authorization: "Bearer valid-pubsub-token" };
+    const push = (rawBody: string, requestHeaders: Record<string, string> = headers) =>
+      request(path, { auth: "none", headers: requestHeaders, rawBody });
+
+    expect((await push("{}", {})).status).toBe(401);
+    verifyGooglePubSubToken.mockRejectedValueOnce(new Error("private verification response"));
+    expect((await push("{}")).status).toBe(401);
+    verifyGooglePubSubToken.mockRejectedValueOnce(new GooglePubSubAuthError(true));
+    expect((await push("{}")).status).toBe(503);
+    expect(
+      (
+        await push("{}", {
+          ...headers,
+          "content-length": "32769",
+        })
+      ).status,
+    ).toBe(413);
+    expect(
+      (
+        await push("x".repeat(32_769), {
+          ...headers,
+          "content-length": "not-a-number",
+        })
+      ).status,
+    ).toBe(413);
+    expect((await push("not-json")).status).toBe(400);
+    expect(
+      (
+        await push(
+          JSON.stringify({
+            message: {
+              data: Buffer.from("{}").toString("base64"),
+              messageId: "wrong-subscription",
+            },
+            subscription: "projects/other/subscriptions/wrong",
+          }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await push(
+          JSON.stringify({
+            message: {
+              data: Buffer.alloc(8_193).toString("base64"),
+              messageId: "oversized-decoded-payload",
+            },
+            subscription: "projects/ilo/subscriptions/gmail-push",
+          }),
+        )
+      ).status,
+    ).toBe(413);
+    expect(JSON.stringify(logs.mock.calls)).not.toMatch(
+      /private verification response|wrong-subscription|oversized-decoded-payload/u,
+    );
+  });
+
+  it("keeps notification endpoints unavailable until each production gate is complete", async () => {
+    const disabled = createApp({
+      config: {
+        ...appConfig,
+        googleCalendarPushEnabled: false,
+        googleGmailPushEnabled: false,
+      },
+      db: database.db,
+    });
+    expect(
+      (
+        await disabled.request("/v1/connectors/google/gmail/notifications", {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await disabled.request("/v1/connectors/google/calendar/notifications", {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+
+    const missingVerifier = createApp({
+      config: {
+        ...appConfig,
+        googleGmailPushAudience: "",
+      },
+      db: database.db,
+    });
+    expect(
+      (
+        await missingVerifier.request("/v1/connectors/google/gmail/notifications", {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+
+    const missingSubscription = createApp({
+      config: {
+        ...appConfig,
+        googleGmailPubsubSubscription: "",
+      },
+      db: database.db,
+      verifyGooglePubSubToken,
+    });
+    expect(
+      (
+        await missingSubscription.request("/v1/connectors/google/gmail/notifications", {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("verifies Calendar channel headers and coalesces only new provider signals", async () => {
+    const [pushUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Calendar Push",
+        email: "calendar-push-user@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!pushUser) throw new Error("Calendar push user was not created.");
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        label: "Calendar Push",
+        mailEnabled: false,
+        provider: "google",
+        providerAccountId: "calendar-push-account",
+        userId: pushUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Calendar push account was not created.");
+    const channelId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const channelToken = "opaque-calendar-verification-token-123456";
+    await database.db.insert(connectorSubscriptions).values({
+      accountId: account.id,
+      channelId,
+      kind: "google_calendar_list",
+      provider: "google",
+      remoteResourceId: "calendar-list-resource",
+      status: "active",
+      verificationTokenHash: createHash("sha256").update(channelToken).digest("hex"),
+    });
+    const headers = {
+      "x-goog-channel-id": channelId,
+      "x-goog-channel-token": channelToken,
+      "x-goog-message-number": "1",
+      "x-goog-resource-id": "calendar-list-resource",
+      "x-goog-resource-state": "exists",
+    };
+    logs.mockClear();
+
+    const accepted = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers,
+      method: "POST",
+    });
+    expect(accepted.status).toBe(204);
+    const duplicate = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers,
+      method: "POST",
+    });
+    expect(duplicate.status).toBe(204);
+    await expect(
+      database.db
+        .select({ notificationCount: connectorSyncTriggers.notificationCount })
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([{ notificationCount: 1 }]);
+    const rejected = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers: { ...headers, "x-goog-channel-token": `${channelToken}-wrong` },
+      method: "POST",
+    });
+    expect(rejected.status).toBe(404);
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_calendar_notification_for_test() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced Calendar notification failure';
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_calendar_notification_for_test
+      BEFORE UPDATE ON connector_subscriptions
+      FOR EACH ROW EXECUTE FUNCTION fail_calendar_notification_for_test();
+    `);
+    try {
+      const unavailable = await request("/v1/connectors/google/calendar/notifications", {
+        auth: "none",
+        headers: { ...headers, "x-goog-message-number": "2" },
+        method: "POST",
+      });
+      expect(unavailable.status).toBe(503);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_calendar_notification_for_test ON connector_subscriptions;
+        DROP FUNCTION IF EXISTS fail_calendar_notification_for_test();
+      `);
+    }
+    expect(JSON.stringify(logs.mock.calls)).not.toContain(channelToken);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("calendar-list-resource");
+    await database.db.delete(users).where(eq(users.id, pushUser.id));
+  });
+
+  it("rejects Calendar notifications with bodies or incomplete provider headers", async () => {
+    const path = "/v1/connectors/google/calendar/notifications";
+    expect(
+      (
+        await request(path, {
+          auth: "none",
+          headers: { "content-length": "2" },
+          rawBody: "{}",
+        })
+      ).status,
+    ).toBe(413);
+    expect(
+      (
+        await request(path, {
+          auth: "none",
+          method: "POST",
+        })
+      ).status,
+    ).toBe(400);
+  });
 
   it("runs the Finance maintenance entry points", async () => {
     await expect(app.backfillFinanceCashflowInsights()).resolves.toEqual({ processed: 0 });
@@ -2586,18 +3018,20 @@ describe.sequential("ilo API", () => {
       `/v1/x-bookmarks/callback?state=${encodeURIComponent(xState)}&code=x-code`,
       { auth: "none" },
     );
-    expect(xCallback.status).toBe(302);
-    expect(xCallback.headers.get("location")).toBe(
-      "https://app.example.com/settings/connectors?x=connected",
+    expect(xCallback.status).toBe(303);
+    const xCallbackLocation = new URL(String(xCallback.headers.get("location")));
+    expect(`${xCallbackLocation.pathname}?${xCallbackLocation.searchParams.get("section")}`).toBe(
+      "/settings?connections",
     );
-    expect((await request("/v1/x-bookmarks/callback?state=x", { auth: "none" })).status).toBe(400);
+    expect(xCallbackLocation.searchParams.get("connection_attempt")).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await request("/v1/x-bookmarks/callback?state=x", { auth: "none" })).status).toBe(303);
     expect(
       (
         await request("/v1/x-bookmarks/callback?state=x&error=access_denied", {
           auth: "none",
         })
       ).status,
-    ).toBe(400);
+    ).toBe(303);
     expect((await payload(await request("/v1/x-bookmarks/folders"))).folders).toMatchObject([
       { name: "Calendar", remoteFolderId: "x-folder" },
     ]);
@@ -2665,6 +3099,10 @@ describe.sequential("ilo API", () => {
       }),
     );
     expect(icloudConnection.account.email).toBe("test@icloud.com");
+    await expect(app.syncDueConnectors()).resolves.toMatchObject({
+      attempted: 1,
+      succeeded: 1,
+    });
     await vi.waitFor(async () => {
       const connectorPayload = await payload(await request("/v1/connectors"));
       expect(connectorPayload.accounts).toEqual([
@@ -2704,7 +3142,7 @@ describe.sequential("ilo API", () => {
       "Google Calendar is not configured.",
     );
     expect((await request("/v1/connectors/google/callback?state=x", { auth: "none" })).status).toBe(
-      400,
+      303,
     );
     expect(
       (
@@ -2712,7 +3150,7 @@ describe.sequential("ilo API", () => {
           auth: "none",
         })
       ).status,
-    ).toBe(400);
+    ).toBe(303);
 
     const audit = (await payload(await request("/v1/audit?limit=100", { auth: "agent" }))).events;
     expect(
@@ -3028,7 +3466,8 @@ describe.sequential("ilo API", () => {
       accessToken: "access",
       expiresAt: "2099-01-01T00:00:00.000Z",
       refreshToken: "refresh",
-      scope: "calendar",
+      scope:
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events",
       tokenType: "Bearer",
     };
     const googleConnector: GoogleConnector = {
@@ -3105,10 +3544,41 @@ describe.sequential("ilo API", () => {
         String(new URL(googleUrl).searchParams.get("state")),
       )}&code=authorization-code`,
     );
-    expect(callback.status).toBe(302);
-    expect(callback.headers.get("location")).toBe(
-      "https://app.production.example.com/setup?google=connected",
+    expect(callback.status).toBe(303);
+    const callbackLocation = new URL(String(callback.headers.get("location")));
+    expect(`${callbackLocation.origin}${callbackLocation.pathname}`).toBe(
+      "https://app.production.example.com/setup",
     );
+    expect(callbackLocation.searchParams.get("connection_attempt")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(callback.headers.get("cache-control")).toBe("no-store");
+    expect(callback.headers.get("pragma")).toBe("no-cache");
+    expect(callback.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(callback.headers.get("x-content-type-options")).toBe("nosniff");
+    const attemptId = String(callbackLocation.searchParams.get("connection_attempt"));
+    const anonymousAttempt = await productionApp.request(
+      `/v1/connectors/authorization-attempts/${attemptId}`,
+    );
+    expect(anonymousAttempt.status).toBe(401);
+    const attemptResponse = await productionApp.request(
+      `/v1/connectors/authorization-attempts/${attemptId}`,
+      { headers: { authorization: `Session ${productionSession}` } },
+    );
+    expect(await attemptResponse.json()).toEqual({
+      attempt: {
+        accountId: expect.any(String),
+        provider: "google",
+        retryable: false,
+        status: "connected",
+      },
+    });
+    const malformedCallback = await productionApp.request(
+      "/v1/connectors/google/callback?error=RAW_PROVIDER_CANARY",
+    );
+    expect(malformedCallback.status).toBe(303);
+    expect(malformedCallback.headers.get("location")).toBe(
+      "https://app.production.example.com/settings?section=connections&connection_result=restart_required",
+    );
+    expect(await malformedCallback.text()).not.toContain("RAW_PROVIDER_CANARY");
     const connectedAccounts = await productionApp.request("/v1/connectors", {
       headers: { authorization: `Session ${productionSession}` },
     });

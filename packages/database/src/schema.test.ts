@@ -3,12 +3,46 @@ import { resolve } from "node:path";
 import { getTableConfig, PgDialect } from "drizzle-orm/pg-core";
 import {
   calendarAccounts,
+  connectorSubscriptions,
+  connectorSyncTriggers,
   domainProfileApprovals,
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
+  oauthStates,
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps connector notification storage bounded and coalesced", async () => {
+    const subscriptions = getTableConfig(connectorSubscriptions);
+    const triggers = getTableConfig(connectorSyncTriggers);
+    expect(subscriptions.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "connector_subscriptions_identity_idx",
+        "connector_subscriptions_channel_idx",
+        "connector_subscriptions_due_idx",
+      ]),
+    );
+    expect(triggers.indexes.map((index) => index.config.name)).toContain(
+      "connector_sync_triggers_due_idx",
+    );
+    expect(triggers.checks.map((constraint) => constraint.name)).toEqual(
+      expect.arrayContaining([
+        "connector_sync_triggers_reason_check",
+        "connector_sync_triggers_count_check",
+        "connector_sync_triggers_time_check",
+        "connector_sync_triggers_claim_check",
+      ]),
+    );
+    expect(calendarAccounts.mailSyncToken.name).toBe("mail_sync_token");
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0052_connector_notifications.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain("NULLS NOT DISTINCT");
+    expect(migrationSql).toContain("ON DELETE cascade");
+    expect(migrationSql).toContain('"notification_count" BETWEEN 1 AND 1000000');
+  });
+
   it("keeps approval snapshot integrity identical in the schema and migration", async () => {
     const check = getTableConfig(domainProfileApprovals).checks.find(
       (candidate) => candidate.name === "domain_profile_approvals_snapshot_check",
@@ -218,5 +252,47 @@ describe("database schema contracts", () => {
     expect(migrationSql).not.toMatch(/"sync_error_code"\s*=\s*"sync_error"/u);
     expect(migrationSql).not.toMatch(/"sync_error_category"\s*=\s*"sync_error"/u);
     expect(migrationSql).not.toMatch(/"sync_recovery"\s*=\s*"sync_error"/u);
+  });
+
+  it("keeps connector authorization attempt lifecycle aligned with its migration", async () => {
+    const table = getTableConfig(oauthStates);
+    expect(table.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "status",
+        "outcome_code",
+        "connected_account_id",
+        "redirect_uri",
+        "completed_at",
+        "request_id",
+      ]),
+    );
+    expect(table.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining([
+        "oauth_states_expiry_idx",
+        "oauth_states_status_expiry_idx",
+        "oauth_states_user_created_idx",
+      ]),
+    );
+    expect(table.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining(["oauth_states_status_check", "oauth_states_lifecycle_check"]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0051_connector_authorization_attempts.sql",
+      ),
+      "utf8",
+    );
+    expect(migrationSql).toContain("ADD COLUMN \"status\" text DEFAULT 'pending' NOT NULL");
+    expect(migrationSql).toContain("\"outcome_code\" = 'legacy_consumed'");
+    expect(migrationSql).toContain('"completed_at" = "consumed_at"');
+    expect(migrationSql).toContain('CREATE INDEX "oauth_states_status_expiry_idx"');
+    expect(migrationSql).toContain('CREATE INDEX "oauth_states_user_created_idx"');
+    const expiryIndexMigration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0053_oauth_states_expiry_index.sql"),
+      "utf8",
+    );
+    expect(expiryIndexMigration).toContain('CREATE INDEX "oauth_states_expiry_idx"');
   });
 });

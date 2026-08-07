@@ -267,7 +267,11 @@ describe("database schema contracts", () => {
       ]),
     );
     expect(table.indexes.map((candidate) => candidate.config.name)).toEqual(
-      expect.arrayContaining(["oauth_states_status_expiry_idx", "oauth_states_user_created_idx"]),
+      expect.arrayContaining([
+        "oauth_states_expiry_idx",
+        "oauth_states_status_expiry_idx",
+        "oauth_states_user_created_idx",
+      ]),
     );
     expect(table.checks.map((candidate) => candidate.name)).toEqual(
       expect.arrayContaining(["oauth_states_status_check", "oauth_states_lifecycle_check"]),
@@ -285,5 +289,10 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('"completed_at" = "consumed_at"');
     expect(migrationSql).toContain('CREATE INDEX "oauth_states_status_expiry_idx"');
     expect(migrationSql).toContain('CREATE INDEX "oauth_states_user_created_idx"');
+    const expiryIndexMigration = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0053_oauth_states_expiry_index.sql"),
+      "utf8",
+    );
+    expect(expiryIndexMigration).toContain('CREATE INDEX "oauth_states_expiry_idx"');
   });
 });

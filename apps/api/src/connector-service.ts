@@ -3192,9 +3192,6 @@ export function createConnectorService({
       googleCredentials = profileResult.credentials;
       const requestedServices = consumed.attempt.requestedServices ?? ["calendar", "mail"];
       const grantedServices = googleGrantedServices(googleCredentials);
-      if (requestedServices.some((service) => !grantedServices.includes(service))) {
-        return close("permission_incomplete", "required_permission_missing");
-      }
       const target = consumed.attempt.targetAccountId
         ? await getAccount(consumed.attempt.userId, consumed.attempt.targetAccountId)
         : null;
@@ -3204,6 +3201,26 @@ export function createConnectorService({
           (target.providerAccountId && target.providerAccountId !== profileResult.value.id))
       ) {
         return close("failed", "account_mismatch");
+      }
+      const [matchedAccount] = await db
+        .select({
+          calendarEnabled: calendarAccounts.calendarEnabled,
+          mailEnabled: calendarAccounts.mailEnabled,
+        })
+        .from(calendarAccounts)
+        .where(
+          and(
+            eq(calendarAccounts.userId, consumed.attempt.userId),
+            eq(calendarAccounts.provider, "google"),
+            eq(calendarAccounts.providerAccountId, profileResult.value.id),
+          ),
+        )
+        .limit(1);
+      const requiredServices = new Set(requestedServices);
+      if ((target ?? matchedAccount)?.calendarEnabled) requiredServices.add("calendar");
+      if ((target ?? matchedAccount)?.mailEnabled) requiredServices.add("mail");
+      if ([...requiredServices].some((service) => !grantedServices.includes(service))) {
+        return close("permission_incomplete", "required_permission_missing");
       }
 
       await db.transaction(async (transaction) => {
@@ -3380,6 +3397,10 @@ export function createConnectorService({
 
     authorizationOutcome(userId: string, attemptId: string) {
       return authorization.publicOutcome(userId, attemptId);
+    },
+
+    purgeExpiredAuthorizationAttempts() {
+      return authorization.purgeExpired();
     },
 
     async connectICloud(

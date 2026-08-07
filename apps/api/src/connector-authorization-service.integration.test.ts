@@ -443,6 +443,23 @@ describe.sequential("connector authorization attempt service", () => {
     ).rejects.toMatchObject({ code: "internal_error" });
   });
 
+  it("fails closed when a stored provider is not supported by public outcomes", async () => {
+    const [attempt] = await database.db
+      .insert(oauthStates)
+      .values({
+        expiresAt: new Date("2026-08-06T12:30:00.000Z"),
+        provider: "icloud",
+        tokenHash: "unsupported-provider-state",
+        userId: ownerId,
+      })
+      .returning({ id: oauthStates.id });
+    if (!attempt) throw new Error("Unsupported provider fixture was not created.");
+
+    await expect(service().publicOutcome(ownerId, attempt.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
   it("hides a completed outcome after its independent visibility deadline", async () => {
     const created = await service().create({
       provider: "google",
@@ -463,9 +480,16 @@ describe.sequential("connector authorization attempt service", () => {
     });
     await database.db
       .update(oauthStates)
-      .set({ createdAt: new Date("2026-08-07T11:00:00.000Z") })
+      .set({
+        completedAt: new Date("2026-08-07T11:30:00.000Z"),
+        createdAt: new Date("2026-08-05T11:00:00.000Z"),
+      })
       .where(eq(oauthStates.id, created.attemptId));
-    now = new Date("2026-08-07T12:00:01.000Z");
+    now = new Date("2026-08-07T12:00:00.000Z");
+    await expect(service().publicOutcome(ownerId, created.attemptId)).resolves.toMatchObject({
+      status: "cancelled",
+    });
+    now = new Date("2026-08-08T11:30:01.000Z");
 
     await expect(service().publicOutcome(ownerId, created.attemptId)).rejects.toMatchObject({
       code: "not_found",

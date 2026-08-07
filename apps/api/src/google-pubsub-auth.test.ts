@@ -1,5 +1,5 @@
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from "jose";
-import { createGooglePubSubAuth } from "./google-pubsub-auth.js";
+import { createGooglePubSubAuth, type GooglePubSubAuthError } from "./google-pubsub-auth.js";
 
 const now = new Date("2026-08-06T12:00:00.000Z");
 const audience = "https://api.example.com/v1/connectors/google/gmail/notifications";
@@ -107,5 +107,23 @@ describe("Google Pub/Sub authentication", () => {
     await expect(
       verify("eyJhbGciOiJub25lIn0.eyJpc3MiOiJodHRwczovL2FjY291bnRzLmdvb2dsZS5jb20ifQ."),
     ).rejects.toThrow("Pub/Sub authentication failed.");
+  });
+
+  it("marks JWKS transport failures as retryable without exposing provider details", async () => {
+    const verify = createGooglePubSubAuth({
+      audience,
+      jwks: async () => {
+        throw new TypeError("private network failure");
+      },
+      now: () => now,
+      serviceAccount,
+    });
+
+    await expect(verify("eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3QifQ.e30.c2lnbmF0dXJl")).rejects.toEqual(
+      expect.objectContaining<Partial<GooglePubSubAuthError>>({
+        message: "Pub/Sub authentication failed.",
+        retryable: true,
+      }),
+    );
   });
 });

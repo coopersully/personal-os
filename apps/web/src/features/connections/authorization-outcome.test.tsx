@@ -2,7 +2,7 @@
 import "@testing-library/jest-dom/vitest";
 import type { ConnectorAuthorizationOutcome } from "@personal-os/domain";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { ConnectionAuthorizationOutcome } from "./authorization-outcome.js";
@@ -117,5 +117,17 @@ describe("connection authorization outcome", () => {
     expect(screen.queryByText(/raw-provider-canary/u)).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole("button", { name: "Connect an account" }));
     expect(onRetry).toHaveBeenCalledWith(null);
+  });
+
+  it("stops polling a pending callback and offers a bounded restart", async () => {
+    vi.useFakeTimers();
+    try {
+      setup({ accountId: null, provider: "google", retryable: false, status: "pending" });
+      await act(() => vi.advanceTimersByTimeAsync(30_000));
+      expect(screen.getByText("Restart the connection")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

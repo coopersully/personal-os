@@ -16,6 +16,20 @@ export type GooglePubSubIdentity = {
   subject: string | null;
 };
 
+export class GooglePubSubAuthError extends Error {
+  public constructor(public readonly retryable: boolean) {
+    super("Pub/Sub authentication failed.");
+    this.name = "GooglePubSubAuthError";
+  }
+}
+
+function isRetryableVerifierError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  const code =
+    typeof error === "object" && error !== null && "code" in error ? String(error.code) : "";
+  return code === "ERR_JWKS_TIMEOUT" || code === "ERR_JWKS_FETCH_FAILED";
+}
+
 export function createGooglePubSubAuth({
   audience,
   jwks = googleJwks,
@@ -35,8 +49,8 @@ export function createGooglePubSubAuth({
         throw new Error("identity_mismatch");
       }
       return { subject: result.payload.sub ?? null };
-    } catch {
-      throw new Error("Pub/Sub authentication failed.");
+    } catch (error) {
+      throw new GooglePubSubAuthError(isRetryableVerifierError(error));
     }
   };
 }

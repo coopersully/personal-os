@@ -157,7 +157,7 @@ function validateNotificationContract(sources) {
   ]) {
     requireTerraformContract(
       sources.waf,
-      new RegExp(path.replaceAll("/", "\\/")),
+      new RegExp(`regex_string\\s*=\\s*"\\^${path}\\$"`),
       `the exact ${path} WAF path`,
     );
   }
@@ -165,6 +165,11 @@ function validateNotificationContract(sources) {
     sources.waf,
     /name\s*=\s*"connector-webhook-rate-limit"[\s\S]*?action\s*\{\s*block[\s\S]*?scope_down_statement[\s\S]*?regex_pattern_set_reference_statement/,
     "a bounded exact-path webhook ingress policy",
+  );
+  requireTerraformContract(
+    sources.waf,
+    /name\s*=\s*"connector-webhook-rate-limit"[\s\S]*?limit\s*=\s*var\.connector_webhook_rate_limit/,
+    "the dedicated connector webhook rate limit",
   );
   requireTerraformContract(
     sources.config,
@@ -189,6 +194,7 @@ const mutations = [
   ["waf", "^/v1/connectors/google/gmail/notifications$"],
   ["waf", "^/v1/connectors/google/calendar/notifications$"],
   ["waf", 'name     = "connector-webhook-rate-limit"'],
+  ["waf", "limit              = var.connector_webhook_rate_limit"],
 ];
 for (const [sourceName, target] of mutations) {
   const source = notificationSources[sourceName];

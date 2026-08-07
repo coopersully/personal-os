@@ -16,8 +16,16 @@ type Props = {
   onRetry: (provider: ConnectorAuthorizationProvider | null) => void;
 };
 
-const providerLabel = (provider: ConnectorAuthorizationProvider) =>
-  provider === "x" ? "X" : "Google";
+const providerLabel = (provider: ConnectorAuthorizationProvider) => {
+  switch (provider) {
+    case "google":
+      return "Google";
+    case "x":
+      return "X";
+    default:
+      return "Account provider";
+  }
+};
 
 function presentation(outcome: ConnectorAuthorizationOutcome) {
   const provider = providerLabel(outcome.provider);
@@ -67,6 +75,13 @@ function presentation(outcome: ConnectorAuthorizationOutcome) {
         title: `Finishing your ${provider} connection`,
         variant: "info" as const,
       };
+    default:
+      return {
+        description: "ilo couldn't confirm that connection. Start again to continue securely.",
+        retry: true,
+        title: "Restart the connection",
+        variant: "warning" as const,
+      };
   }
 }
 
@@ -80,6 +95,7 @@ export function ConnectionAuthorizationOutcome({
   const [restartRequired] = useState(
     () => searchParams.get("connection_result") === "restart_required",
   );
+  const [pendingTimedOut, setPendingTimedOut] = useState(false);
   const query = useQuery({
     enabled: Boolean(attemptId),
     queryFn: () => {
@@ -87,7 +103,8 @@ export function ConnectionAuthorizationOutcome({
       return loadAttempt(attemptId);
     },
     queryKey: ["connector-authorization-attempt", attemptId],
-    refetchInterval: (state) => (state.state.data?.status === "pending" ? 1_000 : false),
+    refetchInterval: (state) =>
+      state.state.data?.status === "pending" && !pendingTimedOut ? 1_000 : false,
   });
   const announcedConnected = useRef(false);
 
@@ -96,6 +113,15 @@ export function ConnectionAuthorizationOutcome({
     announcedConnected.current = true;
     onConnected?.();
   }, [onConnected, query.data?.status]);
+
+  useEffect(() => {
+    if (query.data?.status !== "pending") {
+      setPendingTimedOut(false);
+      return;
+    }
+    const timeout = window.setTimeout(() => setPendingTimedOut(true), 30_000);
+    return () => window.clearTimeout(timeout);
+  }, [query.data?.status]);
 
   useEffect(() => {
     if (!attemptId && !restartRequired) return;
@@ -149,7 +175,15 @@ export function ConnectionAuthorizationOutcome({
     );
   }
 
-  const view = presentation(query.data);
+  const view =
+    query.data.status === "pending" && pendingTimedOut
+      ? {
+          description: "This is taking longer than expected. Start again to finish securely.",
+          retry: true,
+          title: "Restart the connection",
+          variant: "warning" as const,
+        }
+      : presentation(query.data);
   return (
     <Alert variant={view.variant}>
       {query.data.status === "connected" ? <CheckCircle2 /> : <CircleAlert />}

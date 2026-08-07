@@ -150,7 +150,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         }
         settleEvent?.();
       };
-      const providerClosed = () => settleEvent?.();
+      const providerClosed = () => close();
       const providerFailed = (error: Error) => rejectEvent?.(error);
       const abort = () => close();
       const sessionTimeout = setTimeout(close, 25 * 60_000);
@@ -160,6 +160,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
       client.on("flags", signalChange);
       client.on("close", providerClosed);
       client.on("error", providerFailed);
+      let failure: ConnectorError | undefined;
       try {
         await client.connect();
         connected = true;
@@ -167,7 +168,7 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         await client.mailboxOpen("INBOX");
         await Promise.race([client.idle().then(() => undefined), eventEnd]);
       } catch (error) {
-        if (!operation?.signal?.aborted) throw providerError("mail", error);
+        if (!operation?.signal?.aborted) failure = providerError("mail", error);
       } finally {
         clearTimeout(sessionTimeout);
         operation?.signal?.removeEventListener("abort", abort);
@@ -177,8 +178,15 @@ export function createICloudConnector(options: ICloudConnectorOptions = {}): ICl
         client.removeListener("close", providerClosed);
         client.removeListener("error", providerFailed);
         if (operation?.signal?.aborted || closed) close();
-        else if (connected) await client.logout();
+        else if (connected) {
+          try {
+            await client.logout();
+          } catch (error) {
+            failure ??= providerError("mail", error);
+          }
+        }
       }
+      if (failure) throw failure;
     },
 
     async createEvent(credentials, remoteCalendarId, input) {
@@ -697,7 +705,20 @@ async function fullCalendarSync(
     calendar,
     ...fetchOptions(operation),
   });
-  const changes = objects
+  const normalizedObjects = objects.map((object) => {
+    const objectUrl = safeCalendarObjectUrl(object.url, calendar.url);
+    if (!objectUrl) {
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "icloud_calendar_object_url_invalid",
+        disposition: "operator",
+        message: "iCloud Calendar returned an invalid event location.",
+        status: 502,
+      });
+    }
+    return { ...object, url: objectUrl };
+  });
+  const changes = normalizedObjects
     .filter((object): object is DAVCalendarObject & { data: string } =>
       Boolean(typeof object.data === "string" && object.data.includes("BEGIN:VEVENT")),
     )
@@ -708,7 +729,8 @@ async function fullCalendarSync(
   return {
     changes,
     nextSyncToken:
-      calendar.ctag ?? `${objects.length}:${objects.map((object) => object.etag ?? "").join(",")}`,
+      calendar.ctag ??
+      `${normalizedObjects.length}:${normalizedObjects.map((object) => object.etag ?? "").join(",")}`,
     reset: true,
   };
 }
@@ -730,7 +752,7 @@ function collectionSyncToken(responses: DAVResponse[]): string | null {
 
 function safeCalendarObjectUrl(href: string, calendarUrl: string): string | null {
   try {
-    const calendar = new URL(calendarUrl);
+    const calendar = new URL(calendarUrl.endsWith("/") ? calendarUrl : `${calendarUrl}/`);
     const object = new URL(href, calendar);
     if (
       object.origin !== calendar.origin ||

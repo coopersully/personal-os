@@ -216,6 +216,17 @@ describe("Google Calendar connector", () => {
     expect(
       googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/gmail.send")),
     ).toEqual([]);
+    expect(
+      googleGrantedServices(credentialsWith("https://www.googleapis.com/auth/calendar")),
+    ).toEqual(["calendar"]);
+    expect(
+      googleGrantedServices(
+        credentialsWith(
+          "https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/calendar.events",
+        ),
+      ),
+    ).toEqual(["calendar"]);
+    expect(googleGrantedServices(credentialsWith("https://mail.google.com/"))).toEqual(["mail"]);
     expect(googleGrantedServices(credentialsWith(""))).toEqual([]);
   });
 
@@ -689,6 +700,40 @@ describe("Google Calendar connector", () => {
     const historyCalls = fetch.mock.calls.filter(([input]) => String(input).includes("/history"));
     expect(String(historyCalls[0]?.[0])).toContain("startHistoryId=100");
     expect(String(historyCalls[1]?.[0])).toContain("pageToken=next");
+  });
+
+  it("falls back safely when one Gmail history record contains an oversized change array", async () => {
+    const messagesAdded = Array.from({ length: 1_001 }, (_, index) => ({
+      message: { id: `message-${index}`, threadId: `thread-${index}` },
+    }));
+    const fetch = queued(
+      response({ labels: [] }),
+      response({ history: [{ id: "101", messagesAdded }], historyId: "101" }),
+      response({ historyId: "history-reset" }),
+      response({ threads: [] }),
+    );
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Google Mail connector is missing.");
+
+    await expect(syncMail(fresh, "100")).resolves.toMatchObject({
+      value: { nextSyncToken: "history-reset", reset: true },
+    });
+  });
+
+  it("rejects repeated full-sync page tokens instead of polling Gmail indefinitely", async () => {
+    const fetch = queued(
+      response({ labels: [] }),
+      response({ historyId: "history-reset" }),
+      response({ nextPageToken: "repeated", threads: [] }),
+      response({ nextPageToken: "repeated", threads: [] }),
+    );
+    const syncMail = connector(fetch).syncMail;
+    if (!syncMail) throw new Error("Google Mail connector is missing.");
+
+    await expect(syncMail(fresh, null)).rejects.toMatchObject({
+      code: "google_mail_page_limit_exceeded",
+      disposition: "retry",
+    });
   });
 
   it("falls back to a bounded full Gmail sync when the history cursor expires", async () => {

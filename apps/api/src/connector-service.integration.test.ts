@@ -3924,13 +3924,19 @@ describe.sequential("connector service", () => {
   });
 
   it("completes OAuth, updates an existing connection, and validates one-time state", async () => {
+    const completeCredentials = { ...credentials, scope: googleCalendarAndMailScope };
+    vi.mocked(google.exchangeCode).mockResolvedValue(completeCredentials);
+    vi.mocked(google.getProfile).mockResolvedValue({
+      credentials: completeCredentials,
+      value: { email: "person@example.com", id: "google-person", name: null },
+    });
     await expect(service.completeGoogleAuthorization("invalid", "code")).rejects.toMatchObject({
       code: "invalid_request",
     });
 
     const authorizationUrl = await service.startGoogleAuthorization(userId, {
       returnTo: "/settings?section=connections",
-      services: ["calendar"],
+      services: ["calendar", "mail"],
     });
     const state = new URL(authorizationUrl).searchParams.get("state");
     expect(state).toMatch(/^oauth_/);
@@ -3947,7 +3953,7 @@ describe.sequential("connector service", () => {
     );
     const concurrentAuthorizationUrl = await service.startGoogleAuthorization(userId, {
       returnTo: "/settings?section=connections",
-      services: ["calendar"],
+      services: ["calendar", "mail"],
     });
     const concurrentState = String(new URL(concurrentAuthorizationUrl).searchParams.get("state"));
     const exchangeCountBeforeRace = vi.mocked(google.exchangeCode).mock.calls.length;
@@ -3972,7 +3978,7 @@ describe.sequential("connector service", () => {
     );
 
     vi.mocked(google.getProfile).mockResolvedValueOnce({
-      credentials,
+      credentials: completeCredentials,
       value: {
         email: "renamed@example.com",
         id: "google-person",
@@ -3980,7 +3986,7 @@ describe.sequential("connector service", () => {
       },
     });
     vi.mocked(google.listCalendars).mockResolvedValueOnce({
-      credentials,
+      credentials: completeCredentials,
       value: [
         {
           accessRole: "owner",
@@ -3996,7 +4002,7 @@ describe.sequential("connector service", () => {
     });
     const secondUrl = await service.startGoogleAuthorization(userId, {
       returnTo: "/settings?section=connections",
-      services: ["calendar"],
+      services: ["calendar", "mail"],
     });
     const secondState = new URL(secondUrl).searchParams.get("state");
     const reconnected = await service.completeGoogleAuthorization(String(secondState), "code-2");

@@ -81,13 +81,13 @@ Required fields:
 - `provider`: supported provider key;
 - `requested_services`: validated provider-neutral service list;
 - `return_path`: one of the existing allowlisted application paths;
-- `state_hash`: SHA-256 hash of the random state; the raw state is returned to the browser and is
+- `token_hash`: SHA-256 hash of the random state; the raw state is returned to the browser and is
   never stored;
-- `pkce_verifier_ciphertext`: application-encrypted S256 verifier, never returned by an API;
+- `encrypted_verifier`: application-encrypted S256 verifier, never returned by an API;
 - `redirect_uri`: exact callback URI used for this attempt;
 - `status`: `pending | processing | connected | cancelled | expired | permission_incomplete | failed`;
 - `outcome_code`: nullable safe stable code;
-- `account_id`: nullable connected account reference;
+- `connected_account_id`: nullable connected account reference;
 - `created_at`, `expires_at`, `consumed_at`, and `completed_at` timestamps;
 - `request_id`: nullable final callback correlation identifier.
 

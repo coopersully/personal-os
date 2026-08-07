@@ -275,6 +275,90 @@ describe.sequential("connector notification service", () => {
     );
   });
 
+  it("fans one mailbox notification out to every matching owner account", async () => {
+    const [secondOwner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Second Notification Owner",
+        email: "second-notification-owner@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!secondOwner) throw new Error("Second notification owner was not created.");
+    try {
+      const [secondAccount] = await database.db
+        .insert(calendarAccounts)
+        .values({
+          calendarEnabled: false,
+          email: "notification@example.com",
+          encryptedCredentials: encryptJson(credentials, encryptionKey),
+          label: "Shared Google mailbox",
+          mailEnabled: true,
+          provider: "google",
+          providerAccountId: "notification-google-second-owner",
+          userId: secondOwner.id,
+        })
+        .returning();
+      if (!secondAccount) throw new Error("Second notification account was not created.");
+      await service.ensureGoogleSubscriptions(accountId);
+      await service.ensureGoogleSubscriptions(secondAccount.id);
+      await service.renewDueSubscriptions();
+
+      await expect(
+        service.receiveGmailNotification("notification@example.com", "101"),
+      ).resolves.toBe("accepted");
+      await expect(database.db.select().from(connectorSyncTriggers)).resolves.toHaveLength(2);
+    } finally {
+      await database.db.delete(users).where(eq(users.id, secondOwner.id));
+    }
+  });
+
+  it("revives stopped subscriptions only after reconnect recovery clears", async () => {
+    await service.ensureGoogleSubscriptions(accountId);
+    await database.db
+      .update(connectorSubscriptions)
+      .set({ status: "stopped" })
+      .where(eq(connectorSubscriptions.accountId, accountId));
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        nextSyncAt: null,
+        syncError: "Reconnect this account.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "authorization_revoked",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncStatus: "error",
+      })
+      .where(eq(calendarAccounts.id, accountId));
+    await service.ensureGoogleSubscriptions(accountId);
+    expect(
+      (await database.db.select().from(connectorSubscriptions)).every(
+        (subscription) => subscription.status === "stopped",
+      ),
+    ).toBe(true);
+
+    await database.db
+      .update(calendarAccounts)
+      .set({
+        nextSyncAt: timestamp,
+        syncError: null,
+        syncErrorCategory: null,
+        syncErrorCode: null,
+        syncFailureCount: 0,
+        syncRecovery: null,
+        syncStatus: "idle",
+      })
+      .where(eq(calendarAccounts.id, accountId));
+    await service.ensureGoogleSubscriptions(accountId);
+    expect(
+      (await database.db.select().from(connectorSubscriptions)).every(
+        (subscription) => subscription.status === "pending",
+      ),
+    ).toBe(true);
+  });
+
   it("stops an unpersisted replacement Calendar watch when its renewal lease is superseded", async () => {
     await service.ensureGoogleSubscriptions(accountId);
     const future = new Date(timestamp.getTime() + 60_000);
@@ -524,6 +608,15 @@ describe.sequential("connector notification service", () => {
         token: channel.token,
       }),
     ).resolves.toBe("accepted");
+    await expect(
+      service.receiveCalendarNotification({
+        channelId: subscription.channelId,
+        messageNumber: "not-a-number",
+        resourceId: subscription.remoteResourceId,
+        resourceState: "exists",
+        token: channel.token,
+      }),
+    ).resolves.toBe("unknown");
     await expect(database.db.select().from(connectorSyncTriggers)).resolves.toEqual([]);
   });
 
@@ -659,88 +752,91 @@ describe.sequential("connector notification service", () => {
       })
       .returning();
     if (!icloudAccount) throw new Error("iCloud IDLE account was not created.");
-    let entered: (() => void) | undefined;
-    const started = new Promise<void>((resolveStarted) => {
-      entered = resolveStarted;
-    });
-    let release: (() => void) | undefined;
-    const held = new Promise<void>((resolveHeld) => {
-      release = resolveHeld;
-    });
-    const listenForMailChanges = vi.fn(async (_credentials, onChange) => {
-      entered?.();
-      await onChange();
-      await held;
-    });
-    const icloud = { listenForMailChanges } as unknown as ICloudConnector;
-    const idleService = createConnectorNotificationService({
-      db: database.db,
-      encryptionKey,
-      icloud,
-      icloudMailIdleConcurrency: 1,
-      icloudMailIdleEnabled: true,
-      now: () => timestamp,
-    });
-    const secondIdleService = createConnectorNotificationService({
-      db: database.db,
-      encryptionKey,
-      icloud,
-      icloudMailIdleConcurrency: 1,
-      icloudMailIdleEnabled: true,
-      now: () => timestamp,
-    });
-    const firstPass = idleService.runICloudIdlePass();
-    await started;
-    await expect(secondIdleService.runICloudIdlePass()).resolves.toEqual({
-      claimed: 0,
-      failed: 0,
-      skipped: 0,
-      succeeded: 0,
-    });
-    release?.();
-    await expect(firstPass).resolves.toMatchObject({ claimed: 1, succeeded: 1 });
-    expect(listenForMailChanges).toHaveBeenCalledOnce();
-    await expect(
-      database.db
-        .select()
-        .from(connectorSyncTriggers)
-        .where(eq(connectorSyncTriggers.accountId, icloudAccount.id)),
-    ).resolves.toEqual([expect.objectContaining({ reason: "notification" })]);
+    try {
+      let entered: (() => void) | undefined;
+      const started = new Promise<void>((resolveStarted) => {
+        entered = resolveStarted;
+      });
+      let release: (() => void) | undefined;
+      const held = new Promise<void>((resolveHeld) => {
+        release = resolveHeld;
+      });
+      const listenForMailChanges = vi.fn(async (_credentials, onChange) => {
+        entered?.();
+        await onChange();
+        await held;
+      });
+      const icloud = { listenForMailChanges } as unknown as ICloudConnector;
+      const idleService = createConnectorNotificationService({
+        db: database.db,
+        encryptionKey,
+        icloud,
+        icloudMailIdleConcurrency: 1,
+        icloudMailIdleEnabled: true,
+        now: () => timestamp,
+      });
+      const secondIdleService = createConnectorNotificationService({
+        db: database.db,
+        encryptionKey,
+        icloud,
+        icloudMailIdleConcurrency: 1,
+        icloudMailIdleEnabled: true,
+        now: () => timestamp,
+      });
+      const firstPass = idleService.runICloudIdlePass();
+      await started;
+      await expect(secondIdleService.runICloudIdlePass()).resolves.toEqual({
+        claimed: 0,
+        failed: 0,
+        skipped: 0,
+        succeeded: 0,
+      });
+      release?.();
+      await expect(firstPass).resolves.toMatchObject({ claimed: 1, succeeded: 1 });
+      expect(listenForMailChanges).toHaveBeenCalledOnce();
+      await expect(
+        database.db
+          .select()
+          .from(connectorSyncTriggers)
+          .where(eq(connectorSyncTriggers.accountId, icloudAccount.id)),
+      ).resolves.toEqual([expect.objectContaining({ reason: "notification" })]);
 
-    vi.mocked(listenForMailChanges).mockRejectedValueOnce(new Error("socket closed"));
-    await database.db
-      .update(connectorSubscriptions)
-      .set({ nextAttemptAt: timestamp })
-      .where(eq(connectorSubscriptions.accountId, icloudAccount.id));
-    await expect(idleService.runICloudIdlePass()).resolves.toMatchObject({ failed: 1 });
-    const [healthyAccount] = await database.db
-      .select()
-      .from(calendarAccounts)
-      .where(eq(calendarAccounts.id, icloudAccount.id));
-    expect(healthyAccount).toMatchObject({ syncError: null, syncRecovery: null });
-    vi.mocked(listenForMailChanges).mockRejectedValueOnce(
-      new ConnectorError({
-        category: "authorization",
-        code: "icloud_mail_authorization_failed",
-        disposition: "reconnect",
-        message: "iCloud Mail authorization is no longer valid.",
-        status: 401,
-      }),
-    );
-    await database.db
-      .update(connectorSubscriptions)
-      .set({ nextAttemptAt: timestamp })
-      .where(eq(connectorSubscriptions.accountId, icloudAccount.id));
-    await expect(idleService.runICloudIdlePass()).resolves.toMatchObject({ failed: 1 });
-    const [reconnectAccount] = await database.db
-      .select()
-      .from(calendarAccounts)
-      .where(eq(calendarAccounts.id, icloudAccount.id));
-    expect(reconnectAccount).toMatchObject({
-      syncError: "Reconnect this iCloud account to resume syncing.",
-      syncRecovery: "reconnect",
-    });
-    await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, icloudAccount.id));
+      vi.mocked(listenForMailChanges).mockRejectedValueOnce(new Error("socket closed"));
+      await database.db
+        .update(connectorSubscriptions)
+        .set({ nextAttemptAt: timestamp })
+        .where(eq(connectorSubscriptions.accountId, icloudAccount.id));
+      await expect(idleService.runICloudIdlePass()).resolves.toMatchObject({ failed: 1 });
+      const [healthyAccount] = await database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, icloudAccount.id));
+      expect(healthyAccount).toMatchObject({ syncError: null, syncRecovery: null });
+      vi.mocked(listenForMailChanges).mockRejectedValueOnce(
+        new ConnectorError({
+          category: "authorization",
+          code: "icloud_mail_authorization_failed",
+          disposition: "reconnect",
+          message: "iCloud Mail authorization is no longer valid.",
+          status: 401,
+        }),
+      );
+      await database.db
+        .update(connectorSubscriptions)
+        .set({ nextAttemptAt: timestamp })
+        .where(eq(connectorSubscriptions.accountId, icloudAccount.id));
+      await expect(idleService.runICloudIdlePass()).resolves.toMatchObject({ failed: 1 });
+      const [reconnectAccount] = await database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.id, icloudAccount.id));
+      expect(reconnectAccount).toMatchObject({
+        syncError: "Reconnect this iCloud account to resume syncing.",
+        syncRecovery: "reconnect",
+      });
+    } finally {
+      await database.db.delete(calendarAccounts).where(eq(calendarAccounts.id, icloudAccount.id));
+    }
   });
 
   it("coalesces bursts with bounded count and reason priority", async () => {

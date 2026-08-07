@@ -44,7 +44,7 @@ import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createFinanceService } from "./finance-service.js";
 import { createGoalsService } from "./goals-service.js";
-import { createGooglePubSubAuth } from "./google-pubsub-auth.js";
+import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { createMailService } from "./mail-service.js";
 import { createOAuthService } from "./oauth-service.js";
 import { createOpenApiDocument } from "./openapi.js";
@@ -127,6 +127,30 @@ const calendarNotificationHeadersSchema = z.object({
   resourceState: z.enum(["exists", "not_exists", "sync"]),
   token: z.string().min(32).max(512),
 });
+const GMAIL_PUSH_BODY_LIMIT_BYTES = 32_768;
+
+async function readBoundedRequestBody(request: Request, limit: number): Promise<string | null> {
+  if (!request.body) return "";
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let value = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        return null;
+      }
+      value += decoder.decode(chunk.value, { stream: true });
+    }
+    return value + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
 const oauthAuthorizeSchema = z.object({
   client_id: z.string().min(1),
   code_challenge: z.string().min(43).max(128),
@@ -570,17 +594,18 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     }
     try {
       await verifyGooglePubSubToken(match[1]);
-    } catch {
-      observeRejectedNotification(context.get("requestId"), 401, "gmail_mailbox");
-      return context.body(null, 401);
+    } catch (error) {
+      const status = error instanceof GooglePubSubAuthError && error.retryable ? 503 : 401;
+      observeRejectedNotification(context.get("requestId"), status, "gmail_mailbox");
+      return context.body(null, status);
     }
     const contentLength = Number(context.req.header("content-length") ?? "0");
-    if (Number.isFinite(contentLength) && contentLength > 32_768) {
+    if (Number.isFinite(contentLength) && contentLength > GMAIL_PUSH_BODY_LIMIT_BYTES) {
       observeRejectedNotification(context.get("requestId"), 413, "gmail_mailbox");
       return context.body(null, 413);
     }
-    const raw = await context.req.text();
-    if (Buffer.byteLength(raw) > 32_768) {
+    const raw = await readBoundedRequestBody(context.req.raw, GMAIL_PUSH_BODY_LIMIT_BYTES);
+    if (raw === null) {
       observeRejectedNotification(context.get("requestId"), 413, "gmail_mailbox");
       return context.body(null, 413);
     }
@@ -1150,6 +1175,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await automations.dispatchDue();
     },
     async syncDueConnectors() {
+      await connectors.purgeExpiredAuthorizationAttempts();
       await connectors.renewSubscriptions();
       const triggered = await connectors.dispatchTriggeredSyncs();
       const scheduled = await connectors.syncDueAccounts();
@@ -1169,7 +1195,22 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         return;
       }
       while (!signal?.aborted) {
-        await connectors.runICloudIdlePass();
+        const startedAt = Date.now();
+        try {
+          await connectors.runICloudIdlePass();
+        } catch {
+          dependencies.log?.({
+            code: "icloud_idle_supervisor_failed",
+            durationMs: Date.now() - startedAt,
+            event: "connector_subscription_failed",
+            method: "SCHEDULER",
+            path: "/internal/connectors/icloud/mail-idle",
+            provider: "icloud",
+            requestId: randomUUID(),
+            status: 503,
+            subscriptionKind: "icloud_mail_idle",
+          });
+        }
         await new Promise<void>((resolveDelay) => {
           const timeout = setTimeout(resolveDelay, 5_000);
           signal?.addEventListener(

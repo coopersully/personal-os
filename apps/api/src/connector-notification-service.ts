@@ -1,4 +1,11 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
+import {
+  createHash,
+  createHmac,
+  hkdfSync,
+  randomBytes,
+  randomUUID,
+  timingSafeEqual,
+} from "node:crypto";
 import type {
   GoogleConnector,
   GoogleCredentials,
@@ -64,6 +71,17 @@ export function createConnectorNotificationService({
   log,
   now,
 }: Options) {
+  const remoteIdentityKey = encryptionKey
+    ? Buffer.from(
+        hkdfSync(
+          "sha256",
+          Buffer.from(encryptionKey, "base64"),
+          Buffer.alloc(0),
+          "ilo/connector-notification/remote-identity/v1",
+          32,
+        ),
+      )
+    : null;
   function observe(input: {
     ageMs?: number;
     code?: string;
@@ -139,11 +157,12 @@ export function createConnectorNotificationService({
           calendarEnabled: calendarAccounts.calendarEnabled,
           mailEnabled: calendarAccounts.mailEnabled,
           provider: calendarAccounts.provider,
+          syncRecovery: calendarAccounts.syncRecovery,
         })
         .from(calendarAccounts)
         .where(eq(calendarAccounts.id, accountId))
         .limit(1);
-      if (account?.provider !== "google") return;
+      if (account?.provider !== "google" || account.syncRecovery === "reconnect") return;
       const values: Array<typeof connectorSubscriptions.$inferInsert> = [];
       if (gmailTopicName && account.mailEnabled) {
         values.push({ accountId, kind: "gmail_mailbox", provider: "google", nextAttemptAt: now() });
@@ -177,16 +196,44 @@ export function createConnectorNotificationService({
       }
       if (values.length === 0) return;
       await db.insert(connectorSubscriptions).values(values).onConflictDoNothing();
+      await db
+        .update(connectorSubscriptions)
+        .set({
+          failureCount: 0,
+          nextAttemptAt: now(),
+          safeFailureCode: null,
+          status: "pending",
+          updatedAt: now(),
+        })
+        .where(
+          and(
+            eq(connectorSubscriptions.accountId, accountId),
+            eq(connectorSubscriptions.status, "stopped"),
+            inArray(
+              connectorSubscriptions.kind,
+              values.map((value) => value.kind),
+            ),
+          ),
+        );
     },
 
     async ensureICloudMailSubscription(accountId: string): Promise<void> {
       if (!icloudMailIdleEnabled) return;
       const [account] = await db
-        .select({ mailEnabled: calendarAccounts.mailEnabled, provider: calendarAccounts.provider })
+        .select({
+          mailEnabled: calendarAccounts.mailEnabled,
+          provider: calendarAccounts.provider,
+          syncRecovery: calendarAccounts.syncRecovery,
+        })
         .from(calendarAccounts)
         .where(eq(calendarAccounts.id, accountId))
         .limit(1);
-      if (account?.provider !== "icloud" || !account.mailEnabled) return;
+      if (
+        account?.provider !== "icloud" ||
+        !account.mailEnabled ||
+        account.syncRecovery === "reconnect"
+      )
+        return;
       await db
         .insert(connectorSubscriptions)
         .values({
@@ -196,6 +243,22 @@ export function createConnectorNotificationService({
           provider: "icloud",
         })
         .onConflictDoNothing();
+      await db
+        .update(connectorSubscriptions)
+        .set({
+          failureCount: 0,
+          nextAttemptAt: now(),
+          safeFailureCode: null,
+          status: "pending",
+          updatedAt: now(),
+        })
+        .where(
+          and(
+            eq(connectorSubscriptions.accountId, accountId),
+            eq(connectorSubscriptions.kind, "icloud_mail_idle"),
+            eq(connectorSubscriptions.status, "stopped"),
+          ),
+        );
     },
 
     async runICloudIdlePass(input: { signal?: AbortSignal } = {}): Promise<{
@@ -540,7 +603,7 @@ export function createConnectorNotificationService({
                 nextAttemptAt: null,
                 providerCursor,
                 remoteIdentityHash: account.email
-                  ? createHmac("sha256", Buffer.from(encryptionKey, "base64"))
+                  ? createHmac("sha256", remoteIdentityKey as Buffer)
                       .update(account.email.trim().toLowerCase())
                       .digest("hex")
                   : null,
@@ -655,11 +718,11 @@ export function createConnectorNotificationService({
         });
         return "unknown";
       }
-      const remoteIdentityHash = createHmac("sha256", Buffer.from(encryptionKey, "base64"))
+      const remoteIdentityHash = createHmac("sha256", remoteIdentityKey as Buffer)
         .update(mailboxIdentity.trim().toLowerCase())
         .digest("hex");
       const outcome = await db.transaction(async (transaction) => {
-        const [subscription] = await transaction
+        const subscriptions = await transaction
           .select()
           .from(connectorSubscriptions)
           .where(
@@ -669,27 +732,28 @@ export function createConnectorNotificationService({
               inArray(connectorSubscriptions.status, ["active", "renewing"]),
             ),
           )
-          .for("update")
-          .limit(1);
-        if (!subscription) return "unknown" as const;
-        const current = subscription.providerCursor;
-        const isNewer =
-          current === null ||
-          (/^\d+$/u.test(current) &&
+          .for("update");
+        if (subscriptions.length === 0) return "unknown" as const;
+        let accepted = false;
+        for (const subscription of subscriptions) {
+          const current = subscription.providerCursor;
+          const isNewer =
             /^\d+$/u.test(historyId) &&
-            BigInt(historyId) > BigInt(current));
-        await transaction
-          .update(connectorSubscriptions)
-          .set({
-            ...(isNewer ? { providerCursor: historyId } : {}),
-            lastNotificationAt: now(),
-            updatedAt: now(),
-          })
-          .where(eq(connectorSubscriptions.id, subscription.id));
-        if (isNewer) {
-          await this.enqueue(subscription.accountId, "notification", now(), transaction);
+            (current === null || (/^\d+$/u.test(current) && BigInt(historyId) > BigInt(current)));
+          await transaction
+            .update(connectorSubscriptions)
+            .set({
+              ...(isNewer ? { providerCursor: historyId } : {}),
+              lastNotificationAt: now(),
+              updatedAt: now(),
+            })
+            .where(eq(connectorSubscriptions.id, subscription.id));
+          if (isNewer) {
+            accepted = true;
+            await this.enqueue(subscription.accountId, "notification", now(), transaction);
+          }
         }
-        return isNewer ? ("accepted" as const) : ("duplicate" as const);
+        return accepted ? ("accepted" as const) : ("duplicate" as const);
       });
       observe({
         event: "connector_notification_received",
@@ -732,6 +796,7 @@ export function createConnectorNotificationService({
           /^[a-f0-9]{64}$/u.test(expectedHash) &&
           timingSafeEqual(Buffer.from(expectedHash, "hex"), tokenHash);
         if (!subscription || !verified) return "unknown" as const;
+        if (!/^\d+$/u.test(input.messageNumber)) return "unknown" as const;
         const current = subscription.providerCursor;
         const isNewer =
           current === null ||

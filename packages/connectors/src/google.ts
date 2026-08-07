@@ -121,22 +121,10 @@ const gmailHistoryMessageSchema = z.object({
 });
 const gmailHistoryRecordSchema = z.object({
   id: z.string(),
-  labelsAdded: z
-    .array(z.object({ message: gmailHistoryMessageSchema }))
-    .max(1_000)
-    .default([]),
-  labelsRemoved: z
-    .array(z.object({ message: gmailHistoryMessageSchema }))
-    .max(1_000)
-    .default([]),
-  messagesAdded: z
-    .array(z.object({ message: gmailHistoryMessageSchema }))
-    .max(1_000)
-    .default([]),
-  messagesDeleted: z
-    .array(z.object({ message: gmailHistoryMessageSchema }))
-    .max(1_000)
-    .default([]),
+  labelsAdded: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  labelsRemoved: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  messagesAdded: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  messagesDeleted: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
 });
 const gmailHistoryResponseSchema = z.object({
   history: z.array(gmailHistoryRecordSchema).max(1_000).default([]),
@@ -205,6 +193,7 @@ type GoogleConnectorOptions = {
 };
 
 const MAX_GMAIL_HISTORY_PAGES = 10;
+const MAX_GMAIL_FULL_SYNC_PAGES = 10;
 const MAX_GMAIL_SYNC_THREADS = 100;
 
 export function createGoogleConnector(options: GoogleConnectorOptions): GoogleConnector {
@@ -430,6 +419,8 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     const profile = gmailProfileSchema.parse(await parseResponse(profileResult.response));
     const threadIds: string[] = [];
     let pageToken: string | undefined;
+    const seenPageTokens = new Set<string>();
+    let pageCount = 0;
     let currentCredentials = profileResult.credentials;
     do {
       throwIfProviderOperationCancelled(operation);
@@ -439,12 +430,28 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       const result = await authenticatedRequest(currentCredentials, url.toString(), {}, operation);
       currentCredentials = result.credentials;
       const page = gmailThreadListResponseSchema.parse(await parseResponse(result.response));
+      pageCount += 1;
       threadIds.push(
         ...page.threads
           .slice(0, MAX_GMAIL_SYNC_THREADS - threadIds.length)
           .map((thread) => thread.id),
       );
-      pageToken = threadIds.length < MAX_GMAIL_SYNC_THREADS ? page.nextPageToken : undefined;
+      const nextPageToken =
+        threadIds.length < MAX_GMAIL_SYNC_THREADS ? page.nextPageToken : undefined;
+      if (
+        nextPageToken &&
+        (pageCount >= MAX_GMAIL_FULL_SYNC_PAGES || seenPageTokens.has(nextPageToken))
+      ) {
+        throw new ConnectorError({
+          category: "invalid_response",
+          code: "google_mail_page_limit_exceeded",
+          disposition: "retry",
+          message: "Google Mail pagination did not complete safely.",
+          status: 502,
+        });
+      }
+      if (nextPageToken) seenPageTokens.add(nextPageToken);
+      pageToken = nextPageToken;
     } while (pageToken);
     const threads: NormalizedRemoteMailThread[] = [];
     const deletedThreadIds: string[] = [];

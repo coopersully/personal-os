@@ -479,6 +479,7 @@ export const oauthStates = pgTable(
     uniqueIndex("oauth_states_token_hash_idx").on(table.tokenHash),
     index("oauth_states_user_idx").on(table.userId),
     index("oauth_states_status_expiry_idx").on(table.status, table.expiresAt),
+    index("oauth_states_expiry_idx").on(table.expiresAt),
     index("oauth_states_user_created_idx").on(table.userId, table.createdAt),
     check(
       "oauth_states_status_check",

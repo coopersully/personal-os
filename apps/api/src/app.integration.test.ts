@@ -1,4 +1,4 @@
-import { createHash, createHmac } from "node:crypto";
+import { createHash, createHmac, hkdfSync } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   GoogleConnector,
@@ -29,6 +29,7 @@ import { createApp, type PersonalOsApp } from "./app.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
 import type { EmailMessage } from "./email-delivery.js";
+import { GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
 import { createRuntimeLifecycle } from "./runtime-lifecycle.js";
 import { verifyPassword } from "./security.js";
@@ -284,7 +285,18 @@ describe.sequential("ilo API", () => {
       kind: "gmail_mailbox",
       provider: "google",
       providerCursor: "100",
-      remoteIdentityHash: createHmac("sha256", Buffer.from(privacyKey, "base64"))
+      remoteIdentityHash: createHmac(
+        "sha256",
+        Buffer.from(
+          hkdfSync(
+            "sha256",
+            Buffer.from(privacyKey, "base64"),
+            Buffer.alloc(0),
+            "ilo/connector-notification/remote-identity/v1",
+            32,
+          ),
+        ),
+      )
         .update("push-mailbox@example.com")
         .digest("hex"),
       status: "active",
@@ -378,6 +390,8 @@ describe.sequential("ilo API", () => {
     expect((await push("{}", {})).status).toBe(401);
     verifyGooglePubSubToken.mockRejectedValueOnce(new Error("private verification response"));
     expect((await push("{}")).status).toBe(401);
+    verifyGooglePubSubToken.mockRejectedValueOnce(new GooglePubSubAuthError(true));
+    expect((await push("{}")).status).toBe(503);
     expect(
       (
         await push("{}", {

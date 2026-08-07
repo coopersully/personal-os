@@ -352,7 +352,7 @@ export type ICloudConnector = {
 };
 
 export type XConnector = {
-  authorizationUrl: (state: string, codeVerifier: string) => string;
+  authorizationUrl: (state: string, codeChallenge: string) => string;
   exchangeCode: (code: string, codeVerifier: string, redirectUri?: string) => Promise<XCredentials>;
   getProfile: (credentials: XCredentials) => Promise<CredentialResult<XProfile>>;
   listBookmarkFolders: (

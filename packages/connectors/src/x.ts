@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { ConnectorError, connectorHttpError } from "./failures.js";
 import { providerFetch } from "./http.js";
@@ -43,10 +42,6 @@ type XConnectorOptions = {
   now?: () => Date;
   redirectUri: string;
 };
-
-function base64Url(value: Buffer): string {
-  return value.toString("base64").replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
-}
 
 export function createXConnector(options: XConnectorOptions): XConnector {
   const request = options.fetch ?? globalThis.fetch;
@@ -123,12 +118,12 @@ export function createXConnector(options: XConnectorOptions): XConnector {
   }
 
   return {
-    authorizationUrl(state, codeVerifier) {
+    authorizationUrl(state, codeChallenge) {
       requireConfiguration();
       const url = new URL("https://x.com/i/oauth2/authorize");
       url.search = new URLSearchParams({
         client_id: options.clientId,
-        code_challenge: base64Url(createHash("sha256").update(codeVerifier).digest()),
+        code_challenge: codeChallenge,
         code_challenge_method: "S256",
         redirect_uri: options.redirectUri,
         response_type: "code",

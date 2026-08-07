@@ -1095,7 +1095,7 @@ describe("iCloud connector", () => {
         fetchCalendarObjects: vi.fn(async () => [
           {
             data: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nX-BAD:BEGIN:VEVENT\r\nEND:VCALENDAR\r\n",
-            url: "event",
+            url: "event.ics",
           },
         ]),
       }),

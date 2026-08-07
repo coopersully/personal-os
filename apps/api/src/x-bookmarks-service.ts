@@ -421,7 +421,7 @@ export function createXBookmarksService({
         userId,
       });
       try {
-        return x.authorizationUrl(attempt.state, attempt.codeVerifier);
+        return x.authorizationUrl(attempt.state, attempt.codeChallenge);
       } catch (error) {
         throw connectorError(error);
       }

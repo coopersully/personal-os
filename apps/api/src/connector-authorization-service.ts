@@ -6,7 +6,7 @@ import type {
   ConnectorAuthorizationStatus,
   GoogleConnectionService,
 } from "@personal-os/domain";
-import { and, eq, gt, isNull, lt } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, lt, or } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import { decryptJson, encryptJson, generateToken, hashToken } from "./security.js";
 
@@ -14,6 +14,7 @@ const AUTHORIZATION_ATTEMPT_TTL_MS = 30 * 60_000;
 const AUTHORIZATION_ATTEMPT_VISIBILITY_MS = 24 * 60 * 60_000;
 const AUTHORIZATION_ATTEMPT_RETENTION_MS = 7 * 24 * 60 * 60_000;
 const AUTHORIZATION_PROCESSING_LEASE_MS = 2 * 60_000;
+const AUTHORIZATION_PURGE_BATCH_SIZE = 1_000;
 
 type AuthorizationAttemptRow = typeof oauthStates.$inferSelect;
 type ClosedAuthorizationStatus = Exclude<ConnectorAuthorizationStatus, "pending">;
@@ -46,6 +47,16 @@ const retryableOutcomeCodes = new Set([
   "provider_temporarily_unavailable",
   "provider_transport_failure",
 ]);
+
+function publicAuthorizationProvider(provider: AuthorizationAttemptRow["provider"]) {
+  switch (provider) {
+    case "google":
+    case "x":
+      return provider;
+    default:
+      throw new AppError("not_found", "The authorization attempt was not found.");
+  }
+}
 
 export function createConnectorAuthorizationService({
   db,
@@ -225,11 +236,14 @@ export function createConnectorAuthorizationService({
           and(
             eq(oauthStates.id, attemptId),
             eq(oauthStates.userId, userId),
-            gt(oauthStates.createdAt, visibleAfter),
+            or(
+              and(isNull(oauthStates.completedAt), gt(oauthStates.createdAt, visibleAfter)),
+              gt(oauthStates.completedAt, visibleAfter),
+            ),
           ),
         )
         .limit(1);
-      if (!attempt || (attempt.completedAt && attempt.completedAt <= visibleAfter)) {
+      if (!attempt) {
         throw new AppError("not_found", "The authorization attempt was not found.");
       }
       if (attempt.status === "processing" && attempt.consumedAt) {
@@ -272,7 +286,7 @@ export function createConnectorAuthorizationService({
           : attempt.status;
       return {
         accountId: attempt.connectedAccountId,
-        provider: attempt.provider === "x" ? "x" : "google",
+        provider: publicAuthorizationProvider(attempt.provider),
         retryable: attempt.outcomeCode ? retryableOutcomeCodes.has(attempt.outcomeCode) : false,
         status,
       };
@@ -280,9 +294,21 @@ export function createConnectorAuthorizationService({
 
     async purgeExpired(): Promise<number> {
       const cutoff = new Date(now().getTime() - AUTHORIZATION_ATTEMPT_RETENTION_MS);
+      const expired = await db
+        .select({ id: oauthStates.id })
+        .from(oauthStates)
+        .where(lt(oauthStates.expiresAt, cutoff))
+        .orderBy(asc(oauthStates.expiresAt))
+        .limit(AUTHORIZATION_PURGE_BATCH_SIZE);
+      if (expired.length === 0) return 0;
       const removed = await db
         .delete(oauthStates)
-        .where(lt(oauthStates.expiresAt, cutoff))
+        .where(
+          inArray(
+            oauthStates.id,
+            expired.map((attempt) => attempt.id),
+          ),
+        )
         .returning({ id: oauthStates.id });
       return removed.length;
     },

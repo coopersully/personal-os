@@ -53,10 +53,14 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           VITE_API_BASE_URL: ${{ vars.PERSONAL_OS_API_BASE_URL }}
         run: pnpm exec tauri build --bundles dmg --ci
+      - name: Give the public macOS installer a stable filename
+        run: |
+          mkdir -p release-assets
+          cp apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg release-assets/ilo-macos.dmg
       - uses: actions/upload-artifact@v7
         with:
           name: macos-installer
-          path: apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          path: release-assets/ilo-macos.dmg
 
   windows:
     name: Windows installer
@@ -104,10 +108,15 @@ jobs:
             & $signTool sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD $_.FullName
             if ($LASTEXITCODE -ne 0) { throw "Signing failed for $($_.Name)." }
           }
+      - name: Give the public Windows installer a stable filename
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force release-assets | Out-Null
+          Copy-Item (Get-ChildItem "apps/desktop/src-tauri/target/release/bundle/nsis/*.exe" | Select-Object -First 1) release-assets/ilo-windows-x64-setup.exe
       - uses: actions/upload-artifact@v7
         with:
           name: windows-installer
-          path: apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+          path: release-assets/ilo-windows-x64-setup.exe
 
   publish:
     needs: [macos, windows]

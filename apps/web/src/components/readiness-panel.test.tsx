@@ -3,7 +3,7 @@
 import "@testing-library/jest-dom/vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Mail } from "lucide-react";
+import { MailIcon } from "@/components/icons";
 import { ReadinessPanel, type ReadinessPanelCheck } from "./readiness-panel";
 
 const checks: ReadinessPanelCheck[] = [
@@ -32,7 +32,7 @@ function renderPanel(props: Partial<React.ComponentProps<typeof ReadinessPanel>>
         label: "Next step",
         title: "Review Mail preferences",
       }}
-      icon={<Mail />}
+      icon={<MailIcon />}
       title="Mail readiness"
       {...props}
     />,
@@ -78,7 +78,7 @@ describe("ReadinessPanel", () => {
         checks={checks}
         description="Mail readiness could not be loaded."
         detailsLabel="Mail readiness checks"
-        icon={<Mail />}
+        icon={<MailIcon />}
         title="Mail readiness"
         unavailable
       />,
@@ -101,7 +101,7 @@ describe("ReadinessPanel", () => {
         checks={[]}
         description="This product is not published."
         detailsLabel="Unavailable readiness checks"
-        icon={<Mail />}
+        icon={<MailIcon />}
         title="Unavailable readiness"
         unavailable
       />,

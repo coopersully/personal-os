@@ -1,8 +1,8 @@
-import { ExternalLink } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
+import { ExternalLinkIcon } from "@/components/icons";
 
 export default function RichEventNotes({ source }: { source: string }) {
   return (
@@ -11,7 +11,7 @@ export default function RichEventNotes({ source }: { source: string }) {
         components={{
           a: ({ children, href }) => (
             <a href={href} rel="noreferrer" target="_blank">
-              {children} <ExternalLink aria-hidden="true" size={11} />
+              {children} <ExternalLinkIcon aria-hidden="true" size={11} />
             </a>
           ),
         }}

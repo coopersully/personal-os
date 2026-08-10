@@ -30,6 +30,16 @@ pnpm verify
 
 This includes repository mirror checks, lint, type checking, coverage enforcement (95% statements/functions/lines and 94% branches), production builds, and desktop/mobile E2E acceptance tests.
 
+## Frontend Icons
+
+- reicon is the only permitted icon pack. Import every glyph from
+  `@/components/icons`; only `apps/web/src/components/icons.ts` may import `reicon-react`.
+- Adding a glyph means adding a registry entry under a semantic name, not a local import.
+- The contract and its rationale live in `docs/design/system.md`; `pnpm lint` enforces it
+  through `scripts/check-icon-contract.mjs`.
+- Regenerate the application mark with `node scripts/generate-app-mark.mjs` after editing
+  `apps/web/public/icon.svg`; never hand-edit a generated PNG.
+
 ## External Boundary Reliability
 
 - Before changing any external dependency, callback, webhook, scheduled handoff, network

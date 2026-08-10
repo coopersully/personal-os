@@ -128,6 +128,17 @@ These criteria adapt the GOV.UK Design System's [contribution criteria](https://
 including its emphasis on usefulness, uniqueness, usability, consistency, and
 versatility.
 
+### Admitting an icon
+
+A glyph enters the product the same way a pattern does. Adding one means adding
+an entry to `apps/web/src/components/icons.ts`, never a local import, and the
+change is reviewed against the same **Needed** and **Distinct** criteria: a new
+entry must carry a meaning the vocabulary does not already have. Reaching for a
+second icon pack because a glyph is missing or reads wrong is a rejected answer;
+choose a different reicon glyph, or argue the meaning is genuinely new. The
+registry name states the meaning rather than repeating reicon's vendor name.
+`docs/design/system.md` holds the resulting contract.
+
 ## Accessibility baseline
 
 - Target WCAG 2.2 Level AA for the complete user flow, not isolated components.

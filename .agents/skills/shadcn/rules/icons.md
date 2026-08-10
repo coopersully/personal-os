@@ -2,6 +2,18 @@
 
 **Always use the project's configured `iconLibrary` for imports.** Check the `iconLibrary` field from project context: `lucide` → `lucide-react`, `tabler` → `@tabler/icons-react`, etc. Never assume `lucide-react`.
 
+## In this repository: reicon, through the registry
+
+`iconLibrary` is `reicon-react`. The shadcn CLI has no transform for it, so registry components arrive with `lucide-react` imports that you must convert during the mandatory post-add review.
+
+- Import every glyph from `@/components/icons`, never from `reicon-react` or any other icon package. Only `apps/web/src/components/icons.ts` may import `reicon-react`.
+- If the glyph you need is not exported yet, add an entry to that registry under a semantic name (`MailIcon`, not reicon's `Envelope`) rather than importing it locally.
+- Never pass `color`, `strokeWidth`, or `secondaryColor`; the registry's `Icon` type rejects them. Color comes from `text-*` tokens, size from `size-*` classes.
+- Use `weight="Filled"` only for active/selected state; Outline is the default.
+- `pnpm lint` runs `scripts/check-icon-contract.mjs`, which fails on any other icon package, a direct `reicon-react` import, or hand-written inline `<svg>`.
+
+See `docs/design/system.md` for the full contract.
+
 ---
 
 ## Icons in Button use data-icon attribute

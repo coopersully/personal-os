@@ -30,26 +30,6 @@ import {
 } from "@personal-os/domain";
 import { Badge, Button, EmptyState, Input, Label, Spinner } from "@personal-os/ui";
 import {
-  BankIcon as NavigationBank,
-  CalendarIcon as NavigationCalendar,
-  CheckSquareIcon as NavigationCheckSquare,
-  CloudIcon as NavigationCloud,
-  CompassIcon as NavigationCompass,
-  EnvelopeSimpleIcon as NavigationEnvelope,
-  GearIcon as NavigationGear,
-  HouseIcon as NavigationHouse,
-  ImageIcon as NavigationImage,
-  KeyIcon as NavigationKey,
-  ListChecksIcon as NavigationListChecks,
-  LockKeyIcon as NavigationLock,
-  PaintBrushIcon as NavigationPaintBrush,
-  PulseIcon as NavigationPulse,
-  RobotIcon as NavigationRobot,
-  TargetIcon as NavigationTarget,
-  UserCircleIcon as NavigationUser,
-  UsersIcon as NavigationUsers,
-} from "@phosphor-icons/react";
-import {
   type QueryClient,
   type UseQueryResult,
   useMutation,
@@ -57,60 +37,6 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
-import {
-  Activity,
-  ArrowLeft,
-  Bot,
-  CalendarDays,
-  CalendarPlus,
-  Check,
-  CheckCircle2,
-  ChevronDown,
-  Clock3,
-  Cloud,
-  CloudRain,
-  Columns3,
-  Compass,
-  Copy,
-  CopyPlus,
-  Edit3,
-  ExternalLink,
-  Eye,
-  EyeOff,
-  FileText,
-  Grid3X3,
-  Image,
-  KeyRound,
-  Layers3,
-  ListChecks,
-  ListTodo,
-  LocateFixed,
-  LockKeyhole,
-  LogOut,
-  type LucideIcon,
-  Mail,
-  MapPin,
-  Menu,
-  Monitor,
-  Moon,
-  MoreHorizontal,
-  Paintbrush,
-  PanelTop,
-  Pin,
-  Plus,
-  RefreshCw,
-  Scissors,
-  Search,
-  Settings,
-  Sparkles,
-  Sun,
-  Target,
-  Trash2,
-  UserRound,
-  Volleyball,
-  WifiOff,
-  X,
-} from "lucide-react";
 import {
   type CSSProperties,
   type FormEvent,
@@ -161,6 +87,66 @@ import {
   EventCardTime,
   EventCardTitle,
 } from "@/components/event-card";
+import {
+  ActivityIcon,
+  AgentIcon,
+  ArrowLeftIcon,
+  BankIcon,
+  CalendarIcon,
+  CalendarPlusIcon,
+  CheckIcon,
+  CheckSquareIcon,
+  ChevronDownIcon,
+  CircleCheckIcon,
+  ClockIcon,
+  CloudIcon,
+  CloudRainIcon,
+  ColumnsIcon,
+  CompassIcon,
+  CopyIcon,
+  CopyPlusIcon,
+  EditIcon,
+  ExternalLinkIcon,
+  EyeIcon,
+  EyeOffIcon,
+  FileTextIcon,
+  GridIcon,
+  HouseIcon,
+  type Icon,
+  ImageIcon,
+  KeyIcon,
+  LayersIcon,
+  ListChecksIcon,
+  ListTodoIcon,
+  LocationFixedIcon,
+  LockIcon,
+  LogOutIcon,
+  MailIcon,
+  MapPinIcon,
+  MenuIcon,
+  MonitorIcon,
+  MoonIcon,
+  MoreHorizontalIcon,
+  PaintBrushIcon,
+  PanelTopIcon,
+  PinIcon,
+  PlusIcon,
+  PulseIcon,
+  RefreshIcon,
+  ScissorsIcon,
+  SearchIcon,
+  SettingsIcon,
+  SparklesIcon,
+  SunIcon,
+  TargetIcon,
+  TrashIcon,
+  UserCircleIcon,
+  UserIcon,
+  UsersIcon,
+  WifiOffIcon,
+  XIcon,
+} from "@/components/icons";
+import { LogoMark } from "@/components/logo-mark";
 import {
   Alert as ShadcnAlert,
   AlertAction as ShadcnAlertAction,
@@ -366,10 +352,10 @@ type ContextSidebarMode =
   | "tasks"
   | null;
 
-const calendarViews: Array<{ icon: LucideIcon; label: string; value: CalendarView }> = [
-  { icon: CalendarDays, label: "Day", value: "day" },
-  { icon: Columns3, label: "Week", value: "week" },
-  { icon: Grid3X3, label: "Month", value: "month" },
+const calendarViews: Array<{ icon: Icon; label: string; value: CalendarView }> = [
+  { icon: CalendarIcon, label: "Day", value: "day" },
+  { icon: ColumnsIcon, label: "Week", value: "week" },
+  { icon: GridIcon, label: "Month", value: "month" },
 ];
 
 const RichEventNotes = lazy(() => import("./rich-event-notes.js"));
@@ -382,7 +368,7 @@ const calendarDragType = "application/x-personal-os-calendar-event";
 
 type NavigationItemDefinition = {
   badge?: number;
-  icon: LucideIcon;
+  icon: Icon;
   items?: NavigationItemDefinition[];
   label: string;
   path: string;
@@ -403,7 +389,7 @@ type WorkspacePreview = {
 };
 
 const todayNavigationItem: NavigationItemDefinition = {
-  icon: PanelTop,
+  icon: PanelTopIcon,
   label: "Today",
   path: "/today",
 };
@@ -413,13 +399,13 @@ const planNavigationItems: NavigationItemDefinition[] = [
   calendarNavigationItem,
   {
     ...tasksNavigationItem,
-    items: [{ icon: ListTodo, label: "Reminders", path: "/reminders" }],
+    items: [{ icon: ListTodoIcon, label: "Reminders", path: "/reminders" }],
   },
 ];
 
 const lifeNavigationItems: NavigationItemDefinition[] = [
-  { icon: Target, label: "Goals", path: "/goals" },
-  { icon: Compass, label: "Motives", path: "/motives" },
+  { icon: TargetIcon, label: "Goals", path: "/goals" },
+  { icon: CompassIcon, label: "Motives", path: "/motives" },
 ];
 
 const navigationGroups: NavigationGroupDefinition[] = [
@@ -434,7 +420,7 @@ const todayNavigationGroups: NavigationGroupDefinition[] = [
 ];
 
 const workspaceShortcuts: WorkspaceDefinition[] = [
-  { icon: PanelTop, label: "Today at a Glance", path: "/today" },
+  { icon: PanelTopIcon, label: "Today at a Glance", path: "/today" },
   calendarNavigationItem,
   tasksNavigationItem,
   mailNavigationItem,
@@ -442,9 +428,9 @@ const workspaceShortcuts: WorkspaceDefinition[] = [
 ];
 
 const accountNavigationItems: NavigationItemDefinition[] = [
-  { icon: Sparkles, label: "Setup", path: "/setup" },
+  { icon: SparklesIcon, label: "Setup", path: "/setup" },
   settingsNavigationItem,
-  { icon: Activity, label: "Activity", path: "/activity" },
+  { icon: ActivityIcon, label: "Activity", path: "/activity" },
 ];
 
 const mobileNavigationItems: NavigationItemDefinition[] = [
@@ -671,7 +657,7 @@ function CredentialsScreen() {
               <EventCardDescription>Product calendar · 45 min</EventCardDescription>
             </EventCardBody>
             <EventCardAside>
-              <CalendarDays />
+              <CalendarIcon />
             </EventCardAside>
           </EventCardContent>
         </EventCard>
@@ -1084,7 +1070,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                 onClick={closeMobileMenu}
                 to="/today"
               >
-                <ArrowLeft aria-hidden="true" size={18} />{" "}
+                <ArrowLeftIcon aria-hidden="true" size={18} />{" "}
                 <span>{workspaceOwnerName(user)}'s Workspace</span>
               </Link>
             ) : (
@@ -1104,7 +1090,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               onClick={closeMobileMenu}
               type="button"
             >
-              <X aria-hidden="true" size={18} />
+              <XIcon aria-hidden="true" size={18} />
             </button>
           </ShadcnSidebarHeader>
           <ShadcnSidebarContent
@@ -1159,7 +1145,7 @@ function AuthenticatedApp({ user }: { user: User }) {
         <div className="workspace">
           {!online && (
             <div className="offline-banner">
-              <WifiOff size={15} /> Offline — changes are paused until you reconnect.
+              <WifiOffIcon size={15} /> Offline — changes are paused until you reconnect.
             </div>
           )}
           <TopNavigation
@@ -1175,7 +1161,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                         size="icon"
                         variant="ghost"
                       >
-                        <Pin aria-hidden="true" fill={pinned ? "currentColor" : "none"} />
+                        <PinIcon aria-hidden="true" fill={pinned ? "currentColor" : "none"} />
                       </ShadcnButton>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">Keep window on top</TooltipContent>
@@ -1228,7 +1214,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                   onClick={openMobileMenu}
                   type="button"
                 >
-                  <Menu aria-hidden="true" size={19} />
+                  <MenuIcon aria-hidden="true" size={19} />
                 </button>
                 {location.pathname === "/today" ? (
                   todayBrief.data ? (
@@ -1297,7 +1283,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             onClick={openMobileMenu}
             type="button"
           >
-            <MoreHorizontal aria-hidden="true" size={19} />
+            <MoreHorizontalIcon aria-hidden="true" size={19} />
             <span className="nav-item__label">More</span>
           </button>
         </nav>
@@ -1518,25 +1504,25 @@ function SidebarNavigationItem({
 }
 
 const navigationIcons = {
-  "Agent access": NavigationKey,
-  Appearance: NavigationPaintBrush,
-  Automations: NavigationRobot,
-  Calendar: NavigationCalendar,
-  Calendars: NavigationCalendar,
-  Connections: NavigationCloud,
-  Finances: NavigationBank,
-  Goals: NavigationTarget,
-  Invitations: NavigationUsers,
-  Mail: NavigationEnvelope,
-  Motives: NavigationCompass,
-  Profile: NavigationUser,
-  Reminders: NavigationCheckSquare,
-  Sessions: NavigationLock,
-  Settings: NavigationGear,
-  Tasks: NavigationListChecks,
-  Today: NavigationHouse,
-  Wallpaper: NavigationImage,
-  Activity: NavigationPulse,
+  "Agent access": KeyIcon,
+  Appearance: PaintBrushIcon,
+  Automations: AgentIcon,
+  Calendar: CalendarIcon,
+  Calendars: CalendarIcon,
+  Connections: CloudIcon,
+  Finances: BankIcon,
+  Goals: TargetIcon,
+  Invitations: UsersIcon,
+  Mail: MailIcon,
+  Motives: CompassIcon,
+  Profile: UserCircleIcon,
+  Reminders: CheckSquareIcon,
+  Sessions: LockIcon,
+  Settings: SettingsIcon,
+  Tasks: ListChecksIcon,
+  Today: HouseIcon,
+  Wallpaper: ImageIcon,
+  Activity: PulseIcon,
 } as const;
 
 function NavigationIcon({
@@ -1546,7 +1532,7 @@ function NavigationIcon({
   size,
 }: {
   active: boolean;
-  fallback: LucideIcon;
+  fallback: Icon;
   label: string;
   size?: number;
 }) {
@@ -1556,14 +1542,14 @@ function NavigationIcon({
       <WeightedIcon
         aria-hidden="true"
         data-navigation-icon-weight={active ? "fill" : "regular"}
-        weight={active ? "fill" : "regular"}
+        weight={active ? "Filled" : "Outline"}
       />
     ) : (
       <WeightedIcon
         aria-hidden="true"
         data-navigation-icon-weight={active ? "fill" : "regular"}
         size={size}
-        weight={active ? "fill" : "regular"}
+        weight={active ? "Filled" : "Outline"}
       />
     );
   }
@@ -1816,7 +1802,7 @@ function WorkspaceSwitcher({
                 <LogoMark compact />
               )}
               <span>{section}</span>
-              <ChevronDown aria-hidden="true" className="ml-auto" data-icon="inline-end" />
+              <ChevronDownIcon aria-hidden="true" className="ml-auto" data-icon="inline-end" />
             </ShadcnButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -1900,7 +1886,7 @@ function WorkspaceMenuItem({
           <span>{label}</span>
           <small id={summaryId}>{summary}</small>
         </span>
-        {isActive ? <Check aria-hidden="true" className="ml-auto" /> : null}
+        {isActive ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
       </Link>
     </DropdownMenuItem>
   );
@@ -1935,7 +1921,7 @@ function AccountMenu({ onNavigate, user }: { onNavigate: () => void; user: User 
                 size="icon"
                 variant="ghost"
               >
-                <Settings aria-hidden="true" />
+                <SettingsIcon aria-hidden="true" />
               </ShadcnButton>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56" side="top">
@@ -1963,7 +1949,7 @@ function AccountMenu({ onNavigate, user }: { onNavigate: () => void; user: User 
                 }}
                 variant="destructive"
               >
-                <LogOut aria-hidden="true" />
+                <LogOutIcon aria-hidden="true" />
                 <span>{logout.isPending ? "Signing out…" : "Log out"}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -1979,19 +1965,19 @@ function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <ShadcnButton>
-          <Plus aria-hidden="true" data-icon="inline-start" /> Add
+          <PlusIcon aria-hidden="true" data-icon="inline-start" /> Add
         </ShadcnButton>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuGroup>
           <DropdownMenuItem onSelect={() => setEditor({ kind: "task" })}>
-            <ListChecks aria-hidden="true" /> Task
+            <ListChecksIcon aria-hidden="true" /> Task
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setEditor({ kind: "reminder" })}>
-            <ListTodo aria-hidden="true" /> Reminder
+            <ListTodoIcon aria-hidden="true" /> Reminder
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => setEditor({ kind: "event" })}>
-            <CalendarDays aria-hidden="true" /> Event
+            <CalendarIcon aria-hidden="true" /> Event
           </DropdownMenuItem>
         </DropdownMenuGroup>
       </DropdownMenuContent>
@@ -2002,7 +1988,7 @@ function CreateMenu({ setEditor }: { setEditor: (editor: Editor) => void }) {
 function CalendarCreateButton({ setEditor }: { setEditor: (editor: Editor) => void }) {
   return (
     <ShadcnButton onClick={() => setEditor({ kind: "event" })}>
-      <CalendarPlus aria-hidden="true" data-icon="inline-start" /> New event
+      <CalendarPlusIcon aria-hidden="true" data-icon="inline-start" /> New event
     </ShadcnButton>
   );
 }
@@ -2011,7 +1997,7 @@ function FinanceAddTransactionButton() {
   return (
     <ShadcnButton asChild>
       <a href="#finance-add-transaction">
-        <Plus aria-hidden="true" data-icon="inline-start" /> Add transaction
+        <PlusIcon aria-hidden="true" data-icon="inline-start" /> Add transaction
       </a>
     </ShadcnButton>
   );
@@ -2137,7 +2123,7 @@ function TodayPage({
                 timeZone={user.planningTimezone}
               />
             ) : (
-              <EmptyState icon={<CalendarDays />} title="The day is open">
+              <EmptyState icon={<CalendarIcon />} title="The day is open">
                 Leave it spacious or add a block when it matters.
               </EmptyState>
             )}
@@ -2213,7 +2199,7 @@ function TodayPage({
           overdueTasks.length === 0 &&
           todayTasks.length === 0 &&
           nextTasks.length === 0 && (
-            <EmptyState icon={<CheckCircle2 />} title="Nothing pulling at you">
+            <EmptyState icon={<CircleCheckIcon />} title="Nothing pulling at you">
               Add a reminder when something deserves your attention.
             </EmptyState>
           )
@@ -2256,12 +2242,12 @@ function TodayPage({
         {doneToday.length > 0 || doneTasksToday.length > 0 ? (
           <ShadcnCollapsible className="today-history">
             <ShadcnCollapsibleTrigger className="today-history__trigger" type="button">
-              <CheckCircle2 aria-hidden="true" />
+              <CircleCheckIcon aria-hidden="true" />
               <span>Done today</span>
               <ShadcnBadge variant="secondary">
                 {doneToday.length + doneTasksToday.length}
               </ShadcnBadge>
-              <ChevronDown aria-hidden="true" />
+              <ChevronDownIcon aria-hidden="true" />
             </ShadcnCollapsibleTrigger>
             <ShadcnCollapsibleContent className="today-history__content">
               {doneToday.length > 0 ? (
@@ -2312,7 +2298,7 @@ function TodayConditions({
   return (
     <ShadcnItem className="today-conditions" size="sm">
       <ShadcnItemMedia variant="icon">
-        <Cloud aria-hidden="true" />
+        <CloudIcon aria-hidden="true" />
       </ShadcnItemMedia>
       <ShadcnItemContent>
         <ShadcnItemTitle>Current conditions</ShadcnItemTitle>
@@ -2337,10 +2323,10 @@ function TodayWeatherTopbar({
 }) {
   if (!weather) return null;
   const WeatherIcon = weather.alerts.some((alert) => alert.kind === "rain")
-    ? CloudRain
+    ? CloudRainIcon
     : weather.condition.includes("Clear")
-      ? Sun
-      : Cloud;
+      ? SunIcon
+      : CloudIcon;
   const temperature = `${Math.round(weather.temperatureF)}°F`;
   const alertDescription =
     weather.alerts.length > 0 ? weather.alerts.map((alert) => alert.label).join(" · ") : null;
@@ -2382,7 +2368,7 @@ function TodayWeatherTopbar({
           className="top-navigation__weather-location"
           variant="ghost"
         >
-          <MapPin aria-hidden="true" />
+          <MapPinIcon aria-hidden="true" />
           <span>{weather.location.shortLabel}</span>
         </ShadcnButton>
       </TodayWeatherPopover>
@@ -2399,7 +2385,7 @@ function WeatherConditionsPopoverContent({
   alertDescription: string | null;
   planningTimezone: string;
   weather: WeatherSnapshot;
-  WeatherIcon: LucideIcon;
+  WeatherIcon: Icon;
 }) {
   const roundedTemperature = Math.round(weather.temperatureF);
   return (
@@ -2450,7 +2436,7 @@ function WeatherLocationPopoverContent({ weather }: { weather: WeatherSnapshot }
           target="_blank"
         >
           <span>
-            <ExternalLink aria-hidden="true" />
+            <ExternalLinkIcon aria-hidden="true" />
             Open map
           </span>
         </a>
@@ -2604,7 +2590,7 @@ function AutomationsPage({ user }: { user: User }) {
           </div>
         </div>
         {routines.data.length === 0 ? (
-          <EmptyState icon={<Bot />} title="No routines yet">
+          <EmptyState icon={<AgentIcon />} title="No routines yet">
             Install a starter routine above. It never receives more authority than the token you
             give an agent.
           </EmptyState>
@@ -2716,7 +2702,7 @@ function AutomationTemplateCard({
 }) {
   return (
     <article className="automation-template">
-      <Bot aria-hidden="true" size={20} />
+      <AgentIcon aria-hidden="true" size={20} />
       <h2>{title}</h2>
       <p>{description}</p>
       <Button disabled={disabled} onClick={install} tone={disabled ? "ghost" : "accent"}>
@@ -2967,7 +2953,7 @@ function CalendarTopbar({ onToday, user }: { onToday: () => void; user: User }) 
             size="icon"
             variant="default"
           >
-            <LocateFixed aria-hidden="true" />
+            <LocationFixedIcon aria-hidden="true" />
           </ShadcnButton>
         </TooltipTrigger>
         <TooltipContent side="bottom">
@@ -3021,7 +3007,7 @@ function CalendarTopbar({ onToday, user }: { onToday: () => void; user: User }) 
               size="icon"
               variant={includeWeekends ? "secondary" : "ghost"}
             >
-              {includeWeekends ? <Eye aria-hidden="true" /> : <EyeOff aria-hidden="true" />}
+              {includeWeekends ? <EyeIcon aria-hidden="true" /> : <EyeOffIcon aria-hidden="true" />}
             </ShadcnButton>
           </TooltipTrigger>
           <TooltipContent side="bottom">
@@ -3184,6 +3170,7 @@ function CalendarProviderEmblem({ provider }: { provider: string }) {
   const normalizedProvider = provider.toLowerCase();
   if (normalizedProvider === "google") {
     return (
+      // icon-contract-allow: Google brand mark, must reproduce the owner's exact artwork.
       <svg aria-hidden="true" viewBox="0 0 24 24">
         <path
           fill="#4285f4"
@@ -3206,12 +3193,13 @@ function CalendarProviderEmblem({ provider }: { provider: string }) {
   }
   if (normalizedProvider === "icloud" || normalizedProvider === "apple") {
     return (
+      // icon-contract-allow: Apple brand mark, must reproduce the owner's exact artwork.
       <svg aria-hidden="true" fill="currentColor" viewBox="0 0 24 24">
         <path d="M16.68 12.53c.02-1.86 1.52-2.75 1.59-2.79-.87-1.27-2.22-1.45-2.7-1.47-1.15-.12-2.24.68-2.82.68-.58 0-1.48-.66-2.43-.64-1.25.02-2.4.73-3.04 1.86-1.3 2.25-.33 5.57.94 7.4.62.89 1.36 1.89 2.33 1.86.94-.04 1.3-.61 2.44-.61 1.14 0 1.47.61 2.45.59 1.01-.02 1.65-.92 2.27-1.81.71-1.04 1-2.05 1.02-2.1-.02-.01-2.04-.78-2.05-2.97ZM14.8 7.04c.52-.63.87-1.5.77-2.37-.75.03-1.66.5-2.2 1.13-.49.57-.91 1.46-.8 2.32.84.07 1.7-.43 2.23-1.08Z" />
       </svg>
     );
   }
-  return <CalendarDays aria-hidden="true" />;
+  return <CalendarIcon aria-hidden="true" />;
 }
 
 function ConnectedServiceMark({ provider }: { provider: string }) {
@@ -3360,7 +3348,7 @@ function CalendarVisibilitySidebar({
                           {group.calendars.filter((calendar) => calendar.isSelected).length}/
                           {group.calendars.length}
                         </span>
-                        <ChevronDown
+                        <ChevronDownIcon
                           aria-hidden="true"
                           className="transition-transform group-data-[state=closed]/calendar-account:-rotate-90"
                           data-icon="inline-end"
@@ -3444,7 +3432,7 @@ function CalendarVisibilityToggle({
       <ShadcnFieldLabel htmlFor={`calendar-${calendar.id}`}>
         <span>{calendar.name}</span>
         {!calendar.isWritable ? (
-          <ExternalLink
+          <ExternalLinkIcon
             aria-label="Subscribed calendar"
             className="context-sidebar__calendar-external"
             role="img"
@@ -3864,7 +3852,7 @@ function TimelineEvent({
         <strong>
           {event.title}
           {event.blocks.length > 0 ? (
-            <LockKeyhole aria-label="Blocks another calendar" className="linked-block-icon" />
+            <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
           ) : null}
         </strong>
         <span>{formatTimelineTimeRange(event, timeZone)}</span>
@@ -3916,10 +3904,10 @@ function CalendarBlankContextMenu({
       <ContextMenuLabel>{formatHour(Math.floor(minute / 60))}</ContextMenuLabel>
       <ContextMenuSeparator />
       <ContextMenuItem onSelect={() => setEditor({ draft: { endsAt, startsAt }, kind: "event" })}>
-        <CalendarPlus aria-hidden="true" /> New event here
+        <CalendarPlusIcon aria-hidden="true" /> New event here
       </ContextMenuItem>
       <ContextMenuItem disabled={!canPaste || paste.isPending} onSelect={() => paste.mutate()}>
-        <Plus aria-hidden="true" /> Paste event
+        <PlusIcon aria-hidden="true" /> Paste event
       </ContextMenuItem>
     </ContextMenuContent>
   );
@@ -3993,20 +3981,20 @@ function CalendarEventContextMenu({
         <ContextMenuLabel>{event.title}</ContextMenuLabel>
         <ContextMenuSeparator />
         <ContextMenuItem disabled={!canCopy} onSelect={copy}>
-          <Copy aria-hidden="true" /> Copy event
+          <CopyIcon aria-hidden="true" /> Copy event
         </ContextMenuItem>
         <ContextMenuItem disabled={!canCopy || !writable || remove.isPending} onSelect={cut}>
-          <Scissors aria-hidden="true" /> Cut event
+          <ScissorsIcon aria-hidden="true" /> Cut event
         </ContextMenuItem>
         <ContextMenuItem
           disabled={!writable || duplicate.isPending}
           onSelect={() => duplicate.mutate()}
         >
-          <CopyPlus aria-hidden="true" /> Duplicate event
+          <CopyPlusIcon aria-hidden="true" /> Duplicate event
         </ContextMenuItem>
         <ContextMenuSub>
           <ContextMenuSubTrigger disabled={destinations.length === 0 || block.isPending}>
-            <LockKeyhole aria-hidden="true" /> Block on calendar
+            <LockIcon aria-hidden="true" /> Block on calendar
           </ContextMenuSubTrigger>
           <ContextMenuSubContent>
             {destinations.map((destination) => (
@@ -4022,7 +4010,7 @@ function CalendarEventContextMenu({
           onSelect={() => remove.mutate()}
           variant="destructive"
         >
-          <Trash2 aria-hidden="true" /> Delete event
+          <TrashIcon aria-hidden="true" /> Delete event
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>
@@ -4052,7 +4040,7 @@ function AllDayEvents({
           >
             {event.title}
             {event.blocks.length > 0 ? (
-              <LockKeyhole aria-label="Blocks another calendar" className="linked-block-icon" />
+              <LockIcon aria-label="Blocks another calendar" className="linked-block-icon" />
             ) : null}
           </button>
         ))}
@@ -4183,7 +4171,7 @@ function MonthCalendarView({
                     </span>
                     <span>{event.title}</span>
                     {event.blocks.length > 0 ? (
-                      <LockKeyhole
+                      <LockIcon
                         aria-label="Blocks another calendar"
                         className="linked-block-icon"
                       />
@@ -4247,7 +4235,7 @@ function GoalsPage() {
           </ShadcnCardHeader>
           <ShadcnCardContent>
             {goals.data.length === 0 ? (
-              <EmptyState icon={<Target />} title="Set a direction">
+              <EmptyState icon={<TargetIcon />} title="Set a direction">
                 Create one outcome you want your daily decisions to support.
               </EmptyState>
             ) : (
@@ -4307,7 +4295,7 @@ function GoalsPage() {
                 disabled={create.isPending || !title.trim()}
                 onClick={() => create.mutate()}
               >
-                <Target data-icon="inline-start" />
+                <TargetIcon data-icon="inline-start" />
                 Create goal
               </ShadcnButton>
             </ShadcnFieldGroup>
@@ -4373,7 +4361,7 @@ function GoalItem({
           size="icon-sm"
           variant="ghost"
         >
-          <Trash2 />
+          <TrashIcon />
         </ShadcnButton>
       </ShadcnItemActions>
     </ShadcnItem>
@@ -4417,7 +4405,7 @@ function MotivesPage() {
           </ShadcnCardHeader>
           <ShadcnCardContent>
             {motives.data.length === 0 ? (
-              <EmptyState icon={<Compass />} title="Name what matters">
+              <EmptyState icon={<CompassIcon />} title="Name what matters">
                 Add a value or reason that should inform your priorities.
               </EmptyState>
             ) : (
@@ -4451,7 +4439,7 @@ function MotivesPage() {
                         size="icon-sm"
                         variant="ghost"
                       >
-                        <Trash2 />
+                        <TrashIcon />
                       </ShadcnButton>
                     </ShadcnItemActions>
                   </ShadcnItem>
@@ -4491,7 +4479,7 @@ function MotivesPage() {
                 disabled={create.isPending || !title.trim()}
                 onClick={() => create.mutate()}
               >
-                <Compass data-icon="inline-start" />
+                <CompassIcon data-icon="inline-start" />
                 Create motive
               </ShadcnButton>
             </ShadcnFieldGroup>
@@ -4532,7 +4520,7 @@ function MailTopbarControls() {
       >
         <InputGroup className="mail-topbar__search">
           <InputGroupAddon>
-            <Search aria-hidden="true" />
+            <SearchIcon aria-hidden="true" />
           </InputGroupAddon>
           <InputGroupInput
             aria-label="Search mail"
@@ -4587,7 +4575,7 @@ function MailSyncButton() {
         onClick={() => sync.mutate()}
         variant="outline"
       >
-        <RefreshCw aria-hidden="true" className={sync.isPending ? "spin" : ""} />
+        <RefreshIcon aria-hidden="true" className={sync.isPending ? "spin" : ""} />
         {sync.isPending ? "Syncing…" : "Sync"}
       </ShadcnButton>
     </>
@@ -4610,7 +4598,7 @@ function MailComposeButton() {
         })
       }
     >
-      <Plus aria-hidden="true" data-icon="inline-start" />
+      <PlusIcon aria-hidden="true" data-icon="inline-start" />
       Compose
     </ShadcnButton>
   );
@@ -4628,36 +4616,36 @@ type SettingsSectionId =
   | "wallpaper";
 
 const settingsNavigation: Array<{
-  items: Array<{ icon: LucideIcon; id: SettingsSectionId; label: string }>;
+  items: Array<{ icon: Icon; id: SettingsSectionId; label: string }>;
   label: string;
 }> = [
   {
     label: "Personal",
     items: [
-      { icon: UserRound, id: "profile", label: "Profile" },
-      { icon: Paintbrush, id: "appearance", label: "Appearance" },
-      { icon: Image, id: "wallpaper", label: "Wallpaper" },
+      { icon: UserIcon, id: "profile", label: "Profile" },
+      { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
+      { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
     ],
   },
   {
     label: "Security",
     items: [
-      { icon: LockKeyhole, id: "sessions", label: "Sessions" },
-      { icon: UserRound, id: "invitations", label: "Invitations" },
+      { icon: LockIcon, id: "sessions", label: "Sessions" },
+      { icon: UserIcon, id: "invitations", label: "Invitations" },
     ],
   },
   {
     label: "Workspace",
     items: [
-      { icon: Cloud, id: "connections", label: "Connections" },
-      { icon: CalendarDays, id: "calendars", label: "Calendars" },
+      { icon: CloudIcon, id: "connections", label: "Connections" },
+      { icon: CalendarIcon, id: "calendars", label: "Calendars" },
     ],
   },
   {
     label: "Automation",
     items: [
-      { icon: Bot, id: "automations", label: "Automations" },
-      { icon: KeyRound, id: "agents", label: "Agent access" },
+      { icon: AgentIcon, id: "automations", label: "Automations" },
+      { icon: KeyIcon, id: "agents", label: "Agent access" },
     ],
   },
 ];
@@ -4758,7 +4746,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
     <SettingsSection
       action={
         <ShadcnButton onClick={() => setEditor({ kind: "calendar" })}>
-          <Plus data-icon="inline-start" size={15} /> Local calendar
+          <PlusIcon data-icon="inline-start" size={15} /> Local calendar
         </ShadcnButton>
       }
       description="Choose what appears in your unified view."
@@ -4817,7 +4805,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                       <ShadcnItemTitle>
                         {calendar.name}
                         {!calendar.isWritable ? (
-                          <ExternalLink
+                          <ExternalLinkIcon
                             aria-label="Subscribed calendar"
                             className="calendar-settings__calendar-external"
                             role="img"
@@ -4843,7 +4831,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
                           type="button"
                           variant="ghost"
                         >
-                          <Trash2 />
+                          <TrashIcon />
                         </ShadcnButton>
                       </ShadcnItemActions>
                     ) : null}
@@ -4965,7 +4953,7 @@ function ConnectorsSettings() {
         <DropdownMenu onOpenChange={setConnectMenuOpen} open={connectMenuOpen}>
           <DropdownMenuTrigger asChild>
             <ShadcnButton>
-              <Plus aria-hidden="true" data-icon="inline-start" /> Connect
+              <PlusIcon aria-hidden="true" data-icon="inline-start" /> Connect
             </ShadcnButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -4989,7 +4977,7 @@ function ConnectorsSettings() {
                 iCloud
               </DropdownMenuItem>
               <DropdownMenuItem disabled={xConnect.isPending} onSelect={() => xConnect.mutate()}>
-                <ExternalLink aria-hidden="true" />X bookmarks
+                <ExternalLinkIcon aria-hidden="true" />X bookmarks
               </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>
@@ -5031,7 +5019,7 @@ function ConnectorsSettings() {
           }}
         >
           <ShadcnAlert>
-            <Cloud />
+            <CloudIcon />
             <ShadcnAlertTitle>Add iCloud</ShadcnAlertTitle>
             <ShadcnAlertDescription>
               Use an app-specific password—not your Apple Account password. It is encrypted and can
@@ -5090,7 +5078,7 @@ function ConnectorsSettings() {
           </ShadcnFieldSet>
           <div className="icloud-connect-panel__footer">
             <a href="https://account.apple.com/account/manage" rel="noreferrer" target="_blank">
-              Create an app-specific password <ExternalLink size={13} />
+              Create an app-specific password <ExternalLinkIcon size={13} />
             </a>
             <div>
               <ShadcnButton
@@ -5220,7 +5208,7 @@ function XBookmarksConnectorRow({
           type="button"
           variant="ghost"
         >
-          <RefreshCw className={syncing ? "spin" : ""} />
+          <RefreshIcon className={syncing ? "spin" : ""} />
         </ShadcnButton>
         <ShadcnButton
           aria-label={`Disconnect X bookmarks for ${account.username}`}
@@ -5229,7 +5217,7 @@ function XBookmarksConnectorRow({
           type="button"
           variant="ghost"
         >
-          <Trash2 />
+          <TrashIcon />
         </ShadcnButton>
       </ShadcnItemActions>
     </ShadcnItem>
@@ -5377,7 +5365,7 @@ function PinterestWallpaperWebPlaceholder() {
       title="Pinterest wallpaper"
     >
       <ShadcnAlert role="status" variant="info">
-        <Image />
+        <ImageIcon />
         <ShadcnAlertTitle>Available in ilo for macOS</ShadcnAlertTitle>
         <ShadcnAlertDescription>
           Open the desktop app to choose a public Pinterest board and refine the wallpaper.
@@ -5502,7 +5490,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
           disabled={!value?.boardUrl || apply.isPending || update.isPending}
           onClick={() => apply.mutate()}
         >
-          <RefreshCw data-icon="inline-start" size={15} />
+          <RefreshIcon data-icon="inline-start" size={15} />
           {apply.isPending ? "Refreshing" : "Refresh now"}
         </ShadcnButton>
       }
@@ -5557,10 +5545,10 @@ function PinterestWallpaperDesktopSettingsPanel() {
             variant="outline"
           >
             <ShadcnToggleGroupItem aria-label="Tiled grid" value="grid">
-              <Grid3X3 data-icon="inline-start" size={15} /> Grid
+              <GridIcon data-icon="inline-start" size={15} /> Grid
             </ShadcnToggleGroupItem>
             <ShadcnToggleGroupItem aria-label="Overlapping stack" value="stack">
-              <Layers3 data-icon="inline-start" size={15} /> Stack
+              <LayersIcon data-icon="inline-start" size={15} /> Stack
             </ShadcnToggleGroupItem>
           </ShadcnToggleGroup>
           <ShadcnFieldDescription>
@@ -6059,7 +6047,7 @@ function PinterestWallpaperPlaceholder({
     >
       {tiles.map((tile) => (
         <div className="pinterest-wallpaper-placeholder__tile" key={tile}>
-          <Image aria-hidden="true" size={20} strokeWidth={1.5} />
+          <ImageIcon aria-hidden="true" size={20} strokeWidth={1.5} />
           <span>Image</span>
         </div>
       ))}
@@ -6144,7 +6132,7 @@ function ConnectorRow({
           type="button"
           variant="ghost"
         >
-          <RefreshCw className={syncing ? "spin" : ""} />
+          <RefreshIcon className={syncing ? "spin" : ""} />
         </ShadcnButton>
         <ShadcnButton
           aria-label={`Disconnect ${account.label}`}
@@ -6153,7 +6141,7 @@ function ConnectorRow({
           type="button"
           variant="ghost"
         >
-          <Trash2 />
+          <TrashIcon />
         </ShadcnButton>
       </ShadcnItemActions>
     </ShadcnItem>
@@ -6174,9 +6162,9 @@ function ConnectorCapabilityBadge({
   const badge = (
     <>
       {enabled ? (
-        <Check aria-hidden="true" data-icon="inline-start" />
+        <CheckIcon aria-hidden="true" data-icon="inline-start" />
       ) : (
-        <X aria-hidden="true" data-icon="inline-start" />
+        <XIcon aria-hidden="true" data-icon="inline-start" />
       )}
       {label}
     </>
@@ -6265,7 +6253,7 @@ function ProfileSettings({ user }: { user: User }) {
       >
         {!user.emailVerified ? (
           <ShadcnAlert role="status" variant="warning">
-            <Mail />
+            <MailIcon />
             <ShadcnAlertTitle>Email confirmation needed</ShadcnAlertTitle>
             <ShadcnAlertDescription>
               Confirm this address to keep account recovery available and unlock connected accounts.
@@ -6562,7 +6550,7 @@ function InvitationsSettings() {
           </form>
           {latestCode ? (
             <ShadcnAlert>
-              <CheckCircle2 />
+              <CircleCheckIcon />
               <ShadcnAlertTitle>Invitation ready</ShadcnAlertTitle>
               <ShadcnAlertDescription>
                 Share this code privately: <code>{latestCode}</code>
@@ -6628,22 +6616,22 @@ function SessionsSettings() {
 }
 
 const appearanceThemes: Array<{
-  icon: LucideIcon;
+  icon: Icon;
   label: string;
   value: Theme;
 }> = [
   {
-    icon: Monitor,
+    icon: MonitorIcon,
     label: "System",
     value: "system",
   },
   {
-    icon: Sun,
+    icon: SunIcon,
     label: "Light",
     value: "light",
   },
   {
-    icon: Moon,
+    icon: MoonIcon,
     label: "Dark",
     value: "dark",
   },
@@ -6722,7 +6710,7 @@ function SessionRow({ revoke, session }: { revoke: () => void; session: Session 
   return (
     <ShadcnItem variant="outline">
       <ShadcnItemMedia className="provider-icon" variant="icon">
-        <UserRound size={16} />
+        <UserIcon size={16} />
       </ShadcnItemMedia>
       <ShadcnItemContent>
         <ShadcnItemTitle>
@@ -6740,7 +6728,7 @@ function SessionRow({ revoke, session }: { revoke: () => void; session: Session 
           type="button"
           variant="ghost"
         >
-          <Trash2 />
+          <TrashIcon />
         </ShadcnButton>
       </ShadcnItemActions>
     </ShadcnItem>
@@ -6775,7 +6763,7 @@ function SettingsSection({
 function SettingsError({ error }: { error: unknown }) {
   return (
     <ShadcnAlert variant="destructive">
-      <X />
+      <XIcon />
       <ShadcnAlertTitle>Something needs attention</ShadcnAlertTitle>
       <ShadcnAlertDescription>{errorMessage(error)}</ShadcnAlertDescription>
     </ShadcnAlert>
@@ -6881,14 +6869,12 @@ function TodayEventCard({
           <EventCardBody>
             <EventCardTitle>
               <span className="truncate">{event.title}</span>
-              {event.blocks.length > 0 ? (
-                <LockKeyhole aria-label="Blocks another calendar" />
-              ) : null}
+              {event.blocks.length > 0 ? <LockIcon aria-label="Blocks another calendar" /> : null}
             </EventCardTitle>
             <EventCardDescription>
               {event.location ? (
                 <span className="flex min-w-0 items-center gap-1">
-                  <MapPin aria-hidden="true" />
+                  <MapPinIcon aria-hidden="true" />
                   <span className="truncate">{event.location}</span>
                 </span>
               ) : (
@@ -6907,7 +6893,7 @@ function TodayEventCard({
         <EventCardFooter>
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ShadcnBadge variant="outline">
-              <Clock3 aria-hidden="true" data-icon="inline-start" /> In progress
+              <ClockIcon aria-hidden="true" data-icon="inline-start" /> In progress
             </ShadcnBadge>
             <span className="font-mono text-xs text-muted-foreground">
               {meetingTimingSummary(event, currentTime)}
@@ -6917,7 +6903,7 @@ function TodayEventCard({
             <ShadcnButton asChild size="sm">
               <a href={event.conferenceUrl} rel="noreferrer" target="_blank">
                 Join {conferenceProvider}
-                <ExternalLink aria-hidden="true" data-icon="inline-end" />
+                <ExternalLinkIcon aria-hidden="true" data-icon="inline-end" />
               </a>
             </ShadcnButton>
           ) : null}
@@ -7265,7 +7251,7 @@ function EventInspector({
             <Badge>{event.provider}</Badge>
           </div>
           <Button aria-label="Close event details" onClick={close} tone="ghost">
-            <X aria-hidden="true" size={19} />
+            <XIcon aria-hidden="true" size={19} />
           </Button>
         </header>
         <div className="event-sheet__body">
@@ -7276,13 +7262,13 @@ function EventInspector({
           <dl className="event-sheet__facts">
             <div>
               <dt>
-                <Clock3 aria-hidden="true" size={17} /> Time
+                <ClockIcon aria-hidden="true" size={17} /> Time
               </dt>
               <dd>{formatEventRange(event, user.planningTimezone)}</dd>
             </div>
             <div>
               <dt>
-                <CalendarDays aria-hidden="true" size={17} /> Time Zone
+                <CalendarIcon aria-hidden="true" size={17} /> Time Zone
               </dt>
               <dd>
                 {user.planningTimezone} ·{" "}
@@ -7292,7 +7278,7 @@ function EventInspector({
             {event.location ? (
               <div>
                 <dt>
-                  <MapPin aria-hidden="true" size={17} /> Location
+                  <MapPinIcon aria-hidden="true" size={17} /> Location
                 </dt>
                 <dd>
                   <a
@@ -7300,7 +7286,7 @@ function EventInspector({
                     rel="noreferrer"
                     target="_blank"
                   >
-                    {event.location} <ExternalLink aria-hidden="true" size={12} />
+                    {event.location} <ExternalLinkIcon aria-hidden="true" size={12} />
                   </a>
                 </dd>
               </div>
@@ -7311,7 +7297,7 @@ function EventInspector({
               <header>
                 <div>
                   <h3 id="event-blocking-title">
-                    <LockKeyhole aria-hidden="true" size={16} /> Blocked time
+                    <LockIcon aria-hidden="true" size={16} /> Blocked time
                   </h3>
                   <p>Keep one event here while reserving the same time elsewhere.</p>
                 </div>
@@ -7384,7 +7370,7 @@ function EventInspector({
           ) : null}
           <section className="event-sheet__notes" aria-labelledby="event-notes-title">
             <h3 id="event-notes-title">
-              <FileText aria-hidden="true" size={16} /> Notes
+              <FileTextIcon aria-hidden="true" size={16} /> Notes
             </h3>
             {event.notes ? (
               <Suspense fallback={<p className="event-sheet__empty">Formatting notes…</p>}>
@@ -7395,7 +7381,7 @@ function EventInspector({
             )}
           </section>
           <div className="event-sheet__sync-note">
-            <Cloud aria-hidden="true" size={16} />
+            <CloudIcon aria-hidden="true" size={16} />
             <span>
               {event.provider === "google"
                 ? "Edits write through to Google Calendar before they appear here."
@@ -7424,10 +7410,10 @@ function EventInspector({
                 onClick={() => setConfirmDelete(true)}
                 tone="danger"
               >
-                <Trash2 aria-hidden="true" size={15} /> Delete
+                <TrashIcon aria-hidden="true" size={15} /> Delete
               </Button>
               <Button disabled={!calendar?.isWritable} onClick={edit} tone="accent">
-                <Edit3 aria-hidden="true" size={15} /> Edit Event
+                <EditIcon aria-hidden="true" size={15} /> Edit Event
               </Button>
             </>
           )}
@@ -7627,7 +7613,7 @@ function Modal({
             <h2 id="modal-title">{title}</h2>
           </div>
           <Button aria-label="Close" onClick={close} tone="ghost">
-            <X size={19} />
+            <XIcon size={19} />
           </Button>
         </header>
         {children}
@@ -7706,14 +7692,6 @@ function FatalState({ error }: { error: unknown }) {
     </main>
   );
 }
-function LogoMark({ compact = false }: { compact?: boolean }) {
-  return (
-    <span className={`logo-mark${compact ? " logo-mark--compact" : ""}`}>
-      <Volleyball aria-hidden="true" />
-    </span>
-  );
-}
-
 function initials(name: string) {
   return name
     .split(/\s+/)

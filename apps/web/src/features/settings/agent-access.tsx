@@ -6,21 +6,21 @@ import type {
   MailSetupAccount,
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  CheckCircle2,
-  ChevronDown,
-  Circle,
-  Clipboard,
-  ExternalLink,
-  KeyRound,
-  Plug,
-  ShieldCheck,
-  Trash2,
-  X,
-} from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  ChevronDownIcon,
+  CircleCheckIcon,
+  CircleIcon,
+  ClipboardIcon,
+  ExternalLinkIcon,
+  KeyIcon,
+  PlugIcon,
+  ShieldCheckIcon,
+  TrashIcon,
+  XIcon,
+} from "@/components/icons";
 import { api, errorMessage } from "../../api.js";
 import { ReadinessPanel } from "../../components/readiness-panel.js";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
@@ -324,7 +324,7 @@ export function AgentAccessSettings() {
         <CardContent className="settings-section__body agent-access__body">
           {blockingError ? (
             <Alert variant="destructive">
-              <X />
+              <XIcon />
               <AlertTitle>Agent connection details could not be loaded</AlertTitle>
               <AlertDescription>{errorMessage(blockingError)}</AlertDescription>
             </Alert>
@@ -366,7 +366,10 @@ export function AgentAccessSettings() {
                         {setupPhase}
                       </span>
                     </span>
-                    <CheckCircle2 aria-hidden="true" className="agent-access__domain-selection" />
+                    <CircleCheckIcon
+                      aria-hidden="true"
+                      className="agent-access__domain-selection"
+                    />
                   </ToggleGroupItem>
                 );
               })}
@@ -375,7 +378,7 @@ export function AgentAccessSettings() {
 
           {selectedDomainError ? (
             <Alert variant="destructive">
-              <X />
+              <XIcon />
               <AlertTitle>{selectedLabel} readiness could not be loaded</AlertTitle>
               <AlertDescription>{errorMessage(selectedDomainError)}</AlertDescription>
             </Alert>
@@ -444,7 +447,7 @@ export function AgentAccessSettings() {
               title="Let the agent set up Ilo"
             >
               <Alert role="status" variant="info">
-                <ShieldCheck />
+                <ShieldCheckIcon />
                 <AlertTitle>
                   {setupPlan.data
                     ? (setupPlan.data.steps.find(
@@ -471,7 +474,7 @@ export function AgentAccessSettings() {
                 <CollapsibleTrigger asChild>
                   <Button className="agent-access__protocol-trigger" size="sm" variant="ghost">
                     Setup protocol details
-                    <ChevronDown data-icon="inline-end" />
+                    <ChevronDownIcon data-icon="inline-end" />
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="agent-access__protocol-details">
@@ -489,7 +492,7 @@ export function AgentAccessSettings() {
                   {guide.data ? (
                     <Item size="xs" variant="muted">
                       <ItemMedia variant="icon">
-                        <ShieldCheck />
+                        <ShieldCheckIcon />
                       </ItemMedia>
                       <ItemContent>
                         <ItemTitle>Optional setup reference v{guide.data.skill.version}</ItemTitle>
@@ -502,7 +505,7 @@ export function AgentAccessSettings() {
                         <Button asChild size="sm" variant="ghost">
                           <a href={guide.data.skill.sourceUrl} rel="noreferrer" target="_blank">
                             View skill source
-                            <ExternalLink data-icon="inline-end" />
+                            <ExternalLinkIcon data-icon="inline-end" />
                           </a>
                         </Button>
                       </ItemActions>
@@ -530,7 +533,7 @@ export function AgentAccessSettings() {
               {oauthClients.data?.map((client) => (
                 <Item key={client.id} variant="outline">
                   <ItemMedia variant="icon">
-                    <Plug />
+                    <PlugIcon />
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{client.name}</ItemTitle>
@@ -548,7 +551,7 @@ export function AgentAccessSettings() {
                       type="button"
                       variant="ghost"
                     >
-                      <Trash2 />
+                      <TrashIcon />
                     </Button>
                   </ItemActions>
                 </Item>
@@ -614,7 +617,7 @@ function MailRuleReview({
   if (unavailable) {
     return (
       <Alert variant="destructive">
-        <X />
+        <XIcon />
         <AlertTitle>Mail rules are unavailable</AlertTitle>
         <AlertDescription>
           Ilo cannot report an approved-rule count or open rule review until Mail rules load.
@@ -662,7 +665,7 @@ function MailRuleReview({
       {reviewed ? (
         <div className="agent-access__rule-preview">
           <Alert role="status" variant={reviewed.preview.window.truncated ? "warning" : "info"}>
-            <ShieldCheck />
+            <ShieldCheckIcon />
             <AlertTitle>
               {reviewed.preview.matchedCount} current match
               {reviewed.preview.matchedCount === 1 ? "" : "es"}
@@ -694,7 +697,7 @@ function MailRuleReview({
           ) : null}
           {!profileActive ? (
             <Alert variant="warning">
-              <ShieldCheck />
+              <ShieldCheckIcon />
               <AlertTitle>
                 {profileLoading
                   ? "Mail profile status is loading"
@@ -850,7 +853,7 @@ function SetupProtocolStep({ step }: { step: AssistantSetupStep }) {
   return (
     <Item size="xs" variant={step.state === "current" ? "outline" : "muted"}>
       <ItemMedia variant="icon">
-        {step.state === "complete" ? <CheckCircle2 /> : <Circle />}
+        {step.state === "complete" ? <CircleCheckIcon /> : <CircleIcon />}
       </ItemMedia>
       <ItemContent>
         <ItemTitle>{step.title}</ItemTitle>
@@ -885,7 +888,7 @@ function ConnectionStep({
       <Collapsible defaultOpen={defaultOpen}>
         <div className="agent-access__step-layout">
           <div className="agent-access__step-number" aria-hidden="true">
-            {complete ? <CheckCircle2 /> : number}
+            {complete ? <CircleCheckIcon /> : number}
           </div>
           <div className="agent-access__step-content">
             <h3>
@@ -895,7 +898,7 @@ function ConnectionStep({
                     <span className="agent-access__step-title">{title}</span>
                     <span className="agent-access__step-status">{status}</span>
                   </span>
-                  <ChevronDown data-icon="inline-end" />
+                  <ChevronDownIcon data-icon="inline-end" />
                 </Button>
               </CollapsibleTrigger>
             </h3>
@@ -936,7 +939,7 @@ function CopyInput({
             onClick={() => void copyToClipboard(value, label)}
             size="icon-xs"
           >
-            <Clipboard />
+            <ClipboardIcon />
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>
@@ -973,7 +976,7 @@ function CopyPrompt({
         type="button"
         variant="outline"
       >
-        <Clipboard data-icon="inline-start" />
+        <ClipboardIcon data-icon="inline-start" />
         {copyLabel}
       </Button>
     </Field>
@@ -1037,9 +1040,9 @@ function TokenAccess({
         <Collapsible onOpenChange={setOpen} open={open}>
           <CollapsibleTrigger asChild>
             <Button className="settings-disclosure__trigger" type="button" variant="outline">
-              <KeyRound data-icon="inline-start" />
+              <KeyIcon data-icon="inline-start" />
               {open ? "Hide token setup" : "Set up a local token"}
-              <ChevronDown data-icon="inline-end" />
+              <ChevronDownIcon data-icon="inline-end" />
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="agent-access__token-content">
@@ -1083,7 +1086,7 @@ function TokenAccess({
                 <CollapsibleTrigger asChild>
                   <Button className="settings-disclosure__trigger" type="button" variant="outline">
                     Fine-tune permissions · {scopes.length} selected
-                    <ChevronDown data-icon="inline-end" />
+                    <ChevronDownIcon data-icon="inline-end" />
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="settings-disclosure__content">
@@ -1117,13 +1120,13 @@ function TokenAccess({
                 onClick={() => create.mutate()}
                 type="button"
               >
-                <KeyRound data-icon="inline-start" />
+                <KeyIcon data-icon="inline-start" />
                 Create local token
               </Button>
             </FieldGroup>
             {secret ? (
               <Alert role="status">
-                <KeyRound />
+                <KeyIcon />
                 <AlertTitle>Copy this token now</AlertTitle>
                 <AlertDescription>
                   It will not be shown again. <code>{secret}</code>
@@ -1147,7 +1150,7 @@ function TokenAccess({
             {activeTokens.map((token) => (
               <Item key={token.id} variant="outline">
                 <ItemMedia variant="icon">
-                  <KeyRound />
+                  <KeyIcon />
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{token.name}</ItemTitle>
@@ -1165,7 +1168,7 @@ function TokenAccess({
                     type="button"
                     variant="ghost"
                   >
-                    <Trash2 />
+                    <TrashIcon />
                   </Button>
                 </ItemActions>
               </Item>
@@ -1178,7 +1181,7 @@ function TokenAccess({
             <CollapsibleTrigger asChild>
               <Button type="button" variant="ghost">
                 Revoked tokens · {revokedTokens.length}
-                <ChevronDown data-icon="inline-end" />
+                <ChevronDownIcon data-icon="inline-end" />
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent>

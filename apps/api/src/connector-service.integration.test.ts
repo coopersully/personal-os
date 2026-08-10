@@ -1108,6 +1108,92 @@ describe.sequential("connector service", () => {
     );
   });
 
+  it("observes current freshness only for automatically managed connector accounts", async () => {
+    const before = await service.observeSyncFreshness();
+    const [freshnessUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Freshness Observer",
+        email: "connector-freshness@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!freshnessUser) throw new Error("Freshness observer user was not created.");
+    const encryptedCredentials = encryptJson(credentials, encryptionKey);
+    await database.db.insert(calendarAccounts).values([
+      {
+        calendarEnabled: true,
+        createdAt: new Date(timestamp.getTime() - 60 * 60_000),
+        encryptedCredentials,
+        label: "Fresh automatic account",
+        lastSyncedAt: new Date(timestamp.getTime() - 2 * 60_000),
+        mailEnabled: false,
+        provider: "google",
+        providerAccountId: "freshness-fresh",
+        userId: freshnessUser.id,
+      },
+      {
+        calendarEnabled: false,
+        createdAt: new Date(timestamp.getTime() - 30 * 24 * 60 * 60_000),
+        encryptedCredentials,
+        label: "Stale automatic account",
+        lastSyncedAt: new Date(timestamp.getTime() - 20 * 60_000),
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "freshness-stale",
+        userId: freshnessUser.id,
+      },
+      {
+        calendarEnabled: true,
+        createdAt: new Date(timestamp.getTime() - 30 * 60_000),
+        encryptedCredentials,
+        label: "Never synchronized account",
+        mailEnabled: false,
+        provider: "google",
+        providerAccountId: "freshness-never",
+        userId: freshnessUser.id,
+      },
+      {
+        calendarEnabled: false,
+        createdAt: new Date(timestamp.getTime() - 90 * 24 * 60 * 60_000),
+        encryptedCredentials,
+        label: "Reconnect-required account",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "freshness-reconnect",
+        syncError: "Google authorization is no longer valid. Reconnect to resume syncing.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "google_authorization_failed",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncStatus: "error",
+        userId: freshnessUser.id,
+      },
+      {
+        calendarEnabled: true,
+        createdAt: new Date(timestamp.getTime() - 120 * 24 * 60 * 60_000),
+        encryptedCredentials,
+        label: "Operator-required account",
+        mailEnabled: false,
+        provider: "google",
+        providerAccountId: "freshness-operator",
+        syncError: "Google is not configured correctly. ilo is resolving this.",
+        syncErrorCategory: "configuration",
+        syncErrorCode: "google_configuration_failed",
+        syncFailureCount: 1,
+        syncRecovery: "operator",
+        syncStatus: "error",
+        userId: freshnessUser.id,
+      },
+    ]);
+
+    await expect(service.observeSyncFreshness()).resolves.toEqual({
+      eligibleAccountCount: before.eligibleAccountCount + 3,
+      freshnessAgeMs: 30 * 60_000,
+    });
+  });
+
   it("writes Google Mail through the provider gateway and refreshes credentials", async () => {
     const [account] = await database.db
       .select()

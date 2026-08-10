@@ -1179,6 +1179,18 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await connectors.renewSubscriptions();
       const triggered = await connectors.dispatchTriggeredSyncs();
       const scheduled = await connectors.syncDueAccounts();
+      const freshnessStartedAt = Date.now();
+      const freshness = await connectors.observeSyncFreshness();
+      dependencies.log?.({
+        durationMs: Date.now() - freshnessStartedAt,
+        eligibleAccountCount: freshness.eligibleAccountCount,
+        event: "connector_sync_freshness_observed",
+        freshnessAgeMs: freshness.freshnessAgeMs,
+        method: "SCHEDULER",
+        path: "/internal/connectors/freshness",
+        requestId: randomUUID(),
+        status: 200,
+      });
       return {
         attempted: triggered.attempted + scheduled.attempted,
         failed: triggered.failed + scheduled.failed,

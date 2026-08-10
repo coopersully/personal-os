@@ -48,6 +48,7 @@ export type RequestLog = {
   code?: string | undefined;
   disposition?: ConnectorSyncRecovery;
   durationMs: number;
+  eligibleAccountCount?: number;
   event:
     | "calendar_provider_reconciliation"
     | "connector_authorization_callback_failed"
@@ -57,6 +58,7 @@ export type RequestLog = {
     | "connector_subscription_renewed"
     | "connector_sync_completed"
     | "connector_sync_failed"
+    | "connector_sync_freshness_observed"
     | "connector_sync_recovered"
     | "connector_trigger_dispatched"
     | "connector_recovery_failed"

@@ -233,8 +233,8 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /api_deployment_heartbeat_interval_seconds="\$\{API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30\}"[\s\S]*?start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?\/bin\/sleep "\$api_deployment_heartbeat_interval_seconds"[\s\S]*?for heartbeat_attempt in 1 2 3[\s\S]*?publish_api_deployment_state 1/,
-  "a default-thirty-second deployment heartbeat loop with bounded refresh retries",
+  /api_deployment_heartbeat_interval_seconds="\$\{API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30\}"[\s\S]*?start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?for heartbeat_attempt in 1 2 3[\s\S]*?publish_api_deployment_state 1[\s\S]*?api_deployment_heartbeat_ready_file[\s\S]*?\/bin\/sleep "\$api_deployment_heartbeat_interval_seconds"/,
+  "a background-proven default-thirty-second deployment heartbeat loop with bounded refresh retries",
 );
 requireMatch(
   workflow,

@@ -15,6 +15,7 @@ api_deployment_heartbeat_interval_seconds="${API_DEPLOYMENT_HEARTBEAT_INTERVAL_S
 api_deployment_heartbeat_retry_seconds="${API_DEPLOYMENT_HEARTBEAT_RETRY_SECONDS:-5}"
 api_deployment_heartbeat_background_enabled="${API_DEPLOYMENT_HEARTBEAT_BACKGROUND_ENABLED:-true}"
 api_deployment_heartbeat_failure_file=""
+api_deployment_heartbeat_ready_file=""
 api_recovery_entry=false
 api_recovery_marker_persisted=false
 api_recovery_cleanup_persisted=false
@@ -105,9 +106,10 @@ start_api_deployment_heartbeat() {
   api_deployment_heartbeat_started=true
   if test "$api_deployment_heartbeat_background_enabled" = "true"; then
     api_deployment_heartbeat_failure_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-heartbeat.XXXXXX")"
+    api_deployment_heartbeat_ready_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-heartbeat-ready.XXXXXX")"
     (
       trap - ERR EXIT INT TERM
-      while /bin/sleep "$api_deployment_heartbeat_interval_seconds"; do
+      while true; do
         heartbeat_refreshed=false
         for heartbeat_attempt in 1 2 3; do
           if publish_api_deployment_state 1; then
@@ -123,9 +125,22 @@ start_api_deployment_heartbeat() {
             >"$api_deployment_heartbeat_failure_file"
           exit 1
         fi
+        printf '%s\n' ready >"$api_deployment_heartbeat_ready_file"
+        /bin/sleep "$api_deployment_heartbeat_interval_seconds"
       done
     ) &
     api_deployment_heartbeat_pid="$!"
+    for heartbeat_ready_attempt in {1..600}; do
+      if test -s "$api_deployment_heartbeat_ready_file"; then
+        break
+      fi
+      assert_api_deployment_heartbeat_healthy || return 1
+      /bin/sleep 0.1
+    done
+    if test ! -s "$api_deployment_heartbeat_ready_file"; then
+      echo "::error::The API deployment heartbeat worker did not become ready; aborting the rollout."
+      return 1
+    fi
   fi
   if ! wait_for_api_deployment_alarm_state ALARM; then
     stop_api_deployment_heartbeat || true
@@ -165,6 +180,10 @@ stop_api_deployment_heartbeat() {
   if test -n "$api_deployment_heartbeat_failure_file"; then
     rm -f "$api_deployment_heartbeat_failure_file"
     api_deployment_heartbeat_failure_file=""
+  fi
+  if test -n "$api_deployment_heartbeat_ready_file"; then
+    rm -f "$api_deployment_heartbeat_ready_file"
+    api_deployment_heartbeat_ready_file=""
   fi
 }
 

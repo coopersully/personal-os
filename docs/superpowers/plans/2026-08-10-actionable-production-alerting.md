@@ -49,7 +49,7 @@ Replace the completion-gap filter with:
 }
 ```
 
-Require `OKActions: []` and `InsufficientDataActions: []` on every validated alarm. Require the freshness alarm to use comparison `GreaterThanOrEqualToThreshold`, threshold `600000`, period `60`, evaluation periods `5`, datapoints to alarm `3`, and missing data `breaching` in both the fake-AWS contract and production preflight.
+Require the operations SNS `AlarmActions` route on actionable metric alarms and `aws_cloudwatch_composite_alarm.api_availability_actionable`; diagnostic and implementation-only alarms require empty `AlarmActions`. Require `OKActions: []` and `InsufficientDataActions: []` on every validated alarm. Require the freshness alarm to use comparison `GreaterThanOrEqualToThreshold`, threshold `600000`, period `60`, evaluation periods `5`, datapoints to alarm `3`, and missing data `breaching` in both the fake-AWS contract and production preflight.
 
 - [ ] **Step 2: Add deployment-heartbeat and composite assertions**
 

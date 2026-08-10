@@ -42,6 +42,13 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function arnSuffix(arn, marker, prefix, code) {
+  if (typeof arn !== "string") fail(code);
+  const markerIndex = arn.indexOf(marker);
+  if (markerIndex < 0) fail(code);
+  return `${prefix}${arn.slice(markerIndex + marker.length)}`;
+}
+
 function validateFilter(filters, expected) {
   const filter = exactlyOne(
     filters,
@@ -113,9 +120,12 @@ function validateAlarm(alarms, expected) {
   if ((alarm.InsufficientDataActions ?? []).length !== 0) {
     fail(`alarm-insufficient-data-actions:${expected.name}`);
   }
-  const dimensionNames = (alarm.Dimensions ?? []).map(({ Name }) => Name).sort();
-  const expectedDimensionNames = (expected.dimensionNames ?? []).toSorted();
-  if (JSON.stringify(dimensionNames) !== JSON.stringify(expectedDimensionNames)) {
+  const dimensions = Object.fromEntries(
+    (alarm.Dimensions ?? [])
+      .map(({ Name, Value }) => [Name, Value])
+      .sort(([left], [right]) => left.localeCompare(right)),
+  );
+  if (JSON.stringify(dimensions) !== JSON.stringify(expected.dimensions ?? {})) {
     fail(`alarm-dimensions:${expected.name}`);
   }
   if ((alarm.Metrics ?? []).length !== 0) fail(`alarm-metric-math:${expected.name}`);
@@ -126,6 +136,39 @@ try {
 
   const logGroup = `/ecs/${cluster}-api`;
   const filterPrefix = `${cluster}-connector-`;
+  const loadBalancer = exactlyOne(
+    awsJson(["elbv2", "describe-load-balancers", "--names", `${cluster}-public`], "LoadBalancers"),
+    () => true,
+    "load-balancer-count",
+  );
+  const loadBalancerSuffix = arnSuffix(
+    loadBalancer.LoadBalancerArn,
+    ":loadbalancer/",
+    "",
+    "load-balancer-arn",
+  );
+  const targetGroups = awsJson(
+    ["elbv2", "describe-target-groups", "--names", `${cluster}-api`, `${cluster}-mcp`],
+    "TargetGroups",
+  );
+  const targetGroupSuffixes = Object.fromEntries(
+    ["api", "mcp"].map((service) => {
+      const targetGroup = exactlyOne(
+        targetGroups,
+        ({ TargetGroupName }) => TargetGroupName === `${cluster}-${service}`,
+        `target-group-count:${service}`,
+      );
+      return [
+        service,
+        arnSuffix(
+          targetGroup.TargetGroupArn,
+          ":targetgroup/",
+          "targetgroup/",
+          `target-group-arn:${service}`,
+        ),
+      ];
+    }),
+  );
   const expectedFilters = [
     {
       logGroup,
@@ -236,7 +279,10 @@ try {
       treatMissingData: "breaching",
     },
     ...["api", "mcp"].map((service) => ({
-      dimensionNames: ["LoadBalancer", "TargetGroup"],
+      dimensions: {
+        LoadBalancer: loadBalancerSuffix,
+        TargetGroup: targetGroupSuffixes[service],
+      },
       metricName: "HTTPCode_Target_5XX_Count",
       name: `${cluster}-${service}-target-5xx`,
       namespace: "AWS/ApplicationELB",
@@ -247,7 +293,7 @@ try {
       actionsEnabled: false,
       alarmActionCount: 0,
       datapointsToAlarm: 2,
-      dimensionNames: ["LoadBalancer"],
+      dimensions: { LoadBalancer: loadBalancerSuffix },
       evaluationPeriods: 3,
       metricName: "HTTPCode_ELB_5XX_Count",
       name: `${cluster}-alb-5xx`,

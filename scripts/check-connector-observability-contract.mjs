@@ -34,6 +34,11 @@ requireMatch(
   "isolated API-log-group-scoped metric filter authority",
 );
 requireMatch(
+  iam,
+  /sid\s*=\s*"ReadConnectorAlarmResources"[\s\S]*?elasticloadbalancing:DescribeLoadBalancers[\s\S]*?elasticloadbalancing:DescribeTargetGroups[\s\S]*?resources\s*=\s*\["\*"\]/,
+  "read-only load balancer and target group discovery for exact alarm dimensions",
+);
+requireMatch(
   packageJson,
   /node scripts\/check-connector-observability-contract\.mjs/,
   "deterministic validation in the repository lint gate",
@@ -92,6 +97,25 @@ for (const event of [
 }
 
 const validState = {
+  LoadBalancers: [
+    {
+      LoadBalancerArn:
+        "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/app/personal-os-prod-public/lbhash",
+      LoadBalancerName: "personal-os-prod-public",
+    },
+  ],
+  TargetGroups: [
+    {
+      TargetGroupArn:
+        "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/personal-os-prod-api/apihash",
+      TargetGroupName: "personal-os-prod-api",
+    },
+    {
+      TargetGroupArn:
+        "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/personal-os-prod-mcp/mcphash",
+      TargetGroupName: "personal-os-prod-mcp",
+    },
+  ],
   metricFilters: [
     {
       filterName: "personal-os-prod-connector-sync-failure",
@@ -319,8 +343,11 @@ const validState = {
       ComparisonOperator: "GreaterThanOrEqualToThreshold",
       DatapointsToAlarm: 1,
       Dimensions: [
-        { Name: "LoadBalancer", Value: "app/personal-os-prod/example" },
-        { Name: "TargetGroup", Value: `targetgroup/personal-os-prod-${service}/example` },
+        { Name: "LoadBalancer", Value: "app/personal-os-prod-public/lbhash" },
+        {
+          Name: "TargetGroup",
+          Value: `targetgroup/personal-os-prod-${service}/${service}hash`,
+        },
       ],
       EvaluationPeriods: 1,
       InsufficientDataActions: [],
@@ -339,7 +366,7 @@ const validState = {
       AlarmName: "personal-os-prod-alb-5xx",
       ComparisonOperator: "GreaterThanOrEqualToThreshold",
       DatapointsToAlarm: 2,
-      Dimensions: [{ Name: "LoadBalancer", Value: "app/personal-os-prod/example" }],
+      Dimensions: [{ Name: "LoadBalancer", Value: "app/personal-os-prod-public/lbhash" }],
       EvaluationPeriods: 3,
       InsufficientDataActions: [],
       MetricName: "HTTPCode_ELB_5XX_Count",
@@ -408,6 +435,10 @@ if (state.delayAllOperations || state.delayOperation === operation) {
 }
 if (operation === "logs describe-metric-filters") {
   process.stdout.write(JSON.stringify({ metricFilters: state.metricFilters }));
+} else if (operation === "elbv2 describe-load-balancers") {
+  process.stdout.write(JSON.stringify({ LoadBalancers: state.LoadBalancers }));
+} else if (operation === "elbv2 describe-target-groups") {
+  process.stdout.write(JSON.stringify({ TargetGroups: state.TargetGroups }));
 } else if (operation === "cloudwatch describe-alarms") {
   const args = process.argv.slice(4);
   const compositeLookup = args.includes("personal-os-prod-api-availability-actionable");
@@ -464,14 +495,14 @@ if (operation === "logs describe-metric-filters") {
   const sequentiallyDelayed = run({
     ...validState,
     delayAllOperations: true,
-    delayMs: 16_000,
+    delayMs: 10_000,
   });
   if (
     sequentiallyDelayed.status !== 0 ||
     !sequentiallyDelayed.stdout.includes("preflight passed")
   ) {
     throw new Error(
-      `Two slow but responsive AWS reads must fit the enclosing harness budget: ${sequentiallyDelayed.stderr || sequentiallyDelayed.stdout}`,
+      `Five slow but responsive AWS reads must fit the enclosing harness budget: ${sequentiallyDelayed.stderr || sequentiallyDelayed.stdout}`,
     );
   }
 
@@ -599,6 +630,24 @@ if (operation === "logs describe-metric-filters") {
         ...validState,
         MetricAlarms: validState.MetricAlarms.map((alarm, index) =>
           index === 0 ? { ...alarm, TreatMissingData: "missing" } : alarm,
+        ),
+      },
+    },
+    {
+      label: "wrong alarm dimension value",
+      state: {
+        ...validState,
+        MetricAlarms: validState.MetricAlarms.map((alarm) =>
+          alarm.AlarmName === "personal-os-prod-api-target-5xx"
+            ? {
+                ...alarm,
+                Dimensions: alarm.Dimensions.map((dimension) =>
+                  dimension.Name === "TargetGroup"
+                    ? { ...dimension, Value: "targetgroup/unrelated/value" }
+                    : dimension,
+                ),
+              }
+            : alarm,
         ),
       },
     },

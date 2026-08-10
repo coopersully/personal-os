@@ -107,30 +107,14 @@ start_api_deployment_heartbeat() {
   if test "$api_deployment_heartbeat_background_enabled" = "true"; then
     api_deployment_heartbeat_failure_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-heartbeat.XXXXXX")"
     api_deployment_heartbeat_ready_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-heartbeat-ready.XXXXXX")"
-    (
-      trap - ERR EXIT INT TERM
-      while true; do
-        heartbeat_refreshed=false
-        for heartbeat_attempt in 1 2 3; do
-          if publish_api_deployment_state 1; then
-            heartbeat_refreshed=true
-            break
-          fi
-          if test "$heartbeat_attempt" != "3"; then
-            /bin/sleep "$api_deployment_heartbeat_retry_seconds"
-          fi
-        done
-        if test "$heartbeat_refreshed" != "true"; then
-          printf '%s\n' "The API deployment heartbeat failed after three attempts." \
-            >"$api_deployment_heartbeat_failure_file"
-          exit 1
-        fi
-        printf '%s\n' ready >"$api_deployment_heartbeat_ready_file"
-        /bin/sleep "$api_deployment_heartbeat_interval_seconds"
-      done
-    ) &
+    python3 .github/scripts/deployment-heartbeat-worker.py \
+      "$AWS_REGION" \
+      "$api_deployment_heartbeat_interval_seconds" \
+      "$api_deployment_heartbeat_retry_seconds" \
+      "$api_deployment_heartbeat_ready_file" \
+      "$api_deployment_heartbeat_failure_file" &
     api_deployment_heartbeat_pid="$!"
-    for heartbeat_ready_attempt in {1..600}; do
+    for _ in {1..600}; do
       if test -s "$api_deployment_heartbeat_ready_file"; then
         break
       fi

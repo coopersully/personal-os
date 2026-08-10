@@ -9,6 +9,10 @@ const iam = readFileSync(resolve(root, "infra/iam.tf"), "utf8");
 const main = readFileSync(resolve(root, "apps/api/src/main.ts"), "utf8");
 const workflowSource = readFileSync(resolve(root, ".github/workflows/deploy.yml"), "utf8");
 const workflow = readFileSync(resolve(root, ".github/scripts/deploy-api.sh"), "utf8");
+const heartbeatWorker = readFileSync(
+  resolve(root, ".github/scripts/deployment-heartbeat-worker.py"),
+  "utf8",
+);
 const runtimeTaskDefinitionCheck = resolve(
   root,
   ".github/scripts/check-runtime-task-definition.mjs",
@@ -233,8 +237,13 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /api_deployment_heartbeat_interval_seconds="\$\{API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30\}"[\s\S]*?start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?for heartbeat_attempt in 1 2 3[\s\S]*?publish_api_deployment_state 1[\s\S]*?api_deployment_heartbeat_ready_file[\s\S]*?\/bin\/sleep "\$api_deployment_heartbeat_interval_seconds"/,
+  /api_deployment_heartbeat_interval_seconds="\$\{API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30\}"[\s\S]*?start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?python3 \.github\/scripts\/deployment-heartbeat-worker\.py[\s\S]*?api_deployment_heartbeat_ready_file[\s\S]*?api_deployment_heartbeat_failure_file/,
   "a background-proven default-thirty-second deployment heartbeat loop with bounded refresh retries",
+);
+requireMatch(
+  heartbeatWorker,
+  /prctl\(1, signal\.SIGTERM\)[\s\S]*?MetricName=ApiDeploymentInProgress,Value=1[\s\S]*?os\.getppid\(\) != deployment_parent_pid[\s\S]*?for attempt in range\(3\)[\s\S]*?time\.sleep\(interval_seconds\)/,
+  "a parent-death-bound heartbeat worker with bounded refresh retries",
 );
 requireMatch(
   workflow,

@@ -4,6 +4,8 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const compute = readFileSync(resolve(root, "infra/compute.tf"), "utf8");
 const network = readFileSync(resolve(root, "infra/network.tf"), "utf8");
+const operations = readFileSync(resolve(root, "infra/operations.tf"), "utf8");
+const governance = readFileSync(resolve(root, "infra/governance.tf"), "utf8");
 
 function requireMatch(source, pattern, description) {
   if (!pattern.test(source)) {
@@ -36,10 +38,36 @@ for (const service of ["api", "mcp"]) {
   );
 }
 
-requireMatch(
-  network,
-  /resource "aws_nat_gateway" "application"/,
-  "the temporary Release 1 NAT rollback boundary",
-);
+for (const [pattern, description] of [
+  [/resource "aws_eip" "nat"/, "NAT Elastic IP"],
+  [/resource "aws_nat_gateway" "application"/, "NAT gateway"],
+  [/resource "aws_subnet" "application"/, "unused application subnets"],
+  [/resource "aws_route_table" "application"/, "unused application route table"],
+  [/resource "aws_route_table_association" "application"/, "unused application routes"],
+]) {
+  if (pattern.test(network)) {
+    throw new Error(`Production cost-floor contract still contains ${description}.`);
+  }
+}
 
-console.log("Production cost-floor Release 1 contract passed.");
+if (/resource "aws_cloudwatch_metric_alarm" "nat_/.test(operations)) {
+  throw new Error("Production cost-floor contract still contains NAT alarms.");
+}
+
+const publicHealthChecks = operations.match(
+  /public_health_checks\s*=\s*\{([\s\S]*?)\n\s*\}\n\n\s*ecs_services/,
+)?.[1];
+for (const surface of ["app", "api"]) {
+  requireMatch(
+    publicHealthChecks ?? "",
+    new RegExp(`${surface}\\s*=\\s*\\{`),
+    `the ${surface} public health check`,
+  );
+}
+if (/\bmcp\s*=\s*\{/.test(publicHealthChecks ?? "")) {
+  throw new Error("Production cost-floor contract still contains the redundant MCP health check.");
+}
+
+requireMatch(governance, /recording_frequency\s*=\s*"DAILY"/, "daily AWS Config recording");
+
+console.log("Production cost-floor contract passed.");

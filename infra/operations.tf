@@ -13,11 +13,6 @@ locals {
       path          = "/health/ready"
       search_string = "\"ready\""
     }
-    mcp = {
-      fqdn          = local.mcp_domain
-      path          = "/health/live"
-      search_string = "\"ok\""
-    }
   }
 
   ecs_services = {
@@ -460,46 +455,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections_high" {
 
   dimensions = {
     DBInstanceIdentifier = aws_db_instance.postgres.identifier
-  }
-
-  alarm_actions = local.alarm_actions
-}
-
-resource "aws_cloudwatch_metric_alarm" "nat_port_errors" {
-  alarm_name          = "${local.name}-nat-port-errors"
-  alarm_description   = "The NAT gateway cannot allocate an outbound source port."
-  namespace           = "AWS/NATGateway"
-  metric_name         = "ErrorPortAllocation"
-  statistic           = "Sum"
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = 0
-  period              = 300
-  evaluation_periods  = 1
-  datapoints_to_alarm = 1
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    NatGatewayId = aws_nat_gateway.application.id
-  }
-
-  alarm_actions = local.alarm_actions
-}
-
-resource "aws_cloudwatch_metric_alarm" "nat_packet_drops" {
-  alarm_name          = "${local.name}-nat-packet-drops"
-  alarm_description   = "The NAT gateway dropped outbound packets."
-  namespace           = "AWS/NATGateway"
-  metric_name         = "PacketsDropCount"
-  statistic           = "Sum"
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = 0
-  period              = 300
-  evaluation_periods  = 2
-  datapoints_to_alarm = 2
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    NatGatewayId = aws_nat_gateway.application.id
   }
 
   alarm_actions = local.alarm_actions

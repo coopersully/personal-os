@@ -49,11 +49,13 @@ Replace the completion-gap filter with:
 }
 ```
 
-Require `OKActions: []` on every connector alarm and require the freshness alarm to use period `60`, evaluation periods `5`, datapoints to alarm `3`, and missing data `breaching`.
+Require `OKActions: []` and `InsufficientDataActions: []` on every validated alarm. Require the freshness alarm to use comparison `GreaterThanOrEqualToThreshold`, threshold `600000`, period `60`, evaluation periods `5`, datapoints to alarm `3`, and missing data `breaching` in both the fake-AWS contract and production preflight.
 
 - [ ] **Step 2: Add deployment-heartbeat and composite assertions**
 
 Require `.github/scripts/deploy-api.sh` to publish `ApiDeploymentInProgress=1` before the first `--desired-count 0`, maintain a 30-second heartbeat, and publish `0` from success and failure cleanup. Extend the fake AWS command handler so a healthy scenario records `cloudwatch put-metric-data` calls and asserts their order.
+
+Validate the 5xx distinction explicitly: aggregate `HTTPCode_ELB_5XX_Count` (`aws_cloudwatch_metric_alarm.alb_5xx`) is diagnostic with actions disabled, while per-service `HTTPCode_Target_5XX_Count` (`aws_cloudwatch_metric_alarm.target_5xx`) retains its alarm-only operations route. Both have empty recovery and insufficient-data routes.
 
 - [ ] **Step 3: Run the contracts and verify RED**
 

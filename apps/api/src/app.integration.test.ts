@@ -3634,6 +3634,24 @@ describe.sequential("ilo API", () => {
     ).toBe(401);
   }, 120_000);
 
+  it("observes connector freshness when earlier scheduler work fails", async () => {
+    const schedulerError = new Error("scheduler read failed");
+    const freshnessLogsBefore = logs.mock.calls.filter(
+      ([entry]) => entry.event === "connector_sync_freshness_observed",
+    ).length;
+    const selectSpy = vi.spyOn(database.db, "select");
+    selectSpy.mockImplementationOnce(() => {
+      throw schedulerError;
+    });
+
+    await expect(app.syncDueConnectors()).rejects.toBe(schedulerError);
+
+    expect(
+      logs.mock.calls.filter(([entry]) => entry.event === "connector_sync_freshness_observed"),
+    ).toHaveLength(freshnessLogsBefore + 1);
+    selectSpy.mockRestore();
+  });
+
   it("verifies email addresses and resets passwords through one-time email links", async () => {
     expect(
       (

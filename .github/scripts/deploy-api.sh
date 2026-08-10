@@ -12,7 +12,9 @@ api_rollout_complete=false
 api_deployment_heartbeat_pid=""
 api_deployment_heartbeat_started=false
 api_deployment_heartbeat_interval_seconds="${API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30}"
+api_deployment_heartbeat_retry_seconds="${API_DEPLOYMENT_HEARTBEAT_RETRY_SECONDS:-5}"
 api_deployment_heartbeat_background_enabled="${API_DEPLOYMENT_HEARTBEAT_BACKGROUND_ENABLED:-true}"
+api_deployment_heartbeat_failure_file=""
 api_recovery_entry=false
 api_recovery_marker_persisted=false
 api_recovery_cleanup_persisted=false
@@ -102,15 +104,25 @@ start_api_deployment_heartbeat() {
   publish_api_deployment_state 1
   api_deployment_heartbeat_started=true
   if test "$api_deployment_heartbeat_background_enabled" = "true"; then
+    api_deployment_heartbeat_failure_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-heartbeat.XXXXXX")"
     (
       trap - ERR EXIT INT TERM
       while /bin/sleep "$api_deployment_heartbeat_interval_seconds"; do
-        AWS_MAX_ATTEMPTS=1 aws cloudwatch put-metric-data \
-          --namespace ilo/Deployments \
-          --metric-data "MetricName=ApiDeploymentInProgress,Value=1,Unit=Count" \
-          --region "$AWS_REGION" \
-          --cli-connect-timeout 5 \
-          --cli-read-timeout 10 || exit 1
+        heartbeat_refreshed=false
+        for heartbeat_attempt in 1 2 3; do
+          if publish_api_deployment_state 1; then
+            heartbeat_refreshed=true
+            break
+          fi
+          if test "$heartbeat_attempt" != "3"; then
+            /bin/sleep "$api_deployment_heartbeat_retry_seconds"
+          fi
+        done
+        if test "$heartbeat_refreshed" != "true"; then
+          printf '%s\n' "The API deployment heartbeat failed after three attempts." \
+            >"$api_deployment_heartbeat_failure_file"
+          exit 1
+        fi
       done
     ) &
     api_deployment_heartbeat_pid="$!"
@@ -118,6 +130,24 @@ start_api_deployment_heartbeat() {
   if ! wait_for_api_deployment_alarm_state ALARM; then
     stop_api_deployment_heartbeat || true
     echo "::error::The API deployment heartbeat alarm did not become active before drain."
+    return 1
+  fi
+}
+
+assert_api_deployment_heartbeat_healthy() {
+  if {
+    test -n "$api_deployment_heartbeat_failure_file" &&
+      test -s "$api_deployment_heartbeat_failure_file"
+  }; then
+    echo "::error::The API deployment heartbeat could not be refreshed; aborting the rollout."
+    return 1
+  fi
+  if {
+    test "$api_deployment_heartbeat_background_enabled" = "true" &&
+      test -n "$api_deployment_heartbeat_pid" &&
+      ! kill -0 "$api_deployment_heartbeat_pid" 2>/dev/null
+  }; then
+    echo "::error::The API deployment heartbeat stopped unexpectedly; aborting the rollout."
     return 1
   fi
 }
@@ -131,6 +161,10 @@ stop_api_deployment_heartbeat() {
   if test "$api_deployment_heartbeat_started" = "true"; then
     publish_api_deployment_state 0
     api_deployment_heartbeat_started=false
+  fi
+  if test -n "$api_deployment_heartbeat_failure_file"; then
+    rm -f "$api_deployment_heartbeat_failure_file"
+    api_deployment_heartbeat_failure_file=""
   fi
 }
 
@@ -900,6 +934,7 @@ api_iac_deployment_configuration="$(
 # Connector lifecycle migrations invalidate cached authority and cannot
 # safely coexist with a pre-fence process that is still in provider I/O.
 start_api_deployment_heartbeat
+assert_api_deployment_heartbeat_healthy
 if test "$api_recovery_entry" = "true"; then
   # RegisterScalableTarget may enforce MinCapacity even when the request also
   # carries an all-suspended state. Recovery already entered from a proven
@@ -1145,6 +1180,7 @@ run_interruptible aws ecs update-service \
 run_interruptible aws ecs wait services-stable \
   --cluster "$ECS_CLUSTER" \
   --services "$API_SERVICE"
+assert_api_deployment_heartbeat_healthy
 api_primary_completed=false
 # ECS's services-stable waiter can return after desired/running counts converge but
 # before the deployment control plane publishes rolloutState=COMPLETED. Keep the
@@ -1153,6 +1189,7 @@ for api_primary_completion_delay in 0 1 2 4 8 16 30 30 30 30; do
   if test "$api_primary_completion_delay" != "0"; then
     run_interruptible sleep "$api_primary_completion_delay"
   fi
+  assert_api_deployment_heartbeat_healthy
   capture_interruptible aws ecs describe-services \
     --cluster "$ECS_CLUSTER" \
     --services "$API_SERVICE" \
@@ -1269,6 +1306,8 @@ fi
 if test "$api_recovery_authorized" = "true"; then
   clear_successful_recovery_marker
 fi
+
+assert_api_deployment_heartbeat_healthy
 
 run_interruptible aws application-autoscaling register-scalable-target \
   --service-namespace ecs \

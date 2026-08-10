@@ -79,8 +79,8 @@ function validateAlarm(alarms, expected) {
     `alarm-count:${expected.name}`,
   );
   for (const [field, value] of Object.entries({
-    ActionsEnabled: true,
-    ComparisonOperator: "GreaterThanOrEqualToThreshold",
+    ActionsEnabled: expected.actionsEnabled ?? true,
+    ComparisonOperator: expected.comparisonOperator ?? "GreaterThanOrEqualToThreshold",
     DatapointsToAlarm: expected.datapointsToAlarm ?? 1,
     EvaluationPeriods: expected.evaluationPeriods ?? 1,
     MetricName: expected.metricName,
@@ -113,7 +113,11 @@ function validateAlarm(alarms, expected) {
   if ((alarm.InsufficientDataActions ?? []).length !== 0) {
     fail(`alarm-insufficient-data-actions:${expected.name}`);
   }
-  if ((alarm.Dimensions ?? []).length !== 0) fail(`alarm-dimensions:${expected.name}`);
+  const dimensionNames = (alarm.Dimensions ?? []).map(({ Name }) => Name).sort();
+  const expectedDimensionNames = (expected.dimensionNames ?? []).toSorted();
+  if (JSON.stringify(dimensionNames) !== JSON.stringify(expectedDimensionNames)) {
+    fail(`alarm-dimensions:${expected.name}`);
+  }
   if ((alarm.Metrics ?? []).length !== 0) fail(`alarm-metric-math:${expected.name}`);
 }
 
@@ -230,6 +234,26 @@ try {
       statistic: "Maximum",
       threshold: 600000,
       treatMissingData: "breaching",
+    },
+    ...["api", "mcp"].map((service) => ({
+      dimensionNames: ["LoadBalancer", "TargetGroup"],
+      metricName: "HTTPCode_Target_5XX_Count",
+      name: `${cluster}-${service}-target-5xx`,
+      namespace: "AWS/ApplicationELB",
+      period: 300,
+      threshold: 5,
+    })),
+    {
+      actionsEnabled: false,
+      alarmActionCount: 0,
+      datapointsToAlarm: 2,
+      dimensionNames: ["LoadBalancer"],
+      evaluationPeriods: 3,
+      metricName: "HTTPCode_ELB_5XX_Count",
+      name: `${cluster}-alb-5xx`,
+      namespace: "AWS/ApplicationELB",
+      period: 300,
+      threshold: 5,
     },
     {
       alarmActionCount: 0,

@@ -58,6 +58,16 @@ requireMatch(
 );
 requireMatch(
   operations,
+  /resource "aws_cloudwatch_metric_alarm" "alb_5xx"[\s\S]*?actions_enabled\s*=\s*false[\s\S]*?metric_name\s*=\s*"HTTPCode_ELB_5XX_Count"/,
+  "diagnostic-only load-balancer-generated 5xx routing",
+);
+requireMatch(
+  operations,
+  /resource "aws_cloudwatch_metric_alarm" "target_5xx"[\s\S]*?metric_name\s*=\s*"HTTPCode_Target_5XX_Count"[\s\S]*?alarm_actions\s*=\s*local\.alarm_actions/,
+  "actionable target-generated 5xx routing",
+);
+requireMatch(
+  operations,
   /resource "aws_cloudwatch_composite_alarm" "api_availability_actionable"[\s\S]*?ALARM[\s\S]*?api_deployment_in_progress[\s\S]*?alarm_actions\s*=\s*local\.alarm_actions/,
   "deployment-aware actionable API availability paging",
 );
@@ -302,6 +312,45 @@ const validState = {
       Threshold: 5,
       TreatMissingData: "notBreaching",
     },
+    ...["api", "mcp"].map((service) => ({
+      ActionsEnabled: true,
+      AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      AlarmName: `personal-os-prod-${service}-target-5xx`,
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 1,
+      Dimensions: [
+        { Name: "LoadBalancer", Value: "app/personal-os-prod/example" },
+        { Name: "TargetGroup", Value: `targetgroup/personal-os-prod-${service}/example` },
+      ],
+      EvaluationPeriods: 1,
+      InsufficientDataActions: [],
+      MetricName: "HTTPCode_Target_5XX_Count",
+      Metrics: [],
+      Namespace: "AWS/ApplicationELB",
+      OKActions: [],
+      Period: 300,
+      Statistic: "Sum",
+      Threshold: 5,
+      TreatMissingData: "notBreaching",
+    })),
+    {
+      ActionsEnabled: false,
+      AlarmActions: [],
+      AlarmName: "personal-os-prod-alb-5xx",
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 2,
+      Dimensions: [{ Name: "LoadBalancer", Value: "app/personal-os-prod/example" }],
+      EvaluationPeriods: 3,
+      InsufficientDataActions: [],
+      MetricName: "HTTPCode_ELB_5XX_Count",
+      Metrics: [],
+      Namespace: "AWS/ApplicationELB",
+      OKActions: [],
+      Period: 300,
+      Statistic: "Sum",
+      Threshold: 5,
+      TreatMissingData: "notBreaching",
+    },
     {
       ActionsEnabled: true,
       AlarmActions: [],
@@ -518,6 +567,15 @@ if (operation === "logs describe-metric-filters") {
       },
     },
     {
+      label: "drifted alarm comparison",
+      state: {
+        ...validState,
+        MetricAlarms: validState.MetricAlarms.map((alarm, index) =>
+          index === 0 ? { ...alarm, ComparisonOperator: "GreaterThanThreshold" } : alarm,
+        ),
+      },
+    },
+    {
       label: "disabled alarm actions",
       state: {
         ...validState,
@@ -576,6 +634,22 @@ if (operation === "logs describe-metric-filters") {
             ? {
                 ...alarm,
                 OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+              }
+            : alarm,
+        ),
+      },
+    },
+    {
+      label: "insufficient-data notification route",
+      state: {
+        ...validState,
+        MetricAlarms: validState.MetricAlarms.map((alarm, index) =>
+          index === 0
+            ? {
+                ...alarm,
+                InsufficientDataActions: [
+                  "arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations",
+                ],
               }
             : alarm,
         ),

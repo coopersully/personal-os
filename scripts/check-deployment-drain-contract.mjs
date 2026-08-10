@@ -233,8 +233,13 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?\/bin\/sleep "\$api_deployment_heartbeat_interval_seconds"[\s\S]*?ApiDeploymentInProgress,Value=1/,
-  "a thirty-second deployment heartbeat loop",
+  /api_deployment_heartbeat_interval_seconds="\$\{API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30\}"[\s\S]*?start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?\/bin\/sleep "\$api_deployment_heartbeat_interval_seconds"[\s\S]*?for heartbeat_attempt in 1 2 3[\s\S]*?publish_api_deployment_state 1/,
+  "a default-thirty-second deployment heartbeat loop with bounded refresh retries",
+);
+requireMatch(
+  workflow,
+  /assert_api_deployment_heartbeat_healthy\(\)[\s\S]*?api_deployment_heartbeat_failure_file[\s\S]*?kill -0[\s\S]*?# Stop and drain the old binary[\s\S]*?start_api_deployment_heartbeat[\s\S]*?assert_api_deployment_heartbeat_healthy[\s\S]*?api_rollout_complete=true/,
+  "parent-visible heartbeat failure checks throughout the rollout",
 );
 requireMatch(
   workflow,

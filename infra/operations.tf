@@ -383,7 +383,6 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   dimensions = {
     LoadBalancer = aws_lb.public.arn_suffix
   }
-
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
@@ -771,7 +770,7 @@ resource "aws_cloudwatch_metric_alarm" "connector_trigger_age" {
 
 resource "aws_cloudwatch_metric_alarm" "connector_sync_freshness" {
   alarm_name          = "${local.name}-connector-sync-freshness"
-  alarm_description   = "A connector completed after going at least ten minutes without a successful sync."
+  alarm_description   = "Current eligible connector freshness was at least ten minutes old in three of five one-minute observations, or observations stopped."
   namespace           = "ilo/Connectors"
   metric_name         = "ConnectorSyncFreshnessAgeMs"
   statistic           = "Maximum"

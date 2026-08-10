@@ -1175,29 +1175,39 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       await automations.dispatchDue();
     },
     async syncDueConnectors() {
-      await connectors.purgeExpiredAuthorizationAttempts();
-      await connectors.renewSubscriptions();
-      const triggered = await connectors.dispatchTriggeredSyncs();
-      const scheduled = await connectors.syncDueAccounts();
-      const freshnessStartedAt = Date.now();
-      const freshness = await connectors.observeSyncFreshness();
-      dependencies.log?.({
-        durationMs: Date.now() - freshnessStartedAt,
-        eligibleAccountCount: freshness.eligibleAccountCount,
-        event: "connector_sync_freshness_observed",
-        freshnessAgeMs: freshness.freshnessAgeMs,
-        method: "SCHEDULER",
-        path: "/internal/connectors/freshness",
-        requestId: randomUUID(),
-        status: 200,
-      });
-      return {
-        attempted: triggered.attempted + scheduled.attempted,
-        failed: triggered.failed + scheduled.failed,
-        recovered: scheduled.recovered,
-        skipped: scheduled.skipped,
-        succeeded: triggered.succeeded + scheduled.succeeded,
+      const observeFreshness = async () => {
+        const freshnessStartedAt = Date.now();
+        const freshness = await connectors.observeSyncFreshness();
+        dependencies.log?.({
+          durationMs: Date.now() - freshnessStartedAt,
+          eligibleAccountCount: freshness.eligibleAccountCount,
+          event: "connector_sync_freshness_observed",
+          freshnessAgeMs: freshness.freshnessAgeMs,
+          method: "SCHEDULER",
+          path: "/internal/connectors/freshness",
+          requestId: randomUUID(),
+          status: 200,
+        });
       };
+      let syncResult: Awaited<ReturnType<PersonalOsApp["syncDueConnectors"]>>;
+      try {
+        await connectors.purgeExpiredAuthorizationAttempts();
+        await connectors.renewSubscriptions();
+        const triggered = await connectors.dispatchTriggeredSyncs();
+        const scheduled = await connectors.syncDueAccounts();
+        syncResult = {
+          attempted: triggered.attempted + scheduled.attempted,
+          failed: triggered.failed + scheduled.failed,
+          recovered: scheduled.recovered,
+          skipped: scheduled.skipped,
+          succeeded: triggered.succeeded + scheduled.succeeded,
+        };
+      } catch (error: unknown) {
+        await observeFreshness().catch(() => undefined);
+        throw error;
+      }
+      await observeFreshness();
+      return syncResult;
     },
     async superviseICloudMail() {
       if (!dependencies.config.icloudMailIdleEnabled) return;

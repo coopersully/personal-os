@@ -66,12 +66,14 @@ The following raw alarms remain diagnostic and do not publish directly:
 
 - API Route 53 public health;
 - API unhealthy targets;
-- aggregate ALB-generated 5xx responses.
+- aggregate load-balancer-generated 5xx responses (`HTTPCode_ELB_5XX_Count`, Terraform
+  `aws_cloudwatch_metric_alarm.alb_5xx`).
 
 App and MCP public-health alarms continue to page directly because an API deployment cannot explain
 their failure. API/MCP CPU and memory alarms page only on real samples above threshold; absent samples
-are non-breaching. Target 5xx, latency, RDS, NAT, CloudFront, connector failure, and connector
-subscription alarms retain their existing actionable thresholds and alarm-only routes.
+are non-breaching. Per-service target-generated 5xx responses (`HTTPCode_Target_5XX_Count`, Terraform
+`aws_cloudwatch_metric_alarm.target_5xx`), latency, RDS, NAT, CloudFront, connector failure, and
+connector subscription alarms retain their existing actionable thresholds and alarm-only routes.
 
 ### Deployment heartbeat and API availability composite
 
@@ -97,8 +99,9 @@ restore human paging before the workflow exits.
 
 ### Current connector freshness
 
-Each scheduled connector pass emits one structured `connector_sync_freshness_observed` event after
-durable trigger and due-account processing. The event contains only:
+Each scheduled connector pass attempts to emit one structured `connector_sync_freshness_observed`
+event after durable trigger and due-account processing, including when an earlier scheduler operation
+fails. The event contains only:
 
 - `event`;
 - `freshnessAgeMs`;
@@ -122,7 +125,8 @@ as stale automatically managed accounts without leaking identity dimensions.
 The heartbeat does not change the deployment commit point: the API service drain remains the first
 availability-changing mutation. The heartbeat must be proven active before that mutation.
 
-Freshness observation is read-only and occurs after the scheduler's durable work. Failure to emit a
+Freshness observation is read-only and occurs after the scheduler's durable work attempt. Its
+`finally` boundary preserves an earlier scheduler error if observation also fails. Failure to emit a
 log line cannot corrupt connector state. Existing scheduled-task lifecycle handling still reports a
 failed scheduler pass through the runtime background-task boundary.
 

@@ -242,7 +242,7 @@ requireMatch(
 );
 requireMatch(
   heartbeatWorker,
-  /prctl\(1, signal\.SIGTERM\)[\s\S]*?MetricName=ApiDeploymentInProgress,Value=1[\s\S]*?os\.getppid\(\) != deployment_parent_pid[\s\S]*?for attempt in range\(3\)[\s\S]*?time\.sleep\(interval_seconds\)/,
+  /prctl\(1, signal\.SIGTERM\)[\s\S]*?MetricName=ApiDeploymentInProgress,Value=1[\s\S]*?os\.getppid\(\) != deployment_parent_pid[\s\S]*?for attempt in range\(3\)[\s\S]*?ILO_DEPLOYMENT_HEARTBEAT_WORKER[\s\S]*?time\.sleep\(interval_seconds\)/,
   "a parent-death-bound heartbeat worker with bounded refresh retries",
 );
 requireMatch(

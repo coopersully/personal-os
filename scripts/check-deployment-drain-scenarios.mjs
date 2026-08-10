@@ -44,6 +44,20 @@ function fakeAws(args) {
     if (process.env.FAKE_HEARTBEAT_LOG) {
       appendFileSync(process.env.FAKE_HEARTBEAT_LOG, `${value}\n`);
     }
+    if (process.env.ILO_DEPLOYMENT_HEARTBEAT_WORKER === "true") {
+      const heartbeatAttempts = readFileSync(process.env.FAKE_HEARTBEAT_LOG, "utf8")
+        .trim()
+        .split("\n")
+        .filter((entry) => Number(entry) === 1).length;
+      if (
+        Number.isInteger(state.failDeploymentMetricAfter) &&
+        heartbeatAttempts > state.failDeploymentMetricAfter
+      ) {
+        process.stderr.write("Deployment heartbeat unavailable\n");
+        process.exitCode = 254;
+      }
+      return;
+    }
     state.deploymentMetricAttempts += 1;
     if (
       value === 1 &&
@@ -728,7 +742,7 @@ if (process.argv[2] === "--fake-aws") {
     backgroundHeartbeat.result.status === 0 &&
       backgroundHeartbeat.heartbeatValues.filter((value) => value === 1).length >= 2 &&
       backgroundHeartbeat.heartbeatValues.includes(0),
-    `An enabled heartbeat must refresh during rollout and publish zero during cleanup (${JSON.stringify(backgroundHeartbeat.heartbeatValues)}).`,
+    `An enabled heartbeat must refresh during rollout and publish zero during cleanup (${JSON.stringify(backgroundHeartbeat.heartbeatValues)}; status=${backgroundHeartbeat.result.status}; stdout=${backgroundHeartbeat.result.stdout}; stderr=${backgroundHeartbeat.result.stderr}).`,
   );
   const failedBackgroundHeartbeat = runScenario(
     "failed-background-heartbeat",

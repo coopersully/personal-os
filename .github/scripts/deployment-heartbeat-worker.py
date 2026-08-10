@@ -70,7 +70,11 @@ while True:
         raise SystemExit(0)
     refreshed = False
     for attempt in range(3):
-        child_environment = {**os.environ, "AWS_MAX_ATTEMPTS": "3"}
+        child_environment = {
+            **os.environ,
+            "AWS_MAX_ATTEMPTS": "3",
+            "ILO_DEPLOYMENT_HEARTBEAT_WORKER": "true",
+        }
         active_child = subprocess.Popen(
             command,
             env=child_environment,

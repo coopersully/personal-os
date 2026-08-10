@@ -81,7 +81,7 @@ variable "alert_email" {
 variable "monthly_budget_usd" {
   description = "Account-wide monthly AWS cost budget in USD."
   type        = number
-  default     = 100
+  default     = 50
 
   validation {
     condition     = var.monthly_budget_usd >= 10

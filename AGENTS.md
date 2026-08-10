@@ -35,6 +35,9 @@ This includes repository mirror checks, lint, type checking, coverage enforcemen
 - reicon is the only permitted icon pack. Import every glyph from
   `@/components/icons`; only `apps/web/src/components/icons.ts` may import `reicon-react`.
 - Adding a glyph means adding a registry entry under a semantic name, not a local import.
+- Third-party brand marks are not icons. Compose `BrandMark` from
+  `@/components/brand-marks`, the only module allowed inline `<svg>` or `simple-icons`.
+  A brand with no artwork we may ship renders a monogram; never hand-draw a trademark.
 - The contract and its rationale live in `docs/design/system.md`; `pnpm lint` enforces it
   through `scripts/check-icon-contract.mjs`.
 - Regenerate the application mark with `node scripts/generate-app-mark.mjs` after editing

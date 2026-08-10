@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import { BrandMark, hasBrandMark } from "@/components/brand-marks";
 import {
   ChevronDownIcon,
   CircleCheckIcon,
@@ -533,7 +534,12 @@ export function AgentAccessSettings() {
               {oauthClients.data?.map((client) => (
                 <Item key={client.id} variant="outline">
                   <ItemMedia variant="icon">
-                    <PlugIcon />
+                    {/* The client name is already visible in ItemTitle, so the mark is decorative. */}
+                    {hasBrandMark(client.name) ? (
+                      <BrandMark brand={client.name} decorative />
+                    ) : (
+                      <PlugIcon />
+                    )}
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{client.name}</ItemTitle>

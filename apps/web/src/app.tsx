@@ -74,6 +74,7 @@ import {
   PasswordFields,
   TextField,
 } from "@/components/auth-fields";
+import { BrandMark, brandTitle, hasBrandMark } from "@/components/brand-marks";
 import { ChoiceCardGroup } from "@/components/choice-card-group";
 import {
   EventCard,
@@ -3167,38 +3168,7 @@ function CalendarSidebarCaption({
 }
 
 function CalendarProviderEmblem({ provider }: { provider: string }) {
-  const normalizedProvider = provider.toLowerCase();
-  if (normalizedProvider === "google") {
-    return (
-      // icon-contract-allow: Google brand mark, must reproduce the owner's exact artwork.
-      <svg aria-hidden="true" viewBox="0 0 24 24">
-        <path
-          fill="#4285f4"
-          d="M21.35 12.28c0-.78-.07-1.53-.2-2.25H12v4.26h5.23a4.47 4.47 0 0 1-1.94 2.93v2.77h3.15c1.84-1.69 2.91-4.18 2.91-7.71Z"
-        />
-        <path
-          fill="#34a853"
-          d="M12 22c2.63 0 4.84-.87 6.45-2.36l-3.15-2.77c-.87.58-1.99.93-3.3.93-2.54 0-4.69-1.72-5.46-4.03H3.29v2.84A10 10 0 0 0 12 22Z"
-        />
-        <path
-          fill="#fbbc05"
-          d="M6.54 13.77A6 6 0 0 1 6.23 12c0-.62.11-1.21.31-1.77V7.39H3.29A10 10 0 0 0 2 12c0 1.61.39 3.13 1.29 4.61l3.25-2.84Z"
-        />
-        <path
-          fill="#ea4335"
-          d="M12 6.2c1.43 0 2.71.49 3.72 1.45l2.79-2.79C16.83 3.29 14.63 2 12 2a10 10 0 0 0-8.71 5.39l3.25 2.84C7.31 7.92 9.46 6.2 12 6.2Z"
-        />
-      </svg>
-    );
-  }
-  if (normalizedProvider === "icloud" || normalizedProvider === "apple") {
-    return (
-      // icon-contract-allow: Apple brand mark, must reproduce the owner's exact artwork.
-      <svg aria-hidden="true" fill="currentColor" viewBox="0 0 24 24">
-        <path d="M16.68 12.53c.02-1.86 1.52-2.75 1.59-2.79-.87-1.27-2.22-1.45-2.7-1.47-1.15-.12-2.24.68-2.82.68-.58 0-1.48-.66-2.43-.64-1.25.02-2.4.73-3.04 1.86-1.3 2.25-.33 5.57.94 7.4.62.89 1.36 1.89 2.33 1.86.94-.04 1.3-.61 2.44-.61 1.14 0 1.47.61 2.45.59 1.01-.02 1.65-.92 2.27-1.81.71-1.04 1-2.05 1.02-2.1-.02-.01-2.04-.78-2.05-2.97ZM14.8 7.04c.52-.63.87-1.5.77-2.37-.75.03-1.66.5-2.2 1.13-.49.57-.91 1.46-.8 2.32.84.07 1.7-.43 2.23-1.08Z" />
-      </svg>
-    );
-  }
+  if (hasBrandMark(provider)) return <BrandMark brand={provider} decorative />;
   return <CalendarIcon aria-hidden="true" />;
 }
 
@@ -3206,31 +3176,17 @@ function ConnectedServiceMark({ provider }: { provider: string }) {
   const normalizedProvider = provider.toLowerCase();
   if (normalizedProvider === "local") return null;
   const label =
-    normalizedProvider === "google"
-      ? "Google"
-      : normalizedProvider === "icloud"
-        ? "iCloud"
-        : normalizedProvider === "apple"
-          ? "Apple"
-          : provider.replace(
-              /(^|[-_\s])(\p{L})/gu,
-              (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`,
-            );
-  if (
-    normalizedProvider !== "google" &&
-    normalizedProvider !== "icloud" &&
-    normalizedProvider !== "apple"
-  ) {
+    brandTitle(provider) ??
+    provider.replace(
+      /(^|[-_\s])(\p{L})/gu,
+      (_match, prefix: string, letter: string) => `${prefix}${letter.toUpperCase()}`,
+    );
+  if (!hasBrandMark(provider)) {
     return <ShadcnBadge variant="secondary">{label}</ShadcnBadge>;
   }
   return (
-    <span
-      aria-label={`${label} calendar`}
-      className={`connected-service-mark connected-service-mark--${normalizedProvider}`}
-      role="img"
-      title={label}
-    >
-      <CalendarProviderEmblem provider={normalizedProvider} />
+    <span className={`connected-service-mark connected-service-mark--${normalizedProvider}`}>
+      <BrandMark brand={provider} label={`${label} calendar`} />
     </span>
   );
 }

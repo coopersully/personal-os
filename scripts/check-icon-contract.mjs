@@ -6,12 +6,16 @@ import { relative, resolve } from "node:path";
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const scannedRoots = ["apps", "packages", "e2e"];
 const registryPath = resolve(repositoryRoot, "apps", "web", "src", "components", "icons.ts");
+const brandMarksPath = resolve(
+  repositoryRoot,
+  "apps",
+  "web",
+  "src",
+  "components",
+  "brand-marks.tsx",
+);
 const sourceExtensions = new Set([".ts", ".tsx"]);
 const testSuffixes = [".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx"];
-// Third-party brand marks (provider logos) are not interface glyphs: they must reproduce the
-// owner's exact artwork and colors, so no icon pack can supply them. Annotate each one with
-// `icon-contract-allow: <reason>` on or above the element so the exception stays reviewable.
-const allowMarker = /icon-contract-allow:/;
 const forbiddenPacks = [
   "lucide-react",
   "@phosphor-icons/react",
@@ -38,14 +42,22 @@ const rules = [
     appliesTo: (path) => path !== registryPath,
   },
   {
-    name: "inline svg glyph",
-    detail:
-      "add the glyph to the icon registry, or mark a third-party brand mark with icon-contract-allow",
+    // Third-party brand marks are trademarks, not interface glyphs: their artwork is fixed by the
+    // owner and some may not be recolored, so no icon pack can supply them. They live in one
+    // reviewed module that records each mark's provenance, rather than as scattered exemptions.
+    name: "inline svg markup",
+    detail: "add an interface glyph to the icon registry, or a third-party mark to brand-marks.tsx",
     pattern: /<svg[\s>/]/g,
     appliesTo: (path) =>
-      path !== registryPath && !testSuffixes.some((suffix) => path.endsWith(suffix)),
-    allowedBy: (source, index) =>
-      allowMarker.test(source.slice(0, index).split("\n").slice(-4).join("\n")),
+      path !== registryPath &&
+      path !== brandMarksPath &&
+      !testSuffixes.some((suffix) => path.endsWith(suffix)),
+  },
+  {
+    name: "brand artwork outside the brand-mark registry",
+    detail: "import BrandMark from @/components/brand-marks instead",
+    pattern: /\bfrom\s*["']simple-icons(?:\/[^"']*)?["']/g,
+    appliesTo: (path) => path !== brandMarksPath,
   },
 ];
 
@@ -75,10 +87,9 @@ const paths = (
 
 for (const path of paths) {
   const source = await readFile(path, "utf8");
-  for (const { name, detail, pattern, appliesTo, allowedBy } of rules) {
+  for (const { name, detail, pattern, appliesTo } of rules) {
     if (!appliesTo(path)) continue;
     for (const match of source.matchAll(pattern)) {
-      if (allowedBy?.(source, match.index)) continue;
       const line = source.slice(0, match.index).split("\n").length;
       violations.push(`${relative(repositoryRoot, path)}:${line} ${name}: ${detail}`);
     }

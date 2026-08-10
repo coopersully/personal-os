@@ -11,6 +11,7 @@
 - Never pass `color`, `strokeWidth`, or `secondaryColor`; the registry's `Icon` type rejects them. Color comes from `text-*` tokens, size from `size-*` classes.
 - Use `weight="Filled"` only for active/selected state; Outline is the default.
 - `pnpm lint` runs `scripts/check-icon-contract.mjs`, which fails on any other icon package, a direct `reicon-react` import, or hand-written inline `<svg>`.
+- Provider and product logos are **brand marks, not icons**. Compose `BrandMark` from `@/components/brand-marks`; only that module may contain inline `<svg>` or import `simple-icons`. If a brand has no entry it renders a monogram — never hand-draw a trademark to close the gap.
 
 See `docs/design/system.md` for the full contract.
 

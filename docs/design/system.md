@@ -290,10 +290,34 @@ on a direct `reicon-react` import, and on hand-written inline `<svg>` markup.
 - **Icons accept no children.** reicon renders through `dangerouslySetInnerHTML`,
   so a `<title>` cannot be nested inside a glyph. Name an icon-only control with
   `aria-label` plus a tooltip, and mark a decorative icon `aria-hidden`.
-- **Third-party brand marks are the one exception.** A provider logo must
-  reproduce its owner's exact artwork and colors, so no icon pack can supply it.
-  Annotate such an element with `icon-contract-allow: <reason>` so the exception
-  stays greppable and reviewable.
+### Brand marks
+
+A brand mark is not an icon. An icon is a glyph ilo chooses to express a meaning;
+a brand mark is someone else's trademark, whose artwork we may reproduce but not
+redesign. They never enter the reicon registry and are never substituted for a
+similar-looking glyph.
+
+`apps/web/src/components/brand-marks.tsx` is the only module allowed to contain
+inline `<svg>` markup or to import `simple-icons`, and the icon contract enforces
+both. Compose `BrandMark`; do not reach for artwork directly.
+
+- **Artwork is sourced, never drawn.** Marks come from `simple-icons` (CC0-1.0),
+  except where an owner's guidelines require their own asset. That licence covers
+  path data, not trademark rights. Every entry records where its artwork came
+  from.
+- **Some marks may not be recoloured.** Google's branding guidelines forbid a
+  monochrome or recoloured "G", so its multi-colour artwork is vendored and
+  exempt from the `currentColor` rule. Marks whose owners permit monochrome use
+  inherit `currentColor` like any other glyph, which keeps them inside the ink
+  scale.
+- **A missing mark is a monogram, never an approximation.** No CC0 artwork exists
+  for OpenAI/ChatGPT, Microsoft, Slack, or Plaid — simple-icons removes brands at
+  their owner's request. Those render a neutral monogram. Adding a hand-drawn
+  approximation of a trademark to close the gap is not an option.
+- **Naming follows the owner, not our identifiers.** The mark's accessible name
+  is the brand's own name (`iCloud`, not `icloud`). Pass `label` to add
+  surrounding context, and `decorative` when a visible label already names the
+  brand.
 
 ### Motion, loading, and perceived performance
 

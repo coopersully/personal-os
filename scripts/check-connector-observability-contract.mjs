@@ -170,8 +170,7 @@ const validState = {
     },
     {
       filterName: "personal-os-prod-connector-sync-freshness-age",
-      filterPattern:
-        '{ $.event = "connector_sync_freshness_observed" && $.freshnessAgeMs = * }',
+      filterPattern: '{ $.event = "connector_sync_freshness_observed" && $.freshnessAgeMs = * }',
       logGroupName: "/ecs/personal-os-prod-api",
       metricTransformations: [
         {

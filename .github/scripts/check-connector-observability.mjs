@@ -173,8 +173,7 @@ try {
       metricName: "ConnectorSyncFreshnessAgeMs",
       metricValue: "$.freshnessAgeMs",
       name: `${cluster}-connector-sync-freshness-age`,
-      pattern:
-        '{ $.event = "connector_sync_freshness_observed" && $.freshnessAgeMs = * }',
+      pattern: '{ $.event = "connector_sync_freshness_observed" && $.freshnessAgeMs = * }',
     },
   ];
   const expectedAlarms = [
@@ -266,16 +265,13 @@ try {
 
   const compositeName = `${cluster}-api-availability-actionable`;
   const composite = exactlyOne(
-    awsJson(
-      ["cloudwatch", "describe-alarms", "--alarm-names", compositeName],
-      "CompositeAlarms",
-    ),
+    awsJson(["cloudwatch", "describe-alarms", "--alarm-names", compositeName], "CompositeAlarms"),
     ({ AlarmName }) => AlarmName === compositeName,
     `composite-count:${compositeName}`,
   );
   for (const [field, value] of Object.entries({
     ActionsEnabled: true,
-    AlarmRule: `ALARM(\"${cluster}-api-public-health\") AND NOT ALARM(\"${cluster}-api-deployment-in-progress\")`,
+    AlarmRule: `ALARM("${cluster}-api-public-health") AND NOT ALARM("${cluster}-api-deployment-in-progress")`,
   })) {
     sameValue(composite[field], value, `composite-${field}:${compositeName}`);
   }

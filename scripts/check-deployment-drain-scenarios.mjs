@@ -70,7 +70,15 @@ function fakeAws(args) {
       return;
     }
     state.deploymentMetricValues.push(value);
-    if (!(value === 0 && state.stickyDeploymentAlarm === true)) {
+    if (value === 1) {
+      state.deploymentZeroPublishes = 0;
+    }
+    if (value === 0) {
+      state.deploymentZeroPublishes += 1;
+    }
+    const zeroHasCleared =
+      value !== 0 || state.deploymentZeroPublishes >= (state.requiredDeploymentZeroPublishes ?? 1);
+    if (!(value === 0 && state.stickyDeploymentAlarm === true) && zeroHasCleared) {
       state.deploymentAlarmState = value >= 1 ? "ALARM" : "OK";
     }
     writeState(statePath, state);
@@ -387,6 +395,7 @@ if (process.argv[2] === "--fake-aws") {
       deploymentAlarmState: "OK",
       deploymentMetricAttempts: 0,
       deploymentMetricValues: [],
+      deploymentZeroPublishes: 0,
       describeScalingCalls: 0,
       desiredCount: 1,
       drainProtocol: "quiesce-v1",
@@ -767,6 +776,16 @@ if (process.argv[2] === "--fake-aws") {
         "API deployment heartbeat alarm did not clear",
       ),
     "A deployment must fail when CloudWatch cannot prove that suppression cleared.",
+  );
+  const delayedDeploymentAlarmClear = runScenario(
+    "delayed-deployment-alarm-clear",
+    baseState({ requiredDeploymentZeroPublishes: 3 }),
+  );
+  assert(
+    delayedDeploymentAlarmClear.result.status === 0 &&
+      delayedDeploymentAlarmClear.state.deploymentAlarmState === "OK" &&
+      delayedDeploymentAlarmClear.heartbeatValues.filter((value) => value === 0).length >= 3,
+    "Cleanup must keep publishing zero while waiting for CloudWatch to clear suppression.",
   );
   const delayedPrimary = runScenario(
     "delayed-primary-completion",

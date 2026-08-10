@@ -81,9 +81,13 @@ publish_api_deployment_state() {
 
 wait_for_api_deployment_alarm_state() {
   expected_state="$1"
+  refresh_deployment_state="${2:-}"
   for alarm_state_delay in 0 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5; do
     if test "$alarm_state_delay" != "0"; then
       sleep "$alarm_state_delay"
+    fi
+    if test -n "$refresh_deployment_state"; then
+      publish_api_deployment_state "$refresh_deployment_state" || continue
     fi
     observed_state="$(
       AWS_MAX_ATTEMPTS=2 aws cloudwatch describe-alarms \
@@ -161,7 +165,7 @@ stop_api_deployment_heartbeat() {
   if test "$api_deployment_heartbeat_started" = "true"; then
     publish_api_deployment_state 0
     api_deployment_heartbeat_started=false
-    if ! wait_for_api_deployment_alarm_state OK; then
+    if ! wait_for_api_deployment_alarm_state OK 0; then
       heartbeat_alarm_cleared=false
     fi
   fi

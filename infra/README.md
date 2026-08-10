@@ -197,6 +197,12 @@ AWS Config records continuously to the audit bucket but is intentionally not
 attached directly to this topic because its per-resource change stream is far
 too noisy for an operator alert channel.
 
+API and MCP Fargate tasks use the public subnets for direct IPv4 egress while retaining the
+application security group, whose service-port ingress is limited to the load-balancer security
+group. The database remains isolated in database-only private subnets. The previous application
+subnets and NAT gateway are temporarily retained as a rollback boundary until production provider
+egress and scheduled connector freshness are proven on the direct-egress tasks.
+
 CloudWatch alarms cover public HTTPS health, ECS CPU/memory, unhealthy targets,
 5xx responses, latency, RDS CPU/storage/memory/connections, NAT failures, and
 CloudFront 5xx rate. The `personal-os-prod-operations` dashboard collects the

@@ -306,9 +306,9 @@ resource "aws_ecs_service" "api" {
   }
 
   network_configuration {
-    assign_public_ip = false
+    assign_public_ip = true
     security_groups  = [aws_security_group.application.id]
-    subnets          = aws_subnet.application[*].id
+    subnets          = aws_subnet.public[*].id
   }
 
   load_balancer {
@@ -321,7 +321,7 @@ resource "aws_ecs_service" "api" {
     ignore_changes = [desired_count, task_definition]
   }
 
-  depends_on = [aws_route_table_association.application]
+  depends_on = [aws_route_table_association.public]
 }
 
 resource "aws_ecs_service" "mcp" {
@@ -341,9 +341,9 @@ resource "aws_ecs_service" "mcp" {
   }
 
   network_configuration {
-    assign_public_ip = false
+    assign_public_ip = true
     security_groups  = [aws_security_group.application.id]
-    subnets          = aws_subnet.application[*].id
+    subnets          = aws_subnet.public[*].id
   }
 
   load_balancer {
@@ -356,5 +356,5 @@ resource "aws_ecs_service" "mcp" {
     ignore_changes = [desired_count, task_definition]
   }
 
-  depends_on = [aws_route_table_association.application]
+  depends_on = [aws_route_table_association.public]
 }

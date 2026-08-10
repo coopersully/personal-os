@@ -70,6 +70,9 @@ function fakeAws(args) {
       return;
     }
     state.deploymentMetricValues.push(value);
+    if (value === 1) {
+      state.deploymentZeroPublishes = 0;
+    }
     if (value === 0) {
       state.deploymentZeroPublishes += 1;
     }
@@ -780,6 +783,7 @@ if (process.argv[2] === "--fake-aws") {
   );
   assert(
     delayedDeploymentAlarmClear.result.status === 0 &&
+      delayedDeploymentAlarmClear.state.deploymentAlarmState === "OK" &&
       delayedDeploymentAlarmClear.heartbeatValues.filter((value) => value === 0).length >= 3,
     "Cleanup must keep publishing zero while waiting for CloudWatch to clear suppression.",
   );

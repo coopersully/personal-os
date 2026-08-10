@@ -155,16 +155,19 @@ failed scheduler pass through the runtime background-task boundary.
 
 ## Rollout and verification
 
-1. Deploy application/deployment-script support and Terraform declarations together.
-2. Review a production Terraform plan and reject unrelated drift.
-3. Apply only the approved alerting/IAM/filter/alarm scope if the full plan contains unrelated
-   changes.
-4. Run the connector and alerting production preflights.
-5. Verify all raw alarms, the deployment heartbeat alarm, and the API composite have exact routes and
+1. Publish one reviewed PR containing application, deployment-script, validation, and Terraform
+   declarations.
+2. Review a production Terraform plan from the CI-green PR commit and reject unrelated drift.
+3. Before merge, apply only the approved backward-compatible alerting/IAM/filter/alarm scope if the
+   full plan contains unrelated changes. This ordering satisfies the new deployment preflight before
+   the new script runs.
+4. Merge and run the immutable application deployment.
+5. Run the connector and alerting production preflights.
+6. Verify all raw alarms, the deployment heartbeat alarm, and the API composite have exact routes and
    missing-data policies.
-6. Perform a normal deployment smoke: the raw API health alarm may transition during drain, the
+7. Perform a normal deployment smoke: the raw API health alarm may transition during drain, the
    deployment alarm must suppress the composite, and every public endpoint must be healthy afterward.
-7. Confirm no SNS action executed for raw deployment health or an OK transition.
+8. Confirm no SNS action executed for raw deployment health or an OK transition.
 
 ## Remaining risk
 

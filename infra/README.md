@@ -200,14 +200,20 @@ too noisy for an operator alert channel.
 CloudWatch alarms cover public HTTPS health, ECS CPU/memory, unhealthy targets,
 5xx responses, latency, RDS CPU/storage/memory/connections, NAT failures, and
 CloudFront 5xx rate. The `personal-os-prod-operations` dashboard collects the
-primary service and database signals. Alarms send both failure and recovery
-notifications.
+primary service and database signals. Human-facing alarms publish failure transitions only;
+recovery remains available in CloudWatch history without generating another email. Raw API health
+and target alarms remain diagnostic during the intentional serial drain. A 30-second
+`ilo/Deployments` heartbeat suppresses the actionable API availability composite while that drain
+is active; missing heartbeat data restores paging if the API remains unavailable.
 
 Connector alarms additionally cover safe aggregate sync/configuration failures, live subscription
 failure/expiry, renewal lag, rejected notifications, durable-trigger age, and sync freshness.
 Expected duplicate notifications and intentionally stopped subscriptions are excluded. The live
 deploy/health preflight validates the exact filters, transformations, thresholds, missing-data
 policy, and operations-topic routes before treating this declaration as active evidence.
+Freshness is the current maximum age reported by each one-minute scheduler observation across
+automatically managed accounts; accounts awaiting user or operator authority repair do not keep the
+operations pager open.
 
 GitHub records a `production/ilo` commit status for each protected `main`
 release. Failed CI or deployment opens one deduplicated production incident;

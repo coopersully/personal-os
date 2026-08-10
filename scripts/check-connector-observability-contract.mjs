@@ -48,6 +48,28 @@ for (const metric of [
 ]) {
   requireMatch(operations, new RegExp(metric), `the ${metric} metric`);
 }
+if (/\bok_actions\s*=/.test(operations)) {
+  throw new Error("Human-facing CloudWatch alarms must not email recovery transitions.");
+}
+requireMatch(
+  operations,
+  /resource "aws_cloudwatch_metric_alarm" "public_health"[\s\S]*?alarm_actions\s*=\s*each\.key == "api" \? \[\] : local\.alarm_actions/,
+  "diagnostic-only raw API public health routing",
+);
+requireMatch(
+  operations,
+  /resource "aws_cloudwatch_composite_alarm" "api_availability_actionable"[\s\S]*?ALARM[\s\S]*?api_deployment_in_progress[\s\S]*?alarm_actions\s*=\s*local\.alarm_actions/,
+  "deployment-aware actionable API availability paging",
+);
+for (const resource of ["ecs_cpu_high", "ecs_memory_high", "target_unhealthy"]) {
+  requireMatch(
+    operations,
+    new RegExp(
+      `resource "aws_cloudwatch_metric_alarm" "${resource}"[\\s\\S]*?treat_missing_data\\s*=\\s*"notBreaching"`,
+    ),
+    `non-breaching missing data for ${resource}`,
+  );
+}
 for (const event of [
   "connector_notification_received",
   "connector_subscription_expired",
@@ -281,6 +303,35 @@ const validState = {
       Threshold: 5,
       TreatMissingData: "notBreaching",
     },
+    {
+      ActionsEnabled: true,
+      AlarmActions: [],
+      AlarmName: "personal-os-prod-api-deployment-in-progress",
+      ComparisonOperator: "GreaterThanOrEqualToThreshold",
+      DatapointsToAlarm: 1,
+      Dimensions: [],
+      EvaluationPeriods: 1,
+      InsufficientDataActions: [],
+      MetricName: "ApiDeploymentInProgress",
+      Metrics: [],
+      Namespace: "ilo/Deployments",
+      OKActions: [],
+      Period: 60,
+      Statistic: "Maximum",
+      Threshold: 1,
+      TreatMissingData: "notBreaching",
+    },
+  ],
+  CompositeAlarms: [
+    {
+      ActionsEnabled: true,
+      AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      AlarmName: "personal-os-prod-api-availability-actionable",
+      AlarmRule:
+        'ALARM("personal-os-prod-api-public-health") AND NOT ALARM("personal-os-prod-api-deployment-in-progress")',
+      InsufficientDataActions: [],
+      OKActions: [],
+    },
   ],
 };
 
@@ -310,7 +361,10 @@ if (state.delayAllOperations || state.delayOperation === operation) {
 if (operation === "logs describe-metric-filters") {
   process.stdout.write(JSON.stringify({ metricFilters: state.metricFilters }));
 } else if (operation === "cloudwatch describe-alarms") {
-  process.stdout.write(JSON.stringify({ MetricAlarms: state.MetricAlarms }));
+  process.stdout.write(JSON.stringify({
+    CompositeAlarms: state.CompositeAlarms,
+    MetricAlarms: state.MetricAlarms,
+  }));
 } else {
   process.stderr.write("Unexpected AWS operation\\n");
   process.exit(2);
@@ -516,6 +570,30 @@ if (operation === "logs describe-metric-filters") {
               }
             : alarm,
         ),
+      },
+    },
+    {
+      label: "missing actionable API composite",
+      state: { ...validState, CompositeAlarms: [] },
+    },
+    {
+      label: "drifted actionable API composite rule",
+      state: {
+        ...validState,
+        CompositeAlarms: validState.CompositeAlarms.map((alarm) => ({
+          ...alarm,
+          AlarmRule: 'ALARM("personal-os-prod-api-public-health")',
+        })),
+      },
+    },
+    {
+      label: "actionable API composite recovery route",
+      state: {
+        ...validState,
+        CompositeAlarms: validState.CompositeAlarms.map((alarm) => ({
+          ...alarm,
+          OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+        })),
       },
     },
     {

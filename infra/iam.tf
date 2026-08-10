@@ -189,6 +189,18 @@ data "aws_iam_policy_document" "github_deploy" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    sid       = "PublishDeploymentHeartbeat"
+    actions   = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["ilo/Deployments"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "github_deploy" {

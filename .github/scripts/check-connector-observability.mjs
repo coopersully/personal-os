@@ -81,25 +81,29 @@ function validateAlarm(alarms, expected) {
   for (const [field, value] of Object.entries({
     ActionsEnabled: true,
     ComparisonOperator: "GreaterThanOrEqualToThreshold",
-    DatapointsToAlarm: 1,
-    EvaluationPeriods: 1,
+    DatapointsToAlarm: expected.datapointsToAlarm ?? 1,
+    EvaluationPeriods: expected.evaluationPeriods ?? 1,
     MetricName: expected.metricName,
-    Namespace: "ilo/Connectors",
+    Namespace: expected.namespace ?? "ilo/Connectors",
     Period: expected.period,
     Statistic: expected.statistic ?? "Sum",
     Threshold: expected.threshold,
-    TreatMissingData: "notBreaching",
+    TreatMissingData: expected.treatMissingData ?? "notBreaching",
   })) {
     sameValue(alarm[field], value, `alarm-${field}:${expected.name}`);
   }
-  if (!Array.isArray(alarm.AlarmActions) || alarm.AlarmActions.length !== 1) {
+  const expectedAlarmActionCount = expected.alarmActionCount ?? 1;
+  if (
+    !Array.isArray(alarm.AlarmActions) ||
+    alarm.AlarmActions.length !== expectedAlarmActionCount
+  ) {
     fail(`alarm-actions:${expected.name}`);
   }
-  if (!Array.isArray(alarm.OKActions) || alarm.OKActions.length !== 1) {
+  if (!Array.isArray(alarm.OKActions) || alarm.OKActions.length !== 0) {
     fail(`alarm-ok-actions:${expected.name}`);
   }
-  sameValue(alarm.OKActions[0], alarm.AlarmActions[0], `alarm-action-route:${expected.name}`);
   if (
+    expectedAlarmActionCount === 1 &&
     !new RegExp(`^arn:[^:]+:sns:[^:]+:[0-9]{12}:${escapeRegExp(cluster)}-operations$`).test(
       alarm.AlarmActions[0],
     )
@@ -169,7 +173,8 @@ try {
       metricName: "ConnectorSyncFreshnessAgeMs",
       metricValue: "$.freshnessAgeMs",
       name: `${cluster}-connector-sync-freshness-age`,
-      pattern: '{ $.event = "connector_sync_completed" && $.freshnessAgeMs = * }',
+      pattern:
+        '{ $.event = "connector_sync_freshness_observed" && $.freshnessAgeMs = * }',
     },
   ];
   const expectedAlarms = [
@@ -218,11 +223,23 @@ try {
       threshold: 300000,
     },
     {
+      datapointsToAlarm: 3,
+      evaluationPeriods: 5,
       metricName: "ConnectorSyncFreshnessAgeMs",
       name: `${cluster}-connector-sync-freshness`,
-      period: 300,
+      period: 60,
       statistic: "Maximum",
       threshold: 600000,
+      treatMissingData: "breaching",
+    },
+    {
+      alarmActionCount: 0,
+      metricName: "ApiDeploymentInProgress",
+      name: `${cluster}-api-deployment-in-progress`,
+      namespace: "ilo/Deployments",
+      period: 60,
+      statistic: "Maximum",
+      threshold: 1,
     },
   ];
 
@@ -246,6 +263,36 @@ try {
   );
   if (alarms.length !== expectedAlarms.length) fail("alarm-inventory-drifted");
   for (const expected of expectedAlarms) validateAlarm(alarms, expected);
+
+  const compositeName = `${cluster}-api-availability-actionable`;
+  const composite = exactlyOne(
+    awsJson(
+      ["cloudwatch", "describe-alarms", "--alarm-names", compositeName],
+      "CompositeAlarms",
+    ),
+    ({ AlarmName }) => AlarmName === compositeName,
+    `composite-count:${compositeName}`,
+  );
+  for (const [field, value] of Object.entries({
+    ActionsEnabled: true,
+    AlarmRule: `ALARM(\"${cluster}-api-public-health\") AND NOT ALARM(\"${cluster}-api-deployment-in-progress\")`,
+  })) {
+    sameValue(composite[field], value, `composite-${field}:${compositeName}`);
+  }
+  if (!Array.isArray(composite.AlarmActions) || composite.AlarmActions.length !== 1) {
+    fail(`composite-actions:${compositeName}`);
+  }
+  if (
+    !new RegExp(`^arn:[^:]+:sns:[^:]+:[0-9]{12}:${escapeRegExp(cluster)}-operations$`).test(
+      composite.AlarmActions[0],
+    )
+  ) {
+    fail(`composite-action-route:${compositeName}`);
+  }
+  if ((composite.OKActions ?? []).length !== 0) fail(`composite-ok-actions:${compositeName}`);
+  if ((composite.InsufficientDataActions ?? []).length !== 0) {
+    fail(`composite-insufficient-data-actions:${compositeName}`);
+  }
 
   console.log("Connector observability preflight passed.");
 } catch (error) {

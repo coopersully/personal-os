@@ -13,7 +13,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -63,9 +63,9 @@ const taskEmptyCopy: Record<TaskView, string> = {
 
 export function TasksCreateButton({ onCreate }: { onCreate: () => void }) {
   return (
-    <Button onClick={onCreate} size="sm">
-      <Plus aria-hidden="true" />
-      New task
+    <Button aria-label="New task" onClick={onCreate} size="sm">
+      <Plus aria-hidden="true" data-icon="inline-start" />
+      <span>New task</span>
     </Button>
   );
 }
@@ -75,8 +75,11 @@ export function TasksTopbarControls() {
 }
 
 export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
+  const location = useLocation();
   const [searchParams] = useSearchParams();
   const view = taskViewFromParams(searchParams);
+  const remindersActive = location.pathname === "/reminders";
+  const remindersCompleted = searchParams.get("view") === "completed";
   return (
     <>
       <SidebarGroup>
@@ -115,8 +118,12 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
           <nav aria-label="Related commitments">
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton asChild>
-                  <Link onClick={onNavigate} to="/reminders">
+                <SidebarMenuButton asChild isActive={location.pathname === "/reminders"}>
+                  <Link
+                    aria-current={location.pathname === "/reminders" ? "page" : undefined}
+                    onClick={onNavigate}
+                    to="/reminders"
+                  >
                     <ListTodo aria-hidden="true" />
                     <span>Reminders</span>
                   </Link>
@@ -126,6 +133,41 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
           </nav>
         </SidebarGroupContent>
       </SidebarGroup>
+      {remindersActive ? (
+        <SidebarGroup>
+          <SidebarGroupLabel>Reminder view</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <nav aria-label="Reminder views">
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={!remindersCompleted}>
+                    <Link
+                      aria-current={!remindersCompleted ? "page" : undefined}
+                      onClick={onNavigate}
+                      to={workspaceViewPath("/reminders", searchParams)}
+                    >
+                      <ListTodo aria-hidden="true" />
+                      <span>Open</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={remindersCompleted}>
+                    <Link
+                      aria-current={remindersCompleted ? "page" : undefined}
+                      onClick={onNavigate}
+                      to={workspaceViewPath("/reminders", searchParams, "completed")}
+                    >
+                      <CheckCircle2 aria-hidden="true" />
+                      <span>Completed</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </nav>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      ) : null}
     </>
   );
 }

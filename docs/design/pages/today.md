@@ -77,14 +77,15 @@ History (collapsed)
   second page-sized card.
 - **Narrow/mobile:** use one sequence: moment → day flow → decision queue →
   history. Do not move urgent material behind horizontal scrolling or a tab.
-- The app frame keeps date and capture available. Conditions may compress to
-  icon buttons with accessible labels and popovers.
+- The app frame keeps capture available. Conditions may compress to icon buttons
+  with accessible labels and popovers; narrow navigation is the shell-owned
+  bottom workspace dock and contextual Actions sheet.
 
 ## Interaction contract
 
 - The Today sidebar keeps Today, Goals, and Motives available. Calendar, Tasks,
   Mail, and Finances are workspace destinations owned by the workspace switcher
-  and mobile primary navigation; do not duplicate them in this sidebar.
+  and the shell's narrow workspace dock; do not duplicate them in this sidebar.
   Reminders remains a Tasks destination rather than a separate workspace.
 - Opening an event, task, or reminder preserves the user’s place and opens the
   established inspector/dialog.

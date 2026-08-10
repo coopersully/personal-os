@@ -11,6 +11,17 @@ event without losing the shape of the day.
   account groups because local calendars are a separate first-party source.
 - The week header is a compact orientation row. It expands only for real
   all-day material and meets the timeline without a divider.
+- The persistent Calendar orientation occupies the shared workspace app bar's
+  `identity` slot, with Today and the view selector in `context`. It names the
+  selected day, week, or month; the calendar body begins directly with its
+  spatial material and only that body scrolls.
+- Week views keep their day headers vertically pinned and their time axis
+  horizontally pinned. Month views keep weekday labels pinned while the date
+  grid scrolls. These are wayfinding anchors, not optional decoration.
+- The app-frame controls are two understandable groups: a Today action and a
+  connected Day/Week/Month segmented control. They remain available on mobile;
+  mobile reduces the creation action to its labelled icon so it cannot overlap
+  navigation.
 - Timeline columns carry a subtle horizontal rule at every hour. The rule
   continues through today highlighting and remains behind events, drag
   previews, and the current-time marker.
@@ -25,6 +36,11 @@ event without losing the shape of the day.
 - Hour rules align with the time axis in day and week views.
 - Current-time, selection, event, and drag states remain visually dominant over
   the hour grid.
+- Day, week, and month views retain an explicit app-frame date-range heading
+  at every scroll position. The Today control remains a standard action, not a
+  selected state. On narrow screens, Calendar compacts labels within the shared
+  fixed-height workspace app bar; it does not create a two-row Calendar-only
+  layout.
 - A Calendar-enabled account that requires renewed authorization produces one warning callout with
   a direct Connections link. Automatic retry and ilo-owned service repair remain non-destructive
   freshness state and do not interrupt the calendar with credential advice.

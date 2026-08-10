@@ -76,6 +76,37 @@ and the primary create action. When those controls are present in the frame,
 the page body begins with its primary material and never repeats a title,
 eyebrow, search field, or action bar.
 
+### Workspace app bar
+
+Today, Calendar, Tasks, Mail, and Finances render one Integration-owned
+`WorkspaceAppBar`. It is the only top-frame primitive for workspace routes.
+The primitive fixes the structure, 52 px height, sticky position, semantic
+surface, quiet bottom border, and 8 px internal rhythm; a route provides only
+the content of its named slots.
+
+| Slot | Required | Purpose |
+| --- | --- | --- |
+| `identity` | Yes | Compact orientation: a workspace/page title, or Calendar's selected date/range. It truncates before it can displace controls. |
+| `context` | Always structurally present; content optional | Search, filters, freshness, or a compact mutually-exclusive view control. |
+| `actions` | Always structurally present; content optional | The primary create/action and rare platform utility. |
+
+- The structural order is always `identity | context | actions`. Do not create
+  a second header, a workspace-specific app bar, or route modifier classes to
+  rearrange it.
+- The app bar remains opaque, the same height, and in the same sticky position
+  at desktop and narrow widths. Sheets, dialogs, route changes, loading, and
+  selection never change its geometry. A control may compact its own content at
+  narrow width, but it must stay in its slot instead of making a new row.
+- Use shadcn `ToggleGroup` for mutually exclusive view state (for example,
+  Calendar Day/Week/Month). Use independent shadcn Buttons for independent
+  actions. Do not style adjacent independent buttons to impersonate a tab
+  switcher.
+- Calendar's date/range is `identity`; its Today action and view selector are
+  `context`; New event is `actions`. Calendar grid wayfinding remains pinned in
+  the body, but it never owns a second application frame.
+- Account setup and Settings are full-page account utilities. They do not
+  invent a sixth workspace or inherit a workspace app bar.
+
 ### Blocks
 
 A block is a named product pattern with a stable purpose, not merely a rounded
@@ -293,6 +324,13 @@ durations page by page.
   divider borders between the sidebar, top navigation, and body. A workspace
   selector may use the semantic secondary surface to remain discoverable
   without reintroducing a hard seam.
+- At widths of 900 px and below, replace the sidebar drawer with the centred,
+  safe-area-aware mobile workspace dock. Its workspace trigger names the active
+  workspace and opens the five manifest-ordered destinations; its separate
+  Actions control opens a labelled modal bottom sheet of current-workspace
+  pages and account utilities. Do not add a hamburger control, favicon trigger,
+  destination bottom bar, or a direct-create action in the dock. Page-specific
+  actions remain available in the top navigation.
 - Contextual navigation rails compose the shared Sidebar group, menu,
   collapsible, and sub-menu primitives. Account identities are bounded
   disclosure rows; their child destinations are separate, indented rows with
@@ -303,10 +341,15 @@ durations page by page.
   switcher or its first navigation group. Internal destinations never carry an
   external-link glyph; reserve that affordance for actions that actually open
   a new browsing context.
-- Represent Calendar, Tasks, Mail, and Finances as whole workspaces with the
-  shared `WorkspaceIcon`. Its registry owns label, route, and glyph; theme
-  blocks own its semantic accent tokens. Do not reproduce workspace maps or
-  palette values in a page. Use unframed functional icons below workspace level.
+- Represent the five workspace identities—Today, Calendar, Tasks, Mail, and
+  Finances—from the shared navigation manifest. Calendar, Tasks, Mail, and
+  Finances use `WorkspaceIcon`; Today remains neutral. The manifest owns label,
+  default route, and glyph. Do not reproduce workspace maps or palette values
+  in a page. Use unframed functional icons below workspace level.
+- A route's navigation owner is explicit and stable: Today owns Today, Goals,
+  Motives, and Activity; Tasks owns Tasks and Reminders. Account-only routes
+  render the full-page account utility with its own local navigation, not a
+  workspace sidebar, switcher, or workspace identity.
 - When a shared moving selection surface already makes keyboard focus
   unmistakable, do not add a duplicate per-item treatment. Focus must remain at
   least as clear as hover and current-page selection.

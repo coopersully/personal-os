@@ -38,6 +38,11 @@ parallel worktree ownership. It complements the system boundary in
 
 The following are Integration-owned until they are reduced to thin registries:
 
+- The typed workspace/navigation-owner manifest is the source of truth for the
+  five workspace defaults and route-to-sidebar ownership. Feature routes must
+  register an owner or explicitly use the account-utility owner; they must not
+  infer sidebar composition from a leaf route.
+
 - `apps/web/src/app.tsx`
 - `apps/api/src/app.ts`
 - `apps/mcp/src/server.ts`

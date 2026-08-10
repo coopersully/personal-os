@@ -134,8 +134,12 @@ unrelated tools.
   never communicates readiness, selection, warning, or completion. Each accent
   must remain immediately distinguishable at peripheral glance in both themes;
   muddy, gray-shifted variants are not a calmer substitute for workspace identity.
-- Today is ilo's neutral cross-workspace surface. Reminders belong within the
-  Tasks workspace and do not receive a fifth workspace palette.
+- Today is ilo's neutral personal pseudo-workspace: it owns Today, Goals,
+  Motives, and Activity while summarizing the other workspaces. Reminders
+  belong within Tasks and do not receive a separate workspace palette.
+- The only workspace identities are Today, Calendar, Tasks, Mail, and Finances.
+  Account utilities (profile, setup, connections, security, agents, and
+  automations) are full-page utilities, never a sixth workspace.
 
 ### Typography
 

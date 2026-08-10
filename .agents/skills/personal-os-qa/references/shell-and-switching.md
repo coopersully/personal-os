@@ -30,8 +30,14 @@
 
 ## Shell consistency
 
-- Today alone keeps the date title in the top frame. Other workspaces keep their
-  route-global controls there without repeating a large title.
+- Every workspace route renders the same 52 px opaque `WorkspaceAppBar` with
+  `identity`, `context`, and `actions` slots in the same order. Its height,
+  background, border, and sticky position do not change across routes,
+  workspace-state changes, or while a sheet/dialog is open.
+- Today keeps its date in `identity`; Calendar keeps its selected date/range in
+  `identity`; the other workspaces keep compact route orientation there. Route
+  controls occupy `context`, and the primary action occupies `actions`; no
+  workspace introduces a second top frame or a mobile-only transparent bar.
 - Contextual sidebars do not repeat the workspace label below the switcher.
 - Internal links do not show external-link glyphs.
 - Active navigation uses the filled form of the same icon used in outline form
@@ -42,14 +48,22 @@
 ## Narrow pass
 
 1. Set the viewport to 390 × 844.
-2. Confirm the app frame exposes **Open Navigation** and the primary bottom nav.
-3. Open navigation, then the workspace switcher.
-4. Confirm the menu fits within the drawer, summaries remain readable, the
-   active row is clear, and the body behind it is inert/dimmed.
-5. Confirm `document.documentElement.scrollWidth` does not exceed
+2. Visit `/today`, `/calendar`, `/tasks`, `/mail`, and `/finances`. Confirm the
+   app bar has identical 52 px geometry, an opaque surface, and no horizontal
+   overflow. Confirm Calendar's range, Today action, and view controls remain
+   in the shared row rather than a taller Calendar-specific header.
+3. Confirm a centred **Workspace dock** names the active workspace and opens an
+   ordered Today, Calendar, Tasks, Mail, and Finances menu; its separate
+   **Workspace actions** bubble remains fixed beside it. No favicon trigger or
+   hamburger is present.
+4. Select Tasks from that menu and confirm the dock active state follows the
+   workspace owner. Navigate to Reminders and confirm Tasks remains active.
+5. Open **Workspace actions**. Confirm its modal sheet lists the active
+   workspace pages and actions, then close it with Escape.
+6. Confirm `document.documentElement.scrollWidth` does not exceed
    `clientWidth`.
-6. Dismiss both layers using their named controls or Escape.
-7. Reset the viewport override.
+7. Confirm the sheet closes through its named close control or Escape.
+8. Reset the viewport override.
 
 ## Regression sentinels
 

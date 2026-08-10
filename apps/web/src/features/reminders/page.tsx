@@ -24,9 +24,9 @@ import { invalidateMaterial } from "../../lib/material-queries.js";
 
 export function RemindersCreateButton({ onCreate }: { onCreate: () => void }) {
   return (
-    <ShadcnButton onClick={onCreate} size="sm">
-      <Plus aria-hidden="true" />
-      New reminder
+    <ShadcnButton aria-label="New reminder" onClick={onCreate} size="sm">
+      <Plus aria-hidden="true" data-icon="inline-start" />
+      <span>New reminder</span>
     </ShadcnButton>
   );
 }

@@ -1162,7 +1162,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                         size="icon"
                         variant="ghost"
                       >
-                        <PinIcon aria-hidden="true" fill={pinned ? "currentColor" : "none"} />
+                        <PinIcon aria-hidden="true" weight={pinned ? "Filled" : "Outline"} />
                       </ShadcnButton>
                     </TooltipTrigger>
                     <TooltipContent side="bottom">Keep window on top</TooltipContent>

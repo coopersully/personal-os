@@ -1,6 +1,6 @@
 import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
-import { AlertTriangleIcon, CircleCheckIcon, InfoIcon, LoaderIcon, StopIcon } from "@/components/icons";
+import { AlertTriangleIcon, CircleCheckIcon, InfoIcon, LoaderIcon, ErrorIcon } from "@/components/icons";
 
 const Toaster = ({ theme, ...props }: ToasterProps) => {
   const { theme: resolvedTheme = "system" } = useTheme()
@@ -20,7 +20,7 @@ const Toaster = ({ theme, ...props }: ToasterProps) => {
           <AlertTriangleIcon className="size-4" />
         ),
         error: (
-          <StopIcon className="size-4" />
+          <ErrorIcon className="size-4" />
         ),
         loading: (
           <LoaderIcon className="size-4 animate-spin" />

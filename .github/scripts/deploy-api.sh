@@ -152,6 +152,7 @@ assert_api_deployment_heartbeat_healthy() {
 }
 
 stop_api_deployment_heartbeat() {
+  local heartbeat_alarm_cleared=true
   if test -n "$api_deployment_heartbeat_pid"; then
     kill -TERM "$api_deployment_heartbeat_pid" 2>/dev/null || true
     wait "$api_deployment_heartbeat_pid" 2>/dev/null || true
@@ -160,6 +161,9 @@ stop_api_deployment_heartbeat() {
   if test "$api_deployment_heartbeat_started" = "true"; then
     publish_api_deployment_state 0
     api_deployment_heartbeat_started=false
+    if ! wait_for_api_deployment_alarm_state OK; then
+      heartbeat_alarm_cleared=false
+    fi
   fi
   if test -n "$api_deployment_heartbeat_failure_file"; then
     rm -f "$api_deployment_heartbeat_failure_file"
@@ -168,6 +172,10 @@ stop_api_deployment_heartbeat() {
   if test -n "$api_deployment_heartbeat_ready_file"; then
     rm -f "$api_deployment_heartbeat_ready_file"
     api_deployment_heartbeat_ready_file=""
+  fi
+  if test "$heartbeat_alarm_cleared" != "true"; then
+    echo "::error::The API deployment heartbeat alarm did not clear; paging remains suppressed."
+    return 1
   fi
 }
 

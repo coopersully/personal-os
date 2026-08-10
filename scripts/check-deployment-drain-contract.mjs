@@ -252,6 +252,11 @@ requireMatch(
 );
 requireMatch(
   workflow,
+  /stop_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 0[\s\S]*?wait_for_api_deployment_alarm_state OK[\s\S]*?API deployment heartbeat alarm did not clear/,
+  "post-deployment proof that heartbeat suppression cleared",
+);
+requireMatch(
+  workflow,
   /stop_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 0/,
   "deployment heartbeat cleanup that restores incident paging",
 );

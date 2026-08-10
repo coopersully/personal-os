@@ -70,7 +70,9 @@ function fakeAws(args) {
       return;
     }
     state.deploymentMetricValues.push(value);
-    state.deploymentAlarmState = value >= 1 ? "ALARM" : "OK";
+    if (!(value === 0 && state.stickyDeploymentAlarm === true)) {
+      state.deploymentAlarmState = value >= 1 ? "ALARM" : "OK";
+    }
     writeState(statePath, state);
     return;
   }
@@ -754,6 +756,17 @@ if (process.argv[2] === "--fake-aws") {
         "API deployment heartbeat could not be refreshed",
       ),
     "Persistent heartbeat refresh failure must become parent-visible and fail the rollout.",
+  );
+  const unclearedDeploymentAlarm = runScenario(
+    "uncleared-deployment-alarm",
+    baseState({ stickyDeploymentAlarm: true }),
+  );
+  assert(
+    unclearedDeploymentAlarm.result.status !== 0 &&
+      unclearedDeploymentAlarm.result.stdout.includes(
+        "API deployment heartbeat alarm did not clear",
+      ),
+    "A deployment must fail when CloudWatch cannot prove that suppression cleared.",
   );
   const delayedPrimary = runScenario(
     "delayed-primary-completion",

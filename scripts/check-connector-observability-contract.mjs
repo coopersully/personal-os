@@ -360,6 +360,16 @@ if (state.delayAllOperations || state.delayOperation === operation) {
 if (operation === "logs describe-metric-filters") {
   process.stdout.write(JSON.stringify({ metricFilters: state.metricFilters }));
 } else if (operation === "cloudwatch describe-alarms") {
+  const args = process.argv.slice(4);
+  const compositeLookup = args.includes("personal-os-prod-api-availability-actionable");
+  const alarmTypesIndex = args.indexOf("--alarm-types");
+  if (
+    compositeLookup &&
+    (alarmTypesIndex === -1 || args[alarmTypesIndex + 1] !== "CompositeAlarm")
+  ) {
+    process.stderr.write("Composite alarm lookup must request CompositeAlarm explicitly\\n");
+    process.exit(2);
+  }
   process.stdout.write(JSON.stringify({
     CompositeAlarms: state.CompositeAlarms,
     MetricAlarms: state.MetricAlarms,

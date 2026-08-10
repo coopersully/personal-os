@@ -265,7 +265,17 @@ try {
 
   const compositeName = `${cluster}-api-availability-actionable`;
   const composite = exactlyOne(
-    awsJson(["cloudwatch", "describe-alarms", "--alarm-names", compositeName], "CompositeAlarms"),
+    awsJson(
+      [
+        "cloudwatch",
+        "describe-alarms",
+        "--alarm-names",
+        compositeName,
+        "--alarm-types",
+        "CompositeAlarm",
+      ],
+      "CompositeAlarms",
+    ),
     ({ AlarmName }) => AlarmName === compositeName,
     `composite-count:${compositeName}`,
   );

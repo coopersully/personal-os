@@ -9,6 +9,10 @@ api_scaling_suspension=""
 api_service_drain_attempted=false
 api_suspension_attempted=false
 api_rollout_complete=false
+api_deployment_heartbeat_pid=""
+api_deployment_heartbeat_started=false
+api_deployment_heartbeat_interval_seconds="${API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30}"
+api_deployment_heartbeat_background_enabled="${API_DEPLOYMENT_HEARTBEAT_BACKGROUND_ENABLED:-true}"
 api_recovery_entry=false
 api_recovery_marker_persisted=false
 api_recovery_cleanup_persisted=false
@@ -59,6 +63,74 @@ run_interruptible() {
     command_exit_code="$?"
     api_active_child_pid=""
     return "$command_exit_code"
+  fi
+}
+
+publish_api_deployment_state() {
+  deployment_state="$1"
+  AWS_MAX_ATTEMPTS=3 aws cloudwatch put-metric-data \
+    --namespace ilo/Deployments \
+    --metric-data "MetricName=ApiDeploymentInProgress,Value=${deployment_state},Unit=Count" \
+    --region "$AWS_REGION" \
+    --cli-connect-timeout 5 \
+    --cli-read-timeout 10
+}
+
+wait_for_api_deployment_alarm_state() {
+  expected_state="$1"
+  for alarm_state_delay in 0 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5; do
+    if test "$alarm_state_delay" != "0"; then
+      sleep "$alarm_state_delay"
+    fi
+    observed_state="$(
+      AWS_MAX_ATTEMPTS=2 aws cloudwatch describe-alarms \
+        --alarm-names "${ECS_CLUSTER}-api-deployment-in-progress" \
+        --query 'MetricAlarms[0].StateValue' \
+        --output text \
+        --region "$AWS_REGION" \
+        --cli-connect-timeout 5 \
+        --cli-read-timeout 10
+    )" || continue
+    if test "$observed_state" = "$expected_state"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+start_api_deployment_heartbeat() {
+  publish_api_deployment_state 1
+  api_deployment_heartbeat_started=true
+  if test "$api_deployment_heartbeat_background_enabled" = "true"; then
+    (
+      trap - ERR EXIT INT TERM
+      while /bin/sleep "$api_deployment_heartbeat_interval_seconds"; do
+        AWS_MAX_ATTEMPTS=1 aws cloudwatch put-metric-data \
+          --namespace ilo/Deployments \
+          --metric-data "MetricName=ApiDeploymentInProgress,Value=1,Unit=Count" \
+          --region "$AWS_REGION" \
+          --cli-connect-timeout 5 \
+          --cli-read-timeout 10 || exit 1
+      done
+    ) &
+    api_deployment_heartbeat_pid="$!"
+  fi
+  if ! wait_for_api_deployment_alarm_state ALARM; then
+    stop_api_deployment_heartbeat || true
+    echo "::error::The API deployment heartbeat alarm did not become active before drain."
+    return 1
+  fi
+}
+
+stop_api_deployment_heartbeat() {
+  if test -n "$api_deployment_heartbeat_pid"; then
+    kill -TERM "$api_deployment_heartbeat_pid" 2>/dev/null || true
+    wait "$api_deployment_heartbeat_pid" 2>/dev/null || true
+    api_deployment_heartbeat_pid=""
+  fi
+  if test "$api_deployment_heartbeat_started" = "true"; then
+    publish_api_deployment_state 0
+    api_deployment_heartbeat_started=false
   fi
 }
 
@@ -348,6 +420,7 @@ fail_closed_api_deployment() {
     fi
     persist_failed_rollout_marker || true
   fi
+  stop_api_deployment_heartbeat || true
   trap - ERR EXIT INT TERM
   exit "$deployment_exit_code"
 }
@@ -384,7 +457,10 @@ cleanup_api_deployment() {
     }; then
       echo "::error::Pre-drain failure preserved the old service but could not prove exact scaling-state restoration."
     fi
+    stop_api_deployment_heartbeat || true
     trap - ERR EXIT INT TERM
+  elif test "$api_deployment_heartbeat_started" = "true"; then
+    stop_api_deployment_heartbeat || true
   fi
 }
 
@@ -432,6 +508,7 @@ cancel_api_deployment() {
       >/dev/null ||
       true
   fi
+  stop_api_deployment_heartbeat || true
   exit "$cancellation_exit_code"
 }
 
@@ -822,6 +899,7 @@ api_iac_deployment_configuration="$(
 # Stop and drain the old binary before the new task runs migrations.
 # Connector lifecycle migrations invalidate cached authority and cannot
 # safely coexist with a pre-fence process that is still in provider I/O.
+start_api_deployment_heartbeat
 if test "$api_recovery_entry" = "true"; then
   # RegisterScalableTarget may enforce MinCapacity even when the request also
   # carries an all-suspended state. Recovery already entered from a proven
@@ -1204,4 +1282,5 @@ if test "$api_scaling_suspension" != "$api_original_suspended_state"; then
   false
 fi
 api_rollout_complete=true
+stop_api_deployment_heartbeat
 trap - ERR EXIT INT TERM

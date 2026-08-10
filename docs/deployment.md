@@ -186,6 +186,15 @@ protocol header.
 Legacy or mixed task sets fail before drain; lifecycle readiness must be shipped
 and verified separately before a migration-required release can use this path.
 
+Before the first availability-changing mutation, deployment publishes
+`ilo/Deployments/ApiDeploymentInProgress = 1`, starts a 30-second heartbeat, and proves the
+`<cluster>-api-deployment-in-progress` alarm is active. The raw Route 53 API health alarm remains
+visible, but human paging comes from an availability composite that requires public-health failure
+without that heartbeat. Every handled success, failure, and cancellation stops the heartbeat and
+publishes zero. Abrupt runner loss stops new samples; missing heartbeat data is non-breaching, so a
+continuing public outage becomes actionable within the next alarm evaluation instead of remaining
+suppressed. Heartbeat publication or state proof failure before drain preserves the healthy service.
+
 After that gate, the production workflow scales the API service to zero and waits for the
 current tasks to stop before starting the new migration-capable task. It suspends ECS
 dynamic and scheduled scaling before the drain and records the exact old task

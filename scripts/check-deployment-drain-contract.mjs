@@ -233,7 +233,7 @@ requireMatch(
 );
 requireMatch(
   workflow,
-  /start_api_deployment_heartbeat\(\)[\s\S]*?sleep 30[\s\S]*?publish_api_deployment_state 1/,
+  /start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?\/bin\/sleep "\$api_deployment_heartbeat_interval_seconds"[\s\S]*?ApiDeploymentInProgress,Value=1/,
   "a thirty-second deployment heartbeat loop",
 );
 requireMatch(
@@ -241,9 +241,9 @@ requireMatch(
   /stop_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 0/,
   "deployment heartbeat cleanup that restores incident paging",
 );
-requireOrder(
-  "start_api_deployment_heartbeat",
-  "--desired-count 0",
+requireMatch(
+  workflow,
+  /# Stop and drain the old binary[\s\S]*?start_api_deployment_heartbeat[\s\S]*?api_service_drain_attempted=true[\s\S]*?--desired-count 0/,
   "deployment heartbeat proof before the availability-changing API drain",
 );
 requireMatch(

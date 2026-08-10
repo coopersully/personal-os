@@ -30,6 +30,22 @@ function fakeAws(args) {
   const [service, operation] = args;
   logCall(state, args);
 
+  if (service === "cloudwatch" && operation === "put-metric-data") {
+    const metricData = argument(args, "--metric-data") ?? "";
+    const value = Number(metricData.match(/(?:^|,)Value=([^,]+)/)?.[1]);
+    if (!Number.isFinite(value)) throw new Error("Expected deployment metric value.");
+    state.deploymentMetricValues.push(value);
+    state.deploymentAlarmState = value >= 1 ? "ALARM" : "OK";
+    writeState(statePath, state);
+    return;
+  }
+
+  if (service === "cloudwatch" && operation === "describe-alarms") {
+    writeState(statePath, state);
+    process.stdout.write(`${state.deploymentAlarmState}\n`);
+    return;
+  }
+
   if (service === "ecs" && operation === "describe-task-definition") {
     const taskDefinition = argument(args, "--task-definition");
     const definition = state.taskDefinitions[taskDefinition];
@@ -331,6 +347,8 @@ if (process.argv[2] === "--fake-aws") {
       cancelDuringPostLaunchRead: false,
       cancelDuringPostZeroWait: false,
       denyRegister: false,
+      deploymentAlarmState: "OK",
+      deploymentMetricValues: [],
       describeScalingCalls: 0,
       desiredCount: 1,
       drainProtocol: "quiesce-v1",
@@ -389,6 +407,9 @@ if (process.argv[2] === "--fake-aws") {
         API_SERVICE: "ilo-api",
         API_TASK_DEFINITION: state.apiTaskDefinition ?? "new-task-definition",
         API_URL: "https://api.example.com",
+        API_DEPLOYMENT_HEARTBEAT_BACKGROUND_ENABLED: "false",
+        API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS: "0.05",
+        AWS_REGION: "us-east-1",
         ECS_CLUSTER: "ilo-production",
         FAKE_AWS_STATE: statePath,
         PATH: `${bin}${delimiter}${process.env.PATH}`,
@@ -469,7 +490,7 @@ if (process.argv[2] === "--fake-aws") {
   );
   assert(
     cancelled.completedAt - cancelled.state.cancellationSignalAt < 20_000,
-    "Cancellation must interrupt a blocked AWS waiter before runner escalation.",
+    `Cancellation must interrupt a blocked AWS waiter before runner escalation (elapsed=${cancelled.completedAt - cancelled.state.cancellationSignalAt}ms).`,
   );
   assert(cancelled.state.zeroCalls >= 2, "Cancellation recovery must issue a second zero.");
   assert(
@@ -653,6 +674,12 @@ if (process.argv[2] === "--fake-aws") {
     success.state.primaryTaskDefinition === "new-task-definition",
     "Success must launch the exact new task definition.",
   );
+  assert(
+    success.state.deploymentMetricValues[0] === 1 &&
+      success.state.deploymentMetricValues.at(-1) === 0 &&
+      success.state.deploymentAlarmState === "OK",
+    "Success must activate deployment suppression before drain and restore paging afterward.",
+  );
   const delayedPrimary = runScenario(
     "delayed-primary-completion",
     baseState({ primaryRolloutStates: ["IN_PROGRESS", "COMPLETED"] }),
@@ -678,7 +705,7 @@ if (process.argv[2] === "--fake-aws") {
     stalledPrimary.state.primaryRolloutStates.length === 0 &&
       stalledPrimary.state.desiredCount === 0 &&
       JSON.stringify(stalledPrimary.state.suspension) === JSON.stringify(allSuspended),
-    "A stalled primary must exhaust the bounded poll and return to fail-closed zero.",
+    `A stalled primary must exhaust the bounded poll and return to fail-closed zero (${JSON.stringify({ desiredCount: stalledPrimary.state.desiredCount, primaryRolloutStates: stalledPrimary.state.primaryRolloutStates, suspension: stalledPrimary.state.suspension, status: stalledPrimary.result.status })}).`,
   );
   const successfulReadiness = success.state.calls.findIndex((call) => call.startsWith("curl "));
   const successfulSuspension = success.state.calls.findIndex((call) =>
@@ -686,6 +713,11 @@ if (process.argv[2] === "--fake-aws") {
   );
   const successfulDrain = success.state.calls.findIndex(
     (call) => call.startsWith("ecs update-service") && call.includes("--desired-count 0"),
+  );
+  const successfulHeartbeat = success.state.calls.findIndex(
+    (call) =>
+      call.startsWith("cloudwatch put-metric-data") &&
+      call.includes("ApiDeploymentInProgress,Value=1"),
   );
   const successfulMigrationLaunch = success.state.calls.findIndex(
     (call) =>
@@ -695,6 +727,8 @@ if (process.argv[2] === "--fake-aws") {
   assert(
     successfulReadiness >= 0 &&
       successfulReadiness < successfulSuspension &&
+      successfulHeartbeat >= 0 &&
+      successfulHeartbeat < successfulDrain &&
       successfulSuspension < successfulDrain &&
       successfulDrain < successfulMigrationLaunch,
     "The proven live quiesce prerequisite must precede suspension, exact drain, and migration startup.",

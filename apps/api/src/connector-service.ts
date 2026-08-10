@@ -3646,6 +3646,42 @@ export function createConnectorService({
     },
 
     syncAccount,
+    async observeSyncFreshness(): Promise<{
+      eligibleAccountCount: number;
+      freshnessAgeMs: number;
+    }> {
+      const observedAt = now();
+      const accounts = await db
+        .select({
+          createdAt: calendarAccounts.createdAt,
+          lastSyncedAt: calendarAccounts.lastSyncedAt,
+        })
+        .from(calendarAccounts)
+        .where(
+          and(
+            ne(calendarAccounts.provider, "local"),
+            or(eq(calendarAccounts.calendarEnabled, true), eq(calendarAccounts.mailEnabled, true)),
+            or(
+              isNull(calendarAccounts.syncRecovery),
+              eq(calendarAccounts.syncRecovery, "automatic"),
+            ),
+          ),
+        );
+      return {
+        eligibleAccountCount: accounts.length,
+        freshnessAgeMs: accounts.reduce(
+          (maximumAge, account) =>
+            Math.max(
+              maximumAge,
+              Math.max(
+                0,
+                observedAt.getTime() - (account.lastSyncedAt ?? account.createdAt).getTime(),
+              ),
+            ),
+          0,
+        ),
+      };
+    },
     async syncDueAccounts(options: { concurrency?: number; limit?: number } = {}): Promise<{
       attempted: number;
       failed: number;

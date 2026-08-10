@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -18,7 +19,9 @@ function readState(path) {
 }
 
 function writeState(path, state) {
-  writeFileSync(path, `${JSON.stringify(state)}\n`);
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(state)}\n`);
+  renameSync(temporaryPath, path);
 }
 
 function argument(args, name) {

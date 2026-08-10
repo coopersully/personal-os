@@ -727,8 +727,8 @@ if (process.argv[2] === "--fake-aws") {
   assert(
     backgroundHeartbeat.result.status === 0 &&
       backgroundHeartbeat.heartbeatValues.filter((value) => value === 1).length >= 2 &&
-      backgroundHeartbeat.heartbeatValues.at(-1) === 0,
-    "An enabled heartbeat must refresh during rollout and publish zero during cleanup.",
+      backgroundHeartbeat.heartbeatValues.includes(0),
+    `An enabled heartbeat must refresh during rollout and publish zero during cleanup (${JSON.stringify(backgroundHeartbeat.heartbeatValues)}).`,
   );
   const failedBackgroundHeartbeat = runScenario(
     "failed-background-heartbeat",

@@ -54,10 +54,18 @@ if (/resource "aws_cloudwatch_metric_alarm" "nat_/.test(operations)) {
   throw new Error("Production cost-floor contract still contains NAT alarms.");
 }
 
-const publicHealthChecks = operations.match(/public_health_checks\s*=\s*\{([\s\S]*?)\n\s*\}/)?.[1];
-requireMatch(publicHealthChecks ?? "", /app\s*=\s*\{/, "the app public health check");
-if (/\b(api|mcp)\s*=\s*\{/.test(publicHealthChecks ?? "")) {
-  throw new Error("Production cost-floor contract still contains redundant API/MCP health checks.");
+const publicHealthChecks = operations.match(
+  /public_health_checks\s*=\s*\{([\s\S]*?)\n\s*\}\n\n\s*ecs_services/,
+)?.[1];
+for (const surface of ["app", "api"]) {
+  requireMatch(
+    publicHealthChecks ?? "",
+    new RegExp(`${surface}\\s*=\\s*\\{`),
+    `the ${surface} public health check`,
+  );
+}
+if (/\bmcp\s*=\s*\{/.test(publicHealthChecks ?? "")) {
+  throw new Error("Production cost-floor contract still contains the redundant MCP health check.");
 }
 
 requireMatch(governance, /recording_frequency\s*=\s*"DAILY"/, "daily AWS Config recording");

@@ -7,7 +7,7 @@ This directory defines an AWS deployment baseline in `us-east-1`:
 - ECS application tasks in public subnets with tightly scoped security groups and direct provider egress;
 - a public ALB with ACM TLS, strict host routing, managed WAF protections, and CloudWatch logs;
 - a private, encrypted S3 web bucket delivered through CloudFront with browser security headers;
-- one external app HTTPS check, CloudWatch alarms/dashboard, and an email-backed SNS operations channel;
+- external app and deployment-aware API HTTPS checks, CloudWatch alarms/dashboard, and an email-backed SNS operations channel;
 - GuardDuty, IAM Access Analyzer, Security Hub Foundational Best Practices, AWS Config, and a validated multi-Region CloudTrail;
 - weekly database recovery points in AWS Backup in addition to RDS automated backups;
 - monthly budget, low-threshold cost anomaly notifications, and active cost-allocation tags;
@@ -202,7 +202,7 @@ application security group, whose service-port ingress is limited to the load-ba
 group. The database remains isolated in database-only private subnets. This avoids the fixed NAT
 gateway and Elastic IP cost while preserving the same inbound boundary.
 
-CloudWatch alarms cover app public HTTPS health, ECS CPU/memory, unhealthy targets,
+CloudWatch alarms cover app and deployment-aware API public HTTPS health, ECS CPU/memory, unhealthy targets,
 5xx responses, latency, RDS CPU/storage/memory/connections, and
 CloudFront 5xx rate. The `personal-os-prod-operations` dashboard collects the
 primary service and database signals. Human-facing alarms publish failure transitions only;

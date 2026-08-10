@@ -8,6 +8,11 @@ locals {
       path          = "/"
       search_string = "<title>ilo"
     }
+    api = {
+      fqdn          = local.api_domain
+      path          = "/health/ready"
+      search_string = "\"ready\""
+    }
   }
 
   ecs_services = {

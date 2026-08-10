@@ -54,7 +54,7 @@ for (const event of [
   "connector_subscription_failed",
   "connector_subscription_renewed",
   "connector_trigger_dispatched",
-  "connector_sync_completed",
+  "connector_sync_freshness_observed",
 ]) {
   requireMatch(requestLogTypes, new RegExp(event), `the privacy-bounded ${event} event`);
 }
@@ -148,7 +148,8 @@ const validState = {
     },
     {
       filterName: "personal-os-prod-connector-sync-freshness-age",
-      filterPattern: '{ $.event = "connector_sync_completed" && $.freshnessAgeMs = * }',
+      filterPattern:
+        '{ $.event = "connector_sync_freshness_observed" && $.freshnessAgeMs = * }',
       logGroupName: "/ecs/personal-os-prod-api",
       metricTransformations: [
         {
@@ -169,7 +170,7 @@ const validState = {
       EvaluationPeriods: 1,
       MetricName: "ConnectorConfigurationFailureCount",
       Namespace: "ilo/Connectors",
-      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      OKActions: [],
       Period: 300,
       Statistic: "Sum",
       Threshold: 1,
@@ -184,7 +185,7 @@ const validState = {
       EvaluationPeriods: 1,
       MetricName: "ConnectorSubscriptionFailureCount",
       Namespace: "ilo/Connectors",
-      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      OKActions: [],
       Period: 300,
       Statistic: "Sum",
       Threshold: 1,
@@ -199,7 +200,7 @@ const validState = {
       EvaluationPeriods: 1,
       MetricName: "ConnectorSubscriptionExpiredCount",
       Namespace: "ilo/Connectors",
-      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      OKActions: [],
       Period: 300,
       Statistic: "Sum",
       Threshold: 1,
@@ -214,7 +215,7 @@ const validState = {
       EvaluationPeriods: 1,
       MetricName: "ConnectorRenewalLagMs",
       Namespace: "ilo/Connectors",
-      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      OKActions: [],
       Period: 300,
       Statistic: "Maximum",
       Threshold: 300000,
@@ -229,7 +230,7 @@ const validState = {
       EvaluationPeriods: 1,
       MetricName: "ConnectorNotificationRejectedCount",
       Namespace: "ilo/Connectors",
-      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      OKActions: [],
       Period: 300,
       Statistic: "Sum",
       Threshold: 20,
@@ -244,7 +245,7 @@ const validState = {
       EvaluationPeriods: 1,
       MetricName: "ConnectorTriggerAgeMs",
       Namespace: "ilo/Connectors",
-      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      OKActions: [],
       Period: 300,
       Statistic: "Maximum",
       Threshold: 300000,
@@ -255,15 +256,15 @@ const validState = {
       AlarmActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
       AlarmName: "personal-os-prod-connector-sync-freshness",
       ComparisonOperator: "GreaterThanOrEqualToThreshold",
-      DatapointsToAlarm: 1,
-      EvaluationPeriods: 1,
+      DatapointsToAlarm: 3,
+      EvaluationPeriods: 5,
       MetricName: "ConnectorSyncFreshnessAgeMs",
       Namespace: "ilo/Connectors",
-      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
-      Period: 300,
+      OKActions: [],
+      Period: 60,
       Statistic: "Maximum",
       Threshold: 600000,
-      TreatMissingData: "notBreaching",
+      TreatMissingData: "breaching",
     },
     {
       ActionsEnabled: true,
@@ -274,7 +275,7 @@ const validState = {
       EvaluationPeriods: 1,
       MetricName: "ConnectorSyncFailureCount",
       Namespace: "ilo/Connectors",
-      OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
+      OKActions: [],
       Period: 900,
       Statistic: "Sum",
       Threshold: 5,
@@ -498,7 +499,20 @@ if (operation === "logs describe-metric-filters") {
             ? {
                 ...alarm,
                 AlarmActions: ["arn:aws:sns:us-east-1:123456789012:unrelated-topic"],
-                OKActions: ["arn:aws:sns:us-east-1:123456789012:unrelated-topic"],
+              }
+            : alarm,
+        ),
+      },
+    },
+    {
+      label: "recovery notification route",
+      state: {
+        ...validState,
+        MetricAlarms: validState.MetricAlarms.map((alarm, index) =>
+          index === 0
+            ? {
+                ...alarm,
+                OKActions: ["arn:aws:sns:us-east-1:123456789012:personal-os-prod-operations"],
               }
             : alarm,
         ),

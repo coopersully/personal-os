@@ -177,6 +177,11 @@ requireMatch(
   "the isolated scaling-state observation bootstrap required by the workflow",
 );
 requireMatch(
+  iam,
+  /sid\s*=\s*"PublishDeploymentHeartbeat"[\s\S]*?actions\s*=\s*\["cloudwatch:PutMetricData"\][\s\S]*?cloudwatch:namespace[\s\S]*?ilo\/Deployments/,
+  "namespace-scoped deployment heartbeat authority",
+);
+requireMatch(
   main,
   /shutdownApiRuntime\(\{[\s\S]*?timeoutMs:\s*config\.apiShutdownTimeoutMs/,
   "bounded shutdown orchestration",
@@ -220,6 +225,26 @@ requireMatch(
   workflow,
   /fail_closed_api_deployment\(\)[\s\S]*?trap - ERR EXIT[\s\S]*?run_interruptible aws application-autoscaling register-scalable-target[\s\S]*?--suspended-state "\$api_all_suspended_state"[\s\S]*?run_interruptible aws ecs update-service[\s\S]*?--desired-count 0[\s\S]*?capture_interruptible aws ecs describe-services[\s\S]*?desiredCount,runningCount,pendingCount/,
   "post-drain scaling re-suspension plus zero-state recovery and verification",
+);
+requireMatch(
+  workflow,
+  /publish_api_deployment_state\(\)[\s\S]*?cloudwatch put-metric-data[\s\S]*?--namespace ilo\/Deployments[\s\S]*?ApiDeploymentInProgress/,
+  "an aggregate CloudWatch deployment-state publisher",
+);
+requireMatch(
+  workflow,
+  /start_api_deployment_heartbeat\(\)[\s\S]*?sleep 30[\s\S]*?publish_api_deployment_state 1/,
+  "a thirty-second deployment heartbeat loop",
+);
+requireMatch(
+  workflow,
+  /stop_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 0/,
+  "deployment heartbeat cleanup that restores incident paging",
+);
+requireOrder(
+  "start_api_deployment_heartbeat",
+  "--desired-count 0",
+  "deployment heartbeat proof before the availability-changing API drain",
 );
 requireMatch(
   workflow,

@@ -18,10 +18,6 @@ BASE_API_PORT=8788
 BASE_MCP_PORT=8789
 BASE_WEB_PORT=8081
 BASE_DB_PORT=55433
-# The API and MCP base ports are adjacent, so shifting every port by the raw worktree ordinal made
-# worktree N's MCP port equal worktree N+1's API port and any two adjacent worktrees collided. Each
-# worktree therefore claims a whole tier, spaced wider than the closest two base ports.
-PORT_STRIDE=10
 PORT_SHIFT=0
 
 if [[ "$ROOT" != "$PRIMARY_ROOT" ]]; then
@@ -43,11 +39,10 @@ if [[ "$ROOT" != "$PRIMARY_ROOT" ]]; then
   fi
 fi
 
-PORT_OFFSET=$((PORT_SHIFT * PORT_STRIDE))
-API_PORT=$((BASE_API_PORT + PORT_OFFSET))
-MCP_PORT=$((BASE_MCP_PORT + PORT_OFFSET))
-WEB_PORT=$((BASE_WEB_PORT + PORT_OFFSET))
-DB_PORT=$((BASE_DB_PORT + PORT_OFFSET))
+API_PORT=$((BASE_API_PORT + PORT_SHIFT))
+MCP_PORT=$((BASE_MCP_PORT + PORT_SHIFT))
+WEB_PORT=$((BASE_WEB_PORT + PORT_SHIFT))
+DB_PORT=$((BASE_DB_PORT + PORT_SHIFT))
 API_URL="http://127.0.0.1:$API_PORT"
 MCP_URL="http://127.0.0.1:$MCP_PORT"
 WEB_URL="http://localhost:$WEB_PORT"

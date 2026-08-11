@@ -2089,6 +2089,46 @@ describe("ilo web app", () => {
     expect(screen.queryByRole("button", { name: "New task" })).not.toBeInTheDocument();
   });
 
+  it("keeps account sections reachable from the narrow dock without adding a workspace", async () => {
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        matches: true,
+        media: "(max-width: 900px)",
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      }),
+    });
+    const browser = userEvent.setup();
+    setup("/settings?section=profile");
+
+    const dock = await screen.findByRole("navigation", { name: "Workspace dock" });
+    expect(within(dock).getByRole("button", { name: "Switch workspace" })).toHaveTextContent(
+      "Settings",
+    );
+
+    // The sheet carries the account sections that the sidebar owns on desktop.
+    await browser.click(screen.getByRole("button", { name: "Workspace actions" }));
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Appearance" })).toHaveAttribute(
+      "href",
+      "/settings?section=appearance",
+    );
+    await browser.keyboard("{Escape}");
+
+    // The switcher still offers exactly the five workspaces, none of them current.
+    await browser.click(within(dock).getByRole("button", { name: "Switch workspace" }));
+    const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
+    expect(within(workspaceMenu).getAllByRole("menuitem")).toHaveLength(5);
+    expect(
+      within(workspaceMenu)
+        .getAllByRole("menuitem")
+        .filter((item) => item.getAttribute("aria-current") === "page"),
+    ).toHaveLength(0);
+  });
+
   it("keeps the workspace sidebar on desktop", async () => {
     setup("/today");
 
@@ -2487,19 +2527,43 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("presents settings as a full-page account utility", async () => {
+  it("presents the account utility in the shared shell without becoming a workspace", async () => {
     const view = setup("/settings?section=appearance");
     const sidebar = await screen.findByRole("complementary", {
       name: "Account utility navigation",
     });
 
-    expect(screen.getByRole("link", { name: "Return to Today" })).toHaveAttribute("href", "/today");
-    expect(screen.getByRole("heading", { name: "Test User" })).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Top navigation" })).not.toBeInTheDocument();
+    // The account utility is a tenant of the shell: same frame, same app bar.
+    const appBar = screen.getByRole("navigation", { name: "Top navigation" });
+    expect(within(appBar).getByText("Settings")).toBeInTheDocument();
+    // ...but it is not a workspace, so it never offers workspace identity.
     expect(screen.queryByRole("button", { name: "Switch workspace" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Test User" })).not.toBeInTheDocument();
+    expect(within(sidebar).getByRole("link", { name: "Back to Today" })).toHaveAttribute(
+      "href",
+      "/today",
+    );
     expect(within(sidebar).getByRole("link", { name: "Appearance" })).toHaveAttribute(
       "aria-current",
       "page",
+    );
+
+    view.unmount();
+  });
+
+  it("returns from the account utility to the workspace it was opened from", async () => {
+    const view = setup("/mail");
+    const browser = userEvent.setup();
+
+    await browser.click(await screen.findByRole("button", { name: "Account menu" }));
+    await browser.click(await screen.findByRole("menuitem", { name: "Settings" }));
+
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
+    expect(within(sidebar).getByRole("link", { name: "Back to Mail" })).toHaveAttribute(
+      "href",
+      "/mail",
     );
 
     view.unmount();
@@ -3170,13 +3234,16 @@ describe("ilo web app", () => {
     view.unmount();
   }, 15_000);
 
-  it("uses one slot-based app bar contract for every workspace", async () => {
+  it("uses one slot-based app bar contract for every shell route", async () => {
     const routes = [
       ["/today", "today"],
       ["/calendar", "calendar"],
       ["/tasks", "tasks"],
       ["/mail", "mail"],
       ["/finances", "finances"],
+      // The account utility is not a workspace, but it is a tenant of the same
+      // frame and must not invent a second top-bar layout.
+      ["/settings", "account"],
     ] as const;
 
     for (const [route, workspace] of routes) {

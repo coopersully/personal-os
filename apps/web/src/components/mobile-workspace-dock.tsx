@@ -28,8 +28,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { type WorkspaceDefinition, workspaceForLocation } from "../navigation/manifest.js";
-import { mobileWorkspacePages } from "../navigation/mobile-workspace-dock.js";
+import {
+  navigationOwnerForLocation,
+  type WorkspaceDefinition,
+  workspaceForLocation,
+} from "../navigation/manifest.js";
+import {
+  type MobileWorkspacePage,
+  mobileWorkspacePages,
+} from "../navigation/mobile-workspace-dock.js";
 import { WorkspaceIcon } from "./workspace-identity.js";
 
 function DockWorkspaceIcon({ workspace }: { workspace: WorkspaceDefinition }) {
@@ -43,22 +50,41 @@ function DockWorkspaceIcon({ workspace }: { workspace: WorkspaceDefinition }) {
   return <WorkspaceIcon size="sm" workspace={workspace.id} />;
 }
 
+/** Account administration is neutral: it never borrows a workspace identity. */
+function DockAccountIcon() {
+  return (
+    <span aria-hidden="true" className="workspace-dock__identity-frame">
+      <Settings />
+    </span>
+  );
+}
+
 export function MobileWorkspaceDock({
   accountName,
+  accountSections,
   onLogout,
   workspaceDefinitions,
   pathname,
 }: {
   accountName: string;
+  accountSections: MobileWorkspacePage[];
   onLogout: () => void;
   pathname: string;
   workspaceDefinitions: WorkspaceDefinition[];
 }) {
   const [open, setOpen] = useState(false);
   const activeWorkspace = workspaceForLocation(pathname);
-  if (!activeWorkspace) return null;
-  const pages = mobileWorkspacePages(activeWorkspace.id);
-  const workspaceLabel = activeWorkspace.label;
+  const isAccountUtility = navigationOwnerForLocation(pathname).kind === "account-utility";
+  if (!activeWorkspace && !isAccountUtility) return null;
+  // The account utility names where you are without joining the switcher, so
+  // its five workspace destinations stay the only way to change workspace.
+  const pages = activeWorkspace ? mobileWorkspacePages(activeWorkspace.id) : accountSections;
+  const pillLabel = activeWorkspace ? activeWorkspace.label : "Settings";
+  const sheetLabel = activeWorkspace
+    ? activeWorkspace.id === "today"
+      ? "Today"
+      : activeWorkspace.label
+    : "Settings";
   const accountFirstName = accountName.trim().split(/\s+/)[0] || accountName;
 
   return (
@@ -71,8 +97,12 @@ export function MobileWorkspaceDock({
               className="workspace-dock__workspace-trigger"
               variant="ghost"
             >
-              <DockWorkspaceIcon workspace={activeWorkspace} />
-              <span>{workspaceLabel}</span>
+              {activeWorkspace ? (
+                <DockWorkspaceIcon workspace={activeWorkspace} />
+              ) : (
+                <DockAccountIcon />
+              )}
+              <span>{pillLabel}</span>
               <ChevronDown aria-hidden="true" data-icon="inline-end" />
             </Button>
           </DropdownMenuTrigger>
@@ -83,7 +113,7 @@ export function MobileWorkspaceDock({
             side="top"
           >
             {workspaceDefinitions.map((workspace) => {
-              const selected = workspace.id === activeWorkspace.id;
+              const selected = workspace.id === activeWorkspace?.id;
               const descriptionId = `workspace-dock-description-${workspace.id}`;
               return (
                 <DropdownMenuItem asChild key={workspace.id}>
@@ -118,14 +148,14 @@ export function MobileWorkspaceDock({
         </Button>
         <SheetContent
           aria-describedby="workspace-dock-sheet-description"
-          aria-label={activeWorkspace.id === "today" ? "Today" : workspaceLabel}
+          aria-label={sheetLabel}
           className="workspace-dock-sheet"
           side="bottom"
         >
           <SheetHeader>
-            <SheetTitle>{activeWorkspace.id === "today" ? "Today" : workspaceLabel}</SheetTitle>
+            <SheetTitle>{sheetLabel}</SheetTitle>
             <SheetDescription id="workspace-dock-sheet-description">
-              Choose a page in {activeWorkspace.id === "today" ? "Today" : workspaceLabel}.
+              Choose a page in {sheetLabel}.
             </SheetDescription>
           </SheetHeader>
           <section className="workspace-dock-sheet__section" aria-labelledby="workspace-dock-pages">

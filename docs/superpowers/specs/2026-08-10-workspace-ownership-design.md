@@ -34,12 +34,20 @@ ownership. Its identity stays neutral.
 
 ### Account utility
 
-The account utility is a full-page administration surface, not a workspace. It
-owns personal and system configuration: profile, appearance, connected
-services, sessions/security, setup, invitations, agent access, and automations.
-It is entered from the account menu, not the workspace switcher. Its local
-navigation is labelled as account administration and must not use a
-`WorkspaceIcon`, workspace selection state, or a workspace sidebar identity.
+The account utility is an administration surface, not a workspace. It owns
+personal and system configuration: profile, appearance, connected services,
+sessions/security, invitations, agent access, and automations. It is entered
+from the account menu, not the workspace switcher. Its local navigation is
+labelled as account administration and must not use a `WorkspaceIcon`,
+workspace selection state, or a workspace sidebar identity.
+
+**Revision (2026-08-10):** "Full-page" describes its scope, not its chrome. The
+account utility renders inside the application shell and uses the shared
+sidebar column and app bar; only its *content* is account-owned. Building it as
+a separate full-viewport frame reimplemented the shell at a different width,
+dropped the app bar and desktop window chrome, and duplicated its own
+navigation. Account setup is the exception: it is a standalone flow that
+replaces the shell entirely.
 
 The account utility retains a return target for the workspace route from which
 it was opened. If no safe in-app history exists, it returns to `/today`.
@@ -68,7 +76,8 @@ owner, but cannot select a different sidebar. Route-name conditionals such as
 | `/tasks`, `/reminders` | Tasks | Render the Tasks sidebar; Reminders is a related Tasks destination. |
 | `/mail` and mail child routes | Mail | Render the Mail sidebar. |
 | `/finances` and finance child routes | Finances | Render the Finances sidebar. |
-| `/settings`, `/setup`, and account/security/connection administration routes | Account utility | Render the account-utility frame and its local navigation; do not render or select a workspace sidebar. |
+| `/settings` and account/security/connection administration routes | Account utility | Render the shared shell and app bar with the account utility's local navigation in the sidebar; do not render or select a workspace sidebar, switcher, or identity. |
+| `/setup` | Standalone flow | Replace the shell entirely. Resolve before the redirect that sends unfinished accounts to setup. |
 
 The workspace switcher contains only the five workspace defaults in the stated
 order. It can preview only those five workspace surfaces. Account utility and

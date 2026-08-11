@@ -344,10 +344,12 @@ import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
 import {
   navigationOwnerForLocation,
+  rendersApplicationShell,
   type WorkspaceDefinition,
   workspaceDefinitions,
   workspaceForLocation,
 } from "./navigation/manifest.js";
+import type { MobileWorkspacePage } from "./navigation/mobile-workspace-dock.js";
 import { timeToMinute } from "./time.js";
 
 type Editor =
@@ -439,6 +441,13 @@ function workspaceForPath(pathname: string): WorkspaceDefinition | undefined {
   return workspaceForLocation(pathname);
 }
 
+/** Today's registry label is its page title; navigation names it plainly. */
+function workspaceLabelForPath(pathname: string): string {
+  const workspace = workspaceForLocation(pathname);
+  if (!workspace) return "Today";
+  return workspace.id === "today" ? "Today" : workspace.label;
+}
+
 function workspaceDirection(
   fromPath: string | null | undefined,
   toPath: string,
@@ -474,6 +483,12 @@ function AuthenticatedExperience({ user }: { user: User }) {
   const location = useLocation();
   const verificationToken = new URLSearchParams(location.search).get("verifyEmail");
   if (verificationToken) return <EmailVerificationScreen token={verificationToken} />;
+  // A standalone flow owns the whole viewport and must resolve before the
+  // redirect that sends unfinished accounts into it, or the redirect chases
+  // its own destination and never renders.
+  if (!rendersApplicationShell(navigationOwnerForLocation(location.pathname))) {
+    return <SetupPage user={user} />;
+  }
   if (user.setup.status === "not_started" || user.setup.status === "in_progress") {
     return <Navigate replace to="/setup" />;
   }
@@ -893,6 +908,17 @@ function AuthActionShell({ children, title }: { children: ReactNode; title: stri
   );
 }
 
+/**
+ * Remembers the workspace the account utility was opened from so it can offer
+ * an honest return target. Falls back to Today when no workspace was visited,
+ * such as on a cold deep link straight to `/settings`.
+ */
+function useAccountReturnPath(workspacePath: string | null): string {
+  const remembered = useRef("/today");
+  if (workspacePath) remembered.current = workspacePath;
+  return remembered.current;
+}
+
 function AuthenticatedApp({ user }: { user: User }) {
   const [editor, setEditor] = useState<Editor>(null);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
@@ -917,6 +943,7 @@ function AuthenticatedApp({ user }: { user: User }) {
     });
   }
   const routeDirection = routeTransition.direction;
+  const accountReturnPath = useAccountReturnPath(activeWorkspace?.path ?? null);
   const isTodayWorkspace = activeWorkspace?.path === "/today";
   const deviceWeatherLocation = useDeviceWeatherLocation(isTodayWorkspace);
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
@@ -975,20 +1002,14 @@ function AuthenticatedApp({ user }: { user: User }) {
     };
   };
   const closeMobileMenu = () => setMobileMenuOpen(false);
-  const settingsMode = location.pathname === "/settings";
-  const financeMode =
-    location.pathname === "/finances" || location.pathname.startsWith("/finances/");
-  const sidebarMode: ContextSidebarMode = settingsMode
-    ? "settings"
-    : financeMode
-      ? "finances"
-      : location.pathname === "/calendar" || location.pathname.startsWith("/calendar/")
-        ? "calendar"
-        : location.pathname === "/reminders" || location.pathname === "/tasks"
-          ? "tasks"
-          : location.pathname === "/mail" || location.pathname.startsWith("/mail/")
-            ? "mail"
-            : null;
+  // The manifest owner, never a route name, selects the sidebar. Today is the
+  // one workspace whose sidebar is the application navigation itself.
+  const sidebarMode: ContextSidebarMode =
+    navigationOwner.kind === "account-utility"
+      ? "settings"
+      : navigationOwner.kind === "standalone-flow" || navigationOwner.workspace === "today"
+        ? null
+        : navigationOwner.workspace;
   const activeSettingsSection = settingsSectionFromSearch(location.search);
   const pageTitle = workspaceTitleForLocation(location.pathname, location.search);
   const activeFinanceSection = financeSectionFromPath(location.pathname);
@@ -1049,10 +1070,6 @@ function AuthenticatedApp({ user }: { user: User }) {
     });
   };
 
-  if (navigationOwner.kind === "account-utility") {
-    return <AccountUtilityFrame setEditor={setEditor} user={user} />;
-  }
-
   return (
     <>
       <div className="app-shell">
@@ -1071,26 +1088,28 @@ function AuthenticatedApp({ user }: { user: User }) {
         {!isMobileWorkspaceDock ? (
           <aside
             aria-label={
-              sidebarMode
-                ? `${sidebarMode.charAt(0).toUpperCase()}${sidebarMode.slice(1)} Sidebar`
-                : activeWorkspace
-                  ? `${activeWorkspace.id === "today" ? "Today" : activeWorkspace.label} Sidebar`
-                  : "Application Sidebar"
+              navigationOwner.kind === "account-utility"
+                ? "Account utility navigation"
+                : sidebarMode
+                  ? `${sidebarMode.charAt(0).toUpperCase()}${sidebarMode.slice(1)} Sidebar`
+                  : activeWorkspace
+                    ? `${activeWorkspace.id === "today" ? "Today" : activeWorkspace.label} Sidebar`
+                    : "Application Sidebar"
             }
             className={`sidebar${mobileMenuOpen ? " sidebar--mobile-open" : ""}${sidebarMode ? " sidebar--context" : ""}`}
             data-state="expanded"
             id="app-sidebar"
           >
             <ShadcnSidebarHeader className="sidebar__header">
-              {sidebarMode === "settings" ? (
+              {navigationOwner.kind === "account-utility" ? (
                 <Link
-                  aria-label={`Back to ${workspaceOwnerName(user)}'s Workspace`}
+                  aria-label={`Back to ${workspaceLabelForPath(accountReturnPath)}`}
                   className="sidebar__back"
                   onClick={closeMobileMenu}
-                  to="/today"
+                  to={accountReturnPath}
                 >
                   <ArrowLeft aria-hidden="true" size={18} />{" "}
-                  <span>{workspaceOwnerName(user)}'s Workspace</span>
+                  <span>{workspaceLabelForPath(accountReturnPath)}</span>
                 </Link>
               ) : (
                 <WorkspaceSwitcher
@@ -1163,6 +1182,7 @@ function AuthenticatedApp({ user }: { user: User }) {
         {isMobileWorkspaceDock ? (
           <MobileWorkspaceDock
             accountName={workspaceOwnerName(user)}
+            accountSections={settingsSectionPages(user.canManageInvitations === true)}
             onLogout={mobileDockLogout}
             pathname={location.pathname}
             workspaceDefinitions={workspaceDefinitions}
@@ -1174,19 +1194,18 @@ function AuthenticatedApp({ user }: { user: User }) {
               <WifiOff size={15} /> Offline — changes are paused until you reconnect.
             </div>
           )}
-          {navigationOwnerForLocation(location.pathname).kind === "workspace" ? (
-            <WorkspaceAppBarForRoute
-              onCalendarToday={() => setCalendarTodaySnap((current) => current + 1)}
-              pageTitle={pageTitle}
-              pathname={location.pathname}
-              pinned={pinned}
-              setEditor={setEditor}
-              todayBrief={todayBrief.data}
-              togglePin={togglePin}
-              user={user}
-              weather={weather.data}
-            />
-          ) : null}
+          <WorkspaceAppBarForRoute
+            onCalendarToday={() => setCalendarTodaySnap((current) => current + 1)}
+            pageTitle={pageTitle}
+            pathname={location.pathname}
+            pinned={pinned}
+            setEditor={setEditor}
+            todayBrief={todayBrief.data}
+            togglePin={togglePin}
+            user={user}
+            weather={weather.data}
+          />
+
           <main
             className={`content${sidebarMode === "calendar" ? " content--calendar" : ""}`}
             id="main-content"
@@ -4700,6 +4719,27 @@ function settingsSectionFromSearch(search: string): SettingsSectionId {
       : "profile";
 }
 
+export function settingsSectionPath(section: SettingsSectionId): string {
+  return `/settings?section=${section}`;
+}
+
+/** One permission rule for every surface that lists account sections. */
+function visibleSettingsNavigation(canManageInvitations: boolean) {
+  return settingsNavigation
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => item.id !== "invitations" || canManageInvitations),
+    }))
+    .filter((group) => group.items.length > 0);
+}
+
+/** The narrow-layout dock lists the same sections as the sidebar, flattened. */
+function settingsSectionPages(canManageInvitations: boolean): MobileWorkspacePage[] {
+  return visibleSettingsNavigation(canManageInvitations).flatMap((group) =>
+    group.items.map(({ icon, id, label }) => ({ icon, label, path: settingsSectionPath(id) })),
+  );
+}
+
 function SettingsSidebarNavigation({
   canManageInvitations,
   onNavigate,
@@ -4711,93 +4751,28 @@ function SettingsSidebarNavigation({
 }) {
   return (
     <>
-      {settingsNavigation
-        .map((group) => ({
-          ...group,
-          items: group.items.filter((item) => item.id !== "invitations" || canManageInvitations),
-        }))
-        .filter((group) => group.items.length > 0)
-        .map((group) => (
-          <ShadcnSidebarGroup key={group.label}>
-            <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
-            <ShadcnSidebarGroupContent>
-              <nav aria-label={group.label}>
-                <ShadcnSidebarMenu>
-                  {group.items.map(({ icon, id, label }) => (
-                    <SidebarNavigationItem
-                      icon={icon}
-                      isActive={section === id}
-                      key={id}
-                      label={label}
-                      onNavigate={onNavigate}
-                      path={`/settings?section=${id}`}
-                    />
-                  ))}
-                </ShadcnSidebarMenu>
-              </nav>
-            </ShadcnSidebarGroupContent>
-          </ShadcnSidebarGroup>
-        ))}
+      {visibleSettingsNavigation(canManageInvitations).map((group) => (
+        <ShadcnSidebarGroup key={group.label}>
+          <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
+          <ShadcnSidebarGroupContent>
+            <nav aria-label={group.label}>
+              <ShadcnSidebarMenu>
+                {group.items.map(({ icon, id, label }) => (
+                  <SidebarNavigationItem
+                    icon={icon}
+                    isActive={section === id}
+                    key={id}
+                    label={label}
+                    onNavigate={onNavigate}
+                    path={settingsSectionPath(id)}
+                  />
+                ))}
+              </ShadcnSidebarMenu>
+            </nav>
+          </ShadcnSidebarGroupContent>
+        </ShadcnSidebarGroup>
+      ))}
     </>
-  );
-}
-
-function AccountUtilityFrame({
-  setEditor,
-  user,
-}: {
-  setEditor: (editor: Editor) => void;
-  user: User;
-}) {
-  const location = useLocation();
-  const section = settingsSectionFromSearch(location.search);
-  const isSetup = location.pathname === "/setup";
-  const accountName = user.displayName.trim() || user.email;
-
-  if (isSetup) return <SetupPage user={user} />;
-
-  return (
-    <main className="account-utility" id="main-content">
-      <header className="account-utility__header">
-        <Link aria-label="Return to Today" className="account-utility__back" to="/today">
-          <ArrowLeft aria-hidden="true" size={18} />
-          <span>Today</span>
-        </Link>
-        <div>
-          <p className="account-utility__eyebrow">Account</p>
-          <h1>{accountName}</h1>
-        </div>
-      </header>
-      <div className="account-utility__layout">
-        <aside aria-label="Account utility navigation" className="account-utility__navigation">
-          <nav aria-label="Account utility">
-            <ShadcnSidebarMenu>
-              {accountNavigationItems.map(({ icon: Icon, label, path }) => (
-                <ShadcnSidebarMenuItem key={path}>
-                  <ShadcnSidebarMenuButton asChild isActive={location.pathname === path}>
-                    <NavLink
-                      aria-current={location.pathname === path ? "page" : undefined}
-                      to={path}
-                    >
-                      <Icon aria-hidden="true" />
-                      <span>{label}</span>
-                    </NavLink>
-                  </ShadcnSidebarMenuButton>
-                </ShadcnSidebarMenuItem>
-              ))}
-            </ShadcnSidebarMenu>
-          </nav>
-          <SettingsSidebarNavigation
-            canManageInvitations={user.canManageInvitations === true}
-            onNavigate={() => undefined}
-            section={section}
-          />
-        </aside>
-        <div className="account-utility__content">
-          <SettingsPage setEditor={setEditor} user={user} />
-        </div>
-      </div>
-    </main>
   );
 }
 
@@ -4808,7 +4783,7 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
     return <Navigate replace to="/settings?section=profile" />;
   }
   return (
-    <div className="settings-page">
+    <div className="narrow-page settings-page">
       <section aria-live="polite" className="settings-panel" key={section}>
         {section === "calendars" ? <CalendarsSettings setEditor={setEditor} /> : null}
         {section === "connections" ? <ConnectorsSettings /> : null}

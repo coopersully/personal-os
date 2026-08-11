@@ -31,9 +31,14 @@ change its height.
 This is an established cross-product rule, owned by the Integration app shell
 (`apps/web/src/components/workspace-app-bar.tsx`, `apps/web/src/app.tsx`, and
 `apps/web/src/styles.css`). It applies to normal, narrow, empty, loading,
-workspace-switch, dialog, and sheet states. Account setup and Settings are
-full-page account utilities, not workspace surfaces, and are outside this
-contract.
+workspace-switch, dialog, and sheet states.
+
+**Revision (2026-08-10):** Settings is inside this contract. The account
+utility is not a workspace, but it is a tenant of the same shell and renders
+the same `WorkspaceAppBar` with `Settings` as its identity and an empty context
+slot. Exempting it produced a page with no shell, no sidebar, and no app bar,
+which is the moving frame this rule exists to prevent. Only a standalone flow —
+account setup — may replace the shell, because it has no workspace to return to.
 
 ## Slot contract
 

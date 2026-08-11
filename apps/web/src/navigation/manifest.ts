@@ -13,9 +13,20 @@ export type WorkspaceDefinition = {
   path: string;
 };
 
+/**
+ * Every authenticated route declares one navigation owner, and the owner —
+ * never a route name — decides which sidebar and frame the shell renders.
+ *
+ * `account-utility` is account administration. It is a tenant of the
+ * application shell: it uses the shared frame and app bar, but it is not a
+ * workspace and never enters the workspace switcher. `standalone-flow` is a
+ * self-contained flow such as setup, which owns the whole viewport because
+ * there is no workspace to return to yet.
+ */
 export type NavigationOwner =
   | { kind: "workspace"; workspace: WorkspaceId }
-  | { kind: "account-utility" };
+  | { kind: "account-utility" }
+  | { kind: "standalone-flow" };
 
 export const workspaceDefinitions: WorkspaceDefinition[] = [
   {
@@ -32,7 +43,8 @@ export const workspaceDefinitions: WorkspaceDefinition[] = [
 ];
 
 export function navigationOwnerForLocation(pathname: string): NavigationOwner {
-  if (pathname === "/settings" || pathname === "/setup") return { kind: "account-utility" };
+  if (pathname === "/setup") return { kind: "standalone-flow" };
+  if (pathname === "/settings") return { kind: "account-utility" };
   if (["/today", "/goals", "/motives", "/activity"].includes(pathname)) {
     return { kind: "workspace", workspace: "today" };
   }
@@ -49,6 +61,11 @@ export function navigationOwnerForLocation(pathname: string): NavigationOwner {
     return { kind: "workspace", workspace: "finances" };
   }
   return { kind: "workspace", workspace: "today" };
+}
+
+/** Only a self-contained flow may replace the application shell. */
+export function rendersApplicationShell(owner: NavigationOwner): boolean {
+  return owner.kind !== "standalone-flow";
 }
 
 export function workspaceForLocation(pathname: string): WorkspaceDefinition | undefined {

@@ -78,8 +78,9 @@ eyebrow, search field, or action bar.
 
 ### Workspace app bar
 
-Today, Calendar, Tasks, Mail, and Finances render one Integration-owned
-`WorkspaceAppBar`. It is the only top-frame primitive for workspace routes.
+Today, Calendar, Tasks, Mail, Finances, and the account utility render one
+Integration-owned `WorkspaceAppBar`. It is the only top-frame primitive inside
+the application shell.
 The primitive fixes the structure, 52 px height, sticky position, semantic
 surface, quiet bottom border, and 8 px internal rhythm; a route provides only
 the content of its named slots.
@@ -104,8 +105,17 @@ the content of its named slots.
 - Calendar's date/range is `identity`; its Today action and view selector are
   `context`; New event is `actions`. Calendar grid wayfinding remains pinned in
   the body, but it never owns a second application frame.
-- Account setup and Settings are full-page account utilities. They do not
-  invent a sixth workspace or inherit a workspace app bar.
+- The account utility is a tenant of the shell, not a workspace. Settings uses
+  the same frame, sidebar column, and app bar as the five workspaces, with
+  `Settings` as its identity and an empty context slot. It never shows a
+  `WorkspaceIcon`, workspace palette, workspace switcher, or switcher entry,
+  and it never participates in workspace preview or prefetch. Its sidebar
+  header is a `Back to <workspace>` control that restores the workspace the
+  utility was opened from.
+- A standalone flow — currently account setup — is the only surface that may
+  replace the shell. It owns the whole viewport because there is no workspace
+  to return to yet, and it must resolve before any redirect that sends an
+  unfinished account into it.
 
 ### Blocks
 
@@ -348,8 +358,12 @@ durations page by page.
   in a page. Use unframed functional icons below workspace level.
 - A route's navigation owner is explicit and stable: Today owns Today, Goals,
   Motives, and Activity; Tasks owns Tasks and Reminders. Account-only routes
-  render the full-page account utility with its own local navigation, not a
+  render the account utility's own local navigation in the shell sidebar, not a
   workspace sidebar, switcher, or workspace identity.
+- On narrow layouts the account utility keeps the dock so its sections stay
+  reachable. The dock names the current surface and lists the account sections
+  in its sheet, while its switcher still offers exactly the five workspaces
+  with none of them marked current.
 - When a shared moving selection surface already makes keyboard focus
   unmistakable, do not add a duplicate per-item treatment. Focus must remain at
   least as clear as hover and current-page selection.

@@ -91,7 +91,7 @@ function ActivityBatch({ entries }: { entries: AuditEvent[] }) {
             {actor} · {entries.length} changes · {formatRelativeTime(first.createdAt)}
           </span>
         </div>
-        <ChevronDownIcon aria-hidden="true" size={17} />
+        <ChevronDownIcon aria-hidden="true" className="size-[17px]" />
       </summary>
       <div className="activity-batch__entries">
         {entries.map((entry) => (
@@ -110,9 +110,9 @@ function actorLabel(actorType: string): string {
 }
 
 function ActivityActorIcon({ actorType }: { actorType: string }) {
-  if (actorType === "agent") return <CommandIcon size={17} />;
-  if (actorType === "connector") return <CloudIcon size={17} />;
-  return <UserIcon size={17} />;
+  if (actorType === "agent") return <CommandIcon className="size-[17px]" />;
+  if (actorType === "connector") return <CloudIcon className="size-[17px]" />;
+  return <UserIcon className="size-[17px]" />;
 }
 
 function ActivityRow({ entry }: { entry: AuditEvent }) {

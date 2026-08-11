@@ -11,7 +11,7 @@ export default function RichEventNotes({ source }: { source: string }) {
         components={{
           a: ({ children, href }) => (
             <a href={href} rel="noreferrer" target="_blank">
-              {children} <ExternalLinkIcon aria-hidden="true" size={11} />
+              {children} <ExternalLinkIcon aria-hidden="true" className="size-[11px]" />
             </a>
           ),
         }}

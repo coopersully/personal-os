@@ -1071,7 +1071,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                 onClick={closeMobileMenu}
                 to="/today"
               >
-                <ArrowLeftIcon aria-hidden="true" size={18} />{" "}
+                <ArrowLeftIcon aria-hidden="true" className="size-[18px]" />{" "}
                 <span>{workspaceOwnerName(user)}'s Workspace</span>
               </Link>
             ) : (
@@ -1091,7 +1091,7 @@ function AuthenticatedApp({ user }: { user: User }) {
               onClick={closeMobileMenu}
               type="button"
             >
-              <XIcon aria-hidden="true" size={18} />
+              <XIcon aria-hidden="true" className="size-[18px]" />
             </button>
           </ShadcnSidebarHeader>
           <ShadcnSidebarContent
@@ -1146,7 +1146,8 @@ function AuthenticatedApp({ user }: { user: User }) {
         <div className="workspace">
           {!online && (
             <div className="offline-banner">
-              <WifiOffIcon size={15} /> Offline — changes are paused until you reconnect.
+              <WifiOffIcon className="size-[15px]" /> Offline — changes are paused until you
+              reconnect.
             </div>
           )}
           <TopNavigation
@@ -1215,7 +1216,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                   onClick={openMobileMenu}
                   type="button"
                 >
-                  <MenuIcon aria-hidden="true" size={19} />
+                  <MenuIcon aria-hidden="true" className="size-[19px]" />
                 </button>
                 {location.pathname === "/today" ? (
                   todayBrief.data ? (
@@ -1284,7 +1285,7 @@ function AuthenticatedApp({ user }: { user: User }) {
             onClick={openMobileMenu}
             type="button"
           >
-            <MoreHorizontalIcon aria-hidden="true" size={19} />
+            <MoreHorizontalIcon aria-hidden="true" className="size-[19px]" />
             <span className="nav-item__label">More</span>
           </button>
         </nav>
@@ -1454,7 +1455,12 @@ function NavigationItem({
           {workspaceId ? (
             <WorkspaceIcon size="sm" workspace={workspaceId} />
           ) : (
-            <NavigationIcon active={isActive} fallback={Icon} label={label} size={19} />
+            <NavigationIcon
+              active={isActive}
+              className="size-[19px]"
+              fallback={Icon}
+              label={label}
+            />
           )}
           <span className="nav-item__label">{label}</span>
           {badge ? (
@@ -1530,35 +1536,25 @@ function NavigationIcon({
   active,
   fallback: OutlineIcon,
   label,
-  size,
+  className,
 }: {
   active: boolean;
+  className?: string;
   fallback: Icon;
   label: string;
-  size?: number;
 }) {
   const WeightedIcon = navigationIcons[label as keyof typeof navigationIcons];
   if (WeightedIcon) {
-    return size === undefined ? (
+    return (
       <WeightedIcon
         aria-hidden="true"
+        className={className}
         data-navigation-icon-weight={active ? "fill" : "regular"}
-        weight={active ? "Filled" : "Outline"}
-      />
-    ) : (
-      <WeightedIcon
-        aria-hidden="true"
-        data-navigation-icon-weight={active ? "fill" : "regular"}
-        size={size}
         weight={active ? "Filled" : "Outline"}
       />
     );
   }
-  return size === undefined ? (
-    <OutlineIcon aria-hidden="true" />
-  ) : (
-    <OutlineIcon aria-hidden="true" size={size} />
-  );
+  return <OutlineIcon aria-hidden="true" className={className} />;
 }
 
 function SidebarSubNavigationItem({
@@ -2703,7 +2699,7 @@ function AutomationTemplateCard({
 }) {
   return (
     <article className="automation-template">
-      <AgentIcon aria-hidden="true" size={20} />
+      <AgentIcon aria-hidden="true" className="size-5" />
       <h2>{title}</h2>
       <p>{description}</p>
       <Button disabled={disabled} onClick={install} tone={disabled ? "ghost" : "accent"}>
@@ -4702,7 +4698,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
     <SettingsSection
       action={
         <ShadcnButton onClick={() => setEditor({ kind: "calendar" })}>
-          <PlusIcon data-icon="inline-start" size={15} /> Local calendar
+          <PlusIcon data-icon="inline-start" className="size-[15px]" /> Local calendar
         </ShadcnButton>
       }
       description="Choose what appears in your unified view."
@@ -5034,7 +5030,7 @@ function ConnectorsSettings() {
           </ShadcnFieldSet>
           <div className="icloud-connect-panel__footer">
             <a href="https://account.apple.com/account/manage" rel="noreferrer" target="_blank">
-              Create an app-specific password <ExternalLinkIcon size={13} />
+              Create an app-specific password <ExternalLinkIcon className="size-[13px]" />
             </a>
             <div>
               <ShadcnButton
@@ -5446,7 +5442,7 @@ function PinterestWallpaperDesktopSettingsPanel() {
           disabled={!value?.boardUrl || apply.isPending || update.isPending}
           onClick={() => apply.mutate()}
         >
-          <RefreshIcon data-icon="inline-start" size={15} />
+          <RefreshIcon data-icon="inline-start" className="size-[15px]" />
           {apply.isPending ? "Refreshing" : "Refresh now"}
         </ShadcnButton>
       }
@@ -5501,10 +5497,10 @@ function PinterestWallpaperDesktopSettingsPanel() {
             variant="outline"
           >
             <ShadcnToggleGroupItem aria-label="Tiled grid" value="grid">
-              <GridIcon data-icon="inline-start" size={15} /> Grid
+              <GridIcon data-icon="inline-start" className="size-[15px]" /> Grid
             </ShadcnToggleGroupItem>
             <ShadcnToggleGroupItem aria-label="Overlapping stack" value="stack">
-              <LayersIcon data-icon="inline-start" size={15} /> Stack
+              <LayersIcon data-icon="inline-start" className="size-[15px]" /> Stack
             </ShadcnToggleGroupItem>
           </ShadcnToggleGroup>
           <ShadcnFieldDescription>
@@ -6003,7 +5999,7 @@ function PinterestWallpaperPlaceholder({
     >
       {tiles.map((tile) => (
         <div className="pinterest-wallpaper-placeholder__tile" key={tile}>
-          <ImageIcon aria-hidden="true" size={20} strokeWidth={1.5} />
+          <ImageIcon aria-hidden="true" className="size-5" />
           <span>Image</span>
         </div>
       ))}
@@ -6609,7 +6605,7 @@ function ThemeSettings({ user }: { user: User }) {
           disabled={updateTheme.isPending}
           onValueChange={(theme) => updateTheme.mutate({ theme: theme as Theme })}
           options={appearanceThemes.map(({ icon: Icon, label, value }) => ({
-            icon: <Icon size={18} />,
+            icon: <Icon className="size-[18px]" />,
             label,
             preview: <AppearancePreview mode={value} />,
             value,
@@ -6666,7 +6662,7 @@ function SessionRow({ revoke, session }: { revoke: () => void; session: Session 
   return (
     <ShadcnItem variant="outline">
       <ShadcnItemMedia className="provider-icon" variant="icon">
-        <UserIcon size={16} />
+        <UserIcon className="size-4" />
       </ShadcnItemMedia>
       <ShadcnItemContent>
         <ShadcnItemTitle>
@@ -7207,7 +7203,7 @@ function EventInspector({
             <Badge>{event.provider}</Badge>
           </div>
           <Button aria-label="Close event details" onClick={close} tone="ghost">
-            <XIcon aria-hidden="true" size={19} />
+            <XIcon aria-hidden="true" className="size-[19px]" />
           </Button>
         </header>
         <div className="event-sheet__body">
@@ -7218,13 +7214,13 @@ function EventInspector({
           <dl className="event-sheet__facts">
             <div>
               <dt>
-                <ClockIcon aria-hidden="true" size={17} /> Time
+                <ClockIcon aria-hidden="true" className="size-[17px]" /> Time
               </dt>
               <dd>{formatEventRange(event, user.planningTimezone)}</dd>
             </div>
             <div>
               <dt>
-                <CalendarIcon aria-hidden="true" size={17} /> Time Zone
+                <CalendarIcon aria-hidden="true" className="size-[17px]" /> Time Zone
               </dt>
               <dd>
                 {user.planningTimezone} ·{" "}
@@ -7234,7 +7230,7 @@ function EventInspector({
             {event.location ? (
               <div>
                 <dt>
-                  <MapPinIcon aria-hidden="true" size={17} /> Location
+                  <MapPinIcon aria-hidden="true" className="size-[17px]" /> Location
                 </dt>
                 <dd>
                   <a
@@ -7242,7 +7238,7 @@ function EventInspector({
                     rel="noreferrer"
                     target="_blank"
                   >
-                    {event.location} <ExternalLinkIcon aria-hidden="true" size={12} />
+                    {event.location} <ExternalLinkIcon aria-hidden="true" className="size-3" />
                   </a>
                 </dd>
               </div>
@@ -7253,7 +7249,7 @@ function EventInspector({
               <header>
                 <div>
                   <h3 id="event-blocking-title">
-                    <LockIcon aria-hidden="true" size={16} /> Blocked time
+                    <LockIcon aria-hidden="true" className="size-4" /> Blocked time
                   </h3>
                   <p>Keep one event here while reserving the same time elsewhere.</p>
                 </div>
@@ -7326,7 +7322,7 @@ function EventInspector({
           ) : null}
           <section className="event-sheet__notes" aria-labelledby="event-notes-title">
             <h3 id="event-notes-title">
-              <FileTextIcon aria-hidden="true" size={16} /> Notes
+              <FileTextIcon aria-hidden="true" className="size-4" /> Notes
             </h3>
             {event.notes ? (
               <Suspense fallback={<p className="event-sheet__empty">Formatting notes…</p>}>
@@ -7337,7 +7333,7 @@ function EventInspector({
             )}
           </section>
           <div className="event-sheet__sync-note">
-            <CloudIcon aria-hidden="true" size={16} />
+            <CloudIcon aria-hidden="true" className="size-4" />
             <span>
               {event.provider === "google"
                 ? "Edits write through to Google Calendar before they appear here."
@@ -7366,10 +7362,10 @@ function EventInspector({
                 onClick={() => setConfirmDelete(true)}
                 tone="danger"
               >
-                <TrashIcon aria-hidden="true" size={15} /> Delete
+                <TrashIcon aria-hidden="true" className="size-[15px]" /> Delete
               </Button>
               <Button disabled={!calendar?.isWritable} onClick={edit} tone="accent">
-                <EditIcon aria-hidden="true" size={15} /> Edit Event
+                <EditIcon aria-hidden="true" className="size-[15px]" /> Edit Event
               </Button>
             </>
           )}
@@ -7569,7 +7565,7 @@ function Modal({
             <h2 id="modal-title">{title}</h2>
           </div>
           <Button aria-label="Close" onClick={close} tone="ghost">
-            <XIcon size={19} />
+            <XIcon className="size-[19px]" />
           </Button>
         </header>
         {children}

@@ -169,14 +169,19 @@ export function ReminderRow({
         onClick={() => complete.mutate()}
         type="button"
       >
-        {reminder.completedAt ? <CheckIcon size={15} /> : <CircleIcon size={18} />}
+        {reminder.completedAt ? (
+          <CheckIcon className="size-[15px]" />
+        ) : (
+          <CircleIcon className="size-[18px]" />
+        )}
       </button>
       <button className="reminder-row__material" onClick={onEdit} type="button">
         <strong>{reminder.title}</strong>
         <span>
           {reminder.dueAt ? (
             <>
-              <ClockIcon size={13} /> {formatMaterialDateTime(reminder.dueAt, timeZone)}
+              <ClockIcon className="size-[13px]" />{" "}
+              {formatMaterialDateTime(reminder.dueAt, timeZone)}
             </>
           ) : (
             "No due date"
@@ -190,7 +195,7 @@ export function ReminderRow({
         onClick={() => remove.mutate()}
         tone="ghost"
       >
-        <TrashIcon size={15} />
+        <TrashIcon className="size-[15px]" />
       </Button>
       {mutationError ? (
         <span className="col-start-2 col-end-[-1] text-xs text-destructive" role="alert">

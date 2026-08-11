@@ -754,7 +754,9 @@ function ThreadRow({
       <strong>{thread.subject}</strong>
       <span className="mail-thread-row__snippet">{thread.snippet || "No preview available"}</span>
       <span className="mail-thread-row__meta">
-        {thread.starred ? <StarIcon aria-label="Starred" fill="currentColor" size={13} /> : null}
+        {thread.starred ? (
+          <StarIcon aria-label="Starred" fill="currentColor" className="size-[13px]" />
+        ) : null}
         {thread.messageCount > 1 ? `${thread.messageCount} messages` : null}
       </span>
     </button>
@@ -805,16 +807,16 @@ function Reader({
     <article className="mail-reader__article">
       <div className="mail-reader__toolbar">
         <Button className="mail-reader__back" onClick={back} tone="ghost">
-          <ChevronLeftIcon size={16} /> Inbox
+          <ChevronLeftIcon className="size-4" /> Inbox
         </Button>
         <Button onClick={reply} tone="ghost">
-          <ReplyIcon size={16} /> Reply
+          <ReplyIcon className="size-4" /> Reply
         </Button>
         <Button aria-label="Snooze conversation until tomorrow" onClick={snooze} tone="ghost">
-          <ClockIcon size={16} /> Snooze
+          <ClockIcon className="size-4" /> Snooze
         </Button>
         <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
-          <ArchiveIcon size={16} />
+          <ArchiveIcon className="size-4" />
         </Button>
         <Button
           aria-label="Move conversation to trash"
@@ -822,7 +824,7 @@ function Reader({
           onClick={trash}
           tone="ghost"
         >
-          <TrashIcon size={16} />
+          <TrashIcon className="size-4" />
         </Button>
         <Button
           aria-label={thread.starred ? "Unstar conversation" : "Star conversation"}
@@ -830,7 +832,7 @@ function Reader({
           onClick={toggleStar}
           tone="ghost"
         >
-          <StarIcon fill={thread.starred ? "currentColor" : "none"} size={16} />
+          <StarIcon fill={thread.starred ? "currentColor" : "none"} className="size-4" />
         </Button>
         <Button
           aria-label={thread.unread ? "Mark conversation read" : "Mark conversation unread"}
@@ -838,7 +840,7 @@ function Reader({
           onClick={toggleUnread}
           tone="ghost"
         >
-          {thread.unread ? <EyeIcon size={16} /> : <EyeOffIcon size={16} />}
+          {thread.unread ? <EyeIcon className="size-4" /> : <EyeOffIcon className="size-4" />}
         </Button>
       </div>
       <header>

@@ -80,7 +80,7 @@ export function FinanceSidebarNavigation({
             onClick={onNavigate}
             to={id === "overview" ? "/finances" : `/finances/${id}`}
           >
-            <Icon aria-hidden="true" size={19} />
+            <Icon aria-hidden="true" className="size-[19px]" />
             <span>{label}</span>
             {id === "review" && reviewCount > 0 ? <b>{reviewCount}</b> : null}
           </Link>

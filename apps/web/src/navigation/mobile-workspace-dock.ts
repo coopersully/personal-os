@@ -1,55 +1,55 @@
-import type { LucideIcon } from "lucide-react";
 import {
-  Activity,
-  BadgeDollarSign,
-  CalendarDays,
-  CheckCircle2,
-  Clock3,
-  Compass,
-  House,
-  Inbox,
-  Landmark,
-  ListChecks,
-  ListTodo,
-  Mail,
-  ReceiptText,
-  ShieldCheck,
-  SlidersHorizontal,
-  Target,
-  WalletCards,
-} from "lucide-react";
+  ActivityIcon,
+  BankIcon,
+  CalendarIcon,
+  CircleCheckIcon,
+  ClockIcon,
+  CompassIcon,
+  DollarIcon,
+  HouseIcon,
+  type Icon,
+  InboxIcon,
+  ListChecksIcon,
+  ListTodoIcon,
+  MailIcon,
+  ReceiptIcon,
+  ShieldCheckIcon,
+  SliderHorizontalIcon,
+  TargetIcon,
+  WalletIcon,
+} from "../components/icons.js";
 import type { WorkspaceId } from "./manifest.js";
 
 export type MobileWorkspacePage = {
-  icon: LucideIcon;
+  icon: Icon;
   label: string;
   path: string;
 };
 
 const mobileWorkspacePagesByWorkspace: Record<WorkspaceId, MobileWorkspacePage[]> = {
   today: [
-    { icon: House, label: "Today", path: "/today" },
-    { icon: Target, label: "Goals", path: "/goals" },
-    { icon: Compass, label: "Motives", path: "/motives" },
-    { icon: Activity, label: "Activity", path: "/activity" },
+    { icon: HouseIcon, label: "Today", path: "/today" },
+    { icon: TargetIcon, label: "Goals", path: "/goals" },
+    { icon: CompassIcon, label: "Motives", path: "/motives" },
+    { icon: ActivityIcon, label: "Activity", path: "/activity" },
   ],
-  calendar: [{ icon: CalendarDays, label: "Calendar", path: "/calendar" }],
+  calendar: [{ icon: CalendarIcon, label: "Calendar", path: "/calendar" }],
   tasks: [
-    { icon: Inbox, label: "Inbox", path: "/tasks" },
-    { icon: ListChecks, label: "Next", path: "/tasks?view=next" },
-    { icon: Clock3, label: "Scheduled", path: "/tasks?view=scheduled" },
-    { icon: CheckCircle2, label: "Completed", path: "/tasks?view=completed" },
-    { icon: ListTodo, label: "Reminders", path: "/reminders" },
+    { icon: InboxIcon, label: "Inbox", path: "/tasks" },
+    { icon: ListChecksIcon, label: "Next", path: "/tasks?view=next" },
+    { icon: ClockIcon, label: "Scheduled", path: "/tasks?view=scheduled" },
+    { icon: CircleCheckIcon, label: "Completed", path: "/tasks?view=completed" },
+    { icon: ListTodoIcon, label: "Reminders", path: "/reminders" },
   ],
-  mail: [{ icon: Mail, label: "Mail", path: "/mail" }],
+  mail: [{ icon: MailIcon, label: "Mail", path: "/mail" }],
   finances: [
-    { icon: Landmark, label: "Overview", path: "/finances" },
-    { icon: BadgeDollarSign, label: "Cash flow", path: "/finances/cashflow" },
-    { icon: ReceiptText, label: "Transactions", path: "/finances/transactions" },
-    { icon: WalletCards, label: "Budgets", path: "/finances/budgets" },
-    { icon: ReceiptText, label: "Subscriptions", path: "/finances/subscriptions" },
-    { icon: ShieldCheck, label: "Ledger health", path: "/finances/health" },
-    { icon: SlidersHorizontal, label: "Financial profile", path: "/finances/profile" },
+    { icon: BankIcon, label: "Overview", path: "/finances" },
+    { icon: DollarIcon, label: "Cash flow", path: "/finances/cashflow" },
+    { icon: ReceiptIcon, label: "Transactions", path: "/finances/transactions" },
+    { icon: WalletIcon, label: "Budgets", path: "/finances/budgets" },
+    { icon: ReceiptIcon, label: "Subscriptions", path: "/finances/subscriptions" },
+    { icon: ShieldCheckIcon, label: "Ledger health", path: "/finances/health" },
+    { icon: SliderHorizontalIcon, label: "Financial profile", path: "/finances/profile" },
   ],
 };
 

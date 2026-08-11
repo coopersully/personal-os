@@ -1,4 +1,4 @@
-import { CalendarDays, Landmark, ListChecks, type LucideIcon, Mail } from "lucide-react";
+import { BankIcon, CalendarIcon, type Icon, ListChecksIcon, MailIcon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 
 export const workspaceIds = ["calendar", "tasks", "mail", "finances"] as const;
@@ -6,7 +6,7 @@ export const workspaceIds = ["calendar", "tasks", "mail", "finances"] as const;
 export type WorkspaceId = (typeof workspaceIds)[number];
 
 export type WorkspaceIdentity = {
-  icon: LucideIcon;
+  icon: Icon;
   id: WorkspaceId;
   label: string;
   path: `/${WorkspaceId}`;
@@ -14,25 +14,25 @@ export type WorkspaceIdentity = {
 
 export const workspaceIdentities: Record<WorkspaceId, WorkspaceIdentity> = {
   calendar: {
-    icon: CalendarDays,
+    icon: CalendarIcon,
     id: "calendar",
     label: "Calendar",
     path: "/calendar",
   },
   tasks: {
-    icon: ListChecks,
+    icon: ListChecksIcon,
     id: "tasks",
     label: "Tasks",
     path: "/tasks",
   },
   mail: {
-    icon: Mail,
+    icon: MailIcon,
     id: "mail",
     label: "Mail",
     path: "/mail",
   },
   finances: {
-    icon: Landmark,
+    icon: BankIcon,
     id: "finances",
     label: "Finances",
     path: "/finances",

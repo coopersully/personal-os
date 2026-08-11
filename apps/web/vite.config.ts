@@ -101,10 +101,14 @@ export default defineConfig(({ mode }) => {
           icons: [
             { sizes: "any", src: "/icon.svg", type: "image/svg+xml" },
             { sizes: "192x192", src: "/icon-192.png", type: "image/png" },
+            { purpose: "any", sizes: "512x512", src: "/icon-512.png", type: "image/png" },
+            // Android crops maskable icons to a circle, so this variant keeps the framed mark
+            // inside the safe zone instead of losing its corners. It is a separate entry because
+            // one full-bleed asset cannot satisfy both `any` and `maskable` correctly.
             {
-              purpose: "any maskable",
+              purpose: "maskable",
               sizes: "512x512",
-              src: "/icon-512.png",
+              src: "/icon-512-maskable.png",
               type: "image/png",
             },
           ],

@@ -1,5 +1,5 @@
 import type { ConnectedAccountHealth } from "@personal-os/domain";
-import { AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangleIcon, RefreshIcon } from "@/components/icons";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
@@ -8,7 +8,7 @@ export function ConnectionHealthBadge({ health }: { health: ConnectedAccountHeal
   if (health.state === "syncing") {
     return (
       <Badge aria-live="polite" variant="secondary">
-        <RefreshCw aria-hidden="true" className="spin" data-icon="inline-start" /> Syncing
+        <RefreshIcon aria-hidden="true" className="spin" data-icon="inline-start" /> Syncing
       </Badge>
     );
   }
@@ -71,7 +71,7 @@ export function ConnectionRecoveryAlert({
   if (reconnecting.length === 0) return null;
   return (
     <Alert variant="warning">
-      <AlertTriangle aria-hidden="true" />
+      <AlertTriangleIcon aria-hidden="true" />
       <AlertTitle>Reconnect {reconnecting.length === 1 ? "an account" : "accounts"}</AlertTitle>
       <AlertDescription>
         {reconnecting.map((account) => account.label).join(", ")} needs authorization before new

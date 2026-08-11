@@ -488,6 +488,8 @@ describe("agent access settings", () => {
 
     expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
     expect(await screen.findByText("2 connected")).toBeInTheDocument();
+    const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');
+    expect(claudeHost?.querySelector('[data-slot="item-media"] svg.reicon')).not.toBeNull();
     for (const domain of ["Mail", "Finances", "Calendar", "Tasks"] as const) {
       const control = screen.getByRole("radio", { name: domain });
       expect(control.querySelector(`[data-workspace="${domain.toLowerCase()}"]`)).not.toBeNull();

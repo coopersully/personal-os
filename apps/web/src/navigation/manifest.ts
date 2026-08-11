@@ -1,4 +1,4 @@
-import { type LucideIcon, PanelTop } from "lucide-react";
+import { type Icon, PanelTopIcon } from "../components/icons.js";
 import { workspaceIdentities } from "../components/workspace-identity.js";
 
 export const workspaceIds = ["today", "calendar", "tasks", "mail", "finances"] as const;
@@ -7,7 +7,7 @@ export type WorkspaceId = (typeof workspaceIds)[number];
 
 export type WorkspaceDefinition = {
   description: string;
-  icon: LucideIcon;
+  icon: Icon;
   id: WorkspaceId;
   label: string;
   path: string;
@@ -31,7 +31,7 @@ export type NavigationOwner =
 export const workspaceDefinitions: WorkspaceDefinition[] = [
   {
     description: "See your day and personal direction.",
-    icon: PanelTop,
+    icon: PanelTopIcon,
     id: "today",
     label: "Today at a Glance",
     path: "/today",

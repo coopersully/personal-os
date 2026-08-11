@@ -1,5 +1,5 @@
-import { CheckCircle2, Circle } from "lucide-react";
 import type { ReactNode } from "react";
+import { CircleCheckIcon, CircleIcon } from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -133,9 +133,9 @@ export function ReadinessPanel({
                     <Item key={check.id} role="listitem" size="sm" variant="muted">
                       <ItemMedia variant="icon">
                         {check.complete ? (
-                          <CheckCircle2 aria-hidden="true" />
+                          <CircleCheckIcon aria-hidden="true" />
                         ) : (
-                          <Circle aria-hidden="true" />
+                          <CircleIcon aria-hidden="true" />
                         )}
                       </ItemMedia>
                       <ItemContent>

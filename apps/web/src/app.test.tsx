@@ -16,6 +16,14 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { App, formatTimelineTimeRange, isNavigator, positionTimelineEvents } from "./app.js";
 import {
+  CircleCheckIcon,
+  type Icon,
+  InboxIcon,
+  ListChecksIcon,
+  ListTodoIcon,
+  StarIcon,
+} from "./components/icons.js";
+import {
   getWorkspaceCalendarEntry,
   workspaceCalendarSummary,
   workspaceIndicatorOffset,
@@ -36,6 +44,13 @@ const id = "11111111-1111-4111-8111-111111111111";
 const secondId = "22222222-2222-4222-8222-222222222222";
 const thirdId = "33333333-3333-4333-8333-333333333333";
 const fakeAppleAppPassword = ["xxxx", "xxxx", "xxxx", "xxxx"].join("-");
+
+function iconMarkup(Icon: Icon, weight: "Filled" | "Outline") {
+  const view = render(<Icon weight={weight} />);
+  const markup = view.container.querySelector("svg")?.innerHTML;
+  view.unmount();
+  return markup;
+}
 const user: User = {
   accentColor: "#c7d23c",
   emailVerified: true,
@@ -2458,7 +2473,11 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const { queryClient } = setup("/tasks");
     expect(await screen.findByText("Draft brief")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Inbox" })).toHaveAttribute("aria-current", "page");
+    const inboxLink = screen.getByRole("link", { name: "Inbox" });
+    const nextLink = screen.getByRole("link", { name: "Next" });
+    expect(inboxLink).toHaveAttribute("aria-current", "page");
+    expect(inboxLink.querySelector("svg")?.innerHTML).toBe(iconMarkup(InboxIcon, "Filled"));
+    expect(nextLink.querySelector("svg")?.innerHTML).toBe(iconMarkup(ListChecksIcon, "Outline"));
     expect(within(screen.getByLabelText("Task tags")).getByText("planning")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "New task" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent("Capture a task");
@@ -2487,6 +2506,8 @@ describe("ilo web app", () => {
     invalidate.mockRestore();
     await browser.click(screen.getByRole("link", { name: "Next" }));
     expect(screen.getByRole("link", { name: "Next" })).toHaveAttribute("aria-current", "page");
+    expect(inboxLink.querySelector("svg")?.innerHTML).toBe(iconMarkup(InboxIcon, "Outline"));
+    expect(nextLink.querySelector("svg")?.innerHTML).toBe(iconMarkup(ListChecksIcon, "Filled"));
     expect(mocks.listTasks).toHaveBeenCalledWith({ completed: false, status: "next" });
   });
 
@@ -2616,6 +2637,14 @@ describe("ilo web app", () => {
     expect(screen.getByRole("complementary", { name: "Tasks Sidebar" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Reminders" })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "New reminder" })).toBeInTheDocument();
+    const openRemindersLink = screen.getByRole("link", { name: "Open" });
+    const completedRemindersLink = screen.getByRole("link", { name: "Completed" });
+    expect(openRemindersLink.querySelector("svg")?.innerHTML).toBe(
+      iconMarkup(ListTodoIcon, "Filled"),
+    );
+    expect(completedRemindersLink.querySelector("svg")?.innerHTML).toBe(
+      iconMarkup(CircleCheckIcon, "Outline"),
+    );
     await browser.type(screen.getByRole("searchbox", { name: "Search reminders" }), "missing");
     expect(await screen.findByText("No matching reminders")).toBeInTheDocument();
     expect(mocks.listReminders).toHaveBeenCalledWith({
@@ -2626,6 +2655,12 @@ describe("ilo web app", () => {
       within(screen.getByRole("navigation", { name: "Reminder views" })).getByRole("link", {
         name: "Completed",
       }),
+    );
+    expect(openRemindersLink.querySelector("svg")?.innerHTML).toBe(
+      iconMarkup(ListTodoIcon, "Outline"),
+    );
+    expect(completedRemindersLink.querySelector("svg")?.innerHTML).toBe(
+      iconMarkup(CircleCheckIcon, "Filled"),
     );
     expect(screen.getByRole("searchbox", { name: "Search reminders" })).toHaveValue("missing");
     expect(mocks.listReminders).toHaveBeenCalledWith({
@@ -4805,6 +4840,7 @@ describe("ilo web app", () => {
     );
     const view = setup("/mail");
     const browser = userEvent.setup();
+    const filledStarMarkup = iconMarkup(StarIcon, "Filled");
     const topNavigation = await screen.findByRole("navigation", { name: "Top navigation" });
     expect(within(topNavigation).queryByRole("heading")).not.toBeInTheDocument();
     // The app bar hides action labels at narrow width, so these buttons carry a
@@ -4818,13 +4854,15 @@ describe("ilo web app", () => {
       await screen.findByText("Hello Example User. This is the full message."),
     ).toBeInTheDocument();
     expect(await screen.findByRole("list", { name: "Attachments" })).toHaveTextContent("brief.pdf");
-    expect(screen.getByLabelText("Starred")).toBeInTheDocument();
+    expect(screen.getByLabelText("Starred").innerHTML).toBe(filledStarMarkup);
     expect(screen.getByText("2 messages")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Mark conversation read" }));
     await waitFor(() =>
       expect(mocks.updateMailThread).toHaveBeenCalledWith(mailThread.id, { unread: false }),
     );
-    await browser.click(screen.getByRole("button", { name: "Unstar conversation" }));
+    const unstarButton = screen.getByRole("button", { name: "Unstar conversation" });
+    expect(unstarButton.querySelector("svg")?.innerHTML).toBe(filledStarMarkup);
+    await browser.click(unstarButton);
     await waitFor(() =>
       expect(mocks.updateMailThread).toHaveBeenCalledWith(mailThread.id, { starred: false }),
     );

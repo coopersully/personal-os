@@ -1,22 +1,22 @@
 import type { AccountSetupStep, AccountSetupWorkspace, User } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Banknote,
-  CalendarDays,
-  Check,
-  CheckCircle2,
-  Cloud,
-  ExternalLink,
-  Mail,
-  ShieldCheck,
-  Volleyball,
-} from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { CheckboxCardGroup } from "@/components/checkbox-card-group";
+import {
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BanknoteIcon,
+  CalendarIcon,
+  CheckIcon,
+  CircleCheckIcon,
+  CloudIcon,
+  ExternalLinkIcon,
+  MailIcon,
+  ShieldCheckIcon,
+} from "@/components/icons";
+import { LogoMark } from "@/components/logo-mark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -189,9 +189,7 @@ export function SetupPage({ user }: { user: User }) {
     <main className="setup-shell">
       <header className="setup-header">
         <div className="setup-wordmark">
-          <span className="logo-mark logo-mark--compact">
-            <Volleyball aria-hidden="true" />
-          </span>
+          <LogoMark compact />
           ilo
         </div>
         <Button disabled={save.isPending} onClick={exitSetup} variant="ghost">
@@ -298,7 +296,7 @@ export function SetupPage({ user }: { user: User }) {
         ) : null}
         {save.isError ? (
           <Alert variant="destructive">
-            <ShieldCheck />
+            <ShieldCheckIcon />
             <AlertTitle>Setup progress was not saved</AlertTitle>
             <AlertDescription>{errorMessage(save.error)}</AlertDescription>
           </Alert>
@@ -329,7 +327,7 @@ function WelcomeStep({
       <ItemGroup className="setup-intro">
         <Item>
           <ItemMedia variant="icon">
-            <Check />
+            <CheckIcon />
           </ItemMedia>
           <ItemContent>
             <ItemTitle>You choose the sources</ItemTitle>
@@ -338,7 +336,7 @@ function WelcomeStep({
         </Item>
         <Item>
           <ItemMedia variant="icon">
-            <ShieldCheck />
+            <ShieldCheckIcon />
           </ItemMedia>
           <ItemContent>
             <ItemTitle>You stay in control</ItemTitle>
@@ -348,7 +346,7 @@ function WelcomeStep({
       </ItemGroup>
       <Button disabled={pending} onClick={start} size="lg">
         Set up ilo
-        <ArrowRight data-icon="inline-end" />
+        <ArrowRightIcon data-icon="inline-end" />
       </Button>
     </div>
   );
@@ -442,14 +440,14 @@ function VerifyEmailStep({
       </Card>
       {checkFailed ? (
         <Alert>
-          <ShieldCheck />
+          <ShieldCheckIcon />
           <AlertTitle>Still waiting for verification</AlertTitle>
           <AlertDescription>Open the link in your inbox, then check again.</AlertDescription>
         </Alert>
       ) : null}
       {checkError ? (
         <Alert variant="destructive">
-          <ShieldCheck />
+          <ShieldCheckIcon />
           <AlertTitle>Verification could not be checked</AlertTitle>
           <AlertDescription>{errorMessage(checkError)}</AlertDescription>
         </Alert>
@@ -545,7 +543,7 @@ function GoogleStep({
       </Card>
       {connect.isError ? (
         <Alert variant="destructive">
-          <Cloud />
+          <CloudIcon />
           <AlertTitle>Google did not open</AlertTitle>
           <AlertDescription>{errorMessage(connect.error)}</AlertDescription>
         </Alert>
@@ -653,7 +651,7 @@ function ICloudStep({
                       rel="noreferrer"
                       target="_blank"
                     >
-                      Create one with Apple <ExternalLink aria-hidden="true" />
+                      Create one with Apple <ExternalLinkIcon aria-hidden="true" />
                     </a>
                   </FieldDescription>
                 </Field>
@@ -680,7 +678,7 @@ function ICloudStep({
       )}
       {connect.isError ? (
         <Alert variant="destructive">
-          <Cloud />
+          <CloudIcon />
           <AlertTitle>Apple did not connect</AlertTitle>
           <AlertDescription>{errorMessage(connect.error)}</AlertDescription>
         </Alert>
@@ -721,7 +719,7 @@ function FinancesStep({
           {accounts.map((account) => (
             <Item key={account.id} variant="outline">
               <ItemMedia variant="icon">
-                <Banknote />
+                <BanknoteIcon />
               </ItemMedia>
               <ItemContent>
                 <ItemTitle>{account.name}</ItemTitle>
@@ -780,7 +778,7 @@ function ReadyStep({
     <div className="setup-step setup-step--ready">
       <div className="setup-step__heading">
         <span className="setup-ready-mark">
-          <CheckCircle2 aria-hidden="true" />
+          <CircleCheckIcon aria-hidden="true" />
         </span>
         <h1 data-setup-step="ready" tabIndex={-1}>
           Your workspace is ready.
@@ -817,7 +815,7 @@ function ReadyStep({
       </ItemGroup>
       <div className="setup-footer">
         <Button disabled={pending} onClick={review} variant="ghost">
-          <ArrowLeft data-icon="inline-start" />
+          <ArrowLeftIcon data-icon="inline-start" />
           Review setup
         </Button>
         <div className="setup-footer__actions">
@@ -826,7 +824,7 @@ function ReadyStep({
           </Button>
           <Button disabled={pending} onClick={connectAgent} size="lg">
             Connect an agent
-            <ArrowRight data-icon="inline-end" />
+            <ArrowRightIcon data-icon="inline-end" />
           </Button>
         </div>
       </div>
@@ -851,7 +849,7 @@ function ConnectedAccounts({
       {accounts.map((account) => (
         <Item key={account.id} variant="outline">
           <ItemMedia variant="icon">
-            <Cloud />
+            <CloudIcon />
           </ItemMedia>
           <ItemContent>
             <ItemTitle>{account.email ?? account.label}</ItemTitle>
@@ -896,13 +894,13 @@ function ServiceChoices({
       options={[
         {
           description: "Read and edit the calendars you select.",
-          icon: <CalendarDays />,
+          icon: <CalendarIcon />,
           label: "Calendar",
           value: "calendar",
         },
         {
           description: "Read, organize, draft, and send mail.",
-          icon: <Mail />,
+          icon: <MailIcon />,
           label: "Mail",
           value: "mail",
         },
@@ -928,12 +926,12 @@ function SetupFooter({
   return (
     <div className="setup-footer">
       <Button disabled={pending} onClick={back} variant="ghost">
-        <ArrowLeft data-icon="inline-start" />
+        <ArrowLeftIcon data-icon="inline-start" />
         Back
       </Button>
       <Button disabled={pending || continueDisabled} onClick={next}>
         {continueLabel}
-        <ArrowRight data-icon="inline-end" />
+        <ArrowRightIcon data-icon="inline-end" />
       </Button>
     </div>
   );

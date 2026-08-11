@@ -15,22 +15,21 @@ import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import {
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  CheckCircle2,
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  CircleCheck,
-  CircleHelp,
-  Download,
-} from "lucide-react";
 import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  CircleCheckIcon,
+  CircleHelpIcon,
+  DownloadIcon,
+  SortIcon,
+} from "@/components/icons";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import {
@@ -720,7 +719,7 @@ export function FinancesPage() {
                 />
               ) : visibleTransactions.length === 0 ? (
                 <EmptyState
-                  icon={<CheckCircle2 />}
+                  icon={<CircleCheckIcon />}
                   title={reviewOnly ? "Everything is categorized" : "No transactions yet"}
                 >
                   Add one manually now; connected providers will populate this list after sync.
@@ -772,7 +771,10 @@ export function FinancesPage() {
               <FinanceBudgetContext wealth={wealth.data} />
             ) : null}
             {finance.budgets.length === 0 ? (
-              <EmptyState icon={<CircleHelp />} title={`No budget for ${formatMonth(budgetMonth)}`}>
+              <EmptyState
+                icon={<CircleHelpIcon />}
+                title={`No budget for ${formatMonth(budgetMonth)}`}
+              >
                 {budgetMonth > currentMonth
                   ? "This future month has not been planned yet. Set a budget now or come back when you are ready."
                   : "No category limits were set for this month. You can still inspect raw transactions or create a plan."}
@@ -1556,13 +1558,13 @@ function FinanceMonthNavigator({
     <fieldset className="flex items-center rounded-md border bg-background">
       <legend className="sr-only">Budget month</legend>
       <ShadcnButton aria-label="Previous month" onClick={onPrevious} size="icon-sm" variant="ghost">
-        <ChevronLeft />
+        <ChevronLeftIcon />
       </ShadcnButton>
       <span className="min-w-28 px-2 text-center text-sm font-medium tabular-nums">
         {formatMonth(month)}
       </span>
       <ShadcnButton aria-label="Next month" onClick={onNext} size="icon-sm" variant="ghost">
-        <ChevronRight />
+        <ChevronRightIcon />
       </ShadcnButton>
     </fieldset>
   );
@@ -1573,7 +1575,7 @@ function FinanceExportMenu() {
     <ShadcnDropdownMenu>
       <ShadcnDropdownMenuTrigger asChild>
         <ShadcnButton size="sm" variant="outline">
-          <Download data-icon="inline-start" />
+          <DownloadIcon data-icon="inline-start" />
           Export data
         </ShadcnButton>
       </ShadcnDropdownMenuTrigger>
@@ -1633,7 +1635,7 @@ function FinanceBudgetAllocationChart({
   }));
   if (data.length === 0) {
     return (
-      <EmptyState icon={<CircleHelp />} title="No planned categories">
+      <EmptyState icon={<CircleHelpIcon />} title="No planned categories">
         Set a category limit to see its allocation.
       </EmptyState>
     );
@@ -2556,7 +2558,7 @@ function SubscriptionsPanel({
               </ShadcnItem>
             ))
           ) : (
-            <EmptyState icon={<CircleHelp />} title="No subscriptions detected">
+            <EmptyState icon={<CircleHelpIcon />} title="No subscriptions detected">
               We need at least three consistent charges to suggest a subscription.
             </EmptyState>
           )}
@@ -2727,7 +2729,7 @@ function FinanceTransactionsTable({
             <div className="flex min-w-0 items-center gap-2">
               {isKnownMerchant ? (
                 <span aria-label="Merchant entity found" role="img" title="Merchant entity found">
-                  <CircleCheck
+                  <CircleCheckIcon
                     aria-hidden="true"
                     className="shrink-0 text-muted-foreground"
                     data-icon="inline-start"
@@ -2739,7 +2741,7 @@ function FinanceTransactionsTable({
                   role="img"
                   title="Merchant entity needs review"
                 >
-                  <CircleHelp
+                  <CircleHelpIcon
                     aria-hidden="true"
                     className="shrink-0 text-muted-foreground"
                     data-icon="inline-start"
@@ -2800,9 +2802,9 @@ function FinanceTransactionsTable({
             >
               {isExpanded ? "Hide" : "Details"}
               {isExpanded ? (
-                <ChevronUp data-icon="inline-end" />
+                <ChevronUpIcon data-icon="inline-end" />
               ) : (
-                <ChevronDown data-icon="inline-end" />
+                <ChevronDownIcon data-icon="inline-end" />
               )}
             </ShadcnButton>
           );
@@ -2831,7 +2833,7 @@ function FinanceTransactionsTable({
 
   if (transactions.length === 0)
     return (
-      <EmptyState icon={<CheckCircle2 />} title="No transactions yet">
+      <EmptyState icon={<CircleCheckIcon />} title="No transactions yet">
         Add one manually now; connected providers will populate this ledger after sync.
       </EmptyState>
     );
@@ -2933,7 +2935,7 @@ function TransactionSortButton({
   sortBy: FinanceTransactionQuery["sortBy"];
 }) {
   const isActive = sort.sortBy === sortBy;
-  const Icon = !isActive ? ArrowUpDown : sort.sortDirection === "asc" ? ArrowUp : ArrowDown;
+  const Icon = !isActive ? SortIcon : sort.sortDirection === "asc" ? ArrowUpIcon : ArrowDownIcon;
   return (
     <ShadcnButton
       aria-label={`Sort by ${label.toLowerCase()}`}
@@ -3023,7 +3025,7 @@ function FinanceReviewItems({
 }) {
   if (cases.length === 0)
     return (
-      <EmptyState icon={<CheckCircle2 />} title="Nothing needs your judgment">
+      <EmptyState icon={<CircleCheckIcon />} title="Nothing needs your judgment">
         New uncertain transactions will appear here with the evidence behind each suggestion.
       </EmptyState>
     );

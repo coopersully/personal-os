@@ -296,9 +296,69 @@ approved workspace identity palettes are the only feature-level exception.
 | Spacing | Use a 4 px base rhythm. Block gaps are 24–32 px; row gaps are 8–12 px; dense metadata gaps are 4–8 px. Repeated relationships need a shared role; legacy off-scale values are not precedent. |
 | Shape | Shared `--radius` owns component roundness. Use cards and controls from `src/components/ui`; do not invent parallel primitives. |
 | Color | Primary actions, selection, and current context use the monochrome ink scale. Warning, destructive, info, and success use semantic status tokens only. Workspace color is high-chroma, identity-only, and stays inside `WorkspaceIcon`. |
-| Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. |
+| Icons | Icons clarify an existing label or stand in only when the action has a familiar, accessible name. Icon-only actions require an accessible label and tooltip. Every glyph comes from the reicon vocabulary below. |
 | Navigation | Active navigation keeps the same geometry as inactive navigation. Ordinary destinations use solid/outline icon weight for state; framed workspace icons keep stable geometry and rely on the navigation surface for selection. |
 | Motion | Motion confirms a spatial change and stays brief. It never conveys the only signal of urgency, completion, or error. Respect reduced motion. |
+
+### Icons
+
+[reicon](https://reicon.dev) is the only icon pack ilo may use, and
+`apps/web/src/components/icons.ts` is the only module permitted to import it.
+Features import glyphs from `@/components/icons`.
+`scripts/check-icon-contract.mjs` fails `pnpm lint` on any other icon package,
+on a direct `reicon-react` import, and on hand-written inline `<svg>` markup.
+
+- **One glyph per meaning.** The registry exports a semantic name, not a vendor
+  name, because reicon's own names are frequently opaque at a call site
+  (`Record` is an empty circle, `Task` is a to-do list). Adding a glyph means
+  adding a registry entry, which is a reviewed decision; a new entry must
+  represent a new meaning rather than a second glyph for an existing one.
+- **Weight carries state.** Outline is the default. Filled marks the active
+  navigation destination or the selected item in an icon-labelled control
+  family. Weight is supplemental: selection is still carried by the navigation
+  surface, `aria-current`, and the visible label, and geometry never moves
+  between states. Every reicon glyph ships both weights, so no feature needs a
+  second pack to express state.
+- **Size comes from CSS, never the `size` prop.** Shared primitives size icons
+  with `[&_svg:not([class*='size-'])]:size-4`; a call site that needs another
+  size passes a `size-*` class. reicon emits `width`/`height` as attributes, so
+  a CSS declaration always wins.
+- **Color comes from semantic `text-*` tokens.** reicon glyphs are filled with
+  `currentColor`, so they inherit the surrounding role. The registry's `Icon`
+  type removes the `color` prop, making a raw color a type error rather than a
+  review comment. It also removes `strokeWidth` and `secondaryColor`, which are
+  unreliable or inert in reicon 1.2.0.
+- **Icons accept no children.** reicon renders through `dangerouslySetInnerHTML`,
+  so a `<title>` cannot be nested inside a glyph. Name an icon-only control with
+  `aria-label` plus a tooltip, and mark a decorative icon `aria-hidden`.
+### Brand marks
+
+A brand mark is not an icon. An icon is a glyph ilo chooses to express a meaning;
+a brand mark is someone else's trademark, whose artwork we may reproduce but not
+redesign. They never enter the reicon registry and are never substituted for a
+similar-looking glyph.
+
+`apps/web/src/components/brand-marks.tsx` is the only module allowed to contain
+inline `<svg>` markup or to import `simple-icons`, and the icon contract enforces
+both. Compose `BrandMark`; do not reach for artwork directly.
+
+- **Artwork is sourced, never drawn.** Marks come from `simple-icons` (CC0-1.0),
+  except where an owner's guidelines require their own asset. That licence covers
+  path data, not trademark rights. Every entry records where its artwork came
+  from.
+- **Some marks may not be recoloured.** Google's branding guidelines forbid a
+  monochrome or recoloured "G", so its multi-colour artwork is vendored and
+  exempt from the `currentColor` rule. Marks whose owners permit monochrome use
+  inherit `currentColor` like any other glyph, which keeps them inside the ink
+  scale.
+- **A missing mark is a monogram, never an approximation.** No CC0 artwork exists
+  for OpenAI/ChatGPT, Microsoft, Slack, or Plaid — simple-icons removes brands at
+  their owner's request. Those render a neutral monogram. Adding a hand-drawn
+  approximation of a trademark to close the gap is not an option.
+- **Naming follows the owner, not our identifiers.** The mark's accessible name
+  is the brand's own name (`iCloud`, not `icloud`). Pass `label` to add
+  surrounding context, and `decorative` when a visible label already names the
+  brand.
 
 ### Motion, loading, and perceived performance
 

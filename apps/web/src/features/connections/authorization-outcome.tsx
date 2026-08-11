@@ -3,10 +3,10 @@ import type {
   ConnectorAuthorizationProvider,
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, CircleAlert, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { api } from "@/api";
+import { CircleAlertIcon, CircleCheckIcon, LoaderIcon } from "@/components/icons";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
@@ -135,7 +135,7 @@ export function ConnectionAuthorizationOutcome({
   if (restartRequired) {
     return (
       <Alert variant="warning">
-        <CircleAlert />
+        <CircleAlertIcon />
         <AlertTitle>Restart the connection</AlertTitle>
         <AlertDescription>
           That connection link is no longer available. Start a new connection to continue.
@@ -152,7 +152,7 @@ export function ConnectionAuthorizationOutcome({
   if (query.isPending) {
     return (
       <Alert variant="info">
-        <LoaderCircle />
+        <LoaderIcon />
         <AlertTitle>Confirming your connection</AlertTitle>
         <AlertDescription>Checking the secure result with ilo.</AlertDescription>
       </Alert>
@@ -161,7 +161,7 @@ export function ConnectionAuthorizationOutcome({
   if (!query.data) {
     return (
       <Alert variant="warning">
-        <CircleAlert />
+        <CircleAlertIcon />
         <AlertTitle>Restart the connection</AlertTitle>
         <AlertDescription>
           ilo couldn't confirm that connection. Start again; your existing account was not changed.
@@ -186,7 +186,7 @@ export function ConnectionAuthorizationOutcome({
       : presentation(query.data);
   return (
     <Alert variant={view.variant}>
-      {query.data.status === "connected" ? <CheckCircle2 /> : <CircleAlert />}
+      {query.data.status === "connected" ? <CircleCheckIcon /> : <CircleAlertIcon />}
       <AlertTitle>{view.title}</AlertTitle>
       <AlertDescription>{view.description}</AlertDescription>
       {view.retry ? (

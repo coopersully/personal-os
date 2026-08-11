@@ -1,19 +1,19 @@
 import type { DailyBrief, Task } from "@personal-os/domain";
 import { EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  CheckCircle2,
-  Clock3,
-  Edit3,
-  Inbox,
-  ListChecks,
-  ListTodo,
-  type LucideIcon,
-  Plus,
-  Search,
-  Trash2,
-} from "lucide-react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
+import {
+  CircleCheckIcon,
+  ClockIcon,
+  EditIcon,
+  type Icon,
+  InboxIcon,
+  ListChecksIcon,
+  ListTodoIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+} from "@/components/icons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -48,11 +48,11 @@ import { RemindersSidebar } from "../reminders/page.js";
 
 type TaskView = "completed" | "inbox" | "next" | "scheduled";
 
-const taskViews: Array<{ icon: LucideIcon; label: string; value: TaskView }> = [
-  { icon: Inbox, label: "Inbox", value: "inbox" },
-  { icon: ListChecks, label: "Next", value: "next" },
-  { icon: Clock3, label: "Scheduled", value: "scheduled" },
-  { icon: CheckCircle2, label: "Completed", value: "completed" },
+const taskViews: Array<{ icon: Icon; label: string; value: TaskView }> = [
+  { icon: InboxIcon, label: "Inbox", value: "inbox" },
+  { icon: ListChecksIcon, label: "Next", value: "next" },
+  { icon: ClockIcon, label: "Scheduled", value: "scheduled" },
+  { icon: CircleCheckIcon, label: "Completed", value: "completed" },
 ];
 
 /**
@@ -60,9 +60,9 @@ const taskViews: Array<{ icon: LucideIcon; label: string; value: TaskView }> = [
  * Keeping both visible marks which one is current without duplicating the
  * other's view rows.
  */
-const relatedCommitments: Array<{ icon: LucideIcon; label: string; path: string }> = [
-  { icon: ListChecks, label: "Tasks", path: "/tasks" },
-  { icon: ListTodo, label: "Reminders", path: "/reminders" },
+const relatedCommitments: Array<{ icon: Icon; label: string; path: string }> = [
+  { icon: ListChecksIcon, label: "Tasks", path: "/tasks" },
+  { icon: ListTodoIcon, label: "Reminders", path: "/reminders" },
 ];
 
 const taskEmptyCopy: Record<TaskView, string> = {
@@ -75,7 +75,7 @@ const taskEmptyCopy: Record<TaskView, string> = {
 export function TasksCreateButton({ onCreate }: { onCreate: () => void }) {
   return (
     <Button aria-label="New task" onClick={onCreate} size="sm">
-      <Plus aria-hidden="true" data-icon="inline-start" />
+      <PlusIcon aria-hidden="true" data-icon="inline-start" />
       <span>New task</span>
     </Button>
   );
@@ -118,7 +118,7 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
                             value === "inbox" ? undefined : value,
                           )}
                         >
-                          <Icon aria-hidden="true" />
+                          <Icon aria-hidden="true" weight={selected ? "Filled" : "Outline"} />
                           <span>{label}</span>
                         </Link>
                       </SidebarMenuButton>
@@ -145,7 +145,7 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
                         onClick={onNavigate}
                         to={path}
                       >
-                        <Icon aria-hidden="true" />
+                        <Icon aria-hidden="true" weight={selected ? "Filled" : "Outline"} />
                         <span>{label}</span>
                       </Link>
                     </SidebarMenuButton>
@@ -186,11 +186,11 @@ export function TasksPage({
     <div className="narrow-page">
       {tasks.data.items.length === 0 ? (
         search ? (
-          <EmptyState icon={<Search />} title="No matching tasks">
+          <EmptyState icon={<SearchIcon />} title="No matching tasks">
             Try another title or note.
           </EmptyState>
         ) : (
-          <EmptyState icon={<ListChecks />} title="Nothing here yet">
+          <EmptyState icon={<ListChecksIcon />} title="Nothing here yet">
             {taskEmptyCopy[view]}
           </EmptyState>
         )
@@ -257,7 +257,7 @@ export function TaskRow({
       <ItemActions>
         <Badge variant="secondary">{task.status}</Badge>
         <Button aria-label={`Edit ${task.title}`} onClick={onEdit} size="icon-sm" variant="ghost">
-          <Edit3 />
+          <EditIcon />
         </Button>
         <Button
           aria-label={`Remove ${task.title}`}
@@ -266,7 +266,7 @@ export function TaskRow({
           size="icon-sm"
           variant="ghost"
         >
-          <Trash2 />
+          <TrashIcon />
         </Button>
       </ItemActions>
       {complete.isError || remove.isError ? (

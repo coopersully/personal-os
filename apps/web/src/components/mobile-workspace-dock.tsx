@@ -1,15 +1,15 @@
-import {
-  Check,
-  ChevronDown,
-  House,
-  Layers3,
-  LogOut,
-  type LucideIcon,
-  Settings,
-  Sparkles,
-} from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
+import {
+  CheckIcon,
+  ChevronDownIcon,
+  HouseIcon,
+  type Icon,
+  LayersIcon,
+  LogOutIcon,
+  SettingsIcon,
+  SparklesIcon,
+} from "@/components/icons";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -39,7 +39,7 @@ function DockWorkspaceIcon({ workspace }: { workspace: WorkspaceDefinition }) {
   if (workspace.id === "today") {
     return (
       <span aria-hidden="true" className="workspace-dock__identity-frame">
-        <House />
+        <HouseIcon />
       </span>
     );
   }
@@ -50,7 +50,7 @@ function DockWorkspaceIcon({ workspace }: { workspace: WorkspaceDefinition }) {
 function DockAccountIcon() {
   return (
     <span aria-hidden="true" className="workspace-dock__identity-frame">
-      <Settings />
+      <SettingsIcon />
     </span>
   );
 }
@@ -101,7 +101,7 @@ export function MobileWorkspaceDock({
                 <DockAccountIcon />
               )}
               <span>{pillLabel}</span>
-              <ChevronDown aria-hidden="true" data-icon="inline-end" />
+              <ChevronDownIcon aria-hidden="true" data-icon="inline-end" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -126,7 +126,7 @@ export function MobileWorkspaceDock({
                       <span>{workspace.label}</span>
                       <small id={descriptionId}>{workspace.description}</small>
                     </span>
-                    {selected ? <Check aria-hidden="true" className="ml-auto" /> : null}
+                    {selected ? <CheckIcon aria-hidden="true" className="ml-auto" /> : null}
                   </Link>
                 </DropdownMenuItem>
               );
@@ -142,7 +142,7 @@ export function MobileWorkspaceDock({
           size="icon"
           variant="default"
         >
-          <Layers3 aria-hidden="true" />
+          <LayersIcon aria-hidden="true" />
         </Button>
         <SheetContent
           aria-describedby="workspace-dock-sheet-description"
@@ -178,7 +178,7 @@ export function MobileWorkspaceDock({
               <DropdownMenuTrigger asChild>
                 <Button aria-label={`${accountFirstName} account`} variant="ghost">
                   {accountFirstName}
-                  <ChevronDown aria-hidden="true" data-icon="inline-end" />
+                  <ChevronDownIcon aria-hidden="true" data-icon="inline-end" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
@@ -189,13 +189,13 @@ export function MobileWorkspaceDock({
                 <DropdownMenuLabel>{accountName}</DropdownMenuLabel>
                 <DropdownMenuGroup>
                   <DockAccountMenuItem
-                    icon={Sparkles}
+                    icon={SparklesIcon}
                     label="Setup"
                     onNavigate={() => setOpen(false)}
                     path="/setup"
                   />
                   <DockAccountMenuItem
-                    icon={Settings}
+                    icon={SettingsIcon}
                     label="Settings"
                     onNavigate={() => setOpen(false)}
                     path="/settings"
@@ -203,7 +203,7 @@ export function MobileWorkspaceDock({
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onSelect={onLogout} variant="destructive">
-                  <LogOut aria-hidden="true" /> Log out
+                  <LogOutIcon aria-hidden="true" /> Log out
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -220,7 +220,7 @@ function DockAccountMenuItem({
   onNavigate,
   path,
 }: {
-  icon: LucideIcon;
+  icon: Icon;
   label: string;
   onNavigate: () => void;
   path: string;

@@ -4,18 +4,18 @@ This directory defines an AWS deployment baseline in `us-east-1`:
 
 - private RDS PostgreSQL with encrypted storage, automated backups, and an RDS-managed master password;
 - two immutable ECR repositories and ECS Fargate services for the API and public MCP endpoint;
-- private ECS application subnets with outbound-only provider access through a NAT gateway;
+- ECS application tasks in public subnets with tightly scoped security groups and direct provider egress;
 - a public ALB with ACM TLS, strict host routing, managed WAF protections, and CloudWatch logs;
 - a private, encrypted S3 web bucket delivered through CloudFront with browser security headers;
-- external HTTPS checks, CloudWatch alarms/dashboard, and an email-backed SNS operations channel;
+- external app and deployment-aware API HTTPS checks, CloudWatch alarms/dashboard, and an email-backed SNS operations channel;
 - GuardDuty, IAM Access Analyzer, Security Hub Foundational Best Practices, AWS Config, and a validated multi-Region CloudTrail;
 - weekly database recovery points in AWS Backup in addition to RDS automated backups;
 - monthly budget, low-threshold cost anomaly notifications, and active cost-allocation tags;
 - authoritative DNS records in an existing Cloudflare zone; and
 - a GitHub Actions OIDC deployment role restricted to the repository and branch configured in Terraform.
 
-The tasks run without public IP addresses and accept inbound traffic only from
-the ALB. Their security group permits only DNS, PostgreSQL inside the VPC,
+The tasks receive public IP addresses for direct provider egress but accept inbound traffic only
+from the ALB security group. Their security group permits only DNS, PostgreSQL inside the VPC,
 HTTPS provider traffic on TCP 443, iCloud Mail IMAP over TLS on TCP 993, and
 iCloud Mail SMTP submission on TCP 587. PostgreSQL remains in dedicated private
 subnets and accepts traffic only from application tasks.
@@ -193,12 +193,17 @@ events. The configured email endpoint must confirm the one-time Amazon SNS
 subscription before runtime alerts can arrive. Budget and Cost Anomaly
 Detection alerts use the same operations topic; budget notifications are also
 sent directly so the budget does not depend only on SNS confirmation.
-AWS Config records continuously to the audit bucket but is intentionally not
+AWS Config records daily to the audit bucket but is intentionally not
 attached directly to this topic because its per-resource change stream is far
 too noisy for an operator alert channel.
 
-CloudWatch alarms cover public HTTPS health, ECS CPU/memory, unhealthy targets,
-5xx responses, latency, RDS CPU/storage/memory/connections, NAT failures, and
+API and MCP Fargate tasks use the public subnets for direct IPv4 egress while retaining the
+application security group, whose service-port ingress is limited to the load-balancer security
+group. The database remains isolated in database-only private subnets. This avoids the fixed NAT
+gateway and Elastic IP cost while preserving the same inbound boundary.
+
+CloudWatch alarms cover app and deployment-aware API public HTTPS health, ECS CPU/memory, unhealthy targets,
+5xx responses, latency, RDS CPU/storage/memory/connections, and
 CloudFront 5xx rate. The `personal-os-prod-operations` dashboard collects the
 primary service and database signals. Human-facing alarms publish failure transitions only;
 recovery remains available in CloudWatch history without generating another email. Raw API health
@@ -229,13 +234,13 @@ year, with obsolete object versions removed sooner.
 
 AWS Compute Optimizer and Cost Optimization Hub are account-level opt-ins rather
 than Terraform resources. They are enabled for this account and should remain
-active so AWS continuously produces rightsizing and waste-reduction
+active so AWS produces rightsizing and waste-reduction
 recommendations.
 
 ## Cost and availability posture
 
-This is a secured invite-only-beta baseline: one private API task, one private
-MCP task, a single-AZ `db.t4g.micro` database, CloudFront/S3 web delivery, and a
+This is a secured invite-only-beta baseline: one API task, one MCP task, a
+single-AZ `db.t4g.micro` database, CloudFront/S3 web delivery, and a
 public ALB protected by managed WAF rules. The alarm suite and bounded
 auto-scaling are suitable for unattended beta operation. Multi-AZ RDS and
 multi-replica minimums remain deliberate paid upgrades before claiming high

@@ -1,8 +1,17 @@
 import type { Reminder } from "@personal-os/domain";
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CheckCircle2, Circle, Clock3, ListTodo, Plus, Search, Trash2 } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
+import {
+  CheckIcon,
+  CircleCheckIcon,
+  CircleIcon,
+  ClockIcon,
+  ListTodoIcon,
+  PlusIcon,
+  SearchIcon,
+  TrashIcon,
+} from "@/components/icons";
 import { Button as ShadcnButton } from "@/components/ui/button";
 import {
   SidebarGroup,
@@ -25,7 +34,7 @@ import { invalidateMaterial } from "../../lib/material-queries.js";
 export function RemindersCreateButton({ onCreate }: { onCreate: () => void }) {
   return (
     <ShadcnButton aria-label="New reminder" onClick={onCreate} size="sm">
-      <Plus aria-hidden="true" data-icon="inline-start" />
+      <PlusIcon aria-hidden="true" data-icon="inline-start" />
       <span>New reminder</span>
     </ShadcnButton>
   );
@@ -51,7 +60,7 @@ export function RemindersSidebar({ onNavigate }: { onNavigate: () => void }) {
                   onClick={onNavigate}
                   to={workspaceViewPath("/reminders", searchParams)}
                 >
-                  <ListTodo aria-hidden="true" />
+                  <ListTodoIcon aria-hidden="true" weight={!showCompleted ? "Filled" : "Outline"} />
                   <span>Open</span>
                 </Link>
               </SidebarMenuButton>
@@ -63,7 +72,10 @@ export function RemindersSidebar({ onNavigate }: { onNavigate: () => void }) {
                   onClick={onNavigate}
                   to={workspaceViewPath("/reminders", searchParams, "completed")}
                 >
-                  <CheckCircle2 aria-hidden="true" />
+                  <CircleCheckIcon
+                    aria-hidden="true"
+                    weight={showCompleted ? "Filled" : "Outline"}
+                  />
                   <span>Completed</span>
                 </Link>
               </SidebarMenuButton>
@@ -101,12 +113,12 @@ export function RemindersPage({
         <InlineError error={reminders.error} />
       ) : reminders.data.items.length === 0 ? (
         search ? (
-          <EmptyState icon={<Search />} title="No matching reminders">
+          <EmptyState icon={<SearchIcon />} title="No matching reminders">
             Try another title or note.
           </EmptyState>
         ) : (
           <EmptyState
-            icon={<ListTodo />}
+            icon={<ListTodoIcon />}
             title={showCompleted ? "No completed reminders" : "A clear slate"}
           >
             {showCompleted
@@ -160,14 +172,19 @@ export function ReminderRow({
         onClick={() => complete.mutate()}
         type="button"
       >
-        {reminder.completedAt ? <Check size={15} /> : <Circle size={18} />}
+        {reminder.completedAt ? (
+          <CheckIcon className="size-[15px]" />
+        ) : (
+          <CircleIcon className="size-[18px]" />
+        )}
       </button>
       <button className="reminder-row__material" onClick={onEdit} type="button">
         <strong>{reminder.title}</strong>
         <span>
           {reminder.dueAt ? (
             <>
-              <Clock3 size={13} /> {formatMaterialDateTime(reminder.dueAt, timeZone)}
+              <ClockIcon className="size-[13px]" />{" "}
+              {formatMaterialDateTime(reminder.dueAt, timeZone)}
             </>
           ) : (
             "No due date"
@@ -181,7 +198,7 @@ export function ReminderRow({
         onClick={() => remove.mutate()}
         tone="ghost"
       >
-        <Trash2 size={15} />
+        <TrashIcon className="size-[15px]" />
       </Button>
       {mutationError ? (
         <span className="col-start-2 col-end-[-1] text-xs text-destructive" role="alert">

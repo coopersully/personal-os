@@ -9,6 +9,10 @@ const iam = readFileSync(resolve(root, "infra/iam.tf"), "utf8");
 const main = readFileSync(resolve(root, "apps/api/src/main.ts"), "utf8");
 const workflowSource = readFileSync(resolve(root, ".github/workflows/deploy.yml"), "utf8");
 const workflow = readFileSync(resolve(root, ".github/scripts/deploy-api.sh"), "utf8");
+const heartbeatWorker = readFileSync(
+  resolve(root, ".github/scripts/deployment-heartbeat-worker.py"),
+  "utf8",
+);
 const runtimeTaskDefinitionCheck = resolve(
   root,
   ".github/scripts/check-runtime-task-definition.mjs",
@@ -177,6 +181,11 @@ requireMatch(
   "the isolated scaling-state observation bootstrap required by the workflow",
 );
 requireMatch(
+  iam,
+  /sid\s*=\s*"PublishDeploymentHeartbeat"[\s\S]*?actions\s*=\s*\["cloudwatch:PutMetricData"\][\s\S]*?cloudwatch:namespace[\s\S]*?ilo\/Deployments/,
+  "namespace-scoped deployment heartbeat authority",
+);
+requireMatch(
   main,
   /shutdownApiRuntime\(\{[\s\S]*?timeoutMs:\s*config\.apiShutdownTimeoutMs/,
   "bounded shutdown orchestration",
@@ -220,6 +229,41 @@ requireMatch(
   workflow,
   /fail_closed_api_deployment\(\)[\s\S]*?trap - ERR EXIT[\s\S]*?run_interruptible aws application-autoscaling register-scalable-target[\s\S]*?--suspended-state "\$api_all_suspended_state"[\s\S]*?run_interruptible aws ecs update-service[\s\S]*?--desired-count 0[\s\S]*?capture_interruptible aws ecs describe-services[\s\S]*?desiredCount,runningCount,pendingCount/,
   "post-drain scaling re-suspension plus zero-state recovery and verification",
+);
+requireMatch(
+  workflow,
+  /publish_api_deployment_state\(\)[\s\S]*?cloudwatch put-metric-data[\s\S]*?--namespace ilo\/Deployments[\s\S]*?ApiDeploymentInProgress/,
+  "an aggregate CloudWatch deployment-state publisher",
+);
+requireMatch(
+  workflow,
+  /api_deployment_heartbeat_interval_seconds="\$\{API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30\}"[\s\S]*?start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?python3 \.github\/scripts\/deployment-heartbeat-worker\.py[\s\S]*?api_deployment_heartbeat_ready_file[\s\S]*?api_deployment_heartbeat_failure_file/,
+  "a background-proven default-thirty-second deployment heartbeat loop with bounded refresh retries",
+);
+requireMatch(
+  heartbeatWorker,
+  /prctl\(1, signal\.SIGTERM\)[\s\S]*?MetricName=ApiDeploymentInProgress,Value=1[\s\S]*?os\.getppid\(\) != deployment_parent_pid[\s\S]*?for attempt in range\(3\)[\s\S]*?ILO_DEPLOYMENT_HEARTBEAT_WORKER[\s\S]*?time\.sleep\(interval_seconds\)/,
+  "a parent-death-bound heartbeat worker with bounded refresh retries",
+);
+requireMatch(
+  workflow,
+  /assert_api_deployment_heartbeat_healthy\(\)[\s\S]*?api_deployment_heartbeat_failure_file[\s\S]*?kill -0[\s\S]*?# Stop and drain the old binary[\s\S]*?start_api_deployment_heartbeat[\s\S]*?assert_api_deployment_heartbeat_healthy[\s\S]*?api_rollout_complete=true/,
+  "parent-visible heartbeat failure checks throughout the rollout",
+);
+requireMatch(
+  workflow,
+  /stop_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 0[\s\S]*?wait_for_api_deployment_alarm_state OK[\s\S]*?API deployment heartbeat alarm did not clear/,
+  "post-deployment proof that heartbeat suppression cleared",
+);
+requireMatch(
+  workflow,
+  /stop_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 0/,
+  "deployment heartbeat cleanup that restores incident paging",
+);
+requireMatch(
+  workflow,
+  /# Stop and drain the old binary[\s\S]*?start_api_deployment_heartbeat[\s\S]*?api_service_drain_attempted=true[\s\S]*?--desired-count 0/,
+  "deployment heartbeat proof before the availability-changing API drain",
 );
 requireMatch(
   workflow,

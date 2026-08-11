@@ -1,5 +1,13 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, resolve } from "node:path";
 
@@ -11,7 +19,9 @@ function readState(path) {
 }
 
 function writeState(path, state) {
-  writeFileSync(path, `${JSON.stringify(state)}\n`);
+  const temporaryPath = `${path}.${process.pid}.tmp`;
+  writeFileSync(temporaryPath, `${JSON.stringify(state)}\n`);
+  renameSync(temporaryPath, path);
 }
 
 function argument(args, name) {
@@ -29,6 +39,60 @@ function fakeAws(args) {
   const state = readState(statePath);
   const [service, operation] = args;
   logCall(state, args);
+
+  if (service === "cloudwatch" && operation === "put-metric-data") {
+    const metricData = argument(args, "--metric-data") ?? "";
+    const value = Number(metricData.match(/(?:^|,)Value=([^,]+)/)?.[1]);
+    if (!Number.isFinite(value)) throw new Error("Expected deployment metric value.");
+    if (process.env.FAKE_HEARTBEAT_LOG) {
+      appendFileSync(process.env.FAKE_HEARTBEAT_LOG, `${value}\n`);
+    }
+    if (process.env.ILO_DEPLOYMENT_HEARTBEAT_WORKER === "true") {
+      const heartbeatAttempts = readFileSync(process.env.FAKE_HEARTBEAT_LOG, "utf8")
+        .trim()
+        .split("\n")
+        .filter((entry) => Number(entry) === 1).length;
+      if (
+        Number.isInteger(state.failDeploymentMetricAfter) &&
+        heartbeatAttempts > state.failDeploymentMetricAfter
+      ) {
+        process.stderr.write("Deployment heartbeat unavailable\n");
+        process.exitCode = 254;
+      }
+      return;
+    }
+    state.deploymentMetricAttempts += 1;
+    if (
+      value === 1 &&
+      Number.isInteger(state.failDeploymentMetricAfter) &&
+      state.deploymentMetricAttempts > state.failDeploymentMetricAfter
+    ) {
+      writeState(statePath, state);
+      process.stderr.write("Deployment heartbeat unavailable\n");
+      process.exitCode = 254;
+      return;
+    }
+    state.deploymentMetricValues.push(value);
+    if (value === 1) {
+      state.deploymentZeroPublishes = 0;
+    }
+    if (value === 0) {
+      state.deploymentZeroPublishes += 1;
+    }
+    const zeroHasCleared =
+      value !== 0 || state.deploymentZeroPublishes >= (state.requiredDeploymentZeroPublishes ?? 1);
+    if (!(value === 0 && state.stickyDeploymentAlarm === true) && zeroHasCleared) {
+      state.deploymentAlarmState = value >= 1 ? "ALARM" : "OK";
+    }
+    writeState(statePath, state);
+    return;
+  }
+
+  if (service === "cloudwatch" && operation === "describe-alarms") {
+    writeState(statePath, state);
+    process.stdout.write(`${state.deploymentAlarmState}\n`);
+    return;
+  }
 
   if (service === "ecs" && operation === "describe-task-definition") {
     const taskDefinition = argument(args, "--task-definition");
@@ -331,6 +395,10 @@ if (process.argv[2] === "--fake-aws") {
       cancelDuringPostLaunchRead: false,
       cancelDuringPostZeroWait: false,
       denyRegister: false,
+      deploymentAlarmState: "OK",
+      deploymentMetricAttempts: 0,
+      deploymentMetricValues: [],
+      deploymentZeroPublishes: 0,
       describeScalingCalls: 0,
       desiredCount: 1,
       drainProtocol: "quiesce-v1",
@@ -366,10 +434,12 @@ if (process.argv[2] === "--fake-aws") {
 
   function runScenarioInDirectory(directory, state, initialize = true) {
     const statePath = resolve(directory, "state.json");
+    const heartbeatLogPath = resolve(directory, "heartbeat.log");
     const bin = resolve(directory, "bin");
     if (initialize) {
       mkdirSync(bin);
       writeState(statePath, state);
+      writeFileSync(heartbeatLogPath, "");
       writeFileSync(
         resolve(bin, "aws"),
         `#!/bin/sh\nexec "${process.execPath}" "${import.meta.filename}" --fake-aws "$@"\n`,
@@ -380,7 +450,11 @@ if (process.argv[2] === "--fake-aws") {
         `#!/bin/sh\nexec "${process.execPath}" "${import.meta.filename}" --fake-curl "$@"\n`,
         { mode: 0o755 },
       );
-      writeFileSync(resolve(bin, "sleep"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      writeFileSync(
+        resolve(bin, "sleep"),
+        '#!/bin/sh\nif test -n "$FAKE_MAIN_SLEEP_SECONDS"; then /bin/sleep "$FAKE_MAIN_SLEEP_SECONDS"; fi\n',
+        { mode: 0o755 },
+      );
     }
     const result = spawnSync("bash", [deployScript], {
       encoding: "utf8",
@@ -389,12 +463,24 @@ if (process.argv[2] === "--fake-aws") {
         API_SERVICE: "ilo-api",
         API_TASK_DEFINITION: state.apiTaskDefinition ?? "new-task-definition",
         API_URL: "https://api.example.com",
+        API_DEPLOYMENT_HEARTBEAT_BACKGROUND_ENABLED:
+          state.heartbeatBackgroundEnabled === true ? "true" : "false",
+        API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS: "0.01",
+        API_DEPLOYMENT_HEARTBEAT_RETRY_SECONDS: "0.01",
+        AWS_REGION: "us-east-1",
         ECS_CLUSTER: "ilo-production",
         FAKE_AWS_STATE: statePath,
+        FAKE_HEARTBEAT_LOG: heartbeatLogPath,
+        FAKE_MAIN_SLEEP_SECONDS: state.heartbeatBackgroundEnabled === true ? "0.05" : "",
         PATH: `${bin}${delimiter}${process.env.PATH}`,
       },
     });
-    return { completedAt: Date.now(), result, state: readState(statePath) };
+    const heartbeatValues = readFileSync(heartbeatLogPath, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map(Number);
+    return { completedAt: Date.now(), heartbeatValues, result, state: readState(statePath) };
   }
 
   function runScenario(name, state) {
@@ -469,7 +555,7 @@ if (process.argv[2] === "--fake-aws") {
   );
   assert(
     cancelled.completedAt - cancelled.state.cancellationSignalAt < 20_000,
-    "Cancellation must interrupt a blocked AWS waiter before runner escalation.",
+    `Cancellation must interrupt a blocked AWS waiter before runner escalation (elapsed=${cancelled.completedAt - cancelled.state.cancellationSignalAt}ms).`,
   );
   assert(cancelled.state.zeroCalls >= 2, "Cancellation recovery must issue a second zero.");
   assert(
@@ -653,6 +739,57 @@ if (process.argv[2] === "--fake-aws") {
     success.state.primaryTaskDefinition === "new-task-definition",
     "Success must launch the exact new task definition.",
   );
+  assert(
+    success.state.deploymentMetricValues[0] === 1 &&
+      success.state.deploymentMetricValues.at(-1) === 0 &&
+      success.state.deploymentAlarmState === "OK",
+    "Success must activate deployment suppression before drain and restore paging afterward.",
+  );
+  const backgroundHeartbeat = runScenario(
+    "background-heartbeat",
+    baseState({
+      heartbeatBackgroundEnabled: true,
+      primaryRolloutStates: ["IN_PROGRESS", "COMPLETED"],
+    }),
+  );
+  assert(
+    backgroundHeartbeat.result.status === 0 &&
+      backgroundHeartbeat.heartbeatValues.filter((value) => value === 1).length >= 2 &&
+      backgroundHeartbeat.heartbeatValues.includes(0),
+    `An enabled heartbeat must refresh during rollout and publish zero during cleanup (${JSON.stringify(backgroundHeartbeat.heartbeatValues)}; status=${backgroundHeartbeat.result.status}; stdout=${backgroundHeartbeat.result.stdout}; stderr=${backgroundHeartbeat.result.stderr}).`,
+  );
+  const failedBackgroundHeartbeat = runScenario(
+    "failed-background-heartbeat",
+    baseState({ failDeploymentMetricAfter: 1, heartbeatBackgroundEnabled: true }),
+  );
+  assert(
+    failedBackgroundHeartbeat.result.status !== 0 &&
+      failedBackgroundHeartbeat.result.stdout.includes(
+        "API deployment heartbeat could not be refreshed",
+      ),
+    "Persistent heartbeat refresh failure must become parent-visible and fail the rollout.",
+  );
+  const unclearedDeploymentAlarm = runScenario(
+    "uncleared-deployment-alarm",
+    baseState({ stickyDeploymentAlarm: true }),
+  );
+  assert(
+    unclearedDeploymentAlarm.result.status !== 0 &&
+      unclearedDeploymentAlarm.result.stdout.includes(
+        "API deployment heartbeat alarm did not clear",
+      ),
+    "A deployment must fail when CloudWatch cannot prove that suppression cleared.",
+  );
+  const delayedDeploymentAlarmClear = runScenario(
+    "delayed-deployment-alarm-clear",
+    baseState({ requiredDeploymentZeroPublishes: 3 }),
+  );
+  assert(
+    delayedDeploymentAlarmClear.result.status === 0 &&
+      delayedDeploymentAlarmClear.state.deploymentAlarmState === "OK" &&
+      delayedDeploymentAlarmClear.heartbeatValues.filter((value) => value === 0).length >= 3,
+    "Cleanup must keep publishing zero while waiting for CloudWatch to clear suppression.",
+  );
   const delayedPrimary = runScenario(
     "delayed-primary-completion",
     baseState({ primaryRolloutStates: ["IN_PROGRESS", "COMPLETED"] }),
@@ -678,7 +815,7 @@ if (process.argv[2] === "--fake-aws") {
     stalledPrimary.state.primaryRolloutStates.length === 0 &&
       stalledPrimary.state.desiredCount === 0 &&
       JSON.stringify(stalledPrimary.state.suspension) === JSON.stringify(allSuspended),
-    "A stalled primary must exhaust the bounded poll and return to fail-closed zero.",
+    `A stalled primary must exhaust the bounded poll and return to fail-closed zero (${JSON.stringify({ desiredCount: stalledPrimary.state.desiredCount, primaryRolloutStates: stalledPrimary.state.primaryRolloutStates, suspension: stalledPrimary.state.suspension, status: stalledPrimary.result.status })}).`,
   );
   const successfulReadiness = success.state.calls.findIndex((call) => call.startsWith("curl "));
   const successfulSuspension = success.state.calls.findIndex((call) =>
@@ -686,6 +823,11 @@ if (process.argv[2] === "--fake-aws") {
   );
   const successfulDrain = success.state.calls.findIndex(
     (call) => call.startsWith("ecs update-service") && call.includes("--desired-count 0"),
+  );
+  const successfulHeartbeat = success.state.calls.findIndex(
+    (call) =>
+      call.startsWith("cloudwatch put-metric-data") &&
+      call.includes("ApiDeploymentInProgress,Value=1"),
   );
   const successfulMigrationLaunch = success.state.calls.findIndex(
     (call) =>
@@ -695,6 +837,8 @@ if (process.argv[2] === "--fake-aws") {
   assert(
     successfulReadiness >= 0 &&
       successfulReadiness < successfulSuspension &&
+      successfulHeartbeat >= 0 &&
+      successfulHeartbeat < successfulDrain &&
       successfulSuspension < successfulDrain &&
       successfulDrain < successfulMigrationLaunch,
     "The proven live quiesce prerequisite must precede suspension, exact drain, and migration startup.",

@@ -189,6 +189,18 @@ data "aws_iam_policy_document" "github_deploy" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    sid       = "PublishDeploymentHeartbeat"
+    actions   = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["ilo/Deployments"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "github_deploy" {
@@ -202,6 +214,15 @@ data "aws_iam_policy_document" "github_connector_observability" {
     sid       = "ReadConnectorMetricFilters"
     actions   = ["logs:DescribeMetricFilters"]
     resources = ["arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name}-api:*"]
+  }
+
+  statement {
+    sid = "ReadConnectorAlarmResources"
+    actions = [
+      "elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DescribeTargetGroups",
+    ]
+    resources = ["*"]
   }
 }
 

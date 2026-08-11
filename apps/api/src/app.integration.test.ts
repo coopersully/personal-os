@@ -3103,6 +3103,21 @@ describe.sequential("ilo API", () => {
       attempted: 1,
       succeeded: 1,
     });
+    expect(
+      logs.mock.calls
+        .map(([entry]) => entry)
+        .filter(({ event }) => event === "connector_sync_freshness_observed"),
+    ).toEqual([
+      expect.objectContaining({
+        eligibleAccountCount: expect.any(Number),
+        freshnessAgeMs: expect.any(Number),
+        method: "SCHEDULER",
+        path: "/internal/connectors/freshness",
+        status: 200,
+      }),
+    ]);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("test@icloud.com");
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("xxxx-xxxx-xxxx-xxxx");
     await vi.waitFor(async () => {
       const connectorPayload = await payload(await request("/v1/connectors"));
       expect(connectorPayload.accounts).toEqual([
@@ -3618,6 +3633,24 @@ describe.sequential("ilo API", () => {
       ).status,
     ).toBe(401);
   }, 120_000);
+
+  it("observes connector freshness when earlier scheduler work fails", async () => {
+    const schedulerError = new Error("scheduler read failed");
+    const freshnessLogsBefore = logs.mock.calls.filter(
+      ([entry]) => entry.event === "connector_sync_freshness_observed",
+    ).length;
+    const selectSpy = vi.spyOn(database.db, "select");
+    selectSpy.mockImplementationOnce(() => {
+      throw schedulerError;
+    });
+
+    await expect(app.syncDueConnectors()).rejects.toBe(schedulerError);
+
+    expect(
+      logs.mock.calls.filter(([entry]) => entry.event === "connector_sync_freshness_observed"),
+    ).toHaveLength(freshnessLogsBefore + 1);
+    selectSpy.mockRestore();
+  });
 
   it("verifies email addresses and resets passwords through one-time email links", async () => {
     expect(

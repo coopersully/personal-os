@@ -1,13 +1,13 @@
-import type { LucideIcon } from "lucide-react";
-import {
-  BadgeDollarSign,
-  Landmark,
-  ReceiptText,
-  ShieldCheck,
-  SlidersHorizontal,
-  WalletCards,
-} from "lucide-react";
 import { Link } from "react-router-dom";
+import {
+  BankIcon,
+  DollarIcon,
+  type Icon,
+  ReceiptIcon,
+  ShieldCheckIcon,
+  SliderHorizontalIcon,
+  WalletIcon,
+} from "@/components/icons";
 
 export type FinanceSection =
   | "accounts"
@@ -22,18 +22,18 @@ export type FinanceSection =
   | "transactions";
 
 const navigation: Array<{
-  items: Array<{ icon: LucideIcon; id: FinanceSection; label: string }>;
+  items: Array<{ icon: Icon; id: FinanceSection; label: string }>;
   label: string;
 }> = [
   {
     items: [
-      { icon: Landmark, id: "overview", label: "Overview" },
-      { icon: BadgeDollarSign, id: "cashflow", label: "Cash flow" },
-      { icon: ReceiptText, id: "transactions", label: "Transactions" },
-      { icon: WalletCards, id: "budgets", label: "Budgets" },
-      { icon: ReceiptText, id: "subscriptions", label: "Subscriptions" },
-      { icon: ShieldCheck, id: "health", label: "Ledger health" },
-      { icon: SlidersHorizontal, id: "profile", label: "Financial profile" },
+      { icon: BankIcon, id: "overview", label: "Overview" },
+      { icon: DollarIcon, id: "cashflow", label: "Cash flow" },
+      { icon: ReceiptIcon, id: "transactions", label: "Transactions" },
+      { icon: WalletIcon, id: "budgets", label: "Budgets" },
+      { icon: ReceiptIcon, id: "subscriptions", label: "Subscriptions" },
+      { icon: ShieldCheckIcon, id: "health", label: "Ledger health" },
+      { icon: SliderHorizontalIcon, id: "profile", label: "Financial profile" },
     ],
     label: "Finances",
   },
@@ -80,7 +80,7 @@ export function FinanceSidebarNavigation({
             onClick={onNavigate}
             to={id === "overview" ? "/finances" : `/finances/${id}`}
           >
-            <Icon aria-hidden="true" size={19} />
+            <Icon aria-hidden="true" className="size-[19px]" />
             <span>{label}</span>
             {id === "review" && reviewCount > 0 ? <b>{reviewCount}</b> : null}
           </Link>

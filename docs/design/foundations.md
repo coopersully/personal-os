@@ -110,6 +110,9 @@ unrelated tools.
 - Use the semantic material ladder `canvas` → `surface` → `surface-raised`.
   Elevation represents a bounded action, state, or current material—not
   decoration.
+- Icons come from one pack, reicon, reached through the shared registry. Its
+  Outline and Filled weights are the vocabulary for active state; a second pack
+  is never the answer to a glyph that is missing or reads wrong.
 - Use the monochrome ink scale for hierarchy, selection, and primary action.
   Status color is reserved for danger, warning, success, and information with a
   stable semantic meaning.
@@ -172,11 +175,22 @@ unrelated tools.
 ### Product mark and name
 
 - Write the product name as lower-case **ilo** in product prose and the wordmark.
-- The current application mark is a library volleyball glyph inside a rounded
-  square. Treat it as a provisional implementation asset, not an approved brand
-  system. Do not derive illustrations, campaign graphics, or new marks from it
-  until the mark, clear space, minimum size, and accessible variants are
-  deliberately approved.
+- The application mark is the reicon `SideProfile` glyph, filled, inside a
+  rounded-square frame. A person in profile suits a workspace built around one
+  person's commitments. Treat it as a provisional implementation asset, not an
+  approved brand system. Do not derive illustrations, campaign graphics, or new
+  marks from it until the mark, clear space, minimum size, and accessible
+  variants are deliberately approved.
+- The mark uses the Filled weight at every size; the Outline variant is not an
+  approved substitute. At the smallest raster targets, inspect the generated
+  Filled mark for legibility and raise the minimum supported size if its shape
+  breaks down rather than switching weights.
+- `apps/web/public/icon.svg` and `icon-maskable.svg` are the authored masters.
+  Every raster form — web, PWA, and the desktop `.icns`/`.ico` sets — is
+  regenerated from them by `node scripts/generate-app-mark.mjs`. Never hand-edit
+  a generated PNG.
+- In-product, compose `LogoMark` rather than repeating the frame markup; the
+  `.logo-mark` class owns the frame.
 - No illustration or photography language is established yet. Add one only
   from a real communication need and document its relationship to the quiet,
   material product character.

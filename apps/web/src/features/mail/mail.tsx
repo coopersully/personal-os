@@ -2,21 +2,21 @@ import type { CalendarAccount } from "@personal-os/api-client";
 import type { Mailbox, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Archive,
-  ChevronDown,
-  ChevronLeft,
-  Clock3,
-  Eye,
-  EyeOff,
-  Inbox,
-  Mail,
-  Reply,
-  Star,
-  Trash2,
-} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import {
+  ArchiveIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ClockIcon,
+  EyeIcon,
+  EyeOffIcon,
+  InboxIcon,
+  MailIcon,
+  ReplyIcon,
+  StarIcon,
+  TrashIcon,
+} from "@/components/icons";
 import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
 import {
@@ -271,7 +271,7 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
                   isActive={!mailboxId && !accountId}
                   onClick={() => select({})}
                 >
-                  <Inbox aria-hidden="true" />
+                  <InboxIcon aria-hidden="true" />
                   <span>Unified inbox</span>
                 </SidebarMenuButton>
                 {totalInboxUnread > 0 ? (
@@ -455,7 +455,7 @@ export function MailPage({ user }: { user: User }) {
         <div className="narrow-page">
           <p className="eyebrow">Mail for people and agents</p>
           <h1>Inbox</h1>
-          <EmptyState icon={<Inbox />} title="Connect a mailbox">
+          <EmptyState icon={<InboxIcon />} title="Connect a mailbox">
             Enable Mail on a connected Google account or add iCloud from Settings.
           </EmptyState>
         </div>
@@ -539,7 +539,7 @@ export function MailPage({ user }: { user: User }) {
           {threads.isError ? (
             <InlineError error={threads.error} />
           ) : threads.data.length === 0 ? (
-            <EmptyState icon={<Mail />} title="Nothing here">
+            <EmptyState icon={<MailIcon />} title="Nothing here">
               Try another mailbox or a broader search.
             </EmptyState>
           ) : (
@@ -596,7 +596,7 @@ export function MailPage({ user }: { user: User }) {
           ) : selectedId && loaded.isPending ? (
             <PageLoading />
           ) : (
-            <EmptyState icon={<Mail />} title="Select a conversation">
+            <EmptyState icon={<MailIcon />} title="Select a conversation">
               Open a conversation to read every synced message and manage it.
             </EmptyState>
           )}
@@ -668,7 +668,7 @@ function MailboxAccount({
             {unreadCount > 0 ? (
               <span className="mail-sidebar__account-count">{unreadCount}</span>
             ) : null}
-            <ChevronDown aria-hidden="true" className="mail-sidebar__chevron" />
+            <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
           </SidebarMenuButton>
         </CollapsibleTrigger>
         <CollapsibleContent id={panelId}>
@@ -710,7 +710,7 @@ function MailboxAccount({
                     <CollapsibleTrigger asChild>
                       <SidebarMenuSubButton asChild>
                         <button className="mail-sidebar__subgroup-trigger" type="button">
-                          <ChevronDown aria-hidden="true" />
+                          <ChevronDownIcon aria-hidden="true" />
                           <span>{section === "labels" ? "Labels" : "More"}</span>
                           <small>{grouped.get(section)?.length}</small>
                         </button>
@@ -754,7 +754,9 @@ function ThreadRow({
       <strong>{thread.subject}</strong>
       <span className="mail-thread-row__snippet">{thread.snippet || "No preview available"}</span>
       <span className="mail-thread-row__meta">
-        {thread.starred ? <Star aria-label="Starred" fill="currentColor" size={13} /> : null}
+        {thread.starred ? (
+          <StarIcon aria-label="Starred" className="size-[13px]" weight="Filled" />
+        ) : null}
         {thread.messageCount > 1 ? `${thread.messageCount} messages` : null}
       </span>
     </button>
@@ -805,16 +807,16 @@ function Reader({
     <article className="mail-reader__article">
       <div className="mail-reader__toolbar">
         <Button className="mail-reader__back" onClick={back} tone="ghost">
-          <ChevronLeft size={16} /> Inbox
+          <ChevronLeftIcon className="size-4" /> Inbox
         </Button>
         <Button onClick={reply} tone="ghost">
-          <Reply size={16} /> Reply
+          <ReplyIcon className="size-4" /> Reply
         </Button>
         <Button aria-label="Snooze conversation until tomorrow" onClick={snooze} tone="ghost">
-          <Clock3 size={16} /> Snooze
+          <ClockIcon className="size-4" /> Snooze
         </Button>
         <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
-          <Archive size={16} />
+          <ArchiveIcon className="size-4" />
         </Button>
         <Button
           aria-label="Move conversation to trash"
@@ -822,7 +824,7 @@ function Reader({
           onClick={trash}
           tone="ghost"
         >
-          <Trash2 size={16} />
+          <TrashIcon className="size-4" />
         </Button>
         <Button
           aria-label={thread.starred ? "Unstar conversation" : "Star conversation"}
@@ -830,7 +832,7 @@ function Reader({
           onClick={toggleStar}
           tone="ghost"
         >
-          <Star fill={thread.starred ? "currentColor" : "none"} size={16} />
+          <StarIcon className="size-4" weight={thread.starred ? "Filled" : "Outline"} />
         </Button>
         <Button
           aria-label={thread.unread ? "Mark conversation read" : "Mark conversation unread"}
@@ -838,7 +840,7 @@ function Reader({
           onClick={toggleUnread}
           tone="ghost"
         >
-          {thread.unread ? <Eye size={16} /> : <EyeOff size={16} />}
+          {thread.unread ? <EyeIcon className="size-4" /> : <EyeOffIcon className="size-4" />}
         </Button>
       </div>
       <header>

@@ -6,8 +6,8 @@ import {
   passwordSchema,
 } from "@personal-os/domain";
 import { REGEXP_ONLY_DIGITS_AND_CHARS } from "input-otp";
-import { CheckCircle2, Circle, Eye, EyeOff } from "lucide-react";
 import { type ComponentProps, type ReactNode, useId, useMemo, useState } from "react";
+import { CircleCheckIcon, CircleIcon, EyeIcon, EyeOffIcon } from "@/components/icons";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -151,7 +151,7 @@ function PasswordRequirementList({ password }: { password: string }) {
     <ul aria-label="Password requirements" className="flex flex-col gap-1.5">
       {passwordRequirements.map(({ key, label }) => {
         const complete = state[key];
-        const Icon = complete ? CheckCircle2 : Circle;
+        const Icon = complete ? CircleCheckIcon : CircleIcon;
         return (
           <li
             className="flex items-center gap-2 text-sm text-muted-foreground data-[complete=true]:text-foreground"
@@ -217,7 +217,7 @@ export function PasswordFields({
         size="icon-xs"
         title={visibilityLabel}
       >
-        {visible ? <EyeOff /> : <Eye />}
+        {visible ? <EyeOffIcon /> : <EyeIcon />}
       </InputGroupButton>
     </InputGroupAddon>
   );

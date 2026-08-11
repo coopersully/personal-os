@@ -2,8 +2,8 @@
 
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { CalendarDays } from "lucide-react";
 import { describe, expect, it, vi } from "vitest";
+import { CalendarIcon } from "@/components/icons";
 import {
   EventCard,
   EventCardAside,
@@ -34,7 +34,7 @@ describe("EventCard", () => {
             </EventCardBody>
           </EventCardPrimaryAction>
           <EventCardAside>
-            <CalendarDays aria-label="Local calendar" role="img" />
+            <CalendarIcon aria-label="Local calendar" role="img" />
           </EventCardAside>
         </EventCardContent>
         <EventCardFooter>

@@ -25,7 +25,7 @@
     "fixtures:list": "tsx scripts/qa-fixtures.ts list",
     "fixtures:load": "bash ./.codex/scripts/environment.sh fixtures",
     "format": "biome format --write .",
-    "lint": "biome check . && node scripts/check-frontend-theme-contract.mjs && node scripts/check-theme-token-contract.mjs && node scripts/check-provider-network-contract.mjs && node scripts/check-deployment-drain-contract.mjs && node scripts/check-deployment-drain-scenarios.mjs && node scripts/check-waf-health-probe-contract.mjs && node scripts/check-connector-observability-contract.mjs && node scripts/check-production-cost-floor-contract.mjs && node scripts/check-agent-skill-release-contract.mjs",
+    "lint": "biome check . && node scripts/check-frontend-theme-contract.mjs && node scripts/check-icon-contract.mjs && node scripts/check-theme-token-contract.mjs && node scripts/check-provider-network-contract.mjs && node scripts/check-deployment-drain-contract.mjs && node scripts/check-deployment-drain-scenarios.mjs && node scripts/check-waf-health-probe-contract.mjs && node scripts/check-connector-observability-contract.mjs && node scripts/check-production-cost-floor-contract.mjs && node scripts/check-agent-skill-release-contract.mjs",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",

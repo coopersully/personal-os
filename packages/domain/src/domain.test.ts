@@ -4,6 +4,8 @@ import {
   addLocalDays,
   addMonths,
   agentConnectionGuideSchema,
+  agentAccessWorkItemPageSchema,
+  agentAccessWorkItemQuerySchema,
   agentMutationPolicies,
   apiErrorSchema,
   applyFinanceCategorizationsInputSchema,
@@ -108,6 +110,92 @@ const start = "2026-07-13T13:00:00.000Z";
 const end = "2026-07-13T14:00:00.000Z";
 
 describe("domain schemas", () => {
+  it("validates paginated Agent Access work items and local actions", () => {
+    const page = agentAccessWorkItemPageSchema.parse({
+      items: [
+        {
+          action: {
+            label: "Connect an agent",
+            to: "/settings?section=agents&setup=connect",
+          },
+          actionAt: null,
+          domain: null,
+          id: "setup:connect-agent",
+          kind: "setup",
+          priority: "blocked",
+          source: null,
+          summary: "Authorize one compatible host.",
+          title: "Connect an agent",
+          updatedAt: start,
+        },
+        {
+          action: { label: "Review Mail rule", to: `/settings?section=agents&reviewRule=${id}` },
+          actionAt: start,
+          domain: "mail",
+          id: `mail-rule:${id}`,
+          kind: "review",
+          priority: "person_review",
+          source: {
+            accountId,
+            provider: "google",
+            remoteId: id,
+            revision: start,
+            sourceType: "mail_thread",
+          },
+          summary: "Review the current bounded sample before activation.",
+          title: "Review Statements",
+          updatedAt: start,
+        },
+      ],
+      nextCursor: "opaque-next",
+      snapshotAt: start,
+      summary: {
+        byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
+        byKind: { attention: 0, review: 1, setup: 1 },
+        total: 2,
+      },
+      unavailableDomains: [],
+    });
+
+    expect(page.summary).toMatchObject({ total: 2 });
+    expect(agentAccessWorkItemQuerySchema.parse({})).toEqual({ limit: 10 });
+    expect(
+      agentAccessWorkItemQuerySchema.parse({ cursor: "opaque-next", kind: "review", limit: "10" }),
+    ).toEqual({ cursor: "opaque-next", kind: "review", limit: 10 });
+  });
+
+  it("rejects invalid Agent Access pages and queries", () => {
+    expect(agentAccessWorkItemQuerySchema.safeParse({ limit: 11 }).success).toBe(false);
+    expect(agentAccessWorkItemQuerySchema.safeParse({ kind: "diagnostic" }).success).toBe(false);
+    expect(agentAccessWorkItemQuerySchema.safeParse({ cursor: "" }).success).toBe(false);
+    expect(
+      agentAccessWorkItemPageSchema.safeParse({
+        items: [
+          {
+            action: { label: "Leave Ilo", to: "https://example.com" },
+            actionAt: null,
+            domain: "mail",
+            id: "bad-action",
+            kind: "attention",
+            priority: "normal",
+            source: null,
+            summary: "This action is not local.",
+            title: "External action",
+            updatedAt: start,
+          },
+        ],
+        nextCursor: null,
+        snapshotAt: start,
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
+          byKind: { attention: 1, review: 0, setup: 0 },
+          total: 1,
+        },
+        unavailableDomains: [],
+      }).success,
+    ).toBe(false);
+  });
+
   it("exposes stable cross-feature connector and agent-action contracts", () => {
     expect(featureIds).toEqual([
       "automations",

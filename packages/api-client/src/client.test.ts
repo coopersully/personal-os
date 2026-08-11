@@ -832,6 +832,21 @@ function apiFetch() {
           steps: [],
         },
       });
+    if (url.pathname === "/v1/assistant/work-items") {
+      expect(url.searchParams.get("cursor")).toBe("opaque-next");
+      expect(url.searchParams.get("kind")).toBe("review");
+      return json({
+        items: [],
+        nextCursor: null,
+        snapshotAt: now,
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
+          byKind: { attention: 0, review: 0, setup: 0 },
+          total: 0,
+        },
+        unavailableDomains: [],
+      });
+    }
     if (url.pathname === "/v1/assistant/context")
       return json({
         context: {
@@ -1441,6 +1456,9 @@ describe("ilo API client", () => {
       mcpUrl: "https://mcp.example.com/mcp",
       skill: { name: "ilo-setup" },
     });
+    await expect(
+      api.listAgentAccessWorkItems({ cursor: "opaque-next", kind: "review", limit: 10 }),
+    ).resolves.toMatchObject({ items: [], nextCursor: null, summary: { total: 0 } });
     await expect(api.getDomainProfile("mail")).resolves.toEqual(domainProfile);
     await expect(
       api.upsertDomainProfile({

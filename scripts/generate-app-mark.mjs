@@ -54,7 +54,8 @@ try {
 }
 
 console.log("\nRegenerating the desktop icon set from the 1024px master...");
-execFileSync("pnpm", ["exec", "tauri", "icon", resolve(staging, "icon-1024.png")], {
+const pnpmExecutable = process.platform === "win32" ? "pnpm.cmd" : "pnpm";
+execFileSync(pnpmExecutable, ["exec", "tauri", "icon", resolve(staging, "icon-1024.png")], {
   cwd: resolve(repositoryRoot, "apps", "desktop"),
   stdio: "inherit",
 });

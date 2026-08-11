@@ -60,7 +60,7 @@ export function RemindersSidebar({ onNavigate }: { onNavigate: () => void }) {
                   onClick={onNavigate}
                   to={workspaceViewPath("/reminders", searchParams)}
                 >
-                  <ListTodoIcon aria-hidden="true" />
+                  <ListTodoIcon aria-hidden="true" weight={!showCompleted ? "Filled" : "Outline"} />
                   <span>Open</span>
                 </Link>
               </SidebarMenuButton>
@@ -72,7 +72,10 @@ export function RemindersSidebar({ onNavigate }: { onNavigate: () => void }) {
                   onClick={onNavigate}
                   to={workspaceViewPath("/reminders", searchParams, "completed")}
                 >
-                  <CircleCheckIcon aria-hidden="true" />
+                  <CircleCheckIcon
+                    aria-hidden="true"
+                    weight={showCompleted ? "Filled" : "Outline"}
+                  />
                   <span>Completed</span>
                 </Link>
               </SidebarMenuButton>

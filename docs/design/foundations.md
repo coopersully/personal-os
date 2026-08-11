@@ -181,9 +181,10 @@ unrelated tools.
   approved brand system. Do not derive illustrations, campaign graphics, or new
   marks from it until the mark, clear space, minimum size, and accessible
   variants are deliberately approved.
-- The mark uses the Filled weight at every size. Its outline weight is a 1.5 px
-  stroke on a 24-unit grid, which resolves to roughly one pixel in a browser tab
-  and disintegrates.
+- The mark uses the Filled weight at every size; the Outline variant is not an
+  approved substitute. At the smallest raster targets, inspect the generated
+  Filled mark for legibility and raise the minimum supported size if its shape
+  breaks down rather than switching weights.
 - `apps/web/public/icon.svg` and `icon-maskable.svg` are the authored masters.
   Every raster form — web, PWA, and the desktop `.icns`/`.ico` sets — is
   regenerated from them by `node scripts/generate-app-mark.mjs`. Never hand-edit

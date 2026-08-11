@@ -755,7 +755,7 @@ function ThreadRow({
       <span className="mail-thread-row__snippet">{thread.snippet || "No preview available"}</span>
       <span className="mail-thread-row__meta">
         {thread.starred ? (
-          <StarIcon aria-label="Starred" fill="currentColor" className="size-[13px]" />
+          <StarIcon aria-label="Starred" className="size-[13px]" weight="Filled" />
         ) : null}
         {thread.messageCount > 1 ? `${thread.messageCount} messages` : null}
       </span>
@@ -832,7 +832,7 @@ function Reader({
           onClick={toggleStar}
           tone="ghost"
         >
-          <StarIcon fill={thread.starred ? "currentColor" : "none"} className="size-4" />
+          <StarIcon className="size-4" weight={thread.starred ? "Filled" : "Outline"} />
         </Button>
         <Button
           aria-label={thread.unread ? "Mark conversation read" : "Mark conversation unread"}

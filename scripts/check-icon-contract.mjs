@@ -25,20 +25,27 @@ const forbiddenPacks = [
   "@heroicons/react",
 ];
 
+function importPattern(packages) {
+  const alternatives = packages
+    .map((packageName) => packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("|");
+  return new RegExp(
+    `(?:\\bfrom\\s*|\\bimport\\s*(?:\\(\\s*)?)["'](?:${alternatives})(?:/[^"']*)?["']`,
+    "g",
+  );
+}
+
 const rules = [
   {
     name: "forbidden icon pack",
     detail: "import icons from @/components/icons instead",
-    pattern: new RegExp(
-      `\\bfrom\\s*["'](?:${forbiddenPacks.map((pack) => pack.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})(?:/[^"']*)?["']`,
-      "g",
-    ),
+    pattern: importPattern(forbiddenPacks),
     appliesTo: () => true,
   },
   {
     name: "direct reicon-react import",
     detail: "only apps/web/src/components/icons.ts may import reicon-react",
-    pattern: /\bfrom\s*["']reicon-react(?:\/[^"']*)?["']/g,
+    pattern: importPattern(["reicon-react"]),
     appliesTo: (path) => path !== registryPath,
   },
   {
@@ -56,7 +63,7 @@ const rules = [
   {
     name: "brand artwork outside the brand-mark registry",
     detail: "import BrandMark from @/components/brand-marks instead",
-    pattern: /\bfrom\s*["']simple-icons(?:\/[^"']*)?["']/g,
+    pattern: importPattern(["simple-icons"]),
     appliesTo: (path) => path !== brandMarksPath,
   },
 ];

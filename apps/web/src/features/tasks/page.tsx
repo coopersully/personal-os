@@ -98,7 +98,7 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
                           value === "inbox" ? undefined : value,
                         )}
                       >
-                        <Icon aria-hidden="true" />
+                        <Icon aria-hidden="true" weight={selected ? "Filled" : "Outline"} />
                         <span>{label}</span>
                       </Link>
                     </SidebarMenuButton>

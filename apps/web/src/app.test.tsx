@@ -1366,6 +1366,127 @@ describe("ilo web app", () => {
     }
   });
 
+  it("reports calm home-location conditions and an unavailable air-quality reading", async () => {
+    const getCurrentPosition = vi.fn((_success: PositionCallback, failure: PositionErrorCallback) =>
+      failure({} as GeolocationPositionError),
+    );
+    const originalGeolocation = Object.getOwnPropertyDescriptor(navigator, "geolocation");
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: { getCurrentPosition },
+    });
+    try {
+      mocks.getMe.mockResolvedValue({
+        ...user,
+        homeLocation: {
+          coordinates: { latitude: 40.7, longitude: -74 },
+          label: "New York, New York, United States",
+          timezone: "America/New_York",
+        },
+      });
+      mocks.getWeather.mockResolvedValue({
+        alerts: [],
+        condition: "Clear",
+        location: {
+          city: "New York",
+          coordinates: { latitude: 40.7, longitude: -74 },
+          country: "United States",
+          label: "New York, New York, United States",
+          mapUrl: "https://www.openstreetmap.org/?mlat=40.7&mlon=-74#map=12/40.7/-74",
+          region: "New York",
+          shortLabel: "NYC",
+          source: "home",
+        },
+        observedAt: now,
+        temperatureF: 68,
+        usAqi: null,
+      });
+      const view = setup("/today");
+      const browser = userEvent.setup();
+
+      await browser.click(await screen.findByRole("button", { name: "Clear, 68°F" }));
+      // No alert band when nothing needs attention, and an honest reading
+      // rather than an invented air-quality number.
+      expect(screen.getByText("Unavailable")).toBeInTheDocument();
+      expect(screen.queryByText(/Air quality:/)).not.toBeInTheDocument();
+      await browser.click(screen.getByRole("button", { name: "Weather location: NYC" }));
+      expect(screen.getAllByText("Home location")).not.toHaveLength(0);
+      view.unmount();
+    } finally {
+      if (originalGeolocation) Object.defineProperty(navigator, "geolocation", originalGeolocation);
+      else Reflect.deleteProperty(navigator, "geolocation");
+    }
+  });
+
+  it("states honestly why conditions are missing instead of inventing them", async () => {
+    const getCurrentPosition = vi.fn((_success: PositionCallback, failure: PositionErrorCallback) =>
+      failure({} as GeolocationPositionError),
+    );
+    const originalGeolocation = Object.getOwnPropertyDescriptor(navigator, "geolocation");
+    Object.defineProperty(navigator, "geolocation", {
+      configurable: true,
+      value: { getCurrentPosition },
+    });
+    try {
+      // No device permission and no saved location: say what would fix it.
+      const withoutLocation = setup("/today");
+      expect(
+        await screen.findByText("Allow device location or add a saved location in Profile."),
+      ).toBeInTheDocument();
+      withoutLocation.unmount();
+
+      // A saved location that cannot be read reports the failure rather than
+      // presenting a stale or invented reading.
+      mocks.getMe.mockResolvedValue({
+        ...user,
+        homeLocation: {
+          coordinates: { latitude: 40.7, longitude: -74 },
+          label: "New York, New York, United States",
+          timezone: "America/New_York",
+        },
+      });
+      mocks.getWeather.mockRejectedValue(new Error("Weather unavailable"));
+      setup("/today");
+      expect(
+        await screen.findByText("Conditions are temporarily unavailable."),
+      ).toBeInTheDocument();
+    } finally {
+      if (originalGeolocation) Object.defineProperty(navigator, "geolocation", originalGeolocation);
+      else Reflect.deleteProperty(navigator, "geolocation");
+    }
+  });
+
+  it("names an account without a display name from its address", async () => {
+    mocks.getMe.mockResolvedValue({ ...user, displayName: "   " });
+    const view = setup("/settings?section=profile");
+
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
+    expect(within(sidebar).getByRole("link", { name: "Back to Today" })).toBeInTheDocument();
+    view.unmount();
+
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        matches: true,
+        media: "(max-width: 900px)",
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      }),
+    });
+    const browser = userEvent.setup();
+    setup("/today");
+
+    await screen.findByRole("navigation", { name: "Workspace dock" });
+    await browser.click(screen.getByRole("button", { name: "Workspace actions" }));
+    // The dock falls back to the address local part rather than showing a blank
+    // account control.
+    expect(screen.getByRole("button", { name: "test account" })).toBeInTheDocument();
+  });
+
   it("supports failed login, registration, and authentication errors", async () => {
     mocks.getMe.mockRejectedValueOnce(new Error("unauthorized"));
     mocks.login.mockRejectedValueOnce(new Error("Wrong password"));
@@ -2127,6 +2248,38 @@ describe("ilo web app", () => {
         .getAllByRole("menuitem")
         .filter((item) => item.getAttribute("aria-current") === "page"),
     ).toHaveLength(0);
+  });
+
+  it("applies the account section permission rule to the sidebar and the dock alike", async () => {
+    mocks.getMe.mockResolvedValue({ ...user, canManageInvitations: true });
+    const view = setup("/settings?section=profile");
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
+    expect(within(sidebar).getByRole("link", { name: "Invitations" })).toBeInTheDocument();
+    view.unmount();
+
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({
+        addEventListener: vi.fn(),
+        addListener: vi.fn(),
+        matches: true,
+        media: "(max-width: 900px)",
+        removeEventListener: vi.fn(),
+        removeListener: vi.fn(),
+      }),
+    });
+    const browser = userEvent.setup();
+    setup("/settings?section=profile");
+
+    await screen.findByRole("navigation", { name: "Workspace dock" });
+    await browser.click(screen.getByRole("button", { name: "Workspace actions" }));
+    expect(
+      within(screen.getByRole("dialog", { name: "Settings" })).getByRole("link", {
+        name: "Invitations",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the workspace sidebar on desktop", async () => {
@@ -3155,14 +3308,13 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("keeps global badges and calendar date navigation deterministic", async () => {
-    mocks.listTasks.mockResolvedValue({
-      items: [{ ...task, dueAt: now, status: "cancelled" }],
-      nextCursor: null,
-    });
+  it("keeps calendar date navigation deterministic without loading unrelated workspaces", async () => {
+    // Today no longer reads Tasks or Mail for sidebar badges; the workspace
+    // switcher owns those live counts and loads them only when it opens.
     const today = setup("/today");
     await screen.findByRole("heading", { name: "Your commitments" });
-    await waitFor(() => expect(mocks.listTasks).toHaveBeenCalled());
+    expect(mocks.listTasks).not.toHaveBeenCalled();
+    expect(mocks.listMailboxes).not.toHaveBeenCalled();
     today.unmount();
 
     const calendar = setup("/calendar");
@@ -4264,11 +4416,12 @@ describe("ilo web app", () => {
     });
     await browser.click(screen.getByRole("button", { name: "Today" }));
     await waitFor(() => expect(weekCalendar.scrollLeft).toBeGreaterThan(0));
-    const todayButton = screen.getByRole("button", { name: "Today" });
-    expect(todayButton).toHaveAttribute("aria-pressed", "true");
-    expect(todayButton).toHaveAttribute("data-following", "true");
+    // Today is an action, not a toggle, so follow state lives in the route the
+    // calendar grid reads rather than a pressed state on the app-bar button.
+    expect(screen.getByRole("button", { name: "Today" })).not.toHaveAttribute("aria-pressed");
+    expect(view.location.value).toContain("follow=1");
     fireEvent.scroll(weekCalendar, { target: { scrollTop: 0 } });
-    await waitFor(() => expect(todayButton).toHaveAttribute("aria-pressed", "false"));
+    await waitFor(() => expect(view.location.value).toContain("follow=0"));
     fireEvent.scroll(weekCalendar, { target: { scrollTop: 0 } });
     expect(screen.getByText("12 AM")).toBeInTheDocument();
     expect(screen.getByText("11 PM")).toBeInTheDocument();
@@ -4329,12 +4482,7 @@ describe("ilo web app", () => {
     const dayTimelineScroll = document.querySelector(".calendar-timeline-scroll") as HTMLDivElement;
     Object.defineProperty(dayTimelineScroll, "clientHeight", { configurable: true, value: 400 });
     fireEvent.scroll(dayTimelineScroll, { target: { scrollTop: 0 } });
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Today" })).toHaveAttribute(
-        "aria-pressed",
-        "false",
-      ),
-    );
+    await waitFor(() => expect(view.location.value).toContain("follow=0"));
     fireEvent.scroll(dayTimelineScroll, { target: { scrollTop: 0 } });
     await browser.click(screen.getByRole("radio", { name: "Week" }));
     await browser.click(
@@ -4659,7 +4807,9 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const topNavigation = await screen.findByRole("navigation", { name: "Top navigation" });
     expect(within(topNavigation).queryByRole("heading")).not.toBeInTheDocument();
-    const composeButton = within(topNavigation).getByRole("button", { name: "Compose" });
+    // The app bar hides action labels at narrow width, so these buttons carry a
+    // descriptive accessible name for their icon-only state.
+    const composeButton = within(topNavigation).getByRole("button", { name: "Compose mail" });
     expect(composeButton).toHaveAttribute("aria-pressed", "false");
     expect(screen.queryByLabelText("Search conversations")).not.toBeInTheDocument();
     expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();

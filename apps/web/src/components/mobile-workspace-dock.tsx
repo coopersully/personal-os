@@ -28,11 +28,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  navigationOwnerForLocation,
-  type WorkspaceDefinition,
-  workspaceForLocation,
-} from "../navigation/manifest.js";
+import { type WorkspaceDefinition, workspaceForLocation } from "../navigation/manifest.js";
 import {
   type MobileWorkspacePage,
   mobileWorkspacePages,
@@ -73,11 +69,12 @@ export function MobileWorkspaceDock({
   workspaceDefinitions: WorkspaceDefinition[];
 }) {
   const [open, setOpen] = useState(false);
+  // The dock only renders inside the shell, where every route is owned by a
+  // workspace or by the account utility. An absent workspace therefore means
+  // account administration, which names where you are without joining the
+  // switcher: the five workspace destinations stay the only way to change
+  // workspace.
   const activeWorkspace = workspaceForLocation(pathname);
-  const isAccountUtility = navigationOwnerForLocation(pathname).kind === "account-utility";
-  if (!activeWorkspace && !isAccountUtility) return null;
-  // The account utility names where you are without joining the switcher, so
-  // its five workspace destinations stay the only way to change workspace.
   const pages = activeWorkspace ? mobileWorkspacePages(activeWorkspace.id) : accountSections;
   const pillLabel = activeWorkspace ? activeWorkspace.label : "Settings";
   const sheetLabel = activeWorkspace
@@ -85,7 +82,8 @@ export function MobileWorkspaceDock({
       ? "Today"
       : activeWorkspace.label
     : "Settings";
-  const accountFirstName = accountName.trim().split(/\s+/)[0] || accountName;
+  // The shell resolves a non-empty account name before it reaches the dock.
+  const accountFirstName = accountName.trim().split(/\s+/)[0];
 
   return (
     <nav aria-label="Workspace dock" className="workspace-dock">

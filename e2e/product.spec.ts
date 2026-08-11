@@ -64,26 +64,30 @@ test("a person and an agent share one reminder and calendar surface", async ({
   const reminderTitle = `Material reminder ${suffix}`;
   const eventTitle = `Material event ${suffix}`;
   const mobile = testInfo.project.name === "mobile-chromium";
-  const primaryNavigation = page.getByRole("navigation", {
-    name: "Primary",
-  });
-  const openWorkspace = async (name: "Calendar" | "Tasks") => {
-    if (mobile) {
-      await primaryNavigation.getByRole("link", { name, exact: true }).click();
-      return;
-    }
+  // The desktop switcher and the narrow dock expose the same five destinations
+  // under the same accessible names, so workspace movement is one path.
+  const openWorkspace = async (name: string) => {
     await page.getByRole("button", { name: "Switch workspace" }).click();
     await page
       .getByRole("menu", { name: "Switch workspace" })
       .getByRole("menuitem", { name, exact: true })
       .click();
   };
-  const returnToApp = async () => {
-    if (mobile) await page.getByRole("button", { name: "Open Navigation" }).click();
-    await page.getByRole("button", { name: "Switch workspace" }).click();
+  const returnToApp = () => openWorkspace("Today at a Glance");
+  // A workspace's own pages live in its sidebar on desktop and in the dock
+  // sheet when narrow.
+  const openWorkspacePage = async (workspace: string, name: string) => {
+    if (mobile) {
+      await page.getByRole("button", { name: "Workspace actions" }).click();
+      await page
+        .getByRole("dialog", { name: workspace })
+        .getByRole("link", { name, exact: true })
+        .click();
+      return;
+    }
     await page
-      .getByRole("menu", { name: "Switch workspace" })
-      .getByRole("menuitem", { name: "Today" })
+      .getByRole("complementary", { name: `${workspace} Sidebar` })
+      .getByRole("link", { name, exact: true })
       .click();
   };
 
@@ -102,7 +106,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByRole("button", { name: "Exit setup" }).click();
   await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   const applicationSidebar = page.getByRole("complementary", {
-    name: "Application Sidebar",
+    name: "Today Sidebar",
   });
   if (mobile) {
     await expect(applicationSidebar).toBeHidden();
@@ -127,15 +131,8 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.getByLabel("What needs attention?").fill(reminderTitle);
   await page.getByLabel("Notes").fill("Created from the direct manipulation surface.");
   await page.getByRole("button", { name: "Create reminder" }).click();
-  if (mobile) {
-    await primaryNavigation.getByRole("link", { name: "Reminders", exact: true }).click();
-  } else {
-    await openWorkspace("Tasks");
-    await page
-      .getByRole("complementary", { name: "Tasks Sidebar" })
-      .getByRole("link", { name: "Reminders", exact: true })
-      .click();
-  }
+  await openWorkspace("Tasks");
+  await openWorkspacePage("Tasks", "Reminders");
   await expect(page.getByText(reminderTitle)).toBeVisible();
 
   await returnToApp();
@@ -184,25 +181,20 @@ test("a person and an agent share one reminder and calendar surface", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: "Today", exact: true }).click();
 
-  if (mobile) await page.getByRole("button", { name: "Open Navigation" }).click();
-  await page.getByRole("button", { name: "Account menu" }).click();
-  await page
-    .getByRole("menu", { name: "Account menu" })
-    .getByRole("menuitem", { name: "Activity" })
-    .click();
-  if (mobile) await expect(applicationSidebar).toBeHidden();
+  // Activity belongs to Today, so reach it from that workspace rather than the
+  // account menu it used to live in.
+  await returnToApp();
+  await openWorkspacePage("Today", "Activity");
   await expect(page.getByText("Reminder · created").first()).toBeVisible();
   await expect(page.getByText("Calendar event · created").first()).toBeVisible();
 
   if (mobile) {
-    await page.getByRole("button", { name: "More" }).click();
-    await expect(applicationSidebar).toBeVisible();
+    await page.getByRole("button", { name: "Workspace actions" }).click();
+    await page.getByRole("button", { name: /account$/ }).click();
+  } else {
+    await page.getByRole("button", { name: "Account menu" }).click();
   }
-  await page.getByRole("button", { name: "Account menu" }).click();
-  await page
-    .getByRole("menu", { name: "Account menu" })
-    .getByRole("menuitem", { name: "Settings" })
-    .click();
+  await page.getByRole("menuitem", { name: "Settings" }).click();
   // The account utility is a tenant of the shell: same app bar, its own
   // navigation in the sidebar on desktop and in the dock sheet when narrow.
   const settingsSidebar = page.getByRole("complementary", {

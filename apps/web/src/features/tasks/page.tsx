@@ -44,6 +44,7 @@ import {
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatMaterialDateTime } from "../../lib/date-format.js";
 import { invalidateMaterial } from "../../lib/material-queries.js";
+import { RemindersSidebar } from "../reminders/page.js";
 
 type TaskView = "completed" | "inbox" | "next" | "scheduled";
 
@@ -52,6 +53,16 @@ const taskViews: Array<{ icon: LucideIcon; label: string; value: TaskView }> = [
   { icon: ListChecks, label: "Next", value: "next" },
   { icon: Clock3, label: "Scheduled", value: "scheduled" },
   { icon: CheckCircle2, label: "Completed", value: "completed" },
+];
+
+/**
+ * Tasks owns both commitment surfaces, so the sidebar names them as siblings.
+ * Keeping both visible marks which one is current without duplicating the
+ * other's view rows.
+ */
+const relatedCommitments: Array<{ icon: LucideIcon; label: string; path: string }> = [
+  { icon: ListChecks, label: "Tasks", path: "/tasks" },
+  { icon: ListTodo, label: "Reminders", path: "/reminders" },
 ];
 
 const taskEmptyCopy: Record<TaskView, string> = {
@@ -79,27 +90,60 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
   const [searchParams] = useSearchParams();
   const view = taskViewFromParams(searchParams);
   const remindersActive = location.pathname === "/reminders";
-  const remindersCompleted = searchParams.get("view") === "completed";
+  // Tasks owns Reminders, so one sidebar serves both. The View group always
+  // describes the destination in front of the person: showing task views while
+  // reading reminders offered two different "Completed" rows and silently
+  // navigated away from Reminders.
   return (
     <>
+      {remindersActive ? (
+        <RemindersSidebar onNavigate={onNavigate} />
+      ) : (
+        <SidebarGroup>
+          <SidebarGroupLabel>View</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <nav aria-label="Task views">
+              <SidebarMenu>
+                {taskViews.map(({ icon: Icon, label, value }) => {
+                  const selected = view === value;
+                  return (
+                    <SidebarMenuItem key={value}>
+                      <SidebarMenuButton asChild isActive={selected}>
+                        <Link
+                          aria-current={selected ? "page" : undefined}
+                          onClick={onNavigate}
+                          to={workspaceViewPath(
+                            "/tasks",
+                            searchParams,
+                            value === "inbox" ? undefined : value,
+                          )}
+                        >
+                          <Icon aria-hidden="true" />
+                          <span>{label}</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  );
+                })}
+              </SidebarMenu>
+            </nav>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      )}
       <SidebarGroup>
-        <SidebarGroupLabel>View</SidebarGroupLabel>
+        <SidebarGroupLabel>Related</SidebarGroupLabel>
         <SidebarGroupContent>
-          <nav aria-label="Task views">
+          <nav aria-label="Related commitments">
             <SidebarMenu>
-              {taskViews.map(({ icon: Icon, label, value }) => {
-                const selected = view === value;
+              {relatedCommitments.map(({ icon: Icon, label, path }) => {
+                const selected = path === (remindersActive ? "/reminders" : "/tasks");
                 return (
-                  <SidebarMenuItem key={value}>
+                  <SidebarMenuItem key={path}>
                     <SidebarMenuButton asChild isActive={selected}>
                       <Link
                         aria-current={selected ? "page" : undefined}
                         onClick={onNavigate}
-                        to={workspaceViewPath(
-                          "/tasks",
-                          searchParams,
-                          value === "inbox" ? undefined : value,
-                        )}
+                        to={path}
                       >
                         <Icon aria-hidden="true" />
                         <span>{label}</span>
@@ -112,62 +156,6 @@ export function TasksSidebar({ onNavigate }: { onNavigate: () => void }) {
           </nav>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup>
-        <SidebarGroupLabel>Related</SidebarGroupLabel>
-        <SidebarGroupContent>
-          <nav aria-label="Related commitments">
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton asChild isActive={location.pathname === "/reminders"}>
-                  <Link
-                    aria-current={location.pathname === "/reminders" ? "page" : undefined}
-                    onClick={onNavigate}
-                    to="/reminders"
-                  >
-                    <ListTodo aria-hidden="true" />
-                    <span>Reminders</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            </SidebarMenu>
-          </nav>
-        </SidebarGroupContent>
-      </SidebarGroup>
-      {remindersActive ? (
-        <SidebarGroup>
-          <SidebarGroupLabel>Reminder view</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <nav aria-label="Reminder views">
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={!remindersCompleted}>
-                    <Link
-                      aria-current={!remindersCompleted ? "page" : undefined}
-                      onClick={onNavigate}
-                      to={workspaceViewPath("/reminders", searchParams)}
-                    >
-                      <ListTodo aria-hidden="true" />
-                      <span>Open</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild isActive={remindersCompleted}>
-                    <Link
-                      aria-current={remindersCompleted ? "page" : undefined}
-                      onClick={onNavigate}
-                      to={workspaceViewPath("/reminders", searchParams, "completed")}
-                    >
-                      <CheckCircle2 aria-hidden="true" />
-                      <span>Completed</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </nav>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      ) : null}
     </>
   );
 }

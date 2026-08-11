@@ -740,23 +740,6 @@ p {
   overflow: hidden;
   width: 112px;
 }
-.sidebar__mobile-close {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
-  color: var(--sidebar-foreground);
-  cursor: pointer;
-  display: none;
-  height: 34px;
-  justify-content: center;
-  margin-left: auto;
-  width: 34px;
-}
-.sidebar__mobile-close:hover {
-  background: var(--sidebar-accent);
-  color: var(--sidebar-accent-foreground);
-}
 .sidebar__content {
   flex: 1;
   min-height: 0;
@@ -1162,9 +1145,6 @@ p {
   font-size: 0.625rem;
   height: 1.75rem;
   width: 1.75rem;
-}
-.sidebar-overlay {
-  display: none;
 }
 .workspace {
   min-width: 0;
@@ -4259,14 +4239,6 @@ p {
     width: 300px;
     z-index: 45;
   }
-  .sidebar--mobile-open {
-    transform: translateX(0);
-    transition-delay: 0s;
-    visibility: visible;
-  }
-  .sidebar__mobile-close {
-    display: inline-flex;
-  }
   .sidebar-trigger--floating {
     background: var(--surface-raised);
     border-color: var(--line);
@@ -4282,15 +4254,6 @@ p {
   .sidebar-trigger--floating img {
     height: 30px;
     width: 30px;
-  }
-  .sidebar-overlay {
-    background: var(--overlay-mobile);
-    border: 0;
-    display: block;
-    inset: 0;
-    overscroll-behavior: contain;
-    position: fixed;
-    z-index: 40;
   }
   .workspace-app-bar {
     gap: 0.5rem;

@@ -58,6 +58,7 @@ import {
 } from "@tanstack/react-query";
 import { isTauri } from "@tauri-apps/api/core";
 import {
+  Activity,
   ArrowLeft,
   Bot,
   CalendarDays,
@@ -264,11 +265,9 @@ import {
   SidebarGroupLabel as ShadcnSidebarGroupLabel,
   SidebarHeader as ShadcnSidebarHeader,
   SidebarMenu as ShadcnSidebarMenu,
-  SidebarMenuBadge as ShadcnSidebarMenuBadge,
   SidebarMenuButton as ShadcnSidebarMenuButton,
   SidebarMenuItem as ShadcnSidebarMenuItem,
   SidebarMenuSub as ShadcnSidebarMenuSub,
-  SidebarMenuSubButton as ShadcnSidebarMenuSubButton,
   SidebarMenuSubItem as ShadcnSidebarMenuSubItem,
   SidebarProvider as ShadcnSidebarProvider,
 } from "@/components/ui/sidebar";
@@ -311,7 +310,6 @@ import {
   connectionHealth,
   visibleConnectorRefreshInterval,
 } from "./features/connections/health.js";
-import { financesNavigationItem } from "./features/finances/manifest.js";
 import {
   FinanceSidebarNavigation,
   financeSectionFromPath,
@@ -321,7 +319,6 @@ import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
 } from "./features/mail/mail.js";
-import { mailNavigationItem } from "./features/mail/manifest.js";
 import {
   ReminderRow,
   RemindersCreateButton,
@@ -405,7 +402,7 @@ const todayNavigationItem: NavigationItemDefinition = {
   path: "/today",
 };
 
-const planNavigationItems: NavigationItemDefinition[] = [
+const _planNavigationItems: NavigationItemDefinition[] = [
   todayNavigationItem,
   calendarNavigationItem,
   {
@@ -417,12 +414,9 @@ const planNavigationItems: NavigationItemDefinition[] = [
 const lifeNavigationItems: NavigationItemDefinition[] = [
   { icon: Target, label: "Goals", path: "/goals" },
   { icon: Compass, label: "Motives", path: "/motives" },
-];
-
-const navigationGroups: NavigationGroupDefinition[] = [
-  { items: planNavigationItems, label: "Plan" },
-  { items: lifeNavigationItems, label: "Personal" },
-  { items: [mailNavigationItem, financesNavigationItem], label: "Workspace" },
+  // Today owns Activity. It left the account menu with the workspace-ownership
+  // change, so the Today sidebar is the only place that can still reach it.
+  { icon: Activity, label: "Activity", path: "/activity" },
 ];
 
 const todayNavigationGroups: NavigationGroupDefinition[] = [
@@ -444,8 +438,7 @@ function workspaceForPath(pathname: string): WorkspaceDefinition | undefined {
 /** Today's registry label is its page title; navigation names it plainly. */
 function workspaceLabelForPath(pathname: string): string {
   const workspace = workspaceForLocation(pathname);
-  if (!workspace) return "Today";
-  return workspace.id === "today" ? "Today" : workspace.label;
+  return workspace && workspace.id !== "today" ? workspace.label : "Today";
 }
 
 function workspaceDirection(
@@ -922,7 +915,6 @@ function useAccountReturnPath(workspacePath: string | null): string {
 function AuthenticatedApp({ user }: { user: User }) {
   const [editor, setEditor] = useState<Editor>(null);
   const [calendarTodaySnap, setCalendarTodaySnap] = useState(0);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [online, setOnline] = useState(navigator.onLine);
   const [pinned, setPinned] = useState(false);
   const [workspaceSwitcherOpen, setWorkspaceSwitcherOpen] = useState(false);
@@ -947,15 +939,6 @@ function AuthenticatedApp({ user }: { user: User }) {
   const isTodayWorkspace = activeWorkspace?.path === "/today";
   const deviceWeatherLocation = useDeviceWeatherLocation(isTodayWorkspace);
   const calendars = useQuery({ queryFn: api.listCalendars, queryKey: ["calendars"] });
-  const reminders = useQuery({
-    queryFn: () => api.listReminders({ completed: false, limit: 100, query: "" }),
-    queryKey: ["reminders", "badge"],
-  });
-  const tasks = useQuery({
-    queryFn: () => api.listTasks({ completed: false, limit: 100 }),
-    queryKey: ["tasks", "badge"],
-  });
-  const mailboxes = useQuery({ queryFn: api.listMailboxes, queryKey: ["mailboxes", "badge"] });
   const weather = useQuery({
     enabled:
       (isTodayWorkspace || workspaceSwitcherOpen) &&
@@ -973,41 +956,19 @@ function AuthenticatedApp({ user }: { user: User }) {
     queryKey: ["daily-brief", user.planningTimezone],
     refetchInterval: 60_000,
   });
-  const now = new Date();
-  const reminderBadge =
-    reminders.data?.items.filter(
-      (reminder) => reminder.dueAt !== null && new Date(reminder.dueAt).getTime() <= now.getTime(),
-    ).length ?? 0;
-  const taskBadge =
-    tasks.data?.items.filter(
-      (task) =>
-        task.dueAt !== null &&
-        new Date(task.dueAt).getTime() <= now.getTime() &&
-        task.status !== "cancelled",
-    ).length ?? 0;
-  const mailBadge = mailboxes.data?.reduce((total, mailbox) => total + mailbox.unreadCount, 0) ?? 0;
-  const withBadges = (item: NavigationItemDefinition): NavigationItemDefinition => {
-    const badge =
-      item.path === "/reminders"
-        ? reminderBadge
-        : item.path === "/tasks"
-          ? taskBadge
-          : item.path === "/mail"
-            ? mailBadge
-            : 0;
-    return {
-      ...item,
-      ...(badge > 0 ? { badge } : {}),
-      ...(item.items ? { items: item.items.map(withBadges) } : {}),
-    };
-  };
-  const closeMobileMenu = () => setMobileMenuOpen(false);
+  // The narrow dock owns navigation below 900px, so the desktop sidebar has no
+  // drawer to dismiss. Destinations still receive this hook so the dock's sheet
+  // and the sidebar share one navigation contract.
+  const closeMobileMenu = () => undefined;
   // The manifest owner, never a route name, selects the sidebar. Today is the
   // one workspace whose sidebar is the application navigation itself.
+  // A standalone flow never reaches the shell, so an owner here is either a
+  // workspace or the account utility. Today's sidebar is the application
+  // navigation itself and therefore has no contextual mode.
   const sidebarMode: ContextSidebarMode =
-    navigationOwner.kind === "account-utility"
+    navigationOwner.kind !== "workspace"
       ? "settings"
-      : navigationOwner.kind === "standalone-flow" || navigationOwner.workspace === "today"
+      : navigationOwner.workspace === "today"
         ? null
         : navigationOwner.workspace;
   const activeSettingsSection = settingsSectionFromSearch(location.search);
@@ -1043,20 +1004,6 @@ function AuthenticatedApp({ user }: { user: User }) {
     return () => window.removeEventListener("keydown", shortcut);
   }, []);
 
-  useEffect(() => {
-    if (!mobileMenuOpen) return;
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileMenuOpen(false);
-    };
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", closeOnEscape);
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      window.removeEventListener("keydown", closeOnEscape);
-    };
-  }, [mobileMenuOpen]);
-
   const togglePin = async () => {
     const next = !pinned;
     const { getCurrentWindow } = await import("@tauri-apps/api/window");
@@ -1077,26 +1024,16 @@ function AuthenticatedApp({ user }: { user: User }) {
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>
-        {!isMobileWorkspaceDock && mobileMenuOpen ? (
-          <button
-            aria-label="Close Navigation"
-            className="sidebar-overlay"
-            onClick={closeMobileMenu}
-            type="button"
-          />
-        ) : null}
         {!isMobileWorkspaceDock ? (
           <aside
             aria-label={
-              navigationOwner.kind === "account-utility"
+              navigationOwner.kind !== "workspace"
                 ? "Account utility navigation"
                 : sidebarMode
                   ? `${sidebarMode.charAt(0).toUpperCase()}${sidebarMode.slice(1)} Sidebar`
-                  : activeWorkspace
-                    ? `${activeWorkspace.id === "today" ? "Today" : activeWorkspace.label} Sidebar`
-                    : "Application Sidebar"
+                  : "Today Sidebar"
             }
-            className={`sidebar${mobileMenuOpen ? " sidebar--mobile-open" : ""}${sidebarMode ? " sidebar--context" : ""}`}
+            className={`sidebar${sidebarMode ? " sidebar--context" : ""}`}
             data-state="expanded"
             id="app-sidebar"
           >
@@ -1122,14 +1059,6 @@ function AuthenticatedApp({ user }: { user: User }) {
                   weather={weather.data}
                 />
               )}
-              <button
-                aria-label="Close Navigation"
-                className="sidebar__mobile-close"
-                onClick={closeMobileMenu}
-                type="button"
-              >
-                <X aria-hidden="true" size={18} />
-              </button>
             </ShadcnSidebarHeader>
             <ShadcnSidebarContent
               className={`sidebar__content${sidebarMode ? " sidebar__content--context" : " sidebar__content--app"}${sidebarMode === "calendar" ? " sidebar__content--calendar" : ""}`}
@@ -1154,7 +1083,9 @@ function AuthenticatedApp({ user }: { user: User }) {
               ) : sidebarMode === "mail" ? (
                 <MailFeatureSidebar onNavigate={closeMobileMenu} />
               ) : (
-                (isTodayWorkspace ? todayNavigationGroups : navigationGroups).map((group) => (
+                // Today is the only owner without a contextual sidebar, so this
+                // branch always renders its navigation.
+                todayNavigationGroups.map((group) => (
                   <ShadcnSidebarGroup key={group.label}>
                     <ShadcnSidebarGroupLabel>{group.label}</ShadcnSidebarGroupLabel>
                     <ShadcnSidebarGroupContent>
@@ -1164,7 +1095,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                             <SidebarNavigationItem
                               key={item.path}
                               onNavigate={closeMobileMenu}
-                              {...withBadges(item)}
+                              {...item}
                             />
                           ))}
                         </ShadcnSidebarMenu>
@@ -1398,10 +1329,8 @@ function WorkspaceRoutes({
 }
 
 function SidebarNavigationItem({
-  badge,
   icon: Icon,
   isActive: explicitIsActive,
-  items,
   label,
   onNavigate,
   path,
@@ -1411,7 +1340,7 @@ function SidebarNavigationItem({
   const workspaceId = workspaceIdForPath(path);
   return (
     <ShadcnSidebarMenuItem>
-      <ShadcnSidebarMenuButton asChild className={badge ? "pr-14" : undefined} isActive={isActive}>
+      <ShadcnSidebarMenuButton asChild isActive={isActive}>
         <NavLink onClick={onNavigate} to={path}>
           {workspaceId ? (
             <WorkspaceIcon size="sm" workspace={workspaceId} />
@@ -1421,14 +1350,6 @@ function SidebarNavigationItem({
           <span>{label}</span>
         </NavLink>
       </ShadcnSidebarMenuButton>
-      {badge ? <ShadcnSidebarMenuBadge className="right-7">{badge}</ShadcnSidebarMenuBadge> : null}
-      {items?.length ? (
-        <ShadcnSidebarMenuSub>
-          {items.map((item) => (
-            <SidebarSubNavigationItem key={item.path} {...item} onNavigate={onNavigate} />
-          ))}
-        </ShadcnSidebarMenuSub>
-      ) : null}
     </ShadcnSidebarMenuItem>
   );
 }
@@ -1490,30 +1411,6 @@ function NavigationIcon({
   );
 }
 
-function SidebarSubNavigationItem({
-  badge,
-  icon: Icon,
-  label,
-  onNavigate,
-  path,
-}: NavigationItemDefinition & { onNavigate: () => void }) {
-  return (
-    <ShadcnSidebarMenuSubItem>
-      <ShadcnSidebarMenuSubButton asChild>
-        <Link onClick={onNavigate} to={path}>
-          <Icon aria-hidden="true" />
-          <span className="truncate">{label}</span>
-          {badge ? (
-            <span aria-hidden="true" className="ml-auto text-xs tabular-nums">
-              {badge}
-            </span>
-          ) : null}
-        </Link>
-      </ShadcnSidebarMenuSubButton>
-    </ShadcnSidebarMenuSubItem>
-  );
-}
-
 function WorkspaceAppBarForRoute({
   onCalendarToday,
   pageTitle,
@@ -1543,10 +1440,9 @@ function WorkspaceAppBarForRoute({
       <TodayNavigationTitle generatedAt={todayBrief.generatedAt} timeZone={user.planningTimezone} />
     ) : (
       <span className="workspace-app-bar__title">
-        {pageTitle ??
-          (workspace === "account"
-            ? "Account"
-            : workspaceDefinitions.find((item) => item.id === workspace)?.label)}
+        {/* Account routes always supply a page title, so the workspace registry
+            covers the remaining identities. */}
+        {pageTitle ?? workspaceDefinitions.find((item) => item.id === workspace)?.label}
       </span>
     );
   const context =
@@ -1695,13 +1591,7 @@ function WorkspaceSwitcher({
   const queryClient = useQueryClient();
   const [menuOpen, setMenuOpen] = useState(false);
   const workspace = workspaceForPath(pathname);
-  const section =
-    workspace?.label ??
-    navigationGroups
-      .flatMap((group) => group.items)
-      .flatMap((item) => [item, ...(item.items ?? [])])
-      .find((item) => item.path === pathname)?.label ??
-    "Home OS";
+  const section = workspace?.label ?? "Home OS";
   const activeWorkspaceId = workspace ? workspaceIdForPath(workspace.path) : undefined;
   const activeIndex = Math.max(
     0,
@@ -1760,9 +1650,9 @@ function WorkspaceSwitcher({
 
   useEffect(() => {
     previewIndex.current = activeIndex;
-    previewPath.current = workspace?.path ?? null;
+    previewPath.current = pathname;
     setIndicatorIndex(activeIndex);
-  }, [activeIndex, workspace?.path]);
+  }, [activeIndex, pathname]);
 
   const preview = (item: WorkspaceDefinition, index: number) => {
     if (previewPath.current === item.path) return;
@@ -1785,7 +1675,10 @@ function WorkspaceSwitcher({
             onOpenChange(open);
             if (open) {
               previewIndex.current = activeIndex;
-              previewPath.current = workspace?.path ?? null;
+              // Track the committed route, not the workspace default, so a
+              // child route such as /goals can still preview its own
+              // workspace's default surface.
+              previewPath.current = pathname;
               setIndicatorIndex(activeIndex);
             } else {
               onPreviewChange(null);

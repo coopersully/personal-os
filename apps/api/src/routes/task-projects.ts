@@ -11,7 +11,7 @@ import {
 import type { Context, Hono } from "hono";
 import type { createTaskProjectService } from "../task-project-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess } from "./support.js";
+import { parseBody, requireFeatureAccess, requireScope } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
@@ -28,8 +28,14 @@ export function registerTaskProjectRoutes({
   taskProjects,
 }: TaskProjectRouteOptions) {
   const requireTasksAccess = requireFeatureAccess("tasks");
+  const requireTasksRead = requireScope("tasks:read");
   app.use("/v1/task-projects", requireTasksAccess);
-  app.use("/v1/task-projects/*", requireTasksAccess);
+  app.use("/v1/task-projects/*", (context, next) =>
+    context.req.method === "POST" &&
+    /^\/v1\/task-projects\/[^/]+\/move\/preview$/u.test(context.req.path)
+      ? requireTasksRead(context, next)
+      : requireTasksAccess(context, next),
+  );
 
   app.get("/v1/task-projects", async (context) =>
     context.json(

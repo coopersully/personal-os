@@ -13,7 +13,7 @@ import {
 import type { Context, Hono } from "hono";
 import type { createTaskService } from "../task-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, parseOptionalBody, requireFeatureAccess } from "./support.js";
+import { parseBody, parseOptionalBody, requireFeatureAccess, requireScope } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
@@ -26,8 +26,13 @@ type TaskRouteOptions = {
 /** Register the task HTTP surface without constructing its service. */
 export function registerTaskRoutes({ app, mutationContext, tasks }: TaskRouteOptions) {
   const requireTasksAccess = requireFeatureAccess("tasks");
+  const requireTasksRead = requireScope("tasks:read");
   app.use("/v1/tasks", requireTasksAccess);
-  app.use("/v1/tasks/*", requireTasksAccess);
+  app.use("/v1/tasks/*", (context, next) =>
+    context.req.method === "POST" && /^\/v1\/tasks\/[^/]+\/move\/preview$/u.test(context.req.path)
+      ? requireTasksRead(context, next)
+      : requireTasksAccess(context, next),
+  );
 
   app.get("/v1/tasks", async (context) =>
     context.json(

@@ -93,8 +93,10 @@ they use optimistic revision checks. Agent creates require a UUID `idempotencyKe
 payload replay under the same key returns the original create, while a mismatched replay remains a
 structured API conflict. A material Project or Task move first calls the corresponding read-only
 preview tool, then passes the returned preview token and current expected revision to the commit
-tool. Revision or preview drift requires a new source read and preview. MCP never resolves a name,
-performs a cascade, or converts a structured archive/completion conflict into a local decision.
+tool. Both preview tools use `tasks:read`; the move commits and every other Task mutation require
+`tasks:write`. Revision or preview drift requires a new source read and preview. MCP never resolves
+a name, performs a cascade, or converts a structured archive/completion conflict into a local
+decision.
 
 Lists provide durable organization. Projects represent finite outcomes inside a List. Tasks are
 executable actions whose canonical lifecycle is `open`, `completed`, or `cancelled`; completion,

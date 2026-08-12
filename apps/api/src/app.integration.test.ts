@@ -1652,8 +1652,16 @@ describe.sequential("ilo API", () => {
     }
 
     async function taskAgentRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      return scopedTaskAgentRequest(taskAgentToken, path, options);
+    }
+
+    async function scopedTaskAgentRequest(
+      token: string,
+      path: string,
+      options: Omit<RequestOptions, "auth"> = {},
+    ) {
       const headers = new Headers(options.headers);
-      headers.set("authorization", `Bearer ${taskAgentToken}`);
+      headers.set("authorization", `Bearer ${token}`);
       const hasBody = options.body !== undefined || options.rawBody !== undefined;
       if (hasBody) headers.set("content-type", "application/json");
       return app.request(path, {
@@ -2629,6 +2637,148 @@ describe.sequential("ilo API", () => {
         "task.trashed",
         "task.restored",
       ]);
+    });
+
+    it("task and project move previews use tasks read scope without mutation while commits require write", async () => {
+      const sourceList = await createTaskList("Read-scoped Preview Source");
+      const destinationList = await createTaskList("Read-scoped Preview Destination");
+      const project = await createTaskProject(sourceList.id, "Read-scoped Preview Project");
+      const task = await createTask("Read-scoped Preview Task", { listId: sourceList.id });
+      const readTokenResponse = await taskRequest("/v1/access-tokens", {
+        body: { name: "Task preview reader", scopes: ["tasks:read"] },
+      });
+      const writeTokenResponse = await taskRequest("/v1/access-tokens", {
+        body: { name: "Task move writer", scopes: ["tasks:write"] },
+      });
+      expect(readTokenResponse.status).toBe(201);
+      expect(writeTokenResponse.status).toBe(201);
+      const readToken = (await payload(readTokenResponse)).token.token as string;
+      const writeToken = (await payload(writeTokenResponse)).token.token as string;
+      const projectBefore = await database.db
+        .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+        .from(taskProjects)
+        .where(eq(taskProjects.id, project.id));
+      const taskBefore = await database.db
+        .select({
+          listId: reminders.taskListId,
+          projectId: reminders.taskProjectId,
+          revision: reminders.taskRevision,
+        })
+        .from(reminders)
+        .where(eq(reminders.id, task.id));
+      const auditsBefore = await database.db
+        .select({ action: auditEvents.action, id: auditEvents.id })
+        .from(auditEvents)
+        .where(inArray(auditEvents.entityId, [project.id, task.id]));
+
+      const projectPreviewResponse = await scopedTaskAgentRequest(
+        readToken,
+        `/v1/task-projects/${project.id}/move/preview`,
+        {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: project.revision,
+          },
+        },
+      );
+      const taskPreviewResponse = await scopedTaskAgentRequest(
+        readToken,
+        `/v1/tasks/${task.id}/move/preview`,
+        {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: task.revision,
+          },
+        },
+      );
+      expect(projectPreviewResponse.status).toBe(200);
+      expect(taskPreviewResponse.status).toBe(200);
+      const projectPreview = (await payload(projectPreviewResponse)).preview;
+      const taskPreview = (await payload(taskPreviewResponse)).preview;
+      expect(projectPreview.previewToken).toEqual(expect.any(String));
+      expect(taskPreview.previewToken).toEqual(expect.any(String));
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, project.id)),
+      ).toEqual(projectBefore);
+      expect(
+        await database.db
+          .select({
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual(taskBefore);
+      expect(
+        await database.db
+          .select({ action: auditEvents.action, id: auditEvents.id })
+          .from(auditEvents)
+          .where(inArray(auditEvents.entityId, [project.id, task.id])),
+      ).toEqual(auditsBefore);
+
+      expect(
+        (
+          await scopedTaskAgentRequest(writeToken, `/v1/task-projects/${project.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              expectedRevision: project.revision,
+            },
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await scopedTaskAgentRequest(writeToken, `/v1/tasks/${task.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              expectedRevision: task.revision,
+            },
+          })
+        ).status,
+      ).toBe(403);
+
+      const projectMoveInput = {
+        destinationListId: destinationList.id,
+        expectedRevision: project.revision,
+        previewToken: projectPreview.previewToken,
+      };
+      const taskMoveInput = {
+        destinationListId: destinationList.id,
+        expectedRevision: task.revision,
+        previewToken: taskPreview.previewToken,
+      };
+      expect(
+        (
+          await scopedTaskAgentRequest(readToken, `/v1/task-projects/${project.id}/move`, {
+            body: projectMoveInput,
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await scopedTaskAgentRequest(readToken, `/v1/tasks/${task.id}/move`, {
+            body: taskMoveInput,
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await scopedTaskAgentRequest(writeToken, `/v1/task-projects/${project.id}/move`, {
+            body: projectMoveInput,
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await scopedTaskAgentRequest(writeToken, `/v1/tasks/${task.id}/move`, {
+            body: taskMoveInput,
+          })
+        ).status,
+      ).toBe(200);
     });
 
     it("tasks bind move previews to Task, List, and destination Project revisions and audit detachment", async () => {

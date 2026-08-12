@@ -1901,16 +1901,16 @@ describe("ilo MCP server", () => {
         "get_task_list",
         "list_task_projects",
         "get_task_project",
+        "preview_task_project_move",
         "list_tasks",
         "get_task",
+        "preview_task_move",
       ]),
     );
     expect(names).not.toContain("get_daily_brief");
     expect(names).not.toContain("create_task");
     expect(names).not.toContain("archive_task_list");
-    expect(names).not.toContain("preview_task_project_move");
     expect(names).not.toContain("move_task_project");
-    expect(names).not.toContain("preview_task_move");
     expect(names).not.toContain("trash_task");
     expect(names).not.toContain("list_mail");
     expect(tools.tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
@@ -1935,8 +1935,46 @@ describe("ilo MCP server", () => {
       },
     });
 
+    await client.callTool({
+      name: "preview_task_project_move",
+      arguments: { destinationListId: accountId, expectedRevision: 1, id: projectId },
+    });
+    await client.callTool({
+      name: "preview_task_move",
+      arguments: { destinationListId: accountId, expectedRevision: 1, id },
+    });
+    expect(api.previewTaskProjectMove).toHaveBeenCalledWith(projectId, {
+      destinationListId: accountId,
+      expectedRevision: 1,
+    });
+    expect(api.previewTaskMove).toHaveBeenCalledWith(id, {
+      destinationListId: accountId,
+      expectedRevision: 1,
+    });
+
     await client.close();
     await server.close();
+
+    const writeOnlyServer = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      scopes: new Set(["tasks:write"]),
+      timeZone: "UTC",
+    });
+    const writeOnlyClient = new Client({ name: "test", version: "1.0.0" });
+    const [writeOnlyClientTransport, writeOnlyServerTransport] =
+      InMemoryTransport.createLinkedPair();
+    await Promise.all([
+      writeOnlyServer.connect(writeOnlyServerTransport),
+      writeOnlyClient.connect(writeOnlyClientTransport),
+    ]);
+    const writeOnlyNames = (await writeOnlyClient.listTools()).tools.map((tool) => tool.name);
+    expect(writeOnlyNames).toContain("move_task");
+    expect(writeOnlyNames).toContain("move_task_project");
+    expect(writeOnlyNames).not.toContain("preview_task_move");
+    expect(writeOnlyNames).not.toContain("preview_task_project_move");
+    expect(writeOnlyNames).not.toContain("get_task");
+    await writeOnlyClient.close();
+    await writeOnlyServer.close();
   });
 
   it("uses the hardened Mail send schema for normalization and header injection rejection", async () => {

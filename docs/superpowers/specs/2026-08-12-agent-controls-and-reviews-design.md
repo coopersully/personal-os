@@ -125,10 +125,12 @@ Calendar and Tasks own their actions and any future executable rules.
 
 ## Retiring the placeholder routine lifecycle
 
-Morning Brief and Nightly Review routine installation, scheduling, run storage,
+Morning Brief and Nightly Review routine installation, scheduling, run writes,
 API routes, MCP list/run tools, and the API-process scheduler are removed. The
-historical database tables are dropped in a forward migration after existing
-rows are discarded because no user-visible artifact consumes them.
+historical database tables remain inert for this release so a previous binary
+can still roll back safely. They receive no new reads or writes and may be
+dropped only in a later contract migration after the caller-removal release is
+live and rollback no longer depends on them.
 
 The useful daily-brief computation remains and is renamed as an independent
 service. `/v1/daily-brief`, Today, and MCP `get_daily_brief` keep working under
@@ -190,7 +192,8 @@ new permission preset.
    and matching Reviews links.
 5. Verify legacy Agent access and Automations URLs redirect to Workspace access.
 6. Confirm the Automations navigation item, routine API routes, routine MCP
-   tools, scheduler dispatch, and routine tables are absent.
+   tools, scheduler dispatch, and runtime routine-table reads/writes are absent;
+   confirm historical tables remain untouched for rollback compatibility.
 7. Confirm Today and MCP daily brief still return scoped daily material.
 8. Run focused domain, API, client, MCP, React, route, desktop, and mobile tests,
    then `pnpm verify`.

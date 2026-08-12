@@ -2937,7 +2937,9 @@ describe("ilo web app", () => {
     await browser.type(screen.getByLabelText("Merchant"), "Bookstore");
     await browser.type(screen.getByLabelText("Amount"), "19.25");
     await browser.type(screen.getByLabelText("Category (optional)"), "Books");
-    await browser.click(screen.getByRole("button", { name: "Add transaction" }));
+    await browser.click(
+      within(screen.getByRole("main")).getByRole("button", { name: "Add transaction" }),
+    );
     await waitFor(() =>
       expect(mocks.createFinanceTransaction).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2951,7 +2953,9 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: "New transaction" }));
     await browser.type(screen.getByLabelText("Merchant"), "Uncategorized item");
     await browser.type(screen.getByLabelText("Amount"), "3");
-    await browser.click(screen.getByRole("button", { name: "Add transaction" }));
+    await browser.click(
+      within(screen.getByRole("main")).getByRole("button", { name: "Add transaction" }),
+    );
     await waitFor(() =>
       expect(mocks.createFinanceTransaction).toHaveBeenLastCalledWith(
         expect.objectContaining({ category: null, merchant: "Uncategorized item" }),

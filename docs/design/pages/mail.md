@@ -19,6 +19,9 @@ Read and act on one unified mailbox while retaining clear source-account and pro
 - Mail uses the full workspace body: the conversation list and reader fill the
   available shell height like Calendar, rather than sitting in a capped card or
   narrow page column.
+- Connected-account headers are disclosure categories, not mailbox selections:
+  they stay visually flat while their indented child destinations carry the
+  active state.
 - Unified and account mailbox navigation remains usable with stale synchronized material.
 - A reconnect warning is scoped only to Mail-enabled accounts.
 - Manual sync gives transient toast feedback and refreshes durable health after success or failure.

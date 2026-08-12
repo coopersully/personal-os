@@ -935,8 +935,15 @@ p {
   padding: 0.375rem 0.5rem;
 }
 .mail-sidebar__account-trigger:is(:hover, :active, [data-state="open"], [data-state="open"]:hover) {
-  background: var(--sidebar-accent);
+  background: transparent;
   color: var(--sidebar-foreground);
+}
+.mail-sidebar__account-trigger:focus-visible {
+  background: transparent;
+  color: var(--sidebar-foreground);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.1875rem;
 }
 .mail-sidebar__account-trigger .provider-icon {
   border-radius: calc(var(--radius) - 2px);

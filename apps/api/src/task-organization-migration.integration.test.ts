@@ -304,6 +304,35 @@ describe.sequential("Task organization migration", () => {
     expect(remainingLists.rows[0]?.count).toBe("0");
   });
 
+  it("rejects a Task whose canonical lifecycle is null", async () => {
+    await requireTaskOrganizationMigration();
+    const database = await createIsolatedDatabase("task_organization_null_lifecycle");
+    await migrateDatabase(database.db, migrationsFolder);
+
+    const insertedUser = await database.pool.query<{ id: string }>(
+      `INSERT INTO users (email, password_hash, display_name)
+       VALUES ('null-lifecycle-task-user@example.com', 'unused', 'Null Lifecycle Task User')
+       RETURNING id`,
+    );
+    const userId = insertedUser.rows[0]?.id;
+    if (!userId) throw new Error("Null-lifecycle migration user was not inserted.");
+    const inbox = await database.pool.query<{ id: string }>(
+      `SELECT id FROM task_lists WHERE user_id = $1 AND kind = 'inbox'`,
+      [userId],
+    );
+    const inboxId = inbox.rows[0]?.id;
+    if (!inboxId) throw new Error("Null-lifecycle migration user did not receive an Inbox.");
+
+    await expect(
+      database.pool.query(
+        `INSERT INTO reminders (
+           user_id, title, kind, task_list_id, task_revision
+         ) VALUES ($1, 'Null lifecycle Task', 'task', $2, 1)`,
+        [userId, inboxId],
+      ),
+    ).rejects.toThrow();
+  });
+
   it("upgrades every legacy Task in place without changing shared material fields", async () => {
     await requireTaskOrganizationMigration();
     const database = await createIsolatedDatabase("task_organization_upgrade");

@@ -223,6 +223,7 @@ ALTER TABLE "reminders"
 		(
 			"kind" = 'task'
 			AND "task_list_id" IS NOT NULL
+			AND "task_lifecycle" IS NOT NULL
 			AND "task_lifecycle" IN ('open', 'completed', 'cancelled')
 			AND "task_revision" IS NOT NULL
 			AND (

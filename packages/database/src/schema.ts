@@ -1471,6 +1471,7 @@ export const reminders = pgTable(
         (
           ${table.kind} = 'task'
           AND ${table.taskListId} IS NOT NULL
+          AND ${table.taskLifecycle} IS NOT NULL
           AND ${table.taskLifecycle} IN ('open', 'completed', 'cancelled')
           AND ${table.taskRevision} IS NOT NULL
           AND (

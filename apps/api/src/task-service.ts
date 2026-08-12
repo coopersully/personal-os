@@ -344,6 +344,65 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
     throw new AppError("conflict", "The Task could not be created because it conflicts.");
   }
 
+  async function resolveExistingReplay(
+    input: CreateTaskInput,
+    userId: string,
+  ): Promise<Task | null> {
+    if (!input.idempotencyKey) return null;
+    const replay = (
+      await db
+        .select()
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.userId, userId),
+            eq(reminders.kind, "task"),
+            eq(reminders.taskCreateIdempotencyKey, input.idempotencyKey),
+          ),
+        )
+        .limit(1)
+    )[0];
+    if (!replay) return null;
+
+    let originalListId = input.listId;
+    if (!originalListId) {
+      const creation = (
+        await db
+          .select({ after: auditEvents.after })
+          .from(auditEvents)
+          .where(
+            and(
+              eq(auditEvents.userId, userId),
+              eq(auditEvents.entityType, "task"),
+              eq(auditEvents.entityId, replay.id),
+              eq(auditEvents.action, "task.created"),
+            ),
+          )
+          .limit(1)
+      )[0];
+      const after = creation?.after;
+      if (
+        typeof after !== "object" ||
+        after === null ||
+        !("listId" in after) ||
+        typeof after.listId !== "string"
+      ) {
+        throw new AppError(
+          "internal_error",
+          "The original Task destination could not be reconstructed for idempotency replay.",
+        );
+      }
+      originalListId = after.listId;
+    }
+
+    if (replay.taskCreateIdempotencyFingerprint !== createFingerprint(input, originalListId)) {
+      throw new AppError("conflict", "That idempotency key was used for another Task.", {
+        code: "task_idempotency_mismatch",
+      });
+    }
+    return serializeTask(replay);
+  }
+
   async function transition(
     id: string,
     input: CompleteTaskInput | CancelTaskInput | ReopenTaskInput,
@@ -419,6 +478,8 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
       if (context.principal.actorType === "agent" && !input.idempotencyKey) {
         throw new AppError("invalid_request", "Agent Task creates require an idempotency key.");
       }
+      const existingReplay = await resolveExistingReplay(input, context.principal.userId);
+      if (existingReplay) return existingReplay;
       const observedProject = input.projectId
         ? (
             await db
@@ -533,6 +594,23 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
       conditions.push(
         query.view === "trash" ? isNotNull(reminders.deletedAt) : isNull(reminders.deletedAt),
       );
+      if (query.view !== "trash" && query.listId === undefined) {
+        conditions.push(
+          inArray(
+            reminders.taskListId,
+            db
+              .select({ id: taskLists.id })
+              .from(taskLists)
+              .where(
+                and(
+                  eq(taskLists.userId, userId),
+                  eq(taskLists.availability, "active"),
+                  isNull(taskLists.deletedAt),
+                ),
+              ),
+          ),
+        );
+      }
       if (query.lifecycle) conditions.push(eq(reminders.taskLifecycle, query.lifecycle));
       if (query.listId) conditions.push(eq(reminders.taskListId, query.listId));
       if (query.projectId) conditions.push(eq(reminders.taskProjectId, query.projectId));

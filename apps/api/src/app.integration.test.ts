@@ -1854,6 +1854,191 @@ describe.sequential("ilo API", () => {
       ).toBe(404);
     });
 
+    it("tasks resolve idempotency before validating changed List and Project destinations", async () => {
+      const archivedList = await createTaskList("Replay Archived List");
+      const archivedListInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000011",
+        listId: archivedList.id,
+        title: "Replay after List archive",
+      };
+      const archivedListCreate = await taskAgentRequest("/v1/tasks", {
+        body: archivedListInput,
+      });
+      expect(archivedListCreate.status).toBe(201);
+      const archivedListTask = (await payload(archivedListCreate)).task;
+      expect(
+        (
+          await taskRequest(`/v1/task-lists/${archivedList.id}/archive`, {
+            body: {
+              expectedRevision: archivedList.revision,
+              resolution: "archive_contents_together",
+            },
+          })
+        ).status,
+      ).toBe(200);
+      const archivedListReplay = await taskAgentRequest("/v1/tasks", {
+        body: archivedListInput,
+      });
+      expect(archivedListReplay.status).toBe(201);
+      expect((await payload(archivedListReplay)).task.id).toBe(archivedListTask.id);
+      const archivedListMismatch = await taskAgentRequest("/v1/tasks", {
+        body: { ...archivedListInput, title: "Mismatched archived destination retry" },
+      });
+      expect(archivedListMismatch.status).toBe(409);
+      expect((await payload(archivedListMismatch)).error.details).toEqual({
+        code: "task_idempotency_mismatch",
+      });
+
+      const projectList = await createTaskList("Replay Project States");
+
+      const completedProject = await createTaskProject(projectList.id, "Replay Completed Project");
+      const completedInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000012",
+        listId: projectList.id,
+        projectId: completedProject.id,
+        title: "Replay after Project completion",
+      };
+      const completedCreate = await taskAgentRequest("/v1/tasks", { body: completedInput });
+      expect(completedCreate.status).toBe(201);
+      const completedTask = (await payload(completedCreate)).task;
+      expect(
+        (
+          await taskRequest(`/v1/task-projects/${completedProject.id}/complete`, {
+            body: {
+              expectedRevision: completedProject.revision,
+              resolution: "complete_open_tasks",
+            },
+          })
+        ).status,
+      ).toBe(200);
+      const completedReplay = await taskAgentRequest("/v1/tasks", { body: completedInput });
+      expect(completedReplay.status).toBe(201);
+      expect((await payload(completedReplay)).task).toMatchObject({
+        id: completedTask.id,
+        lifecycle: "completed",
+        revision: 2,
+      });
+
+      const archivedProject = await createTaskProject(projectList.id, "Replay Archived Project");
+      const archivedProjectInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000013",
+        listId: projectList.id,
+        projectId: archivedProject.id,
+        title: "Replay after Project archive",
+      };
+      const archivedProjectCreate = await taskAgentRequest("/v1/tasks", {
+        body: archivedProjectInput,
+      });
+      expect(archivedProjectCreate.status).toBe(201);
+      const archivedProjectTask = (await payload(archivedProjectCreate)).task;
+      expect(
+        (
+          await taskRequest(`/v1/task-projects/${archivedProject.id}/archive`, {
+            body: { expectedRevision: archivedProject.revision },
+          })
+        ).status,
+      ).toBe(200);
+      const archivedProjectReplay = await taskAgentRequest("/v1/tasks", {
+        body: archivedProjectInput,
+      });
+      expect(archivedProjectReplay.status).toBe(201);
+      expect((await payload(archivedProjectReplay)).task.id).toBe(archivedProjectTask.id);
+
+      const moveSourceList = await createTaskList("Replay Project Move Source");
+      const moveDestinationList = await createTaskList("Replay Project Move Destination");
+      const movedProject = await createTaskProject(moveSourceList.id, "Replay Moved Project");
+      const movedInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000014",
+        projectId: movedProject.id,
+        title: "Replay after Project move",
+      };
+      const movedCreate = await taskAgentRequest("/v1/tasks", { body: movedInput });
+      expect(movedCreate.status).toBe(201);
+      const movedTask = (await payload(movedCreate)).task;
+      const movePreview = (
+        await payload(
+          await taskRequest(`/v1/task-projects/${movedProject.id}/move/preview`, {
+            body: {
+              destinationListId: moveDestinationList.id,
+              expectedRevision: movedProject.revision,
+            },
+          }),
+        )
+      ).preview;
+      expect(
+        (
+          await taskRequest(`/v1/task-projects/${movedProject.id}/move`, {
+            body: {
+              destinationListId: moveDestinationList.id,
+              expectedRevision: movedProject.revision,
+              previewToken: movePreview.previewToken,
+            },
+          })
+        ).status,
+      ).toBe(200);
+      const movedReplay = await taskAgentRequest("/v1/tasks", { body: movedInput });
+      expect(movedReplay.status).toBe(201);
+      expect((await payload(movedReplay)).task).toMatchObject({
+        id: movedTask.id,
+        listId: moveDestinationList.id,
+        revision: 2,
+      });
+
+      const deletedProject = await createTaskProject(projectList.id, "Replay Deleted Project");
+      const deletedProjectInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000015",
+        listId: projectList.id,
+        projectId: deletedProject.id,
+        title: "Replay after Project deletion",
+      };
+      const deletedProjectCreate = await taskAgentRequest("/v1/tasks", {
+        body: deletedProjectInput,
+      });
+      expect(deletedProjectCreate.status).toBe(201);
+      const deletedProjectTask = (await payload(deletedProjectCreate)).task;
+      await database.db
+        .update(taskProjects)
+        .set({ deletedAt: new Date("2026-07-13T12:00:00.000Z") })
+        .where(eq(taskProjects.id, deletedProject.id));
+      const deletedProjectReplay = await taskAgentRequest("/v1/tasks", {
+        body: deletedProjectInput,
+      });
+      expect(deletedProjectReplay.status).toBe(201);
+      expect((await payload(deletedProjectReplay)).task.id).toBe(deletedProjectTask.id);
+      const deletedProjectMismatch = await taskAgentRequest("/v1/tasks", {
+        body: { ...deletedProjectInput, title: "Mismatched deleted Project retry" },
+      });
+      expect(deletedProjectMismatch.status).toBe(409);
+      expect((await payload(deletedProjectMismatch)).error.details).toEqual({
+        code: "task_idempotency_mismatch",
+      });
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Task Replay Other User",
+          email: "task-replay-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "UTC",
+        },
+      });
+      expect(otherRegistration.status).toBe(201);
+      const otherSession = (await payload(otherRegistration)).sessionToken;
+      const crossUserKeyReuse = await app.request("/v1/tasks", {
+        body: JSON.stringify({
+          idempotencyKey: archivedListInput.idempotencyKey,
+          title: "Other user owns an independent key namespace",
+        }),
+        headers: {
+          authorization: `Session ${otherSession}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      expect(crossUserKeyReuse.status).toBe(201);
+      expect((await payload(crossUserKeyReuse)).task.id).not.toBe(archivedListTask.id);
+    });
+
     it("tasks preserve legacy metadata until canonical timing changes and query canonical views", async () => {
       const [legacyTask] = await database.db
         .insert(reminders)
@@ -1962,6 +2147,87 @@ describe.sequential("ilo API", () => {
           .from(auditEvents)
           .where(eq(auditEvents.entityId, todayTask.id)),
       ).toHaveLength(auditBefore.length + 1);
+      const staleHuman = await taskRequest(`/v1/tasks/${todayTask.id}`, {
+        body: { expectedRevision: 1, title: "Stale human write" },
+        method: "PATCH",
+      });
+      expect(staleHuman.status).toBe(409);
+      expect((await payload(staleHuman)).error.details).toEqual({ currentRevision: 2 });
+      expect(
+        await database.db
+          .select({ revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, todayTask.id)),
+      ).toEqual([{ revision: 2 }]);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(eq(auditEvents.entityId, todayTask.id)),
+      ).toHaveLength(auditBefore.length + 1);
+    });
+
+    it("tasks hide archived-List contents from ordinary views but allow owned explicit List inspection", async () => {
+      const archivedList = await createTaskList("Archived View Management List");
+      const openTask = await createTask("Archived List open timing Task", {
+        dueAt: "2026-07-13T16:00:00.000Z",
+        listId: archivedList.id,
+        scheduledAt: "2026-07-14T16:00:00.000Z",
+      });
+      const completedTask = await createTask("Archived List completed Task", {
+        lifecycle: "completed",
+        listId: archivedList.id,
+      });
+      const cancelledTask = await createTask("Archived List cancelled Task", {
+        lifecycle: "cancelled",
+        listId: archivedList.id,
+      });
+      expect(
+        (
+          await taskRequest(`/v1/task-lists/${archivedList.id}/archive`, {
+            body: {
+              expectedRevision: archivedList.revision,
+              resolution: "archive_contents_together",
+            },
+          })
+        ).status,
+      ).toBe(200);
+
+      const archivedIds = [openTask.id, completedTask.id, cancelledTask.id];
+      for (const [path, hiddenIds] of [
+        ["/v1/tasks", archivedIds],
+        ["/v1/tasks?view=today", [openTask.id]],
+        ["/v1/tasks?view=upcoming", [openTask.id]],
+        ["/v1/tasks?view=scheduled", [openTask.id]],
+        ["/v1/tasks?view=completed", [completedTask.id]],
+        ["/v1/tasks?view=cancelled", [cancelledTask.id]],
+      ] as const) {
+        const result = await payload(await taskRequest(path));
+        const resultIds = result.items.map(({ id }: { id: string }) => id);
+        for (const hiddenId of hiddenIds) expect(resultIds).not.toContain(hiddenId);
+      }
+
+      const explicitList = await payload(await taskRequest(`/v1/tasks?listId=${archivedList.id}`));
+      expect(explicitList.items.map(({ id }: { id: string }) => id)).toEqual(
+        expect.arrayContaining(archivedIds),
+      );
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Archived List Other User",
+          email: "archived-list-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "UTC",
+        },
+      });
+      expect(otherRegistration.status).toBe(201);
+      const otherSession = (await payload(otherRegistration)).sessionToken;
+      const crossUserInspection = await app.request(`/v1/tasks?listId=${archivedList.id}`, {
+        headers: { authorization: `Session ${otherSession}` },
+      });
+      expect(crossUserInspection.status).toBe(200);
+      expect((await payload(crossUserInspection)).items).toEqual([]);
     });
 
     it("tasks use focused revision-safe complete, reopen, and cancel transitions with canonical audits", async () => {
@@ -1986,6 +2252,26 @@ describe.sequential("ilo API", () => {
         source: { revision: "2" },
       });
       expect(
+        await database.db
+          .select({
+            cancelledAt: reminders.taskCancelledAt,
+            completedAt: reminders.completedAt,
+            legacyStatus: reminders.status,
+            lifecycle: reminders.taskLifecycle,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          cancelledAt: null,
+          completedAt: new Date("2026-07-13T12:00:00.000Z"),
+          legacyStatus: "completed",
+          lifecycle: "completed",
+          revision: 2,
+        },
+      ]);
+      expect(
         (await payload(await taskRequest("/v1/tasks?view=completed"))).items.map(
           ({ id }: { id: string }) => id,
         ),
@@ -2008,6 +2294,26 @@ describe.sequential("ilo API", () => {
         lifecycle: "open",
         revision: 3,
       });
+      expect(
+        await database.db
+          .select({
+            cancelledAt: reminders.taskCancelledAt,
+            completedAt: reminders.completedAt,
+            legacyStatus: reminders.status,
+            lifecycle: reminders.taskLifecycle,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          cancelledAt: null,
+          completedAt: null,
+          legacyStatus: "inbox",
+          lifecycle: "open",
+          revision: 3,
+        },
+      ]);
       const cancelled = await taskAgentRequest(`/v1/tasks/${task.id}/cancel`, {
         body: { expectedRevision: 3 },
       });
@@ -2019,6 +2325,26 @@ describe.sequential("ilo API", () => {
         lifecycle: "cancelled",
         revision: 4,
       });
+      expect(
+        await database.db
+          .select({
+            cancelledAt: reminders.taskCancelledAt,
+            completedAt: reminders.completedAt,
+            legacyStatus: reminders.status,
+            lifecycle: reminders.taskLifecycle,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          cancelledAt: new Date("2026-07-13T12:00:00.000Z"),
+          completedAt: null,
+          legacyStatus: "cancelled",
+          lifecycle: "cancelled",
+          revision: 4,
+        },
+      ]);
       expect(
         (await payload(await taskRequest("/v1/tasks?view=cancelled"))).items.map(
           ({ id }: { id: string }) => id,
@@ -2221,6 +2547,22 @@ describe.sequential("ilo API", () => {
       expect((await payload(stale)).error.details).toMatchObject({
         code: "task_move_preview_stale",
       });
+      expect(
+        await database.db
+          .select({
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([{ listId: sourceList.id, projectId: sourceProject.id, revision: task.revision }]);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(and(eq(auditEvents.entityId, task.id), eq(auditEvents.action, "task.moved"))),
+      ).toHaveLength(0);
 
       const freshPreview = (
         await payload(

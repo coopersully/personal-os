@@ -34,6 +34,9 @@ import type {
   MailRuleProviderEffect,
   MailRuleWorkStatus,
   MaterialSourceReference,
+  TaskContainerAvailability,
+  TaskLifecycle,
+  TaskListKind,
   Theme,
   TransactionDirection,
 } from "@personal-os/domain";
@@ -42,6 +45,7 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -1245,6 +1249,147 @@ export const calendarEvents = pgTable(
   ],
 );
 
+export const taskLists = pgTable(
+  "task_lists",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<TaskListKind>().notNull().default("standard"),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    description: text("description"),
+    color: text("color"),
+    availability: text("availability")
+      .$type<TaskContainerAvailability>()
+      .notNull()
+      .default("active"),
+    revision: integer("revision").notNull().default(1),
+    createIdempotencyKey: uuid("create_idempotency_key"),
+    createIdempotencyFingerprint: text("create_idempotency_fingerprint"),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("task_lists_inbox_per_user_idx")
+      .on(table.userId)
+      .where(sql`${table.kind} = 'inbox'`),
+    uniqueIndex("task_lists_active_name_idx")
+      .on(table.userId, table.normalizedName)
+      .where(sql`${table.deletedAt} is null`),
+    uniqueIndex("task_lists_ownership_idx").on(table.id, table.userId),
+    uniqueIndex("task_lists_create_idempotency_idx")
+      .on(table.userId, table.createIdempotencyKey)
+      .where(sql`${table.createIdempotencyKey} is not null`),
+    index("task_lists_user_availability_idx").on(table.userId, table.availability),
+    check("task_lists_kind_check", sql`${table.kind} IN ('inbox', 'standard')`),
+    check(
+      "task_lists_availability_check",
+      sql`
+        (${table.availability} = 'active' AND ${table.archivedAt} IS NULL)
+        OR (${table.availability} = 'archived' AND ${table.archivedAt} IS NOT NULL)
+      `,
+    ),
+    check("task_lists_revision_check", sql`${table.revision} > 0`),
+    check(
+      "task_lists_create_idempotency_check",
+      sql`
+        (${table.createIdempotencyKey} IS NULL AND ${table.createIdempotencyFingerprint} IS NULL)
+        OR (
+          ${table.createIdempotencyKey} IS NOT NULL
+          AND ${table.createIdempotencyFingerprint} IS NOT NULL
+          AND ${table.createIdempotencyFingerprint} ~ '^[0-9a-f]{64}$'
+        )
+      `,
+    ),
+  ],
+);
+
+export const taskProjects = pgTable(
+  "task_projects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    listId: uuid("list_id").notNull(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
+    notes: text("notes"),
+    why: text("why"),
+    targetDate: date("target_date"),
+    lifecycle: text("lifecycle").$type<TaskLifecycle>().notNull().default("open"),
+    availability: text("availability")
+      .$type<TaskContainerAvailability>()
+      .notNull()
+      .default("active"),
+    revision: integer("revision").notNull().default(1),
+    createIdempotencyKey: uuid("create_idempotency_key"),
+    createIdempotencyFingerprint: text("create_idempotency_fingerprint"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("task_projects_active_name_idx")
+      .on(table.userId, table.listId, table.normalizedName)
+      .where(sql`${table.deletedAt} is null`),
+    uniqueIndex("task_projects_location_idx").on(table.id, table.userId, table.listId),
+    uniqueIndex("task_projects_create_idempotency_idx")
+      .on(table.userId, table.createIdempotencyKey)
+      .where(sql`${table.createIdempotencyKey} is not null`),
+    index("task_projects_list_availability_idx").on(table.userId, table.listId, table.availability),
+    foreignKey({
+      columns: [table.listId, table.userId],
+      foreignColumns: [taskLists.id, taskLists.userId],
+      name: "task_projects_list_ownership_fk",
+    }),
+    check(
+      "task_projects_lifecycle_check",
+      sql`${table.lifecycle} IN ('open', 'completed', 'cancelled')`,
+    ),
+    check(
+      "task_projects_availability_check",
+      sql`
+        (${table.availability} = 'active' AND ${table.archivedAt} IS NULL)
+        OR (${table.availability} = 'archived' AND ${table.archivedAt} IS NOT NULL)
+      `,
+    ),
+    check(
+      "task_projects_lifecycle_timestamps_check",
+      sql`
+        (${table.lifecycle} = 'open' AND ${table.completedAt} IS NULL AND ${table.cancelledAt} IS NULL)
+        OR (
+          ${table.lifecycle} = 'completed'
+          AND ${table.completedAt} IS NOT NULL
+          AND ${table.cancelledAt} IS NULL
+        )
+        OR (
+          ${table.lifecycle} = 'cancelled'
+          AND ${table.completedAt} IS NULL
+          AND ${table.cancelledAt} IS NOT NULL
+        )
+      `,
+    ),
+    check("task_projects_revision_check", sql`${table.revision} > 0`),
+    check(
+      "task_projects_create_idempotency_check",
+      sql`
+        (${table.createIdempotencyKey} IS NULL AND ${table.createIdempotencyFingerprint} IS NULL)
+        OR (
+          ${table.createIdempotencyKey} IS NOT NULL
+          AND ${table.createIdempotencyFingerprint} IS NOT NULL
+          AND ${table.createIdempotencyFingerprint} ~ '^[0-9a-f]{64}$'
+        )
+      `,
+    ),
+  ],
+);
+
 export const reminders = pgTable(
   "reminders",
   {
@@ -1265,6 +1410,14 @@ export const reminders = pgTable(
     scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     estimateMinutes: integer("estimate_minutes"),
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
+    taskListId: uuid("task_list_id"),
+    taskProjectId: uuid("task_project_id"),
+    taskWhy: text("task_why"),
+    taskLifecycle: text("task_lifecycle").$type<TaskLifecycle>(),
+    taskRevision: integer("task_revision"),
+    taskCancelledAt: timestamp("task_cancelled_at", { withTimezone: true }),
+    taskCreateIdempotencyKey: uuid("task_create_idempotency_key"),
+    taskCreateIdempotencyFingerprint: text("task_create_idempotency_fingerprint"),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...timestamps,
@@ -1272,6 +1425,85 @@ export const reminders = pgTable(
   (table) => [
     index("reminders_user_due_idx").on(table.userId, table.completedAt, table.dueAt),
     index("reminders_user_task_idx").on(table.userId, table.kind, table.status, table.scheduledAt),
+    index("reminders_task_list_idx")
+      .on(table.userId, table.taskListId, table.taskLifecycle)
+      .where(sql`${table.kind} = 'task'`),
+    index("reminders_task_project_idx")
+      .on(table.userId, table.taskProjectId, table.taskLifecycle)
+      .where(sql`${table.kind} = 'task'`),
+    uniqueIndex("reminders_task_create_idempotency_idx")
+      .on(table.userId, table.taskCreateIdempotencyKey)
+      .where(sql`${table.taskCreateIdempotencyKey} is not null`),
+    foreignKey({
+      columns: [table.taskListId, table.userId],
+      foreignColumns: [taskLists.id, taskLists.userId],
+      name: "reminders_task_list_ownership_fk",
+    }),
+    foreignKey({
+      columns: [table.taskProjectId, table.userId, table.taskListId],
+      foreignColumns: [taskProjects.id, taskProjects.userId, taskProjects.listId],
+      name: "reminders_task_project_location_fk",
+    }),
+    check("reminders_kind_check", sql`${table.kind} IN ('reminder', 'task')`),
+    check("reminders_priority_check", sql`${table.priority} IN ('low', 'medium', 'high')`),
+    check(
+      "reminders_legacy_status_check",
+      sql`${table.status} IN ('inbox', 'next', 'scheduled', 'completed', 'cancelled')`,
+    ),
+    check(
+      "reminders_task_revision_check",
+      sql`${table.taskRevision} IS NULL OR ${table.taskRevision} > 0`,
+    ),
+    check(
+      "reminders_task_create_idempotency_check",
+      sql`
+        (${table.taskCreateIdempotencyKey} IS NULL AND ${table.taskCreateIdempotencyFingerprint} IS NULL)
+        OR (
+          ${table.taskCreateIdempotencyKey} IS NOT NULL
+          AND ${table.taskCreateIdempotencyFingerprint} IS NOT NULL
+          AND ${table.taskCreateIdempotencyFingerprint} ~ '^[0-9a-f]{64}$'
+        )
+      `,
+    ),
+    check(
+      "reminders_task_fields_check",
+      sql`
+        (
+          ${table.kind} = 'task'
+          AND ${table.taskListId} IS NOT NULL
+          AND ${table.taskLifecycle} IN ('open', 'completed', 'cancelled')
+          AND ${table.taskRevision} IS NOT NULL
+          AND (
+            (
+              ${table.taskLifecycle} = 'open'
+              AND ${table.completedAt} IS NULL
+              AND ${table.taskCancelledAt} IS NULL
+            )
+            OR (
+              ${table.taskLifecycle} = 'completed'
+              AND ${table.completedAt} IS NOT NULL
+              AND ${table.taskCancelledAt} IS NULL
+            )
+            OR (
+              ${table.taskLifecycle} = 'cancelled'
+              AND ${table.completedAt} IS NULL
+              AND ${table.taskCancelledAt} IS NOT NULL
+            )
+          )
+        )
+        OR (
+          ${table.kind} = 'reminder'
+          AND ${table.taskListId} IS NULL
+          AND ${table.taskProjectId} IS NULL
+          AND ${table.taskWhy} IS NULL
+          AND ${table.taskLifecycle} IS NULL
+          AND ${table.taskRevision} IS NULL
+          AND ${table.taskCancelledAt} IS NULL
+          AND ${table.taskCreateIdempotencyKey} IS NULL
+          AND ${table.taskCreateIdempotencyFingerprint} IS NULL
+        )
+      `,
+    ),
   ],
 );
 

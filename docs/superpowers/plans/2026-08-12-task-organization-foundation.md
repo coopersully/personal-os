@@ -157,7 +157,7 @@ git commit -m "feat: define task organization contracts"
 
 **Files:**
 - Modify: `packages/database/src/schema.ts`
-- Create: `packages/database/migrations/0054_task_organization.sql`
+- Create: `packages/database/migrations/0055_task_organization.sql`
 - Modify: `packages/database/migrations/meta/_journal.json`
 - Modify: `packages/database/src/schema.test.ts`
 - Create: `apps/api/src/task-organization-migration.integration.test.ts`
@@ -242,7 +242,7 @@ Run the command from Step 2. Expected: PASS from both a fresh database and the `
 
 ```bash
 git add packages/database/src/schema.ts packages/database/src/schema.test.ts \
-  packages/database/migrations/0054_task_organization.sql \
+  packages/database/migrations/0055_task_organization.sql \
   packages/database/migrations/meta/_journal.json \
   apps/api/src/task-organization-migration.integration.test.ts
 git commit -m "feat: persist task organization and lifecycle"

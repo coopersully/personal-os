@@ -22,10 +22,13 @@ Read and act on one unified mailbox while retaining clear source-account and pro
 - Connected-account headers are disclosure categories, not mailbox selections:
   they stay visually flat while their indented child destinations carry the
   active state.
-- The app bar keeps list-wide triage together: search and the mutually
-  exclusive All mail, Unread, Starred, and Snoozed scopes govern the
-  conversation list. Sync is a mailbox utility, Compose is the primary action,
-  and conversation actions remain in the reader.
+- Unified inbox is a disclosure category in the contextual sidebar. Its All
+  mail, Unread, Starred, and Snoozed children govern the cross-account
+  conversation list; account headers use the same category pattern.
+- Mail keeps the global app bar for its identity, Sync, and Compose. A
+  Mail-owned secondary bar sits immediately beneath it: it supplies list search
+  in inbox state and pinned Reply, Snooze, Archive, Delete, Star, and read-state
+  actions when a conversation is selected.
 - Unified and account mailbox navigation remains usable with stale synchronized material.
 - A reconnect warning is scoped only to Mail-enabled accounts.
 - Manual sync gives transient toast feedback and refreshes durable health after success or failure.

@@ -2819,7 +2819,7 @@ p {
 .mail-page {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0;
   height: 100%;
   min-height: 0;
   min-width: 0;
@@ -2887,18 +2887,67 @@ p {
   flex-wrap: wrap;
   gap: 8px;
 }
-.mail-topbar-controls {
+.mail-secondary-nav {
+  align-items: center;
+  background: var(--paper-deep);
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.875rem;
+  min-height: 3rem;
+  padding: 0.375rem 1rem;
+}
+.mail-secondary-nav__context {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0.0625rem;
+  min-width: max-content;
+}
+.mail-secondary-nav__context > span {
+  color: var(--muted);
+  font-family: var(--app-font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.mail-secondary-nav__context > strong {
+  font-size: 0.8125rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.mail-secondary-nav__actions {
   align-items: center;
   display: flex;
-  gap: 0.5rem;
+  gap: 0.125rem;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.mail-topbar-controls form { min-width: 0; }
-.workspace-topbar__search,
-.mail-topbar__search { width: min(15rem, 24vw); }
-.mail-topbar__scope-switch { flex: 0 1 auto; min-width: 0; }
-.mail-reader__back {
-  display: none;
+.mail-secondary-nav__actions::-webkit-scrollbar { display: none; }
+.mail-secondary-nav__actions .button {
+  flex: 0 0 auto;
+  font-size: 0.75rem;
+  min-height: 2rem;
+}
+.mail-secondary-nav__search {
+  min-width: 0;
+  width: min(22rem, 42vw);
+}
+.mail-sidebar__unified-icon {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: calc(var(--radius) - 2px);
+  color: var(--accent-strong);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 1.75rem;
+  justify-content: center;
+  width: 1.75rem;
+}
+.mail-sidebar__unified-icon > svg { height: 1rem; width: 1rem; }
+.mail-sidebar__mailbox-link > svg {
+  flex: 0 0 auto;
+  height: 0.875rem;
+  width: 0.875rem;
 }
 .mail-workspace {
   background: var(--surface-raised);
@@ -4443,10 +4492,6 @@ p {
   .mail-workspace--reader .mail-thread-list {
     display: none;
   }
-  .mail-reader__back {
-    display: inline-flex;
-    margin-bottom: 22px;
-  }
 }
 
 @media (max-width: 560px) {
@@ -4477,9 +4522,14 @@ p {
   .workspace-skeleton__metric {
     height: 4.5rem;
   }
-  .workspace-topbar__search,
-  .mail-topbar__search { width: min(10rem, 32vw); }
-  .mail-topbar__scope-label { display: none; }
+  .mail-secondary-nav {
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding-inline: 0.75rem;
+  }
+  .mail-secondary-nav__context > span { display: none; }
+  .mail-secondary-nav__search { min-width: 10rem; width: min(18rem, 58vw); }
+  .mail-secondary-nav__actions .button { padding-inline: 0.5rem; }
   .mail-send-recovery {
     border-radius: 12px;
     padding: 14px;

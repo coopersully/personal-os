@@ -133,10 +133,8 @@ import {
   PulseIcon,
   RefreshIcon,
   ScissorsIcon,
-  SearchIcon,
   SettingsIcon,
   SparklesIcon,
-  StarIcon,
   SunIcon,
   TargetIcon,
   TrashIcon,
@@ -222,7 +220,6 @@ import {
   FieldSet as ShadcnFieldSet,
 } from "@/components/ui/field";
 import { Input as ShadcnInput } from "@/components/ui/input";
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 import {
   Item as ShadcnItem,
   ItemActions as ShadcnItemActions,
@@ -304,11 +301,8 @@ import {
 } from "./features/finances/navigation.js";
 import { FinancesPage } from "./features/finances/page.js";
 import {
-  isMailListScope,
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
-  mailListScopeFromSearch,
-  mailListScopeParams,
 } from "./features/mail/mail.js";
 import {
   ReminderRow,
@@ -1435,8 +1429,6 @@ function WorkspaceAppBarForRoute({
       <CalendarAppBarControls onToday={onCalendarToday} user={user} />
     ) : pathname === "/today" ? (
       <TodayWeatherTopbar user={user} weather={weather} />
-    ) : workspace === "mail" ? (
-      <MailTopbarControls />
     ) : pathname === "/activity" ? (
       <ActivityTopbarControls />
     ) : pathname === "/reminders" ? (
@@ -4369,80 +4361,6 @@ function MotivesPage() {
           </ShadcnCardContent>
         </ShadcnCard>
       </section>
-    </div>
-  );
-}
-
-function MailTopbarControls() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const search = searchParams.get("q")?.trim() ?? "";
-  const listScope = mailListScopeFromSearch(searchParams);
-  const [searchDraft, setSearchDraft] = useState(search);
-
-  useEffect(() => setSearchDraft(search), [search]);
-
-  const updateMailState = (updates: Record<string, null | string>) => {
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current);
-      for (const [key, value] of Object.entries(updates)) {
-        if (value) next.set(key, value);
-        else next.delete(key);
-      }
-      return next;
-    });
-  };
-
-  return (
-    <div className="mail-topbar-controls">
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          updateMailState({ q: searchDraft.trim() || null, thread: null });
-        }}
-      >
-        <InputGroup className="mail-topbar__search">
-          <InputGroupAddon>
-            <SearchIcon aria-hidden="true" />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label="Search mail"
-            onChange={(event) => setSearchDraft(event.currentTarget.value)}
-            placeholder="Search mail"
-            type="search"
-            value={searchDraft}
-          />
-        </InputGroup>
-      </form>
-      <ShadcnToggleGroup
-        aria-label="Mail list scope"
-        className="mail-topbar__scope-switch"
-        onValueChange={(value) => {
-          if (isMailListScope(value))
-            updateMailState({ thread: null, ...mailListScopeParams(value) });
-        }}
-        size="sm"
-        spacing={0}
-        type="single"
-        value={listScope}
-        variant="outline"
-      >
-        <ShadcnToggleGroupItem aria-label="All mail" value="all">
-          <MailIcon aria-hidden="true" data-icon="inline-start" />
-          <span className="mail-topbar__scope-label">All mail</span>
-        </ShadcnToggleGroupItem>
-        <ShadcnToggleGroupItem aria-label="Unread" value="unread">
-          <EyeIcon aria-hidden="true" data-icon="inline-start" />
-          <span className="mail-topbar__scope-label">Unread</span>
-        </ShadcnToggleGroupItem>
-        <ShadcnToggleGroupItem aria-label="Starred" value="starred">
-          <StarIcon aria-hidden="true" data-icon="inline-start" />
-          <span className="mail-topbar__scope-label">Starred</span>
-        </ShadcnToggleGroupItem>
-        <ShadcnToggleGroupItem aria-label="Snoozed" value="snoozed">
-          <ClockIcon aria-hidden="true" data-icon="inline-start" />
-          <span className="mail-topbar__scope-label">Snoozed</span>
-        </ShadcnToggleGroupItem>
-      </ShadcnToggleGroup>
     </div>
   );
 }

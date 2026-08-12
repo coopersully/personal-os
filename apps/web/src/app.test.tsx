@@ -3451,10 +3451,12 @@ describe("ilo web app", () => {
     }
   });
 
-  it("keeps Mail and Finances app-bar controls on workspace child routes", async () => {
+  it("keeps Mail and Finances workspace controls on child routes", async () => {
     const mail = setup("/mail/thread/example");
     const mailAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
-    expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
+    expect(
+      within(mailAppBar).queryByRole("searchbox", { name: "Search mail" }),
+    ).not.toBeInTheDocument();
     expect(within(mailAppBar).getByRole("button", { name: "Compose mail" })).toBeInTheDocument();
     mail.unmount();
 
@@ -3470,13 +3472,13 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const view = setup("/mail?thread=f1000000-0000-4000-8000-000000000136");
 
-    const scope = await screen.findByRole("radiogroup", { name: "Mail list scope" });
-    await browser.click(within(scope).getByRole("radio", { name: "Starred" }));
+    const mailboxes = await screen.findByRole("navigation", { name: "Mailboxes" });
+    await browser.click(await within(mailboxes).findByRole("button", { name: "Starred" }));
 
     expect(view.location.value).toBe("/mail?view=starred");
-    expect(within(scope).getByRole("radio", { name: "All mail" })).toBeInTheDocument();
-    expect(within(scope).getByRole("radio", { name: "Unread" })).toBeInTheDocument();
-    expect(within(scope).getByRole("radio", { name: "Snoozed" })).toBeInTheDocument();
+    expect(within(mailboxes).getAllByRole("button", { name: "All mail" })).not.toHaveLength(0);
+    expect(within(mailboxes).getByRole("button", { name: "Unread" })).toBeInTheDocument();
+    expect(within(mailboxes).getByRole("button", { name: "Snoozed" })).toBeInTheDocument();
     view.unmount();
   });
 
@@ -4883,6 +4885,7 @@ describe("ilo web app", () => {
     expect(screen.queryByLabelText("Search conversations")).not.toBeInTheDocument();
     expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
+    expect(await screen.findByRole("region", { name: "Conversation actions" })).toBeInTheDocument();
     expect(
       await screen.findByText("Hello Example User. This is the full message."),
     ).toBeInTheDocument();
@@ -4951,6 +4954,7 @@ describe("ilo web app", () => {
     expect(
       await screen.findByText("This message has no plain-text body.", {}, { timeout: 5_000 }),
     ).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Back to Unified inbox" }));
     await browser.type(screen.getByLabelText("Search mail"), "Project");
     await browser.keyboard("{Enter}");
     await waitFor(() =>
@@ -4959,7 +4963,7 @@ describe("ilo web app", () => {
       ),
     );
     await browser.click(
-      within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("button", {
+      within(screen.getByRole("navigation", { name: "Mailboxes" })).getByRole("button", {
         name: "Unread",
       }),
     );
@@ -5146,7 +5150,7 @@ describe("ilo web app", () => {
     setup("/mail");
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
-    await browser.click(screen.getByRole("button", { name: "Move conversation to trash" }));
+    await browser.click(screen.getByRole("button", { name: "Delete conversation" }));
     await waitFor(() =>
       expect(mocks.updateMailThread).toHaveBeenCalledWith(mailThread.id, {
         mailboxIds: [trash.id],
@@ -5304,7 +5308,7 @@ describe("ilo web app", () => {
     expect(screen.getByRole("button", { name: "Spam" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Trash" })).toBeInTheDocument();
 
-    await browser.click(screen.getAllByRole("button", { name: "All mail" })[0] as HTMLElement);
+    await browser.click(screen.getAllByRole("button", { name: "All mail" })[1] as HTMLElement);
     expect(
       within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("heading"),
     ).not.toBeInTheDocument();
@@ -5313,9 +5317,9 @@ describe("ilo web app", () => {
         expect.objectContaining({ accountIds: [secondId] }),
       ),
     );
-    const topNavigation = screen.getByRole("navigation", { name: "Top navigation" });
-    await browser.click(within(topNavigation).getByRole("button", { name: "Unread" }));
-    await browser.click(within(topNavigation).getByRole("button", { name: "Unread" }));
+    const unifiedInbox = screen.getByRole("navigation", { name: "Mailboxes" });
+    await browser.click(within(unifiedInbox).getByRole("button", { name: "Unread" }));
+    await browser.click(within(unifiedInbox).getByRole("button", { name: "Unread" }));
     const search = screen.getByLabelText("Search mail");
     await browser.clear(search);
     await browser.keyboard("{Enter}");
@@ -5327,7 +5331,7 @@ describe("ilo web app", () => {
 
     const iCloudToggle = screen.getByRole("button", { name: /icloud@example.com iCloud Mail/ });
     await browser.click(iCloudToggle);
-    await browser.click(screen.getAllByRole("button", { name: "All mail" })[1] as HTMLElement);
+    await browser.click(screen.getAllByRole("button", { name: "All mail" })[2] as HTMLElement);
     expect(
       within(screen.getByRole("navigation", { name: "Top navigation" })).queryByRole("heading"),
     ).not.toBeInTheDocument();

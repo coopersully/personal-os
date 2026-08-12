@@ -66,8 +66,10 @@ type NavigationOwner =
 
 The integration-owned route manifest resolves `NavigationOwner` before the
 shell renders. A route can change the selected row or local state inside its
-owner, but cannot select a different sidebar. Route-name conditionals such as
-`sidebarMode` are forbidden as a navigation-ownership mechanism.
+owner, but cannot select a different sidebar. Each setup journey is standalone
+and replaces the shell before it can claim a workspace owner. Route-name
+conditionals such as `sidebarMode` are forbidden as a navigation-ownership
+mechanism.
 
 | Route family | Navigation owner | Required shell behavior |
 | --- | --- | --- |

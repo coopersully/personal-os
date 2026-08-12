@@ -15,6 +15,7 @@ import {
 } from "@personal-os/database";
 import type { AccessScope, AgentConnectionGuide } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { asc, eq } from "drizzle-orm";
 import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
 import { AppError } from "./errors.js";
 import type { Principal } from "./types.js";
@@ -209,7 +210,11 @@ describe.sequential("Agent Access work-item projection", () => {
   });
 
   it("orders, summarizes, filters, and cursor-paginates owned work", async () => {
-    const service = createAgentAccessWorkItemService({ db: database.db, now: () => snapshot });
+    const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
+      db: database.db,
+      now: () => snapshot,
+    });
 
     const first = await service.list(principal, { limit: 10 }, publishedDomains);
     expect(first.items).toHaveLength(10);
@@ -260,10 +265,22 @@ describe.sequential("Agent Access work-item projection", () => {
     await expect(
       service.list(principal, { cursor: "not-a-cursor", limit: 10 }, publishedDomains),
     ).rejects.toBeInstanceOf(AppError);
+    const cursorPayload = JSON.parse(
+      Buffer.from(first.nextCursor as string, "base64url").toString("utf8"),
+    ) as { cursor: { id: string } };
+    cursorPayload.cursor.id = "attention:tampered";
+    const tamperedCursor = Buffer.from(JSON.stringify(cursorPayload)).toString("base64url");
+    await expect(
+      service.list(principal, { cursor: tamperedCursor, limit: 10 }, publishedDomains),
+    ).rejects.toBeInstanceOf(AppError);
   });
 
   it("shows one account-level connection action without leaking other-user work", async () => {
-    const service = createAgentAccessWorkItemService({ db: database.db, now: () => snapshot });
+    const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
+      db: database.db,
+      now: () => snapshot,
+    });
     const page = await service.list(otherPrincipal, { limit: 10 }, publishedDomains);
 
     expect(page.items[0]).toMatchObject({
@@ -278,6 +295,7 @@ describe.sequential("Agent Access work-item projection", () => {
 
   it("keeps successful work visible when one domain projection is unavailable", async () => {
     const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
       db: database.db,
       now: () => snapshot,
       sourceReaders: {
@@ -296,26 +314,42 @@ describe.sequential("Agent Access work-item projection", () => {
   });
 
   it("projects mixed authority and source edge cases without inventing work", async () => {
-    const [credential] = (await database.db.select().from(accessTokens)).filter(
-      (row) => row.userId === principal.userId,
-    );
-    const [attention] = (await database.db.select().from(attentionItems)).filter(
-      (row) => row.userId === principal.userId,
-    );
-    const [rule] = (await database.db.select().from(mailRules)).filter(
-      (row) => row.userId === principal.userId,
-    );
-    const [profile] = (await database.db.select().from(domainProfiles)).filter(
-      (row) => row.userId === principal.userId,
-    );
-    const [account] = (await database.db.select().from(calendarAccounts)).filter(
-      (row) => row.userId === principal.userId,
-    );
+    const [credential] = await database.db
+      .select()
+      .from(accessTokens)
+      .where(eq(accessTokens.userId, principal.userId))
+      .orderBy(asc(accessTokens.id))
+      .limit(1);
+    const [attention] = await database.db
+      .select()
+      .from(attentionItems)
+      .where(eq(attentionItems.userId, principal.userId))
+      .orderBy(asc(attentionItems.id))
+      .limit(1);
+    const [rule] = await database.db
+      .select()
+      .from(mailRules)
+      .where(eq(mailRules.userId, principal.userId))
+      .orderBy(asc(mailRules.id))
+      .limit(1);
+    const [profile] = await database.db
+      .select()
+      .from(domainProfiles)
+      .where(eq(domainProfiles.userId, principal.userId))
+      .orderBy(asc(domainProfiles.id))
+      .limit(1);
+    const [account] = await database.db
+      .select()
+      .from(calendarAccounts)
+      .where(eq(calendarAccounts.userId, principal.userId))
+      .orderBy(asc(calendarAccounts.id))
+      .limit(1);
     if (!credential || !attention || !rule || !profile || !account) {
       throw new Error("Agent Access edge-case fixtures were not found.");
     }
 
     const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
       db: database.db,
       now: () => snapshot,
       sourceReaders: {
@@ -370,6 +404,7 @@ describe.sequential("Agent Access work-item projection", () => {
 
   it("marks every affected summary unavailable when core projections fail", async () => {
     const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
       db: database.db,
       now: () => snapshot,
       sourceReaders: {
@@ -389,5 +424,27 @@ describe.sequential("Agent Access work-item projection", () => {
       byKind: { attention: null, setup: null },
       total: null,
     });
+  });
+
+  it("does not hide an available kind when a failed source belongs only to inaccessible workspaces", async () => {
+    const service = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
+      db: database.db,
+      now: () => snapshot,
+      sourceReaders: {
+        mailRules: async () => {
+          throw new Error("Mail rules unavailable");
+        },
+      },
+    });
+    const calendarOnly: Principal = {
+      ...principal,
+      scopes: new Set<AccessScope>(["calendar:read"]),
+    };
+
+    const page = await service.list(calendarOnly, { limit: 10 }, publishedDomains);
+
+    expect(page.unavailableDomains).not.toContain("mail");
+    expect(page.summary.byKind.review).toBe(0);
   });
 });

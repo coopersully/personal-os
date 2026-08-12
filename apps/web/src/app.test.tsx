@@ -3447,6 +3447,21 @@ describe("ilo web app", () => {
     }
   });
 
+  it("keeps Mail and Finances app-bar controls on workspace child routes", async () => {
+    const mail = setup("/mail/thread/example");
+    const mailAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
+    expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
+    expect(within(mailAppBar).getByRole("button", { name: "Compose mail" })).toBeInTheDocument();
+    mail.unmount();
+
+    const finances = setup("/finances/transactions");
+    const financeAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
+    expect(
+      within(financeAppBar).getByRole("button", { name: "Add transaction" }),
+    ).toBeInTheDocument();
+    finances.unmount();
+  });
+
   it("describes task material with scheduled, note-only, and blank states", async () => {
     mocks.listTasks.mockResolvedValueOnce({
       items: [

@@ -32,16 +32,21 @@ test("Agent Access prioritizes paginated work and keeps setup contextual", async
   await expect(page.getByText("1–10 of 11")).toBeVisible();
   await page.getByRole("button", { name: "Next page" }).click();
   await expect(page.getByText("11–11 of 11")).toBeVisible();
-  await page.getByRole("button", { name: "Previous page" }).click();
-  await expect(page.getByText("1–10 of 11")).toBeVisible();
 
   await page.getByRole("radio", { name: "Attention" }).click();
   await expect(page.getByText("1–8 of 8")).toBeVisible();
   await expect(page.getByRole("button", { name: "Next page" })).toBeDisabled();
   await page.getByRole("radio", { name: "All" }).click();
+  await expect(page.getByText("1–10 of 11")).toBeVisible();
+  await page.getByRole("button", { name: "Next page" }).click();
+  await expect(page.getByText("11–11 of 11")).toBeVisible();
+  await page.getByRole("button", { name: "Previous page" }).click();
+  await expect(page.getByText("1–10 of 11")).toBeVisible();
   const mailReview = page.getByRole("listitem").filter({ hasText: "Review Fixture newsletters" });
   await mailReview.getByRole("link", { name: "Review rule" }).click();
   await expect(page.getByRole("dialog", { name: "Review Fixture newsletters" })).toBeVisible();
+  await expect(page).toHaveURL(/workspace=mail&reviewRule=/);
+  await expect(page.getByRole("dialog").getByText(/Rule scope:/)).toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Close" }).last().click();
 
   await page.getByRole("radio", { name: "Calendar" }).click();

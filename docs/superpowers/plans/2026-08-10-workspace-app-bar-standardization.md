@@ -28,7 +28,7 @@ a green whole-repository signal for this shell-only change.
 
 ---
 
-### Task 1: Establish the app-shell primitive and behavioral proof ✓
+## Task 1: Establish the app-shell primitive and behavioral proof ✓
 
 **Files:**
 - Create: `apps/web/src/components/workspace-app-bar.tsx`
@@ -43,7 +43,7 @@ a green whole-repository signal for this shell-only change.
 3. Run the focused test. It must demonstrate the new contract before route
    migration begins.
 
-### Task 2: Migrate workspace content into the shared slots ✓
+## Task 2: Migrate workspace content into the shared slots ✓
 
 **Files:**
 - Modify: `apps/web/src/app.tsx`
@@ -60,7 +60,7 @@ a green whole-repository signal for this shell-only change.
    modifiers.
 5. Run the focused unit test after migration, then type-check the web app.
 
-### Task 3: Establish the visual contract, document it, and QA it ✓
+## Task 3: Establish the visual contract, document it, and QA it ✓
 
 **Files:**
 - Modify: `apps/web/src/styles.css`
@@ -79,7 +79,7 @@ a green whole-repository signal for this shell-only change.
    usable controls, accessible names, and a console free of newly introduced
    errors.
 
-### Review checkpoints
+## Review checkpoints
 
 - [x] The primitive prevents the original divergence instead of moving it into
   a different per-workspace CSS class.

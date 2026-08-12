@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import {
   accessTokens,
   attentionItems,
@@ -92,10 +93,12 @@ const workspaceRoutes: Record<AgentAccessDomain, string> = {
 };
 
 export function createAgentAccessWorkItemService({
+  cursorSigningKey,
   db,
   now,
   sourceReaders: sourceReaderOverrides,
 }: {
+  cursorSigningKey: string;
   db: Database;
   now: () => Date;
   sourceReaders?: Partial<SourceReaders>;
@@ -178,7 +181,7 @@ export function createAgentAccessWorkItemService({
       query: AgentAccessWorkItemQuery,
       domains: AgentConnectionGuide["domains"],
     ): Promise<AgentAccessWorkItemPage> {
-      const cursor = query.cursor ? decodeCursor(query.cursor) : null;
+      const cursor = query.cursor ? decodeCursor(query.cursor, cursorSigningKey) : null;
       if (
         cursor &&
         (cursor.domain !== (query.domain ?? null) || cursor.kind !== (query.kind ?? null))
@@ -225,7 +228,11 @@ export function createAgentAccessWorkItemService({
         .filter((domain) => accessibleDomains.has(domain))
         .toSorted();
       const failedKinds = new Set(
-        [...failedSources].flatMap((source) => sourceImpact[source].kinds),
+        [...failedSources]
+          .filter((source) =>
+            sourceImpact[source].domains.some((domain) => accessibleDomains.has(domain)),
+          )
+          .flatMap((source) => sourceImpact[source].kinds),
       );
       const summary = summarizeItems(items, new Set(unavailableDomains), failedKinds);
       const filtered = items.filter(
@@ -241,7 +248,13 @@ export function createAgentAccessWorkItemService({
         items: pageItems,
         nextCursor:
           filtered.length > query.limit && last
-            ? encodeCursor(last, snapshotAt, query.domain ?? null, query.kind ?? null)
+            ? encodeCursor(
+                last,
+                snapshotAt,
+                query.domain ?? null,
+                query.kind ?? null,
+                cursorSigningKey,
+              )
             : null,
         snapshotAt: snapshotAt.toISOString(),
         summary,
@@ -430,19 +443,23 @@ function summarizeItems(
 function compareItems(left: AgentAccessWorkItem, right: AgentAccessWorkItem): number {
   return (
     priorityOrder[left.priority] - priorityOrder[right.priority] ||
-    effectiveAt(left).localeCompare(effectiveAt(right)) ||
-    left.updatedAt.localeCompare(right.updatedAt) ||
-    left.id.localeCompare(right.id)
+    compareText(effectiveAt(left), effectiveAt(right)) ||
+    compareText(left.updatedAt, right.updatedAt) ||
+    compareText(left.id, right.id)
   );
 }
 
 function compareItemToCursor(item: AgentAccessWorkItem, cursor: Cursor): number {
   return (
     priorityOrder[item.priority] - priorityOrder[cursor.priority] ||
-    effectiveAt(item).localeCompare(cursor.effectiveAt) ||
-    item.updatedAt.localeCompare(cursor.updatedAt) ||
-    item.id.localeCompare(cursor.id)
+    compareText(effectiveAt(item), cursor.effectiveAt) ||
+    compareText(item.updatedAt, cursor.updatedAt) ||
+    compareText(item.id, cursor.id)
   );
+}
+
+function compareText(left: string, right: string): number {
+  return left === right ? 0 : left < right ? -1 : 1;
 }
 
 function effectiveAt(item: AgentAccessWorkItem): string {
@@ -454,26 +471,47 @@ function encodeCursor(
   snapshotAt: Date,
   domain: AgentAccessDomain | null,
   kind: AgentAccessWorkItemKind | null,
+  cursorSigningKey: string,
 ): string {
+  const cursor = {
+    domain,
+    effectiveAt: effectiveAt(item),
+    id: item.id,
+    kind,
+    priority: item.priority,
+    snapshotAt: snapshotAt.toISOString(),
+    updatedAt: item.updatedAt,
+  } satisfies Cursor;
   return Buffer.from(
     JSON.stringify({
-      domain,
-      effectiveAt: effectiveAt(item),
-      id: item.id,
-      kind,
-      priority: item.priority,
-      snapshotAt: snapshotAt.toISOString(),
-      updatedAt: item.updatedAt,
-    } satisfies Cursor),
+      cursor,
+      signature: cursorSignature(cursor, cursorSigningKey),
+    }),
   ).toString("base64url");
 }
 
-function decodeCursor(value: string): Cursor {
+function decodeCursor(value: string, cursorSigningKey: string): Cursor {
   try {
-    return cursorSchema.parse(JSON.parse(Buffer.from(value, "base64url").toString("utf8")));
+    const envelope = z
+      .object({ cursor: cursorSchema, signature: z.string().regex(/^[a-f0-9]{64}$/) })
+      .parse(JSON.parse(Buffer.from(value, "base64url").toString("utf8")));
+    if (!signaturesMatch(envelope.signature, cursorSignature(envelope.cursor, cursorSigningKey))) {
+      throw new Error("Cursor signature mismatch");
+    }
+    return envelope.cursor;
   } catch {
     throw new AppError("invalid_request", "The Agent Access cursor is invalid.");
   }
+}
+
+function cursorSignature(cursor: Cursor, cursorSigningKey: string): string {
+  return createHmac("sha256", cursorSigningKey).update(JSON.stringify(cursor)).digest("hex");
+}
+
+function signaturesMatch(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left, "hex");
+  const rightBuffer = Buffer.from(right, "hex");
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function isAgentAccessDomain(value: string): value is AgentAccessDomain {

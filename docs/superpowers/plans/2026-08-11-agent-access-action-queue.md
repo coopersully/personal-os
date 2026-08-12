@@ -15,7 +15,7 @@
 - Only Mail, Finances, Calendar, and Tasks are agent workspaces; an account-level connection item has `domain: null`.
 - The queue is a read model. Mail, Finance, profile, attention, source, and access mutations remain domain-owned.
 - Cursor values are opaque to the client and bind the snapshot, ordering tuple, and active filters.
-- A successful empty result says **You're caught up**; partial availability never becomes an authoritative zero.
+- A successful empty result says **You’re caught up**; partial availability never becomes an authoritative zero.
 - Agent-owned setup work is not presented as a human action.
 - Existing readiness evidence stays inside the selected workspace detail.
 - Use existing semantic tokens and reicon glyphs from `@/components/icons`; do not add raw colors or another icon package.
@@ -275,7 +275,7 @@ Fetch the returned docs URLs, inspect the dry-run diff, then add the two officia
 Render with mocked pages and assert:
 
 - loading skeleton geometry;
-- **You're caught up** on a successful empty page;
+- **You’re caught up** on a successful empty page;
 - partial availability names unavailable workspaces without showing a false zero;
 - `All`, `Review`, `Attention`, and `Setup` reset cursor state;
 - Next requests `nextCursor`, Previous returns to the saved cursor, and page one uses no cursor;

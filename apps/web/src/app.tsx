@@ -999,9 +999,12 @@ function AuthenticatedApp({ user }: { user: User }) {
   };
 
   const mobileDockLogout = () => {
-    void api.logout().finally(() => {
-      window.location.assign("/");
-    });
+    void api
+      .logout()
+      .catch((error) => toast.error(errorMessage(error)))
+      .finally(() => {
+        window.location.assign("/");
+      });
   };
 
   return (
@@ -1428,7 +1431,7 @@ function WorkspaceAppBarForRoute({
       <CalendarAppBarControls onToday={onCalendarToday} user={user} />
     ) : pathname === "/today" ? (
       <TodayWeatherTopbar user={user} weather={weather} />
-    ) : pathname === "/mail" ? (
+    ) : workspace === "mail" ? (
       <MailTopbarControls />
     ) : pathname === "/activity" ? (
       <ActivityTopbarControls />
@@ -1464,12 +1467,12 @@ function WorkspaceAppBarForRoute({
             <TasksCreateButton onCreate={() => setEditor({ kind: "task" })} />
           ) : workspace === "calendar" ? (
             <CalendarCreateButton setEditor={setEditor} />
-          ) : pathname === "/mail" ? (
+          ) : workspace === "mail" ? (
             <>
               <MailSyncButton />
               <MailComposeButton />
             </>
-          ) : pathname === "/finances" ? (
+          ) : workspace === "finances" ? (
             <FinanceAddTransactionButton />
           ) : workspace === "account" ? null : (
             <CreateMenu setEditor={setEditor} />

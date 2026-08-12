@@ -165,7 +165,7 @@ The layout remains action-first in every state:
   agent-owned work is described in workspace detail and is not presented as a
   human task.
 - **Host connected, caught up:** the queue uses the shared Empty composition
-  with **You're caught up** and leaves workspace status visible below.
+  with **You’re caught up** and leaves workspace status visible below.
 - **Multiple hosts:** the header reports the total. Permission differences are
   explained in workspace evidence; credential management remains in Access
   management.
@@ -181,7 +181,7 @@ queue in React:
 type AgentAccessWorkItem = {
   action: { label: string; to: string } | null;
   actionAt: string | null;
-  domain: "mail" | "finances" | "calendar" | "tasks";
+  domain: "mail" | "finances" | "calendar" | "tasks" | null;
   id: string;
   kind: "review" | "attention" | "setup";
   priority: "person_review" | "blocked" | "critical" | "high" | "normal" | "low";
@@ -195,7 +195,11 @@ type AgentAccessWorkItemPage = {
   items: AgentAccessWorkItem[];
   nextCursor: string | null;
   snapshotAt: string;
-  total: number | null;
+  summary: {
+    byDomain: Record<"calendar" | "finances" | "mail" | "tasks", number | null>;
+    byKind: Record<AgentAccessWorkItem["kind"], number | null>;
+    total: number | null;
+  };
   unavailableDomains: Array<AgentAccessWorkItem["domain"]>;
 };
 ```
@@ -222,7 +226,7 @@ URLs, opened disclosures, or local UI state.
 
 - Loading uses the shared Skeleton composition and preserves the queue's
   expected row geometry.
-- A successful empty result renders **You're caught up**; it never disappears
+- A successful empty result renders **You’re caught up**; it never disappears
   into whitespace.
 - Partial domain failure keeps available work visible, identifies which
   workspace could not be checked, and offers one queue-level retry. It never

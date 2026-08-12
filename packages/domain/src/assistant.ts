@@ -170,7 +170,7 @@ export const agentAccessWorkItemSchema = z.object({
         .trim()
         .min(1)
         .max(500)
-        .regex(/^\/(?!\/)/),
+        .regex(/^\/(?![\\/])/),
     })
     .nullable(),
   actionAt: isoDateTimeSchema.nullable(),

@@ -787,6 +787,7 @@ function MailRuleReviewDialog({
               !reviewRuleId ||
               !reviewed ||
               activate.isPending ||
+              unavailable ||
               !profileActive ||
               reviewed.ruleVersion === null
             }
@@ -1071,7 +1072,10 @@ function TokenAccess({
     onSuccess: (token) => {
       setSecret(token.token);
       toast.success("Local agent token created.");
-      return queryClient.invalidateQueries({ queryKey: ["tokens"] });
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tokens"] }),
+        queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
+      ]);
     },
   });
   const remove = useMutation({
@@ -1079,7 +1083,10 @@ function TokenAccess({
     onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => {
       toast.success("Agent token revoked.");
-      return queryClient.invalidateQueries({ queryKey: ["tokens"] });
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tokens"] }),
+        queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
+      ]);
     },
   });
   const selectedPreset =

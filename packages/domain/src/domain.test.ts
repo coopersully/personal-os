@@ -172,6 +172,32 @@ describe("domain schemas", () => {
       agentAccessWorkItemPageSchema.safeParse({
         items: [
           {
+            action: { label: "Unsafe route", to: "/\\\\untrusted.example" },
+            actionAt: null,
+            domain: "mail",
+            id: "unsafe-route",
+            kind: "review",
+            priority: "person_review",
+            source: null,
+            summary: "This must not be accepted as an in-app route.",
+            title: "Unsafe route",
+            updatedAt: start,
+          },
+        ],
+        nextCursor: null,
+        snapshotAt: start,
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
+          byKind: { attention: 0, review: 1, setup: 0 },
+          total: 1,
+        },
+        unavailableDomains: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      agentAccessWorkItemPageSchema.safeParse({
+        items: [
+          {
             action: { label: "Leave Ilo", to: "https://example.com" },
             actionAt: null,
             domain: "mail",

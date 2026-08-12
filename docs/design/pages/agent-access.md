@@ -51,7 +51,7 @@ Access management
   manufactures offsets.
 - Changing **All / Review / Attention / Setup** resets to the first page and
   restores focus to the queue heading. The range uses the selected kind's exact
-  count. A successful empty result says **You're caught up**.
+  count. A successful empty result says **You’re caught up**.
 - Source projections settle independently. Available work remains usable when
   one source fails; affected counts become unknown, unavailable workspaces are
   named, and the UI never reports a false zero.
@@ -201,7 +201,7 @@ Access management
 - The readiness overview retains its aggregate state, determinate progress, and
   one-line current focus at every width without exceeding two rows. Its progress
   bar has the same visible count as its accessible name; **View checks** remains
-  on that row and the dialog title names the selected product's evidence.
+  on that row and the dialog title names the selected workspace's evidence.
 - The four protocol steps use the shared Item composition with text status;
   check and circle icons supplement rather than replace that status.
 - Every copy action, domain choice, permission preset, disclosure, and revoke

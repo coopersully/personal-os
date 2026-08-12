@@ -412,6 +412,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     },
   });
   const agentAccessWorkItems = createAgentAccessWorkItemService({
+    cursorSigningKey: dependencies.config.encryptionKey,
     db: dependencies.db,
     now,
   });

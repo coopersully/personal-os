@@ -137,7 +137,9 @@ describe("assistant setup routes", () => {
       { cursor: "opaque-next", kind: "review", limit: 10 },
       expect.arrayContaining([expect.objectContaining({ domain: "mail" })]),
     );
-    expect((await app.request("/v1/assistant/work-items?limit=11")).status).toBe(403);
+    const oversizedPage = await app.request("/v1/assistant/work-items?limit=11");
+    expect(oversizedPage.status).toBe(403);
+    expect((await oversizedPage.json()).error).toContain("10");
     expect(
       (await app.request("/v1/assistant/setup-plan?domain=mail&stepId=learn_preferences")).status,
     ).toBe(200);

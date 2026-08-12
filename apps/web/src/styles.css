@@ -4339,38 +4339,6 @@ p {
   .app-shell {
     display: block;
   }
-  .sidebar {
-    bottom: 0;
-    height: 100dvh;
-    left: 0;
-    max-width: calc(100vw - 42px);
-    padding: max(12px, env(safe-area-inset-top)) 12px max(14px, env(safe-area-inset-bottom));
-    position: fixed;
-    top: 0;
-    transform: translateX(-105%);
-    transition:
-      transform 0.2s ease,
-      visibility 0s linear 0.2s;
-    visibility: hidden;
-    width: 300px;
-    z-index: 45;
-  }
-  .sidebar-trigger--floating {
-    background: var(--surface-raised);
-    border-color: var(--line);
-    border-radius: 50%;
-    display: inline-flex;
-    bottom: max(16px, env(safe-area-inset-bottom));
-    height: 52px;
-    position: fixed;
-    right: max(16px, env(safe-area-inset-right));
-    width: 52px;
-    z-index: 35;
-  }
-  .sidebar-trigger--floating img {
-    height: 30px;
-    width: 30px;
-  }
   .workspace-app-bar {
     gap: 0.5rem;
     padding-inline: 0.75rem;

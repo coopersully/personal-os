@@ -6693,7 +6693,7 @@ function ReminderGroup({
         {label}
         <span>{reminders.length}</span>
       </h3>
-      <div className="reminder-list">
+      <ShadcnItemGroup>
         {reminders.map((reminder) => (
           <ReminderRow
             key={reminder.id}
@@ -6702,7 +6702,7 @@ function ReminderGroup({
             timeZone={timeZone}
           />
         ))}
-      </div>
+      </ShadcnItemGroup>
     </section>
   );
 }

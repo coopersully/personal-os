@@ -1,18 +1,28 @@
 import type { Reminder } from "@personal-os/domain";
-import { Badge, Button, EmptyState } from "@personal-os/ui";
+import { Badge, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import {
-  CheckIcon,
   CircleCheckIcon,
-  CircleIcon,
   ClockIcon,
   ListTodoIcon,
   PlusIcon,
   SearchIcon,
   TrashIcon,
 } from "@/components/icons";
+import {
+  ReminderItem,
+  ReminderItemActions,
+  ReminderItemCompletion,
+  ReminderItemContent,
+  ReminderItemDescription,
+  ReminderItemMetadata,
+  ReminderItemPrimaryAction,
+  ReminderItemTitle,
+} from "@/components/reminder-item";
 import { Button as ShadcnButton } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ItemGroup } from "@/components/ui/item";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -127,7 +137,7 @@ export function RemindersPage({
           </EmptyState>
         )
       ) : (
-        <div className="reminder-list reminder-list--large">
+        <ItemGroup>
           {reminders.data.items.map((reminder) => (
             <ReminderRow
               key={reminder.id}
@@ -136,7 +146,7 @@ export function RemindersPage({
               timeZone={timeZone}
             />
           ))}
-        </div>
+        </ItemGroup>
       )}
     </div>
   );
@@ -162,49 +172,51 @@ export function ReminderRow({
   });
   const mutationError = complete.error ?? remove.error;
   return (
-    <article className={`reminder-row${reminder.completedAt ? " reminder-row--done" : ""}`}>
-      <button
-        aria-label={
-          reminder.completedAt ? `Reopen ${reminder.title}` : `Complete ${reminder.title}`
-        }
-        className="check-button"
-        disabled={complete.isPending}
-        onClick={() => complete.mutate()}
-        type="button"
-      >
-        {reminder.completedAt ? (
-          <CheckIcon className="size-[15px]" />
-        ) : (
-          <CircleIcon className="size-[18px]" />
-        )}
-      </button>
-      <button className="reminder-row__material" onClick={onEdit} type="button">
-        <strong>{reminder.title}</strong>
-        <span>
-          {reminder.dueAt ? (
-            <>
-              <ClockIcon className="size-[13px]" />{" "}
-              {formatMaterialDateTime(reminder.dueAt, timeZone)}
-            </>
-          ) : (
-            "No due date"
-          )}
-        </span>
-      </button>
-      <Badge className={`priority priority--${reminder.priority}`}>{reminder.priority}</Badge>
-      <Button
-        aria-label={`Delete ${reminder.title}`}
-        disabled={remove.isPending}
-        onClick={() => remove.mutate()}
-        tone="ghost"
-      >
-        <TrashIcon className="size-[15px]" />
-      </Button>
+    <ReminderItem data-completed={reminder.completedAt !== null}>
+      <ReminderItemCompletion>
+        <Checkbox
+          aria-label={
+            reminder.completedAt ? `Reopen ${reminder.title}` : `Complete ${reminder.title}`
+          }
+          checked={reminder.completedAt !== null}
+          disabled={complete.isPending}
+          onCheckedChange={() => complete.mutate()}
+        />
+      </ReminderItemCompletion>
+      <ReminderItemPrimaryAction aria-label={`Open ${reminder.title}`} onClick={onEdit}>
+        <ReminderItemContent>
+          <ReminderItemTitle>{reminder.title}</ReminderItemTitle>
+          <ReminderItemDescription>
+            {reminder.dueAt ? (
+              <>
+                <ClockIcon className="size-[13px]" />{" "}
+                {formatMaterialDateTime(reminder.dueAt, timeZone)}
+              </>
+            ) : (
+              "No due date"
+            )}
+          </ReminderItemDescription>
+        </ReminderItemContent>
+      </ReminderItemPrimaryAction>
+      <ReminderItemMetadata>
+        <Badge className={`priority priority--${reminder.priority}`}>{reminder.priority}</Badge>
+      </ReminderItemMetadata>
+      <ReminderItemActions>
+        <ShadcnButton
+          aria-label={`Delete ${reminder.title}`}
+          disabled={remove.isPending}
+          onClick={() => remove.mutate()}
+          size="icon-sm"
+          variant="ghost"
+        >
+          <TrashIcon className="size-[15px]" />
+        </ShadcnButton>
+      </ReminderItemActions>
       {mutationError ? (
-        <span className="col-start-2 col-end-[-1] text-xs text-destructive" role="alert">
+        <ReminderItemDescription className="basis-full text-destructive" role="alert">
           {errorMessage(mutationError)}
-        </span>
+        </ReminderItemDescription>
       ) : null}
-    </article>
+    </ReminderItem>
   );
 }

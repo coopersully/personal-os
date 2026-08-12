@@ -5,7 +5,6 @@ import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   CircleCheckIcon,
   ClockIcon,
-  EditIcon,
   type Icon,
   InboxIcon,
   ListChecksIcon,
@@ -14,18 +13,21 @@ import {
   SearchIcon,
   TrashIcon,
 } from "@/components/icons";
+import {
+  TaskItem,
+  TaskItemActions,
+  TaskItemCompletion,
+  TaskItemContent,
+  TaskItemDescription,
+  TaskItemMetadata,
+  TaskItemPrimaryAction,
+  TaskItemTags,
+  TaskItemTitle,
+} from "@/components/task-item";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemMedia,
-  ItemTitle,
-} from "@/components/ui/item";
+import { ItemGroup } from "@/components/ui/item";
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -227,38 +229,37 @@ export function TaskRow({
   });
   const completeTask = task.completedAt !== null;
   return (
-    <Item variant="outline">
-      <ItemMedia>
+    <TaskItem data-completed={completeTask}>
+      <TaskItemCompletion>
         <Checkbox
           aria-label={`${completeTask ? "Reopen" : "Complete"} ${task.title}`}
           checked={completeTask}
           disabled={complete.isPending}
           onCheckedChange={(checked) => complete.mutate(checked === true)}
         />
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle className={completeTask ? "line-through text-muted-foreground" : undefined}>
-          {task.title}
-        </ItemTitle>
-        <ItemDescription>{taskDescription(task, timeZone)}</ItemDescription>
-        {recommendation ? (
-          <ItemDescription>{recommendationCopy(recommendation)}</ItemDescription>
-        ) : null}
-        {task.tags.length > 0 ? (
-          <ul aria-label="Task tags" className="flex flex-wrap gap-1">
-            {task.tags.map((tag) => (
-              <Badge asChild key={tag} variant="outline">
-                <li>{tag}</li>
-              </Badge>
-            ))}
-          </ul>
-        ) : null}
-      </ItemContent>
-      <ItemActions>
+      </TaskItemCompletion>
+      <TaskItemPrimaryAction aria-label={`Open ${task.title}`} onClick={onEdit}>
+        <TaskItemContent>
+          <TaskItemTitle>{task.title}</TaskItemTitle>
+          <TaskItemDescription>{taskDescription(task, timeZone)}</TaskItemDescription>
+          {recommendation ? (
+            <TaskItemDescription>{recommendationCopy(recommendation)}</TaskItemDescription>
+          ) : null}
+          {task.tags.length > 0 ? (
+            <TaskItemTags aria-label="Task tags" className="mt-1 pl-0">
+              {task.tags.map((tag) => (
+                <Badge asChild key={tag} variant="outline">
+                  <li>{tag}</li>
+                </Badge>
+              ))}
+            </TaskItemTags>
+          ) : null}
+        </TaskItemContent>
+      </TaskItemPrimaryAction>
+      <TaskItemMetadata>
         <Badge variant="secondary">{task.status}</Badge>
-        <Button aria-label={`Edit ${task.title}`} onClick={onEdit} size="icon-sm" variant="ghost">
-          <EditIcon />
-        </Button>
+      </TaskItemMetadata>
+      <TaskItemActions>
         <Button
           aria-label={`Remove ${task.title}`}
           disabled={remove.isPending}
@@ -268,13 +269,13 @@ export function TaskRow({
         >
           <TrashIcon />
         </Button>
-      </ItemActions>
+      </TaskItemActions>
       {complete.isError || remove.isError ? (
-        <ItemDescription className="basis-full text-destructive" role="alert">
+        <TaskItemDescription className="basis-full text-destructive" role="alert">
           {errorMessage(complete.error ?? remove.error)}
-        </ItemDescription>
+        </TaskItemDescription>
       ) : null}
-    </Item>
+    </TaskItem>
   );
 }
 

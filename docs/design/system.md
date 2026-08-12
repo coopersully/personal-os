@@ -159,6 +159,11 @@ Rules:
 - A `connection` never substitutes a demonstration or skeleton for provider
   state. Existing accounts are material rows, and the action launches the same
   production connection used elsewhere in the product.
+- Tasks and reminders compose the shared slot-based commitment-item family:
+  completion is a named native checkbox; the primary action opens the material;
+  description, metadata, tags, and secondary actions are optional sibling
+  slots. Never make the whole row one target when it contains completion or
+  destructive actions.
 
 ### Readiness overviews and diagnostic disclosure
 

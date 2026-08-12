@@ -49,6 +49,7 @@ export const taskListSchema = taskListFieldsSchema.extend({
   archivedAt: isoDateTimeSchema.nullable(),
   availability: taskContainerAvailabilitySchema,
   createdAt: isoDateTimeSchema,
+  deletedAt: isoDateTimeSchema.nullable(),
   id: idSchema,
   kind: taskListKindSchema,
   revision: revisionSchema,
@@ -115,6 +116,7 @@ export const taskProjectSchema = taskProjectFieldsSchema.extend({
   cancelledAt: isoDateTimeSchema.nullable(),
   completedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,
+  deletedAt: isoDateTimeSchema.nullable(),
   id: idSchema,
   lifecycle: taskLifecycleSchema,
   listId: idSchema,
@@ -208,24 +210,50 @@ export const taskProjectMovePreviewSchema = z.object({
 });
 export type TaskProjectMovePreview = z.infer<typeof taskProjectMovePreviewSchema>;
 
-export const taskOrganizationConflictSchema = z.object({
-  code: z.string().trim().min(1).max(100),
-  currentRevisions: z.object({
-    destinationList: revisionSchema.nullable(),
-    project: revisionSchema.nullable(),
-    sourceList: revisionSchema.nullable(),
-    task: revisionSchema.nullable(),
-  }),
-  openContentCounts: z.object({
-    projects: z.number().int().nonnegative(),
-    tasks: z.number().int().nonnegative(),
-  }),
-  resolutions: z.array(z.string().trim().min(1).max(100)).min(1),
+const taskOrganizationConflictFieldsSchema = z.object({
+  currentRevisions: z
+    .object({
+      destinationList: revisionSchema.nullable(),
+      project: revisionSchema.nullable(),
+      sourceList: revisionSchema.nullable(),
+      task: revisionSchema.nullable(),
+    })
+    .strict(),
+  openContentCounts: z
+    .object({
+      projects: z.number().int().nonnegative(),
+      tasks: z.number().int().nonnegative(),
+    })
+    .strict(),
 });
-export type TaskOrganizationConflict = z.infer<typeof taskOrganizationConflictSchema>;
 
-export const taskProjectCompletionConflictSchema = taskOrganizationConflictSchema.extend({
-  code: z.literal("task_project_has_open_tasks"),
-  resolutions: z.array(taskProjectCompletionResolutionSchema).min(1),
-});
+export const taskListArchiveConflictSchema = taskOrganizationConflictFieldsSchema
+  .extend({
+    code: z.literal("task_list_has_active_contents"),
+    resolutions: z.tuple([
+      z.literal("move_active_contents"),
+      z.literal("archive_contents_together"),
+      z.literal("cancel"),
+    ]),
+  })
+  .strict();
+export type TaskListArchiveConflict = z.infer<typeof taskListArchiveConflictSchema>;
+
+export const taskProjectCompletionConflictSchema = taskOrganizationConflictFieldsSchema
+  .extend({
+    code: z.literal("task_project_has_open_tasks"),
+    resolutions: z.tuple([
+      z.literal("complete_open_tasks"),
+      z.literal("cancel_open_tasks"),
+      z.literal("move_open_tasks"),
+      z.literal("keep_project_open"),
+    ]),
+  })
+  .strict();
 export type TaskProjectCompletionConflict = z.infer<typeof taskProjectCompletionConflictSchema>;
+
+export const taskOrganizationConflictSchema = z.discriminatedUnion("code", [
+  taskListArchiveConflictSchema,
+  taskProjectCompletionConflictSchema,
+]);
+export type TaskOrganizationConflict = z.infer<typeof taskOrganizationConflictSchema>;

@@ -67,6 +67,7 @@ export const taskSchema = taskContentFieldsSchema.extend({
   cancelledAt: isoDateTimeSchema.nullable(),
   completedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,
+  deletedAt: isoDateTimeSchema.nullable(),
   id: idSchema,
   legacyStatus: taskStatusSchema.nullable(),
   lifecycle: taskLifecycleSchema,
@@ -82,14 +83,10 @@ const taskTransitionInputSchema = z
   .object({ expectedRevision: revisionSchema.optional() })
   .strict();
 
-export const completeTaskInputSchema = taskTransitionInputSchema.extend({
-  completed: z.boolean().default(true),
-});
+export const completeTaskInputSchema = taskTransitionInputSchema;
 export type CompleteTaskInput = z.infer<typeof completeTaskInputSchema>;
 
-export const cancelTaskInputSchema = taskTransitionInputSchema.extend({
-  cancelled: z.boolean().default(true),
-});
+export const cancelTaskInputSchema = taskTransitionInputSchema;
 export type CancelTaskInput = z.infer<typeof cancelTaskInputSchema>;
 
 export const trashTaskInputSchema = taskTransitionInputSchema;
@@ -112,11 +109,9 @@ export const moveTaskInputSchema = taskMovePreviewInputSchema.extend({
 });
 export type MoveTaskInput = z.infer<typeof moveTaskInputSchema>;
 
-export const taskMovePreviewSchema = z.object({
+const taskMovePreviewFieldsSchema = z.object({
   destinationListId: idSchema,
   destinationListRevision: revisionSchema,
-  destinationProjectId: idSchema.nullable(),
-  destinationProjectRevision: revisionSchema.nullable(),
   detachedProjectId: idSchema.nullable(),
   previewToken: z.string().trim().min(1).max(512),
   sourceListId: idSchema,
@@ -125,6 +120,16 @@ export const taskMovePreviewSchema = z.object({
   taskId: idSchema,
   taskRevision: revisionSchema,
 });
+export const taskMovePreviewSchema = z.union([
+  taskMovePreviewFieldsSchema.extend({
+    destinationProjectId: z.null(),
+    destinationProjectRevision: z.null(),
+  }),
+  taskMovePreviewFieldsSchema.extend({
+    destinationProjectId: idSchema,
+    destinationProjectRevision: revisionSchema,
+  }),
+]);
 export type TaskMovePreview = z.infer<typeof taskMovePreviewSchema>;
 
 export const taskListQuerySchema = paginationSchema.extend({

@@ -17,6 +17,8 @@ import {
   calendarProfilePreferencesSchema,
   calendarProviderSchema,
   calendarSchema,
+  cancelTaskInputSchema,
+  completeTaskInputSchema,
   connectedAccountHealthSchema,
   connectICloudInputSchema,
   connectorAuthorizationOutcomeSchema,
@@ -79,9 +81,12 @@ import {
   startGoogleAuthorizationInputSchema,
   taskContainerAvailabilitySchema,
   taskLifecycleSchema,
+  taskListArchiveConflictSchema,
   taskListQuerySchema,
   taskListSchema,
   taskMovePreviewSchema,
+  taskOrganizationConflictSchema,
+  taskProjectCompletionConflictSchema,
   taskProjectCompletionResolutionSchema,
   taskProjectSchema,
   taskSchema,
@@ -1013,64 +1018,149 @@ describe("domain schemas", () => {
         sourceType: "task_project",
       }).sourceType,
     ).toBe("task_project");
+    const taskList = taskListSchema.parse({
+      archivedAt: null,
+      availability: "active",
+      color: null,
+      createdAt: start,
+      deletedAt: null,
+      description: null,
+      id: listId,
+      kind: "inbox",
+      name: "Inbox",
+      revision: 1,
+      source: null,
+      updatedAt: start,
+    });
+    expect(taskList).toMatchObject({ deletedAt: null, kind: "inbox" });
+    const taskProject = taskProjectSchema.parse({
+      archivedAt: null,
+      availability: "active",
+      cancelledAt: null,
+      completedAt: null,
+      createdAt: start,
+      deletedAt: null,
+      id: projectId,
+      lifecycle: "open",
+      listId,
+      name: "Launch",
+      notes: null,
+      revision: 1,
+      source: null,
+      targetDate: null,
+      updatedAt: start,
+      why: null,
+    });
+    expect(taskProject).toMatchObject({ deletedAt: null, lifecycle: "open" });
+    const canonicalTask = taskSchema.parse({
+      cancelledAt: null,
+      completedAt: null,
+      createdAt: start,
+      deletedAt: null,
+      estimateMinutes: null,
+      id,
+      legacyStatus: "scheduled",
+      lifecycle: "open",
+      listId,
+      notes: null,
+      priority: "medium",
+      projectId: projectId,
+      revision: 1,
+      scheduledAt: "2026-07-14T13:00:00.000Z",
+      source: null,
+      tags: [],
+      timezone: null,
+      title: "Task",
+      updatedAt: start,
+      why: null,
+      dueAt: null,
+    });
+    expect(canonicalTask).toMatchObject({ deletedAt: null, lifecycle: "open" });
+    expect(completeTaskInputSchema.safeParse({ completed: false }).success).toBe(false);
+    expect(cancelTaskInputSchema.safeParse({ cancelled: false }).success).toBe(false);
+    expect(completeTaskInputSchema.parse({ expectedRevision: 1 })).toEqual({ expectedRevision: 1 });
+    expect(cancelTaskInputSchema.parse({ expectedRevision: 1 })).toEqual({ expectedRevision: 1 });
     expect(
-      taskListSchema.parse({
-        archivedAt: null,
-        availability: "active",
-        color: null,
-        createdAt: start,
-        description: null,
-        id: listId,
-        kind: "inbox",
-        name: "Inbox",
-        revision: 1,
-        source: null,
-        updatedAt: start,
-      }).kind,
-    ).toBe("inbox");
+      taskMovePreviewSchema.safeParse({
+        destinationListId: listId,
+        destinationListRevision: 3,
+        destinationProjectId: projectId,
+        destinationProjectRevision: null,
+        detachedProjectId: null,
+        previewToken: "task-move-preview",
+        sourceListId: listId,
+        sourceListRevision: 2,
+        sourceProjectId: null,
+        taskId: id,
+        taskRevision: 4,
+      }).success,
+    ).toBe(false);
     expect(
-      taskProjectSchema.parse({
-        archivedAt: null,
-        availability: "active",
-        cancelledAt: null,
-        completedAt: null,
-        createdAt: start,
-        id: projectId,
-        lifecycle: "open",
-        listId,
-        name: "Launch",
-        notes: null,
-        revision: 1,
-        source: null,
-        targetDate: null,
-        updatedAt: start,
-        why: null,
-      }).lifecycle,
-    ).toBe("open");
+      taskMovePreviewSchema.safeParse({
+        destinationListId: listId,
+        destinationListRevision: 3,
+        destinationProjectId: null,
+        destinationProjectRevision: 5,
+        detachedProjectId: projectId,
+        previewToken: "task-move-preview",
+        sourceListId: listId,
+        sourceListRevision: 2,
+        sourceProjectId: projectId,
+        taskId: id,
+        taskRevision: 4,
+      }).success,
+    ).toBe(false);
+    const conflictDetails = {
+      currentRevisions: { destinationList: 3, project: null, sourceList: 2, task: null },
+      openContentCounts: { projects: 1, tasks: 2 },
+    };
     expect(
-      taskSchema.parse({
-        cancelledAt: null,
-        completedAt: null,
-        createdAt: start,
-        estimateMinutes: null,
-        id,
-        legacyStatus: "scheduled",
-        lifecycle: "open",
-        listId,
-        notes: null,
-        priority: "medium",
-        projectId: projectId,
-        revision: 1,
-        scheduledAt: "2026-07-14T13:00:00.000Z",
-        source: null,
-        tags: [],
-        timezone: null,
-        title: "Task",
-        updatedAt: start,
-        why: null,
-        dueAt: null,
-      }).lifecycle,
-    ).toBe("open");
+      taskListArchiveConflictSchema.parse({
+        ...conflictDetails,
+        code: "task_list_has_active_contents",
+        resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
+      }).resolutions,
+    ).toEqual(["move_active_contents", "archive_contents_together", "cancel"]);
+    expect(
+      taskListArchiveConflictSchema.safeParse({
+        ...conflictDetails,
+        code: "unexpected_conflict",
+        resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
+      }).success,
+    ).toBe(false);
+    expect(
+      taskOrganizationConflictSchema.safeParse({
+        ...conflictDetails,
+        code: "unexpected_conflict",
+        resolutions: ["move_active_contents"],
+      }).success,
+    ).toBe(false);
+    expect(
+      taskProjectCompletionConflictSchema.parse({
+        ...conflictDetails,
+        code: "task_project_has_open_tasks",
+        resolutions: [
+          "complete_open_tasks",
+          "cancel_open_tasks",
+          "move_open_tasks",
+          "keep_project_open",
+        ],
+      }).resolutions,
+    ).toEqual(["complete_open_tasks", "cancel_open_tasks", "move_open_tasks", "keep_project_open"]);
+    expect(
+      taskProjectCompletionConflictSchema.safeParse({
+        ...conflictDetails,
+        code: "task_project_has_open_tasks",
+        resolutions: ["complete_open_tasks", "complete_open_tasks"],
+      }).success,
+    ).toBe(false);
+    expect(
+      taskListArchiveConflictSchema.safeParse({
+        ...conflictDetails,
+        code: "task_list_has_active_contents",
+        resolutions: ["move_active_contents", "move_active_contents", "cancel"],
+      }).success,
+    ).toBe(false);
     expect(
       taskListQuerySchema.parse({ lifecycle: "open", listId, projectId, view: "today" }),
     ).toMatchObject({

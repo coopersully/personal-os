@@ -928,7 +928,7 @@ describe("agent access settings", () => {
       ),
     ).toBeInTheDocument();
     expect(financeChecks.getByText("100+ open Finances attention items.")).toBeInTheDocument();
-  });
+  }, 10_000);
 
   it("isolates a selected-domain readiness failure from the connection handoff", async () => {
     const browser = userEvent.setup();

@@ -1152,7 +1152,6 @@ p {
 .workspace-app-bar {
   align-items: center;
   background: var(--paper-deep);
-  border-bottom: 1px solid var(--line);
   display: grid;
   gap: 0.5rem;
   grid-template-columns: minmax(0, auto) minmax(0, 1fr) auto;
@@ -1793,7 +1792,6 @@ p {
   width: 5px;
 }
 .today-queue {
-  border-left: 1px solid var(--line);
   min-height: 500px;
   padding: 2px 0 0 24px;
 }

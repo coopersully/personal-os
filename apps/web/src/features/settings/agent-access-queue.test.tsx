@@ -127,7 +127,21 @@ describe("AgentAccessQueue", () => {
         total: 12,
       },
     });
-    mocks.listAgentAccessWorkItems.mockResolvedValue(first);
+    mocks.listAgentAccessWorkItems.mockImplementation(async ({ kind }: { kind?: string }) =>
+      kind === "attention"
+        ? page({
+            items: [
+              { ...workItem(21), kind: "attention", title: "Reconnect Calendar" },
+              { ...workItem(22), kind: "attention", title: "Review Task reminder" },
+            ],
+            summary: {
+              byDomain: { calendar: 1, finances: 0, mail: 12, tasks: 1 },
+              byKind: { attention: 2, review: 12, setup: 0 },
+              total: 14,
+            },
+          })
+        : first,
+    );
     const user = userEvent.setup();
     renderQueue();
 
@@ -148,6 +162,8 @@ describe("AgentAccessQueue", () => {
       }),
     );
     expect(screen.getByRole("radio", { name: "Attention" })).toHaveAttribute("data-state", "on");
+    expect(screen.getByText("1–2 of 2")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Your action queue" })).toHaveFocus();
   });
 
   it("moves forward and backward using opaque cursors", async () => {

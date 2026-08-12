@@ -9,13 +9,13 @@ import {
 } from "@personal-os/database";
 import {
   type AgentAccessDomain,
-  agentAccessDomains,
   type AgentAccessWorkItem,
   type AgentAccessWorkItemKind,
   type AgentAccessWorkItemPage,
   type AgentAccessWorkItemPriority,
   type AgentAccessWorkItemQuery,
   type AgentConnectionGuide,
+  agentAccessDomains,
   featureAccessPolicies,
 } from "@personal-os/domain";
 import { and, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm";
@@ -143,10 +143,7 @@ export function createAgentAccessWorkItemService({
         .where(
           and(
             eq(financeReviewCases.userId, userId),
-            or(
-              eq(financeReviewCases.status, "open"),
-              eq(financeReviewCases.status, "deferred"),
-            ),
+            or(eq(financeReviewCases.status, "open"), eq(financeReviewCases.status, "deferred")),
             lte(financeReviewCases.updatedAt, snapshotAt),
           ),
         ),
@@ -203,9 +200,7 @@ export function createAgentAccessWorkItemService({
           .map((entry) => entry.domain),
       );
       const input = { snapshotAt, userId: principal.userId };
-      const entries = Object.entries(sourceReaders) as Array<
-        [SourceKey, SourceReaders[SourceKey]]
-      >;
+      const entries = Object.entries(sourceReaders) as Array<[SourceKey, SourceReaders[SourceKey]]>;
       const settled = await Promise.allSettled(entries.map(([, reader]) => reader(input)));
       const results = {} as Partial<SourceResult>;
       const failedSources = new Set<SourceKey>();
@@ -224,9 +219,9 @@ export function createAgentAccessWorkItemService({
         results,
         snapshotAt,
       }).toSorted(compareItems);
-      const unavailableDomains = [...new Set(
-        [...failedSources].flatMap((source) => sourceImpact[source].domains),
-      )]
+      const unavailableDomains = [
+        ...new Set([...failedSources].flatMap((source) => sourceImpact[source].domains)),
+      ]
         .filter((domain) => accessibleDomains.has(domain))
         .toSorted();
       const failedKinds = new Set(
@@ -291,10 +286,9 @@ function projectItems({
         const missingRead = !observedScopes.has(access.readScope);
         const missingWrite = !observedScopes.has(access.writeScope);
         if (!missingRead && !missingWrite) continue;
-        const missing = [
-          ...(missingRead ? ["read"] : []),
-          ...(missingWrite ? ["write"] : []),
-        ].join(" and ");
+        const missing = [...(missingRead ? ["read"] : []), ...(missingWrite ? ["write"] : [])].join(
+          " and ",
+        );
         items.push({
           action: {
             label: "Manage access",
@@ -425,9 +419,7 @@ function summarizeItems(
       tasks: unavailableDomains.has("tasks") ? null : count((item) => item.domain === "tasks"),
     },
     byKind: {
-      attention: failedKinds.has("attention")
-        ? null
-        : count((item) => item.kind === "attention"),
+      attention: failedKinds.has("attention") ? null : count((item) => item.kind === "attention"),
       review: failedKinds.has("review") ? null : count((item) => item.kind === "review"),
       setup: failedKinds.has("setup") ? null : count((item) => item.kind === "setup"),
     },

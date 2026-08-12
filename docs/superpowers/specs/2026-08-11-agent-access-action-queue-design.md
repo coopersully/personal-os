@@ -86,7 +86,8 @@ detail.
 
 Each row contains:
 
-1. the framed workspace identity;
+1. the framed workspace identity, or the Key functional icon and **Agent
+   access** label when `domain` is `null`;
 2. a persistent type label: **Review**, **Attention**, or **Setup**;
 3. a concise title and one-line outcome or source context;
 4. optional freshness or due metadata;

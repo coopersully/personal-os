@@ -186,6 +186,13 @@ the checks a dashboard grid. Use the shared `ReadinessPanel`, composed from
 - keep loading, unavailable, incomplete, empty, and complete distinct. A
   partial read never becomes a successful zero or a confident readiness score.
 
+On a cross-domain supervision surface, actionable person-owned work precedes
+diagnostic status. Use one Integration-owned read model to order and paginate
+that work, keep workspace identity visible on each row, and route the one
+explicit action back to its owning domain. Never duplicate domain mutations in
+the global queue, present healthy evidence as work, or convert a partial source
+failure into a successful zero.
+
 Keep product selection outside the overview. A small mutually exclusive set
 uses one icon-labelled control family; selection changes which overview is
 shown. When setup phase helps selection, each option may add one stable phase:

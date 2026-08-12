@@ -15,8 +15,8 @@ import {
 } from "@personal-os/database";
 import type { AccessScope, AgentConnectionGuide } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { AppError } from "./errors.js";
 import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
+import { AppError } from "./errors.js";
 import type { Principal } from "./types.js";
 
 const snapshot = new Date("2026-08-11T18:00:00.000Z");
@@ -247,12 +247,18 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(reviews.items.every((item) => item.kind === "review")).toBe(true);
     expect(reviews.summary.total).toBe(21);
 
+    const mail = await service.list(principal, { domain: "mail", limit: 10 }, publishedDomains);
+    expect(mail.items.every((item) => item.domain === "mail")).toBe(true);
+
     await expect(
       service.list(
         principal,
         { cursor: first.nextCursor as string, kind: "review", limit: 10 },
         publishedDomains,
       ),
+    ).rejects.toBeInstanceOf(AppError);
+    await expect(
+      service.list(principal, { cursor: "not-a-cursor", limit: 10 }, publishedDomains),
     ).rejects.toBeInstanceOf(AppError);
   });
 
@@ -287,5 +293,101 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(page.summary.total).toBeNull();
     expect(page.summary.byDomain.mail).toBeNull();
     expect(page.summary.byDomain.tasks).toBeGreaterThan(0);
+  });
+
+  it("projects mixed authority and source edge cases without inventing work", async () => {
+    const [credential] = (await database.db.select().from(accessTokens)).filter(
+      (row) => row.userId === principal.userId,
+    );
+    const [attention] = (await database.db.select().from(attentionItems)).filter(
+      (row) => row.userId === principal.userId,
+    );
+    const [rule] = (await database.db.select().from(mailRules)).filter(
+      (row) => row.userId === principal.userId,
+    );
+    const [profile] = (await database.db.select().from(domainProfiles)).filter(
+      (row) => row.userId === principal.userId,
+    );
+    const [account] = (await database.db.select().from(calendarAccounts)).filter(
+      (row) => row.userId === principal.userId,
+    );
+    if (!credential || !attention || !rule || !profile || !account) {
+      throw new Error("Agent Access edge-case fixtures were not found.");
+    }
+
+    const service = createAgentAccessWorkItemService({
+      db: database.db,
+      now: () => snapshot,
+      sourceReaders: {
+        accounts: async () => [
+          { ...account, calendarEnabled: false, mailEnabled: false },
+          { ...account, id: `${account.id}-calendar`, mailEnabled: false },
+        ],
+        attention: async () => [
+          {
+            ...attention,
+            domain: "unsupported-domain" as (typeof attention)["domain"],
+          },
+          {
+            ...attention,
+            id: `${attention.id}-scheduled`,
+            occursAt: new Date("2026-08-11T13:00:00.000Z"),
+          },
+        ],
+        credentials: async () => [
+          {
+            ...credential,
+            scopes: ["mail:read", "finances:write", "tasks:read", "tasks:write"],
+          },
+        ],
+        financeReviews: async () => [],
+        mailRules: async () => [{ ...rule, description: "" }],
+        profiles: async () => [{ ...profile, domain: "mail" }],
+      },
+    });
+    const page = await service.list(principal, { limit: 10 }, publishedDomains);
+
+    expect(page.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          domain: "mail",
+          id: `mail-rule:${rule.id}`,
+          summary: "Review the current bounded sample before activation.",
+        }),
+        expect.objectContaining({
+          actionAt: "2026-08-11T13:00:00.000Z",
+          id: `attention:${attention.id}-scheduled`,
+        }),
+        expect.objectContaining({ domain: "mail", id: "setup:mail:agent-authority" }),
+        expect.objectContaining({ domain: "finances", id: "setup:finances:agent-authority" }),
+        expect.objectContaining({ domain: "calendar", id: "setup:calendar:agent-authority" }),
+      ]),
+    );
+    expect(page.items.some((item) => item.id.startsWith("profile:"))).toBe(false);
+    expect(page.items.some((item) => item.id.startsWith("reconnect:mail:"))).toBe(false);
+    expect(page.items.some((item) => item.id.includes("unsupported-domain"))).toBe(false);
+  });
+
+  it("marks every affected summary unavailable when core projections fail", async () => {
+    const service = createAgentAccessWorkItemService({
+      db: database.db,
+      now: () => snapshot,
+      sourceReaders: {
+        attention: async () => {
+          throw new Error("Attention unavailable");
+        },
+        credentials: async () => {
+          throw new Error("Credentials unavailable");
+        },
+      },
+    });
+    const page = await service.list(principal, { limit: 10 }, publishedDomains);
+
+    expect(page.unavailableDomains).toEqual(["calendar", "finances", "mail", "tasks"]);
+    expect(page.summary).toMatchObject({
+      byDomain: { calendar: null, finances: null, mail: null, tasks: null },
+      byKind: { attention: null, setup: null },
+      total: null,
+    });
   });
 });

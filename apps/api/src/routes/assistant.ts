@@ -1,7 +1,7 @@
 import {
   type AgentConnectionGuide,
-  agentAccessWorkItemQuerySchema,
   type AssistantDomain,
+  agentAccessWorkItemQuerySchema,
   assistantDomainSchema,
   assistantSetupPlanQuerySchema,
   attentionItemQuerySchema,

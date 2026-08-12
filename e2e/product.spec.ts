@@ -17,14 +17,37 @@ test("the repository QA fixture login exposes representative workspace data", as
   await expect(page.getByRole("row", { name: /Sq Unknown Popup Uncategorized/ })).toBeVisible();
 });
 
-test("agent setup is server-owned, collapsible, and served by ilo", async ({ baseURL, page }) => {
+test("Agent Access prioritizes paginated work and keeps setup contextual", async ({
+  baseURL,
+  page,
+}) => {
   await page.goto("/");
   await page.getByLabel("Email").fill("demo+full@ilo.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Open ilo" }).click();
   await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
   await page.goto("/settings?section=agents");
-  await expect(page.getByRole("heading", { name: "Connect an agent", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Agent access", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Your action queue" })).toBeVisible();
+  await expect(page.getByText("1–10 of 11")).toBeVisible();
+  await page.getByRole("button", { name: "Next page" }).click();
+  await expect(page.getByText("11–11 of 11")).toBeVisible();
+  await page.getByRole("button", { name: "Previous page" }).click();
+  await expect(page.getByText("1–10 of 11")).toBeVisible();
+
+  await page.getByRole("radio", { name: "Attention" }).click();
+  await expect(page.getByText("1–8 of 8")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Next page" })).toBeDisabled();
+  await page.getByRole("radio", { name: "All" }).click();
+  const mailReview = page.getByRole("listitem").filter({ hasText: "Review Fixture newsletters" });
+  await mailReview.getByRole("link", { name: "Review rule" }).click();
+  await expect(page.getByRole("dialog", { name: "Review Fixture newsletters" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Close" }).last().click();
+
+  await page.getByRole("radio", { name: "Calendar" }).click();
+  await expect(page).toHaveURL(/workspace=calendar/);
+  await expect(page.getByText("Calendar readiness")).toBeVisible();
+  await page.getByRole("radio", { name: "Mail" }).click();
 
   const connectTrigger = page.getByRole("button", {
     name: /Connect an agent/,
@@ -54,6 +77,25 @@ test("agent setup is server-owned, collapsible, and served by ilo", async ({ bas
   expect(
     await page.locator("html").evaluate((element) => element.scrollWidth <= innerWidth + 1),
   ).toBe(true);
+
+  await page.route("**/v1/assistant/work-items*", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      json: {
+        items: [],
+        nextCursor: null,
+        snapshotAt: new Date().toISOString(),
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
+          byKind: { attention: 0, review: 0, setup: 0 },
+          total: 0,
+        },
+        unavailableDomains: [],
+      },
+    });
+  });
+  await page.reload();
+  await expect(page.getByText("You’re caught up")).toBeVisible();
 });
 
 test("a person and an agent share one reminder and calendar surface", async ({
@@ -238,7 +280,7 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
   await openSettingsSection("Agent access");
-  await expect(page.getByRole("heading", { name: "Connect an agent", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Agent access", exact: true })).toBeVisible();
   const connectionTrigger = page.getByRole("button", { name: /Connect an agent/ });
   if ((await connectionTrigger.getAttribute("aria-expanded")) !== "true") {
     await connectionTrigger.click();

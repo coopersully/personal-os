@@ -4,7 +4,7 @@ import type {
   AgentAccessWorkItemKind,
 } from "@personal-os/domain";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   AlertTriangleIcon,
@@ -109,6 +109,7 @@ function QueueSkeleton() {
 }
 
 export function AgentAccessQueue() {
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const [kind, setKind] = useState<AgentAccessWorkItemKind | "all">("all");
   const [cursor, setCursor] = useState<string | null>(null);
   const [previousCursors, setPreviousCursors] = useState<Array<string | null>>([]);
@@ -124,12 +125,18 @@ export function AgentAccessQueue() {
   const pageNumber = previousCursors.length + 1;
   const start = (pageNumber - 1) * pageSize + 1;
   const end = start + (query.data?.items.length ?? 0) - 1;
+  const total = query.data
+    ? kind === "all"
+      ? query.data.summary.total
+      : query.data.summary.byKind[kind]
+    : null;
 
   function selectKind(value: string) {
     if (!value) return;
     setKind(value as AgentAccessWorkItemKind | "all");
     setCursor(null);
     setPreviousCursors([]);
+    headingRef.current?.focus();
   }
 
   function nextPage() {
@@ -150,7 +157,9 @@ export function AgentAccessQueue() {
     <Card className="agent-access-queue">
       <CardHeader>
         <CardTitle>
-          <h2>Your action queue</h2>
+          <h2 ref={headingRef} tabIndex={-1}>
+            Your action queue
+          </h2>
         </CardTitle>
         <CardDescription>
           Review decisions, unblock agents, and finish workspace setup.
@@ -230,9 +239,7 @@ export function AgentAccessQueue() {
             </ItemGroup>
             <div className="agent-access-queue__pagination">
               <span className="agent-access-queue__range">
-                {query.data.summary.total === null
-                  ? `${start}–${end}`
-                  : `${start}–${end} of ${query.data.summary.total}`}
+                {total === null ? `${start}–${end}` : `${start}–${end} of ${total}`}
               </span>
               <Pagination>
                 <PaginationContent>

@@ -1689,7 +1689,7 @@ describe("ilo web app", () => {
       ),
     );
     expect(
-      await screen.findByRole("heading", { name: "Connect an agent" }, { timeout: 3_000 }),
+      await screen.findByRole("heading", { name: "Agent access" }, { timeout: 3_000 }),
     ).toBeInTheDocument();
   });
 

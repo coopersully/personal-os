@@ -550,6 +550,7 @@ describe("agent access settings", () => {
     expect(screen.getByLabelText("Current location")).toHaveTextContent(
       "/settings?section=agents&workspace=mail",
     );
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByText("Routine orders")).not.toBeInTheDocument();
     const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');
     expect(claudeHost?.querySelector('[data-slot="item-media"] svg.reicon')).not.toBeNull();

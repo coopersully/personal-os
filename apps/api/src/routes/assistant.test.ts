@@ -129,11 +129,8 @@ describe("assistant setup routes", () => {
     expect((await app.request("/v1/assistant/context")).status).toBe(200);
     expect((await app.request("/v1/assistant/setup-status")).status).toBe(200);
     expect(
-      (
-        await app.request(
-          "/v1/assistant/work-items?cursor=opaque-next&kind=review&limit=10",
-        )
-      ).status,
+      (await app.request("/v1/assistant/work-items?cursor=opaque-next&kind=review&limit=10"))
+        .status,
     ).toBe(200);
     expect(workItems.list).toHaveBeenCalledWith(
       expect.objectContaining({ actorType: "agent", userId: id }),

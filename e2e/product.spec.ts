@@ -30,8 +30,20 @@ test("Agent Access prioritizes paginated work and keeps setup contextual", async
   await expect(page.getByRole("heading", { name: "Agent access", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Your action queue" })).toBeVisible();
   await expect(page.getByText("1–10 of 11")).toBeVisible();
+  const firstPageRows = page.locator("[data-work-item-id]");
+  const firstPageIds = await firstPageRows.evaluateAll((rows) =>
+    rows.map((row) => row.getAttribute("data-work-item-id")),
+  );
+  expect(firstPageIds).toHaveLength(10);
+  expect(new Set(firstPageIds).size).toBe(10);
+  await expect(firstPageRows.nth(0)).toHaveAttribute("data-work-item-priority", "person_review");
   await page.getByRole("button", { name: "Next page" }).click();
   await expect(page.getByText("11–11 of 11")).toBeVisible();
+  const secondPageIds = await page
+    .locator("[data-work-item-id]")
+    .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-work-item-id")));
+  expect(secondPageIds).toHaveLength(1);
+  expect(secondPageIds.some((id) => firstPageIds.includes(id))).toBe(false);
 
   await page.getByRole("radio", { name: "Attention" }).click();
   await expect(page.getByText("1–8 of 8")).toBeVisible();
@@ -47,7 +59,11 @@ test("Agent Access prioritizes paginated work and keeps setup contextual", async
   await expect(page.getByRole("dialog", { name: "Review Fixture newsletters" })).toBeVisible();
   await expect(page).toHaveURL(/workspace=mail&reviewRule=/);
   await expect(page.getByRole("dialog").getByText(/Rule scope:/)).toBeVisible();
+  await expect(
+    page.getByRole("dialog").getByRole("button", { name: "Activate reviewed rule" }),
+  ).toBeEnabled();
   await page.getByRole("dialog").getByRole("button", { name: "Close" }).last().click();
+  await expect(page).toHaveURL(/settings\?section=agents&workspace=mail$/);
 
   await page.getByRole("radio", { name: "Calendar" }).click();
   await expect(page).toHaveURL(/workspace=calendar/);

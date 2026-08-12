@@ -117,6 +117,28 @@ describe("AgentAccessQueue", () => {
     expect(screen.queryByText("You’re caught up")).not.toBeInTheDocument();
   });
 
+  it("retries a partial workspace failure without reloading the page", async () => {
+    mocks.listAgentAccessWorkItems
+      .mockResolvedValueOnce(
+        page({
+          summary: {
+            byDomain: { calendar: null, finances: 0, mail: 0, tasks: 0 },
+            byKind: { attention: null, review: 0, setup: 0 },
+            total: null,
+          },
+          unavailableDomains: ["calendar"],
+        }),
+      )
+      .mockResolvedValueOnce(page());
+    const user = userEvent.setup();
+    renderQueue();
+
+    await user.click(await screen.findByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(mocks.listAgentAccessWorkItems).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("You’re caught up")).toBeInTheDocument();
+  });
+
   it("filters by kind and resets pagination", async () => {
     const first = page({
       items: Array.from({ length: 10 }, (_, index) => workItem(index + 1)),

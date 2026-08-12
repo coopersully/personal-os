@@ -59,7 +59,14 @@ function WorkItemRow({ item }: { item: AgentAccessWorkItem }) {
   const workspaceLabel = item.domain ? workspaceIdentities[item.domain].label : "Agent access";
 
   return (
-    <Item role="listitem" size="sm" variant="outline">
+    <Item
+      data-work-item-id={item.id}
+      data-work-item-kind={item.kind}
+      data-work-item-priority={item.priority}
+      role="listitem"
+      size="sm"
+      variant="outline"
+    >
       <ItemMedia variant="icon">
         {item.domain ? (
           <WorkspaceIcon size="sm" workspace={item.domain} />
@@ -207,6 +214,12 @@ export function AgentAccessQueue() {
               {joinLabels(query.data.unavailableDomains)} could not be checked. Counts may be
               incomplete.
             </AlertDescription>
+            <AlertAction>
+              <Button onClick={() => query.refetch()} size="sm" variant="outline">
+                <RefreshIcon data-icon="inline-start" />
+                Try again
+              </Button>
+            </AlertAction>
           </Alert>
         ) : null}
 

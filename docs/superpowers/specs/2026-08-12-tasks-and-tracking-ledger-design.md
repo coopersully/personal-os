@@ -159,16 +159,24 @@ A **Tracker** defines a repeated question or event the person wants to record. I
 
 - name, description, optional `why`, color/icon presentation, and state;
 - mode: `check_in`, for expected responses, or `event_log`, for entries whenever something happens;
-- a versioned field schema;
+- a versioned primary-value definition;
 - optional schedule and response window;
 - optional habit configuration and target;
 - presentation and privacy preferences;
 - source reference, revision, and audit timestamps.
 
-The initial field types are deliberately general: boolean, number with unit, duration, rating,
-single choice, short text, timestamp, time interval, and attachment reference. Tracker templates may
-compose these fields. Schema changes create a new version; historical entries continue to validate
-and render against the version used when they were recorded.
+A custom tracker in v1 has exactly one primary value, selected from deliberately general types:
+boolean, number with unit, duration, rating, single choice, short text, timestamp, or time interval.
+Every entry may also carry an optional note and attachment references. This keeps capture and
+analysis predictable while still covering check-offs, measurements, ratings, descriptions, and
+intervals.
+
+Tightly defined system configurations may add a small fixed set of supplemental fields when the
+subject materially requires them. For example, a Sleep Diary can use an interval as its primary
+value and offer optional perceived-quality and awakening fields. This exception is owned and tested
+by the configuration; v1 does not expose an arbitrary multi-field form builder. Definition changes
+create a new version, and historical entries continue to validate and render against the version
+used when they were recorded.
 
 ### Check-in schedule and occurrence
 
@@ -198,8 +206,10 @@ negative entry.
 
 An **Entry** is a timestamped fact in the ledger. It contains:
 
-- tracker and tracker-schema version;
-- values keyed to the versioned fields;
+- tracker and tracker-definition version;
+- a primary value validated against the versioned definition;
+- optional note and attachment references;
+- supplemental values only when declared by a system configuration;
 - `observedAt`, or `observedFrom` and `observedTo` for an interval;
 - the observation time zone and the separate time at which it was recorded;
 - origin: manual, agent, import, or automation;
@@ -212,6 +222,10 @@ An event-log tracker accepts multiple entries in a period. A check-in occurrence
 answer, but corrections remain an append-only chain: a replacement entry supersedes the prior
 version instead of silently overwriting it. Retraction similarly preserves the fact that a record
 once existed. Backfilling is supported because `observedAt` and `recordedAt` are distinct.
+
+Generic summaries and goals operate on the primary value. A system configuration may expose an
+explicitly named derived metric from its supplemental fields, but arbitrary user-authored formulas
+are outside v1.
 
 For habit check-ins, an answered entry may record `completed`, `partial`, `not_completed`, or
 `not_applicable`. `skipped` remains an occurrence action, and `expired` remains missing data. This
@@ -237,7 +251,7 @@ A **Goal** is a desired outcome or constraint over time. It can be:
 
 - task-backed, such as completing a project by Friday;
 - tracker-backed, such as three workouts per week;
-- numeric, such as an average or range over a tracker field;
+- numeric, such as an average or range over a tracker's primary value or declared derived metric;
 - manual when no honest computation is possible.
 
 A goal stores its own title, optional description and `why`, period, state, target definition, and
@@ -272,10 +286,10 @@ preserved during migration and converted only when their intended task semantics
 | Repetition in a stable context supports habit formation. | A habit can store an optional cue, place, or “after I…” context and reuse it in a short check-in. | ilo never claims a behavior is formed after a fixed number of days; reported formation times vary widely. |
 | Self-monitoring and goal setting can support behavior change. | Fast entry, visible history, clear targets, and descriptive progress are first-class. | Tracking is always optional and editable; ilo does not assume monitoring helps every person or behavior. |
 | Specific when/where plans can improve follow-through. | A tracker or task may record an implementation cue and turn it into a schedule suggestion. | The person reviews the suggestion; an agent does not silently impose routines. |
-| Frequent or long assessment increases burden. | A check-in asks one primary question by default, remembers sensible field defaults, and limits follow-ups. Quiet hours, pause, and batching are first-class. | Research thresholds from intensive assessment studies are design signals, not universal limits for ilo. |
+| Frequent or long assessment increases burden. | A check-in asks one primary question by default, remembers sensible value defaults, and limits follow-ups. Quiet hours, pause, and batching are first-class. | Research thresholds from intensive assessment studies are design signals, not universal limits for ilo. |
 | Real self-tracking includes lapses and resumption. | Pause, resume, skip, backfill, and change-target flows are ordinary actions with preserved history. | No shame copy, reset punishment, or fabricated negative entry. |
 | Streaks can motivate but a broken highlighted streak can reduce engagement. | Streak display is opt-in and may offer a transparent repair rule. | Counts and trends remain available without streaks; repair never alters source entries. |
-| Personal observations vary in structure and precision. | Event logs accept concise text, optional attachments, and optional structured fields. Interval logs support overnight spans and source attribution. | Estimated values are labelled estimated; imported or device-derived data is not presented as diagnosis or clinical-grade truth. |
+| Personal observations vary in structure and precision. | Each custom tracker uses one typed primary value with an optional note and attachments. System configurations add supplemental fields only where needed. | Estimated values are labelled estimated; imported or device-derived data is not presented as diagnosis or clinical-grade truth. |
 | Goal adjustment can be adaptive. | Goals can be revised, paused, or retired with a reason and intact history. | ilo does not equate target revision with failure. |
 
 ## Illustrative tracker configurations
@@ -299,11 +313,10 @@ single supposedly exact value.
 ### Event log
 
 An event log records something whenever it happens, without manufacturing scheduled failures. It
-can hold a timestamp, plain-language description, optional attachment, optional labels, and
-tracker-defined fields. A meal description is one possible use, alongside exercise, reading,
+uses one primary value—often a description, duration, number, or timestamp—plus an optional note and
+attachments. A meal description is one possible use, alongside exercise, reading,
 caffeine, symptoms, or any other event the person chooses to record. If a future integration or
-model supplies estimated structured values, they require source labels and review before becoming
-canonical.
+model supplies an estimated value, it requires a source label and review before becoming canonical.
 
 ### Numeric or rating log
 
@@ -371,7 +384,12 @@ The initial tracking surface is:
 - `record_entry`, `list_entries`, `get_entry`, `correct_entry`, `retract_entry`;
 - `list_tracking_goals`, `get_tracking_goal`, `create_tracking_goal`, `update_tracking_goal`,
   `get_goal_progress`;
-- preview tools for schema changes, material schedule changes, bulk backfill, and destructive actions.
+- preview tools for value-definition changes, material schedule changes, bulk backfill, and
+  destructive actions.
+
+`create_tracker` and `update_tracker` accept one primary-value definition, not an arbitrary array of
+fields. A caller can select a server-owned system configuration by stable key, but cannot invent its
+supplemental schema.
 
 Every mutation accepts an idempotency key where a retry can duplicate a durable fact and an expected
 revision where concurrent edits matter. Deletion is soft by default. Tool metadata must accurately
@@ -387,7 +405,7 @@ not be exposed or described as personal tasks.
 
 - Reads and descriptive queries execute directly within the granted sources.
 - Low-risk writes may execute directly only under the person's reviewed domain policy.
-- Ambiguous capture, schema changes, schedule expansion, and estimated structured data require a
+- Ambiguous capture, definition changes, schedule expansion, and estimated structured data require a
   preview and explicit confirmation.
 - Bulk edits, deletion, or changes that increase prompt frequency are destructive/material and
   require confirmation.
@@ -428,7 +446,7 @@ estimate is source-labelled and reviewable rather than silently treated as groun
 
 ### “Work out three times a week”
 
-ilo creates a Habit tracker with an event or check-off field and a weekly count target. The person
+ilo creates a Habit tracker with a check-off primary value and a weekly count target. The person
 can log three workouts on any days; the model does not create seven daily failures.
 
 ## Architecture and ownership
@@ -446,9 +464,10 @@ Tracking is a new first-class product domain following the existing monorepo bou
 - `apps/mcp` remains a stateless adapter over the API and owns tool descriptions, discovery, and MCP
   error mapping only.
 
-Core records should be normalized rather than kept as opaque JSON. Versioned field definitions and
-entry values may use constrained JSON shapes validated by shared schemas. Attachments use the
-existing storage boundary and are referenced, not embedded. All times are stored as instants plus
+Core records should be normalized rather than kept as opaque JSON. Versioned primary-value
+definitions, fixed system-configuration supplements, and entry values may use constrained JSON
+shapes validated by shared schemas. Attachments use the existing storage boundary and are
+referenced, not embedded. All times are stored as instants plus
 the local-zone context required to reproduce the person's intended schedule.
 
 Any phase that adds push delivery, a native health bridge, provider import, or other external
@@ -508,8 +527,8 @@ This design should be implemented as bounded, independently reviewable plans:
 
 1. **Task and reminder contract cleanup:** safe task parity, truthful tool metadata, prompt domain
    contract, and compatibility plan.
-2. **Core tracking ledger:** tracker/schema versions, entries, corrections, source provenance, and
-   generic queries without scheduled prompting.
+2. **Core tracking ledger:** tracker-definition versions, entries, corrections, source provenance,
+   and generic queries without scheduled prompting.
 3. **Tracking workspace:** tracker setup, history, templates, pause/archive, manual logging, and
    source-scoped agent consent.
 4. **Check-in orchestration and Today:** schedules, durable occurrences, delivery attempts,
@@ -523,7 +542,9 @@ This design should be implemented as bounded, independently reviewable plans:
 
 At minimum, implementation must prove:
 
-- domain validation for every field type, schedule, lifecycle transition, and goal formula;
+- domain validation for every primary-value type, schedule, lifecycle transition, and goal formula;
+- rejection of arbitrary multi-field custom trackers and validation of every fixed system
+  configuration against its owned schema;
 - API authorization for workspace scope plus tracker source selection;
 - optimistic concurrency, retry idempotency, audit events, correction/retraction chains, and soft
   deletion;
@@ -550,13 +571,17 @@ occurrences, source-scoped tracking grants, revision-safe mutations, explicit co
 and a separation between prompts, deliveries, and underlying commitments.
 
 The second pass challenged the model against self-tracking research and interval, event-log, and
-device-import edge cases. It added durable check-in occurrences, versioned tracker schemas, honest
-missing-data states, append-only correction chains, overnight intervals, explicit estimates, burden
-controls, pause/resume/backfill, optional streaks, and future import identity/deduplication.
+device-import edge cases. It added durable check-in occurrences, versioned tracker definitions,
+honest missing-data states, append-only correction chains, overnight intervals, explicit estimates,
+burden controls, pause/resume/backfill, optional streaks, and future import
+identity/deduplication.
 
 ## Design defaults
 
-- Tracking v1 has no food-specific vertical. Food works through the same generic event-log fields as
+- A custom tracker has one primary typed value plus an optional note and attachments. Only
+  product-owned, tightly defined system configurations may add supplemental fields; arbitrary
+  multi-field forms are out of scope for v1.
+- Tracking v1 has no food-specific vertical. Food works through the same generic event-log shape as
   any other subject; food databases, nutrient modeling, and calorie workflows are out of scope.
 - Agent check-ins are channel-agnostic in the domain. The first implementation should use ilo's
   existing in-product agent/notification path before adding external channels.
@@ -564,9 +589,9 @@ controls, pause/resume/backfill, optional streaks, and future import identity/de
   arbitrary formulas are out of scope.
 - Correlation is descriptive and opt-in. Predictive recommendations or causal claims are out of
   scope.
-- A tracker may ask one primary question plus optional fields. There is no universal hard cap on
-  daily check-ins, but ilo warns before creating a high-burden schedule and requires confirmation to
-  increase prompt frequency.
+- A tracker asks one primary question. A system configuration may reveal its optional supplemental
+  fields after the primary answer. There is no universal hard cap on daily check-ins, but ilo warns
+  before creating a high-burden schedule and requires confirmation to increase prompt frequency.
 
 ## Research basis
 

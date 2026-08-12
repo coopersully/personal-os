@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal OS Product QA"
+  short_description: "Run fixture-backed browser QA for Personal OS"
+  default_prompt: "Use $personal-os-qa to refresh fixtures and QA the affected Personal OS product areas in the in-app browser."

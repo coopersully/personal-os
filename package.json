@@ -15,7 +15,8 @@
   },
   "scripts": {
     "build": "pnpm --filter './apps/**' --filter './packages/**' --filter '!@personal-os/desktop' --if-present run build",
-    "check": "bash ./.codex/scripts/check.sh && pnpm lint && pnpm typecheck && pnpm test:coverage && pnpm build",
+    "check": "bash ./.codex/scripts/check.sh && pnpm check:public-agent-skills && pnpm lint && pnpm typecheck && pnpm test:coverage && pnpm build",
+    "check:public-agent-skills": "node scripts/check-public-agent-skills.mjs",
     "dev": "pnpm --parallel --filter @personal-os/api --filter @personal-os/web run dev",
     "env:logs": "bash ./.codex/scripts/environment.sh logs",
     "env:restart": "bash ./.codex/scripts/environment.sh restart",
@@ -25,6 +26,7 @@
     "format": "biome format --write .",
     "lint": "biome check . && node scripts/check-frontend-theme-contract.mjs && node scripts/check-theme-token-contract.mjs",
     "test": "vitest run",
+    "test:public-agent-skills": "node scripts/check-public-agent-skills.test.mjs",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "typecheck": "tsc --noEmit -p e2e/tsconfig.json && pnpm --filter './apps/**' --filter './packages/**' --if-present run typecheck",

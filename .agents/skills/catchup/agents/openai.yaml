@@ -1,0 +1,4 @@
+interface:
+  display_name: "Catch Up Branch"
+  short_description: "Safely update a Personal OS branch from its PR base."
+  default_prompt: "Use $catchup to update this branch from its pull request base safely."

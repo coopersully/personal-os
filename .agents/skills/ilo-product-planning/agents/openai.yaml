@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal OS Product Planning"
+  short_description: "Map Personal OS goals into public delivery work"
+  default_prompt: "Use $ilo-product-planning to turn this explicit Personal OS product goal into a public, evidence-backed delivery map."

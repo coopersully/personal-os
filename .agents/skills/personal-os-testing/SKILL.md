@@ -1,9 +1,9 @@
 ---
 name: personal-os-testing
-description: Verify ilo changes at the appropriate unit, API integration, UI, and end-to-end layers. Use when adding or reviewing tests, investigating test failures, choosing a test layer, or preparing a change for handoff.
+description: Verify Personal OS changes at the appropriate unit, API integration, UI, and end-to-end layers. Use when adding or reviewing tests, investigating test failures, choosing a test layer, or preparing a change for handoff.
 ---
 
-# ilo testing
+# Personal OS testing
 
 The repository requires `pnpm verify` before handoff. It runs environment
 checks, linting, type checks, high-threshold coverage, production builds, and

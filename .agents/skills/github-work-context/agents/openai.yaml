@@ -1,0 +1,4 @@
+interface:
+  display_name: "GitHub Work Context"
+  short_description: "Apply Personal OS GitHub work-tracking conventions."
+  default_prompt: "Use $github-work-context before reading or updating Personal OS GitHub issues, milestones, or PR links."

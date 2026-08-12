@@ -19,6 +19,7 @@ import {
   mailThreads,
   migrateDatabase,
   reminders,
+  taskLists,
   taskProjects,
   users,
 } from "@personal-os/database";
@@ -705,6 +706,597 @@ describe.sequential("ilo API", () => {
           .from(reminders)
           .where(eq(reminders.id, togetherTask.id)),
       ).toEqual([{ listId: together.id, revision: 1 }]);
+    });
+  });
+
+  describe("task projects", () => {
+    let projectAgentToken = "";
+    let projectSessionToken = "";
+    let projectUserId = "";
+
+    type ProjectResponse = {
+      availability: "active" | "archived";
+      id: string;
+      lifecycle: "open" | "completed" | "cancelled";
+      listId: string;
+      name: string;
+      revision: number;
+      source: {
+        accountId: null;
+        provider: "local";
+        remoteId: string;
+        revision: string;
+        sourceType: "task_project";
+      };
+    };
+
+    async function projectRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Session ${projectSessionToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function agentProjectRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Bearer ${projectAgentToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function createProjectList(name: string) {
+      const response = await projectRequest("/v1/task-lists", { body: { name } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskList as { id: string; revision: number };
+    }
+
+    async function createProject(
+      listId: string,
+      name: string,
+      extra: Record<string, unknown> = {},
+    ) {
+      const response = await projectRequest("/v1/task-projects", {
+        body: { listId, name, ...extra },
+      });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskProject as ProjectResponse;
+    }
+
+    async function insertProjectTask(project: ProjectResponse, title: string) {
+      const [task] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: project.listId,
+          taskProjectId: project.id,
+          taskRevision: 1,
+          title,
+          userId: projectUserId,
+        })
+        .returning();
+      if (!task) throw new Error("Task Project Task fixture was not created.");
+      return task;
+    }
+
+    beforeAll(async () => {
+      const registration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Task Projects User",
+          email: "task-projects@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(registration.status).toBe(201);
+      const body = await payload(registration);
+      projectSessionToken = body.sessionToken;
+      projectUserId = body.user.id;
+      const tokenResponse = await projectRequest("/v1/access-tokens", {
+        body: { name: "Task Projects agent", scopes: ["tasks:read", "tasks:write"] },
+      });
+      expect(tokenResponse.status).toBe(201);
+      projectAgentToken = (await payload(tokenResponse)).token.token;
+    });
+
+    it("task projects enforce List ownership, local provenance, scoped uniqueness, and idempotent empty creation", async () => {
+      expect((await request("/v1/task-projects", { auth: "none" })).status).toBe(401);
+      const firstList = await createProjectList("Project Alpha List");
+      const secondList = await createProjectList("Project Beta List");
+      const first = await createProject(firstList.id, "Ｆｏｃｕｓ　Project");
+      expect(first).toMatchObject({
+        availability: "active",
+        lifecycle: "open",
+        listId: firstList.id,
+        notes: null,
+        revision: 1,
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: first.id,
+          revision: "1",
+          sourceType: "task_project",
+        },
+        targetDate: null,
+        why: null,
+      });
+      expect(
+        await database.db
+          .select()
+          .from(reminders)
+          .where(and(eq(reminders.taskProjectId, first.id), eq(reminders.kind, "task"))),
+      ).toHaveLength(0);
+      expect(
+        (
+          await projectRequest("/v1/task-projects", {
+            body: {
+              listId: firstList.id,
+              name: "Forged source",
+              source: first.source,
+            },
+          })
+        ).status,
+      ).toBe(400);
+
+      const collision = await projectRequest("/v1/task-projects", {
+        body: { listId: firstList.id, name: " focus project " },
+      });
+      expect(collision.status).toBe(409);
+      expect((await payload(collision)).error.details).toMatchObject({
+        code: "task_project_name_conflict",
+      });
+      expect((await createProject(secondList.id, "focus project")).listId).toBe(secondList.id);
+
+      const idempotencyKey = "66666666-6666-4666-8666-666666666666";
+      const input = { idempotencyKey, listId: firstList.id, name: "Replay Project" };
+      const created = await projectRequest("/v1/task-projects", { body: input });
+      const replayed = await projectRequest("/v1/task-projects", { body: input });
+      expect(created.status).toBe(201);
+      expect(replayed.status).toBe(201);
+      expect((await payload(replayed)).taskProject).toEqual((await payload(created)).taskProject);
+      const mismatch = await projectRequest("/v1/task-projects", {
+        body: { ...input, notes: "Different material" },
+      });
+      expect(mismatch.status).toBe(409);
+      expect((await payload(mismatch)).error.details).toMatchObject({
+        code: "task_project_idempotency_mismatch",
+      });
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Other Task Projects User",
+          email: "task-projects-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(otherRegistration.status).toBe(201);
+      const other = await payload(otherRegistration);
+      const [otherInbox] = await database.db
+        .select({ id: taskLists.id })
+        .from(taskLists)
+        .where(and(eq(taskLists.userId, other.user.id), eq(taskLists.kind, "inbox")));
+      if (!otherInbox) throw new Error("Other Project Inbox fixture was not created.");
+      expect(
+        (
+          await projectRequest("/v1/task-projects", {
+            body: { listId: otherInbox.id, name: "Cross-owner Project" },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await app.request(`/v1/task-projects/${first.id}`, {
+            headers: { authorization: `Session ${other.sessionToken}` },
+          })
+        ).status,
+      ).toBe(404);
+
+      const listed = await payload(await projectRequest("/v1/task-projects?limit=1"));
+      expect(listed.items).toHaveLength(1);
+      expect(listed.nextCursor).toEqual(expect.any(String));
+      expect(
+        (
+          await payload(
+            await projectRequest(
+              `/v1/task-projects?limit=1&cursor=${encodeURIComponent(listed.nextCursor)}`,
+            ),
+          )
+        ).items,
+      ).toHaveLength(1);
+    });
+
+    it("task projects enforce agent idempotency and revision guards", async () => {
+      const list = await createProjectList("Agent Project List");
+      const missingKey = await agentProjectRequest("/v1/task-projects", {
+        body: { listId: list.id, name: "Agent missing key" },
+      });
+      expect(missingKey.status).toBe(400);
+      const createInput = {
+        idempotencyKey: "77777777-7777-4777-8777-777777777777",
+        listId: list.id,
+        name: "Agent Project",
+      };
+      const createdResponse = await agentProjectRequest("/v1/task-projects", {
+        body: createInput,
+      });
+      expect(createdResponse.status).toBe(201);
+      const created = (await payload(createdResponse)).taskProject as ProjectResponse;
+      for (const [path, body, method] of [
+        [`/v1/task-projects/${created.id}`, { name: "No revision" }, "PATCH"],
+        [`/v1/task-projects/${created.id}/cancel`, {}, "POST"],
+        [`/v1/task-projects/${created.id}/archive`, {}, "POST"],
+        [`/v1/task-projects/${created.id}/complete`, {}, "POST"],
+      ] as const) {
+        expect((await agentProjectRequest(path, { body, method })).status).toBe(400);
+      }
+    });
+
+    it("task projects use dedicated revision-safe update, cancel, and archive transitions", async () => {
+      const list = await createProjectList("Project Lifecycle List");
+      const mutable = await createProject(list.id, "Mutable Project");
+      const updatedResponse = await projectRequest(`/v1/task-projects/${mutable.id}`, {
+        body: {
+          expectedRevision: mutable.revision,
+          name: "Renamed Project",
+          notes: "Reviewed",
+          targetDate: "2026-07-31",
+          why: "Ship it",
+        },
+        method: "PATCH",
+      });
+      expect(updatedResponse.status).toBe(200);
+      const updated = (await payload(updatedResponse)).taskProject as ProjectResponse;
+      expect(updated).toMatchObject({
+        listId: list.id,
+        name: "Renamed Project",
+        revision: 2,
+        source: { remoteId: mutable.id, revision: "2", sourceType: "task_project" },
+      });
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${mutable.id}`, {
+            body: { expectedRevision: 2, listId: list.id },
+            method: "PATCH",
+          })
+        ).status,
+      ).toBe(400);
+      const stale = await projectRequest(`/v1/task-projects/${mutable.id}`, {
+        body: { expectedRevision: mutable.revision, name: "Stale Project" },
+        method: "PATCH",
+      });
+      expect(stale.status).toBe(409);
+      expect((await payload(stale)).error.details).toMatchObject({ currentRevision: 2 });
+
+      const cancellable = await createProject(list.id, "Cancellable Project");
+      const cancelledResponse = await projectRequest(`/v1/task-projects/${cancellable.id}/cancel`, {
+        body: { expectedRevision: cancellable.revision },
+      });
+      expect(cancelledResponse.status).toBe(200);
+      expect((await payload(cancelledResponse)).taskProject).toMatchObject({
+        cancelledAt: "2026-07-13T12:00:00.000Z",
+        lifecycle: "cancelled",
+        revision: 2,
+      });
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${cancellable.id}/cancel`, {
+            body: { expectedRevision: cancellable.revision },
+          })
+        ).status,
+      ).toBe(409);
+
+      const archivable = await createProject(list.id, "Archivable Project");
+      const archivedResponse = await projectRequest(`/v1/task-projects/${archivable.id}/archive`, {
+        body: { expectedRevision: archivable.revision },
+      });
+      expect(archivedResponse.status).toBe(200);
+      expect((await payload(archivedResponse)).taskProject).toMatchObject({
+        archivedAt: "2026-07-13T12:00:00.000Z",
+        availability: "archived",
+        revision: 2,
+      });
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${archivable.id}/archive`, {
+            body: { expectedRevision: archivable.revision },
+          })
+        ).status,
+      ).toBe(409);
+    });
+
+    it("task projects require an explicit open-Task completion resolution and apply every choice atomically", async () => {
+      const sourceList = await createProjectList("Project Completion Source");
+      const destinationList = await createProjectList("Project Completion Destination");
+      const destinationProject = await createProject(destinationList.id, "Destination Project");
+
+      const kept = await createProject(sourceList.id, "Keep Project Open");
+      const keptTask = await insertProjectTask(kept, "Keep Task Open");
+      const conflict = await projectRequest(`/v1/task-projects/${kept.id}/complete`, {
+        body: { expectedRevision: kept.revision },
+      });
+      expect(conflict.status).toBe(409);
+      expect((await payload(conflict)).error.details).toEqual({
+        code: "task_project_has_open_tasks",
+        currentRevisions: {
+          destinationList: null,
+          project: 1,
+          sourceList: 1,
+          task: null,
+        },
+        openContentCounts: { projects: 0, tasks: 1 },
+        resolutions: [
+          "complete_open_tasks",
+          "cancel_open_tasks",
+          "move_open_tasks",
+          "keep_project_open",
+        ],
+      });
+      const keepResponse = await projectRequest(`/v1/task-projects/${kept.id}/complete`, {
+        body: { expectedRevision: kept.revision, resolution: "keep_project_open" },
+      });
+      expect(keepResponse.status).toBe(200);
+      expect((await payload(keepResponse)).taskProject).toMatchObject({
+        lifecycle: "open",
+        revision: 1,
+      });
+      expect(
+        await database.db.select().from(reminders).where(eq(reminders.id, keptTask.id)),
+      ).toEqual([expect.objectContaining({ taskLifecycle: "open", taskRevision: 1 })]);
+
+      const completed = await createProject(sourceList.id, "Complete Tasks Project");
+      const completeTasks = await Promise.all([
+        insertProjectTask(completed, "Complete First Task"),
+        insertProjectTask(completed, "Complete Second Task"),
+      ]);
+      const completedResponse = await projectRequest(`/v1/task-projects/${completed.id}/complete`, {
+        body: { expectedRevision: completed.revision, resolution: "complete_open_tasks" },
+      });
+      expect(completedResponse.status).toBe(200);
+      expect((await payload(completedResponse)).taskProject).toMatchObject({
+        completedAt: "2026-07-13T12:00:00.000Z",
+        lifecycle: "completed",
+        revision: 2,
+      });
+      expect(
+        await database.db
+          .select({ lifecycle: reminders.taskLifecycle, revision: reminders.taskRevision })
+          .from(reminders)
+          .where(
+            inArray(
+              reminders.id,
+              completeTasks.map(({ id }) => id),
+            ),
+          ),
+      ).toEqual([
+        { lifecycle: "completed", revision: 2 },
+        { lifecycle: "completed", revision: 2 },
+      ]);
+      const completionAudit = await database.db
+        .select({ entityId: auditEvents.entityId, requestId: auditEvents.requestId })
+        .from(auditEvents)
+        .where(
+          and(
+            inArray(auditEvents.entityId, [completed.id, ...completeTasks.map(({ id }) => id)]),
+            inArray(auditEvents.action, ["task_project.completed", "task.completed_with_project"]),
+          ),
+        );
+      expect(completionAudit).toHaveLength(3);
+      expect(new Set(completionAudit.map(({ requestId }) => requestId)).size).toBe(1);
+
+      const cancelled = await createProject(sourceList.id, "Cancel Tasks Project");
+      const cancelledTask = await insertProjectTask(cancelled, "Cancel This Task");
+      const cancelResponse = await projectRequest(`/v1/task-projects/${cancelled.id}/complete`, {
+        body: { expectedRevision: cancelled.revision, resolution: "cancel_open_tasks" },
+      });
+      expect(cancelResponse.status).toBe(200);
+      expect((await payload(cancelResponse)).taskProject.lifecycle).toBe("completed");
+      expect(
+        await database.db.select().from(reminders).where(eq(reminders.id, cancelledTask.id)),
+      ).toEqual([
+        expect.objectContaining({
+          completedAt: null,
+          taskCancelledAt: new Date("2026-07-13T12:00:00.000Z"),
+          taskLifecycle: "cancelled",
+          taskRevision: 2,
+        }),
+      ]);
+
+      const moved = await createProject(sourceList.id, "Move Tasks Project");
+      const movedTask = await insertProjectTask(moved, "Move This Task");
+      const selfMove = await projectRequest(`/v1/task-projects/${moved.id}/complete`, {
+        body: {
+          destinationListId: sourceList.id,
+          destinationProjectId: moved.id,
+          expectedRevision: moved.revision,
+          resolution: "move_open_tasks",
+        },
+      });
+      expect(selfMove.status).toBe(409);
+      expect((await payload(selfMove)).error.details).toMatchObject({
+        code: "task_project_destination_unavailable",
+      });
+      const moveResponse = await projectRequest(`/v1/task-projects/${moved.id}/complete`, {
+        body: {
+          destinationListId: destinationList.id,
+          destinationProjectId: destinationProject.id,
+          expectedRevision: moved.revision,
+          resolution: "move_open_tasks",
+        },
+      });
+      expect(moveResponse.status).toBe(200);
+      expect((await payload(moveResponse)).taskProject.lifecycle).toBe("completed");
+      expect(
+        await database.db.select().from(reminders).where(eq(reminders.id, movedTask.id)),
+      ).toEqual([
+        expect.objectContaining({
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: destinationList.id,
+          taskProjectId: destinationProject.id,
+          taskRevision: 2,
+        }),
+      ]);
+    });
+
+    it("task projects preview and atomically commit Project-plus-Task moves while rejecting drift and cross-user destinations", async () => {
+      const sourceList = await createProjectList("Project Move Source");
+      const destinationList = await createProjectList("Project Move Destination");
+      const project = await createProject(sourceList.id, "Atomic Move Project");
+      const firstTask = await insertProjectTask(project, "Atomic Move First");
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Project Move Other",
+          email: "task-project-move-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      const other = await payload(otherRegistration);
+      const [otherInbox] = await database.db
+        .select({ id: taskLists.id })
+        .from(taskLists)
+        .where(and(eq(taskLists.userId, other.user.id), eq(taskLists.kind, "inbox")));
+      if (!otherInbox) throw new Error("Other Project Move Inbox fixture was not created.");
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: { destinationListId: otherInbox.id, expectedRevision: project.revision },
+          })
+        ).status,
+      ).toBe(404);
+
+      const previewResponse = await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+        body: { destinationListId: destinationList.id, expectedRevision: project.revision },
+      });
+      expect(previewResponse.status).toBe(200);
+      const preview = (await payload(previewResponse)).preview;
+      expect(preview).toEqual({
+        affectedTaskCount: 1,
+        destinationListId: destinationList.id,
+        destinationListRevision: destinationList.revision,
+        previewToken: expect.any(String),
+        sourceListId: sourceList.id,
+        sourceListRevision: sourceList.revision,
+        taskProjectId: project.id,
+        taskProjectRevision: project.revision,
+      });
+
+      const secondTask = await insertProjectTask(project, "Atomic Move Drift");
+      const stale = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: project.revision,
+          previewToken: preview.previewToken,
+        },
+      });
+      expect(stale.status).toBe(409);
+      expect((await payload(stale)).error.details).toMatchObject({
+        code: "task_project_move_preview_stale",
+        currentRevision: project.revision,
+      });
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, project.id)),
+      ).toEqual([{ listId: sourceList.id }]);
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId })
+          .from(reminders)
+          .where(inArray(reminders.id, [firstTask.id, secondTask.id])),
+      ).toEqual([{ listId: sourceList.id }, { listId: sourceList.id }]);
+
+      const freshPreview = (
+        await payload(
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: { destinationListId: destinationList.id, expectedRevision: project.revision },
+          }),
+        )
+      ).preview;
+      const movedResponse = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: project.revision,
+          previewToken: freshPreview.previewToken,
+        },
+      });
+      expect(movedResponse.status).toBe(200);
+      expect((await payload(movedResponse)).taskProject).toMatchObject({
+        listId: destinationList.id,
+        revision: 2,
+        source: { remoteId: project.id, revision: "2", sourceType: "task_project" },
+      });
+      expect(
+        await database.db
+          .select({
+            legacyStatus: reminders.status,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(inArray(reminders.id, [firstTask.id, secondTask.id])),
+      ).toEqual([
+        {
+          legacyStatus: "inbox",
+          listId: destinationList.id,
+          projectId: project.id,
+          revision: 2,
+        },
+        {
+          legacyStatus: "inbox",
+          listId: destinationList.id,
+          projectId: project.id,
+          revision: 2,
+        },
+      ]);
+      const moveAudit = await database.db
+        .select({
+          action: auditEvents.action,
+          entityId: auditEvents.entityId,
+          requestId: auditEvents.requestId,
+        })
+        .from(auditEvents)
+        .where(
+          and(
+            inArray(auditEvents.entityId, [project.id, firstTask.id, secondTask.id]),
+            inArray(auditEvents.action, ["task_project.moved", "task.moved_with_project"]),
+          ),
+        );
+      expect(moveAudit).toHaveLength(3);
+      expect(moveAudit.map(({ action }) => action).sort()).toEqual([
+        "task.moved_with_project",
+        "task.moved_with_project",
+        "task_project.moved",
+      ]);
+      expect(new Set(moveAudit.map(({ requestId }) => requestId)).size).toBe(1);
+
+      const staleRevision = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: sourceList.id,
+          expectedRevision: project.revision,
+          previewToken: freshPreview.previewToken,
+        },
+      });
+      expect(staleRevision.status).toBe(409);
+      expect((await payload(staleRevision)).error.details).toMatchObject({ currentRevision: 2 });
     });
   });
 

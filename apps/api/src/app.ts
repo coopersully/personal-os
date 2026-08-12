@@ -64,8 +64,10 @@ import {
   requireScope,
 } from "./routes/support.js";
 import { registerTaskListRoutes } from "./routes/task-lists.js";
+import { registerTaskProjectRoutes } from "./routes/task-projects.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 import { createTaskListService } from "./task-list-service.js";
+import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
@@ -227,6 +229,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     });
   const reminders = createReminderService({ db: dependencies.db, now });
   const taskLists = createTaskListService({ db: dependencies.db, now });
+  const taskProjects = createTaskProjectService({ db: dependencies.db, now });
   const tasks = createTaskService({ db: dependencies.db, now });
   const google =
     dependencies.google ??
@@ -808,6 +811,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/reminders", authenticate);
   app.use("/v1/task-lists/*", authenticate);
   app.use("/v1/task-lists", authenticate);
+  app.use("/v1/task-projects/*", authenticate);
+  app.use("/v1/task-projects", authenticate);
   app.use("/v1/tasks/*", authenticate);
   app.use("/v1/tasks", authenticate);
   app.use("/v1/calendars/*", authenticate);
@@ -1083,6 +1088,8 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   registerReminderRoutes({ app, mutationContext, reminders });
 
   registerTaskListRoutes({ app, mutationContext, taskLists });
+
+  registerTaskProjectRoutes({ app, mutationContext, taskProjects });
 
   registerTaskRoutes({ app, mutationContext, tasks });
 

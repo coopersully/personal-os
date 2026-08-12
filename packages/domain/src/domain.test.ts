@@ -977,6 +977,19 @@ describe("domain schemas", () => {
         name: "Launch",
       }).success,
     ).toBe(false);
+    expect(
+      createTaskProjectInputSchema.safeParse({
+        listId,
+        name: "Local only",
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: projectId,
+          revision: "1",
+          sourceType: "task_project",
+        },
+      }).success,
+    ).toBe(false);
     expect(updateTaskInputSchema.safeParse({ expectedRevision: 1 }).success).toBe(false);
     expect(
       updateTaskInputSchema.safeParse({ expectedRevision: 0, title: "Invalid revision" }).success,
@@ -1075,12 +1088,23 @@ describe("domain schemas", () => {
       name: "Launch",
       notes: null,
       revision: 1,
-      source: null,
+      source: {
+        accountId: null,
+        provider: "local",
+        remoteId: projectId,
+        revision: "1",
+        sourceType: "task_project",
+      },
       targetDate: null,
       updatedAt: start,
       why: null,
     });
-    expect(taskProject).toMatchObject({ deletedAt: null, lifecycle: "open" });
+    expect(taskProject).toMatchObject({
+      deletedAt: null,
+      lifecycle: "open",
+      source: { provider: "local", remoteId: projectId, revision: "1" },
+    });
+    expect(taskProjectSchema.safeParse({ ...taskProject, source: null }).success).toBe(false);
     const canonicalTask = taskSchema.parse({
       cancelledAt: null,
       completedAt: null,

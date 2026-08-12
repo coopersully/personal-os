@@ -34,13 +34,19 @@ export function normalizeTaskContainerName(value: string): string {
 const taskContainerNameSchema = z.string().trim().min(1).max(240);
 const nullableTaskContainerTextSchema = z.string().trim().max(10_000).nullable();
 const nullableTaskContainerColorSchema = z.string().trim().min(1).max(32).nullable();
-const nullableSourceSchema = materialSourceReferenceSchema.nullable();
 const taskListSourceSchema = materialSourceReferenceSchema.extend({
   accountId: z.null(),
   provider: z.literal("local"),
   remoteId: idSchema,
   revision: z.string().trim().min(1),
   sourceType: z.literal("task_list"),
+});
+const taskProjectSourceSchema = materialSourceReferenceSchema.extend({
+  accountId: z.null(),
+  provider: z.literal("local"),
+  remoteId: idSchema,
+  revision: z.string().trim().min(1),
+  sourceType: z.literal("task_project"),
 });
 const revisionSchema = z.number().int().positive();
 const optionalExpectedRevisionSchema = revisionSchema.optional();
@@ -127,7 +133,7 @@ export const taskProjectSchema = taskProjectFieldsSchema.extend({
   lifecycle: taskLifecycleSchema,
   listId: idSchema,
   revision: revisionSchema,
-  source: nullableSourceSchema,
+  source: taskProjectSourceSchema,
   updatedAt: isoDateTimeSchema,
 });
 export type TaskProject = z.infer<typeof taskProjectSchema>;
@@ -137,7 +143,6 @@ export const createTaskProjectInputSchema = taskProjectFieldsSchema
     idempotencyKey: optionalIdempotencyKeySchema,
     listId: idSchema,
     notes: nullableTaskContainerTextSchema.default(null),
-    source: nullableSourceSchema.default(null),
     targetDate: z.iso.date().nullable().default(null),
     why: nullableTaskContainerTextSchema.default(null),
   })

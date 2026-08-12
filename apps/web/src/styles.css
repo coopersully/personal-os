@@ -2917,20 +2917,20 @@ p {
 .mail-secondary-nav__actions {
   align-items: center;
   display: flex;
+  flex: 0 0 auto;
   gap: 0.125rem;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.mail-secondary-nav__actions::-webkit-scrollbar { display: none; }
 .mail-secondary-nav__actions .button {
   flex: 0 0 auto;
   font-size: 0.75rem;
   min-height: 2rem;
 }
+.mail-secondary-nav__overflow-action { display: none; }
+.mail-secondary-nav__overflow-separator { display: none; }
 .mail-secondary-nav__search {
-  min-width: 0;
-  width: min(22rem, 42vw);
+  flex: 1 1 16rem;
+  max-width: 22rem;
+  min-width: 8rem;
 }
 .mail-sidebar__unified-icon {
   align-items: center;
@@ -4524,12 +4524,15 @@ p {
   }
   .mail-secondary-nav {
     gap: 0.5rem;
-    overflow-x: auto;
     padding-inline: 0.75rem;
   }
-  .mail-secondary-nav__context > span { display: none; }
-  .mail-secondary-nav__search { min-width: 10rem; width: min(18rem, 58vw); }
+  .mail-secondary-nav__context { display: none; }
+  .mail-secondary-nav__search { min-width: 7rem; }
   .mail-secondary-nav__actions .button { padding-inline: 0.5rem; }
+  .mail-secondary-nav__actions .button > span { display: none; }
+  .mail-secondary-nav__compact-action { display: none; }
+  .mail-secondary-nav__overflow-action { display: flex; }
+  .mail-secondary-nav__overflow-separator { display: block; }
   .mail-send-recovery {
     border-radius: 12px;
     padding: 14px;

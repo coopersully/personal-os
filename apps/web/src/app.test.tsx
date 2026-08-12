@@ -4886,6 +4886,8 @@ describe("ilo web app", () => {
     expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
     expect(await screen.findByRole("region", { name: "Conversation actions" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Search mail")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back to Unified inbox" })).not.toBeInTheDocument();
     expect(
       await screen.findByText("Hello Example User. This is the full message."),
     ).toBeInTheDocument();
@@ -4954,7 +4956,6 @@ describe("ilo web app", () => {
     expect(
       await screen.findByText("This message has no plain-text body.", {}, { timeout: 5_000 }),
     ).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Back to Unified inbox" }));
     await browser.type(screen.getByLabelText("Search mail"), "Project");
     await browser.keyboard("{Enter}");
     await waitFor(() =>
@@ -5150,7 +5151,8 @@ describe("ilo web app", () => {
     setup("/mail");
     const browser = userEvent.setup();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
-    await browser.click(screen.getByRole("button", { name: "Delete conversation" }));
+    await browser.click(screen.getByRole("button", { name: "More conversation actions" }));
+    await browser.click(await screen.findByRole("menuitem", { name: "Delete conversation" }));
     await waitFor(() =>
       expect(mocks.updateMailThread).toHaveBeenCalledWith(mailThread.id, {
         mailboxIds: [trash.id],

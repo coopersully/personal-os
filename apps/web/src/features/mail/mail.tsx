@@ -7,12 +7,12 @@ import { useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
   ClockIcon,
   EyeIcon,
   EyeOffIcon,
   InboxIcon,
   MailIcon,
+  MoreHorizontalIcon,
   ReplyIcon,
   SearchIcon,
   StarIcon,
@@ -25,6 +25,13 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu.js";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../../components/ui/input-group.js";
 import {
   SidebarGroup,
@@ -568,7 +575,6 @@ export function MailPage({ user }: { user: User }) {
             ),
           })
         }
-        back={() => update({ thread: null })}
         pending={updateThread.isPending}
         reply={() => {
           if (!selected) return;
@@ -638,7 +644,6 @@ export function MailPage({ user }: { user: User }) {
 
 function MailSecondaryNavigation({
   archive,
-  back,
   pending,
   reply,
   selected,
@@ -648,7 +653,6 @@ function MailSecondaryNavigation({
   trash,
 }: {
   archive: () => void;
-  back: () => void;
   pending: boolean;
   reply: () => void;
   selected: MailThread | undefined;
@@ -678,99 +682,117 @@ function MailSecondaryNavigation({
       aria-label={selected ? "Conversation actions" : "Unified inbox controls"}
       className="mail-secondary-nav"
     >
+      <div className="mail-secondary-nav__context">
+        <span>Unified inbox</span>
+        <strong>Mail</strong>
+      </div>
+      <form
+        className="mail-secondary-nav__search"
+        onSubmit={(event) => {
+          event.preventDefault();
+          updateSearch();
+        }}
+      >
+        <InputGroup>
+          <InputGroupAddon>
+            <SearchIcon aria-hidden="true" />
+          </InputGroupAddon>
+          <InputGroupInput
+            aria-label="Search mail"
+            onChange={(event) => setSearchDraft(event.currentTarget.value)}
+            placeholder="Search mail"
+            type="search"
+            value={searchDraft}
+          />
+        </InputGroup>
+      </form>
       {selected ? (
-        <>
-          <div className="mail-secondary-nav__context">
-            <span>Unified inbox</span>
-            <strong>Conversation actions</strong>
-          </div>
-          <div className="mail-secondary-nav__actions">
-            <Button aria-label="Back to Unified inbox" onClick={back} tone="ghost">
-              <ChevronLeftIcon aria-hidden="true" className="size-4" />
-              <span>Inbox</span>
-            </Button>
-            <Button onClick={reply} tone="ghost">
-              <ReplyIcon aria-hidden="true" className="size-4" />
-              <span>Reply</span>
-            </Button>
-            <Button aria-label="Snooze conversation until tomorrow" onClick={snooze} tone="ghost">
-              <ClockIcon aria-hidden="true" className="size-4" />
-              <span>Snooze</span>
-            </Button>
-            <Button
-              aria-label="Archive conversation"
-              disabled={pending}
-              onClick={archive}
-              tone="ghost"
-            >
-              <ArchiveIcon aria-hidden="true" className="size-4" />
-              <span>Archive</span>
-            </Button>
-            <Button
-              aria-label="Delete conversation"
-              disabled={pending}
-              onClick={trash}
-              tone="ghost"
-            >
-              <TrashIcon aria-hidden="true" className="size-4" />
-              <span>Delete</span>
-            </Button>
-            <Button
-              aria-label={selected.starred ? "Unstar conversation" : "Star conversation"}
-              disabled={pending}
-              onClick={toggleStar}
-              tone="ghost"
-            >
-              <StarIcon
-                aria-hidden="true"
-                className="size-4"
-                weight={selected.starred ? "Filled" : "Outline"}
-              />
-              <span>{selected.starred ? "Unstar" : "Star"}</span>
-            </Button>
-            <Button
-              aria-label={selected.unread ? "Mark conversation read" : "Mark conversation unread"}
-              disabled={pending}
-              onClick={toggleUnread}
-              tone="ghost"
-            >
-              {selected.unread ? (
-                <EyeIcon aria-hidden="true" className="size-4" />
-              ) : (
-                <EyeOffIcon aria-hidden="true" className="size-4" />
-              )}
-              <span>{selected.unread ? "Mark read" : "Mark unread"}</span>
-            </Button>
-          </div>
-        </>
-      ) : (
-        <>
-          <div className="mail-secondary-nav__context">
-            <span>Unified inbox</span>
-            <strong>Mail</strong>
-          </div>
-          <form
-            className="mail-secondary-nav__search"
-            onSubmit={(event) => {
-              event.preventDefault();
-              updateSearch();
-            }}
+        <div className="mail-secondary-nav__actions">
+          <Button onClick={reply} tone="ghost">
+            <ReplyIcon aria-hidden="true" className="size-4" />
+            <span>Reply</span>
+          </Button>
+          <Button
+            aria-label="Archive conversation"
+            disabled={pending}
+            onClick={archive}
+            tone="ghost"
           >
-            <InputGroup>
-              <InputGroupAddon>
-                <SearchIcon aria-hidden="true" />
-              </InputGroupAddon>
-              <InputGroupInput
-                aria-label="Search mail"
-                onChange={(event) => setSearchDraft(event.currentTarget.value)}
-                placeholder="Search mail"
-                type="search"
-                value={searchDraft}
-              />
-            </InputGroup>
-          </form>
-        </>
-      )}
+            <ArchiveIcon aria-hidden="true" className="size-4" />
+            <span>Archive</span>
+          </Button>
+          <Button
+            aria-label="Snooze conversation until tomorrow"
+            className="mail-secondary-nav__compact-action"
+            onClick={snooze}
+            tone="ghost"
+          >
+            <ClockIcon aria-hidden="true" className="size-4" />
+          </Button>
+          <Button
+            aria-label={selected.starred ? "Unstar conversation" : "Star conversation"}
+            className="mail-secondary-nav__compact-action"
+            disabled={pending}
+            onClick={toggleStar}
+            tone="ghost"
+          >
+            <StarIcon
+              aria-hidden="true"
+              className="size-4"
+              weight={selected.starred ? "Filled" : "Outline"}
+            />
+          </Button>
+          <Button
+            aria-label={selected.unread ? "Mark conversation read" : "Mark conversation unread"}
+            className="mail-secondary-nav__compact-action"
+            disabled={pending}
+            onClick={toggleUnread}
+            tone="ghost"
+          >
+            {selected.unread ? (
+              <EyeIcon aria-hidden="true" className="size-4" />
+            ) : (
+              <EyeOffIcon aria-hidden="true" className="size-4" />
+            )}
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button aria-label="More conversation actions" disabled={pending} tone="ghost">
+                <MoreHorizontalIcon aria-hidden="true" className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={snooze}>
+                <ClockIcon aria-hidden="true" />
+                Snooze until tomorrow
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="mail-secondary-nav__overflow-action"
+                onSelect={toggleStar}
+              >
+                <StarIcon aria-hidden="true" weight={selected.starred ? "Filled" : "Outline"} />
+                {selected.starred ? "Unstar" : "Star"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="mail-secondary-nav__overflow-action"
+                onSelect={toggleUnread}
+              >
+                {selected.unread ? (
+                  <EyeIcon aria-hidden="true" />
+                ) : (
+                  <EyeOffIcon aria-hidden="true" />
+                )}
+                {selected.unread ? "Mark read" : "Mark unread"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="mail-secondary-nav__overflow-separator" />
+              <DropdownMenuItem onSelect={trash} variant="destructive">
+                <TrashIcon aria-hidden="true" />
+                Delete conversation
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : null}
     </section>
   );
 }

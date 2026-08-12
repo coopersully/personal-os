@@ -9,6 +9,10 @@ goal/motive/habit framing in `docs/product/master-design.md` sections 6.5–6.6 
 MCP vocabulary. Those authoritative documents should be updated in the first implementation plan,
 not piecemeal during design review.
 
+**Normative companion:** Core entity definitions, relational invariants, the deterministic capture
+rubric, and golden fixtures are defined in
+[Tasks and Tracking Ontology and Classification Design](./2026-08-12-tasks-tracking-ontology-classification-design.md).
+
 ## Decision summary
 
 ilo will have two sibling workspaces:
@@ -99,10 +103,19 @@ goal. The ledger preserves those distinctions.
 
 ### Tasks workspace
 
-Tasks remains a primary navigation destination at `/tasks`. It contains finite commitments,
-including inbox, scheduled, upcoming, completed, cancelled, and trashed views. A task may be one-off
-or recurring. Each recurring occurrence is independently completable so that completing Monday does
-not rewrite Tuesday.
+Tasks remains a primary navigation destination at `/tasks`. It contains Lists, Projects, and finite
+commitments. Inbox is the required system List; Upcoming, Scheduled, Completed, Cancelled, and Trash
+are computed Views. A Task may be one-off or recurring. Each recurring occurrence is independently
+completable so that completing Monday does not rewrite Tuesday.
+
+Tasks uses a deliberately shallow organizational hierarchy:
+
+- every Task belongs to exactly one List, using the system Inbox by default;
+- a Project is a finite outcome inside exactly one List;
+- a Task may belong to at most one Project in the same List;
+- Lists and Projects do not nest in v1;
+- tags remain cross-cutting Task metadata;
+- Today, Upcoming, Scheduled, Completed, and similar surfaces are computed Views, not Lists.
 
 Task detail includes its title, notes, due or scheduled window, priority, estimate, tags, optional
 `why`, recurrence, prompts, history, and links to a larger goal when applicable.
@@ -142,12 +155,28 @@ underlying item from Today.
 
 A **Task** is a finite action with a completion state. It contains:
 
-- identity, owner, title, notes, tags, priority, and optional estimate;
+- identity, owner, List, optional Project, title, notes, tags, priority, and optional estimate;
 - optional `why` in the person's own words;
 - scheduled time or window, due time or window, and the time zone in which the intention was made;
-- status and completion/cancellation timestamps;
+- lifecycle and completion/cancellation timestamps;
 - recurrence definition when it repeats;
 - source reference, revision, created/updated timestamps, and soft-deletion state.
+
+Task lifecycle is only `open`, `completed`, or `cancelled`. Inbox is its default List; scheduled is
+timing; archived/deleted are availability states. The current `next` value remains temporary
+migration metadata and a compatibility filter, not a new canonical state. These axes must not share
+one status field.
+
+### List and Project
+
+A **List** is an ongoing organizational context, not a completable commitment. A **Project** is a
+finite execution outcome used to organize multiple Tasks. Every Project belongs to one List; every
+Project Task carries the same List. Moving a Project atomically moves its Tasks after preview.
+Moving one Task to another List detaches an incompatible Project after preview.
+
+Completing a Project with open Tasks requires an explicit resolution for those Tasks. Archiving a
+List with active Projects or Tasks likewise requires an exact move/archive decision. Neither action
+silently completes, cancels, hides, or strands child work.
 
 The system stores **Task Occurrences** for recurring work. An occurrence has its own effective time
 window and outcome. Changes to the recurrence rule apply prospectively; past occurrences retain the
@@ -166,10 +195,10 @@ A **Tracker** defines a repeated question or event the person wants to record. I
 - source reference, revision, and audit timestamps.
 
 A custom tracker in v1 has exactly one primary value, selected from deliberately general types:
-boolean, number with unit, duration, rating, single choice, short text, timestamp, or time interval.
-Every entry may also carry an optional note and attachment references. This keeps capture and
-analysis predictable while still covering check-offs, measurements, ratings, descriptions, and
-intervals.
+boolean, outcome (`completed`, `partial`, or `not_completed`), number with unit, duration, rating,
+single choice, short text, timestamp, or time interval. Every entry may also carry an optional note
+and attachment references. This keeps capture and analysis predictable while still covering
+check-offs, measurements, ratings, descriptions, and intervals.
 
 Tightly defined system configurations may add a small fixed set of supplemental fields when the
 subject materially requires them. For example, a Sleep Diary can use an interval as its primary
@@ -195,6 +224,7 @@ A durable **Check-in Occurrence** is created separately from any notification. I
 - `open`: available to answer;
 - `answered`: linked to a canonical entry;
 - `skipped`: explicitly declined by the person;
+- `not_applicable`: explicitly marked as not applying, with no fabricated entry;
 - `expired`: the response window ended without an answer;
 - `cancelled`: invalidated by an intentional schedule change.
 
@@ -227,9 +257,10 @@ Generic summaries and goals operate on the primary value. A system configuration
 explicitly named derived metric from its supplemental fields, but arbitrary user-authored formulas
 are outside v1.
 
-For habit check-ins, an answered entry may record `completed`, `partial`, `not_completed`, or
-`not_applicable`. `skipped` remains an occurrence action, and `expired` remains missing data. This
-prevents four materially different states from collapsing into a false boolean.
+Habit check-offs use an outcome primary value: `completed`, `partial`, or `not_completed`.
+`not_applicable` and `skipped` remain explicit occurrence dispositions without an Entry, while
+`expired` remains missing data. This prevents five materially different states from collapsing into
+a false Boolean.
 
 ### Habit
 
@@ -372,6 +403,9 @@ tracker outside the corresponding source selection.
 
 The coherent task surface is:
 
+- `list_task_lists`, `get_task_list`, `create_task_list`, `update_task_list`, `archive_task_list`;
+- `list_projects`, `get_project`, `create_project`, `update_project`, `complete_project`,
+  `cancel_project`, `archive_project`, `move_project`;
 - `list_tasks`, `get_task`, `create_task`, `update_task`;
 - `complete_task`, `cancel_task`, `trash_task`, `restore_task`;
 - recurrence occurrence operations where a single instance must differ from the series.
@@ -380,7 +414,8 @@ The initial tracking surface is:
 
 - `list_trackers`, `get_tracker`, `create_tracker`, `update_tracker`, `pause_tracker`,
   `archive_tracker`;
-- `list_due_checkins`, `get_checkin`, `answer_checkin`, `skip_checkin`;
+- `list_due_checkins`, `get_checkin`, `answer_checkin`, `skip_checkin`,
+  `mark_checkin_not_applicable`;
 - `record_entry`, `list_entries`, `get_entry`, `correct_entry`, `retract_entry`;
 - `list_tracking_goals`, `get_tracking_goal`, `create_tracking_goal`, `update_tracking_goal`,
   `get_goal_progress`;
@@ -453,7 +488,8 @@ can log three workouts on any days; the model does not create seven daily failur
 
 Tracking is a new first-class product domain following the existing monorepo boundaries:
 
-- `packages/domain` owns tracker, schedule, occurrence, entry, goal, query, and response schemas;
+- `packages/domain` owns List, Project, Task, tracker, schedule, occurrence, entry, goal, query, and
+  response schemas;
 - `packages/database` owns normalized persistence, migrations, constraints, idempotency, and source
   identity;
 - `apps/api` owns authorization, lifecycle rules, aggregation, schedule materialization, correction,
@@ -509,7 +545,11 @@ mixed sources and duplicate exclusions.
 1. Bring Tasks to the existing Reminder safety baseline: get, revision guards, source references,
    structured errors, trash/restore, accurate idempotency declarations, and audit consistency.
 2. Preserve task IDs and task behavior while separating task persistence from the legacy shared
-   `reminders` representation through a reviewed migration.
+   `reminders` representation through a reviewed migration. Create each person's system Inbox,
+   assign every existing Task to it, map incomplete states to `open`, preserve valid scheduling, and
+   retain the old mixed `inbox`/`next`/`scheduled` value as bounded compatibility metadata until
+   first-party clients and the person have had a review path. Do not invent a new permanent “next”
+   field merely to preserve the old collision.
 3. Represent new reminders as prompts. Keep legacy reminder endpoints/tools temporarily, returning
    compatibility projections and deprecation metadata. Convert a standalone legacy reminder to a
    Task plus Prompt only when its semantics are unambiguous; otherwise preserve it until the person
@@ -525,8 +565,9 @@ mixed sources and duplicate exclusions.
 
 This design should be implemented as bounded, independently reviewable plans:
 
-1. **Task and reminder contract cleanup:** safe task parity, truthful tool metadata, prompt domain
-   contract, and compatibility plan.
+1. **Task organization and reminder contract cleanup:** Lists, Projects, system Inbox, safe task
+   parity, independent lifecycle/timing, truthful tool metadata, prompt domain contract, and
+   compatibility plan.
 2. **Core tracking ledger:** tracker-definition versions, entries, corrections, source provenance,
    and generic queries without scheduled prompting.
 3. **Tracking workspace:** tracker setup, history, templates, pause/archive, manual logging, and
@@ -550,6 +591,8 @@ At minimum, implementation must prove:
   deletion;
 - recurrence and schedule behavior across time zones, travel, DST gaps/folds, overnight intervals,
   target-period boundaries, and prospective schedule revisions;
+- List/Project uniqueness, system Inbox protection, same-List Project membership, Project move
+  cascades, Task detachment previews, and completion/archive conflicts with active contents;
 - no response, skipped, not applicable, partial, not completed, delivery failed, and cancelled remain
   distinguishable end to end;
 - imported source deduplication, provider correction, manual/import overlap, mixed-source summaries,
@@ -562,6 +605,8 @@ At minimum, implementation must prove:
   entries;
 - descriptive queries disclose their time window, sample/missingness, unit, estimation, and source
   assumptions;
+- the versioned golden classification corpus passes at the shared domain, API, MCP-contract, and
+  representative UI E2E layers;
 - repository verification through focused unit/integration/E2E coverage followed by `pnpm verify`.
 
 ## Refinement findings incorporated

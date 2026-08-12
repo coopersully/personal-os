@@ -1475,7 +1475,8 @@ p {
   max-width: 1440px;
   padding: 0.5rem;
 }
-.content--calendar {
+.content--calendar,
+.content--mail {
   height: calc(100dvh - var(--chrome-height));
   margin: 0;
   max-width: none;
@@ -1496,7 +1497,9 @@ p {
   animation: workspace-page-from-top var(--motion-duration-spatial) var(--motion-ease-spatial) both;
 }
 .content--calendar .workspace-stage,
-.content--calendar .workspace-route {
+.content--calendar .workspace-route,
+.content--mail .workspace-stage,
+.content--mail .workspace-route {
   height: 100%;
   min-height: 0;
 }
@@ -2807,6 +2810,11 @@ p {
   text-wrap: pretty;
 }
 .mail-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
 }
 .mail-send-recovery {
@@ -2887,11 +2895,10 @@ p {
 .mail-workspace {
   background: var(--surface-raised);
   border: 0;
-  border-radius: var(--radius);
   display: grid;
+  flex: 1;
   grid-template-columns: minmax(280px, 340px) minmax(360px, 1fr);
-  height: min(760px, calc(100dvh - var(--chrome-height) - 1rem));
-  min-height: 560px;
+  min-height: 0;
   overflow: hidden;
 }
 .mail-thread-list,
@@ -4477,8 +4484,8 @@ p {
   }
   .mail-workspace {
     display: block;
-    height: calc(100dvh - var(--chrome-height) - 1rem);
-    min-height: 430px;
+    height: 100%;
+    min-height: 0;
   }
   .mail-thread-list,
   .mail-reader {

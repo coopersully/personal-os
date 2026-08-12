@@ -1129,7 +1129,7 @@ function AuthenticatedApp({ user }: { user: User }) {
           />
 
           <main
-            className={`content${sidebarMode === "calendar" ? " content--calendar" : ""}`}
+            className={`content${sidebarMode === "calendar" || sidebarMode === "mail" ? ` content--${sidebarMode}` : ""}`}
             id="main-content"
           >
             <div className="workspace-stage">

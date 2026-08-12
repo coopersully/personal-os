@@ -72,6 +72,8 @@ export const materialSourceReferenceSchema = z.object({
     "mail_thread",
     "reminder",
     "task",
+    "task_list",
+    "task_project",
     "goal",
     "bookmark",
     "local",

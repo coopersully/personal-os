@@ -31,6 +31,8 @@ import {
   createMotiveInputSchema,
   createReminderInputSchema,
   createTaskInputSchema,
+  createTaskListInputSchema,
+  createTaskProjectInputSchema,
   dailyBriefSchema,
   eventListQuerySchema,
   featureAccessPolicies,
@@ -58,6 +60,8 @@ import {
   mailRuleActionSchema,
   mailThreadSchema,
   matchesMailRule,
+  materialSourceReferenceSchema,
+  normalizeTaskContainerName,
   paginationSchema,
   passwordRequirementState,
   passwordSchema,
@@ -73,9 +77,15 @@ import {
   semanticVersionSchema,
   sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
+  taskContainerAvailabilitySchema,
+  taskLifecycleSchema,
   taskListQuerySchema,
+  taskListSchema,
+  taskMovePreviewSchema,
+  taskProjectCompletionResolutionSchema,
+  taskProjectSchema,
   taskSchema,
-  taskStatusSchema,
+  taskSystemViewSchema,
   timeZoneSchema,
   updateAccountSetupInputSchema,
   updateEventBlockInputSchema,
@@ -901,40 +911,173 @@ describe("domain schemas", () => {
       }).success,
     ).toBe(false);
 
-    expect(taskStatusSchema.parse("scheduled")).toBe("scheduled");
+    const listId = "33333333-3333-4333-8333-333333333333";
+    const projectId = "44444444-4444-4444-8444-444444444444";
+    const idempotencyKey = "55555555-5555-4555-8555-555555555555";
+
+    for (const [schema, allowed] of [
+      [taskLifecycleSchema, ["open", "completed", "cancelled"]],
+      [taskContainerAvailabilitySchema, ["active", "archived"]],
+      [taskSystemViewSchema, ["today", "upcoming", "scheduled", "completed", "cancelled", "trash"]],
+    ] as const) {
+      expect(schema.options).toEqual(allowed);
+      expect(schema.safeParse("not-a-value").success).toBe(false);
+    }
+
+    expect(normalizeTaskContainerName("  Caf\u00e9\t\uff37\uff4f\uff52\uff4b  ")).toBe(
+      "caf\u00e9 work",
+    );
+    const inboxCapture = createTaskInputSchema.parse({ idempotencyKey, title: " Inbox task " });
+    expect(inboxCapture).toMatchObject({
+      estimateMinutes: null,
+      lifecycle: "open",
+      title: "Inbox task",
+    });
+    expect(inboxCapture).not.toHaveProperty("listId");
+    expect(inboxCapture).not.toHaveProperty("projectId");
     expect(
       createTaskInputSchema.parse({
-        title: " Plan task ",
         scheduledAt: "2026-07-14T13:00:00.000Z",
-        status: "scheduled",
+        title: "Scheduled independently",
       }),
-    ).toMatchObject({
-      estimateMinutes: null,
-      status: "scheduled",
-      title: "Plan task",
-    });
+    ).toMatchObject({ lifecycle: "open", scheduledAt: "2026-07-14T13:00:00.000Z" });
     expect(
-      createTaskInputSchema.safeParse({ title: "Missing schedule", status: "scheduled" }).success,
+      createTaskInputSchema.safeParse({
+        childProject: { id: projectId },
+        title: "Task cannot contain a Project",
+      }).success,
     ).toBe(false);
-    expect(updateTaskInputSchema.safeParse({}).success).toBe(false);
-    expect(updateTaskInputSchema.parse({ estimateMinutes: null })).toEqual({
+    expect(
+      createTaskListInputSchema.safeParse({
+        childList: { name: "Nested" },
+        name: "Personal",
+      }).success,
+    ).toBe(false);
+    expect(
+      createTaskProjectInputSchema.safeParse({
+        childProject: { name: "Nested" },
+        listId,
+        name: "Launch",
+      }).success,
+    ).toBe(false);
+    expect(updateTaskInputSchema.safeParse({ expectedRevision: 1 }).success).toBe(false);
+    expect(
+      updateTaskInputSchema.safeParse({ expectedRevision: 0, title: "Invalid revision" }).success,
+    ).toBe(false);
+    expect(
+      updateTaskInputSchema.safeParse({ expectedRevision: 1.5, title: "Invalid revision" }).success,
+    ).toBe(false);
+    expect(updateTaskInputSchema.parse({ expectedRevision: 1, estimateMinutes: null })).toEqual({
       estimateMinutes: null,
+      expectedRevision: 1,
     });
     expect(createTaskInputSchema.parse({ tags: ["work", "work"], title: "Tag task" }).tags).toEqual(
       ["work"],
     );
+    expect(taskProjectCompletionResolutionSchema.options).toEqual([
+      "complete_open_tasks",
+      "cancel_open_tasks",
+      "move_open_tasks",
+      "keep_project_open",
+    ]);
+    expect(
+      taskMovePreviewSchema.parse({
+        destinationListId: listId,
+        destinationListRevision: 3,
+        destinationProjectId: null,
+        destinationProjectRevision: null,
+        detachedProjectId: projectId,
+        previewToken: "task-move-preview",
+        sourceListId: listId,
+        sourceListRevision: 2,
+        sourceProjectId: projectId,
+        taskId: id,
+        taskRevision: 4,
+      }).detachedProjectId,
+    ).toBe(projectId);
+    expect(
+      materialSourceReferenceSchema.parse({
+        accountId: null,
+        provider: "local",
+        remoteId: listId,
+        revision: "1",
+        sourceType: "task_list",
+      }).sourceType,
+    ).toBe("task_list");
+    expect(
+      materialSourceReferenceSchema.parse({
+        accountId: null,
+        provider: "local",
+        remoteId: projectId,
+        revision: "1",
+        sourceType: "task_project",
+      }).sourceType,
+    ).toBe("task_project");
+    expect(
+      taskListSchema.parse({
+        archivedAt: null,
+        availability: "active",
+        color: null,
+        createdAt: start,
+        description: null,
+        id: listId,
+        kind: "inbox",
+        name: "Inbox",
+        revision: 1,
+        source: null,
+        updatedAt: start,
+      }).kind,
+    ).toBe("inbox");
+    expect(
+      taskProjectSchema.parse({
+        archivedAt: null,
+        availability: "active",
+        cancelledAt: null,
+        completedAt: null,
+        createdAt: start,
+        id: projectId,
+        lifecycle: "open",
+        listId,
+        name: "Launch",
+        notes: null,
+        revision: 1,
+        source: null,
+        targetDate: null,
+        updatedAt: start,
+        why: null,
+      }).lifecycle,
+    ).toBe("open");
     expect(
       taskSchema.parse({
-        id,
-        title: "Task",
-        createdAt: start,
-        updatedAt: start,
+        cancelledAt: null,
         completedAt: null,
-      }),
-    ).toMatchObject({ estimateMinutes: null, scheduledAt: null, status: "inbox" });
-    expect(taskListQuerySchema.parse({ completed: "false", status: "next" })).toMatchObject({
-      completed: false,
-      status: "next",
+        createdAt: start,
+        estimateMinutes: null,
+        id,
+        legacyStatus: "scheduled",
+        lifecycle: "open",
+        listId,
+        notes: null,
+        priority: "medium",
+        projectId: projectId,
+        revision: 1,
+        scheduledAt: "2026-07-14T13:00:00.000Z",
+        source: null,
+        tags: [],
+        timezone: null,
+        title: "Task",
+        updatedAt: start,
+        why: null,
+        dueAt: null,
+      }).lifecycle,
+    ).toBe("open");
+    expect(
+      taskListQuerySchema.parse({ lifecycle: "open", listId, projectId, view: "today" }),
+    ).toMatchObject({
+      lifecycle: "open",
+      listId,
+      projectId,
+      view: "today",
     });
   });
 

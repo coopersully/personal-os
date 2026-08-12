@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema, paginationSchema, timeZoneSchema } from "./common.js";
+import { materialSourceReferenceSchema } from "./feature-contracts.js";
 import { reminderPrioritySchema } from "./reminder.js";
+import { taskLifecycleSchema, taskSystemViewSchema } from "./task-organization.js";
 
+/** Compatibility-only metadata retained while legacy Task rows are reviewed. */
 export const taskStatusSchema = z.enum(["inbox", "next", "scheduled", "completed", "cancelled"]);
 export type TaskStatus = z.infer<typeof taskStatusSchema>;
 
@@ -16,68 +19,123 @@ const tagsSchema = z
   .array(z.string().trim().min(1).max(60))
   .max(20)
   .transform((tags) => [...new Set(tags)]);
+const nullableTaskTextSchema = z.string().trim().max(10_000).nullable();
+const revisionSchema = z.number().int().positive();
 
-const taskFieldsSchema = z.object({
+const taskContentFieldsSchema = z.object({
+  dueAt: isoDateTimeSchema.nullable(),
+  estimateMinutes: nullableEstimateMinutesSchema,
+  notes: nullableTaskTextSchema,
+  priority: reminderPrioritySchema,
+  scheduledAt: isoDateTimeSchema.nullable(),
+  tags: tagsSchema,
+  timezone: timeZoneSchema.nullable(),
   title: z.string().trim().min(1).max(240),
-  notes: z.string().trim().max(10_000).nullable().default(null),
-  dueAt: isoDateTimeSchema.nullable().default(null),
-  scheduledAt: isoDateTimeSchema.nullable().default(null),
-  timezone: timeZoneSchema.nullable().default(null),
-  priority: reminderPrioritySchema.default("medium"),
-  estimateMinutes: estimateMinutesSchema,
-  tags: tagsSchema.default([]),
-  status: taskStatusSchema.default("inbox"),
+  why: nullableTaskTextSchema,
 });
 
-function validateTaskScheduling<
-  T extends { scheduledAt?: string | null | undefined; status?: TaskStatus | undefined },
->(input: T, context: z.RefinementCtx) {
-  if (input.status === "scheduled" && !input.scheduledAt) {
-    context.addIssue({
-      code: "custom",
-      message: "A scheduled task requires a scheduled time.",
-      path: ["scheduledAt"],
-    });
-  }
-}
-
-export const createTaskInputSchema = taskFieldsSchema.superRefine(validateTaskScheduling);
+export const createTaskInputSchema = taskContentFieldsSchema
+  .extend({
+    dueAt: isoDateTimeSchema.nullable().default(null),
+    estimateMinutes: estimateMinutesSchema,
+    idempotencyKey: z.uuid().optional(),
+    lifecycle: taskLifecycleSchema.default("open"),
+    listId: idSchema.optional(),
+    notes: nullableTaskTextSchema.default(null),
+    priority: reminderPrioritySchema.default("medium"),
+    projectId: idSchema.optional(),
+    scheduledAt: isoDateTimeSchema.nullable().default(null),
+    source: materialSourceReferenceSchema.nullable().default(null),
+    tags: tagsSchema.default([]),
+    timezone: timeZoneSchema.nullable().default(null),
+    why: nullableTaskTextSchema.default(null),
+  })
+  .strict();
 export type CreateTaskInput = z.infer<typeof createTaskInputSchema>;
 
-export const updateTaskInputSchema = z
-  .object({
-    title: z.string().trim().min(1).max(240).optional(),
-    notes: z.string().trim().max(10_000).nullable().optional(),
-    dueAt: isoDateTimeSchema.nullable().optional(),
-    scheduledAt: isoDateTimeSchema.nullable().optional(),
-    timezone: timeZoneSchema.nullable().optional(),
-    priority: reminderPrioritySchema.optional(),
-    estimateMinutes: nullableEstimateMinutesSchema.optional(),
-    tags: tagsSchema.optional(),
-    status: taskStatusSchema.optional(),
-  })
-  .refine((value) => Object.keys(value).length > 0, "At least one task field is required")
-  .superRefine(validateTaskScheduling);
+export const updateTaskInputSchema = taskContentFieldsSchema
+  .partial()
+  .extend({ expectedRevision: revisionSchema.optional() })
+  .strict()
+  .refine(
+    (value) => Object.keys(value).some((key) => key !== "expectedRevision"),
+    "At least one task field is required",
+  );
 export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;
 
-export const taskSchema = taskFieldsSchema.extend({
-  id: idSchema,
+export const taskSchema = taskContentFieldsSchema.extend({
+  cancelledAt: isoDateTimeSchema.nullable(),
   completedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,
+  id: idSchema,
+  legacyStatus: taskStatusSchema.nullable(),
+  lifecycle: taskLifecycleSchema,
+  listId: idSchema,
+  projectId: idSchema.nullable(),
+  revision: revisionSchema,
+  source: materialSourceReferenceSchema.nullable(),
   updatedAt: isoDateTimeSchema,
 });
 export type Task = z.infer<typeof taskSchema>;
 
+const taskTransitionInputSchema = z
+  .object({ expectedRevision: revisionSchema.optional() })
+  .strict();
+
+export const completeTaskInputSchema = taskTransitionInputSchema.extend({
+  completed: z.boolean().default(true),
+});
+export type CompleteTaskInput = z.infer<typeof completeTaskInputSchema>;
+
+export const cancelTaskInputSchema = taskTransitionInputSchema.extend({
+  cancelled: z.boolean().default(true),
+});
+export type CancelTaskInput = z.infer<typeof cancelTaskInputSchema>;
+
+export const trashTaskInputSchema = taskTransitionInputSchema;
+export type TrashTaskInput = z.infer<typeof trashTaskInputSchema>;
+
+export const restoreTaskInputSchema = taskTransitionInputSchema;
+export type RestoreTaskInput = z.infer<typeof restoreTaskInputSchema>;
+
+export const taskMovePreviewInputSchema = z
+  .object({
+    destinationListId: idSchema,
+    destinationProjectId: idSchema.nullable().optional(),
+    expectedRevision: revisionSchema.optional(),
+  })
+  .strict();
+export type TaskMovePreviewInput = z.infer<typeof taskMovePreviewInputSchema>;
+
+export const moveTaskInputSchema = taskMovePreviewInputSchema.extend({
+  previewToken: z.string().trim().min(1).max(512),
+});
+export type MoveTaskInput = z.infer<typeof moveTaskInputSchema>;
+
+export const taskMovePreviewSchema = z.object({
+  destinationListId: idSchema,
+  destinationListRevision: revisionSchema,
+  destinationProjectId: idSchema.nullable(),
+  destinationProjectRevision: revisionSchema.nullable(),
+  detachedProjectId: idSchema.nullable(),
+  previewToken: z.string().trim().min(1).max(512),
+  sourceListId: idSchema,
+  sourceListRevision: revisionSchema,
+  sourceProjectId: idSchema.nullable(),
+  taskId: idSchema,
+  taskRevision: revisionSchema,
+});
+export type TaskMovePreview = z.infer<typeof taskMovePreviewSchema>;
+
 export const taskListQuerySchema = paginationSchema.extend({
-  completed: z
-    .enum(["true", "false"])
-    .transform((value) => value === "true")
-    .optional(),
-  dueBefore: isoDateTimeSchema.optional(),
   dueAfter: isoDateTimeSchema.optional(),
-  status: taskStatusSchema.optional(),
-  scheduledBefore: isoDateTimeSchema.optional(),
-  scheduledAfter: isoDateTimeSchema.optional(),
+  dueBefore: isoDateTimeSchema.optional(),
+  lifecycle: taskLifecycleSchema.optional(),
+  listId: idSchema.optional(),
+  projectId: idSchema.optional(),
   query: z.string().trim().min(1).max(200).optional(),
+  scheduledAfter: isoDateTimeSchema.optional(),
+  scheduledBefore: isoDateTimeSchema.optional(),
+  view: taskSystemViewSchema.optional(),
 });
 export type TaskListQuery = z.infer<typeof taskListQuerySchema>;

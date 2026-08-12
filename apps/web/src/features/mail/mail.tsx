@@ -164,6 +164,45 @@ function initials(name: string) {
     .join("")
     .toUpperCase();
 }
+
+export function MailTopbarSearch() {
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q")?.trim() ?? "";
+  const [searchDraft, setSearchDraft] = useState(search);
+
+  useEffect(() => setSearchDraft(search), [search]);
+
+  return (
+    <form
+      className="mail-topbar__search"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setParams((current) => {
+          const next = new URLSearchParams(current);
+          const query = searchDraft.trim();
+          if (query) next.set("q", query);
+          else next.delete("q");
+          next.delete("thread");
+          return next;
+        });
+      }}
+    >
+      <InputGroup>
+        <InputGroupAddon>
+          <SearchIcon aria-hidden="true" />
+        </InputGroupAddon>
+        <InputGroupInput
+          aria-label="Search mail"
+          onChange={(event) => setSearchDraft(event.currentTarget.value)}
+          placeholder="Search mail"
+          type="search"
+          value={searchDraft}
+        />
+      </InputGroup>
+    </form>
+  );
+}
+
 function mailDate(value: string, timeZone: string) {
   return new Intl.DateTimeFormat("en", {
     dateStyle: "medium",
@@ -565,38 +604,33 @@ export function MailPage({ user }: { user: User }) {
           </div>
         </form>
       ) : null}
-      <MailSecondaryNavigation
-        archive={() =>
-          selected &&
-          updateThread.mutate({
-            id: selected.id,
-            mailboxIds: selected.mailboxIds.filter(
-              (id) => mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
-            ),
-          })
-        }
-        pending={updateThread.isPending}
-        reply={() => {
-          if (!selected) return;
-          setComposeThread(selected);
-          update({ compose: "1" });
-        }}
-        selected={selected}
-        snooze={() => selected && snoozeThread.mutate(selected.id)}
-        toggleStar={() =>
-          selected && updateThread.mutate({ id: selected.id, starred: !selected.starred })
-        }
-        toggleUnread={() =>
-          selected && updateThread.mutate({ id: selected.id, unread: !selected.unread })
-        }
-        trash={() => {
-          if (!selected) return;
-          const trash = mailboxes.data.find(
-            (mailbox) => mailbox.accountId === selected.accountId && mailbox.role === "trash",
-          );
-          if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
-        }}
-      />
+      {selected ? (
+        <MailSecondaryNavigation
+          archive={() =>
+            updateThread.mutate({
+              id: selected.id,
+              mailboxIds: selected.mailboxIds.filter(
+                (id) => mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
+              ),
+            })
+          }
+          pending={updateThread.isPending}
+          reply={() => {
+            setComposeThread(selected);
+            update({ compose: "1" });
+          }}
+          selected={selected}
+          snooze={() => snoozeThread.mutate(selected.id)}
+          toggleStar={() => updateThread.mutate({ id: selected.id, starred: !selected.starred })}
+          toggleUnread={() => updateThread.mutate({ id: selected.id, unread: !selected.unread })}
+          trash={() => {
+            const trash = mailboxes.data.find(
+              (mailbox) => mailbox.accountId === selected.accountId && mailbox.role === "trash",
+            );
+            if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
+          }}
+        />
+      ) : null}
       <div className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}>
         <section aria-label="Conversations" className="mail-thread-list">
           {threads.isError ? (
@@ -655,144 +689,87 @@ function MailSecondaryNavigation({
   archive: () => void;
   pending: boolean;
   reply: () => void;
-  selected: MailThread | undefined;
+  selected: MailThread;
   snooze: () => void;
   toggleStar: () => void;
   toggleUnread: () => void;
   trash: () => void;
 }) {
-  const [params, setParams] = useSearchParams();
-  const search = params.get("q")?.trim() ?? "";
-  const [searchDraft, setSearchDraft] = useState(search);
-
-  useEffect(() => setSearchDraft(search), [search]);
-
-  const updateSearch = () =>
-    setParams((current) => {
-      const next = new URLSearchParams(current);
-      const query = searchDraft.trim();
-      if (query) next.set("q", query);
-      else next.delete("q");
-      next.delete("thread");
-      return next;
-    });
-
   return (
-    <section
-      aria-label={selected ? "Conversation actions" : "Unified inbox controls"}
-      className="mail-secondary-nav"
-    >
-      <div className="mail-secondary-nav__context">
-        <span>Unified inbox</span>
-        <strong>Mail</strong>
-      </div>
-      <form
-        className="mail-secondary-nav__search"
-        onSubmit={(event) => {
-          event.preventDefault();
-          updateSearch();
-        }}
-      >
-        <InputGroup>
-          <InputGroupAddon>
-            <SearchIcon aria-hidden="true" />
-          </InputGroupAddon>
-          <InputGroupInput
-            aria-label="Search mail"
-            onChange={(event) => setSearchDraft(event.currentTarget.value)}
-            placeholder="Search mail"
-            type="search"
-            value={searchDraft}
+    <section aria-label="Conversation actions" className="mail-secondary-nav">
+      <div className="mail-secondary-nav__actions">
+        <Button onClick={reply} tone="ghost">
+          <ReplyIcon aria-hidden="true" className="size-4" />
+          <span>Reply</span>
+        </Button>
+        <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
+          <ArchiveIcon aria-hidden="true" className="size-4" />
+          <span>Archive</span>
+        </Button>
+        <Button
+          aria-label="Snooze conversation until tomorrow"
+          className="mail-secondary-nav__compact-action"
+          onClick={snooze}
+          tone="ghost"
+        >
+          <ClockIcon aria-hidden="true" className="size-4" />
+        </Button>
+        <Button
+          aria-label={selected.starred ? "Unstar conversation" : "Star conversation"}
+          className="mail-secondary-nav__compact-action"
+          disabled={pending}
+          onClick={toggleStar}
+          tone="ghost"
+        >
+          <StarIcon
+            aria-hidden="true"
+            className="size-4"
+            weight={selected.starred ? "Filled" : "Outline"}
           />
-        </InputGroup>
-      </form>
-      {selected ? (
-        <div className="mail-secondary-nav__actions">
-          <Button onClick={reply} tone="ghost">
-            <ReplyIcon aria-hidden="true" className="size-4" />
-            <span>Reply</span>
-          </Button>
-          <Button
-            aria-label="Archive conversation"
-            disabled={pending}
-            onClick={archive}
-            tone="ghost"
-          >
-            <ArchiveIcon aria-hidden="true" className="size-4" />
-            <span>Archive</span>
-          </Button>
-          <Button
-            aria-label="Snooze conversation until tomorrow"
-            className="mail-secondary-nav__compact-action"
-            onClick={snooze}
-            tone="ghost"
-          >
-            <ClockIcon aria-hidden="true" className="size-4" />
-          </Button>
-          <Button
-            aria-label={selected.starred ? "Unstar conversation" : "Star conversation"}
-            className="mail-secondary-nav__compact-action"
-            disabled={pending}
-            onClick={toggleStar}
-            tone="ghost"
-          >
-            <StarIcon
-              aria-hidden="true"
-              className="size-4"
-              weight={selected.starred ? "Filled" : "Outline"}
-            />
-          </Button>
-          <Button
-            aria-label={selected.unread ? "Mark conversation read" : "Mark conversation unread"}
-            className="mail-secondary-nav__compact-action"
-            disabled={pending}
-            onClick={toggleUnread}
-            tone="ghost"
-          >
-            {selected.unread ? (
-              <EyeIcon aria-hidden="true" className="size-4" />
-            ) : (
-              <EyeOffIcon aria-hidden="true" className="size-4" />
-            )}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button aria-label="More conversation actions" disabled={pending} tone="ghost">
-                <MoreHorizontalIcon aria-hidden="true" className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={snooze}>
-                <ClockIcon aria-hidden="true" />
-                Snooze until tomorrow
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="mail-secondary-nav__overflow-action"
-                onSelect={toggleStar}
-              >
-                <StarIcon aria-hidden="true" weight={selected.starred ? "Filled" : "Outline"} />
-                {selected.starred ? "Unstar" : "Star"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                className="mail-secondary-nav__overflow-action"
-                onSelect={toggleUnread}
-              >
-                {selected.unread ? (
-                  <EyeIcon aria-hidden="true" />
-                ) : (
-                  <EyeOffIcon aria-hidden="true" />
-                )}
-                {selected.unread ? "Mark read" : "Mark unread"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator className="mail-secondary-nav__overflow-separator" />
-              <DropdownMenuItem onSelect={trash} variant="destructive">
-                <TrashIcon aria-hidden="true" />
-                Delete conversation
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ) : null}
+        </Button>
+        <Button
+          aria-label={selected.unread ? "Mark conversation read" : "Mark conversation unread"}
+          className="mail-secondary-nav__compact-action"
+          disabled={pending}
+          onClick={toggleUnread}
+          tone="ghost"
+        >
+          {selected.unread ? (
+            <EyeIcon aria-hidden="true" className="size-4" />
+          ) : (
+            <EyeOffIcon aria-hidden="true" className="size-4" />
+          )}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button aria-label="More conversation actions" disabled={pending} tone="ghost">
+              <MoreHorizontalIcon aria-hidden="true" className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={snooze}>
+              <ClockIcon aria-hidden="true" />
+              Snooze until tomorrow
+            </DropdownMenuItem>
+            <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={toggleStar}>
+              <StarIcon aria-hidden="true" weight={selected.starred ? "Filled" : "Outline"} />
+              {selected.starred ? "Unstar" : "Star"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="mail-secondary-nav__overflow-action"
+              onSelect={toggleUnread}
+            >
+              {selected.unread ? <EyeIcon aria-hidden="true" /> : <EyeOffIcon aria-hidden="true" />}
+              {selected.unread ? "Mark read" : "Mark unread"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="mail-secondary-nav__overflow-separator" />
+            <DropdownMenuItem onSelect={trash} variant="destructive">
+              <TrashIcon aria-hidden="true" />
+              Delete conversation
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     </section>
   );
 }

@@ -303,6 +303,7 @@ import { FinancesPage } from "./features/finances/page.js";
 import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
+  MailTopbarSearch,
 } from "./features/mail/mail.js";
 import {
   ReminderRow,
@@ -1427,6 +1428,8 @@ function WorkspaceAppBarForRoute({
   const context =
     workspace === "calendar" ? (
       <CalendarAppBarControls onToday={onCalendarToday} user={user} />
+    ) : workspace === "mail" ? (
+      <MailTopbarSearch />
     ) : pathname === "/today" ? (
       <TodayWeatherTopbar user={user} weather={weather} />
     ) : pathname === "/activity" ? (

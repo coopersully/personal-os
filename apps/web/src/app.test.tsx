@@ -3454,9 +3454,7 @@ describe("ilo web app", () => {
   it("keeps Mail and Finances workspace controls on child routes", async () => {
     const mail = setup("/mail/thread/example");
     const mailAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
-    expect(
-      within(mailAppBar).queryByRole("searchbox", { name: "Search mail" }),
-    ).not.toBeInTheDocument();
+    expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
     expect(within(mailAppBar).getByRole("button", { name: "Compose mail" })).toBeInTheDocument();
     mail.unmount();
 
@@ -4886,7 +4884,7 @@ describe("ilo web app", () => {
     expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
     expect(await screen.findByRole("region", { name: "Conversation actions" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Search mail")).toBeInTheDocument();
+    expect(within(topNavigation).getByLabelText("Search mail")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Back to Unified inbox" })).not.toBeInTheDocument();
     expect(
       await screen.findByText("Hello Example User. This is the full message."),

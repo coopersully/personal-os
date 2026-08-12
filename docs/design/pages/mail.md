@@ -25,12 +25,11 @@ Read and act on one unified mailbox while retaining clear source-account and pro
 - Unified inbox is a disclosure category in the contextual sidebar. Its All
   mail, Unread, Starred, and Snoozed children govern the cross-account
   conversation list; account headers use the same category pattern.
-- Mail keeps the global app bar for its identity, Sync, and Compose. A
-  Mail-owned secondary bar sits immediately beneath it and always exposes
-  search. When a conversation is selected, Reply and Archive retain labels;
-  Snooze, Star, and read state are icon controls; Delete stays in the More
-  menu. At narrow widths, the compact controls move into More rather than
-  overflowing horizontally.
+- Mail keeps the global app bar for its identity, search, Sync, and Compose.
+  Its secondary bar appears only for a selected conversation: Reply and
+  Archive retain labels; Snooze, Star, and read state are icon controls; Delete
+  stays in the More menu. At narrow widths, the compact controls move into More
+  rather than overflowing horizontally.
 - Unified and account mailbox navigation remains usable with stale synchronized material.
 - A reconnect warning is scoped only to Mail-enabled accounts.
 - Manual sync gives transient toast feedback and refreshes durable health after success or failure.

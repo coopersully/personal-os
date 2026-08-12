@@ -7,7 +7,7 @@ without hiding where information came from or asking them to surrender control
 to an agent. The interface should feel like a well-made personal instrument:
 quiet by default, direct when needed, and detailed only at the point of use.
 
-The visual character is soft neutral paper, soft charcoal, modest elevation, and a
+The visual character is soft neutral paper, soft charcoal, flat surfaces, and a
 monochrome primary scale. It is not a generic dashboard, a collection of
 unrelated cards, or an AI chat surface.
 
@@ -82,8 +82,8 @@ Today, Calendar, Tasks, Mail, Finances, and the account utility render one
 Integration-owned `WorkspaceAppBar`. It is the only top-frame primitive inside
 the application shell.
 The primitive fixes the structure, 52 px height, sticky position, semantic
-surface, quiet bottom border, and 8 px internal rhythm; a route provides only
-the content of its named slots.
+surface, contrast-led separation from its body, and 8 px internal rhythm; a
+route provides only the content of its named slots.
 
 | Slot | Required | Purpose |
 | --- | --- | --- |
@@ -401,6 +401,11 @@ durations page by page.
   divider borders between the sidebar, top navigation, and body. A workspace
   selector may use the semantic secondary surface to remain discoverable
   without reintroducing a hard seam.
+- Default to flat material: no decorative gradients or shadows. Use a border
+  only when it identifies an interactive control, ordered-row boundary,
+  modal/sheet edge, or semantic state boundary. Connected material may flow
+  together when hierarchy, spacing, and semantic background already express
+  its relationship.
 - At widths of 900 px and below, replace the sidebar drawer with the centred,
   safe-area-aware mobile workspace dock. Its workspace trigger names the active
   workspace and opens the five manifest-ordered destinations; its separate

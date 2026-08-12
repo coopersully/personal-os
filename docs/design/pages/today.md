@@ -73,8 +73,8 @@ History (collapsed)
 ## Responsive contract
 
 - **Desktop:** moment and day flow occupy the primary column; decision queue is
-  a stable secondary rail. The queue has an independent visual boundary, not a
-  second page-sized card.
+  a stable secondary rail, distinguished through spacing and hierarchy rather
+  than a structural divider or second page-sized card.
 - **Narrow/mobile:** use one sequence: moment → day flow → decision queue →
   history. Do not move urgent material behind horizontal scrolling or a tab.
 - The app frame keeps capture available. Conditions may compress to icon buttons

@@ -22,7 +22,20 @@ import {
   type TrashTaskInput,
   type UpdateTaskInput,
 } from "@personal-os/domain";
-import { and, desc, eq, gte, ilike, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  ilike,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
@@ -313,44 +326,14 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
     return project;
   }
 
-  async function replayOrConflict(
-    userId: string,
-    idempotencyKey: string | undefined,
-    fingerprint: string,
-  ): Promise<Task> {
-    if (idempotencyKey) {
-      const replay = (
-        await db
-          .select()
-          .from(reminders)
-          .where(
-            and(
-              eq(reminders.userId, userId),
-              eq(reminders.kind, "task"),
-              eq(reminders.taskCreateIdempotencyKey, idempotencyKey),
-            ),
-          )
-          .limit(1)
-      )[0];
-      if (replay) {
-        if (replay.taskCreateIdempotencyFingerprint === fingerprint) {
-          return serializeTask(replay);
-        }
-        throw new AppError("conflict", "That idempotency key was used for another Task.", {
-          code: "task_idempotency_mismatch",
-        });
-      }
-    }
-    throw new AppError("conflict", "The Task could not be created because it conflicts.");
-  }
-
   async function resolveExistingReplay(
+    transaction: DbTransaction,
     input: CreateTaskInput,
     userId: string,
   ): Promise<Task | null> {
     if (!input.idempotencyKey) return null;
     const replay = (
-      await db
+      await transaction
         .select()
         .from(reminders)
         .where(
@@ -367,7 +350,7 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
     let originalListId = input.listId;
     if (!originalListId) {
       const creation = (
-        await db
+        await transaction
           .select({ after: auditEvents.after })
           .from(auditEvents)
           .where(
@@ -478,47 +461,59 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
       if (context.principal.actorType === "agent" && !input.idempotencyKey) {
         throw new AppError("invalid_request", "Agent Task creates require an idempotency key.");
       }
-      const existingReplay = await resolveExistingReplay(input, context.principal.userId);
-      if (existingReplay) return existingReplay;
-      const observedProject = input.projectId
-        ? (
-            await db
-              .select({ listId: taskProjects.listId })
-              .from(taskProjects)
-              .where(
-                and(
-                  eq(taskProjects.id, input.projectId),
-                  eq(taskProjects.userId, context.principal.userId),
-                  isNull(taskProjects.deletedAt),
-                ),
-              )
-              .limit(1)
-          )[0]
-        : undefined;
-      if (input.projectId && !observedProject) {
-        throw new AppError("not_found", "The destination task Project was not found.");
-      }
-      const observedListId =
-        input.listId ??
-        observedProject?.listId ??
-        (
-          await db
-            .select({ id: taskLists.id })
-            .from(taskLists)
-            .where(
-              and(
-                eq(taskLists.userId, context.principal.userId),
-                eq(taskLists.kind, "inbox"),
-                isNull(taskLists.deletedAt),
-              ),
-            )
-            .limit(1)
-        )[0]?.id;
-      if (!observedListId)
-        throw new AppError("not_found", "The destination task List was not found.");
-      const fingerprint = createFingerprint(input, observedListId);
       try {
-        const row = await db.transaction(async (transaction) => {
+        return await db.transaction(async (transaction) => {
+          if (input.idempotencyKey) {
+            const lockKey = `task-create:${context.principal.userId}:${input.idempotencyKey}`;
+            await transaction.execute(
+              sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
+            );
+          }
+          const existingReplay = await resolveExistingReplay(
+            transaction,
+            input,
+            context.principal.userId,
+          );
+          if (existingReplay) return existingReplay;
+
+          const observedProject = input.projectId
+            ? (
+                await transaction
+                  .select({ listId: taskProjects.listId })
+                  .from(taskProjects)
+                  .where(
+                    and(
+                      eq(taskProjects.id, input.projectId),
+                      eq(taskProjects.userId, context.principal.userId),
+                      isNull(taskProjects.deletedAt),
+                    ),
+                  )
+                  .limit(1)
+              )[0]
+            : undefined;
+          if (input.projectId && !observedProject) {
+            throw new AppError("not_found", "The destination task Project was not found.");
+          }
+          const observedListId =
+            input.listId ??
+            observedProject?.listId ??
+            (
+              await transaction
+                .select({ id: taskLists.id })
+                .from(taskLists)
+                .where(
+                  and(
+                    eq(taskLists.userId, context.principal.userId),
+                    eq(taskLists.kind, "inbox"),
+                    isNull(taskLists.deletedAt),
+                  ),
+                )
+                .limit(1)
+            )[0]?.id;
+          if (!observedListId) {
+            throw new AppError("not_found", "The destination task List was not found.");
+          }
+          const fingerprint = createFingerprint(input, observedListId);
           const destination = assertActiveDestinationList(
             (await lockLists(transaction, context.principal.userId, [observedListId]))[0] ?? null,
           );
@@ -571,12 +566,25 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
               ...context,
             }),
           );
-          return created;
+          return serializeTask(created);
         });
-        return serializeTask(row);
       } catch (error) {
         if (isUniqueViolation(error, "reminders_task_create_idempotency_idx")) {
-          return replayOrConflict(context.principal.userId, input.idempotencyKey, fingerprint);
+          return db.transaction(async (transaction) => {
+            if (input.idempotencyKey) {
+              const lockKey = `task-create:${context.principal.userId}:${input.idempotencyKey}`;
+              await transaction.execute(
+                sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
+              );
+            }
+            const replay = await resolveExistingReplay(
+              transaction,
+              input,
+              context.principal.userId,
+            );
+            if (replay) return replay;
+            throw new AppError("conflict", "The Task could not be created because it conflicts.");
+          });
         }
         throw error;
       }

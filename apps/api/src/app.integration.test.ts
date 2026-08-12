@@ -1696,6 +1696,26 @@ describe.sequential("ilo API", () => {
       };
     }
 
+    async function waitForTaskCreateLockWaiters(expected: number) {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const result = await database.pool.query<{ count: string }>(`
+          SELECT count(*)::text AS count
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND (
+              query LIKE '%task_lists%'
+              OR query LIKE '%pg_advisory_xact_lock%'
+            )
+            AND query NOT LIKE '%pg_stat_activity%'
+        `);
+        if (Number(result.rows[0]?.count ?? 0) >= expected) return;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+      throw new Error(`Expected at least ${expected} Task create lock waiter(s).`);
+    }
+
     beforeAll(async () => {
       const registration = await request("/v1/auth/register", {
         auth: "none",
@@ -2038,6 +2058,152 @@ describe.sequential("ilo API", () => {
       expect(crossUserKeyReuse.status).toBe(201);
       expect((await payload(crossUserKeyReuse)).task.id).not.toBe(archivedListTask.id);
     });
+
+    it("tasks serialize concurrent idempotency before destination archive or terminal changes", async () => {
+      const archivedList = await createTaskList("Concurrent Replay Archive List");
+      const exactInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000021",
+        listId: archivedList.id,
+        title: "Concurrent exact replay",
+      };
+      const archiveBlocker = await database.pool.connect();
+      let archiveRequest: Promise<Response> | undefined;
+      let firstExact: Promise<Response> | undefined;
+      let secondExact: Promise<Response> | undefined;
+      try {
+        await archiveBlocker.query("BEGIN");
+        await archiveBlocker.query("SELECT id FROM task_lists WHERE id = $1 FOR UPDATE", [
+          archivedList.id,
+        ]);
+        firstExact = taskAgentRequest("/v1/tasks", { body: exactInput });
+        void firstExact.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(1);
+        archiveRequest = taskRequest(`/v1/task-lists/${archivedList.id}/archive`, {
+          body: {
+            expectedRevision: archivedList.revision,
+            resolution: "archive_contents_together",
+          },
+        });
+        void archiveRequest.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(2);
+        secondExact = taskAgentRequest("/v1/tasks", { body: exactInput });
+        void secondExact.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(3);
+        await archiveBlocker.query("COMMIT");
+        const [firstResponse, archiveResponse, secondResponse] = await Promise.all([
+          firstExact,
+          archiveRequest,
+          secondExact,
+        ]);
+        expect(firstResponse.status).toBe(201);
+        expect(archiveResponse.status).toBe(200);
+        expect(secondResponse.status).toBe(201);
+        expect((await payload(secondResponse)).task.id).toBe(
+          (await payload(firstResponse)).task.id,
+        );
+      } finally {
+        await archiveBlocker.query("ROLLBACK");
+        archiveBlocker.release();
+        await Promise.allSettled(
+          [archiveRequest, firstExact, secondExact].filter(
+            (candidate): candidate is Promise<Response> => candidate !== undefined,
+          ),
+        );
+      }
+      const exactRows = await database.db
+        .select({ id: reminders.id })
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.userId, taskUserId),
+            eq(reminders.taskCreateIdempotencyKey, exactInput.idempotencyKey),
+          ),
+        );
+      expect(exactRows).toHaveLength(1);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(
+            and(
+              eq(auditEvents.entityId, exactRows[0]?.id as string),
+              eq(auditEvents.action, "task.created"),
+            ),
+          ),
+      ).toHaveLength(1);
+
+      const projectList = await createTaskList("Concurrent Replay Terminal List");
+      const project = await createTaskProject(projectList.id, "Concurrent Replay Terminal Project");
+      const firstInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000022",
+        listId: projectList.id,
+        projectId: project.id,
+        title: "Concurrent original payload",
+      };
+      const mismatchedInput = { ...firstInput, title: "Concurrent mismatched payload" };
+      const terminalBlocker = await database.pool.connect();
+      let completeRequest: Promise<Response> | undefined;
+      let firstCreate: Promise<Response> | undefined;
+      let mismatchedCreate: Promise<Response> | undefined;
+      try {
+        await terminalBlocker.query("BEGIN");
+        await terminalBlocker.query("SELECT id FROM task_lists WHERE id = $1 FOR UPDATE", [
+          projectList.id,
+        ]);
+        firstCreate = taskAgentRequest("/v1/tasks", { body: firstInput });
+        void firstCreate.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(1);
+        completeRequest = taskRequest(`/v1/task-projects/${project.id}/complete`, {
+          body: { expectedRevision: project.revision, resolution: "complete_open_tasks" },
+        });
+        void completeRequest.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(2);
+        mismatchedCreate = taskAgentRequest("/v1/tasks", { body: mismatchedInput });
+        void mismatchedCreate.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(3);
+        await terminalBlocker.query("COMMIT");
+        const [firstResponse, completeResponse, mismatchResponse] = await Promise.all([
+          firstCreate,
+          completeRequest,
+          mismatchedCreate,
+        ]);
+        expect(firstResponse.status).toBe(201);
+        expect(completeResponse.status).toBe(200);
+        expect(mismatchResponse.status).toBe(409);
+        expect((await payload(mismatchResponse)).error.details).toEqual({
+          code: "task_idempotency_mismatch",
+        });
+      } finally {
+        await terminalBlocker.query("ROLLBACK");
+        terminalBlocker.release();
+        await Promise.allSettled(
+          [completeRequest, firstCreate, mismatchedCreate].filter(
+            (candidate): candidate is Promise<Response> => candidate !== undefined,
+          ),
+        );
+      }
+      const mismatchRows = await database.db
+        .select({ id: reminders.id })
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.userId, taskUserId),
+            eq(reminders.taskCreateIdempotencyKey, firstInput.idempotencyKey),
+          ),
+        );
+      expect(mismatchRows).toHaveLength(1);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(
+            and(
+              eq(auditEvents.entityId, mismatchRows[0]?.id as string),
+              eq(auditEvents.action, "task.created"),
+            ),
+          ),
+      ).toHaveLength(1);
+    }, 20_000);
 
     it("tasks preserve legacy metadata until canonical timing changes and query canonical views", async () => {
       const [legacyTask] = await database.db

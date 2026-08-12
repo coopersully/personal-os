@@ -3,7 +3,7 @@ import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { AgentAccessSettings } from "./agent-access.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   getFinanceGuidedSetup: vi.fn(),
   getMailSetupContext: vi.fn(),
   listAccessTokens: vi.fn(),
+  listAgentAccessWorkItems: vi.fn(),
   listAttentionItems: vi.fn(),
   listCalendars: vi.fn(),
   listMailRules: vi.fn(),
@@ -38,14 +39,20 @@ vi.mock("../../api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Fallback error"),
 }));
 
-function renderSettings() {
+function LocationProbe() {
+  const location = useLocation();
+  return <output aria-label="Current location">{`${location.pathname}${location.search}`}</output>;
+}
+
+function renderSettings(initialEntry = "/settings?section=agents") {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false, gcTime: 0 } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <AgentAccessSettings />
+        <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -480,14 +487,70 @@ describe("agent access settings", () => {
     });
     mocks.deleteAccessToken.mockResolvedValue(undefined);
     mocks.revokeOAuthClient.mockResolvedValue(undefined);
+    mocks.listAgentAccessWorkItems.mockResolvedValue({
+      items: [],
+      nextCursor: null,
+      snapshotAt: now,
+      summary: {
+        byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
+        byKind: { attention: 0, review: 0, setup: 0 },
+        total: 0,
+      },
+      unavailableDomains: [],
+    });
+  });
+
+  it("puts actions before workspace detail and keeps workspace/setup state in the URL", async () => {
+    const browser = userEvent.setup();
+    renderSettings("/settings?section=agents&workspace=calendar&setup=connect");
+
+    const headings = [
+      await screen.findByRole("heading", { name: "Agent access" }),
+      screen.getByRole("heading", { name: "Your action queue" }),
+      screen.getByRole("heading", { name: "Agent workspaces" }),
+      screen.getByRole("heading", { name: "Access management" }),
+    ];
+    for (let index = 0; index < headings.length - 1; index += 1) {
+      expect(headings[index]?.compareDocumentPosition(headings[index + 1] as Node)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    }
+    expect(screen.getByRole("radio", { name: "Calendar" })).toBeChecked();
+    await waitFor(() =>
+      expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp"),
+    );
+
+    await browser.click(screen.getByRole("radio", { name: "Tasks" }));
+    expect(screen.getByLabelText("Current location")).toHaveTextContent(
+      "/settings?section=agents&workspace=tasks&setup=connect",
+    );
   });
 
   it("connects a host, shows agent-owned setup progress, selects a domain, and manages fallback access", async () => {
     const browser = userEvent.setup();
-    renderSettings();
+    renderSettings(
+      "/settings?section=agents&workspace=mail&reviewRule=33333333-3333-4333-8333-333333333333",
+    );
 
-    expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Agent access" })).toBeInTheDocument();
     expect(await screen.findByText("2 connected")).toBeInTheDocument();
+    expect(await screen.findByText("Weekly news")).toBeInTheDocument();
+    expect(screen.getByText(/Rule scope: person@example.com/)).toBeInTheDocument();
+    expect(screen.getByText(/mark read — due now/)).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Activate reviewed rule" }));
+    await waitFor(() =>
+      expect(mocks.activateMailRule).toHaveBeenCalledWith("33333333-3333-4333-8333-333333333333", {
+        expectedCandidateIds: ["44444444-4444-4444-8444-444444444444"],
+        expectedPreviewFingerprint: "a".repeat(64),
+        expectedPreviewedAt: now,
+        expectedVersion: 1,
+      }),
+    );
+    await waitFor(() => expect(mocks.getMailSetupContext).toHaveBeenCalledTimes(2));
+    expect(screen.getByLabelText("Current location")).toHaveTextContent(
+      "/settings?section=agents&workspace=mail",
+    );
+    expect(screen.queryByText("Routine orders")).not.toBeInTheDocument();
     const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');
     expect(claudeHost?.querySelector('[data-slot="item-media"] svg.reicon')).not.toBeNull();
     for (const domain of ["Mail", "Finances", "Calendar", "Tasks"] as const) {
@@ -557,21 +620,6 @@ describe("agent access settings", () => {
       "https://app.example.com/skills/ilo-setup/v0.2.0/SKILL.md",
     );
     expect(screen.getAllByText(/Not used yet/)).toHaveLength(2);
-    await browser.click(screen.getByRole("button", { name: "Review" }));
-    expect(await screen.findByText("Weekly news")).toBeInTheDocument();
-    expect(screen.getByText(/Rule scope: person@example.com/)).toBeInTheDocument();
-    expect(screen.getByText(/mark read — due now/)).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Activate reviewed rule" }));
-    await waitFor(() =>
-      expect(mocks.activateMailRule).toHaveBeenCalledWith("33333333-3333-4333-8333-333333333333", {
-        expectedCandidateIds: ["44444444-4444-4444-8444-444444444444"],
-        expectedPreviewFingerprint: "a".repeat(64),
-        expectedPreviewedAt: now,
-        expectedVersion: 1,
-      }),
-    );
-    await waitFor(() => expect(mocks.getMailSetupContext).toHaveBeenCalledTimes(2));
-
     await browser.click(screen.getByRole("button", { name: "Copy Ilo MCP URL" }));
     await expect(navigator.clipboard.readText()).resolves.toBe("https://mcp.example.com/mcp");
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Clipboard denied"));
@@ -709,9 +757,8 @@ describe("agent access settings", () => {
         truncated: true,
       },
     });
-    renderSettings();
-    await browser.click(await screen.findByRole("button", { name: "Review" }));
-    expect(screen.getByText("(No subject)")).toBeInTheDocument();
+    renderSettings(`/settings?section=agents&workspace=mail&reviewRule=${ruleId}`);
+    expect(await screen.findByText("(No subject)")).toBeInTheDocument();
     expect(screen.getByText(/Unknown account/)).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: no explicit account selected/)).toBeInTheDocument();
     expect(screen.getByText(/more than 200 exist/)).toBeInTheDocument();
@@ -962,7 +1009,6 @@ describe("agent access settings", () => {
   });
 
   it("explains an empty rule sample while an inactive profile blocks activation", async () => {
-    const browser = userEvent.setup();
     const ruleId = "33333333-3333-4333-8333-333333333333";
     mocks.getAssistantSetupStatus.mockResolvedValue({
       domains: [
@@ -1011,9 +1057,7 @@ describe("agent access settings", () => {
         truncated: false,
       },
     });
-    renderSettings();
-
-    await browser.click(await screen.findByRole("button", { name: "Review" }));
+    renderSettings(`/settings?section=agents&workspace=mail&reviewRule=${ruleId}`);
     expect(await screen.findByText(/Reviewed 0 of 200 recent conversations/)).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: Unknown account/)).toBeInTheDocument();
     expect(screen.getByText("Activate your Mail profile first")).toBeInTheDocument();

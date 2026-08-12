@@ -3649,6 +3649,40 @@ p {
 .agent-access__hero {
   margin-bottom: 0;
 }
+.agent-access__header-actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+.agent-access__access {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-margin-top: 24px;
+}
+.agent-access__section-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 2px 0;
+}
+.agent-access__section-heading h2,
+.agent-access__section-heading p {
+  margin: 0;
+}
+.agent-access__section-heading h2 {
+  font-family: var(--app-font-heading);
+  font-size: 16px;
+  font-weight: 600;
+}
+.agent-access__section-heading p {
+  color: var(--muted);
+  font-size: 13px;
+}
+.agent-access__rule-dialog {
+  max-height: min(44rem, calc(100vh - 2rem));
+  overflow-y: auto;
+}
 .agent-access-queue__content {
   display: flex;
   flex-direction: column;

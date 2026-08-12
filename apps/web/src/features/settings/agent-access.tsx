@@ -7,7 +7,7 @@ import type {
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ChevronDownIcon,
@@ -40,6 +40,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog.js";
 import {
   Field,
   FieldContent,
@@ -89,6 +97,7 @@ import {
 } from "../finances/agent-access.js";
 import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
 import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
+import { AgentAccessQueue } from "./agent-access-queue.js";
 
 const scopeLabels: Record<AccessScope, string> = {
   "audit:read": "Read activity",
@@ -160,7 +169,24 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
 
 export function AgentAccessSettings() {
   const queryClient = useQueryClient();
-  const [selectedDomain, setSelectedDomain] = useState<SetupDomain>("mail");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedWorkspace = searchParams.get("workspace");
+  const selectedDomain: SetupDomain = setupDomainOptions.some(
+    (option) => option.domain === requestedWorkspace,
+  )
+    ? (requestedWorkspace as SetupDomain)
+    : "mail";
+  const reviewRuleId = searchParams.get("reviewRule");
+  const connectRequested = searchParams.get("setup") === "connect";
+
+  function updateSearchParam(name: string, value: string | null) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (value === null) next.delete(name);
+      else next.set(name, value);
+      return next;
+    });
+  }
   const guide = useQuery({
     queryFn: api.getAgentConnectionGuide,
     queryKey: ["agent-connection-guide"],
@@ -297,29 +323,47 @@ export function AgentAccessSettings() {
       <Card className="settings-section agent-access__hero">
         <CardHeader>
           <CardTitle>
-            <h2>Connect an agent</h2>
+            <h2>Agent access</h2>
           </CardTitle>
           <CardDescription>
-            Connect once. Ilo gives the agent its identity, available work surface, current setup
-            step, evidence, and next tools so the agent can do the setup work itself.
+            See what needs you across agent-enabled workspaces, then manage setup and access in
+            context.
           </CardDescription>
           <CardAction>
-            <Badge
-              variant={
-                !connectionCountLoading && !connectionCountUnavailable && connectedAgentCount > 0
-                  ? "default"
-                  : "secondary"
-              }
-            >
-              {connectionCountLoading
-                ? "Checking connections"
-                : connectionCountUnavailable
-                  ? "Connections unavailable"
-                  : connectedAgentCount > 0
-                    ? `${connectedAgentCount} connected`
-                    : "Not connected"}
-            </Badge>
+            <div className="agent-access__header-actions">
+              <Badge
+                variant={
+                  !connectionCountLoading && !connectionCountUnavailable && connectedAgentCount > 0
+                    ? "default"
+                    : "secondary"
+                }
+              >
+                {connectionCountLoading
+                  ? "Checking connections"
+                  : connectionCountUnavailable
+                    ? "Connections unavailable"
+                    : connectedAgentCount > 0
+                      ? `${connectedAgentCount} connected`
+                      : "Not connected"}
+              </Badge>
+              <Button asChild size="sm" variant="outline">
+                <a href="#access-management">Manage access</a>
+              </Button>
+            </div>
           </CardAction>
+        </CardHeader>
+      </Card>
+
+      <AgentAccessQueue />
+
+      <Card className="settings-section agent-access__workspaces">
+        <CardHeader>
+          <CardTitle>
+            <h2>Agent workspaces</h2>
+          </CardTitle>
+          <CardDescription>
+            Choose a workspace to inspect readiness, authority, and the current setup step.
+          </CardDescription>
         </CardHeader>
         <CardContent className="settings-section__body agent-access__body">
           {blockingError ? (
@@ -331,12 +375,14 @@ export function AgentAccessSettings() {
           ) : null}
 
           <FieldSet>
-            <FieldLegend variant="label">Product setup</FieldLegend>
+            <FieldLegend className="sr-only" variant="label">
+              Choose an agent workspace
+            </FieldLegend>
             <ToggleGroup
-              aria-label="Domain to set up"
+              aria-label="Agent workspaces"
               className="agent-access__domains"
               onValueChange={(value) => {
-                if (value) setSelectedDomain(value as SetupDomain);
+                if (value) updateSearchParam("workspace", value);
               }}
               type="single"
               value={selectedDomain}
@@ -394,25 +440,12 @@ export function AgentAccessSettings() {
             readiness={readiness}
           />
 
-          {selectedDomain === "mail" && selectedDomainEnabled ? (
-            <MailRuleReview
-              accounts={mailSources}
-              loading={rules.isPending}
-              profileActive={
-                mailProfile.state === "ready" && mailProfile.data?.profileStatus === "active"
-              }
-              profileLoading={mailProfile.state === "loading"}
-              profileUnavailable={mailProfile.state === "unavailable"}
-              rules={rules.data ?? []}
-              unavailable={rules.isError}
-            />
-          ) : null}
-
           <div className="agent-access__steps">
             <ConnectionStep
               complete={mcpConnectionComplete}
-              defaultOpen={!mcpConnectionComplete}
+              defaultOpen={connectRequested || !mcpConnectionComplete}
               description="Add this remote MCP URL to the host and authorize Ilo. This is the only setup handoff the person must complete. Provider credentials stay in Ilo."
+              key={`connect-${connectRequested}`}
               number="1"
               status={
                 setupPlan.isPending
@@ -518,82 +551,109 @@ export function AgentAccessSettings() {
         </CardContent>
       </Card>
 
-      {(oauthClients.data?.length ?? 0) > 0 ? (
-        <Card className="settings-section" size="sm">
-          <CardHeader>
-            <CardTitle>
-              <h2>Connected hosts</h2>
-            </CardTitle>
-            <CardDescription>
-              OAuth connections can be revoked without affecting Ilo sessions.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ItemGroup>
-              {oauthClients.data?.map((client) => (
-                <Item key={client.id} variant="outline">
-                  <ItemMedia variant="icon">
-                    {/* OAuth client names are self-asserted, not verified provider identities. */}
-                    <PlugIcon />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{client.name}</ItemTitle>
-                    <ItemDescription>
-                      {client.scopes.length} permissions ·{" "}
-                      {client.lastUsedAt ? "Used recently" : "Not used yet"}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button
-                      aria-label={`Revoke ${client.name}`}
-                      disabled={revokeOAuthClient.isPending}
-                      onClick={() => revokeOAuthClient.mutate(client.id)}
-                      size="icon"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <TrashIcon />
-                    </Button>
-                  </ItemActions>
-                </Item>
-              ))}
-            </ItemGroup>
-          </CardContent>
-        </Card>
+      {selectedDomain === "mail" && selectedDomainEnabled ? (
+        <MailRuleReviewDialog
+          accounts={mailSources}
+          onClose={() => updateSearchParam("reviewRule", null)}
+          profileActive={
+            mailProfile.state === "ready" && mailProfile.data?.profileStatus === "active"
+          }
+          profileLoading={mailProfile.state === "loading"}
+          profileUnavailable={mailProfile.state === "unavailable"}
+          reviewRuleId={reviewRuleId}
+          rules={rules.data ?? []}
+          unavailable={rules.isError}
+        />
       ) : null}
 
-      <TokenAccess
-        activeTokens={activeTokens}
-        loading={tokens.isPending}
-        revokedTokens={(tokens.data ?? []).filter((token) => token.revokedAt !== null)}
-      />
+      <section
+        aria-labelledby="access-management-heading"
+        className="agent-access__access"
+        id="access-management"
+      >
+        <div className="agent-access__section-heading">
+          <h2 id="access-management-heading">Access management</h2>
+          <p>Review connected hosts and least-privilege local credentials.</p>
+        </div>
+
+        {(oauthClients.data?.length ?? 0) > 0 ? (
+          <Card className="settings-section" size="sm">
+            <CardHeader>
+              <CardTitle>
+                <h3>Connected hosts</h3>
+              </CardTitle>
+              <CardDescription>
+                OAuth connections can be revoked without affecting Ilo sessions.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ItemGroup>
+                {oauthClients.data?.map((client) => (
+                  <Item key={client.id} variant="outline">
+                    <ItemMedia variant="icon">
+                      {/* OAuth client names are self-asserted, not verified provider identities. */}
+                      <PlugIcon />
+                    </ItemMedia>
+                    <ItemContent>
+                      <ItemTitle>{client.name}</ItemTitle>
+                      <ItemDescription>
+                        {client.scopes.length} permissions ·{" "}
+                        {client.lastUsedAt ? "Used recently" : "Not used yet"}
+                      </ItemDescription>
+                    </ItemContent>
+                    <ItemActions>
+                      <Button
+                        aria-label={`Revoke ${client.name}`}
+                        disabled={revokeOAuthClient.isPending}
+                        onClick={() => revokeOAuthClient.mutate(client.id)}
+                        size="icon"
+                        type="button"
+                        variant="ghost"
+                      >
+                        <TrashIcon />
+                      </Button>
+                    </ItemActions>
+                  </Item>
+                ))}
+              </ItemGroup>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <TokenAccess
+          activeTokens={activeTokens}
+          loading={tokens.isPending}
+          revokedTokens={(tokens.data ?? []).filter((token) => token.revokedAt !== null)}
+        />
+      </section>
     </div>
   );
 }
 
-function MailRuleReview({
+function MailRuleReviewDialog({
   accounts,
-  loading,
+  onClose,
   profileActive,
   profileLoading,
   profileUnavailable,
+  reviewRuleId,
   rules,
   unavailable,
 }: {
   accounts: MailSetupAccount[];
-  loading: boolean;
+  onClose: () => void;
   profileActive: boolean;
   profileLoading: boolean;
   profileUnavailable: boolean;
+  reviewRuleId: string | null;
   rules: Awaited<ReturnType<typeof api.listMailRules>>;
   unavailable: boolean;
 }) {
   const queryClient = useQueryClient();
-  const [reviewed, setReviewed] = useState<{ id: string; preview: MailRulePreview } | null>(null);
-  const review = useMutation({
-    mutationFn: api.previewSavedMailRule,
-    onError: (error) => toast.error(errorMessage(error)),
-    onSuccess: (preview, id) => setReviewed({ id, preview }),
+  const preview = useQuery({
+    enabled: reviewRuleId !== null,
+    queryFn: () => api.previewSavedMailRule(reviewRuleId as string),
+    queryKey: ["mail-rule-preview", reviewRuleId],
   });
   const activate = useMutation({
     mutationFn: ({ id, preview }: { id: string; preview: MailRulePreview }) =>
@@ -605,137 +665,143 @@ function MailRuleReview({
       }),
     onError: (error) => toast.error(errorMessage(error)),
     onSuccess: async () => {
-      setReviewed(null);
       toast.success("Mail rule activated.");
+      onClose();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["mail-rules"] }),
         queryClient.invalidateQueries({ queryKey: ["mail-setup-context"] }),
+        queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]);
     },
   });
-  if (loading) return null;
-  if (unavailable) {
-    return (
-      <Alert variant="destructive">
-        <XIcon />
-        <AlertTitle>Mail rules are unavailable</AlertTitle>
-        <AlertDescription>
-          Ilo cannot report an approved-rule count or open rule review until Mail rules load.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  if (rules.length === 0) return null;
   const accountNames = new Map(
     accounts.map((account) => [account.accountId, account.email ?? account.label]),
   );
-  const reviewedRule = reviewed ? rules.find((rule) => rule.id === reviewed.id) : null;
+  const reviewedRule = reviewRuleId ? rules.find((rule) => rule.id === reviewRuleId) : null;
+  const reviewed = preview.data;
+
   return (
-    <section aria-labelledby="mail-rule-review-heading" className="agent-access__rule-review">
-      <div>
-        <h3 id="mail-rule-review-heading">Review Mail rules</h3>
-        <p>Agents can draft rules. Only you can activate one after reviewing its current sample.</p>
-      </div>
-      <ItemGroup>
-        {rules.map((rule) => (
-          <Item key={rule.id} size="sm" variant="outline">
-            <ItemContent>
-              <ItemTitle>{rule.name}</ItemTitle>
-              <ItemDescription>
-                {describeMailRule(rule)} ·{" "}
-                {rule.enabled && rule.policy === "approved_rule" ? "Active" : "Draft"}
-              </ItemDescription>
-            </ItemContent>
-            {!rule.enabled ? (
-              <ItemActions>
-                <Button
-                  disabled={review.isPending}
-                  onClick={() => review.mutate(rule.id)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Review
-                </Button>
-              </ItemActions>
-            ) : null}
-          </Item>
-        ))}
-      </ItemGroup>
-      {reviewed ? (
-        <div className="agent-access__rule-preview">
-          <Alert role="status" variant={reviewed.preview.window.truncated ? "warning" : "info"}>
-            <ShieldCheckIcon />
-            <AlertTitle>
-              {reviewed.preview.matchedCount} current match
-              {reviewed.preview.matchedCount === 1 ? "" : "es"}
-            </AlertTitle>
+    <Dialog
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      open={reviewRuleId !== null}
+    >
+      <DialogContent className="agent-access__rule-dialog">
+        <DialogHeader>
+          <DialogTitle>
+            {reviewedRule ? `Review ${reviewedRule.name}` : "Review Mail rule"}
+          </DialogTitle>
+          <DialogDescription>
+            Review the current bounded sample before activating this agent-drafted rule.
+          </DialogDescription>
+        </DialogHeader>
+
+        {unavailable ? (
+          <Alert variant="destructive">
+            <XIcon />
+            <AlertTitle>Mail rules are unavailable</AlertTitle>
             <AlertDescription>
-              Reviewed {formatPreviewWindow(reviewed.preview)}. This is a bounded recent sample; the
-              rule condition will also govern future matching Mail. Activation rechecks this sample,
-              due states, rule version, and fingerprint.
-              {reviewedRule
-                ? ` Rule scope: ${formatRuleSources(reviewedRule.sourceIds, accountNames)}.`
-                : ""}
+              Reload Mail rules before making an activation decision.
             </AlertDescription>
           </Alert>
-          {reviewed.preview.candidates.length > 0 ? (
-            <ItemGroup aria-label="Exact Mail rule matches">
-              {reviewed.preview.candidates.map((candidate) => (
-                <Item key={candidate.id} size="xs" variant="muted">
-                  <ItemContent>
-                    <ItemTitle>{candidate.subject || "(No subject)"}</ItemTitle>
-                    <ItemDescription>
-                      {candidate.from.address} ·{" "}
-                      {accountNames.get(candidate.accountId) ?? "Unknown account"} ·{" "}
-                      {formatCandidateActions(candidate.actions)}
-                    </ItemDescription>
-                  </ItemContent>
-                </Item>
-              ))}
-            </ItemGroup>
-          ) : null}
-          {!profileActive ? (
-            <Alert variant="warning">
+        ) : null}
+
+        {preview.isPending ? (
+          <Alert role="status" variant="info">
+            <ShieldCheckIcon />
+            <AlertTitle>Checking current matches</AlertTitle>
+            <AlertDescription>
+              Ilo is rebuilding the bounded preview for this rule.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {preview.isError ? (
+          <Alert variant="destructive">
+            <XIcon />
+            <AlertTitle>Rule preview could not be loaded</AlertTitle>
+            <AlertDescription>{errorMessage(preview.error)}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {reviewed ? (
+          <div className="agent-access__rule-preview">
+            <Alert role="status" variant={reviewed.window.truncated ? "warning" : "info"}>
               <ShieldCheckIcon />
               <AlertTitle>
-                {profileLoading
-                  ? "Mail profile status is loading"
-                  : profileUnavailable
-                    ? "Mail profile status is unavailable"
-                    : "Activate your Mail profile first"}
+                {reviewed.matchedCount} current match
+                {reviewed.matchedCount === 1 ? "" : "es"}
               </AlertTitle>
               <AlertDescription>
-                {profileLoading
-                  ? "Wait for setup status before deciding whether this rule can be activated."
-                  : profileUnavailable
-                    ? "Reload setup status before deciding whether this rule can be activated."
-                    : "Review and accept the profile summary in your agent conversation before activating a rule."}
+                Reviewed {formatPreviewWindow(reviewed)}. This is a bounded recent sample; the rule
+                condition will also govern future matching Mail. Activation rechecks this sample,
+                due states, rule version, and fingerprint.
+                {reviewedRule
+                  ? ` Rule scope: ${formatRuleSources(reviewedRule.sourceIds, accountNames)}.`
+                  : ""}
               </AlertDescription>
             </Alert>
-          ) : null}
+            {reviewed.candidates.length > 0 ? (
+              <ItemGroup aria-label="Exact Mail rule matches">
+                {reviewed.candidates.map((candidate) => (
+                  <Item key={candidate.id} size="xs" variant="muted">
+                    <ItemContent>
+                      <ItemTitle>{candidate.subject || "(No subject)"}</ItemTitle>
+                      <ItemDescription>
+                        {candidate.from.address} ·{" "}
+                        {accountNames.get(candidate.accountId) ?? "Unknown account"} ·{" "}
+                        {formatCandidateActions(candidate.actions)}
+                      </ItemDescription>
+                    </ItemContent>
+                  </Item>
+                ))}
+              </ItemGroup>
+            ) : null}
+            {!profileActive ? (
+              <Alert variant="warning">
+                <ShieldCheckIcon />
+                <AlertTitle>
+                  {profileLoading
+                    ? "Mail profile status is loading"
+                    : profileUnavailable
+                      ? "Mail profile status is unavailable"
+                      : "Activate your Mail profile first"}
+                </AlertTitle>
+                <AlertDescription>
+                  {profileLoading
+                    ? "Wait for setup status before deciding whether this rule can be activated."
+                    : profileUnavailable
+                      ? "Reload setup status before deciding whether this rule can be activated."
+                      : "Review and accept the profile summary in your agent conversation before activating a rule."}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+        ) : null}
+
+        <DialogFooter showCloseButton>
           <Button
-            disabled={activate.isPending || !profileActive || reviewed.preview.ruleVersion === null}
-            onClick={() => activate.mutate(reviewed)}
+            disabled={
+              !reviewRuleId ||
+              !reviewed ||
+              activate.isPending ||
+              !profileActive ||
+              reviewed.ruleVersion === null
+            }
+            onClick={() => {
+              if (reviewRuleId && reviewed)
+                activate.mutate({ id: reviewRuleId, preview: reviewed });
+            }}
             type="button"
           >
             Activate reviewed rule
           </Button>
-        </div>
-      ) : null}
-    </section>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
-}
-
-function describeMailRule(rule: Awaited<ReturnType<typeof api.listMailRules>>[number]): string {
-  const action = rule.actions
-    .map(
-      (item) =>
-        `${item.type.replaceAll("_", " ")}${item.afterDays ? ` after ${item.afterDays}d` : ""}`,
-    )
-    .join(", ");
-  return `${rule.condition.field} ${rule.condition.operator.replaceAll("_", " ")} “${rule.condition.value}” → ${action}`;
 }
 
 function formatPreviewWindow(preview: MailRulePreview): string {

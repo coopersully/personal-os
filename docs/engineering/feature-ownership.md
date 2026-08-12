@@ -31,6 +31,7 @@ parallel worktree ownership. It complements the system boundary in
 | --- | --- | --- |
 | Finances | `apps/web/src/features/finances`, `apps/api/src/routes/finances.ts`, `apps/api/src/finance-*`, `packages/domain/src/finance.ts`, `packages/api-client/src/features/finances.ts`, `apps/mcp/src/tools/finances.ts`, `packages/connectors/src/plaid*` | Sessions, generic OAuth, Today composition, global navigation |
 | Mail | `apps/web/src/features/mail`, `apps/api/src/routes/mail.ts`, `apps/api/src/mail-*`, `packages/domain/src/mail.ts`, `packages/connectors/src/google/mail.ts`, `packages/connectors/src/icloud-mail*` | Google OAuth core, Calendar provider adapter, Today composition |
+| Commitments | `apps/web/src/features/reminders`, `apps/web/src/features/tasks`, `apps/api/src/routes/reminders.ts`, `apps/api/src/routes/tasks.ts`, `apps/api/src/reminder-service.ts`, `apps/api/src/task-service.ts`, `packages/domain/src/reminder.ts`, `packages/domain/src/task.ts`, `packages/api-client/src/features/reminders.ts`, `packages/api-client/src/features/tasks.ts` | Today composition, global navigation, generic Add menu |
 | Settings/Auth | `apps/web/src/features/settings`, `apps/api/src/routes/auth.ts`, `apps/api/src/auth-*`, `apps/api/src/security.ts`, account and token contracts | Feature-specific mail/calendar/finance workflows |
 | Calendar | `apps/web/src/features/calendar`, `apps/api/src/routes/calendar.ts`, `apps/api/src/calendar-*`, `packages/domain/src/calendar.ts`, `packages/connectors/src/google/calendar.ts`, `packages/connectors/src/icloud-calendar*` | Google OAuth core, Today composition, mail provider adapter |
 | Integration | app/API/MCP composition roots, global navigation, Today, shared shadcn primitives, shared style tokens, cross-domain automations, migration journal | Feature-specific implementation details owned above |
@@ -69,6 +70,19 @@ from repeatedly conflicting on the same file.
   retry/reconnect state, and provider error. UI never calls a provider directly.
 - Read/write capability is checked before a UI, MCP, or automation operation is
   offered or executed.
+
+### External dependencies
+
+- A feature owner owns the capability, domain state, degraded behavior, and repair path for an
+  external dependency it introduces.
+- Integration owns shared edge deadlines, composition-root wiring, runtime configuration, network
+  policy, deployment ordering, and cross-feature infrastructure. A change that adds a credential,
+  callback, webhook, host class, protocol, port, queue, or native bridge crosses both ownership
+  surfaces.
+- The feature and Integration owners use the boundary record in
+  [`external-boundary-reliability.md`](external-boundary-reliability.md) to agree on the durable
+  commit point and production evidence. Neither side may infer that the other supplied the missing
+  runtime contract.
 
 ### Agent actions and source links
 

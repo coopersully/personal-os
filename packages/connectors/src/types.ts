@@ -96,6 +96,7 @@ export type RemoteCalendar = {
 export type RemoteMailbox = {
   id: string;
   name: string;
+  providerRevision?: string | null;
   role: MailboxRole;
   totalCount: number;
   unreadCount: number;
@@ -110,10 +111,13 @@ export type NormalizedRemoteMailThread = {
     bodyText: string;
     cc: MailAddress[];
     from: MailAddress;
+    mailboxIds?: string[];
+    providerRevision?: string | null;
     receivedAt: Date;
     remoteMessageId: string;
     to: MailAddress[];
   }>;
+  messagesComplete?: boolean;
   messageCount: number;
   receivedAt: Date;
   remoteThreadId: string;
@@ -156,9 +160,35 @@ export type SyncResult = CredentialResult<{
 }>;
 
 export type MailSyncResult = CredentialResult<{
+  deletedThreadIds: string[];
   mailboxes: RemoteMailbox[];
+  nextSyncToken: string | null;
+  reset: boolean;
   threads: NormalizedRemoteMailThread[];
 }>;
+
+export type GmailWatch = {
+  expiresAt: string;
+  historyId: string;
+};
+
+export type GoogleCalendarWatch = {
+  expiresAt: string;
+  resourceId: string;
+};
+
+export type GoogleCalendarWatchChannel = {
+  address: string;
+  id: string;
+  token: string;
+};
+
+export type RemoteMailThreadState = {
+  mailboxIds: string[];
+  remoteThreadId: string;
+  starred: boolean;
+  unread: boolean;
+};
 
 export type UpdateRemoteMailThreadInput = {
   addMailboxIds?: string[];
@@ -168,13 +198,33 @@ export type UpdateRemoteMailThreadInput = {
 export type SendRemoteMailInput = {
   body: string;
   cc: MailAddress[];
+  from: string;
   subject: string;
   threadId?: string;
   to: MailAddress[];
 };
 
+export type ProviderOperationOptions = {
+  deadlineMs?: number;
+  signal?: AbortSignal;
+};
+
+export function throwIfProviderOperationCancelled(operation?: ProviderOperationOptions): void {
+  operation?.signal?.throwIfAborted();
+  if (operation?.deadlineMs !== undefined && Date.now() >= operation.deadlineMs) {
+    throw new DOMException("Provider operation deadline expired.", "TimeoutError");
+  }
+}
+
+export type GoogleAuthorizationService = "calendar" | "mail";
+
 export type GoogleConnector = {
-  authorizationUrl: (state: string, loginHint?: string) => string;
+  authorizationUrl: (
+    state: string,
+    codeChallenge: string,
+    loginHint?: string,
+    services?: GoogleAuthorizationService[],
+  ) => string;
   createEvent: (
     credentials: GoogleCredentials,
     remoteCalendarId: string,
@@ -186,9 +236,20 @@ export type GoogleConnector = {
     remoteEventId: string,
     etag: string | null,
   ) => Promise<GoogleCredentials>;
-  exchangeCode: (code: string) => Promise<GoogleCredentials>;
+  exchangeCode: (
+    code: string,
+    codeVerifier: string,
+    redirectUri?: string,
+  ) => Promise<GoogleCredentials>;
   getProfile: (credentials: GoogleCredentials) => Promise<CredentialResult<ProviderProfile>>;
-  listCalendars: (credentials: GoogleCredentials) => Promise<CredentialResult<RemoteCalendar[]>>;
+  getMailThreadState?: (
+    credentials: GoogleCredentials,
+    remoteThreadId: string,
+  ) => Promise<CredentialResult<RemoteMailThreadState>>;
+  listCalendars: (
+    credentials: GoogleCredentials,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<RemoteCalendar[]>>;
   sendMail?: (
     credentials: GoogleCredentials,
     input: SendRemoteMailInput,
@@ -198,11 +259,26 @@ export type GoogleConnector = {
     remoteThreadId: string,
     input: UpdateRemoteMailThreadInput,
   ) => Promise<GoogleCredentials>;
-  syncMail?: (credentials: GoogleCredentials) => Promise<MailSyncResult>;
+  syncMail?: (
+    credentials: GoogleCredentials,
+    syncToken: string | null,
+    operation?: ProviderOperationOptions,
+  ) => Promise<MailSyncResult>;
+  trashMailThread?: (
+    credentials: GoogleCredentials,
+    remoteThreadId: string,
+  ) => Promise<GoogleCredentials>;
+  stopCalendarWatch?: (
+    credentials: GoogleCredentials,
+    channelId: string,
+    resourceId: string,
+    operation?: ProviderOperationOptions,
+  ) => Promise<GoogleCredentials>;
   syncCalendar: (
     credentials: GoogleCredentials,
     remoteCalendarId: string,
     syncToken: string | null,
+    operation?: ProviderOperationOptions,
   ) => Promise<SyncResult>;
   updateEvent: (
     credentials: GoogleCredentials,
@@ -211,6 +287,22 @@ export type GoogleConnector = {
     etag: string | null,
     input: UpdateEventInput,
   ) => Promise<CredentialResult<NormalizedRemoteEvent>>;
+  watchCalendarEvents?: (
+    credentials: GoogleCredentials,
+    remoteCalendarId: string,
+    channel: GoogleCalendarWatchChannel,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GoogleCalendarWatch>>;
+  watchCalendarList?: (
+    credentials: GoogleCredentials,
+    channel: GoogleCalendarWatchChannel,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GoogleCalendarWatch>>;
+  watchGmail?: (
+    credentials: GoogleCredentials,
+    topicName: string,
+    operation?: ProviderOperationOptions,
+  ) => Promise<CredentialResult<GmailWatch>>;
 };
 
 export type ICloudConnector = {
@@ -224,7 +316,15 @@ export type ICloudConnector = {
     remoteEventId: string,
     etag: string | null,
   ) => Promise<void>;
-  listCalendars: (credentials: ICloudCredentials) => Promise<RemoteCalendar[]>;
+  listCalendars: (
+    credentials: ICloudCredentials,
+    operation?: ProviderOperationOptions,
+  ) => Promise<RemoteCalendar[]>;
+  listenForMailChanges?: (
+    credentials: ICloudCredentials,
+    onChange: () => Promise<void> | void,
+    operation?: ProviderOperationOptions,
+  ) => Promise<void>;
   sendMail?: (credentials: ICloudCredentials, input: SendRemoteMailInput) => Promise<void>;
   updateMailThread?: (
     credentials: ICloudCredentials,
@@ -235,8 +335,13 @@ export type ICloudConnector = {
     credentials: ICloudCredentials,
     remoteCalendarId: string,
     syncToken: string | null,
+    operation?: ProviderOperationOptions,
   ) => Promise<SyncResult["value"]>;
-  syncMail: (credentials: ICloudCredentials) => Promise<MailSyncResult["value"]>;
+  syncMail: (
+    credentials: ICloudCredentials,
+    syncToken: string | null,
+    operation?: ProviderOperationOptions,
+  ) => Promise<MailSyncResult["value"]>;
   updateEvent: (
     credentials: ICloudCredentials,
     remoteCalendarId: string,
@@ -247,8 +352,8 @@ export type ICloudConnector = {
 };
 
 export type XConnector = {
-  authorizationUrl: (state: string, codeVerifier: string) => string;
-  exchangeCode: (code: string, codeVerifier: string) => Promise<XCredentials>;
+  authorizationUrl: (state: string, codeChallenge: string) => string;
+  exchangeCode: (code: string, codeVerifier: string, redirectUri?: string) => Promise<XCredentials>;
   getProfile: (credentials: XCredentials) => Promise<CredentialResult<XProfile>>;
   listBookmarkFolders: (
     credentials: XCredentials,

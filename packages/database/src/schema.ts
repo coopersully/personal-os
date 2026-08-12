@@ -1,14 +1,37 @@
 import type {
   AccessScope,
+  AccountSetupStatus,
+  AccountSetupStep,
+  AccountSetupWorkspace,
   ActorType,
+  AgentMutationPolicy,
+  AssistantDomain,
+  AttentionItemImportance,
+  AttentionItemKind,
+  AttentionItemStatus,
   AutomationRunStatus,
   AutomationTemplate,
   CalendarProvider,
+  ConnectorFailureCategory,
+  ConnectorSubscriptionKind,
+  ConnectorSubscriptionStatus,
+  ConnectorSyncRecovery,
+  ConnectorSyncStatus,
+  ConnectorSyncTriggerReason,
+  DomainProfile,
   FinanceProvider,
+  GoogleConnectionService,
   HomeLocation,
+  LegacyMailRuleAction,
   MailAddress,
+  MailAttachment,
   MailboxRole,
   MailProvider,
+  MailRuleAction,
+  MailRuleCondition,
+  MailRuleProviderEffect,
+  MailRuleWorkStatus,
+  MaterialSourceReference,
   Theme,
   TransactionDirection,
 } from "@personal-os/domain";
@@ -16,6 +39,8 @@ import { sql } from "drizzle-orm";
 import {
   type AnyPgColumn,
   boolean,
+  check,
+  foreignKey,
   index,
   integer,
   jsonb,
@@ -39,6 +64,18 @@ export const users = pgTable("users", {
   emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
   passwordHash: text("password_hash").notNull(),
   displayName: text("display_name").notNull(),
+  setupStatus: text("setup_status").$type<AccountSetupStatus>().notNull().default("dismissed"),
+  setupCurrentStep: text("setup_current_step")
+    .$type<AccountSetupStep>()
+    .notNull()
+    .default("welcome"),
+  setupSelectedWorkspaces: jsonb("setup_selected_workspaces")
+    .$type<AccountSetupWorkspace[]>()
+    .notNull()
+    .default(sql`'["calendar","tasks","mail","finances"]'::jsonb`),
+  setupStartedAt: timestamp("setup_started_at", { withTimezone: true }),
+  setupCompletedAt: timestamp("setup_completed_at", { withTimezone: true }),
+  setupDismissedAt: timestamp("setup_dismissed_at", { withTimezone: true }),
   planningTimezone: text("planning_timezone").notNull().default("UTC"),
   homeLocation: jsonb("home_location").$type<HomeLocation>(),
   workdayStartMinute: integer("workday_start_minute")
@@ -253,6 +290,125 @@ export const automationRuns = pgTable(
   ],
 );
 
+export const domainProfiles = pgTable(
+  "domain_profiles",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    objective: text("objective").notNull(),
+    summary: text("summary").notNull(),
+    instructions: jsonb("instructions").$type<string[]>().notNull().default([]),
+    sourceContexts: jsonb("source_contexts")
+      .$type<
+        Array<{
+          notes: string | null;
+          purpose: string;
+          sourceId: string;
+          sourceLabel: string;
+        }>
+      >()
+      .notNull()
+      .default([]),
+    categories: jsonb("categories")
+      .$type<Array<{ description: string; examples: string[]; key: string; label: string }>>()
+      .notNull()
+      .default([]),
+    preferences: jsonb("preferences")
+      .$type<Record<string, boolean | null | number | string | string[]>>()
+      .notNull()
+      .default({}),
+    status: text("status").$type<"active" | "draft">().notNull().default("draft"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("domain_profiles_user_domain_idx").on(table.userId, table.domain),
+    uniqueIndex("domain_profiles_id_user_domain_idx").on(table.id, table.userId, table.domain),
+    index("domain_profiles_user_status_idx").on(table.userId, table.status),
+  ],
+);
+
+export const domainProfileApprovals = pgTable(
+  "domain_profile_approvals",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    profileId: uuid("profile_id").notNull(),
+    profileVersion: integer("profile_version").notNull(),
+    profile: jsonb("profile").$type<DomainProfile>().notNull(),
+    approvedByUserId: uuid("approved_by_user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("domain_profile_approvals_user_domain_idx").on(table.userId, table.domain),
+    index("domain_profile_approvals_profile_idx").on(table.profileId),
+    foreignKey({
+      columns: [table.profileId, table.userId, table.domain],
+      foreignColumns: [domainProfiles.id, domainProfiles.userId, domainProfiles.domain],
+      name: "domain_profile_approvals_owned_profile_fk",
+    }).onDelete("cascade"),
+    check("domain_profile_approvals_owner_check", sql`${table.approvedByUserId} = ${table.userId}`),
+    check(
+      "domain_profile_approvals_snapshot_check",
+      sql`(${table.profile}->>'id' = ${table.profileId}::text
+        AND ${table.profile}->>'domain' = ${table.domain}
+        AND (${table.profile}->>'version')::integer = ${table.profileVersion}
+        AND ${table.profile}->>'status' = 'active') IS TRUE`,
+    ),
+  ],
+);
+
+export const financeSetupBackfillState = pgTable("finance_setup_backfill_state", {
+  key: text("key").primaryKey(),
+  categoriesComplete: boolean("categories_complete").notNull().default(false),
+  profileCursor: uuid("profile_cursor"),
+  profilesComplete: boolean("profiles_complete").notNull().default(false),
+  userCursor: uuid("user_cursor"),
+  ...timestamps,
+});
+
+export const attentionItems = pgTable(
+  "attention_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    kind: text("kind").$type<AttentionItemKind>().notNull(),
+    importance: text("importance").$type<AttentionItemImportance>().notNull(),
+    status: text("status").$type<AttentionItemStatus>().notNull().default("open"),
+    version: integer("version").notNull().default(1),
+    title: text("title").notNull(),
+    summary: text("summary").notNull(),
+    occursAt: timestamp("occurs_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    source: jsonb("source").$type<MaterialSourceReference>(),
+    relatedEntityType: text("related_entity_type"),
+    relatedEntityId: uuid("related_entity_id"),
+    ...timestamps,
+  },
+  (table) => [
+    index("attention_items_user_domain_status_idx").on(
+      table.userId,
+      table.domain,
+      table.status,
+      table.createdAt,
+    ),
+    index("attention_items_user_occurs_idx").on(table.userId, table.occursAt),
+    check("attention_items_version_check", sql`${table.version} > 0`),
+  ],
+);
+
 export const goals = pgTable(
   "goals",
   {
@@ -297,12 +453,46 @@ export const oauthStates = pgTable(
     tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    status: text("status")
+      .$type<
+        | "pending"
+        | "processing"
+        | "connected"
+        | "cancelled"
+        | "expired"
+        | "permission_incomplete"
+        | "failed"
+      >()
+      .notNull()
+      .default("pending"),
+    outcomeCode: text("outcome_code"),
+    connectedAccountId: uuid("connected_account_id"),
+    redirectUri: text("redirect_uri"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    requestId: text("request_id"),
     targetAccountId: uuid("target_account_id"),
+    requestedServices: jsonb("requested_services").$type<GoogleConnectionService[]>(),
+    returnPath: text("return_path"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     uniqueIndex("oauth_states_token_hash_idx").on(table.tokenHash),
     index("oauth_states_user_idx").on(table.userId),
+    index("oauth_states_status_expiry_idx").on(table.status, table.expiresAt),
+    index("oauth_states_expiry_idx").on(table.expiresAt),
+    index("oauth_states_user_created_idx").on(table.userId, table.createdAt),
+    check(
+      "oauth_states_status_check",
+      sql`${table.status} IN ('pending', 'processing', 'connected', 'cancelled', 'expired', 'permission_incomplete', 'failed')`,
+    ),
+    check(
+      "oauth_states_lifecycle_check",
+      sql`(
+        (${table.status} = 'pending' AND ${table.consumedAt} IS NULL AND ${table.completedAt} IS NULL)
+        OR (${table.status} = 'processing' AND ${table.consumedAt} IS NOT NULL AND ${table.completedAt} IS NULL)
+        OR (${table.status} IN ('connected', 'cancelled', 'expired', 'permission_incomplete', 'failed') AND ${table.consumedAt} IS NOT NULL AND ${table.completedAt} IS NOT NULL)
+      )`,
+    ),
   ],
 );
 
@@ -328,17 +518,43 @@ export const calendarAccounts = pgTable(
     encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>(),
     calendarEnabled: boolean("calendar_enabled").notNull().default(true),
     mailEnabled: boolean("mail_enabled").notNull().default(false),
-    syncStatus: text("sync_status").$type<"idle" | "syncing" | "error">().notNull().default("idle"),
+    mailSyncToken: text("mail_sync_token"),
+    syncStatus: text("sync_status").$type<ConnectorSyncStatus>().notNull().default("idle"),
+    syncGeneration: integer("sync_generation").notNull().default(0),
+    syncClaimId: uuid("sync_claim_id"),
     syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("calendar_accounts_user_idx").on(table.userId),
+    index("calendar_accounts_sync_due_idx").on(table.syncStatus, table.nextSyncAt),
     uniqueIndex("calendar_accounts_remote_idx").on(
       table.userId,
       table.provider,
       table.providerAccountId,
+    ),
+    check("calendar_accounts_sync_generation_check", sql`${table.syncGeneration} >= 0`),
+    check("calendar_accounts_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
+    check(
+      "calendar_accounts_sync_claim_check",
+      sql`(${table.syncStatus} = 'syncing') = (${table.syncClaimId} IS NOT NULL)`,
+    ),
+    check(
+      "calendar_accounts_sync_recovery_check",
+      sql`(
+        ${table.provider} = 'local'
+        OR
+        (${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('automatic', 'operator', 'reconnect'))
+      )`,
     ),
   ],
 );
@@ -459,6 +675,7 @@ export const mailboxes = pgTable(
     remoteMailboxId: text("remote_mailbox_id").notNull(),
     name: text("name").notNull(),
     role: text("role").$type<MailboxRole>().notNull().default("custom"),
+    providerRevision: text("provider_revision"),
     unreadCount: integer("unread_count").notNull().default(0),
     totalCount: integer("total_count").notNull().default(0),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
@@ -514,14 +731,85 @@ export const mailMessages = pgTable(
     from: jsonb("from_address").$type<MailAddress>().notNull(),
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
-    attachments: jsonb("attachments")
-      .$type<Array<{ contentType: string; filename: string; id: string; size: number }>>()
-      .notNull()
-      .default([]),
+    attachments: jsonb("attachments").$type<MailAttachment[]>().notNull().default([]),
+    providerMailboxIds: jsonb("provider_mailbox_ids").$type<string[]>().notNull().default([]),
+    providerRevision: text("provider_revision"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
     ...timestamps,
   },
   (table) => [uniqueIndex("mail_messages_remote_idx").on(table.threadId, table.remoteMessageId)],
+);
+
+export const mailCalendarCommitmentIntakes = pgTable(
+  "mail_calendar_commitment_intakes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    sourceThreadId: uuid("source_thread_id").references(() => mailThreads.id, {
+      onDelete: "set null",
+    }),
+    sourceMessageId: uuid("source_message_id").references(() => mailMessages.id, {
+      onDelete: "set null",
+    }),
+    remoteThreadId: text("remote_thread_id").notNull(),
+    remoteMessageId: text("remote_message_id").notNull(),
+    remotePartId: text("remote_part_id").notNull(),
+    sourceThreadRevision: timestamp("source_thread_revision", { withTimezone: true }).notNull(),
+    sourceFingerprint: text("source_fingerprint").notNull(),
+    sourceMessageMailboxIds: jsonb("source_message_mailbox_ids")
+      .$type<string[]>()
+      .notNull()
+      .default([]),
+    sourceMessageRevision: text("source_message_revision"),
+    providerAccountAddressHintHash: text("provider_account_address_hint_hash"),
+    attachmentFingerprint: text("attachment_fingerprint").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    attachment: jsonb("attachment").$type<MailAttachment>().notNull(),
+    evidenceKind: text("evidence_kind").notNull(),
+    authority: text("authority")
+      .$type<"provider_projected_unverified" | "server_verified">()
+      .notNull()
+      .default("provider_projected_unverified"),
+    status: text("status")
+      .$type<"preview_only" | "pending" | "claimed" | "reconcile" | "succeeded" | "failed">()
+      .notNull()
+      .default("preview_only"),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_calendar_commitment_intake_identity_idx").on(
+      table.accountId,
+      table.remoteMessageId,
+      table.remotePartId,
+    ),
+    uniqueIndex("mail_calendar_commitment_intake_idempotency_idx").on(table.idempotencyKey),
+    index("mail_calendar_commitment_intake_user_status_idx").on(table.userId, table.status),
+    check(
+      "mail_calendar_commitment_intake_source_fingerprint_check",
+      sql`${table.sourceFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.attachmentFingerprint} ~ '^[0-9a-f]{64}$' AND ${table.idempotencyKey} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_account_address_hint_hash_check",
+      sql`${table.providerAccountAddressHintHash} IS NULL OR ${table.providerAccountAddressHintHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_authority_check",
+      sql`${table.authority} IN ('provider_projected_unverified', 'server_verified')`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_status_check",
+      sql`${table.status} IN ('preview_only', 'pending', 'claimed', 'reconcile', 'succeeded', 'failed')`,
+    ),
+    check(
+      "mail_calendar_commitment_intake_authority_status_check",
+      sql`${table.authority} <> 'provider_projected_unverified' OR ${table.status} = 'preview_only'`,
+    ),
+  ],
 );
 
 export const mailDrafts = pgTable(
@@ -540,9 +828,46 @@ export const mailDrafts = pgTable(
     to: jsonb("to_addresses").$type<MailAddress[]>().notNull().default([]),
     cc: jsonb("cc_addresses").$type<MailAddress[]>().notNull().default([]),
     sentAt: timestamp("sent_at", { withTimezone: true }),
+    sendClaimId: uuid("send_claim_id"),
+    sendClaimedAt: timestamp("send_claimed_at", { withTimezone: true }),
+    sendStatus: text("send_status")
+      .$type<"draft" | "sending" | "sent" | "reconcile">()
+      .notNull()
+      .default("draft"),
     ...timestamps,
   },
-  (table) => [index("mail_drafts_user_updated_idx").on(table.userId, table.updatedAt)],
+  (table) => [
+    index("mail_drafts_user_updated_idx").on(table.userId, table.updatedAt),
+    check(
+      "mail_drafts_send_state_check",
+      sql`
+        (
+          ${table.sendStatus} = 'draft'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NULL
+          AND ${table.sendClaimedAt} IS NULL
+        )
+        OR (
+          ${table.sendStatus} = 'sending'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NOT NULL
+          AND ${table.sendClaimedAt} IS NOT NULL
+        )
+        OR (
+          ${table.sendStatus} = 'reconcile'
+          AND ${table.sentAt} IS NULL
+          AND ${table.sendClaimId} IS NOT NULL
+          AND ${table.sendClaimedAt} IS NOT NULL
+        )
+        OR (
+          ${table.sendStatus} = 'sent'
+          AND ${table.sentAt} IS NOT NULL
+          AND ${table.sendClaimId} IS NULL
+          AND ${table.sendClaimedAt} IS NULL
+        )
+      `,
+    ),
+  ],
 );
 
 export const mailSnoozes = pgTable(
@@ -571,13 +896,137 @@ export const mailRules = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").references(() => domainProfiles.id, { onDelete: "set null" }),
     name: text("name").notNull(),
-    query: text("query").notNull(),
-    action: text("action").$type<"archive" | "mark_read" | "star">().notNull(),
-    enabled: boolean("enabled").notNull().default(true),
+    legacyQuery: text("query").notNull().default("__ilo_rule_v2__"),
+    legacyAction: text("action").$type<LegacyMailRuleAction>().notNull().default("archive"),
+    description: text("description").notNull().default(""),
+    condition: jsonb("condition").$type<MailRuleCondition>(),
+    actions: jsonb("actions").$type<MailRuleAction[]>(),
+    sourceAccountIds: jsonb("source_account_ids").$type<string[]>().notNull().default([]),
+    confidenceThreshold: integer("confidence_threshold_basis_points"),
+    policy: text("policy").$type<AgentMutationPolicy>().notNull().default("preview"),
+    enabled: boolean("enabled").notNull().default(false),
+    version: integer("version").notNull().default(1),
     ...timestamps,
   },
-  (table) => [index("mail_rules_user_idx").on(table.userId)],
+  (table) => [
+    index("mail_rules_user_idx").on(table.userId),
+    index("mail_rules_user_enabled_idx").on(table.userId, table.enabled),
+    check(
+      "mail_rules_activation_state_check",
+      sql`
+        (${table.enabled} = false AND ${table.policy} = 'preview')
+        OR (${table.enabled} = true AND ${table.policy} = 'approved_rule')
+        OR (
+          ${table.enabled} = true
+          AND ${table.policy} = 'preview'
+          AND ${table.condition} IS NULL
+          AND ${table.actions} IS NULL
+        )
+      `,
+    ),
+    check("mail_rules_exact_match_confidence_check", sql`${table.confidenceThreshold} IS NULL`),
+  ],
+);
+
+export const mailRuleWorkItems = pgTable(
+  "mail_rule_work_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => mailRules.id, { onDelete: "cascade" }),
+    profileId: uuid("profile_id").references(() => domainProfiles.id, { onDelete: "set null" }),
+    threadId: uuid("thread_id").references(() => mailThreads.id, { onDelete: "set null" }),
+    remoteThreadId: text("remote_thread_id").notNull(),
+    ruleVersion: integer("rule_version").notNull(),
+    profileVersion: integer("profile_version").notNull(),
+    sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }).notNull(),
+    action: jsonb("action").$type<MailRuleAction>().notNull(),
+    actionFingerprint: text("action_fingerprint").notNull(),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull(),
+    status: text("status").$type<MailRuleWorkStatus>().notNull().default("pending"),
+    claimId: uuid("claim_id"),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    claimMode: text("claim_mode").$type<"execute" | "reconcile">(),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    providerEffect: text("provider_effect")
+      .$type<MailRuleProviderEffect>()
+      .notNull()
+      .default("none"),
+    lastErrorCode: text("last_error_code"),
+    lastErrorMessage: text("last_error_message"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("mail_rule_work_identity_idx").on(
+      table.accountId,
+      table.remoteThreadId,
+      table.ruleId,
+      table.ruleVersion,
+      table.profileVersion,
+      table.actionFingerprint,
+    ),
+    index("mail_rule_work_due_idx").on(table.status, table.nextAttemptAt, table.dueAt),
+    index("mail_rule_work_account_idx").on(table.accountId, table.status),
+    index("mail_rule_work_thread_status_idx").on(table.threadId, table.status),
+    index("mail_rule_work_user_status_idx").on(table.userId, table.accountId, table.status),
+    check(
+      "mail_rule_work_revision_check",
+      sql`${table.ruleVersion} > 0 AND ${table.profileVersion} > 0`,
+    ),
+    check(
+      "mail_rule_work_action_fingerprint_check",
+      sql`${table.actionFingerprint} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check(
+      "mail_rule_work_attempt_count_check",
+      sql`${table.attemptCount} >= 0 AND ${table.attemptCount} <= 5`,
+    ),
+    check(
+      "mail_rule_work_provider_effect_check",
+      sql`${table.providerEffect} IN ('none', 'rejected', 'indeterminate', 'applied')`,
+    ),
+    check(
+      "mail_rule_work_claim_mode_check",
+      sql`${table.claimMode} IS NULL OR ${table.claimMode} IN ('execute', 'reconcile')`,
+    ),
+    check(
+      "mail_rule_work_claim_state_check",
+      sql`
+        (
+          ${table.status} = 'claimed'
+          AND ${table.claimId} IS NOT NULL
+          AND ${table.claimedAt} IS NOT NULL
+          AND ${table.claimMode} IS NOT NULL
+          AND ${table.completedAt} IS NULL
+        )
+        OR (
+          ${table.status} IN ('pending', 'reconcile')
+          AND ${table.claimId} IS NULL
+          AND ${table.claimedAt} IS NULL
+          AND ${table.claimMode} IS NULL
+          AND ${table.completedAt} IS NULL
+        )
+        OR (
+          ${table.status} IN ('succeeded', 'failed')
+          AND ${table.claimId} IS NULL
+          AND ${table.claimedAt} IS NULL
+          AND ${table.claimMode} IS NULL
+          AND ${table.completedAt} IS NOT NULL
+        )
+      `,
+    ),
+  ],
 );
 
 export const calendars = pgTable(
@@ -607,6 +1056,94 @@ export const calendars = pgTable(
   (table) => [
     index("calendars_user_idx").on(table.userId),
     uniqueIndex("calendars_remote_idx").on(table.accountId, table.remoteCalendarId),
+  ],
+);
+
+export const connectorSubscriptions = pgTable(
+  "connector_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"google" | "icloud">().notNull(),
+    kind: text("kind").$type<ConnectorSubscriptionKind>().notNull(),
+    calendarId: uuid("calendar_id").references(() => calendars.id, { onDelete: "cascade" }),
+    channelId: text("channel_id"),
+    remoteResourceId: text("remote_resource_id"),
+    remoteIdentityHash: text("remote_identity_hash"),
+    verificationTokenHash: text("verification_token_hash"),
+    providerCursor: text("provider_cursor"),
+    status: text("status").$type<ConnectorSubscriptionStatus>().notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    renewAfter: timestamp("renew_after", { withTimezone: true }),
+    lastNotificationAt: timestamp("last_notification_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    failureCount: integer("failure_count").notNull().default(0),
+    safeFailureCode: text("safe_failure_code"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    leaseClaimId: uuid("lease_claim_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("connector_subscriptions_identity_idx").on(
+      table.accountId,
+      table.kind,
+      sql`COALESCE(${table.calendarId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    ),
+    uniqueIndex("connector_subscriptions_channel_idx").on(table.channelId),
+    index("connector_subscriptions_due_idx").on(table.status, table.nextAttemptAt),
+    check("connector_subscriptions_provider_check", sql`${table.provider} IN ('google', 'icloud')`),
+    check(
+      "connector_subscriptions_kind_check",
+      sql`${table.kind} IN ('gmail_mailbox', 'google_calendar_list', 'google_calendar_events', 'icloud_mail_idle')`,
+    ),
+    check(
+      "connector_subscriptions_status_check",
+      sql`${table.status} IN ('pending', 'active', 'renewing', 'expired', 'failed', 'stopped')`,
+    ),
+    check("connector_subscriptions_failure_count_check", sql`${table.failureCount} >= 0`),
+    check(
+      "connector_subscriptions_lease_check",
+      sql`(${table.leaseClaimId} IS NULL) = (${table.leaseExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
+export const connectorSyncTriggers = pgTable(
+  "connector_sync_triggers",
+  {
+    accountId: uuid("account_id")
+      .primaryKey()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    reason: text("reason").$type<ConnectorSyncTriggerReason>().notNull(),
+    firstTriggeredAt: timestamp("first_triggered_at", { withTimezone: true }).notNull(),
+    lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }).notNull(),
+    notificationCount: integer("notification_count").notNull().default(1),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    claimId: uuid("claim_id"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("connector_sync_triggers_due_idx").on(table.availableAt),
+    check(
+      "connector_sync_triggers_reason_check",
+      sql`${table.reason} IN ('initial', 'notification', 'reconciliation', 'manual', 'retry', 'recovery')`,
+    ),
+    check(
+      "connector_sync_triggers_count_check",
+      sql`${table.notificationCount} BETWEEN 1 AND 1000000`,
+    ),
+    check(
+      "connector_sync_triggers_time_check",
+      sql`${table.firstTriggeredAt} <= ${table.lastTriggeredAt}`,
+    ),
+    check(
+      "connector_sync_triggers_claim_check",
+      sql`(${table.claimId} IS NULL) = (${table.claimExpiresAt} IS NULL)`,
+    ),
   ],
 );
 
@@ -825,6 +1362,7 @@ export const financeTransactions = pgTable(
     providerCategory: text("provider_category"),
     providerCategoryDetailed: text("provider_category_detailed"),
     providerCategoryConfidence: text("provider_category_confidence"),
+    providerDirection: text("provider_direction").$type<"expense" | "income">(),
     merchant: text("merchant").notNull(),
     amount: integer("amount_cents").notNull(),
     direction: text("direction").$type<TransactionDirection>().notNull(),
@@ -852,6 +1390,10 @@ export const financeTransactions = pgTable(
     uniqueIndex("finance_transactions_provider_idx").on(
       table.accountId,
       table.providerTransactionId,
+    ),
+    check(
+      "finance_transactions_provider_direction_check",
+      sql`${table.providerDirection} IS NULL OR ${table.providerDirection} IN ('expense', 'income')`,
     ),
   ],
 );

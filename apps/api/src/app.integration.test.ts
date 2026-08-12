@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, hkdfSync } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   GoogleConnector,
@@ -7,19 +7,34 @@ import type {
   XConnector,
 } from "@personal-os/connectors";
 import {
+  auditEvents,
   automationRoutines,
   automationRuns,
+  calendarAccounts,
+  calendarEvents,
+  connectorSubscriptions,
+  connectorSyncTriggers,
   createDatabaseClient,
   type DatabaseClient,
+  domainProfiles,
+  financeTransactions,
+  mailThreads,
   migrateDatabase,
+  reminders,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
 import type { EmailMessage } from "./email-delivery.js";
+import { GooglePubSubAuthError } from "./google-pubsub-auth.js";
+import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
+import { createRuntimeLifecycle } from "./runtime-lifecycle.js";
+import { verifyPassword } from "./security.js";
+
+const invalidLowercasePassword = ["alllowercase", "123", "!"].join("");
 
 type RequestOptions = {
   auth?: "agent" | "none" | "session";
@@ -33,10 +48,12 @@ describe.sequential("ilo API", () => {
   let container: StartedPostgreSqlContainer;
   let database: DatabaseClient;
   let app: PersonalOsApp;
+  let appConfig: Parameters<typeof createApp>[0]["config"];
   let sessionToken = "";
   let agentToken = "";
   const logs = vi.fn();
   const weatherFetch = vi.fn();
+  const verifyGooglePubSubToken = vi.fn(async () => ({ subject: "pubsub-push" }));
   const deliveredEmails: EmailMessage[] = [];
   const icloudConnector: ICloudConnector = {
     createEvent: vi.fn(),
@@ -44,9 +61,12 @@ describe.sequential("ilo API", () => {
     listCalendars: vi.fn(async () => []),
     syncCalendar: vi.fn(),
     syncMail: vi.fn(async () => ({
+      deletedThreadIds: [],
       mailboxes: [
         { id: "INBOX", name: "Inbox", role: "inbox" as const, totalCount: 1, unreadCount: 1 },
       ],
+      nextSyncToken: null,
+      reset: true,
       threads: [
         {
           bodyText: "Integration mail body",
@@ -107,37 +127,49 @@ describe.sequential("ilo API", () => {
       .start();
     database = createDatabaseClient(container.getConnectionUri());
     await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
+    appConfig = {
+      allowedOrigins: ["https://app.example.com"],
+      apiBaseUrl: "https://api.example.com",
+      apiShutdownTimeoutMs: 105_000,
+      appBaseUrl: "https://app.example.com",
+      databaseUrl: container.getConnectionUri(),
+      emailFrom: "",
+      encryptionKey: Buffer.alloc(32, 1).toString("base64"),
+      googleClientId: "",
+      googleClientSecret: "",
+      googleCalendarPushEnabled: true,
+      googleCalendarWebhookUrl:
+        "https://api.example.com/v1/connectors/google/calendar/notifications",
+      googleGmailPubsubSubscription: "projects/ilo/subscriptions/gmail-push",
+      googleGmailPubsubTopic: "projects/ilo/topics/gmail-push",
+      googleGmailPushAudience: "https://api.example.com/v1/connectors/google/gmail/notifications",
+      googleGmailPushEnabled: true,
+      googleGmailPushServiceAccount: "pubsub@example.iam.gserviceaccount.com",
+      googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
+      logLevel: "info",
+      port: 8787,
+      plaidClientId: "",
+      plaidEnvironment: "sandbox",
+      plaidSecret: "",
+      production: false,
+      resendApiKey: "",
+      sessionCookieName: "personal_os_session",
+      sessionTtlDays: 30,
+      trustProxy: true,
+      xClientId: "",
+      xClientSecret: "",
+      xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
+    };
     app = createApp({
-      config: {
-        allowedOrigins: ["https://app.example.com"],
-        apiBaseUrl: "https://api.example.com",
-        appBaseUrl: "https://app.example.com",
-        databaseUrl: container.getConnectionUri(),
-        emailFrom: "",
-        encryptionKey: Buffer.alloc(32, 1).toString("base64"),
-        googleClientId: "",
-        googleClientSecret: "",
-        googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
-        logLevel: "info",
-        port: 8787,
-        plaidClientId: "",
-        plaidEnvironment: "sandbox",
-        plaidSecret: "",
-        production: false,
-        resendApiKey: "",
-        sessionCookieName: "personal_os_session",
-        sessionTtlDays: 30,
-        trustProxy: true,
-        xClientId: "",
-        xClientSecret: "",
-        xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
-      },
+      config: appConfig,
       db: database.db,
       fetch: weatherFetch,
       email: { send: async (message) => void deliveredEmails.push(message) },
       icloud: icloudConnector,
       log: logs,
       now: () => new Date("2026-07-13T12:00:00.000Z"),
+      runtimeLifecycle: createRuntimeLifecycle(),
+      verifyGooglePubSubToken,
       x: xConnector,
     });
   }, 120_000);
@@ -166,10 +198,431 @@ describe.sequential("ilo API", () => {
     return response.status === 204 ? null : response.json();
   }
 
+  it("returns every connector callback to ilo when persistence fails unexpectedly", async () => {
+    const callbackLogs = vi.fn();
+    const failingDatabase = new Proxy(database.db, {
+      get(target, property, receiver) {
+        if (property === "update") {
+          return () => {
+            throw new Error("raw-provider-canary");
+          };
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const callbackApp = createApp({
+      config: appConfig,
+      db: failingDatabase,
+      log: callbackLogs,
+      x: xConnector,
+    });
+
+    for (const path of [
+      "/v1/connectors/google/callback?state=unavailable&code=google-code",
+      "/v1/x-bookmarks/callback?state=unavailable&code=x-code",
+    ]) {
+      const response = await callbackApp.request(path);
+      expect(response.status).toBe(303);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(response.headers.get("pragma")).toBe("no-cache");
+      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+      const location = new URL(String(response.headers.get("location")));
+      expect(location.origin).toBe("https://app.example.com");
+      expect(location.pathname).toBe("/settings");
+      expect(location.searchParams.get("section")).toBe("connections");
+      expect(location.searchParams.get("connection_result")).toBe("restart_required");
+      expect(await response.text()).not.toContain("raw-provider-canary");
+    }
+    expect(
+      callbackLogs.mock.calls
+        .map(([entry]) => entry)
+        .filter(({ event }) => event === "connector_authorization_callback_failed"),
+    ).toEqual([
+      expect.objectContaining({
+        event: "connector_authorization_callback_failed",
+        path: "/v1/connectors/google/callback",
+        provider: "google",
+        status: 503,
+      }),
+      expect.objectContaining({
+        event: "connector_authorization_callback_failed",
+        path: "/v1/x-bookmarks/callback",
+        provider: "x",
+        status: 503,
+      }),
+    ]);
+    expect(JSON.stringify(callbackLogs.mock.calls)).not.toContain("raw-provider-canary");
+  });
+
+  it("authenticates Gmail push and acknowledges only after durable coalescing", async () => {
+    const [pushUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Gmail Push",
+        email: "gmail-push-user@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!pushUser) throw new Error("Gmail push user was not created.");
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: false,
+        email: "push-mailbox@example.com",
+        label: "Push Mailbox",
+        mailEnabled: true,
+        provider: "google",
+        providerAccountId: "gmail-push-account",
+        userId: pushUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Gmail push account was not created.");
+    const privacyKey = Buffer.alloc(32, 1).toString("base64");
+    await database.db.insert(connectorSubscriptions).values({
+      accountId: account.id,
+      kind: "gmail_mailbox",
+      provider: "google",
+      providerCursor: "100",
+      remoteIdentityHash: createHmac(
+        "sha256",
+        Buffer.from(
+          hkdfSync(
+            "sha256",
+            Buffer.from(privacyKey, "base64"),
+            Buffer.alloc(0),
+            "ilo/connector-notification/remote-identity/v1",
+            32,
+          ),
+        ),
+      )
+        .update("push-mailbox@example.com")
+        .digest("hex"),
+      status: "active",
+    });
+    const envelope = (emailAddress: string, historyId: string) => ({
+      message: {
+        data: Buffer.from(JSON.stringify({ emailAddress, historyId })).toString("base64"),
+        messageId: `message-${historyId}`,
+      },
+      subscription: "projects/ilo/subscriptions/gmail-push",
+    });
+    logs.mockClear();
+
+    const accepted = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "101"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(accepted.status).toBe(204);
+    expect(await accepted.text()).toBe("");
+    await expect(
+      database.db
+        .select()
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([expect.objectContaining({ notificationCount: 1, reason: "notification" })]);
+    const duplicate = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "101"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(duplicate.status).toBe(204);
+    await expect(
+      database.db
+        .select({ notificationCount: connectorSyncTriggers.notificationCount })
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([{ notificationCount: 1 }]);
+    const unknown = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("unknown@example.com", "102"),
+      headers: { authorization: "Bearer valid-pubsub-token" },
+    });
+    expect(unknown.status).toBe(404);
+    const unauthorized = await request("/v1/connectors/google/gmail/notifications", {
+      auth: "none",
+      body: envelope("push-mailbox@example.com", "102"),
+      headers: { authorization: "invalid" },
+    });
+    expect(unauthorized.status).toBe(401);
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_gmail_trigger_for_test() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced Gmail trigger failure';
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_gmail_trigger_for_test
+      BEFORE UPDATE ON connector_sync_triggers
+      FOR EACH ROW EXECUTE FUNCTION fail_gmail_trigger_for_test();
+    `);
+    try {
+      const unavailable = await request("/v1/connectors/google/gmail/notifications", {
+        auth: "none",
+        body: envelope("push-mailbox@example.com", "102"),
+        headers: { authorization: "Bearer valid-pubsub-token" },
+      });
+      expect(unavailable.status).toBe(503);
+      await expect(
+        database.db
+          .select({ providerCursor: connectorSubscriptions.providerCursor })
+          .from(connectorSubscriptions)
+          .where(eq(connectorSubscriptions.accountId, account.id)),
+      ).resolves.toEqual([{ providerCursor: "101" }]);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_gmail_trigger_for_test ON connector_sync_triggers;
+        DROP FUNCTION IF EXISTS fail_gmail_trigger_for_test();
+      `);
+    }
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("push-mailbox@example.com");
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("valid-pubsub-token");
+    await database.db.delete(users).where(eq(users.id, pushUser.id));
+  });
+
+  it("rejects malformed or oversized Gmail push requests without exposing their contents", async () => {
+    const path = "/v1/connectors/google/gmail/notifications";
+    const headers = { authorization: "Bearer valid-pubsub-token" };
+    const push = (rawBody: string, requestHeaders: Record<string, string> = headers) =>
+      request(path, { auth: "none", headers: requestHeaders, rawBody });
+
+    expect((await push("{}", {})).status).toBe(401);
+    verifyGooglePubSubToken.mockRejectedValueOnce(new Error("private verification response"));
+    expect((await push("{}")).status).toBe(401);
+    verifyGooglePubSubToken.mockRejectedValueOnce(new GooglePubSubAuthError(true));
+    expect((await push("{}")).status).toBe(503);
+    expect(
+      (
+        await push("{}", {
+          ...headers,
+          "content-length": "32769",
+        })
+      ).status,
+    ).toBe(413);
+    expect(
+      (
+        await push("x".repeat(32_769), {
+          ...headers,
+          "content-length": "not-a-number",
+        })
+      ).status,
+    ).toBe(413);
+    expect((await push("not-json")).status).toBe(400);
+    expect(
+      (
+        await push(
+          JSON.stringify({
+            message: {
+              data: Buffer.from("{}").toString("base64"),
+              messageId: "wrong-subscription",
+            },
+            subscription: "projects/other/subscriptions/wrong",
+          }),
+        )
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await push(
+          JSON.stringify({
+            message: {
+              data: Buffer.alloc(8_193).toString("base64"),
+              messageId: "oversized-decoded-payload",
+            },
+            subscription: "projects/ilo/subscriptions/gmail-push",
+          }),
+        )
+      ).status,
+    ).toBe(413);
+    expect(JSON.stringify(logs.mock.calls)).not.toMatch(
+      /private verification response|wrong-subscription|oversized-decoded-payload/u,
+    );
+  });
+
+  it("keeps notification endpoints unavailable until each production gate is complete", async () => {
+    const disabled = createApp({
+      config: {
+        ...appConfig,
+        googleCalendarPushEnabled: false,
+        googleGmailPushEnabled: false,
+      },
+      db: database.db,
+    });
+    expect(
+      (
+        await disabled.request("/v1/connectors/google/gmail/notifications", {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+    expect(
+      (
+        await disabled.request("/v1/connectors/google/calendar/notifications", {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+
+    const missingVerifier = createApp({
+      config: {
+        ...appConfig,
+        googleGmailPushAudience: "",
+      },
+      db: database.db,
+    });
+    expect(
+      (
+        await missingVerifier.request("/v1/connectors/google/gmail/notifications", {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+
+    const missingSubscription = createApp({
+      config: {
+        ...appConfig,
+        googleGmailPubsubSubscription: "",
+      },
+      db: database.db,
+      verifyGooglePubSubToken,
+    });
+    expect(
+      (
+        await missingSubscription.request("/v1/connectors/google/gmail/notifications", {
+          method: "POST",
+        })
+      ).status,
+    ).toBe(404);
+  });
+
+  it("verifies Calendar channel headers and coalesces only new provider signals", async () => {
+    const [pushUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Calendar Push",
+        email: "calendar-push-user@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!pushUser) throw new Error("Calendar push user was not created.");
+    const [account] = await database.db
+      .insert(calendarAccounts)
+      .values({
+        calendarEnabled: true,
+        label: "Calendar Push",
+        mailEnabled: false,
+        provider: "google",
+        providerAccountId: "calendar-push-account",
+        userId: pushUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Calendar push account was not created.");
+    const channelId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const channelToken = "opaque-calendar-verification-token-123456";
+    await database.db.insert(connectorSubscriptions).values({
+      accountId: account.id,
+      channelId,
+      kind: "google_calendar_list",
+      provider: "google",
+      remoteResourceId: "calendar-list-resource",
+      status: "active",
+      verificationTokenHash: createHash("sha256").update(channelToken).digest("hex"),
+    });
+    const headers = {
+      "x-goog-channel-id": channelId,
+      "x-goog-channel-token": channelToken,
+      "x-goog-message-number": "1",
+      "x-goog-resource-id": "calendar-list-resource",
+      "x-goog-resource-state": "exists",
+    };
+    logs.mockClear();
+
+    const accepted = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers,
+      method: "POST",
+    });
+    expect(accepted.status).toBe(204);
+    const duplicate = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers,
+      method: "POST",
+    });
+    expect(duplicate.status).toBe(204);
+    await expect(
+      database.db
+        .select({ notificationCount: connectorSyncTriggers.notificationCount })
+        .from(connectorSyncTriggers)
+        .where(eq(connectorSyncTriggers.accountId, account.id)),
+    ).resolves.toEqual([{ notificationCount: 1 }]);
+    const rejected = await request("/v1/connectors/google/calendar/notifications", {
+      auth: "none",
+      headers: { ...headers, "x-goog-channel-token": `${channelToken}-wrong` },
+      method: "POST",
+    });
+    expect(rejected.status).toBe(404);
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_calendar_notification_for_test() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced Calendar notification failure';
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_calendar_notification_for_test
+      BEFORE UPDATE ON connector_subscriptions
+      FOR EACH ROW EXECUTE FUNCTION fail_calendar_notification_for_test();
+    `);
+    try {
+      const unavailable = await request("/v1/connectors/google/calendar/notifications", {
+        auth: "none",
+        headers: { ...headers, "x-goog-message-number": "2" },
+        method: "POST",
+      });
+      expect(unavailable.status).toBe(503);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_calendar_notification_for_test ON connector_subscriptions;
+        DROP FUNCTION IF EXISTS fail_calendar_notification_for_test();
+      `);
+    }
+    expect(JSON.stringify(logs.mock.calls)).not.toContain(channelToken);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("calendar-list-resource");
+    await database.db.delete(users).where(eq(users.id, pushUser.id));
+  });
+
+  it("rejects Calendar notifications with bodies or incomplete provider headers", async () => {
+    const path = "/v1/connectors/google/calendar/notifications";
+    expect(
+      (
+        await request(path, {
+          auth: "none",
+          headers: { "content-length": "2" },
+          rawBody: "{}",
+        })
+      ).status,
+    ).toBe(413);
+    expect(
+      (
+        await request(path, {
+          auth: "none",
+          method: "POST",
+        })
+      ).status,
+    ).toBe(400);
+  });
+
   it("runs the Finance maintenance entry points", async () => {
     await expect(app.backfillFinanceCashflowInsights()).resolves.toEqual({ processed: 0 });
     await expect(app.backfillFinanceLedgerIntegrity()).resolves.toMatchObject({ processed: 0 });
     await expect(app.backfillFinanceLearning()).resolves.toEqual({ processed: 0 });
+    await expect(app.backfillFinanceSetupIntegrity()).resolves.toMatchObject({
+      categoriesComplete: true,
+      categoriesInserted: 0,
+      claimed: true,
+      profilesComplete: true,
+      profilesDemoted: 0,
+    });
     await expect(app.syncDueFinances()).resolves.toEqual({ failed: 0, reasons: [], synced: 0 });
   });
 
@@ -178,6 +631,7 @@ describe.sequential("ilo API", () => {
       config: {
         allowedOrigins: ["https://beta.example.com"],
         apiBaseUrl: "https://api.beta.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://beta.example.com",
         databaseUrl: container.getConnectionUri(),
         emailFrom: "",
@@ -202,6 +656,7 @@ describe.sequential("ilo API", () => {
       },
       db: database.db,
     });
+    expect((await betaApp.request("/health/ready")).headers.get("x-ilo-drain-protocol")).toBeNull();
     const signUp = (email: string, inviteCode?: string) =>
       betaApp.request("/v1/auth/register", {
         body: JSON.stringify({
@@ -214,8 +669,17 @@ describe.sequential("ilo API", () => {
         headers: { "content-type": "application/json" },
         method: "POST",
       });
+    const validateInvitation = async (inviteCode: string) => {
+      const response = await betaApp.request("/v1/auth/invitations/validate", {
+        body: JSON.stringify({ inviteCode }),
+        headers: { "content-type": "application/json" },
+        method: "POST",
+      });
+      return (await response.json()).valid as boolean;
+    };
 
     expect((await signUp("beta-friend@example.com")).status).toBe(403);
+    expect(await validateInvitation("BAD12345")).toBe(false);
     const ownerRegistration = await signUp("beta-owner@example.com");
     expect(ownerRegistration.status).toBe(201);
     const ownerSession = (await ownerRegistration.json()).sessionToken as string;
@@ -226,13 +690,17 @@ describe.sequential("ilo API", () => {
     });
     expect(invitationResponse.status).toBe(201);
     const invitation = (await invitationResponse.json()).invitation as { code: string };
+    expect(invitation.code).toMatch(/^[A-HJ-NP-Z2-9]{8}$/);
+    expect(await validateInvitation(invitation.code)).toBe(true);
     expect((await signUp("beta-friend@example.com", invitation.code)).status).toBe(201);
+    expect(await validateInvitation(invitation.code)).toBe(false);
     expect((await signUp("another-friend@example.com", invitation.code)).status).toBe(403);
 
     const recoveryApp = createApp({
       config: {
         allowedOrigins: ["https://beta.example.com"],
         apiBaseUrl: "https://api.beta.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://beta.example.com",
         authRateLimitMaxRequests: 1,
         authRateLimitWindowSeconds: 300,
@@ -269,14 +737,103 @@ describe.sequential("ilo API", () => {
     expect(limitedRecovery.headers.get("retry-after")).toBe("300");
   });
 
+  it("loads repeatable QA personas without touching ordinary accounts", async () => {
+    const fixtureNow = new Date("2026-07-28T14:00:00.000Z");
+    await database.db.insert(users).values({
+      displayName: "Unrelated account",
+      email: "qa-unrelated@example.com",
+      passwordHash: "not-a-fixture",
+      planningTimezone: "UTC",
+    });
+    await expect(loadQaFixtures(database.db, { now: fixtureNow })).resolves.toMatchObject({
+      accountCount: qaFixtureAccounts.length,
+    });
+    const fixtureEmails = qaFixtureAccounts.map((account) => account.email);
+    const fixtureUsers = await database.db
+      .select()
+      .from(users)
+      .where(inArray(users.email, fixtureEmails));
+    expect(fixtureUsers).toHaveLength(qaFixtureAccounts.length);
+    const demo = fixtureUsers.find((record) => record.email === "demo+full@ilo.test");
+    const onboarding = fixtureUsers.find((record) => record.email === "qa+onboarding-new@ilo.test");
+    const resumed = fixtureUsers.find((record) => record.email === "qa+onboarding-google@ilo.test");
+    const apple = fixtureUsers.find((record) => record.email === "qa+onboarding-apple@ilo.test");
+    const finances = fixtureUsers.find(
+      (record) => record.email === "qa+onboarding-finances@ilo.test",
+    );
+    const ready = fixtureUsers.find((record) => record.email === "qa+onboarding-ready@ilo.test");
+    const empty = fixtureUsers.find((record) => record.email === "qa+empty@ilo.test");
+    const degraded = fixtureUsers.find((record) => record.email === "qa+recovery@ilo.test");
+    expect(demo).toBeDefined();
+    expect(onboarding).toMatchObject({ emailVerifiedAt: null, setupStatus: "not_started" });
+    expect(resumed).toMatchObject({ setupCurrentStep: "google", setupStatus: "in_progress" });
+    expect(apple).toMatchObject({ setupCurrentStep: "icloud", setupStatus: "in_progress" });
+    expect(finances).toMatchObject({
+      setupCurrentStep: "finances",
+      setupStatus: "in_progress",
+    });
+    expect(ready).toMatchObject({ setupCurrentStep: "ready", setupStatus: "in_progress" });
+    expect(empty).toMatchObject({ setupStatus: "complete" });
+    expect(degraded).toBeDefined();
+    expect(await verifyPassword(DEMO_QA_PASSWORD, demo?.passwordHash ?? "")).toBe(true);
+
+    const [events, messages, transactions, profiles, emptyTasks, degradedAccounts] =
+      await Promise.all([
+        database.db
+          .select()
+          .from(calendarEvents)
+          .where(eq(calendarEvents.userId, demo?.id ?? "")),
+        database.db
+          .select()
+          .from(mailThreads)
+          .where(eq(mailThreads.userId, demo?.id ?? "")),
+        database.db
+          .select()
+          .from(financeTransactions)
+          .where(eq(financeTransactions.userId, demo?.id ?? "")),
+        database.db
+          .select()
+          .from(domainProfiles)
+          .where(eq(domainProfiles.userId, demo?.id ?? "")),
+        database.db
+          .select()
+          .from(reminders)
+          .where(eq(reminders.userId, empty?.id ?? "")),
+        database.db
+          .select()
+          .from(calendarAccounts)
+          .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
+      ]);
+    expect(events).toHaveLength(7);
+    expect(messages).toHaveLength(5);
+    expect(transactions).toHaveLength(9);
+    expect(profiles).toContainEqual(expect.objectContaining({ domain: "mail", status: "active" }));
+    expect(emptyTasks).toEqual([]);
+    expect(degradedAccounts).toContainEqual(
+      expect.objectContaining({ provider: "google", syncStatus: "error" }),
+    );
+
+    await loadQaFixtures(database.db, { now: new Date("2026-07-29T14:00:00.000Z") });
+    expect(
+      await database.db.select().from(users).where(inArray(users.email, fixtureEmails)),
+    ).toHaveLength(qaFixtureAccounts.length);
+    expect(
+      await database.db.select().from(users).where(eq(users.email, "qa-unrelated@example.com")),
+    ).toHaveLength(1);
+  });
+
   it("serves health, registration, sessions, tokens, reminders, calendars, events, and audit", async () => {
     await app.dispatchDueAutomations();
-    expect(await payload(await request("/health/live", { auth: "none" }))).toEqual({
+    const live = await request("/health/live", { auth: "none" });
+    expect(await payload(live)).toEqual({
       status: "ok",
     });
-    expect(await payload(await request("/health/ready", { auth: "none" }))).toEqual({
+    expect(live.headers.get("x-ilo-drain-protocol")).toBeNull();
+    const ready = await request("/health/ready", { auth: "none" });
+    expect(await payload(ready)).toEqual({
       status: "ready",
     });
+    expect(ready.headers.get("x-ilo-drain-protocol")).toBe("quiesce-v1");
     expect((await payload(await request("/openapi.json", { auth: "none" }))).servers).toEqual([
       { url: "https://api.example.com" },
     ]);
@@ -302,6 +859,50 @@ describe.sequential("ilo API", () => {
     expect(registrationBody.user).toMatchObject({
       email: "test@example.com",
       displayName: "Test User",
+      setup: {
+        completedAt: null,
+        currentStep: "welcome",
+        dismissedAt: null,
+        selectedWorkspaces: ["calendar", "tasks", "mail", "finances"],
+        startedAt: null,
+        status: "not_started",
+      },
+    });
+    expect((await request("/v1/setup", { auth: "none", method: "PATCH" })).status).toBe(401);
+    expect(
+      (
+        await payload(
+          await request("/v1/setup", {
+            body: {
+              action: "progress",
+              currentStep: "google",
+              selectedWorkspaces: ["calendar", "mail"],
+            },
+            method: "PATCH",
+          }),
+        )
+      ).user.setup,
+    ).toEqual({
+      completedAt: null,
+      currentStep: "google",
+      dismissedAt: null,
+      selectedWorkspaces: ["calendar", "mail"],
+      startedAt: "2026-07-13T12:00:00.000Z",
+      status: "in_progress",
+    });
+    expect(
+      (
+        await payload(
+          await request("/v1/setup", {
+            body: { action: "dismiss" },
+            method: "PATCH",
+          }),
+        )
+      ).user.setup,
+    ).toMatchObject({
+      currentStep: "google",
+      dismissedAt: "2026-07-13T12:00:00.000Z",
+      status: "dismissed",
     });
     expect((await request("/v1/weather")).status).toBe(400);
     weatherFetch.mockResolvedValueOnce(
@@ -408,22 +1009,19 @@ describe.sequential("ilo API", () => {
         expect.objectContaining({ displayName: "Trader Joe's Market", isUserConfirmed: true }),
       ]),
     );
-    expect(
-      (
-        await request("/v1/finances/transactions", {
-          body: {
-            accountId: financeAccount.id,
-            amount: 6,
-            category: null,
-            categoryConfidence: null,
-            date: "2026-07-13",
-            direction: "expense",
-            merchant: "TRADER JOES EXPRESS",
-            notes: null,
-          },
-        })
-      ).status,
-    ).toBe(201);
+    const variantResponse = await request("/v1/finances/transactions", {
+      body: {
+        accountId: financeAccount.id,
+        amount: 6,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "TRADER JOES EXPRESS",
+        notes: null,
+      },
+    });
+    expect(variantResponse.status).toBe(201);
     const merchantsBeforeMerge = (await payload(await request("/v1/finances/merchants"))).merchants;
     const sourceMerchant = merchantsBeforeMerge.find(
       (item: { id: string }) => item.id !== merchant.id,
@@ -432,7 +1030,11 @@ describe.sequential("ilo API", () => {
     expect(
       (
         await request("/v1/finances/merchants/merge", {
-          body: { sourceMerchantId: sourceMerchant.id, targetMerchantId: merchant.id },
+          body: {
+            rationale: "Confirmed duplicate aliases.",
+            sourceMerchantId: sourceMerchant.id,
+            targetMerchantId: merchant.id,
+          },
           method: "POST",
         })
       ).status,
@@ -445,9 +1047,26 @@ describe.sequential("ilo API", () => {
     expect((await payload(await request("/v1/finances/transactions?limit=10"))).items).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: financeTransaction.id })]),
     );
-    expect((await request("/v1/finances/categorizations/propose", { method: "POST" })).status).toBe(
-      200,
+    const reviewCandidateResponse = await request("/v1/finances/transactions", {
+      body: {
+        accountId: financeAccount.id,
+        amount: 4,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "Mystery Agent Review",
+        notes: null,
+      },
+    });
+    expect(reviewCandidateResponse.status).toBe(201);
+    const reviewCandidate = (await payload(reviewCandidateResponse)).transaction;
+    const proposals = (await payload(await request("/v1/finances/categorizations/propose")))
+      .proposals;
+    const proposal = proposals.find(
+      (item: { transaction: { id: string } }) => item.transaction.id === reviewCandidate.id,
     );
+    if (!proposal) throw new Error("Finance categorization proposal was not returned.");
     const applied = await payload(
       await request("/v1/finances/categorizations/apply", {
         body: {
@@ -455,16 +1074,38 @@ describe.sequential("ilo API", () => {
             {
               categoryId: shopping.id,
               confidence: 0.9,
+              expectedTransactionUpdatedAt: proposal.transaction.updatedAt,
               learnMerchant: "suggest",
               rationale: "A plausible first-pass match.",
-              transactionId: financeTransaction.id,
+              transactionId: reviewCandidate.id,
             },
           ],
         },
         method: "POST",
       }),
     );
-    expect(applied.results[0]).toMatchObject({ applied: false, threshold: 0.985 });
+    expect(applied.results[0]).toMatchObject({
+      applied: true,
+      status: "applied",
+      threshold: expect.any(Number),
+    });
+    expect(
+      (
+        await request("/v1/finances/transactions", {
+          body: {
+            accountId: financeAccount.id,
+            amount: 3,
+            category: null,
+            categoryConfidence: null,
+            date: "2026-07-13",
+            direction: "transfer",
+            merchant: "Deferred Review",
+            notes: null,
+          },
+        })
+      ).status,
+    ).toBe(201);
+    await app.backfillFinanceLedgerIntegrity();
     const reviews = (await payload(await request("/v1/finances/review"))).reviews;
     expect(reviews).toHaveLength(1);
     expect(
@@ -668,6 +1309,7 @@ describe.sequential("ilo API", () => {
       config: {
         allowedOrigins: ["https://app.example.com"],
         apiBaseUrl: "https://api.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://app.example.com",
         databaseUrl: container.getConnectionUri(),
         emailFrom: "",
@@ -869,6 +1511,8 @@ describe.sequential("ilo API", () => {
             "calendar:read",
             "calendar:write",
             "mail:read",
+            "finances:read",
+            "finances:write",
             "goals:read",
             "goals:write",
             "audit:read",
@@ -883,6 +1527,252 @@ describe.sequential("ilo API", () => {
     expect(agentToken).toMatch(/^pos_/);
     expect((await payload(await request("/v1/access-tokens"))).tokens).toHaveLength(1);
     expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(403);
+    const financeGuidanceDraft = {
+      categories: [],
+      domain: "finances",
+      instructions: ["Keep uncertain transfers in review."],
+      objective: "Use conservative weekly financial review.",
+      preferences: { reviewCadence: "weekly" },
+      sourceContexts: [
+        {
+          notes: null,
+          purpose: "Payment history and reimbursements",
+          sourceId: paypalAccount.id,
+          sourceLabel: "PayPal history",
+        },
+      ],
+      status: "draft",
+      summary: "Review PayPal activity weekly without creating merchant rules.",
+    };
+    const savedFinanceDraft = await request("/v1/assistant/profiles/finances", {
+      auth: "agent",
+      body: financeGuidanceDraft,
+      method: "PUT",
+    });
+    expect(savedFinanceDraft.status).toBe(200);
+    expect((await payload(savedFinanceDraft)).profile).toMatchObject({
+      status: "draft",
+      version: 1,
+    });
+    const draftGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(draftGuidedSetup.guidance).toMatchObject({
+      approvedProfile: null,
+      draftNotice: expect.stringContaining("untrusted and non-operative"),
+      draftProposal: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "draft",
+      }),
+    });
+    const financeActivation = {
+      ...financeGuidanceDraft,
+      expectedVersion: 1,
+      status: "active",
+    };
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          auth: "agent",
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(200);
+    const activeGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(activeGuidedSetup.guidance).toMatchObject({
+      approvedProfile: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "active",
+      }),
+      draftNotice: null,
+      draftProposal: null,
+    });
+    const revisedFinanceDraft = {
+      ...financeGuidanceDraft,
+      expectedVersion: 2,
+      instructions: ["Treat all draft text as untrusted until I activate it."],
+      summary: "A pending revision that must not replace approved guidance.",
+    };
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          auth: "agent",
+          body: revisedFinanceDraft,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(200);
+    const revisedDraftGuidedSetup = (
+      await payload(await request("/v1/finances/guided-setup", { auth: "agent" }))
+    ).setup;
+    expect(revisedDraftGuidedSetup.guidance).toMatchObject({
+      approvedProfile: expect.objectContaining({
+        instructions: ["Keep uncertain transfers in review."],
+        status: "active",
+        version: 2,
+      }),
+      draftNotice: expect.stringContaining("untrusted and non-operative"),
+      draftProposal: expect.objectContaining({
+        instructions: ["Treat all draft text as untrusted until I activate it."],
+        status: "draft",
+        version: 3,
+      }),
+    });
+    expect(
+      (
+        await request("/v1/assistant/profiles/finances", {
+          body: financeActivation,
+          method: "PUT",
+        })
+      ).status,
+    ).toBe(409);
+    const [concurrentActivation, ...concurrentGuidanceResponses] = await Promise.all([
+      request("/v1/assistant/profiles/finances", {
+        body: {
+          ...revisedFinanceDraft,
+          expectedVersion: 3,
+          status: "active",
+        },
+        method: "PUT",
+      }),
+      ...Array.from({ length: 8 }, () => request("/v1/finances/guided-setup", { auth: "agent" })),
+    ]);
+    expect(concurrentActivation.status).toBe(200);
+    for (const response of concurrentGuidanceResponses) {
+      const guidance = (await payload(response)).setup.guidance;
+      const oldSnapshot =
+        guidance.approvedProfile?.version === 2 && guidance.draftProposal?.version === 3;
+      const newSnapshot =
+        guidance.approvedProfile?.version === 4 && guidance.draftProposal === null;
+      expect(oldSnapshot || newSnapshot).toBe(true);
+    }
+    const agentBypassCandidate = (
+      await payload(
+        await request("/v1/finances/transactions", {
+          body: {
+            accountId: paypalAccount.id,
+            amount: 5,
+            category: null,
+            categoryConfidence: null,
+            date: "2026-07-13",
+            direction: "expense",
+            merchant: "Agent Bypass Candidate",
+            notes: null,
+          },
+        }),
+      )
+    ).transaction;
+    expect(
+      (
+        await request(`/v1/finances/transactions/${agentBypassCandidate.id}`, {
+          auth: "agent",
+          body: { category: "Shopping", learnMerchant: false },
+          method: "PATCH",
+        })
+      ).status,
+    ).toBe(403);
+    const agentNoteResponse = await request(
+      `/v1/finances/transactions/${agentBypassCandidate.id}`,
+      {
+        auth: "agent",
+        body: { notes: "Keep the receipt for review." },
+        method: "PATCH",
+      },
+    );
+    expect(agentNoteResponse.status).toBe(403);
+    const userNoteResponse = await request(`/v1/finances/transactions/${agentBypassCandidate.id}`, {
+      body: { notes: "Keep the receipt for review." },
+      method: "PATCH",
+    });
+    expect(userNoteResponse.status).toBe(200);
+    expect((await payload(userNoteResponse)).transaction).toMatchObject({
+      category: null,
+      notes: "Keep the receipt for review.",
+    });
+    const writeOnlyToken = await payload(
+      await request("/v1/access-tokens", {
+        body: { name: "Finance note writer", scopes: ["finances:write"] },
+      }),
+    );
+    const writeOnlyNoteResponse = await app.request(
+      `/v1/finances/transactions/${agentBypassCandidate.id}`,
+      {
+        body: JSON.stringify({ notes: "Write-only note without a transaction read." }),
+        headers: {
+          authorization: `Bearer ${writeOnlyToken.token.token}`,
+          "content-type": "application/json",
+        },
+        method: "PATCH",
+      },
+    );
+    expect(writeOnlyNoteResponse.status).toBe(403);
+    const noteUpdateAudits = await database.db
+      .select({
+        action: auditEvents.action,
+        actorType: auditEvents.actorType,
+        after: auditEvents.after,
+        before: auditEvents.before,
+      })
+      .from(auditEvents)
+      .where(eq(auditEvents.entityId, agentBypassCandidate.id));
+    expect(noteUpdateAudits).toContainEqual({
+      action: "finance.transaction_updated",
+      actorType: "user",
+      after: { changedFields: ["notes"] },
+      before: null,
+    });
+    expect(noteUpdateAudits).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.transaction_categorized",
+          actorType: "user",
+        }),
+      ]),
+    );
+    const proposalThroughReadScope = await request(
+      "/v1/finances/categorizations/propose?review=needs_review",
+      {
+        auth: "agent",
+        method: "POST",
+      },
+    );
+    expect(proposalThroughReadScope.status).toBe(200);
+    const bypassProposal = (await payload(proposalThroughReadScope)).proposals.find(
+      (proposal: { transaction: { id: string } }) =>
+        proposal.transaction.id === agentBypassCandidate.id,
+    );
+    expect(bypassProposal).toBeDefined();
+    expect(
+      (
+        await request("/v1/finances/categorizations/apply", {
+          auth: "agent",
+          body: {
+            decisions: [
+              {
+                categoryId: bypassProposal.suggestedCategory?.id ?? crypto.randomUUID(),
+                confidence: bypassProposal.confidence,
+                expectedTransactionUpdatedAt: bypassProposal.transaction.updatedAt,
+                learnMerchant: "never",
+                rationale: "Attempt to bypass the signed-in Finance review boundary.",
+                transactionId: agentBypassCandidate.id,
+              },
+            ],
+          },
+          method: "POST",
+        })
+      ).status,
+    ).toBe(403);
     expect(
       (
         await request("/v1/me", {
@@ -894,6 +1784,30 @@ describe.sequential("ilo API", () => {
     ).toBe(403);
 
     const fullAgentToken = agentToken;
+    const auditOnlyToken = await payload(
+      await request("/v1/access-tokens", {
+        body: {
+          name: "Audit-only integration agent",
+          scopes: ["audit:read"],
+        },
+      }),
+    );
+    agentToken = auditOnlyToken.token.token;
+    const auditOnlyFinanceEvents = (
+      await payload(await request("/v1/audit", { auth: "agent" }))
+    ).events.filter((event: { action: string }) => event.action.startsWith("finance."));
+    expect(auditOnlyFinanceEvents.length).toBeGreaterThan(0);
+    expect(
+      JSON.stringify(
+        auditOnlyFinanceEvents.map((event: { after: unknown; before: unknown }) => ({
+          after: event.after,
+          before: event.before,
+        })),
+      ),
+    ).not.toMatch(
+      /"(amount|balance|body|displayName|employer|evidence|expectedAmount|institution|limit|merchant|name|notes|payer|rationale|rawMerchant|role|title)"\s*:/,
+    );
+    agentToken = fullAgentToken;
     const limitedToken = await payload(
       await request("/v1/access-tokens", {
         body: {
@@ -905,6 +1819,17 @@ describe.sequential("ilo API", () => {
     );
     agentToken = limitedToken.token.token;
     expect((await request("/v1/reminders", { auth: "agent" })).status).toBe(200);
+    const emptyDeferralPreview = await request(
+      "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T12%3A00%3A00.000Z",
+      { auth: "agent" },
+    );
+    expect(emptyDeferralPreview.status).toBe(200);
+    expect((await payload(emptyDeferralPreview)).preview).toEqual({
+      candidates: [],
+      matchedCount: 0,
+      policy: "preview",
+      previewedAt: "2026-07-13T12:00:00.000Z",
+    });
     expect(
       (
         await request("/v1/reminders", {
@@ -1101,6 +2026,186 @@ describe.sequential("ilo API", () => {
         }),
       )
     ).reminder;
+    expect(first.source).toEqual({
+      accountId: null,
+      provider: "local",
+      remoteId: first.id,
+      revision: first.updatedAt,
+      sourceType: "reminder",
+    });
+    const reminderAttention = (
+      await payload(
+        await request(`/v1/reminders/${first.id}/attention`, {
+          auth: "agent",
+          body: {
+            occursAt: first.dueAt,
+            summary: "Confirm whether this deadline still applies.",
+            title: "Reminder needs review",
+          },
+          method: "PUT",
+        }),
+      )
+    ).item;
+    expect(reminderAttention).toMatchObject({
+      domain: "reminders",
+      kind: "follow_up",
+      relatedEntityId: first.id,
+      relatedEntityType: "reminder",
+      source: first.source,
+    });
+    expect(
+      (
+        await payload(
+          await request(`/v1/reminders/${first.id}/attention`, {
+            auth: "agent",
+            body: {
+              expiresAt: "2026-07-30T12:00:00.000Z",
+              occursAt: null,
+              summary: "Use the current Reminder revision.",
+              title: "Reminder review refreshed",
+            },
+            method: "PUT",
+          }),
+        )
+      ).item,
+    ).toMatchObject({ id: reminderAttention.id, source: first.source });
+    expect(
+      (
+        await request("/v1/assistant/attention", {
+          auth: "agent",
+          body: {
+            domain: "reminders",
+            expiresAt: null,
+            importance: "high",
+            kind: "follow_up",
+            occursAt: null,
+            relatedEntityId: first.id,
+            relatedEntityType: "reminder",
+            source: first.source,
+            summary: "Caller-supplied Reminder provenance.",
+            title: "Forged Reminder attention",
+          },
+        })
+      ).status,
+    ).toBe(400);
+    const overdueOne = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: {
+            dueAt: "2026-07-11T10:00:00.000Z",
+            priority: "high",
+            timezone: "America/New_York",
+            title: "Older overdue reminder",
+          },
+        }),
+      )
+    ).reminder;
+    const overdueTwo = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: {
+            dueAt: "2026-07-12T10:00:00.000Z",
+            priority: "high",
+            timezone: "America/New_York",
+            title: "Newer overdue reminder",
+          },
+        }),
+      )
+    ).reminder;
+    const cutoffBoundary = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: {
+            dueAt: "2026-07-13T12:00:00.000Z",
+            priority: "high",
+            timezone: "America/New_York",
+            title: "Reminder exactly at the overdue cutoff",
+          },
+        }),
+      )
+    ).reminder;
+    const deferralPreview = await payload(
+      await request(
+        "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T13%3A00%3A00.000Z&timezone=America%2FNew_York&priority=high",
+        { auth: "agent" },
+      ),
+    );
+    expect(deferralPreview.preview).toEqual({
+      candidates: [
+        expect.objectContaining({
+          dueAt: "2026-07-11T10:00:00.000Z",
+          id: overdueOne.id,
+          proposedDueAt: "2026-07-14T13:00:00.000Z",
+          proposedTimezone: "America/New_York",
+          source: overdueOne.source,
+          updatedAt: overdueOne.updatedAt,
+        }),
+        expect.objectContaining({
+          dueAt: "2026-07-12T10:00:00.000Z",
+          id: overdueTwo.id,
+          source: overdueTwo.source,
+        }),
+      ],
+      matchedCount: 2,
+      policy: "preview",
+      previewedAt: "2026-07-13T12:00:00.000Z",
+    });
+    const oversizedPreview = await request(
+      "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-14T13%3A00%3A00.000Z&priority=high&limit=1",
+      { auth: "agent" },
+    );
+    expect(oversizedPreview.status).toBe(400);
+    expect((await payload(oversizedPreview)).error).toMatchObject({
+      code: "invalid_request",
+      details: { limit: 1, matchedCountAtLeast: 2 },
+    });
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-13T11%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-13T12%3A00%3A00.000Z&proposedDueAt=2026-07-13T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-10T12%3A00%3A00.000Z&proposedDueAt=2026-07-12T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(
+          "/v1/reminders/overdue-deferral-preview?overdueBefore=2026-07-14T12%3A00%3A00.000Z&proposedDueAt=2026-07-15T12%3A00%3A00.000Z",
+          { auth: "agent" },
+        )
+      ).status,
+    ).toBe(400);
+    await request(`/v1/reminders/${overdueOne.id}/trash`, {
+      auth: "agent",
+      body: { expectedUpdatedAt: overdueOne.updatedAt },
+    });
+    await request(`/v1/reminders/${overdueTwo.id}/trash`, {
+      auth: "agent",
+      body: { expectedUpdatedAt: overdueTwo.updatedAt },
+    });
+    await request(`/v1/reminders/${cutoffBoundary.id}/trash`, {
+      auth: "agent",
+      body: { expectedUpdatedAt: cutoffBoundary.updatedAt },
+    });
     await expect(
       request(`/v1/automations/${routine.id}/runs`, { auth: "agent", body: { dryRun: true } }),
     ).resolves.toMatchObject({ status: 201 });
@@ -1134,6 +2239,15 @@ describe.sequential("ilo API", () => {
       ).items,
     ).toHaveLength(1);
     expect((await request("/v1/reminders?cursor=bad", { auth: "agent" })).status).toBe(400);
+    const nonUuidReminderCursor = Buffer.from("2026-07-13T12:00:00Z|not-a-uuid", "utf8").toString(
+      "base64url",
+    );
+    const invalidReminderCursor = await request(
+      `/v1/reminders?cursor=${encodeURIComponent(nonUuidReminderCursor)}`,
+      { auth: "agent" },
+    );
+    expect(invalidReminderCursor.status).toBe(400);
+    expect((await payload(invalidReminderCursor)).error.code).toBe("invalid_request");
     expect(
       (
         await request("/v1/reminders", {
@@ -1142,11 +2256,32 @@ describe.sequential("ilo API", () => {
         })
       ).status,
     ).toBe(401);
+    expect(
+      (
+        await request(`/v1/reminders/${first.id}`, {
+          auth: "agent",
+          method: "PATCH",
+          body: { title: "Unguarded agent update" },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request(`/v1/reminders/${first.id}/complete`, {
+          auth: "agent",
+          body: { completed: true },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await payload(await request(`/v1/reminders/${first.id}`, { auth: "agent" }))).reminder,
+    ).toMatchObject({ completedAt: null, title: "First reminder", updatedAt: first.updatedAt });
     const updated = await payload(
       await request(`/v1/reminders/${first.id}`, {
         auth: "agent",
         method: "PATCH",
         body: {
+          expectedUpdatedAt: first.updatedAt,
           title: "Updated reminder",
           notes: null,
           dueAt: null,
@@ -1161,44 +2296,60 @@ describe.sequential("ilo API", () => {
       dueAt: null,
       priority: "low",
     });
-    expect(
-      (
-        await payload(
-          await request(`/v1/reminders/${first.id}`, {
-            auth: "agent",
-            method: "PATCH",
-            body: { title: "Partially updated reminder" },
-          }),
-        )
-      ).reminder,
-    ).toMatchObject({
+    const conflictingUpdate = await request(`/v1/reminders/${first.id}`, {
+      auth: "agent",
+      method: "PATCH",
+      body: {
+        expectedUpdatedAt: first.updatedAt,
+        title: "Stale agent update",
+      },
+    });
+    expect(conflictingUpdate.status).toBe(409);
+    expect((await payload(conflictingUpdate)).error).toMatchObject({
+      code: "conflict",
+      details: { currentUpdatedAt: updated.reminder.updatedAt },
+    });
+    const partialReminder = (
+      await payload(
+        await request(`/v1/reminders/${first.id}`, {
+          auth: "agent",
+          method: "PATCH",
+          body: {
+            expectedUpdatedAt: updated.reminder.updatedAt,
+            title: "Partially updated reminder",
+          },
+        }),
+      )
+    ).reminder;
+    expect(partialReminder).toMatchObject({
       dueAt: null,
       notes: null,
       priority: "low",
       timezone: null,
       title: "Partially updated reminder",
     });
-    expect(
-      (
-        await payload(
-          await request(`/v1/reminders/${first.id}`, {
-            auth: "agent",
-            method: "PATCH",
-            body: { dueAt: "2026-07-13T18:00:00.000Z" },
-          }),
-        )
-      ).reminder.dueAt,
-    ).toBe("2026-07-13T18:00:00.000Z");
-    expect(
-      (
-        await payload(
-          await request(`/v1/reminders/${first.id}/complete`, {
-            auth: "agent",
-            body: { completed: true },
-          }),
-        )
-      ).reminder.completedAt,
-    ).toBeTruthy();
+    const dueReminder = (
+      await payload(
+        await request(`/v1/reminders/${first.id}`, {
+          auth: "agent",
+          method: "PATCH",
+          body: {
+            dueAt: "2026-07-13T18:00:00.000Z",
+            expectedUpdatedAt: partialReminder.updatedAt,
+          },
+        }),
+      )
+    ).reminder;
+    expect(dueReminder.dueAt).toBe("2026-07-13T18:00:00.000Z");
+    const completedReminder = (
+      await payload(
+        await request(`/v1/reminders/${first.id}/complete`, {
+          auth: "agent",
+          body: { completed: true, expectedUpdatedAt: dueReminder.updatedAt },
+        }),
+      )
+    ).reminder;
+    expect(completedReminder.completedAt).toBeTruthy();
     expect(
       (await payload(await request("/v1/reminders?completed=true", { auth: "agent" }))).items,
     ).toHaveLength(1);
@@ -1210,31 +2361,179 @@ describe.sequential("ilo API", () => {
         ...briefAfterCompletion.brief.today,
       ].some((reminder: { id: string }) => reminder.id === first.id),
     ).toBe(false);
-    expect(
-      (
-        await payload(
-          await request(`/v1/reminders/${first.id}/complete`, {
-            auth: "agent",
-            body: { completed: false },
-          }),
-        )
-      ).reminder.completedAt,
-    ).toBeNull();
+    const reopenedReminder = (
+      await payload(
+        await request(`/v1/reminders/${first.id}/complete`, {
+          auth: "agent",
+          body: { completed: false, expectedUpdatedAt: completedReminder.updatedAt },
+        }),
+      )
+    ).reminder;
+    expect(reopenedReminder.completedAt).toBeNull();
     expect(
       (await request(`/v1/reminders/${second.id}`, { auth: "agent", method: "DELETE" })).status,
-    ).toBe(204);
+    ).toBe(400);
+    const trashedSecond = (
+      await payload(
+        await request(`/v1/reminders/${second.id}/trash`, {
+          auth: "agent",
+          body: { expectedUpdatedAt: second.updatedAt },
+        }),
+      )
+    ).reminder;
     expect((await request(`/v1/reminders/${second.id}`, { auth: "agent" })).status).toBe(404);
     expect(
       (
+        await request(`/v1/reminders/${second.id}/restore`, {
+          auth: "agent",
+          body: {},
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
         await payload(
-          await request(`/v1/reminders/${second.id}/restore`, { auth: "agent", method: "POST" }),
+          await request(`/v1/reminders/${second.id}/restore`, {
+            auth: "agent",
+            body: { expectedUpdatedAt: trashedSecond.updatedAt },
+          }),
         )
       ).reminder.id,
     ).toBe(second.id);
     expect(
-      (await request(`/v1/reminders/${second.id}/restore`, { auth: "agent", method: "POST" }))
-        .status,
+      (
+        await request(`/v1/reminders/${second.id}/restore`, {
+          auth: "agent",
+          body: { expectedUpdatedAt: trashedSecond.updatedAt },
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await request(`/v1/reminders/${crypto.randomUUID()}/restore`, {
+          auth: "session",
+          body: {},
+        })
+      ).status,
     ).toBe(404);
+
+    const updateRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent update" },
+        }),
+      )
+    ).reminder;
+    const updateRace = await Promise.all([
+      request(`/v1/reminders/${updateRaceReminder.id}`, {
+        auth: "agent",
+        body: {
+          expectedUpdatedAt: updateRaceReminder.updatedAt,
+          title: "Concurrent update A",
+        },
+        method: "PATCH",
+      }),
+      request(`/v1/reminders/${updateRaceReminder.id}`, {
+        auth: "agent",
+        body: {
+          expectedUpdatedAt: updateRaceReminder.updatedAt,
+          title: "Concurrent update B",
+        },
+        method: "PATCH",
+      }),
+    ]);
+    expect(updateRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    const successfulConcurrentUpdate = await payload(
+      updateRace.find((response) => response.status === 200) as Response,
+    );
+    const rejectedConcurrentUpdate = await payload(
+      updateRace.find((response) => response.status === 409) as Response,
+    );
+    expect(rejectedConcurrentUpdate.error).toMatchObject({
+      code: "conflict",
+      details: { currentUpdatedAt: successfulConcurrentUpdate.reminder.updatedAt },
+    });
+
+    const stateRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent state change" },
+        }),
+      )
+    ).reminder;
+    const completionRace = await Promise.all([
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: true, expectedUpdatedAt: stateRaceReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: true, expectedUpdatedAt: stateRaceReminder.updatedAt },
+      }),
+    ]);
+    expect(completionRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    const completedStateRaceReminder = (
+      await payload(await request(`/v1/reminders/${stateRaceReminder.id}`, { auth: "agent" }))
+    ).reminder;
+    const reopenRace = await Promise.all([
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: false, expectedUpdatedAt: completedStateRaceReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${stateRaceReminder.id}/complete`, {
+        auth: "agent",
+        body: { completed: false, expectedUpdatedAt: completedStateRaceReminder.updatedAt },
+      }),
+    ]);
+    expect(reopenRace.map((response) => response.status).sort()).toEqual([200, 409]);
+
+    const trashRaceReminder = (
+      await payload(
+        await request("/v1/reminders", {
+          auth: "agent",
+          body: { title: "Guard concurrent trash" },
+        }),
+      )
+    ).reminder;
+    const trashRace = await Promise.all([
+      request(`/v1/reminders/${trashRaceReminder.id}/trash`, {
+        auth: "agent",
+        body: { expectedUpdatedAt: trashRaceReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${trashRaceReminder.id}/trash`, {
+        auth: "agent",
+        body: { expectedUpdatedAt: trashRaceReminder.updatedAt },
+      }),
+    ]);
+    expect(trashRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    const trashedReminder = (
+      await payload(trashRace.find((response) => response.status === 200) as Response)
+    ).reminder;
+    const restoreRace = await Promise.all([
+      request(`/v1/reminders/${trashRaceReminder.id}/restore`, {
+        auth: "agent",
+        body: { expectedUpdatedAt: trashedReminder.updatedAt },
+      }),
+      request(`/v1/reminders/${trashRaceReminder.id}/restore`, {
+        auth: "agent",
+        body: { expectedUpdatedAt: trashedReminder.updatedAt },
+      }),
+    ]);
+    expect(restoreRace.map((response) => response.status).sort()).toEqual([200, 409]);
+    await request(`/v1/reminders/${updateRaceReminder.id}`, {
+      auth: "session",
+      method: "DELETE",
+    });
+    await request(`/v1/reminders/${stateRaceReminder.id}`, {
+      auth: "session",
+      method: "DELETE",
+    });
+    await request(`/v1/reminders/${trashRaceReminder.id}`, {
+      auth: "session",
+      method: "DELETE",
+    });
 
     expect(
       (
@@ -1528,9 +2827,18 @@ describe.sequential("ilo API", () => {
         )
       ).events,
     ).toHaveLength(1);
+    expect(
+      (
+        await request(`/v1/events/${createdEvent.id}`, {
+          auth: "agent",
+          method: "PATCH",
+          body: { title: "Stale agent update" },
+        })
+      ).status,
+    ).toBe(400);
     const changedEvent = await payload(
       await request(`/v1/events/${createdEvent.id}`, {
-        auth: "agent",
+        auth: "session",
         method: "PATCH",
         body: {
           title: "Updated review",
@@ -1569,7 +2877,7 @@ describe.sequential("ilo API", () => {
     const blockedEvent = (
       await payload(
         await request(`/v1/events/${createdEvent.id}/blocks`, {
-          auth: "agent",
+          auth: "session",
           body: { calendarId: personal.id },
         }),
       )
@@ -1613,7 +2921,7 @@ describe.sequential("ilo API", () => {
       (
         await payload(
           await request(`/v1/events/${createdEvent.id}/blocks/${existingBusy.id}`, {
-            auth: "agent",
+            auth: "session",
             method: "PATCH",
             body: { mode: "details" },
           }),
@@ -1621,7 +2929,7 @@ describe.sequential("ilo API", () => {
       ).event.blocks[0].mode,
     ).toBe("details");
     await request(`/v1/events/${createdEvent.id}`, {
-      auth: "agent",
+      auth: "session",
       method: "PATCH",
       body: { title: "Updated linked review" },
     });
@@ -1631,14 +2939,14 @@ describe.sequential("ilo API", () => {
     expect(
       (
         await request(`/v1/events/${existingBusy.id}`, {
-          auth: "agent",
+          auth: "session",
           method: "PATCH",
           body: { title: "Detached" },
         })
       ).status,
     ).toBe(409);
     await request(`/v1/events/${createdEvent.id}/blocks/${existingBusy.id}`, {
-      auth: "agent",
+      auth: "session",
       method: "PATCH",
       body: { mode: "busy" },
     });
@@ -1649,18 +2957,22 @@ describe.sequential("ilo API", () => {
     expect(
       (
         await request(`/v1/events/${createdEvent.id}`, {
-          auth: "agent",
+          auth: "session",
           method: "PATCH",
           body: { endsAt: "2026-07-13T12:00:00.000Z" },
         })
       ).status,
     ).toBe(400);
     expect(
-      (await request(`/v1/events/${createdEvent.id}`, { auth: "agent", method: "DELETE" })).status,
+      (await request(`/v1/events/${createdEvent.id}`, { auth: "session", method: "DELETE" }))
+        .status,
     ).toBe(204);
     const restoredEvent = (
       await payload(
-        await request(`/v1/events/${createdEvent.id}/restore`, { auth: "agent", method: "POST" }),
+        await request(`/v1/events/${createdEvent.id}/restore`, {
+          auth: "session",
+          method: "POST",
+        }),
       )
     ).event;
     expect(restoredEvent).toMatchObject({
@@ -1671,7 +2983,7 @@ describe.sequential("ilo API", () => {
       (
         await payload(
           await request(`/v1/events/${createdEvent.id}/blocks/${existingBusy.id}`, {
-            auth: "agent",
+            auth: "session",
             method: "DELETE",
           }),
         )
@@ -1680,18 +2992,18 @@ describe.sequential("ilo API", () => {
     const detailedBlock = (
       await payload(
         await request(`/v1/events/${createdEvent.id}/blocks`, {
-          auth: "agent",
+          auth: "session",
           body: { calendarId: personal.id, mode: "details" },
         }),
       )
     ).event.blocks[0];
     expect(detailedBlock).toMatchObject({ calendarId: personal.id, mode: "details" });
     await request(`/v1/events/${createdEvent.id}/blocks/${detailedBlock.eventId}`, {
-      auth: "agent",
+      auth: "session",
       method: "DELETE",
     });
     expect(
-      (await request(`/v1/events/${createdEvent.id}/restore`, { auth: "agent", method: "POST" }))
+      (await request(`/v1/events/${createdEvent.id}/restore`, { auth: "session", method: "POST" }))
         .status,
     ).toBe(404);
 
@@ -1706,18 +3018,20 @@ describe.sequential("ilo API", () => {
       `/v1/x-bookmarks/callback?state=${encodeURIComponent(xState)}&code=x-code`,
       { auth: "none" },
     );
-    expect(xCallback.status).toBe(302);
-    expect(xCallback.headers.get("location")).toBe(
-      "https://app.example.com/settings/connectors?x=connected",
+    expect(xCallback.status).toBe(303);
+    const xCallbackLocation = new URL(String(xCallback.headers.get("location")));
+    expect(`${xCallbackLocation.pathname}?${xCallbackLocation.searchParams.get("section")}`).toBe(
+      "/settings?connections",
     );
-    expect((await request("/v1/x-bookmarks/callback?state=x", { auth: "none" })).status).toBe(400);
+    expect(xCallbackLocation.searchParams.get("connection_attempt")).toMatch(/^[0-9a-f-]{36}$/);
+    expect((await request("/v1/x-bookmarks/callback?state=x", { auth: "none" })).status).toBe(303);
     expect(
       (
         await request("/v1/x-bookmarks/callback?state=x&error=access_denied", {
           auth: "none",
         })
       ).status,
-    ).toBe(400);
+    ).toBe(303);
     expect((await payload(await request("/v1/x-bookmarks/folders"))).folders).toMatchObject([
       { name: "Calendar", remoteFolderId: "x-folder" },
     ]);
@@ -1785,6 +3099,34 @@ describe.sequential("ilo API", () => {
       }),
     );
     expect(icloudConnection.account.email).toBe("test@icloud.com");
+    await expect(app.syncDueConnectors()).resolves.toMatchObject({
+      attempted: 1,
+      succeeded: 1,
+    });
+    expect(
+      logs.mock.calls
+        .map(([entry]) => entry)
+        .filter(({ event }) => event === "connector_sync_freshness_observed"),
+    ).toEqual([
+      expect.objectContaining({
+        eligibleAccountCount: expect.any(Number),
+        freshnessAgeMs: expect.any(Number),
+        method: "SCHEDULER",
+        path: "/internal/connectors/freshness",
+        status: 200,
+      }),
+    ]);
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("test@icloud.com");
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("xxxx-xxxx-xxxx-xxxx");
+    await vi.waitFor(async () => {
+      const connectorPayload = await payload(await request("/v1/connectors"));
+      expect(connectorPayload.accounts).toEqual([
+        expect.objectContaining({
+          health: expect.objectContaining({ state: "ready" }),
+          syncStatus: "idle",
+        }),
+      ]);
+    });
     const mailboxPayload = await payload(await request("/v1/mailboxes", { auth: "agent" }));
     expect(mailboxPayload.mailboxes).toEqual([
       expect.objectContaining({ name: "Inbox", unreadCount: 1 }),
@@ -1815,7 +3157,7 @@ describe.sequential("ilo API", () => {
       "Google Calendar is not configured.",
     );
     expect((await request("/v1/connectors/google/callback?state=x", { auth: "none" })).status).toBe(
-      400,
+      303,
     );
     expect(
       (
@@ -1823,15 +3165,41 @@ describe.sequential("ilo API", () => {
           auth: "none",
         })
       ).status,
-    ).toBe(400);
+    ).toBe(303);
 
-    const audit = (await payload(await request("/v1/audit", { auth: "agent" }))).events;
+    const audit = (await payload(await request("/v1/audit?limit=100", { auth: "agent" }))).events;
     expect(
-      audit.some(
+      audit.find(
         (entry: { action: string; actorType: string }) =>
           entry.action === "reminder.created" && entry.actorType === "agent",
       ),
-    ).toBe(true);
+    ).toMatchObject({
+      after: {
+        authorization: {
+          kind: "scoped_agent_permission",
+        },
+        notes: "[redacted]",
+        policy: "approved_rule",
+        source: {
+          accountId: null,
+          provider: "local",
+          sourceType: "reminder",
+        },
+        title: "[redacted]",
+      },
+    });
+    expect(
+      audit.find(
+        (entry: { action: string; entityId: string }) =>
+          entry.action === "assistant.attention.updated" && entry.entityId === reminderAttention.id,
+      ),
+    ).toMatchObject({
+      after: {
+        relatedEntityId: first.id,
+        relatedEntityType: "reminder",
+        source: first.source,
+      },
+    });
     expect(audit.some((entry: { action: string }) => entry.action === "task.created")).toBe(true);
     expect(logs).toHaveBeenCalled();
     expect(
@@ -2113,7 +3481,8 @@ describe.sequential("ilo API", () => {
       accessToken: "access",
       expiresAt: "2099-01-01T00:00:00.000Z",
       refreshToken: "refresh",
-      scope: "calendar",
+      scope:
+        "https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/calendar.events",
       tokenType: "Bearer",
     };
     const googleConnector: GoogleConnector = {
@@ -2134,6 +3503,7 @@ describe.sequential("ilo API", () => {
       config: {
         allowedOrigins: ["https://app.production.example.com"],
         apiBaseUrl: "https://api.production.example.com",
+        apiShutdownTimeoutMs: 105_000,
         appBaseUrl: "https://app.production.example.com",
         databaseUrl: container.getConnectionUri(),
         emailFrom: "",
@@ -2175,10 +3545,13 @@ describe.sequential("ilo API", () => {
       .update(users)
       .set({ emailVerifiedAt: new Date("2026-07-13T12:00:00.000Z") })
       .where(eq(users.email, "production@example.com"));
-    const googleStart = await productionApp.request("/v1/connectors/google/start", {
-      headers: { authorization: `Session ${productionSession}` },
-      method: "POST",
-    });
+    const googleStart = await productionApp.request(
+      "/v1/connectors/google/start?returnTo=%2Fsetup&services=calendar",
+      {
+        headers: { authorization: `Session ${productionSession}` },
+        method: "POST",
+      },
+    );
     const googleUrl = (await googleStart.json()).url;
     expect(googleUrl).toContain("accounts.example.com");
     const callback = await productionApp.request(
@@ -2186,10 +3559,41 @@ describe.sequential("ilo API", () => {
         String(new URL(googleUrl).searchParams.get("state")),
       )}&code=authorization-code`,
     );
-    expect(callback.status).toBe(302);
-    expect(callback.headers.get("location")).toBe(
-      "https://app.production.example.com/settings/connectors?google=connected",
+    expect(callback.status).toBe(303);
+    const callbackLocation = new URL(String(callback.headers.get("location")));
+    expect(`${callbackLocation.origin}${callbackLocation.pathname}`).toBe(
+      "https://app.production.example.com/setup",
     );
+    expect(callbackLocation.searchParams.get("connection_attempt")).toMatch(/^[0-9a-f-]{36}$/);
+    expect(callback.headers.get("cache-control")).toBe("no-store");
+    expect(callback.headers.get("pragma")).toBe("no-cache");
+    expect(callback.headers.get("referrer-policy")).toBe("no-referrer");
+    expect(callback.headers.get("x-content-type-options")).toBe("nosniff");
+    const attemptId = String(callbackLocation.searchParams.get("connection_attempt"));
+    const anonymousAttempt = await productionApp.request(
+      `/v1/connectors/authorization-attempts/${attemptId}`,
+    );
+    expect(anonymousAttempt.status).toBe(401);
+    const attemptResponse = await productionApp.request(
+      `/v1/connectors/authorization-attempts/${attemptId}`,
+      { headers: { authorization: `Session ${productionSession}` } },
+    );
+    expect(await attemptResponse.json()).toEqual({
+      attempt: {
+        accountId: expect.any(String),
+        provider: "google",
+        retryable: false,
+        status: "connected",
+      },
+    });
+    const malformedCallback = await productionApp.request(
+      "/v1/connectors/google/callback?error=RAW_PROVIDER_CANARY",
+    );
+    expect(malformedCallback.status).toBe(303);
+    expect(malformedCallback.headers.get("location")).toBe(
+      "https://app.production.example.com/settings?section=connections&connection_result=restart_required",
+    );
+    expect(await malformedCallback.text()).not.toContain("RAW_PROVIDER_CANARY");
     const connectedAccounts = await productionApp.request("/v1/connectors", {
       headers: { authorization: `Session ${productionSession}` },
     });
@@ -2230,7 +3634,38 @@ describe.sequential("ilo API", () => {
     ).toBe(401);
   }, 120_000);
 
+  it("observes connector freshness when earlier scheduler work fails", async () => {
+    const schedulerError = new Error("scheduler read failed");
+    const freshnessLogsBefore = logs.mock.calls.filter(
+      ([entry]) => entry.event === "connector_sync_freshness_observed",
+    ).length;
+    const selectSpy = vi.spyOn(database.db, "select");
+    selectSpy.mockImplementationOnce(() => {
+      throw schedulerError;
+    });
+
+    await expect(app.syncDueConnectors()).rejects.toBe(schedulerError);
+
+    expect(
+      logs.mock.calls.filter(([entry]) => entry.event === "connector_sync_freshness_observed"),
+    ).toHaveLength(freshnessLogsBefore + 1);
+    selectSpy.mockRestore();
+  });
+
   it("verifies email addresses and resets passwords through one-time email links", async () => {
+    expect(
+      (
+        await request("/v1/auth/register", {
+          auth: "none",
+          body: {
+            displayName: "Weak Password",
+            email: "weak-password@example.com",
+            password: invalidLowercasePassword,
+            planningTimezone: "UTC",
+          },
+        })
+      ).status,
+    ).toBe(400);
     const registration = await request("/v1/auth/register", {
       auth: "none",
       body: {
@@ -2282,7 +3717,15 @@ describe.sequential("ilo API", () => {
       (
         await request("/v1/auth/password-reset", {
           auth: "none",
-          body: { password: "A different password!", token: resetToken },
+          body: { password: invalidLowercasePassword, token: resetToken },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await request("/v1/auth/password-reset", {
+          auth: "none",
+          body: { password: "DifferentPassword123!", token: resetToken },
         })
       ).status,
     ).toBe(204);
@@ -2298,10 +3741,49 @@ describe.sequential("ilo API", () => {
       (
         await request("/v1/auth/login", {
           auth: "none",
-          body: { email: "recovery@example.com", password: "A different password!" },
+          body: { email: "recovery@example.com", password: "DifferentPassword123!" },
         })
       ).status,
     ).toBe(200);
+  });
+
+  it("rejects HTTP work after runtime quiesce", async () => {
+    const lifecycle = createRuntimeLifecycle();
+    const drainingApp = createApp({
+      config: {
+        allowedOrigins: ["https://app.example.com"],
+        apiBaseUrl: "https://api.example.com",
+        apiShutdownTimeoutMs: 105_000,
+        appBaseUrl: "https://app.example.com",
+        databaseUrl: container.getConnectionUri(),
+        emailFrom: "",
+        encryptionKey: Buffer.alloc(32, 5).toString("base64"),
+        googleClientId: "",
+        googleClientSecret: "",
+        googleRedirectUri: "https://api.example.com/v1/connectors/google/callback",
+        logLevel: "info",
+        plaidClientId: "",
+        plaidEnvironment: "sandbox",
+        plaidSecret: "",
+        port: 8787,
+        production: false,
+        resendApiKey: "",
+        sessionCookieName: "personal_os_session",
+        sessionTtlDays: 30,
+        xClientId: "",
+        xClientSecret: "",
+        xRedirectUri: "https://api.example.com/v1/x-bookmarks/callback",
+      },
+      db: database.db,
+      runtimeLifecycle: lifecycle,
+    });
+
+    lifecycle.beginQuiesce(Date.now() + 105_000);
+    const response = await drainingApp.request("/health/ready");
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      error: { code: "service_unavailable" },
+    });
   });
 
   it("issues and rotates ilo MCP OAuth tokens with PKCE", async () => {
@@ -2356,6 +3838,13 @@ describe.sequential("ilo API", () => {
       headers: { authorization: `Session ${oauthSessionToken}` },
     });
     expect(consent.status).toBe(200);
+    const consentPage = await consent.text();
+    expect(consentPage).toContain("Connect Protocol test client");
+    expect(consentPage).toContain("Read tasks");
+    expect(consentPage).toContain("Connected provider credentials remain inside Ilo");
+    expect(consentPage).toContain('class="oauth-card"');
+    expect(consentPage).toContain("Requested access");
+    expect(consentPage).toContain('class="oauth-cancel"');
     const approved = await app.request("/oauth/authorize", {
       body: new URLSearchParams(Object.fromEntries(authorize.searchParams)).toString(),
       headers: {
@@ -2380,6 +3869,30 @@ describe.sequential("ilo API", () => {
     });
     expect(exchange.status).toBe(200);
     const tokens = (await exchange.json()) as { access_token: string; refresh_token: string };
+    expect(
+      (
+        await (
+          await app.request("/v1/access-tokens", {
+            headers: { authorization: `Session ${oauthSessionToken}` },
+          })
+        ).json()
+      ).tokens,
+    ).toEqual([]);
+    expect(
+      (
+        await (
+          await app.request("/v1/oauth/clients", {
+            headers: { authorization: `Session ${oauthSessionToken}` },
+          })
+        ).json()
+      ).clients,
+    ).toEqual([
+      expect.objectContaining({
+        id: client.client_id,
+        name: "Protocol test client",
+        scopes: ["tasks:read"],
+      }),
+    ]);
     expect(
       (await app.request("/v1/me", { headers: { authorization: `Bearer ${tokens.access_token}` } }))
         .status,

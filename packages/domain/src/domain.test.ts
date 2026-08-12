@@ -1,22 +1,34 @@
 import {
+  accountSetupStateSchema,
   actorTypeSchema,
   addLocalDays,
   addMonths,
+  agentConnectionGuideSchema,
   agentMutationPolicies,
   apiErrorSchema,
+  applyFinanceCategorizationsInputSchema,
+  assistantSetupPlanQuerySchema,
+  assistantSetupPlanSchema,
   automationRoutineSchema,
   automationRunSchema,
+  bulkUpdateMailInputSchema,
+  calendarCommitmentCandidateSchema,
   calendarEventSchema,
+  calendarProfilePreferencesSchema,
   calendarProviderSchema,
   calendarSchema,
+  connectedAccountHealthSchema,
   connectICloudInputSchema,
+  connectorAuthorizationOutcomeSchema,
   connectorCapabilities,
   createAccessTokenInputSchema,
+  createAttentionItemInputSchema,
   createAutomationRoutineInputSchema,
   createEventBlockInputSchema,
   createEventInputSchema,
   createGoalInputSchema,
   createLocalCalendarInputSchema,
+  createMailRuleInputSchema,
   createMotiveInputSchema,
   createReminderInputSchema,
   createTaskInputSchema,
@@ -24,10 +36,14 @@ import {
   eventListQuerySchema,
   featureAccessPolicies,
   featureIds,
+  financeGuidedPreferencesSchema,
+  financeReviewDecisionInputSchema,
+  financeTransactionQuerySchema,
   formatDateOnly,
   formatDateWithOrdinal,
   formatMonth,
   idSchema,
+  invitationCodeSchema,
   isoDateTimeSchema,
   localDateAt,
   localDateRange,
@@ -39,26 +55,46 @@ import {
   mailboxSchema,
   mailListQuerySchema,
   mailProviderSchema,
+  mailRuleActionIsDue,
+  mailRuleActionSchema,
   mailThreadSchema,
+  matchesMailRule,
   paginationSchema,
+  passwordRequirementState,
+  passwordSchema,
+  previewCalendarCommitmentInputSchema,
   registerInputSchema,
+  reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
   reminderPrioritySchema,
+  reminderProfilePreferencesSchema,
   reminderSchema,
+  reminderTimeZoneSchema,
+  resolveStoredMailRule,
+  semanticVersionSchema,
+  sendMailInputSchema,
+  startGoogleAuthorizationInputSchema,
   taskListQuerySchema,
   taskSchema,
   taskStatusSchema,
   timeZoneSchema,
+  updateAccountSetupInputSchema,
   updateAutomationRoutineInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
   updateFinanceTransactionInputSchema,
   updateGoalInputSchema,
   updateLocalCalendarInputSchema,
+  updateMailRuleInputSchema,
+  updateMailThreadInputSchema,
   updateMotiveInputSchema,
   updateReminderInputSchema,
   updateTaskInputSchema,
   updateUserInputSchema,
+  upsertDomainProfileInputSchema,
+  upsertMailProfileInputSchema,
+  upsertReminderAttentionItemInputSchema,
+  upsertReminderProfileInputSchema,
   userSchema,
   weatherLocationOptionSchema,
   weatherLocationSearchQuerySchema,
@@ -101,6 +137,386 @@ describe("domain schemas", () => {
     expect(featureAccessPolicies.goals.writeScope).toBe("goals:write");
   });
 
+  it("uses shared profile and attention envelopes with domain-owned mail rules", () => {
+    expect(
+      agentConnectionGuideSchema.parse({
+        domains: [
+          {
+            domain: "mail",
+            readScope: "mail:read",
+            support: "executable_rules",
+            writeScope: "mail:write",
+          },
+        ],
+        mcpUrl: "https://mcp.example.com/mcp",
+        skill: {
+          displayName: "Ilo Guided Setup",
+          installPrompt: "Install the Ilo skill.",
+          invocation: "$ilo-setup",
+          name: "ilo-setup",
+          revision: "release-0.1.0",
+          setupPrompt: "Set up Ilo.",
+          sourceUrl: "https://example.com/ilo-setup",
+          version: "0.1.0",
+        },
+      }),
+    ).toMatchObject({ domains: [{ domain: "mail", support: "executable_rules" }] });
+    expect(
+      assistantSetupPlanQuerySchema.parse({ domain: "mail", stepId: "learn_preferences" }),
+    ).toEqual({ domain: "mail", stepId: "learn_preferences" });
+    expect(
+      assistantSetupPlanSchema.parse({
+        access: { canRead: true, canWrite: true },
+        connection: { lastObservedAt: "2026-07-28T12:00:00.000Z", observed: true },
+        currentStepId: "learn_preferences",
+        domain: "mail",
+        nextAction: "Inspect Mail and save a draft.",
+        profile: {
+          approvedStatus: null,
+          approvedVersion: null,
+          pendingDraftVersion: null,
+          status: null,
+          version: null,
+        },
+        progress: { completed: 1, total: 4 },
+        protocolVersion: "1.0",
+        selectedStepId: "learn_preferences",
+        status: "in_progress",
+        steps: [
+          {
+            completionEvidence: [],
+            description: "Inspect existing material.",
+            id: "learn_preferences",
+            instructions: ["Read the current profile."],
+            order: 2,
+            owner: "agent",
+            requiredTools: ["get_domain_profile"],
+            state: "current",
+            title: "Learn Mail preferences",
+            userAction: null,
+          },
+        ],
+      }),
+    ).toMatchObject({ currentStepId: "learn_preferences", protocolVersion: "1.0" });
+    expect(semanticVersionSchema.parse("1.2.3-rc.1+build.7")).toBe("1.2.3-rc.1+build.7");
+    expect(() => semanticVersionSchema.parse("1.2.3-01")).toThrow();
+    expect(
+      upsertDomainProfileInputSchema.parse({
+        categories: [],
+        domain: "mail",
+        instructions: ["Keep delivery problems visible."],
+        objective: "Keep a clean inbox.",
+        preferences: { retentionDays: null },
+        sourceContexts: [],
+        status: "draft",
+        summary: "Only high-signal mail stays visible.",
+      }),
+    ).toMatchObject({
+      domain: "mail",
+      preferences: { retentionDays: null },
+      status: "draft",
+    });
+    expect(
+      upsertMailProfileInputSchema.parse({
+        categories: [],
+        domain: "mail",
+        instructions: ["Keep delivery problems visible."],
+        objective: "Keep a clean inbox.",
+        preferences: {
+          importantEmailHandling: "inbox_and_attention",
+          inboxStyle: "signal_only",
+          noiseDisposition: "archive_after_days",
+          noiseRetentionDays: 3,
+        },
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Personal decisions",
+            sourceId: accountId,
+            sourceLabel: "Personal",
+          },
+        ],
+        status: "draft",
+        summary: "Only high-signal mail stays visible.",
+      }),
+    ).toMatchObject({
+      preferences: { noiseDisposition: "archive_after_days", noiseRetentionDays: 3 },
+    });
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep a clean inbox.",
+        preferences: {
+          noiseDisposition: "trash_after_days",
+          noiseRetentionDays: 1,
+        },
+        sourceContexts: [],
+        status: "draft",
+        summary: "One-day recoverable Trash.",
+      }).success,
+    ).toBe(true);
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Complete Mail setup.",
+        preferences: {},
+        sourceContexts: [],
+        status: "active",
+        summary: "No inbox was mapped.",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertMailProfileInputSchema.safeParse({
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep a clean inbox.",
+        preferences: {},
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Personal",
+            sourceId: accountId,
+            sourceLabel: "Personal",
+          },
+          {
+            notes: null,
+            purpose: "Work",
+            sourceId: accountId,
+            sourceLabel: "Duplicate",
+          },
+        ],
+        status: "draft",
+        summary: "Conflicting source meanings.",
+      }).success,
+    ).toBe(false);
+    const reminderPreferences = {
+      defaultCapture: "due_when_stated",
+      dueAtMeaning: "deadline",
+      notificationLeadMinutes: 30,
+      overdueBehavior: "propose_deferral",
+      overdueReviewAfterDays: 2,
+      preferredAutomaticActions: ["create", "complete"],
+      preferredMutationPolicy: "approve_each",
+      priorityHighMeaning: "Needs attention today",
+      priorityLowMeaning: "Optional when convenient",
+      priorityMediumMeaning: "Should happen soon",
+      reviewPriorityAtOrAbove: "medium",
+      timezoneBehavior: "ask_when_ambiguous",
+    } as const;
+    expect(reminderProfilePreferencesSchema.parse(reminderPreferences)).toEqual(
+      reminderPreferences,
+    );
+    expect(
+      reminderProfilePreferencesSchema.safeParse({
+        ...reminderPreferences,
+        preferredMutationPolicy: "approved_rule",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertReminderProfileInputSchema.parse({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep commitments visible.",
+        preferences: { priorityHighMeaning: "  Needs attention today  " },
+        sourceContexts: [],
+        status: "draft",
+        summary: "Partial Reminder setup.",
+      }),
+    ).toMatchObject({
+      domain: "reminders",
+      preferences: { priorityHighMeaning: "Needs attention today" },
+      status: "draft",
+    });
+    expect(
+      upsertReminderProfileInputSchema.safeParse({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep commitments visible.",
+        preferences: {},
+        sourceContexts: [],
+        status: "active",
+        summary: "Incomplete Reminder setup.",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertReminderProfileInputSchema.safeParse({
+        categories: [],
+        domain: "reminders",
+        instructions: [],
+        objective: "Keep commitments visible.",
+        preferences: reminderPreferences,
+        sourceContexts: [],
+        status: "active",
+        summary: "Complete Reminder setup.",
+      }).success,
+    ).toBe(true);
+    expect(
+      createAttentionItemInputSchema.parse({
+        domain: "calendar",
+        expiresAt: null,
+        importance: "high",
+        kind: "upcoming",
+        occursAt: start,
+        relatedEntityId: null,
+        relatedEntityType: null,
+        source: null,
+        summary: "A commitment is approaching.",
+        title: "Upcoming commitment",
+      }),
+    ).toMatchObject({ domain: "calendar", kind: "upcoming" });
+    expect(
+      matchesMailRule(
+        { field: "sender", operator: "ends_with", value: "@example.com" },
+        {
+          from: { address: "orders@example.com", name: "Orders" },
+          snippet: "Your order shipped",
+          subject: "Shipment",
+        },
+      ),
+    ).toBe(true);
+    expect(
+      mailRuleActionIsDue(
+        { afterDays: 1, mailboxId: null, type: "trash" },
+        "2026-07-26T12:00:00.000Z",
+        new Date("2026-07-28T12:00:00.000Z"),
+      ),
+    ).toBe(true);
+    expect(
+      mailRuleActionIsDue(
+        { afterDays: 3, mailboxId: null, type: "trash" },
+        new Date("2026-07-26T12:00:00.000Z"),
+        new Date("2026-07-28T12:00:00.000Z"),
+      ),
+    ).toBe(false);
+    expect(
+      matchesMailRule(
+        { field: "subject", operator: "equals", value: "shipment" },
+        {
+          from: { address: "orders@example.com", name: null },
+          snippet: "Your order shipped",
+          subject: "Shipment",
+        },
+      ),
+    ).toBe(true);
+    expect(
+      matchesMailRule(
+        { field: "snippet", operator: "contains", value: "missing" },
+        {
+          from: { address: "orders@example.com", name: null },
+          snippet: "Your order shipped",
+          subject: "Shipment",
+        },
+      ),
+    ).toBe(false);
+    expect(
+      matchesMailRule(
+        { field: "any", operator: "contains", value: "orders@example.com" },
+        {
+          from: { address: "orders@example.com", name: null },
+          snippet: "Your order shipped",
+          subject: "Shipment",
+        },
+      ),
+    ).toBe(true);
+    expect(
+      mailRuleActionSchema.safeParse({
+        mailboxId: accountId,
+        type: "add_label",
+      }).success,
+    ).toBe(true);
+    expect(mailRuleActionSchema.safeParse({ type: "add_label" }).success).toBe(false);
+    expect(
+      mailRuleActionSchema.safeParse({
+        mailboxId: accountId,
+        type: "archive",
+      }).success,
+    ).toBe(false);
+    expect(
+      resolveStoredMailRule({
+        action: "mark_read",
+        actions: null,
+        condition: null,
+        enabled: true,
+        policy: "preview",
+        query: "legacy sender",
+      }),
+    ).toEqual({
+      actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+      condition: { field: "any", operator: "contains", value: "legacy sender" },
+      policy: "approved_rule",
+    });
+    expect(
+      updateMailRuleInputSchema.parse({
+        expectedVersion: 1,
+        name: "Updated rule",
+      }),
+    ).toEqual({
+      expectedVersion: 1,
+      name: "Updated rule",
+    });
+    expect(
+      createMailRuleInputSchema.safeParse({
+        actions: [{ afterDays: 0, mailboxId: null, type: "archive" }],
+        condition: { field: "sender", operator: "contains", value: "news" },
+        enabled: true,
+        name: "Unsafe active rule",
+        policy: "approved_rule",
+      }).success,
+    ).toBe(false);
+    expect(
+      sendMailInputSchema.parse({
+        accountId: "00000000-0000-4000-8000-000000000001",
+        body: "No subject",
+        subject: "   ",
+        to: [{ address: "To@Example.COM", name: null }],
+      }),
+    ).toMatchObject({
+      subject: "",
+      to: [{ address: "To@Example.COM", name: null }],
+    });
+    expect(
+      createMailRuleInputSchema.safeParse({
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "sender", operator: "contains", value: "news" },
+        confidenceThreshold: 0.9,
+        name: "Decorative confidence",
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        enabled: true,
+        expectedVersion: 1,
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        expectedVersion: 1,
+        policy: "approve_each",
+      }).success,
+    ).toBe(false);
+    expect(
+      createMailRuleInputSchema.safeParse({
+        actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+        condition: { field: "sender", operator: "contains", value: "news" },
+        name: "Duplicate source draft",
+        sourceIds: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000001"],
+      }).success,
+    ).toBe(false);
+    expect(
+      updateMailRuleInputSchema.safeParse({
+        expectedVersion: 1,
+        sourceIds: ["00000000-0000-4000-8000-000000000001", "00000000-0000-4000-8000-000000000001"],
+      }).success,
+    ).toBe(false);
+  });
+
   it("formats calendar dates without timezone drift", () => {
     expect(formatDateWithOrdinal("2026-06-06")).toBe("June 6th");
     expect(formatMonth("2026-06")).toBe("June 2026");
@@ -139,6 +555,44 @@ describe("domain schemas", () => {
     expect(loginInputSchema.parse({ email: "UPPER@EXAMPLE.COM", password: "x" }).email).toBe(
       "upper@example.com",
     );
+    expect(invitationCodeSchema.parse("abcd2345")).toBe("ABCD2345");
+    expect(invitationCodeSchema.safeParse("too-short").success).toBe(false);
+    expect(invitationCodeSchema.safeParse("ABCD-234").success).toBe(false);
+    expect(passwordSchema.safeParse("alllowercase123!").success).toBe(false);
+    expect(passwordSchema.safeParse("ALLUPPERCASE123!").success).toBe(false);
+    expect(passwordSchema.safeParse("NoNumbersHere!").success).toBe(false);
+    expect(passwordSchema.safeParse("NoSymbolsHere123").success).toBe(false);
+    expect(passwordRequirementState("LocalTestOnly123!")).toEqual({
+      length: true,
+      mixedCase: true,
+      number: true,
+      symbol: true,
+    });
+    expect(passwordRequirementState("short")).toEqual({
+      length: false,
+      mixedCase: false,
+      number: false,
+      symbol: false,
+    });
+    expect(
+      updateAccountSetupInputSchema.parse({
+        action: "progress",
+        currentStep: "verify_email",
+        selectedWorkspaces: ["calendar", "mail"],
+      }),
+    ).toMatchObject({ currentStep: "verify_email", selectedWorkspaces: ["calendar", "mail"] });
+    expect(startGoogleAuthorizationInputSchema.parse({})).toEqual({
+      returnTo: "/settings?section=connections",
+      services: ["calendar", "mail"],
+    });
+    const setup = accountSetupStateSchema.parse({
+      completedAt: null,
+      currentStep: "welcome",
+      dismissedAt: null,
+      selectedWorkspaces: ["calendar", "tasks"],
+      startedAt: null,
+      status: "not_started",
+    });
     expect(
       userSchema.parse({
         accentColor: "#c7d23c",
@@ -146,6 +600,7 @@ describe("domain schemas", () => {
         id,
         displayName: "Test",
         email: "a@example.com",
+        setup,
         theme: "system",
         planningTimezone: "UTC",
         workdayEndMinute: 17 * 60,
@@ -222,6 +677,29 @@ describe("domain schemas", () => {
     expect(updateFinanceTransactionInputSchema.parse({ notes: "Receipt saved" })).toEqual({
       notes: "Receipt saved",
     });
+    expect(
+      financeReviewDecisionInputSchema.parse({
+        action: "recategorize",
+        categoryId: "00000000-0000-4000-8000-000000000000",
+        confidence: 0.965,
+        expectedTransactionUpdatedAt: start,
+      }),
+    ).toMatchObject({
+      confidence: 0.965,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: "suggest",
+    });
+    expect(
+      financeReviewDecisionInputSchema.safeParse({
+        action: "approve",
+      }).success,
+    ).toBe(false);
+    expect(
+      financeReviewDecisionInputSchema.safeParse({
+        action: "recategorize",
+        expectedTransactionUpdatedAt: start,
+      }).success,
+    ).toBe(false);
     expect(() => updateFinanceTransactionInputSchema.parse({ learnMerchant: false })).toThrow();
     expect(
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
@@ -295,10 +773,58 @@ describe("domain schemas", () => {
         createdAt: start,
         updatedAt: start,
         completedAt: null,
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: id,
+          revision: start,
+          sourceType: "reminder",
+        },
       }).priority,
     ).toBe("medium");
+    expect(
+      reminderDeferralPreviewInputSchema.parse({
+        overdueBefore: start,
+        proposedDueAt: end,
+      }),
+    ).toMatchObject({ limit: 100, timezone: null });
+    expect(
+      reminderDeferralPreviewInputSchema.safeParse({
+        overdueBefore: end,
+        proposedDueAt: start,
+      }).success,
+    ).toBe(false);
+    expect(
+      reminderDeferralPreviewInputSchema.safeParse({
+        overdueBefore: start,
+        proposedDueAt: start,
+      }).success,
+    ).toBe(false);
+    expect(reminderTimeZoneSchema.safeParse("definitely/not-a-zone").success).toBe(false);
+    expect(
+      reminderDeferralPreviewInputSchema.safeParse({
+        overdueBefore: start,
+        proposedDueAt: end,
+        timezone: "definitely/not-a-zone",
+      }).success,
+    ).toBe(false);
+    expect(
+      upsertReminderAttentionItemInputSchema.parse({
+        summary: "Clarify what needs to happen.",
+        title: "Reminder needs review",
+      }),
+    ).toMatchObject({
+      importance: "high",
+      kind: "follow_up",
+    });
     expect(reminderListQuerySchema.parse({ completed: "true" }).completed).toBe(true);
     expect(reminderListQuerySchema.parse({ completed: "false" }).completed).toBe(false);
+    expect(
+      reminderListQuerySchema.safeParse({
+        dueAfter: "2026-07-14T00:00:00.000Z",
+        dueBefore: "2026-07-13T00:00:00.000Z",
+      }).success,
+    ).toBe(false);
 
     expect(taskStatusSchema.parse("scheduled")).toBe("scheduled");
     expect(
@@ -365,14 +891,88 @@ describe("domain schemas", () => {
       location: null,
     });
     expect(createEventInputSchema.safeParse({ ...input, endsAt: start }).success).toBe(false);
+    expect(
+      createEventInputSchema.safeParse({ ...input, timezone: "Definitely/Not_A_Time_Zone" })
+        .success,
+    ).toBe(false);
     expect(updateEventInputSchema.safeParse({}).success).toBe(false);
+    expect(
+      updateEventInputSchema.safeParse({
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: start,
+      }).success,
+    ).toBe(false);
     expect(updateEventInputSchema.safeParse({ startsAt: end, endsAt: start }).success).toBe(false);
     expect(updateEventInputSchema.parse({ startsAt: start })).toEqual({ startsAt: start });
+    expect(
+      updateEventInputSchema.parse({
+        expectedBlockUpdatedAtById: { [accountId]: start },
+        expectedUpdatedAt: start,
+        title: "Revised focus",
+      }),
+    ).toEqual({
+      expectedBlockUpdatedAtById: { [accountId]: start },
+      expectedUpdatedAt: start,
+      title: "Revised focus",
+    });
     expect(createEventBlockInputSchema.parse({ calendarId: id })).toEqual({
       calendarId: id,
       mode: "busy",
     });
     expect(updateEventBlockInputSchema.parse({ mode: "details" })).toEqual({ mode: "details" });
+    const candidate = {
+      allDay: false,
+      buffer: { afterMinutes: 15, beforeMinutes: 15 },
+      calendarId: id,
+      endsAt: end,
+      evidence: {
+        kind: "ticket",
+        source: {
+          accountId,
+          provider: "google",
+          remoteId: "ticket-1",
+          revision: "v1",
+          sourceType: "mail_thread",
+        },
+        summary: "Confirmed ticket.",
+      },
+      flexibility: "hard",
+      location: null,
+      notes: null,
+      startsAt: start,
+      timezone: "UTC",
+      title: "Train",
+      visibility: "private",
+    };
+    expect(calendarCommitmentCandidateSchema.parse(candidate)).toMatchObject(candidate);
+    expect(
+      calendarCommitmentCandidateSchema.safeParse({ ...candidate, endsAt: start }).success,
+    ).toBe(false);
+    expect(previewCalendarCommitmentInputSchema.parse({ candidate }).requestedPolicy).toBe(
+      "preview",
+    );
+    expect(
+      calendarProfilePreferencesSchema.parse({
+        afterBufferMinutes: 15,
+        automaticEventCreation: false,
+        automaticEventEvidence: ["ticket", "booking"],
+        beforeBufferMinutes: 15,
+        busyBlockPrivacy: "busy",
+        defaultCalendarId: id,
+        defaultTimezone: "UTC",
+      }).defaultCalendarId,
+    ).toBe(id);
+    expect(
+      calendarProfilePreferencesSchema.safeParse({
+        afterBufferMinutes: 15,
+        automaticEventCreation: false,
+        automaticEventEvidence: ["ticket"],
+        beforeBufferMinutes: 15,
+        busyBlockPrivacy: "busy",
+        defaultCalendarId: id,
+        defaultTimezone: "Eastern",
+      }).success,
+    ).toBe(false);
     expect(updateAutomationRoutineInputSchema.safeParse({}).success).toBe(false);
     expect(
       updateAutomationRoutineInputSchema.parse({ enabled: false, schedule: "Daily at 8:00 PM" }),
@@ -448,8 +1048,34 @@ describe("domain schemas", () => {
         subject: "Subject",
         to: [],
         unread: true,
+        updatedAt: start,
       }).subject,
     ).toBe("Subject");
+    expect(
+      updateMailThreadInputSchema.parse({
+        expectedUpdatedAt: start,
+        unread: false,
+      }),
+    ).toEqual({ expectedUpdatedAt: start, unread: false });
+    expect(updateMailThreadInputSchema.safeParse({ expectedUpdatedAt: start }).success).toBe(false);
+    expect(
+      bulkUpdateMailInputSchema.parse({
+        items: [{ expectedUpdatedAt: start, id }],
+        unread: false,
+      }),
+    ).toEqual({
+      items: [{ expectedUpdatedAt: start, id }],
+      unread: false,
+    });
+    expect(
+      bulkUpdateMailInputSchema.safeParse({
+        items: [
+          { expectedUpdatedAt: start, id },
+          { expectedUpdatedAt: "2026-07-28T12:00:00.000Z", id },
+        ],
+        starred: true,
+      }).success,
+    ).toBe(false);
     expect(
       mailListQuerySchema.parse({
         accountIds: `${accountId},`,
@@ -479,6 +1105,67 @@ describe("domain schemas", () => {
         mail: false,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("finance agent contracts", () => {
+  it("uses percentage points for recurring-change preferences", () => {
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        recurringAmountChangePercent: 20,
+      }).recurringAmountChangePercent,
+    ).toBe(20);
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        recurringAmountChangePercent: 101,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        futurePreference: "x".repeat(501),
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        futureNullablePreference: null,
+      }),
+    ).toMatchObject({ futureNullablePreference: null });
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        largeExpenseAlertAmount: 500,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        largeExpenseAlertAmount: 500,
+        lowBalanceAlertAmount: 100,
+        planningCurrency: "USD",
+      }),
+    ).toMatchObject({ planningCurrency: "USD" });
+  });
+
+  it("requires one revision-guarded decision per transaction", () => {
+    const decision = {
+      categoryId: accountId,
+      confidence: 0.95,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: "suggest" as const,
+      rationale: "The user accepted this proposal.",
+      transactionId: id,
+    };
+    expect(
+      applyFinanceCategorizationsInputSchema.safeParse({ decisions: [decision] }).success,
+    ).toBe(true);
+    expect(
+      applyFinanceCategorizationsInputSchema.safeParse({
+        decisions: [decision, decision],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("parses explicit Finance pending query booleans without truthy string coercion", () => {
+    expect(financeTransactionQuerySchema.parse({ pending: "false" }).pending).toBe(false);
+    expect(financeTransactionQuerySchema.parse({ pending: "true" }).pending).toBe(true);
   });
 });
 
@@ -523,5 +1210,96 @@ describe("time-zone ranges", () => {
       from: "2026-03-08T05:00:00.000Z",
       to: "2026-03-09T04:00:00.000Z",
     });
+  });
+});
+
+describe("connected account health", () => {
+  it("parses retrying account health with automatic recovery", () => {
+    expect(
+      connectedAccountHealthSchema.parse({
+        message: "Google is temporarily unavailable. ilo will retry automatically.",
+        nextSyncAt: "2026-08-05T20:05:00.000Z",
+        recovery: "automatic",
+        state: "retrying",
+      }),
+    ).toMatchObject({ state: "retrying", recovery: "automatic" });
+  });
+
+  it("rejects provider-sized health messages", () => {
+    expect(
+      connectedAccountHealthSchema.safeParse({
+        message: "x".repeat(301),
+        nextSyncAt: null,
+        recovery: "operator",
+        state: "service_attention",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("connector authorization outcomes", () => {
+  it("keeps only the provider-neutral browser outcome", () => {
+    expect(
+      connectorAuthorizationOutcomeSchema.parse({
+        accountId: null,
+        code: "authorization-code-canary",
+        email: "person@example.com",
+        provider: "google",
+        providerMessage: "provider-message-canary",
+        requestId: "request-canary",
+        retryable: true,
+        scope: "scope-canary",
+        state: "state-canary",
+        status: "failed",
+      }),
+    ).toEqual({
+      accountId: null,
+      provider: "google",
+      retryable: true,
+      status: "failed",
+    });
+  });
+
+  it("rejects identities outside the closed connector outcome contract", () => {
+    expect(
+      connectorAuthorizationOutcomeSchema.safeParse({
+        accountId: "not-a-uuid",
+        provider: "icloud",
+        retryable: false,
+        status: "connected",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("connector notification contracts", () => {
+  it("keeps subscription lifecycle and trigger reasons closed", async () => {
+    const {
+      connectorSubscriptionKindSchema,
+      connectorSubscriptionStatusSchema,
+      connectorSyncTriggerReasonSchema,
+    } = await import("./connection.js");
+    expect(connectorSubscriptionKindSchema.options).toEqual([
+      "gmail_mailbox",
+      "google_calendar_list",
+      "google_calendar_events",
+      "icloud_mail_idle",
+    ]);
+    expect(connectorSubscriptionStatusSchema.options).toEqual([
+      "pending",
+      "active",
+      "renewing",
+      "expired",
+      "failed",
+      "stopped",
+    ]);
+    expect(connectorSyncTriggerReasonSchema.options).toEqual([
+      "initial",
+      "notification",
+      "reconciliation",
+      "manual",
+      "retry",
+      "recovery",
+    ]);
   });
 });

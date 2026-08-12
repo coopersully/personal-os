@@ -6,7 +6,7 @@
 
 ## 1. Decision and intentional scope expansion
 
-ilo will be a private, cross-device operating layer for an individual's commitments, communications, reflection, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
+ilo will be a private, cross-device operating layer for an individual's commitments, communications, priorities, and money. It will sit on top of existing desktop and mobile operating systems and provider accounts; it will not replace them. A person operates the same material directly in the app or delegates bounded work to Claude, Codex, or another MCP client.
 
 This design intentionally expands scope beyond the current MVP. The expansion is necessary to make safe automation usable: a permission prompt alone is not a workflow. Every automated mutation therefore needs a comprehensible UI path, a preview or rule policy, audit evidence, undo/recovery where possible, and a way to stop future runs.
 
@@ -98,6 +98,9 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 | Reminder/task | Title, notes, status, project/area, priority, due date, scheduled time, estimate, recurrence, subtasks, tags, energy/context, defer history, source material, goal/motive links. |
 | Goal/motive/habit | Outcome, timeframe, progress metric, parent/child relationship, rationale, rewards, constraints, coaching preference, habit schedule/flexibility and completion data. |
 | Finance | Institution/account, balance, transaction, merchant, category/tag, split, recurring stream, rule, budget, cash-flow forecast, goal, review state and confidence. |
+| Domain profile | Domain, objective, source meanings, categories, durable instructions/preferences, status, and optimistic version. |
+| Attention item | Domain, important/upcoming/follow-up/run-summary kind, importance, source/related material, lifecycle state, and optional occurrence/expiry. |
+| Rule | Common version/policy/source/profile envelope plus a domain-owned condition and action contract. |
 | Automation | Template, versioned instructions/skill, trigger, schedule/event trigger, inputs, scopes, policy, model host, state, run and approval queue. |
 | Activity/audit | Actor, request/run, operation, entity, redacted before/after, remote request/revision, reversible action, result and failure data. |
 
@@ -151,7 +154,9 @@ Now
 4. Batch mode exposes the same actions, confirms destructive change count, supports undo where the provider permits it, and writes one auditable material action per affected item.
 5. A triage session shows one category or bounded batch, with shortcuts and a visible “done for now” exit. Nothing is auto-archived just because it was read.
 6. The agent can propose classifications, labels, archives, task/event drafts, unsubscribe candidates, or reply drafts. The person can approve one, approve a category/rule, edit, reject, or allow safe recurring application.
-7. Mail rules use deterministic conditions plus optional agent classification. Each rule has scope, dry-run results, confidence threshold, effective date, undo/review behavior, and a kill switch.
+7. MVP Mail rules use exact deterministic conditions, explicit scope, dry-run results, effective
+   date, undo/review behavior, and a kill switch; their shared-envelope confidence threshold stays
+   null. Optional server-owned agent classification and scored confidence remain future scope.
 8. Briefs cite source threads and distinguish “needs reply,” “FYI,” “deadline,” “event/invite,” “financial,” and “newsletter.”
 
 Mail policy tiers:
@@ -207,7 +212,11 @@ Mail policy tiers:
 
 ### 6.8 Agent access, routines, and activity
 
-**Token/scopes:** `mail:read`, `mail:manage`, `mail:send`, `calendar:read`, `calendar:write`, `calendar:rsvp`, `reminders:read`, `reminders:write`, `tasks:write`, `goals:read/write`, `finance:read`, `finance:categorize`, `automation:read/run`, and `audit:read`. Scopes are paired with account/source selections and policy tiers.
+**Guided setup:** after connecting sources, the Ready step and Settings → Agent access provide the deployment's remote MCP URL and supervise one server-owned setup plan. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. After authentication the agent calls `get_ilo_setup`, which returns the actual semantic step, observed evidence, exact scope, required tools, domain instructions, and approval boundary. The agent reads any existing profile, inspects a bounded representative sample, asks only unresolved questions, saves a draft, previews consequential behavior, and calls the plan again after every save or signed-in approval. The person handles only the unavoidable connection, genuine preference decisions, and consequential approval. A versioned Ilo-hosted `ilo-setup` skill remains an optional compatibility reference, not a required install or parallel source of completion state. Agent Access composes Mail, Finance, Calendar, and Reminder readiness from each domain's authoritative material, profile, workflow, and attention APIs. Personal preferences live in Ilo rather than in a host skill or conversation memory.
+
+Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
+
+**Token/scopes:** `mail:read`, `mail:write`, `calendar:read`, `calendar:write`, `calendar:rsvp`, `reminders:read`, `reminders:write`, `tasks:write`, `goals:read/write`, `finance:read`, `finance:categorize`, `automation:read/run`, and `audit:read`. Scopes are paired with account/source selections and policy tiers.
 
 **Presets:** Read my day; Calendar manager; Reminder/task manager; Mail triage (preview); Mail manager; Goals coach; Finance categorizer (preview); Morning routine; Midday reset; Nightly cleanup; Weekly review; Monthly finance close.
 
@@ -264,7 +273,11 @@ API + Domain policy engine ──► Postgres + encrypted credential store + aud
               └──► Google / iCloud / Plaid / future provider connectors
 ```
 
-- Add a durable job queue, scheduler, worker lease/heartbeats, dead-letter handling, and run/event store before enabling real recurring automation.
+- Mail retention is the first domain-owned durable execution implementation: stable work identity,
+  bounded scheduler claims, lease recovery, exact provider reconciliation, terminal state, and
+  redacted audit/attention observations. Other recurring domains still require a shared durable
+  job queue, scheduler, worker lease/heartbeats, dead-letter handling, and run/event store before
+  enabling real recurring automation.
 - Model native domain records separately and expose a typed material-link/source-reference graph above them. A link carries relation type, source reference, ownership, revision/reconciliation state, and policy/audit references; it never makes a provider record and a local note falsely interchangeable.
 - Maintain provider-neutral connectors with capability discovery. Google uses incremental OAuth and Gmail write scopes only when needed; iCloud uses IMAP/CalDAV and app-specific passwords; Plaid uses Link, webhook/sync cursor, and transaction enrichment.
 - Add connector contracts for mail mutations, calendar RSVP/availability, attachments, finance transactions/rules, notification targets, and platform widgets. A capability matrix prevents unsupported controls from appearing enabled. Gmail "delete" means move to Trash unless a provider offers a separately scoped reversible behavior; permanent deletion is never implied by an archive/triage shortcut.

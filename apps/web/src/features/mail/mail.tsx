@@ -1,28 +1,44 @@
 import type { CalendarAccount } from "@personal-os/api-client";
-import type { Mailbox, MailMessage, MailThread, User } from "@personal-os/domain";
+import type { Mailbox, MailDraft, MailMessage, MailThread, User } from "@personal-os/domain";
 import { Badge, Button, EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Archive,
-  ChevronDown,
-  ChevronLeft,
-  Clock3,
-  Eye,
-  EyeOff,
-  Inbox,
-  Mail,
-  Plus,
-  RefreshCw,
-  Reply,
-  Search,
-  Star,
-  Trash2,
-} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import {
+  ArchiveIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ClockIcon,
+  EyeIcon,
+  EyeOffIcon,
+  InboxIcon,
+  MailIcon,
+  ReplyIcon,
+  StarIcon,
+  TrashIcon,
+} from "@/components/icons";
 import { api } from "../../api.js";
 import { InlineError, PageLoading } from "../../components/async-state.js";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "../../components/ui/collapsible.js";
+import {
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarMenu,
+  SidebarMenuBadge,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
+} from "../../components/ui/sidebar.js";
+import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
+import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
 const googleMailboxNames: Record<string, string> = {
@@ -120,12 +136,88 @@ function mailDate(value: string, timeZone: string) {
     timeZone,
   }).format(new Date(value));
 }
+
+function MailSendRecovery({
+  drafts,
+  error,
+  isPending,
+  mutationError,
+  mutationPending,
+  reconcile,
+}: {
+  drafts: MailDraft[];
+  error: Error | null;
+  isPending: boolean;
+  mutationError: Error | null;
+  mutationPending: boolean;
+  reconcile: (id: string, outcome: "not_sent" | "sent") => void;
+}) {
+  if (isPending)
+    return (
+      <p aria-live="polite" className="mail-send-recovery__loading">
+        Checking uncertain sends…
+      </p>
+    );
+  if (error) return <InlineError error={error} />;
+  if (drafts.length === 0) return null;
+  return (
+    <section aria-labelledby="mail-send-recovery-title" className="mail-send-recovery">
+      <div>
+        <p className="eyebrow">Send safety</p>
+        <h2 id="mail-send-recovery-title">Resolve an uncertain send</h2>
+        <p>
+          First inspect this account’s provider Sent Mail. Never resend until you confirm whether
+          the message is there.
+        </p>
+      </div>
+      <div className="mail-send-recovery__items">
+        {drafts.map((draft) => (
+          <article className="mail-send-recovery__item" key={draft.id}>
+            <div>
+              <strong>{draft.subject || "(No subject)"}</strong>
+              <span>
+                {draft.reconciliationState === "in_progress"
+                  ? "This send is still in progress. Ilo will refresh its state automatically."
+                  : "Ilo could not confirm the provider result."}
+              </span>
+            </div>
+            {draft.reconciliationState === "sent_mail_review_required" ? (
+              <div className="mail-send-recovery__actions">
+                <Button
+                  aria-label={`I found it in Sent Mail: ${draft.subject || "this message"}`}
+                  disabled={mutationPending}
+                  onClick={() => reconcile(draft.id, "sent")}
+                  type="button"
+                >
+                  I found it in Sent Mail
+                </Button>
+                <Button
+                  aria-label={`It was not sent: ${draft.subject || "this message"}`}
+                  disabled={mutationPending}
+                  onClick={() => reconcile(draft.id, "not_sent")}
+                  tone="ghost"
+                  type="button"
+                >
+                  It was not sent
+                </Button>
+              </div>
+            ) : (
+              <span aria-live="polite">Waiting for the provider result…</span>
+            )}
+          </article>
+        ))}
+      </div>
+      {mutationError ? <InlineError error={mutationError} /> : null}
+    </section>
+  );
+}
+
 export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   const [params, setParams] = useSearchParams();
   const accounts = useQuery({
     queryFn: api.listConnectors,
     queryKey: ["connectors"],
-    refetchInterval: 60_000,
+    refetchInterval: visibleConnectorRefreshInterval,
   });
   const mailboxes = useQuery({
     queryFn: api.listMailboxes,
@@ -140,6 +232,7 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   );
   const selectedMailbox = mailboxes.data?.find((mailbox) => mailbox.id === mailboxId);
   const activeAccountId = selectedMailbox?.accountId ?? accountId;
+  const totalInboxUnread = inboxUnreadCount(mailboxes.data ?? []);
   const [expanded, setExpanded] = useState<string[]>([]);
   useEffect(() => {
     const first = activeAccountId ?? enabled[0]?.id;
@@ -160,53 +253,55 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
     onNavigate();
   };
   return (
-    <>
-      <p className="sidebar__mode-label">Mail</p>
-      <nav aria-label="Mailboxes" className="sidebar-group context-sidebar__mailboxes">
-        <p className="sidebar-group__label">Mailboxes</p>
-        {accounts.isPending || mailboxes.isPending ? (
-          <p className="context-sidebar__empty">Loading mailboxes…</p>
-        ) : accounts.isError || mailboxes.isError ? (
-          <InlineError error={accounts.isError ? accounts.error : mailboxes.error} />
-        ) : enabled.length === 0 ? (
-          <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
-        ) : (
-          <div className="context-sidebar__mailbox-list">
-            <button
-              aria-pressed={!mailboxId && !accountId}
-              className={!mailboxId && !accountId ? "mailbox-link is-active" : "mailbox-link"}
-              onClick={() => select({})}
-              type="button"
-            >
-              <Inbox size={16} />
-              <span>Unified inbox</span>
-              {inboxUnreadCount(mailboxes.data) > 0 ? (
-                <b>{inboxUnreadCount(mailboxes.data)}</b>
-              ) : null}
-            </button>
-            {enabled.map((account) => (
-              <MailboxAccount
-                account={account}
-                activeAccountId={activeAccountId}
-                activeMailboxId={mailboxId}
-                expanded={expanded.includes(account.id)}
-                key={account.id}
-                mailboxes={mailboxes.data.filter((mailbox) => mailbox.accountId === account.id)}
-                selectAccount={() => select({ account: account.id })}
-                selectMailbox={(id) => select({ mailbox: id })}
-                toggle={() =>
-                  setExpanded((current) =>
-                    current.includes(account.id)
-                      ? current.filter((id) => id !== account.id)
-                      : [...current, account.id],
-                  )
-                }
-              />
-            ))}
-          </div>
-        )}
-      </nav>
-    </>
+    <SidebarGroup className="context-sidebar__mailboxes">
+      <SidebarGroupLabel>Mailboxes</SidebarGroupLabel>
+      <SidebarGroupContent>
+        <nav aria-label="Mailboxes">
+          {accounts.isPending || mailboxes.isPending ? (
+            <p className="context-sidebar__empty">Loading mailboxes…</p>
+          ) : accounts.isError || mailboxes.isError ? (
+            <InlineError error={accounts.isError ? accounts.error : mailboxes.error} />
+          ) : enabled.length === 0 ? (
+            <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
+          ) : (
+            <SidebarMenu className="mail-sidebar__menu">
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  aria-pressed={!mailboxId && !accountId}
+                  isActive={!mailboxId && !accountId}
+                  onClick={() => select({})}
+                >
+                  <InboxIcon aria-hidden="true" />
+                  <span>Unified inbox</span>
+                </SidebarMenuButton>
+                {totalInboxUnread > 0 ? (
+                  <SidebarMenuBadge>{totalInboxUnread}</SidebarMenuBadge>
+                ) : null}
+              </SidebarMenuItem>
+              {enabled.map((account) => (
+                <MailboxAccount
+                  account={account}
+                  activeAccountId={activeAccountId}
+                  activeMailboxId={mailboxId}
+                  expanded={expanded.includes(account.id)}
+                  key={account.id}
+                  mailboxes={mailboxes.data.filter((mailbox) => mailbox.accountId === account.id)}
+                  selectAccount={() => select({ account: account.id })}
+                  selectMailbox={(id) => select({ mailbox: id })}
+                  toggle={() =>
+                    setExpanded((current) =>
+                      current.includes(account.id)
+                        ? current.filter((id) => id !== account.id)
+                        : [...current, account.id],
+                    )
+                  }
+                />
+              ))}
+            </SidebarMenu>
+          )}
+        </nav>
+      </SidebarGroupContent>
+    </SidebarGroup>
   );
 }
 
@@ -217,7 +312,7 @@ export function MailPage({ user }: { user: User }) {
   const accounts = useQuery({
     queryFn: api.listConnectors,
     queryKey: ["connectors"],
-    refetchInterval: 60_000,
+    refetchInterval: visibleConnectorRefreshInterval,
   });
   const mailboxes = useQuery({
     queryFn: api.listMailboxes,
@@ -229,11 +324,9 @@ export function MailPage({ user }: { user: User }) {
   const selectedId = params.get("thread");
   const search = params.get("q")?.trim() ?? "";
   const unreadOnly = params.get("unread") === "1";
-  const [draft, setDraft] = useState(search);
-  const [composing, setComposing] = useState(false);
+  const composing = params.get("compose") === "1";
   const [composeThread, setComposeThread] = useState<MailThread | null>(null);
   const composeFormRef = useRef<HTMLFormElement>(null);
-  useEffect(() => setDraft(search), [search]);
   const enabled = useMemo(
     () => accounts.data?.filter((account) => account.mailEnabled) ?? [],
     [accounts.data],
@@ -256,6 +349,13 @@ export function MailPage({ user }: { user: User }) {
     queryKey: ["mail-threads", accountId, mailboxId, search, unreadOnly],
     refetchInterval: 60_000,
   });
+  const drafts = useQuery({
+    queryFn: api.listMailDrafts,
+    queryKey: ["mail-drafts"],
+    refetchInterval: 15_000,
+  });
+  const uncertainDrafts =
+    drafts.data?.filter((draft) => draft.reconciliationState !== "none") ?? [];
   const listed = threads.data?.find((thread) => thread.id === selectedId);
   const loaded = useQuery({
     enabled: Boolean(selectedId && threads.data && !listed),
@@ -267,15 +367,6 @@ export function MailPage({ user }: { user: User }) {
     enabled: Boolean(selected),
     queryFn: () => api.listMailMessages(selected?.id as string),
     queryKey: ["mail-messages", selected?.id],
-  });
-  const sync = useMutation({
-    mutationFn: () => Promise.all(enabled.map((account) => api.syncConnector(account.id))),
-    onSuccess: () =>
-      Promise.all([
-        client.invalidateQueries({ queryKey: ["connectors"] }),
-        client.invalidateQueries({ queryKey: ["mailboxes"] }),
-        client.invalidateQueries({ queryKey: ["mail-threads"] }),
-      ]),
   });
   const updateThread = useMutation({
     mutationFn: ({
@@ -311,7 +402,7 @@ export function MailPage({ user }: { user: User }) {
       });
     },
     onSuccess: () => {
-      setComposing(false);
+      update({ compose: null });
       setComposeThread(null);
       return client.invalidateQueries({ queryKey: ["mail-threads"] });
     },
@@ -333,87 +424,48 @@ export function MailPage({ user }: { user: User }) {
       });
     },
     onSuccess: () => {
-      setComposing(false);
+      update({ compose: null });
       setComposeThread(null);
       return client.invalidateQueries({ queryKey: ["mail-drafts"] });
     },
   });
-  if (accounts.isPending || mailboxes.isPending) return <PageLoading />;
+  const reconcileDraft = useMutation({
+    mutationFn: ({ id, outcome }: { id: string; outcome: "not_sent" | "sent" }) =>
+      api.reconcileMailDraft(id, { outcome }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["mail-drafts"] }),
+  });
+  const sendRecovery = (
+    <MailSendRecovery
+      drafts={uncertainDrafts}
+      error={drafts.error}
+      isPending={drafts.isPending}
+      mutationError={reconcileDraft.error}
+      mutationPending={reconcileDraft.isPending}
+      reconcile={(id, outcome) => reconcileDraft.mutate({ id, outcome })}
+    />
+  );
+  if (accounts.isPending || mailboxes.isPending) return <WorkspaceSkeleton kind="mail" />;
   if (accounts.isError) return <InlineError error={accounts.error} />;
   if (mailboxes.isError) return <InlineError error={mailboxes.error} />;
   if (!enabled.length)
     return (
-      <div className="narrow-page">
-        <p className="eyebrow">Mail for people and agents</p>
-        <h1>Inbox</h1>
-        <EmptyState icon={<Inbox />} title="Connect a mailbox">
-          Enable Mail on a connected Google account or add iCloud from Settings.
-        </EmptyState>
+      <div className="mail-page">
+        {sendRecovery}
+        <ConnectionRecoveryAlert accounts={enabled} />
+        <div className="narrow-page">
+          <p className="eyebrow">Mail for people and agents</p>
+          <h1>Inbox</h1>
+          <EmptyState icon={<InboxIcon />} title="Connect a mailbox">
+            Enable Mail on a connected Google account or add iCloud from Settings.
+          </EmptyState>
+        </div>
       </div>
     );
-  const selectedMailbox = mailboxId
-    ? mailboxes.data.find((mailbox) => mailbox.id === mailboxId)
-    : undefined;
-  const active = enabled.find(
-    (account) => account.id === (selectedMailbox?.accountId ?? accountId),
-  );
-  const title = selectedMailbox
-    ? mailboxDisplayName(selectedMailbox)
-    : active
-      ? active.email || active.label
-      : "Inbox";
+  if (threads.isPending) return <WorkspaceSkeleton kind="mail" />;
   return (
     <div className="mail-page">
-      <header className="mail-command-header">
-        <div>
-          <p className="eyebrow">Unified mail · synced every five minutes</p>
-          <h1>{title}</h1>
-        </div>
-        <div className="mail-command-actions">
-          <form
-            className="mail-search"
-            onSubmit={(event) => {
-              event.preventDefault();
-              update({ q: draft.trim() || null, thread: null, view: null });
-            }}
-          >
-            <Search aria-hidden="true" size={16} />
-            <input
-              aria-label="Search conversations"
-              onChange={(event) => setDraft(event.currentTarget.value)}
-              placeholder="Search people or subjects…"
-              type="search"
-              value={draft}
-            />
-          </form>
-          <Button
-            aria-pressed={unreadOnly}
-            onClick={() => update({ thread: null, unread: unreadOnly ? null : "1", view: null })}
-            tone={unreadOnly ? "accent" : "ghost"}
-          >
-            Unread
-          </Button>
-          <Button
-            aria-label={`Sync ${title}`}
-            disabled={sync.isPending}
-            onClick={() => sync.mutate()}
-            tone="ghost"
-          >
-            <RefreshCw className={sync.isPending ? "spin" : ""} size={16} />
-            {sync.isPending ? "Syncing…" : "Sync"}
-          </Button>
-          <Button
-            onClick={() => {
-              setComposeThread(null);
-              setComposing(true);
-            }}
-            tone="accent"
-          >
-            <Plus size={16} /> Compose
-          </Button>
-        </div>
-      </header>
-      {sync.isError ? <InlineError error={sync.error} /> : null}
+      {sendRecovery}
+      <ConnectionRecoveryAlert accounts={enabled} />
       {composing ? (
         <form
           className="mail-compose"
@@ -458,7 +510,7 @@ export function MailPage({ user }: { user: User }) {
           <div>
             <Button
               onClick={() => {
-                setComposing(false);
+                update({ compose: null });
                 setComposeThread(null);
               }}
               tone="ghost"
@@ -482,19 +534,12 @@ export function MailPage({ user }: { user: User }) {
           </div>
         </form>
       ) : null}
-      {sync.isSuccess ? (
-        <p className="mail-sync-status" role="status">
-          Mail is up to date.
-        </p>
-      ) : null}
       <div className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}>
         <section aria-label="Conversations" className="mail-thread-list">
-          {threads.isPending ? (
-            <PageLoading />
-          ) : threads.isError ? (
+          {threads.isError ? (
             <InlineError error={threads.error} />
           ) : threads.data.length === 0 ? (
-            <EmptyState icon={<Mail />} title="Nothing here">
+            <EmptyState icon={<MailIcon />} title="Nothing here">
               Try another mailbox or a broader search.
             </EmptyState>
           ) : (
@@ -527,10 +572,10 @@ export function MailPage({ user }: { user: User }) {
               }
               back={() => update({ thread: null })}
               pending={updateThread.isPending}
-              messages={messages.data}
+              messages={messages.data ?? []}
               reply={() => {
                 setComposeThread(selected);
-                setComposing(true);
+                update({ compose: "1" });
               }}
               snooze={() => snoozeThread.mutate(selected.id)}
               thread={selected}
@@ -551,7 +596,7 @@ export function MailPage({ user }: { user: User }) {
           ) : selectedId && loaded.isPending ? (
             <PageLoading />
           ) : (
-            <EmptyState icon={<Mail />} title="Select a conversation">
+            <EmptyState icon={<MailIcon />} title="Select a conversation">
               Open a conversation to read every synced message and manage it.
             </EmptyState>
           )}
@@ -584,78 +629,106 @@ function MailboxAccount({
   const grouped = Map.groupBy(sortMailboxes(mailboxes), mailboxSection);
   const label = account.label || account.email || "Connected account";
   const panelId = `mailbox-account-${account.id}`;
+  const unreadCount = inboxUnreadCount(mailboxes);
   const links = (section: MailboxSection) =>
     (grouped.get(section) ?? []).map((mailbox) => (
-      <button
-        aria-pressed={mailbox.id === activeMailboxId}
-        className={mailbox.id === activeMailboxId ? "mailbox-link is-active" : "mailbox-link"}
-        key={mailbox.id}
-        onClick={() => selectMailbox(mailbox.id)}
-        type="button"
-      >
-        <span>{mailboxDisplayName(mailbox)}</span>
-        {mailbox.unreadCount > 0 ? <b>{mailbox.unreadCount}</b> : null}
-      </button>
-    ));
-  return (
-    <section className="mailbox-account">
-      <button
-        aria-controls={panelId}
-        aria-expanded={expanded}
-        aria-label={`Toggle ${label} ${account.provider === "google" ? "Google Mail" : "iCloud Mail"} mailboxes`}
-        className="mailbox-account__header"
-        onClick={toggle}
-        type="button"
-      >
-        <span className={`provider-icon provider-icon--${account.provider}`}>
-          {account.provider === "google" ? "G" : "i"}
-        </span>
-        <span className="mailbox-account__identity">
-          <strong>{label}</strong>
-          <small>{account.provider === "google" ? "Google Mail" : "iCloud Mail"}</small>
-        </span>
-        {inboxUnreadCount(mailboxes) > 0 ? <b>{inboxUnreadCount(mailboxes)}</b> : null}
-        <ChevronDown aria-hidden="true" size={15} />
-      </button>
-      {expanded ? (
-        <div className="mailbox-account__body" id={panelId}>
+      <SidebarMenuSubItem key={mailbox.id}>
+        <SidebarMenuSubButton asChild isActive={mailbox.id === activeMailboxId}>
           <button
-            aria-pressed={activeAccountId === account.id && !activeMailboxId}
-            className={
-              activeAccountId === account.id && !activeMailboxId
-                ? "mailbox-link is-active"
-                : "mailbox-link"
-            }
-            onClick={selectAccount}
+            aria-pressed={mailbox.id === activeMailboxId}
+            className="mail-sidebar__mailbox-link"
+            onClick={() => selectMailbox(mailbox.id)}
             type="button"
           >
-            <span>All mail</span>
+            <span>{mailboxDisplayName(mailbox)}</span>
+            {mailbox.unreadCount > 0 ? <b>{mailbox.unreadCount}</b> : null}
           </button>
-          {links("primary")}
-          {(grouped.get("categories")?.length ?? 0) > 0 ? (
-            <div className="mailbox-subgroup">
-              <span className="mailbox-subgroup__label">Categories</span>
-              {links("categories")}
-            </div>
-          ) : null}
-          {(["labels", "more"] as const).map((section) =>
-            (grouped.get(section)?.length ?? 0) > 0 ? (
-              <details
-                className="mailbox-subgroup"
-                key={section}
-                open={grouped.get(section)?.some((mailbox) => mailbox.id === activeMailboxId)}
+        </SidebarMenuSubButton>
+      </SidebarMenuSubItem>
+    ));
+  return (
+    <Collapsible asChild onOpenChange={toggle} open={expanded}>
+      <SidebarMenuItem className="mail-sidebar__account">
+        <CollapsibleTrigger asChild>
+          <SidebarMenuButton
+            aria-controls={panelId}
+            aria-label={`Toggle ${label} ${account.provider === "google" ? "Google Mail" : "iCloud Mail"} mailboxes`}
+            className="mail-sidebar__account-trigger"
+            size="lg"
+          >
+            <span className={`provider-icon provider-icon--${account.provider}`}>
+              {account.provider === "google" ? "G" : "i"}
+            </span>
+            <span className="mail-sidebar__account-copy">
+              <span className="mail-sidebar__account-name">{label}</span>
+              <span className="mail-sidebar__account-email">
+                {account.provider === "google" ? "Google Mail" : "iCloud Mail"}
+              </span>
+            </span>
+            {unreadCount > 0 ? (
+              <span className="mail-sidebar__account-count">{unreadCount}</span>
+            ) : null}
+            <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
+          </SidebarMenuButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent id={panelId}>
+          <SidebarMenuSub className="mail-sidebar__account-body">
+            <SidebarMenuSubItem>
+              <SidebarMenuSubButton
+                asChild
+                isActive={activeAccountId === account.id && !activeMailboxId}
               >
-                <summary>
-                  <span>{section === "labels" ? "Labels" : "More"}</span>
-                  <small>{grouped.get(section)?.length}</small>
-                </summary>
-                {links(section)}
-              </details>
-            ) : null,
-          )}
-        </div>
-      ) : null}
-    </section>
+                <button
+                  aria-pressed={activeAccountId === account.id && !activeMailboxId}
+                  className="mail-sidebar__mailbox-link"
+                  onClick={selectAccount}
+                  type="button"
+                >
+                  <span>All mail</span>
+                </button>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+            {links("primary")}
+            {(grouped.get("categories")?.length ?? 0) > 0 ? (
+              <>
+                <SidebarMenuSubItem aria-hidden="true" className="mail-sidebar__subgroup-label">
+                  Categories
+                </SidebarMenuSubItem>
+                {links("categories")}
+              </>
+            ) : null}
+            {(["labels", "more"] as const).map((section) =>
+              (grouped.get(section)?.length ?? 0) > 0 ? (
+                <Collapsible
+                  asChild
+                  defaultOpen={
+                    grouped.get(section)?.some((mailbox) => mailbox.id === activeMailboxId) ?? false
+                  }
+                  key={section}
+                >
+                  <SidebarMenuSubItem className="mail-sidebar__subgroup">
+                    <CollapsibleTrigger asChild>
+                      <SidebarMenuSubButton asChild>
+                        <button className="mail-sidebar__subgroup-trigger" type="button">
+                          <ChevronDownIcon aria-hidden="true" />
+                          <span>{section === "labels" ? "Labels" : "More"}</span>
+                          <small>{grouped.get(section)?.length}</small>
+                        </button>
+                      </SidebarMenuSubButton>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <SidebarMenuSub className="mail-sidebar__nested-list">
+                        {links(section)}
+                      </SidebarMenuSub>
+                    </CollapsibleContent>
+                  </SidebarMenuSubItem>
+                </Collapsible>
+              ) : null,
+            )}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      </SidebarMenuItem>
+    </Collapsible>
   );
 }
 function ThreadRow({
@@ -681,7 +754,9 @@ function ThreadRow({
       <strong>{thread.subject}</strong>
       <span className="mail-thread-row__snippet">{thread.snippet || "No preview available"}</span>
       <span className="mail-thread-row__meta">
-        {thread.starred ? <Star aria-label="Starred" fill="currentColor" size={13} /> : null}
+        {thread.starred ? (
+          <StarIcon aria-label="Starred" className="size-[13px]" weight="Filled" />
+        ) : null}
         {thread.messageCount > 1 ? `${thread.messageCount} messages` : null}
       </span>
     </button>
@@ -703,7 +778,7 @@ function Reader({
   archive: () => void;
   back: () => void;
   pending: boolean;
-  messages: MailMessage[] | undefined;
+  messages: MailMessage[];
   reply: () => void;
   snooze: () => void;
   thread: MailThread;
@@ -722,7 +797,7 @@ function Reader({
     threadId: thread.id,
     to: thread.to,
   };
-  const displayedMessages = messages?.length
+  const displayedMessages = messages.length
     ? messages.some((message) => message.bodyText === thread.bodyText)
       ? messages
       : [fallbackMessage, ...messages]
@@ -732,16 +807,16 @@ function Reader({
     <article className="mail-reader__article">
       <div className="mail-reader__toolbar">
         <Button className="mail-reader__back" onClick={back} tone="ghost">
-          <ChevronLeft size={16} /> Inbox
+          <ChevronLeftIcon className="size-4" /> Inbox
         </Button>
         <Button onClick={reply} tone="ghost">
-          <Reply size={16} /> Reply
+          <ReplyIcon className="size-4" /> Reply
         </Button>
         <Button aria-label="Snooze conversation until tomorrow" onClick={snooze} tone="ghost">
-          <Clock3 size={16} /> Snooze
+          <ClockIcon className="size-4" /> Snooze
         </Button>
         <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
-          <Archive size={16} />
+          <ArchiveIcon className="size-4" />
         </Button>
         <Button
           aria-label="Move conversation to trash"
@@ -749,7 +824,7 @@ function Reader({
           onClick={trash}
           tone="ghost"
         >
-          <Trash2 size={16} />
+          <TrashIcon className="size-4" />
         </Button>
         <Button
           aria-label={thread.starred ? "Unstar conversation" : "Star conversation"}
@@ -757,7 +832,7 @@ function Reader({
           onClick={toggleStar}
           tone="ghost"
         >
-          <Star fill={thread.starred ? "currentColor" : "none"} size={16} />
+          <StarIcon className="size-4" weight={thread.starred ? "Filled" : "Outline"} />
         </Button>
         <Button
           aria-label={thread.unread ? "Mark conversation read" : "Mark conversation unread"}
@@ -765,7 +840,7 @@ function Reader({
           onClick={toggleUnread}
           tone="ghost"
         >
-          {thread.unread ? <Eye size={16} /> : <EyeOff size={16} />}
+          {thread.unread ? <EyeIcon className="size-4" /> : <EyeOffIcon className="size-4" />}
         </Button>
       </div>
       <header>

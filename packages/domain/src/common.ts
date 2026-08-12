@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+const semanticVersionPattern =
+  /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+/** Semantic Versioning 2.0.0, including prerelease and build metadata. */
+export const semanticVersionSchema = z
+  .string()
+  .regex(semanticVersionPattern, "Use a valid semantic version.");
+
 export const idSchema = z.uuid();
 export const isoDateTimeSchema = z.iso.datetime({ offset: true });
 export const timeZoneSchema = z.string().trim().min(1).max(100);

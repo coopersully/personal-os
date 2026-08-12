@@ -37,11 +37,16 @@ export class AppError extends Error {
   }
 }
 
-export function isUniqueViolation(error: unknown): boolean {
+export function isUniqueViolation(error: unknown, constraint?: string): boolean {
   let current = error;
   const seen = new Set<unknown>();
   while (typeof current === "object" && current !== null && !seen.has(current)) {
-    if ("code" in current && current.code === "23505") return true;
+    if (
+      "code" in current &&
+      current.code === "23505" &&
+      (constraint === undefined || ("constraint" in current && current.constraint === constraint))
+    )
+      return true;
     seen.add(current);
     current = "cause" in current ? current.cause : null;
   }

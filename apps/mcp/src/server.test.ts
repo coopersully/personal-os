@@ -1,6 +1,5 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { PersonalOsApiClient } from "@personal-os/api-client";
+import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
+import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import type {
   AutomationRoutine,
   AutomationRun,
@@ -12,7 +11,9 @@ import type {
   Reminder,
   Task,
 } from "@personal-os/domain";
+import { accessScopeSchema } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "./server.js";
+import { availableToolNames } from "./tool-catalog.js";
 
 const now = "2026-07-13T12:00:00.000Z";
 const id = "11111111-1111-4111-8111-111111111111";
@@ -24,6 +25,13 @@ const reminder: Reminder = {
   dueAt: null,
   timezone: null,
   priority: "medium",
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: now,
+    sourceType: "reminder",
+  },
   completedAt: null,
   createdAt: now,
   updatedAt: now,
@@ -76,6 +84,30 @@ const event: CalendarEvent = {
   createdAt: now,
   updatedAt: now,
 };
+const commitmentCandidate = {
+  allDay: false,
+  buffer: { afterMinutes: 15, beforeMinutes: 15 },
+  calendarId: id,
+  endsAt: "2026-07-13T13:00:00.000Z",
+  evidence: {
+    kind: "booking" as const,
+    source: {
+      accountId,
+      provider: "google" as const,
+      remoteId: "booking-1",
+      revision: "v1",
+      sourceType: "mail_thread" as const,
+    },
+    summary: "Confirmed reservation.",
+  },
+  flexibility: "hard" as const,
+  location: null,
+  notes: null,
+  startsAt: now,
+  timezone: "UTC",
+  title: "Reservation",
+  visibility: "private" as const,
+};
 const mailbox: Mailbox = {
   accountId,
   id,
@@ -100,6 +132,54 @@ const mailThread: MailThread = {
   subject: "Test mail",
   to: [],
   unread: true,
+  updatedAt: now,
+};
+const domainProfile = {
+  categories: [],
+  createdAt: now,
+  domain: "mail" as const,
+  id,
+  instructions: ["Keep only high-signal mail visible."],
+  objective: "Keep a clean inbox.",
+  preferences: { inboxStyle: "signal_only" },
+  sourceContexts: [],
+  status: "draft" as const,
+  summary: "A low-noise inbox.",
+  updatedAt: now,
+  version: 1,
+};
+const attentionItem = {
+  createdAt: now,
+  domain: "mail" as const,
+  expiresAt: null,
+  id,
+  importance: "high" as const,
+  kind: "important" as const,
+  occursAt: null,
+  relatedEntityId: null,
+  relatedEntityType: null,
+  source: null,
+  status: "open" as const,
+  summary: "A reply is due.",
+  title: "Reply needed",
+  updatedAt: now,
+  version: 1,
+};
+const mailRule = {
+  actions: [{ afterDays: 1, mailboxId: null, type: "archive" as const }],
+  condition: { field: "any" as const, operator: "contains" as const, value: "newsletter" },
+  confidenceThreshold: null,
+  createdAt: now,
+  description: "Archive newsletters after one day.",
+  domain: "mail" as const,
+  enabled: false,
+  id,
+  name: "Archive newsletters",
+  policy: "preview" as const,
+  profileId: id,
+  sourceIds: [accountId],
+  updatedAt: now,
+  version: 1,
 };
 const automation: AutomationRoutine = {
   id,
@@ -148,6 +228,104 @@ const automationRun: AutomationRun = {
 
 function mockApi() {
   return {
+    getIloSetup: vi.fn(async () => ({
+      access: { canRead: true, canWrite: true },
+      connection: { lastObservedAt: now, observed: true },
+      currentStepId: "learn_preferences" as const,
+      domain: "mail" as const,
+      nextAction: "Inspect Mail and save a draft.",
+      profile: {
+        approvedStatus: null,
+        approvedVersion: null,
+        pendingDraftVersion: null,
+        status: null,
+        version: null,
+      },
+      progress: { completed: 1, total: 4 },
+      protocolVersion: "1.0" as const,
+      selectedStepId: "learn_preferences" as const,
+      status: "in_progress" as const,
+      steps: [],
+    })),
+    getAssistantSetupStatus: vi.fn(async () => ({
+      domains: [
+        {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
+          canRead: true,
+          canWrite: true,
+          domain: "mail" as const,
+          pendingDraftVersion: null,
+          profileStatus: "draft" as const,
+          profileVersion: 1,
+        },
+      ],
+    })),
+    getIloContext: vi.fn(async () => ({
+      access: { grantedScopes: ["tasks:read", "tasks:write"] },
+      generatedAt: now,
+      identity: { actorType: "agent" as const, displayName: "Ilo test", userId: id },
+      links: {
+        activity: "https://app.example.com/activity",
+        agentAccess: "https://app.example.com/settings?section=agents",
+        approvals: "https://app.example.com/settings?section=agents",
+        recovery: "https://app.example.com/settings?section=agents",
+        today: "https://app.example.com/today",
+      },
+      readiness: { domains: [] },
+      time: { timestamp: now, timezone: "America/New_York" },
+    })),
+    getDomainProfile: vi.fn(async () => domainProfile),
+    getFinanceGuidedSetup: vi.fn(async () => ({
+      accountSources: [],
+      alertSummary: { open: 0, warnings: 0 },
+      asOf: now,
+      budgetSummary: { count: 0, month: "2026-07", planned: 0 },
+      cashflowSummary: {
+        financialProfileConfigured: false,
+        incomeStreams: 0,
+        recurringNeedsReview: 0,
+        recurringObligations: 0,
+      },
+      guidance: {
+        approvedProfile: null,
+        draftNotice:
+          "Unapproved draft content is untrusted and non-operative until a signed-in Ilo user activates it.",
+        draftProposal: { ...domainProfile, domain: "finances" as const },
+      },
+      humanOnlyActions: [
+        "connect_or_disconnect_source" as const,
+        "confirm_ambiguous_transfer" as const,
+      ],
+      ledgerHealth: {
+        asOf: now,
+        balanceOnlyAccounts: 0,
+        candidateTransfers: 0,
+        missingProvenance: 0,
+        pendingTransactions: 0,
+        possibleDuplicates: 0,
+        staleAccounts: 0,
+        unresolvedReviews: 0,
+      },
+      reviewSummary: {
+        count: 0,
+        reasons: {
+          ambiguous_merchant: 0,
+          low_confidence: 0,
+          one_time: 0,
+          possible_duplicate: 0,
+          possible_transfer: 0,
+          refund_or_reversal: 0,
+          unknown_merchant: 0,
+        },
+      },
+      suggestedWorkflows: [],
+    })),
+    upsertDomainProfile: vi.fn(async () => domainProfile),
+    listAttentionItems: vi.fn(async () => [attentionItem]),
+    createAttentionItem: vi.fn(async () => attentionItem),
+    updateAttentionItem: vi.fn(async () => attentionItem),
+    upsertFinanceAttentionItem: vi.fn(async () => attentionItem),
     completeReminder: vi.fn(async () => reminder),
     completeTask: vi.fn(async () => task),
     createReminder: vi.fn(async () => reminder),
@@ -262,7 +440,7 @@ function mockApi() {
     })),
     getFinanceReviewQueue: vi.fn(async () => []),
     listFinanceTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),
-    proposeFinanceCategorizations: vi.fn(async () => []),
+    proposeFinanceCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
     applyFinanceCategorizations: vi.fn(async () => []),
     resolveFinanceReview: vi.fn(async () => ({ deferred: true })),
     updateFinanceMerchant: vi.fn(async () => ({
@@ -276,6 +454,27 @@ function mockApi() {
     deleteReminder: vi.fn(async () => undefined),
     deleteTask: vi.fn(async () => undefined),
     listReminders: vi.fn(async () => ({ items: [reminder], nextCursor: null })),
+    getReminder: vi.fn(async () => reminder),
+    previewOverdueReminderDeferral: vi.fn(async () => ({
+      candidates: [
+        {
+          dueAt: "2026-07-13T10:00:00.000Z",
+          id,
+          priority: reminder.priority,
+          proposedDueAt: "2026-07-14T13:00:00.000Z",
+          proposedTimezone: "America/New_York",
+          source: reminder.source,
+          title: reminder.title,
+          updatedAt: reminder.updatedAt,
+        },
+      ],
+      matchedCount: 1,
+      policy: "preview" as const,
+      previewedAt: now,
+    })),
+    restoreReminder: vi.fn(async () => reminder),
+    trashReminder: vi.fn(async () => reminder),
+    upsertReminderAttentionItem: vi.fn(async () => attentionItem),
     listTasks: vi.fn(async () => ({ items: [task], nextCursor: null })),
     listGoals: vi.fn(async () => []),
     createGoal: vi.fn(async () => ({
@@ -309,19 +508,103 @@ function mockApi() {
     })),
     listCalendars: vi.fn(async () => [calendar]),
     listMailboxes: vi.fn(async () => [mailbox]),
+    getMailSetupContext: vi.fn(async () => ({
+      accounts: [],
+      automation: {
+        executionLimitPerRun: 6 as const,
+        failedCount: 0,
+        inProgressCount: 0,
+        lastCompletedAt: null,
+        oldestDueAt: null,
+        pendingCount: 0,
+        reconciliationCount: 0,
+      },
+      safety: {
+        delayedRetentionAutomation: true as const,
+        permanentDeletion: false as const,
+        providerFilterCreation: false as const,
+        spamClassification: false as const,
+        unsubscribeAutomation: false as const,
+      },
+    })),
     listMailThreads: vi.fn(async () => [mailThread]),
     getMailThread: vi.fn(async () => mailThread),
     listMailMessages: vi.fn(async () => []),
+    listMailRules: vi.fn(async () => [mailRule]),
+    previewMailRule: vi.fn(async () => ({
+      candidates: [],
+      fingerprint: "a".repeat(64),
+      matchedCount: 0,
+      previewedAt: now,
+      ruleId: null,
+      ruleVersion: null,
+      scannedCount: 1,
+      window: {
+        limit: 200 as const,
+        newestReceivedAt: now,
+        oldestReceivedAt: now,
+        truncated: false,
+      },
+    })),
+    previewSavedMailRule: vi.fn(async () => ({
+      candidates: [],
+      fingerprint: "b".repeat(64),
+      matchedCount: 0,
+      previewedAt: now,
+      ruleId: id,
+      ruleVersion: 1,
+      scannedCount: 1,
+      window: {
+        limit: 200 as const,
+        newestReceivedAt: now,
+        oldestReceivedAt: now,
+        truncated: false,
+      },
+    })),
+    createMailDraft: vi.fn(async () => ({ id })),
+    createMailRule: vi.fn(async () => mailRule),
+    upsertMailAttentionItem: vi.fn(async () => attentionItem),
+    updateMailRule: vi.fn(async () => ({ ...mailRule, enabled: true, version: 2 })),
     updateMailThread: vi.fn(async () => mailThread),
+    bulkUpdateMail: vi.fn(async ({ items }: { items: Array<{ id: string }> }) => ({
+      failedCount: 0,
+      failures: [],
+      updatedCount: items.length,
+      updatedIds: items.map((item) => item.id),
+    })),
     snoozeMailThread: vi.fn(async () => undefined),
     sendMail: vi.fn(async () => undefined),
     listEvents: vi.fn(async () => [event]),
+    getEvent: vi.fn(async () => event),
     createEvent: vi.fn(async () => event),
     createEventBlock: vi.fn(async () => event),
+    previewCalendarCommitment: vi.fn(async () => ({
+      authority: "caller_supplied_unverified" as const,
+      candidate: commitmentCandidate,
+      destination: calendar,
+      possibleDuplicateEventId: null,
+      fingerprint: "a".repeat(64),
+      policy: {
+        canApply: false,
+        effectivePolicy: "preview" as const,
+        reasons: ["Caller-supplied evidence is not authority."],
+        requestedPolicy: "approved_rule" as const,
+        requiresInteractiveApproval: true,
+      },
+      providerEffect: "local_write" as const,
+      warnings: [],
+    })),
     updateEvent: vi.fn(async () => event),
     updateEventBlock: vi.fn(async () => event),
     deleteEvent: vi.fn(async () => undefined),
     deleteEventBlock: vi.fn(async () => event),
+    restoreEvent: vi.fn(async () => event),
+    trashEvent: vi.fn(async () => ({
+      blockUpdatedAtById: {},
+      eventId: id,
+      updatedAt: now,
+    })),
+    upsertCalendarAttentionItem: vi.fn(async () => attentionItem),
     listActivity: vi.fn(async () => [
       {
         id,
@@ -357,66 +640,342 @@ describe("ilo MCP server", () => {
     await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
 
     const tools = await client.listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual([
-      "get_finance_wealth_summary",
-      "get_finance_cashflow",
-      "review_finance_recurring_payment",
-      "resolve_finance_alert",
-      "get_finance_ledger_health",
-      "list_finance_transactions",
-      "get_finance_categories",
-      "get_finance_budget_status",
-      "list_finance_merchants",
-      "rename_finance_merchant",
-      "merge_finance_merchants",
-      "get_finance_review_queue",
-      "propose_finance_categorizations",
-      "apply_finance_categorizations",
-      "resolve_finance_review",
-      "get_finance_overview",
-      "add_finance_transaction",
-      "categorize_finance_transaction",
-      "list_x_bookmarks",
-      "sync_x_bookmarks",
-      "list_reminders",
-      "create_reminder",
-      "update_reminder",
-      "complete_reminder",
-      "delete_reminder",
-      "list_tasks",
-      "create_task",
-      "update_task",
-      "complete_task",
-      "delete_task",
-      "list_calendars",
-      "list_mailboxes",
-      "list_mail",
-      "read_mail",
-      "update_mail",
-      "bulk_update_mail",
-      "snooze_mail",
-      "send_mail",
-      "list_events",
-      "create_event",
-      "update_event",
-      "block_event",
-      "set_event_block_privacy",
-      "unblock_event",
-      "delete_event",
-      "list_goals",
-      "create_goal",
-      "update_goal",
-      "list_motives",
-      "create_motive",
-      "list_activity",
-      "get_daily_brief",
-      "list_automations",
-      "run_automation",
-    ]);
+    expect(new Set(tools.tools.map((tool) => tool.name))).toEqual(
+      new Set(availableToolNames(new Set(accessScopeSchema.options), false)),
+    );
+    for (const tool of tools.tools) {
+      expect(tool.outputSchema).toMatchObject({
+        properties: { _ilo: expect.any(Object) },
+        required: ["_ilo"],
+        type: "object",
+      });
+      expect(tool.annotations).toEqual({
+        destructiveHint: expect.any(Boolean),
+        idempotentHint: expect.any(Boolean),
+        openWorldHint: expect.any(Boolean),
+        readOnlyHint: expect.any(Boolean),
+      });
+      expect(tool._meta).toMatchObject({
+        "ilo/domain": expect.any(String),
+        "ilo/policy": expect.any(String),
+        "ilo/stage": expect.any(String),
+      });
+    }
+    expect(tools.tools.find((tool) => tool.name === "run_automation")?.annotations).toMatchObject({
+      idempotentHint: false,
+      readOnlyHint: false,
+    });
+    expect(tools.tools.find((tool) => tool.name === "sync_x_bookmarks")?.annotations).toMatchObject(
+      {
+        readOnlyHint: false,
+      },
+    );
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
+    const reminderTools = tools.tools.filter((tool) => tool.name.includes("reminder"));
+    expect(reminderTools).toHaveLength(9);
+    for (const tool of reminderTools) {
+      expect(tool.annotations).toEqual(
+        expect.objectContaining({
+          destructiveHint: expect.any(Boolean),
+          idempotentHint: expect.any(Boolean),
+          openWorldHint: false,
+          readOnlyHint: expect.any(Boolean),
+        }),
+      );
+    }
+    expect(tools.tools.find((tool) => tool.name === "delete_reminder")?.annotations).toMatchObject({
+      destructiveHint: true,
+      idempotentHint: false,
+      readOnlyHint: false,
+    });
+    expect(
+      tools.tools.find((tool) => tool.name === "propose_finance_categorizations")?.annotations,
+    ).toMatchObject({
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+      readOnlyHint: true,
+    });
+    for (const tool of tools.tools.filter(
+      (candidate) =>
+        candidate.name.includes("finance") && candidate.name !== "create_finance_attention_item",
+    )) {
+      expect(tool.annotations).toEqual({
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      });
+    }
+    expect(
+      tools.tools.find((tool) => tool.name === "create_finance_attention_item")?.annotations,
+    ).toEqual({
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+      readOnlyHint: false,
+    });
+    for (const tool of tools.tools.filter((candidate) =>
+      [
+        "get_ilo_setup",
+        "get_agent_setup_status",
+        "get_domain_profile",
+        "save_domain_profile",
+        "list_attention_items",
+        "create_attention_item",
+        "update_attention_item",
+      ].includes(candidate.name),
+    )) {
+      expect(tool.annotations).toEqual({
+        destructiveHint: expect.any(Boolean),
+        idempotentHint: expect.any(Boolean),
+        openWorldHint: expect.any(Boolean),
+        readOnlyHint: expect.any(Boolean),
+      });
+    }
+    for (const tool of tools.tools.filter((candidate) =>
+      [
+        "list_mailboxes",
+        "get_mail_setup_context",
+        "list_mail",
+        "read_mail",
+        "update_mail",
+        "bulk_update_mail",
+        "snooze_mail",
+        "create_mail_draft",
+        "send_mail",
+        "create_mail_attention_item",
+        "list_mail_rules",
+        "preview_mail_rule",
+        "review_mail_rule",
+        "create_mail_rule",
+        "update_mail_rule",
+      ].includes(candidate.name),
+    )) {
+      expect(tool.annotations).toEqual({
+        destructiveHint: expect.any(Boolean),
+        idempotentHint: expect.any(Boolean),
+        openWorldHint: expect.any(Boolean),
+        readOnlyHint: expect.any(Boolean),
+      });
+    }
+    expect(tools.tools.find((tool) => tool.name === "send_mail")?.annotations).toMatchObject({
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+      readOnlyHint: false,
+    });
+    const sendMailInput = tools.tools.find((tool) => tool.name === "send_mail")?.inputSchema as {
+      required?: string[];
+    };
+    expect(sendMailInput.required).toContain("draftId");
+    const updateMailInput = tools.tools.find((tool) => tool.name === "update_mail")
+      ?.inputSchema as { required?: string[] };
+    expect(updateMailInput.required).toContain("expectedUpdatedAt");
+    const bulkMailInput = tools.tools.find((tool) => tool.name === "bulk_update_mail")
+      ?.inputSchema as {
+      properties?: { items?: { items?: { required?: string[] } } };
+      required?: string[];
+    };
+    expect(bulkMailInput.required).toContain("items");
+    expect(bulkMailInput.properties?.items?.items?.required).toEqual(
+      expect.arrayContaining(["expectedUpdatedAt", "id"]),
+    );
+    for (const name of [
+      "update_mail",
+      "bulk_update_mail",
+      "snooze_mail",
+      "create_mail_draft",
+      "send_mail",
+      "create_mail_attention_item",
+      "create_mail_rule",
+      "update_mail_rule",
+    ]) {
+      expect(tools.tools.find((tool) => tool.name === name)?.annotations?.idempotentHint).toBe(
+        false,
+      );
+    }
+    const calendarAnnotations = new Map(
+      tools.tools
+        .filter((tool) =>
+          [
+            "list_calendars",
+            "list_events",
+            "get_event",
+            "create_event",
+            "update_event",
+            "block_event",
+            "set_event_block_privacy",
+            "unblock_event",
+            "delete_event",
+            "restore_event",
+            "create_calendar_attention_item",
+            "preview_calendar_commitment",
+          ].includes(tool.name),
+        )
+        .map((tool) => [tool.name, tool.annotations]),
+    );
+    expect(calendarAnnotations).toEqual(
+      new Map([
+        [
+          "list_calendars",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "list_events",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "get_event",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+        [
+          "create_event",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "update_event",
+          {
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "block_event",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "set_event_block_privacy",
+          {
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "unblock_event",
+          {
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "delete_event",
+          {
+            destructiveHint: true,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "restore_event",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: true,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "create_calendar_attention_item",
+          {
+            destructiveHint: false,
+            idempotentHint: false,
+            openWorldHint: false,
+            readOnlyHint: false,
+          },
+        ],
+        [
+          "preview_calendar_commitment",
+          {
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+            readOnlyHint: true,
+          },
+        ],
+      ]),
+    );
 
+    await client.callTool({
+      name: "get_ilo_setup",
+      arguments: { domain: "mail", stepId: "learn_preferences" },
+    });
+    await client.callTool({ name: "get_domain_profile", arguments: { domain: "mail" } });
+    await client.callTool({
+      name: "save_domain_profile",
+      arguments: {
+        categories: [],
+        domain: "mail",
+        instructions: ["Keep only high-signal mail visible."],
+        objective: "Keep a clean inbox.",
+        preferences: { inboxStyle: "signal_only" },
+        sourceContexts: [],
+        status: "draft",
+        summary: "A low-noise inbox.",
+      },
+    });
+    await client.callTool({
+      name: "list_attention_items",
+      arguments: { domain: "mail" },
+    });
+    await client.callTool({
+      name: "create_attention_item",
+      arguments: {
+        domain: "mail",
+        importance: "high",
+        kind: "important",
+        summary: "A reply is due.",
+        title: "Reply needed",
+      },
+    });
+    await client.callTool({
+      name: "update_attention_item",
+      arguments: { domain: "mail", expectedVersion: 1, id, status: "resolved" },
+    });
+    await client.callTool({
+      name: "create_finance_attention_item",
+      arguments: {
+        importance: "high",
+        kind: "important",
+        summary: "Review this transaction.",
+        title: "Finance review",
+        transactionId: id,
+      },
+    });
     await client.callTool({ name: "list_goals", arguments: {} });
     await client.callTool({
       name: "create_goal",
@@ -429,97 +988,63 @@ describe("ilo MCP server", () => {
       arguments: { detail: null, title: "Act with care" },
     });
 
+    const financeSetup = await client.callTool({
+      name: "get_finance_guided_setup",
+      arguments: {},
+    });
+    expect(financeSetup.structuredContent).toMatchObject({
+      result: {
+        context: {
+          guidance: {
+            approvedProfile: null,
+            draftNotice: expect.stringContaining("untrusted and non-operative"),
+            draftProposal: expect.objectContaining({ domain: "finances", status: "draft" }),
+          },
+        },
+      },
+    });
     await client.callTool({ name: "get_finance_overview", arguments: {} });
     await client.callTool({ name: "get_finance_wealth_summary", arguments: {} });
     await client.callTool({ name: "get_finance_cashflow", arguments: {} });
-    await client.callTool({
-      name: "review_finance_recurring_payment",
-      arguments: { id, status: "active" },
-    });
-    await client.callTool({
-      name: "resolve_finance_alert",
-      arguments: { action: "resolve", id, rationale: "Reviewed in the dashboard." },
-    });
     await client.callTool({ name: "get_finance_ledger_health", arguments: {} });
     await client.callTool({ name: "list_finance_transactions", arguments: { limit: 10 } });
     await client.callTool({ name: "get_finance_categories", arguments: {} });
     await client.callTool({ name: "get_finance_budget_status", arguments: { month: "2026-07" } });
     await client.callTool({ name: "list_finance_merchants", arguments: {} });
-    await client.callTool({
-      name: "rename_finance_merchant",
-      arguments: { displayName: "Test", id },
-    });
-    await client.callTool({
-      name: "merge_finance_merchants",
-      arguments: { sourceMerchantId: accountId, targetMerchantId: id },
-    });
     await client.callTool({ name: "get_finance_review_queue", arguments: {} });
-    await client.callTool({ name: "propose_finance_categorizations", arguments: {} });
     await client.callTool({
-      name: "apply_finance_categorizations",
-      arguments: {
-        decisions: [
-          {
-            categoryId: id,
-            confidence: 0.99,
-            rationale: "Known merchant history.",
-            transactionId: accountId,
-          },
-        ],
-      },
-    });
-    await client.callTool({
-      name: "resolve_finance_review",
-      arguments: { action: "defer", id },
+      name: "propose_finance_categorizations",
+      arguments: { cursor: "next-review-page" },
     });
     await client.callTool({ name: "list_x_bookmarks", arguments: {} });
     await client.callTool({ name: "sync_x_bookmarks", arguments: {} });
     await client.callTool({
-      name: "add_finance_transaction",
-      arguments: {
-        accountId,
-        amount: 1,
-        date: "2026-07-13",
-        direction: "expense",
-        merchant: "Test",
-      },
-    });
-    await client.callTool({
-      name: "add_finance_transaction",
-      arguments: {
-        accountId,
-        amount: 2,
-        category: null,
-        date: "2026-07-13",
-        direction: "expense",
-        merchant: "Uncategorized",
-      },
-    });
-    await client.callTool({
-      name: "add_finance_transaction",
-      arguments: {
-        accountId,
-        amount: 3,
-        category: "Dining",
-        date: "2026-07-13",
-        direction: "expense",
-        merchant: "Categorized",
-      },
-    });
-    await client.callTool({
-      name: "categorize_finance_transaction",
-      arguments: { id, category: "Dining" },
-    });
-
-    await client.callTool({
       name: "list_reminders",
-      arguments: { completed: false, query: "Test" },
+      arguments: { completed: false, cursor: "next-page", limit: 25, query: "Test" },
+    });
+    await client.callTool({ name: "get_reminder", arguments: { id } });
+    await client.callTool({
+      name: "preview_overdue_reminder_deferral",
+      arguments: {
+        overdueBefore: now,
+        proposedDueAt: "2026-07-14T13:00:00.000Z",
+        timezone: "America/New_York",
+      },
     });
     await client.callTool({ name: "create_reminder", arguments: { title: "Test" } });
+    await client.callTool({
+      name: "create_reminder_attention_item",
+      arguments: {
+        reminderId: id,
+        summary: "Clarify this reminder.",
+        title: "Reminder needs review",
+      },
+    });
     await client.callTool({
       name: "update_reminder",
       arguments: {
         id,
+        expectedUpdatedAt: now,
         title: "Changed",
         dueAt: null,
         notes: null,
@@ -527,9 +1052,43 @@ describe("ilo MCP server", () => {
         priority: "high",
       },
     });
-    await client.callTool({ name: "complete_reminder", arguments: { id } });
-    const deletedReminder = await client.callTool({ name: "delete_reminder", arguments: { id } });
-    expect(deletedReminder.structuredContent).toEqual({ ok: true });
+    api.updateReminder.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "conflict",
+        details: { currentUpdatedAt: "2026-07-13T12:01:00.000Z" },
+        message: "The reminder changed since it was loaded.",
+        requestId: "request-conflict",
+        status: 409,
+      }),
+    );
+    const conflict = await client.callTool({
+      name: "update_reminder",
+      arguments: { expectedUpdatedAt: now, id, title: "Stale change" },
+    });
+    expect(conflict).toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: {
+          code: "conflict",
+          details: { currentUpdatedAt: "2026-07-13T12:01:00.000Z" },
+          requestId: "request-conflict",
+          status: 409,
+        },
+      },
+    });
+    await client.callTool({
+      name: "complete_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
+    const deletedReminder = await client.callTool({
+      name: "delete_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
+    expect(deletedReminder.structuredContent).toMatchObject({ result: reminder });
+    await client.callTool({
+      name: "restore_reminder",
+      arguments: { expectedUpdatedAt: now, id },
+    });
     await client.callTool({ name: "list_tasks", arguments: { status: "scheduled" } });
     await client.callTool({
       name: "create_task",
@@ -546,33 +1105,87 @@ describe("ilo MCP server", () => {
     });
     await client.callTool({ name: "complete_task", arguments: { id } });
     const deletedTask = await client.callTool({ name: "delete_task", arguments: { id } });
-    expect(deletedTask.structuredContent).toEqual({ ok: true });
+    expect(deletedTask.structuredContent).toMatchObject({ ok: true });
     await client.callTool({ name: "list_calendars", arguments: {} });
     await client.callTool({ name: "list_mailboxes", arguments: {} });
+    await client.callTool({ name: "get_mail_setup_context", arguments: {} });
     await client.callTool({
       name: "list_mail",
       arguments: { accountIds: [accountId], mailboxId: id, query: "Test", unread: true },
     });
     await client.callTool({ name: "read_mail", arguments: { id } });
-    await client.callTool({ name: "update_mail", arguments: { id, starred: true } });
-    await client.callTool({ name: "bulk_update_mail", arguments: { ids: [id], unread: false } });
+    await client.callTool({
+      name: "update_mail",
+      arguments: { expectedUpdatedAt: now, id, starred: true },
+    });
+    await client.callTool({
+      name: "bulk_update_mail",
+      arguments: { items: [{ expectedUpdatedAt: now, id }], unread: false },
+    });
     await client.callTool({
       name: "snooze_mail",
       arguments: { id, until: "2026-07-14T12:00:00.000Z" },
+    });
+    await client.callTool({
+      name: "create_mail_draft",
+      arguments: {
+        accountId,
+        body: "Reply body",
+        subject: "Re: Test mail",
+        to: [{ address: "Recipient@Example.COM", name: null }],
+      },
     });
     await client.callTool({
       name: "send_mail",
       arguments: {
         accountId,
         body: "Reply body",
+        draftId: id,
         subject: "Re: Test mail",
-        to: [{ address: "recipient@example.com", name: null }],
+        to: [{ address: "Recipient@Example.COM", name: null }],
       },
+    });
+    await client.callTool({
+      name: "create_mail_attention_item",
+      arguments: {
+        importance: "high",
+        kind: "important",
+        summary: "A reply is due.",
+        threadId: id,
+        title: "Reply needed",
+      },
+    });
+    await client.callTool({ name: "list_mail_rules", arguments: {} });
+    await client.callTool({
+      name: "preview_mail_rule",
+      arguments: {
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        description: mailRule.description,
+        sourceIds: mailRule.sourceIds,
+      },
+    });
+    await client.callTool({ name: "review_mail_rule", arguments: { id } });
+    await client.callTool({
+      name: "create_mail_rule",
+      arguments: {
+        actions: mailRule.actions,
+        condition: mailRule.condition,
+        description: mailRule.description,
+        name: mailRule.name,
+        profileId: id,
+        sourceIds: mailRule.sourceIds,
+      },
+    });
+    await client.callTool({
+      name: "update_mail_rule",
+      arguments: { enabled: false, expectedVersion: 1, id },
     });
     await client.callTool({
       name: "list_events",
       arguments: { from: now, to: event.endsAt, calendarIds: [id], query: "Focus" },
     });
+    await client.callTool({ name: "get_event", arguments: { id } });
     await client.callTool({
       name: "create_event",
       arguments: {
@@ -585,19 +1198,64 @@ describe("ilo MCP server", () => {
     });
     await client.callTool({
       name: "update_event",
-      arguments: { id, title: "Changed", notes: null, location: null, allDay: true },
+      arguments: {
+        allDay: true,
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: now,
+        id,
+        location: null,
+        notes: null,
+        title: "Changed",
+      },
     });
     await client.callTool({
       name: "block_event",
-      arguments: { calendarId: id, id },
+      arguments: { calendarId: id, expectedUpdatedAt: now, id },
     });
     await client.callTool({
       name: "set_event_block_privacy",
-      arguments: { blockId: id, id, mode: "details" },
+      arguments: {
+        blockId: id,
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+        id,
+        mode: "details",
+      },
     });
-    await client.callTool({ name: "unblock_event", arguments: { blockId: id, id } });
-    const deletedEvent = await client.callTool({ name: "delete_event", arguments: { id } });
-    expect(deletedEvent.content).toEqual([{ type: "text", text: "Event moved to trash." }]);
+    await client.callTool({
+      name: "unblock_event",
+      arguments: {
+        blockId: id,
+        expectedBlockUpdatedAt: now,
+        expectedUpdatedAt: now,
+        id,
+      },
+    });
+    const deletedEvent = await client.callTool({
+      name: "delete_event",
+      arguments: { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now, id },
+    });
+    expect(deletedEvent.structuredContent).toMatchObject({
+      result: { blockUpdatedAtById: {}, eventId: id, updatedAt: now },
+    });
+    await client.callTool({
+      name: "restore_event",
+      arguments: { expectedBlockUpdatedAtById: {}, expectedUpdatedAt: now, id },
+    });
+    await client.callTool({
+      name: "create_calendar_attention_item",
+      arguments: {
+        eventId: id,
+        importance: "high",
+        kind: "upcoming",
+        summary: "Prepare the agenda.",
+        title: "Upcoming focus",
+      },
+    });
+    await client.callTool({
+      name: "preview_calendar_commitment",
+      arguments: { candidate: commitmentCandidate, requestedPolicy: "approved_rule" },
+    });
     await client.callTool({ name: "list_activity", arguments: {} });
     await client.callTool({ name: "get_daily_brief", arguments: {} });
     await client.callTool({ name: "list_automations", arguments: {} });
@@ -610,7 +1268,21 @@ describe("ilo MCP server", () => {
       timezone: null,
       priority: "medium",
     });
-    expect(api.completeReminder).toHaveBeenCalledWith(id, true);
+    expect(api.completeReminder).toHaveBeenCalledWith(id, true, now);
+    expect(api.getReminder).toHaveBeenCalledWith(id);
+    expect(api.previewOverdueReminderDeferral).toHaveBeenCalledWith({
+      limit: 100,
+      overdueBefore: now,
+      priority: undefined,
+      proposedDueAt: "2026-07-14T13:00:00.000Z",
+      timezone: "America/New_York",
+    });
+    expect(api.updateReminder).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ expectedUpdatedAt: now, title: "Changed" }),
+    );
+    expect(api.trashReminder).toHaveBeenCalledWith(id, now);
+    expect(api.restoreReminder).toHaveBeenCalledWith(id, now);
     expect(api.createTask).toHaveBeenCalledWith({
       title: "Plan task",
       dueAt: null,
@@ -625,13 +1297,57 @@ describe("ilo MCP server", () => {
     expect(api.completeTask).toHaveBeenCalledWith(id, true);
     expect(api.deleteTask).toHaveBeenCalledWith(id);
     expect(api.createEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ allDay: false, notes: null, location: null }),
+      expect.objectContaining({
+        allDay: false,
+        location: null,
+        notes: null,
+        visibility: "default",
+      }),
     );
-    expect(api.createEventBlock).toHaveBeenCalledWith(id, { calendarId: id, mode: "busy" });
-    expect(api.updateEventBlock).toHaveBeenCalledWith(id, id, { mode: "details" });
-    expect(api.deleteEventBlock).toHaveBeenCalledWith(id, id);
+    expect(api.getEvent).toHaveBeenCalledWith(id);
+    expect(api.createEventBlock).toHaveBeenCalledWith(id, {
+      calendarId: id,
+      expectedUpdatedAt: now,
+      mode: "busy",
+    });
+    expect(api.updateEventBlock).toHaveBeenCalledWith(id, id, {
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+      mode: "details",
+    });
+    expect(api.deleteEventBlock).toHaveBeenCalledWith(id, id, {
+      expectedBlockUpdatedAt: now,
+      expectedUpdatedAt: now,
+    });
+    expect(api.trashEvent).toHaveBeenCalledWith(id, {
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    expect(api.restoreEvent).toHaveBeenCalledWith(id, {
+      expectedBlockUpdatedAtById: {},
+      expectedUpdatedAt: now,
+    });
+    expect(api.upsertCalendarAttentionItem).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ kind: "upcoming", summary: "Prepare the agenda." }),
+    );
+    expect(api.previewCalendarCommitment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidate: commitmentCandidate,
+        requestedPolicy: "approved_rule",
+      }),
+    );
     expect(api.listActivity).toHaveBeenCalledWith(50);
     expect(api.runAutomation).toHaveBeenCalledWith(id, true);
+    expect(api.proposeFinanceCategorizations).toHaveBeenCalledWith({
+      cursor: "next-review-page",
+      limit: 50,
+      review: "needs_review",
+    });
+    expect(api.upsertFinanceAttentionItem).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ importance: "high", kind: "important" }),
+    );
     expect(api.listMailThreads).toHaveBeenCalledWith({
       accountIds: [accountId],
       limit: 100,
@@ -639,19 +1355,74 @@ describe("ilo MCP server", () => {
       query: "Test",
       unread: true,
     });
-    expect(api.updateMailThread).toHaveBeenCalledWith(id, { starred: true });
-    expect(api.updateMailThread).toHaveBeenCalledWith(id, { unread: false });
+    expect(api.updateMailThread).toHaveBeenCalledWith(id, {
+      expectedUpdatedAt: now,
+      starred: true,
+    });
+    expect(api.bulkUpdateMail).toHaveBeenCalledWith({
+      items: [{ expectedUpdatedAt: now, id }],
+      unread: false,
+    });
     expect(api.snoozeMailThread).toHaveBeenCalledWith(id, "2026-07-14T12:00:00.000Z");
     expect(api.sendMail).toHaveBeenCalledWith({
       accountId,
       body: "Reply body",
       cc: [],
+      draftId: id,
       subject: "Re: Test mail",
-      to: [{ address: "recipient@example.com", name: null }],
+      to: [{ address: "Recipient@Example.COM", name: null }],
+    });
+    expect(api.upsertDomainProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ domain: "mail", status: "draft" }),
+    );
+    expect(api.previewMailRule).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceIds: [accountId] }),
+    );
+    expect(api.previewSavedMailRule).toHaveBeenCalledWith(id);
+    expect(api.upsertMailAttentionItem).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ importance: "high", kind: "important" }),
+    );
+    expect(api.updateMailRule).toHaveBeenCalledWith(id, {
+      enabled: false,
+      expectedVersion: 1,
     });
 
     const resources = await client.listResources();
-    expect(resources.resources).toHaveLength(2);
+    expect(resources.resources.map((resource) => resource.uri)).toEqual([
+      "personal-os://agenda/today",
+      "personal-os://brief/daily",
+      "ilo://context/self",
+      "ui://ilo/work-surface",
+    ]);
+    const templates = await client.listResourceTemplates();
+    expect(templates.resourceTemplates.map((template) => template.uriTemplate)).toEqual([
+      "ilo://setup/{domain}/{step}",
+      "ilo://guidance/{domain}",
+    ]);
+    const prompts = await client.listPrompts();
+    expect(prompts.prompts.map((prompt) => prompt.name)).toEqual([
+      "set_up_ilo",
+      "plan_today",
+      "triage_mail",
+      "prepare_calendar_commitment",
+      "review_overdue_reminders",
+      "review_finances",
+      "weekly_review",
+    ]);
+    const workSurface = await client.readResource({ uri: "ui://ilo/work-surface" });
+    expect(workSurface.contents[0]).toMatchObject({
+      _meta: { ui: { prefersBorder: true } },
+      mimeType: "text/html;profile=mcp-app",
+      uri: "ui://ilo/work-surface",
+    });
+    const workSurfaceContent = workSurface.contents[0];
+    expect(workSurfaceContent && "text" in workSurfaceContent && workSurfaceContent.text).toContain(
+      "ui/initialize",
+    );
+    expect(workSurfaceContent && "text" in workSurfaceContent && workSurfaceContent.text).toContain(
+      "ui/notifications/tool-result",
+    );
     const agenda = await client.readResource({ uri: "personal-os://agenda/today" });
     const agendaContent = agenda.contents[0];
     expect(agendaContent && "text" in agendaContent).toBe(true);
@@ -698,5 +1469,373 @@ describe("ilo MCP server", () => {
     await client.close();
     await server.close();
     vi.useRealTimers();
+  });
+
+  it("filters discovery by scopes and read-only posture while keeping typed Ilo metadata", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      appBaseUrl: "https://app.example.com",
+      readOnly: true,
+      scopes: new Set(["tasks:read", "tasks:write"]),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const tools = await client.listTools();
+    const names = tools.tools.map((tool) => tool.name);
+    expect(names).toContain("get_ilo_context");
+    expect(names).toContain("list_tasks");
+    expect(names).not.toContain("get_daily_brief");
+    expect(names).not.toContain("create_task");
+    expect(names).not.toContain("list_mail");
+    expect(tools.tools.every((tool) => tool.annotations?.readOnlyHint === true)).toBe(true);
+    expect(tools.tools.find((tool) => tool.name === "get_ilo_context")).toMatchObject({
+      _meta: { ui: { resourceUri: "ui://ilo/work-surface" } },
+      outputSchema: { type: "object" },
+    });
+
+    const context = await client.callTool({ arguments: {}, name: "get_ilo_context" });
+    expect(context.structuredContent).toMatchObject({
+      _ilo: {
+        domain: "assistant",
+        links: { today: "https://app.example.com/today" },
+        policy: "read_only",
+        stage: "context",
+      },
+      result: {
+        mcp: {
+          availableTools: expect.arrayContaining(["get_ilo_context", "list_tasks"]),
+          readOnly: true,
+        },
+      },
+    });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("uses the hardened Mail send schema for normalization and header injection rejection", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      now: () => new Date("2026-07-13T16:00:00.000Z"),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const invalidSubject = await client.callTool({
+      arguments: {
+        accountId,
+        body: "Body",
+        draftId: id,
+        subject: "Hello\r\nBcc: attacker@example.com",
+        to: [{ address: "recipient@example.com", name: null }],
+      },
+      name: "send_mail",
+    });
+    const invalidName = await client.callTool({
+      arguments: {
+        accountId,
+        body: "Body",
+        draftId: id,
+        subject: "Hello",
+        to: [
+          {
+            address: "recipient@example.com",
+            name: "Recipient\r\nBcc: attacker@example.com",
+          },
+        ],
+      },
+      name: "send_mail",
+    });
+    expect(invalidSubject).toMatchObject({ isError: true });
+    expect(invalidName).toMatchObject({ isError: true });
+    expect(api.sendMail).not.toHaveBeenCalled();
+    const missingDraft = await client.callTool({
+      arguments: {
+        accountId,
+        body: "Body",
+        subject: "Hello",
+        to: [{ address: "recipient@example.com", name: null }],
+      },
+      name: "send_mail",
+    });
+    expect(missingDraft).toMatchObject({ isError: true });
+    expect(api.sendMail).not.toHaveBeenCalled();
+
+    const normalized = await client.callTool({
+      arguments: {
+        accountId,
+        body: "Body",
+        draftId: id,
+        subject: "Hello",
+        to: [{ address: "Recipient@Example.COM", name: null }],
+      },
+      name: "send_mail",
+    });
+    expect(normalized.isError).not.toBe(true);
+    expect(api.sendMail).toHaveBeenCalledWith({
+      accountId,
+      body: "Body",
+      cc: [],
+      draftId: id,
+      subject: "Hello",
+      to: [{ address: "Recipient@Example.COM", name: null }],
+    });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves structured Mail API partial-effect errors at the tool boundary", async () => {
+    const api = mockApi();
+    api.updateMailThread.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "provider_partial_effect",
+        details: {
+          accountId,
+          partialEffect: true,
+          remoteThreadId: "remote-thread-1",
+          repairAction: "reconnect_then_sync_mail_account",
+        },
+        message:
+          "The provider update may have committed, but Ilo could not persist rotated credentials.",
+        requestId: "mail-request-123",
+        status: 502,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      now: () => new Date("2026-07-13T16:00:00.000Z"),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: { expectedUpdatedAt: now, id, unread: false },
+      name: "update_mail",
+    });
+    const expectedError = {
+      code: "provider_partial_effect",
+      details: {
+        accountId,
+        partialEffect: true,
+        remoteThreadId: "remote-thread-1",
+        repairAction: "reconnect_then_sync_mail_account",
+      },
+      message:
+        "The provider update may have committed, but Ilo could not persist rotated credentials.",
+      requestId: "mail-request-123",
+      status: 502,
+    };
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: { error: expectedError },
+    });
+    expect(response.content).toEqual([
+      { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
+    ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves structured Calendar API partial-effect errors at the tool boundary", async () => {
+    const api = mockApi();
+    api.updateEvent.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "provider_partial_effect",
+        details: {
+          completedEffects: [
+            {
+              action: "update",
+              calendarId: id,
+              eventId: id,
+              provider: "google",
+              remoteEventId: "remote-event-1",
+              role: "source",
+            },
+          ],
+          operation: "update_event",
+          partialEffect: true,
+          pendingEffects: [],
+          provider: "google",
+          recovery: "Synchronize Calendar before retrying.",
+          remoteEventId: "remote-event-1",
+        },
+        message:
+          "The provider event changed, but Ilo could not finish its local Calendar projection.",
+        requestId: "calendar-request-123",
+        status: 502,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      now: () => new Date("2026-07-13T16:00:00.000Z"),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: {
+        expectedBlockUpdatedAtById: {},
+        expectedUpdatedAt: now,
+        id,
+        title: "Updated focus",
+      },
+      name: "update_event",
+    });
+    const expectedError = {
+      code: "provider_partial_effect",
+      details: {
+        completedEffects: [
+          {
+            action: "update",
+            calendarId: id,
+            eventId: id,
+            provider: "google",
+            remoteEventId: "remote-event-1",
+            role: "source",
+          },
+        ],
+        operation: "update_event",
+        partialEffect: true,
+        pendingEffects: [],
+        provider: "google",
+        recovery: "Synchronize Calendar before retrying.",
+        remoteEventId: "remote-event-1",
+      },
+      message:
+        "The provider event changed, but Ilo could not finish its local Calendar projection.",
+      requestId: "calendar-request-123",
+      status: 502,
+    };
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: { error: expectedError },
+    });
+    expect(response.content).toEqual([
+      { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
+    ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves structured Finance conflicts at the proposal tool boundary", async () => {
+    const api = mockApi();
+    api.proposeFinanceCategorizations.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "conflict",
+        details: { currentCursor: "opaque-current" },
+        message: "The Finance proposal page changed.",
+        requestId: "finance-request-123",
+        status: 409,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      now: () => new Date("2026-07-13T16:00:00.000Z"),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: { cursor: "opaque-stale" },
+      name: "propose_finance_categorizations",
+    });
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: {
+        error: {
+          code: "conflict",
+          details: { currentCursor: "opaque-current" },
+          message: "The Finance proposal page changed.",
+          requestId: "finance-request-123",
+          status: 409,
+        },
+      },
+    });
+
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves domain profile validation errors at the shared setup tool boundary", async () => {
+    const api = mockApi();
+    api.upsertDomainProfile.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "invalid_request",
+        details: {
+          domain: "mail",
+          reason: "source_disconnected",
+          sourceIds: [accountId],
+        },
+        message: "Active Mail setup requires an owned connected Mail source.",
+        requestId: "profile-request-123",
+        status: 400,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      now: () => new Date("2026-07-13T16:00:00.000Z"),
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({
+      arguments: {
+        categories: [],
+        domain: "mail",
+        instructions: [],
+        objective: "Keep a focused inbox.",
+        preferences: {},
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Primary inbox",
+            sourceId: accountId,
+            sourceLabel: "Personal",
+          },
+        ],
+        status: "active",
+        summary: "Only high-signal mail stays visible.",
+      },
+      name: "save_domain_profile",
+    });
+    const expectedError = {
+      code: "invalid_request",
+      details: {
+        domain: "mail",
+        reason: "source_disconnected",
+        sourceIds: [accountId],
+      },
+      message: "Active Mail setup requires an owned connected Mail source.",
+      requestId: "profile-request-123",
+      status: 400,
+    };
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: { error: expectedError },
+    });
+    expect(response.content).toEqual([
+      { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
+    ]);
+
+    await client.close();
+    await server.close();
   });
 });

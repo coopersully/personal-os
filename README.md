@@ -39,7 +39,7 @@ bash ./.codex/scripts/environment.sh setup
 pnpm env:start
 ```
 
-Open `http://localhost:8080`. The API serves health checks at `http://localhost:8787/health/ready` and its OpenAPI document at `http://localhost:8787/openapi.json`.
+Open `http://localhost:8081`. The API serves health checks at `http://localhost:8788/health/ready` and its OpenAPI document at `http://localhost:8788/openapi.json`.
 
 For a foreground-only web/API development session, `pnpm dev` remains available on Vite's default `:5173`; use the environment actions for the repeatable full-stack path.
 
@@ -47,15 +47,22 @@ For a foreground-only web/API development session, `pnpm dev` remains available 
 
 The checked-in Codex environment exposes deterministic actions backed by one lifecycle controller:
 
-- **Start** runs PostgreSQL plus the current API, MCP, and web source on `:55432`, `:8787`, `:8788`, and `:8080`.
+- **Start** synchronizes the primary checkout's authoritative `.env`, then runs PostgreSQL plus the current API, MCP, and web source on `:55433`, `:8788`, `:8789`, and `:8081`.
 - **Stop** shuts down the runtime without deleting PostgreSQL data.
 - **Restart**, **Status**, and **Logs** provide predictable operational controls without hunting for processes.
+- **Load QA Fixtures** recreates the repository-owned demo, onboarding, empty, and recovery personas.
 - **Test** enforces the repository's coverage floor: 95% statements/functions/lines and 94% branches.
 - **E2E** runs the desktop and mobile Playwright acceptance suite.
 - **Verify** runs mirror checks, lint, types, coverage, every production build, and E2E acceptance tests.
 - **Build** builds all applications and packages, including the native desktop bundles.
 
+Playwright uses local web `5174` and API `8797` by default. When another local project owns either
+port, set `ILO_E2E_WEB_PORT` and `ILO_E2E_API_PORT`; the Playwright client and its isolated fixture
+servers consume the same overrides.
+
 The first environment setup installs the lockfile exactly and creates `.env` with a valid local encryption key only when the file is missing. Start remains attached to its action terminal so crashes are immediately visible; use Stop from another action to shut it down. All runtime state is kept under ignored `.codex/run/` PID and log directories.
+
+Linked worktrees copy the primary `.env` on setup and start, then load a generated, ignored `.env.codex.local` with a deterministic whole-set port shift. This keeps secrets authoritative in the primary checkout while allowing the primary and linked worktrees to run with separate ports, containers, and PostgreSQL volumes.
 
 The same controls are available outside Codex:
 
@@ -65,8 +72,13 @@ pnpm env:status
 pnpm env:logs
 pnpm env:restart
 pnpm env:stop
+pnpm fixtures:list
+pnpm fixtures:load
 pnpm verify
 ```
+
+Fixture credentials and scenario coverage are documented in
+[docs/engineering/qa-fixtures.md](docs/engineering/qa-fixtures.md).
 
 ## Desktop overlay
 
@@ -99,14 +111,14 @@ Create an agent token in **Settings → Agent access**, then configure a stdio c
   "command": "node",
     "args": ["/absolute/path/to/personal-os/apps/mcp/dist/stdio.js"],
   "env": {
-    "PERSONAL_OS_API_URL": "http://localhost:8787",
+    "PERSONAL_OS_API_URL": "http://localhost:8788",
     "PERSONAL_OS_TOKEN": "pos_…",
     "PERSONAL_OS_TIMEZONE": "America/New_York"
   }
 }
 ```
 
-For remote hosts, POST Streamable HTTP requests to `http://localhost:8788/mcp` with the agent token as `Authorization: Bearer pos_…`. See [docs/mcp.md](docs/mcp.md).
+For remote hosts, POST Streamable HTTP requests to `http://localhost:8789/mcp` with the agent token as `Authorization: Bearer pos_…`. See [docs/mcp.md](docs/mcp.md).
 
 ## Production containers
 
@@ -115,7 +127,7 @@ export APP_ENCRYPTION_KEY="$(openssl rand -base64 32)"
 docker compose up --build
 ```
 
-This starts PostgreSQL, the API on `:8787`, MCP on `:8788`, and the web app on `:8080`. Set the public URLs plus Google or X credentials in the environment for a hosted deployment. See [docs/deployment.md](docs/deployment.md).
+This starts PostgreSQL, the API on `:8788`, MCP on `:8789`, and the web app on `:8081`. Set the public URLs plus Google or X credentials in the environment for a hosted deployment. See [docs/deployment.md](docs/deployment.md).
 
 ## Repository layout
 

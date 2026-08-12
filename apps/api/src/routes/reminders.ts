@@ -1,15 +1,21 @@
 import {
-  completeInputSchema,
+  type AgentMutationPolicy,
+  completeReminderInputSchema,
   createReminderInputSchema,
+  featureAccessPolicies,
+  reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
+  reminderRevisionInputSchema,
   updateReminderInputSchema,
+  upsertReminderAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createReminderService } from "../reminder-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess } from "./support.js";
+import { parseBody, parseOptionalBody, requireFeatureAccess } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
+type ReminderMutationContext = MutationContext & { policy: AgentMutationPolicy };
 
 type ReminderRouteOptions = {
   app: Hono<AppEnv>;
@@ -20,6 +26,16 @@ type ReminderRouteOptions = {
 /** Register the reminder HTTP surface without constructing its service. */
 export function registerReminderRoutes({ app, mutationContext, reminders }: ReminderRouteOptions) {
   const requireRemindersAccess = requireFeatureAccess("reminders");
+  const reminderMutationContext = (context: Context<AppEnv>): ReminderMutationContext => {
+    const base = mutationContext(context);
+    return {
+      ...base,
+      policy:
+        base.principal.actorType === "user"
+          ? "approve_each"
+          : featureAccessPolicies.reminders.mutationPolicy,
+    };
+  };
   app.use("/v1/reminders", requireRemindersAccess);
   app.use("/v1/reminders/*", requireRemindersAccess);
 
@@ -31,10 +47,18 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
       ),
     ),
   );
+  app.get("/v1/reminders/overdue-deferral-preview", async (context) =>
+    context.json({
+      preview: await reminders.previewOverdueDeferral(
+        context.get("principal").userId,
+        reminderDeferralPreviewInputSchema.parse(context.req.query()),
+      ),
+    }),
+  );
   app.post("/v1/reminders", async (context) => {
     const reminder = await reminders.create(
       await parseBody(context, createReminderInputSchema),
-      mutationContext(context),
+      reminderMutationContext(context),
     );
     return context.json({ reminder }, 201);
   });
@@ -48,27 +72,52 @@ export function registerReminderRoutes({ app, mutationContext, reminders }: Remi
       reminder: await reminders.update(
         context.req.param("id"),
         await parseBody(context, updateReminderInputSchema),
-        mutationContext(context),
+        reminderMutationContext(context),
       ),
     }),
   );
   app.delete("/v1/reminders/:id", async (context) => {
-    await reminders.delete(context.req.param("id"), mutationContext(context));
+    await reminders.delete(context.req.param("id"), reminderMutationContext(context));
     return context.body(null, 204);
   });
+  // Revision-bearing destructive requests use POST so intermediaries cannot drop their CAS body.
+  app.post("/v1/reminders/:id/trash", async (context) =>
+    context.json({
+      reminder: await reminders.delete(
+        context.req.param("id"),
+        reminderMutationContext(context),
+        (await parseBody(context, reminderRevisionInputSchema)).expectedUpdatedAt,
+      ),
+    }),
+  );
   app.post("/v1/reminders/:id/complete", async (context) => {
-    const input = await parseBody(context, completeInputSchema);
+    const input = await parseBody(context, completeReminderInputSchema);
     return context.json({
       reminder: await reminders.complete(
         context.req.param("id"),
         input.completed,
-        mutationContext(context),
+        reminderMutationContext(context),
+        input.expectedUpdatedAt,
       ),
     });
   });
-  app.post("/v1/reminders/:id/restore", async (context) =>
+  app.post("/v1/reminders/:id/restore", async (context) => {
+    const input = await parseOptionalBody(context, reminderRevisionInputSchema);
+    return context.json({
+      reminder: await reminders.restore(
+        context.req.param("id"),
+        reminderMutationContext(context),
+        input.expectedUpdatedAt,
+      ),
+    });
+  });
+  app.put("/v1/reminders/:id/attention", async (context) =>
     context.json({
-      reminder: await reminders.restore(context.req.param("id"), mutationContext(context)),
+      item: await reminders.upsertAttentionItem(
+        context.req.param("id"),
+        await parseBody(context, upsertReminderAttentionItemInputSchema),
+        reminderMutationContext(context),
+      ),
     }),
   );
 }

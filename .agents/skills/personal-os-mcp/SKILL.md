@@ -22,11 +22,42 @@ Read `docs/mcp.md` and the agent-action section of
 1. Add or verify the API contract and its authorization scope first.
 2. Implement a focused module in `apps/mcp/src/tools` and register it from the
    server composition root.
-3. Describe inputs, return structured and useful errors, and set read-only or
-   destructive annotations accurately.
-4. Preserve API authorization errors rather than inventing separate permission
+3. Add the tool to `apps/mcp/src/tool-catalog.ts` with its domain, workflow
+   stage, policy, read/write posture, least-privilege scopes, and whether it is
+   a visual entrypoint. A tool without a catalog record must fail at startup.
+4. Describe inputs precisely and preserve API authorization errors rather than inventing separate permission
    rules in MCP.
-5. Add server/tool tests using the typed client boundary.
+5. Add typed-client tests that prove full catalog coverage, output metadata,
+   the least-privilege scope view, and the read-only view. A token must not
+   discover a capability it cannot use.
+
+## Design progressive disclosure
+
+- Start hosts with `get_ilo_context`; keep identity, time, readiness, scopes,
+  available tools, and first-party links in that one orientation result.
+- Model a workflow as `context → inspect → prepare → commit → verify/recover`.
+  Prefer preview tools to boolean `dryRun` flags for consequential changes.
+- Keep tools focused and composable. Do not create a generic multi-domain
+  action tool to reduce the tool count.
+- Use `ilo://` templates for reusable context and `ui://` only for compact MCP
+  Apps. Every visual entrypoint must retain useful text and structured output.
+- Advertise prompts only when their prerequisite read scopes are present.
+- Do not expose MCP Tasks until the API owns a durable handle, progress,
+  idempotency/reconciliation rule, and terminal recovery contract.
+
+## Keep one result and annotation contract
+
+The tool surface supplies all four standard annotations and the shared output
+schema. Feature callbacks return `result`, `ok`, or a structured API `error`;
+the surface adds `_ilo` domain, stage, policy, read-only state, and work-surface
+links. Do not add a domain-local envelope, omit text fallback, or treat
+annotations/UI metadata as authorization.
+
+Use the original feature annotation when it is more precise. Optimistic-lock
+mutations and uncertain provider effects are usually not idempotent, even when
+their input resembles a PUT or update. A reversible trash action can still be
+destructive for host UX. External side effects are open-world; cached reads and
+local drafts are closed-world.
 
 ## Treat mutations as policy decisions
 

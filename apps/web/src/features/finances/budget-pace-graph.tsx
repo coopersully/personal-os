@@ -38,7 +38,7 @@ function cellClassName(
   period: FinanceBudgetPacePeriod,
 ) {
   return cn(
-    "block shrink-0 rounded-md outline-none ring-ring/50 transition-transform focus-visible:ring-3",
+    "block shrink-0 rounded-md border border-transparent outline-none transition-colors focus-visible:border-foreground/60",
     period === "week" ? "size-10 sm:size-12" : period === "month" ? "size-5" : "size-3",
     status === "ahead" ? "bg-success/60" : status === "behind" ? "bg-destructive/55" : "bg-muted",
   );

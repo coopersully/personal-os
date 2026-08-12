@@ -19,6 +19,7 @@ import {
   TaskItemCompletion,
   TaskItemContent,
   TaskItemDescription,
+  TaskItemDue,
   TaskItemMetadata,
   TaskItemPrimaryAction,
   TaskItemTags,
@@ -241,7 +242,12 @@ export function TaskRow({
       <TaskItemPrimaryAction aria-label={`Open ${task.title}`} onClick={onEdit}>
         <TaskItemContent>
           <TaskItemTitle>{task.title}</TaskItemTitle>
-          <TaskItemDescription>{taskDescription(task, timeZone)}</TaskItemDescription>
+          {taskTiming(task, timeZone) ? (
+            <TaskItemDue>{taskTiming(task, timeZone)}</TaskItemDue>
+          ) : null}
+          {taskDescription(task) ? (
+            <TaskItemDescription>{taskDescription(task)}</TaskItemDescription>
+          ) : null}
           {recommendation ? (
             <TaskItemDescription>{recommendationCopy(recommendation)}</TaskItemDescription>
           ) : null}
@@ -257,14 +263,16 @@ export function TaskRow({
         </TaskItemContent>
       </TaskItemPrimaryAction>
       <TaskItemMetadata>
-        <Badge variant="secondary">{task.status}</Badge>
+        <span className="text-[0.625rem] font-medium tracking-[0.08em] text-muted-foreground uppercase">
+          {task.status}
+        </span>
       </TaskItemMetadata>
       <TaskItemActions>
         <Button
           aria-label={`Remove ${task.title}`}
           disabled={remove.isPending}
           onClick={() => remove.mutate()}
-          size="icon-sm"
+          size="icon-xs"
           variant="ghost"
         >
           <TrashIcon />
@@ -286,13 +294,20 @@ function taskViewFromParams(searchParams: URLSearchParams): TaskView {
     : "inbox";
 }
 
-function taskDescription(task: Task, timeZone: string): string {
-  const details = [
+function taskTiming(task: Task, timeZone: string): string | null {
+  const timing = [
     task.scheduledAt ? `Reserved ${formatMaterialDateTime(task.scheduledAt, timeZone)}` : null,
     task.dueAt ? `Due ${formatMaterialDateTime(task.dueAt, timeZone)}` : null,
-    task.estimateMinutes ? `${task.estimateMinutes} min` : null,
   ].filter((detail): detail is string => detail !== null);
-  return details.length > 0 ? details.join(" · ") : task.notes || "No date or estimate yet";
+  return timing.length > 0 ? timing.join(" · ") : null;
+}
+
+function taskDescription(task: Task): string | null {
+  const details = [
+    task.estimateMinutes ? `${task.estimateMinutes} min` : null,
+    task.notes || null,
+  ].filter((detail): detail is string => detail !== null);
+  return details.length > 0 ? details.join(" · ") : null;
 }
 
 function recommendationCopy(recommendation: DailyBrief["recommendedTasks"][number]) {

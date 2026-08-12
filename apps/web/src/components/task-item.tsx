@@ -5,6 +5,7 @@ import {
   CommitmentItemCompletion,
   CommitmentItemContent,
   CommitmentItemDescription,
+  CommitmentItemDue,
   CommitmentItemMetadata,
   CommitmentItemPrimaryAction,
   CommitmentItemTags,
@@ -35,6 +36,10 @@ function TaskItemDescription(props: React.ComponentProps<typeof CommitmentItemDe
   return <CommitmentItemDescription data-slot="task-item-description" {...props} />;
 }
 
+function TaskItemDue(props: React.ComponentProps<typeof CommitmentItemDue>) {
+  return <CommitmentItemDue data-slot="task-item-due" {...props} />;
+}
+
 function TaskItemMetadata(props: React.ComponentProps<typeof CommitmentItemMetadata>) {
   return <CommitmentItemMetadata data-slot="task-item-metadata" {...props} />;
 }
@@ -53,6 +58,7 @@ export {
   TaskItemCompletion,
   TaskItemContent,
   TaskItemDescription,
+  TaskItemDue,
   TaskItemMetadata,
   TaskItemPrimaryAction,
   TaskItemTags,

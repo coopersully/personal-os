@@ -17,7 +17,7 @@ function CommitmentItem({ className, ...props }: React.ComponentProps<typeof Ite
       role="listitem"
       variant="outline"
       className={cn(
-        "group/commitment-item min-h-13 items-start gap-x-2.5 gap-y-2 px-3 py-2.5 sm:items-center [&[data-completed=true]]:opacity-65",
+        "group/commitment-item min-h-14 items-start gap-x-2.5 gap-y-2 rounded-md px-3 py-3 [&[data-completed=true]]:opacity-65",
         className,
       )}
       {...props}
@@ -29,7 +29,7 @@ function CommitmentItemCompletion({ className, ...props }: React.ComponentProps<
   return (
     <ItemMedia
       data-slot="commitment-item-completion"
-      className={cn("self-start pt-0.5 sm:self-center sm:pt-0", className)}
+      className={cn("self-start pt-0.5", className)}
       {...props}
     />
   );
@@ -46,7 +46,7 @@ function CommitmentItemPrimaryAction({
       type={type}
       variant="ghost"
       className={cn(
-        "h-auto min-h-0 min-w-0 flex-1 justify-start rounded-md px-0 py-0 text-left text-inherit hover:bg-transparent hover:text-inherit focus-visible:border-transparent active:translate-y-0",
+        "h-auto min-h-0 min-w-0 flex-1 items-start justify-start rounded-md px-0 py-0 text-left text-inherit whitespace-normal hover:bg-transparent hover:text-inherit focus-visible:border-transparent active:translate-y-0",
         className,
       )}
       {...props}
@@ -58,7 +58,7 @@ function CommitmentItemContent({ className, ...props }: React.ComponentProps<typ
   return (
     <ItemContent
       data-slot="commitment-item-content"
-      className={cn("min-w-0", className)}
+      className={cn("min-w-0 gap-1", className)}
       {...props}
     />
   );
@@ -69,7 +69,7 @@ function CommitmentItemTitle({ className, ...props }: React.ComponentProps<typeo
     <ItemTitle
       data-slot="commitment-item-title"
       className={cn(
-        "w-full text-left group-hover/commitment-item:underline group-focus-within/commitment-item:underline group-data-[completed=true]/commitment-item:line-through group-data-[completed=true]/commitment-item:text-muted-foreground",
+        "line-clamp-2 w-full text-left text-[0.9375rem] leading-5 group-hover/commitment-item:underline group-focus-within/commitment-item:underline group-data-[completed=true]/commitment-item:line-through group-data-[completed=true]/commitment-item:text-muted-foreground",
         className,
       )}
       {...props}
@@ -82,7 +82,24 @@ function CommitmentItemDescription({
   ...props
 }: React.ComponentProps<typeof ItemDescription>) {
   return (
-    <ItemDescription data-slot="commitment-item-description" className={className} {...props} />
+    <ItemDescription
+      data-slot="commitment-item-description"
+      className={cn("line-clamp-2 text-xs leading-4", className)}
+      {...props}
+    />
+  );
+}
+
+function CommitmentItemDue({ className, ...props }: React.ComponentProps<"span">) {
+  return (
+    <span
+      data-slot="commitment-item-due"
+      className={cn(
+        "line-clamp-1 flex w-full items-center gap-1 text-[0.6875rem] leading-4 font-medium text-muted-foreground",
+        className,
+      )}
+      {...props}
+    />
   );
 }
 
@@ -90,7 +107,7 @@ function CommitmentItemMetadata({ className, ...props }: React.ComponentProps<"d
   return (
     <div
       data-slot="commitment-item-metadata"
-      className={cn("flex shrink-0 flex-wrap items-center gap-1.5 self-center", className)}
+      className={cn("flex shrink-0 flex-wrap items-center gap-1.5 self-start pt-0.5", className)}
       {...props}
     />
   );
@@ -100,7 +117,7 @@ function CommitmentItemTags({ className, ...props }: React.ComponentProps<"ul">)
   return (
     <ul
       data-slot="commitment-item-tags"
-      className={cn("order-last flex basis-full flex-wrap gap-1 pl-7 sm:pl-0", className)}
+      className={cn("mt-1 flex flex-wrap gap-1", className)}
       {...props}
     />
   );
@@ -110,7 +127,7 @@ function CommitmentItemActions({ className, ...props }: React.ComponentProps<typ
   return (
     <ItemActions
       data-slot="commitment-item-actions"
-      className={cn("self-center", className)}
+      className={cn("self-start", className)}
       {...props}
     />
   );
@@ -122,6 +139,7 @@ export {
   CommitmentItemCompletion,
   CommitmentItemContent,
   CommitmentItemDescription,
+  CommitmentItemDue,
   CommitmentItemMetadata,
   CommitmentItemPrimaryAction,
   CommitmentItemTags,

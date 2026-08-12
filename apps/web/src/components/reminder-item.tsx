@@ -5,6 +5,7 @@ import {
   CommitmentItemCompletion,
   CommitmentItemContent,
   CommitmentItemDescription,
+  CommitmentItemDue,
   CommitmentItemMetadata,
   CommitmentItemPrimaryAction,
   CommitmentItemTags,
@@ -37,6 +38,10 @@ function ReminderItemDescription(props: React.ComponentProps<typeof CommitmentIt
   return <CommitmentItemDescription data-slot="reminder-item-description" {...props} />;
 }
 
+function ReminderItemDue(props: React.ComponentProps<typeof CommitmentItemDue>) {
+  return <CommitmentItemDue data-slot="reminder-item-due" {...props} />;
+}
+
 function ReminderItemMetadata(props: React.ComponentProps<typeof CommitmentItemMetadata>) {
   return <CommitmentItemMetadata data-slot="reminder-item-metadata" {...props} />;
 }
@@ -55,6 +60,7 @@ export {
   ReminderItemCompletion,
   ReminderItemContent,
   ReminderItemDescription,
+  ReminderItemDue,
   ReminderItemMetadata,
   ReminderItemPrimaryAction,
   ReminderItemTags,

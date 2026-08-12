@@ -1,5 +1,5 @@
 import type { Reminder } from "@personal-os/domain";
-import { Badge, EmptyState } from "@personal-os/ui";
+import { EmptyState } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import {
@@ -16,6 +16,7 @@ import {
   ReminderItemCompletion,
   ReminderItemContent,
   ReminderItemDescription,
+  ReminderItemDue,
   ReminderItemMetadata,
   ReminderItemPrimaryAction,
   ReminderItemTitle,
@@ -186,27 +187,27 @@ export function ReminderRow({
       <ReminderItemPrimaryAction aria-label={`Open ${reminder.title}`} onClick={onEdit}>
         <ReminderItemContent>
           <ReminderItemTitle>{reminder.title}</ReminderItemTitle>
-          <ReminderItemDescription>
-            {reminder.dueAt ? (
-              <>
-                <ClockIcon className="size-[13px]" />{" "}
-                {formatMaterialDateTime(reminder.dueAt, timeZone)}
-              </>
-            ) : (
-              "No due date"
-            )}
-          </ReminderItemDescription>
+          {reminder.dueAt ? (
+            <ReminderItemDue>
+              <ClockIcon className="size-3" />
+              {formatMaterialDateTime(reminder.dueAt, timeZone)}
+            </ReminderItemDue>
+          ) : null}
         </ReminderItemContent>
       </ReminderItemPrimaryAction>
-      <ReminderItemMetadata>
-        <Badge className={`priority priority--${reminder.priority}`}>{reminder.priority}</Badge>
-      </ReminderItemMetadata>
+      {reminder.priority === "high" ? (
+        <ReminderItemMetadata>
+          <span className="text-[0.625rem] font-medium tracking-[0.08em] text-destructive uppercase">
+            High
+          </span>
+        </ReminderItemMetadata>
+      ) : null}
       <ReminderItemActions>
         <ShadcnButton
           aria-label={`Delete ${reminder.title}`}
           disabled={remove.isPending}
           onClick={() => remove.mutate()}
-          size="icon-sm"
+          size="icon-xs"
           variant="ghost"
         >
           <TrashIcon className="size-[15px]" />

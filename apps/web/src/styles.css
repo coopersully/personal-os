@@ -1888,17 +1888,6 @@ p {
   border-radius: 20px;
   padding: 3px 6px;
 }
-.priority {
-  font-size: 8px;
-}
-.priority--high {
-  background: color-mix(in srgb, var(--danger) 20%, var(--paper));
-  color: var(--danger);
-}
-.priority--low {
-  background: var(--ui-muted);
-  color: var(--muted);
-}
 .agent-note {
   background: var(--accent-soft);
   border-radius: 12px;

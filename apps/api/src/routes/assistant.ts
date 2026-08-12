@@ -1,5 +1,6 @@
 import {
   type AgentConnectionGuide,
+  agentAccessWorkItemQuerySchema,
   type AssistantDomain,
   assistantDomainSchema,
   assistantSetupPlanQuerySchema,
@@ -12,6 +13,7 @@ import {
   upsertMailProfileInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
+import type { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import type { createAssistantService } from "../assistant-service.js";
 import { AppError } from "../errors.js";
 import type { AppEnv, Principal } from "../types.js";
@@ -24,6 +26,7 @@ type AssistantRouteOptions = {
   app: Hono<AppEnv>;
   assistant: ReturnType<typeof createAssistantService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
+  workItems: ReturnType<typeof createAgentAccessWorkItemService>;
 };
 
 export function registerAssistantRoutes({
@@ -31,6 +34,7 @@ export function registerAssistantRoutes({
   assistant,
   connectionGuide,
   mutationContext,
+  workItems,
 }: AssistantRouteOptions) {
   app.get("/v1/assistant/connection-guide", (context) => context.json({ guide: connectionGuide }));
   app.get("/v1/assistant/context", async (context) =>
@@ -46,6 +50,15 @@ export function registerAssistantRoutes({
         assistantSetupPlanQuerySchema.parse(context.req.query()),
       ),
     }),
+  );
+  app.get("/v1/assistant/work-items", async (context) =>
+    context.json(
+      await workItems.list(
+        context.get("principal"),
+        agentAccessWorkItemQuerySchema.parse(context.req.query()),
+        connectionGuide.domains,
+      ),
+    ),
   );
   app.get("/v1/assistant/profiles/:domain", async (context) => {
     const domain = assistantDomainSchema.parse(context.req.param("domain"));

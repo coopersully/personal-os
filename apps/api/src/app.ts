@@ -33,6 +33,7 @@ import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
 import { z } from "zod";
 import { createAssistantService } from "./assistant-service.js";
+import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
 import { createAutomationService } from "./automation-service.js";
@@ -409,6 +410,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         await finances.validateProfileSources(transaction, userId, sourceIds, status, actorType);
       }
     },
+  });
+  const agentAccessWorkItems = createAgentAccessWorkItemService({
+    db: dependencies.db,
+    now,
   });
   const agentSkillRevision = dependencies.config.agentSkillRevision ?? officialAgentSkill.revision;
   const agentSkillSourceUrl =
@@ -1104,6 +1109,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   registerMailRoutes({ app, mail, mutationContext });
 
   registerAssistantRoutes({
+    workItems: agentAccessWorkItems,
     app,
     assistant,
     connectionGuide: agentConnectionGuide,

@@ -63,7 +63,8 @@ useful specialization without fragmenting the ledger.
 ### Tasks plus Tracking, composed in Today (selected)
 
 Keep finite actions and repeated observations as two coherent sibling domains. Treat habits,
-sleep, food, ratings, and measurements as configurations of the same honest tracking primitives.
+ratings, measurements, sleep, meals, and other observations as configurations of the same honest
+tracking primitives.
 Treat reminders as delivery behavior. This gives the person clear homes while preserving one daily
 surface and one agent conversation.
 
@@ -119,8 +120,8 @@ and their entries. It provides:
   shown.
 
 Habits are presented as a convenient type of tracker, not as a separate storage domain or
-workspace. Sleep and food are tracker templates with appropriate fields and displays, not privileged
-medical domains.
+workspace. Sleep, meals, exercise, and other subjects are ordinary tracker configurations with
+appropriate field types and views—not separate product verticals or privileged medical domains.
 
 ### Today
 
@@ -224,7 +225,7 @@ an optional stable cue or context, and a target such as:
 - every weekday;
 - at least three times in a week;
 - between seven and nine hours per night;
-- log any meal, with no success threshold.
+- record an event whenever it happens, with no success threshold.
 
 The default progress view shows period counts, target ranges, and recent history. Streaks are an
 optional presentation setting, off by default. Breaking a streak never deletes prior progress or
@@ -274,12 +275,14 @@ preserved during migration and converted only when their intended task semantics
 | Frequent or long assessment increases burden. | A check-in asks one primary question by default, remembers sensible field defaults, and limits follow-ups. Quiet hours, pause, and batching are first-class. | Research thresholds from intensive assessment studies are design signals, not universal limits for ilo. |
 | Real self-tracking includes lapses and resumption. | Pause, resume, skip, backfill, and change-target flows are ordinary actions with preserved history. | No shame copy, reset punishment, or fabricated negative entry. |
 | Streaks can motivate but a broken highlighted streak can reduce engagement. | Streak display is opt-in and may offer a transparent repair rule. | Counts and trends remain available without streaks; repair never alters source entries. |
-| Consumer food and sleep data can be burdensome or imprecise. | Food accepts concise text, optional photo, and optional structured fields. Sleep uses an overnight interval plus optional subjective fields and device source. | Estimated nutrition is labelled estimated; wearable sleep is not presented as diagnosis or clinical-grade truth. |
+| Personal observations vary in structure and precision. | Event logs accept concise text, optional attachments, and optional structured fields. Interval logs support overnight spans and source attribution. | Estimated values are labelled estimated; imported or device-derived data is not presented as diagnosis or clinical-grade truth. |
 | Goal adjustment can be adaptive. | Goals can be revised, paused, or retired with a reason and intact history. | ilo does not equate target revision with failure. |
 
-## First-class templates
+## Illustrative tracker configurations
 
-Templates accelerate setup but produce ordinary versioned trackers.
+These examples validate the general model. They do not create separate product domains, imply equal
+launch priority, or require dedicated food, fitness, or health experiences. Any setup shortcut
+produces an ordinary versioned tracker.
 
 ### Habit check-off
 
@@ -293,12 +296,14 @@ morning check-in can prefill a likely interval but the person confirms it. Impor
 retain their source and can coexist with a subjective diary; ilo does not silently merge them into a
 single supposedly exact value.
 
-### Food log
+### Event log
 
-An event log with time, plain-language description, optional meal label, photo, hunger/fullness or
-notes, and optional structured nutrition fields. The first release treats this as a personal record,
-not a calorie database. If later computer vision or a food database supplies portions or nutrients,
-those values are estimates that require review before becoming canonical.
+An event log records something whenever it happens, without manufacturing scheduled failures. It
+can hold a timestamp, plain-language description, optional attachment, optional labels, and
+tracker-defined fields. A meal description is one possible use, alongside exercise, reading,
+caffeine, symptoms, or any other event the person chooses to record. If a future integration or
+model supplies estimated structured values, they require source labels and review before becoming
+canonical.
 
 ### Numeric or rating log
 
@@ -344,8 +349,8 @@ have a reviewed projection or migration, existing grants have been reauthorized 
 access, and compatibility use has remained absent for a published observation window. The delivery
 plan chooses that window and release count before deprecation begins.
 
-Workspace scopes alone are too coarse for potentially sensitive sleep, food, medication, mood, or
-other personal logs. Agent authorization pairs the tracking scope with explicitly selected tracker
+Workspace scopes alone are too coarse for potentially sensitive sleep, medication, mood, journal,
+or other personal logs. Agent authorization pairs the tracking scope with explicitly selected tracker
 sources. New trackers are not automatically shared with an existing agent unless the person chose a
 clearly described “all current and future trackers” grant. A write grant cannot create entries for a
 tracker outside the corresponding source selection.
@@ -414,11 +419,12 @@ ilo previews a Sleep Diary tracker, morning local-time window, requested fields,
 morning generates a durable occurrence. The answer records an overnight interval; ignoring the
 prompt expires the occurrence without recording zero sleep.
 
-### “Track what I eat”
+### “Track what I eat” as an ordinary event log
 
-ilo creates an event-log Food tracker. “Lunch was leftover curry” records the exact description and
-time. A later photograph or nutrient estimate is source-labelled and reviewable rather than silently
-treated as ground truth.
+ilo creates a generic event-log tracker named by the person. “Lunch was leftover curry” records the
+description and time using the same primitives as any other event log. This does not activate a
+food-specific application, nutrition model, or calorie workflow. A later photograph or nutrient
+estimate is source-labelled and reviewable rather than silently treated as ground truth.
 
 ### “Work out three times a week”
 
@@ -470,7 +476,7 @@ mixed sources and duplicate exclusions.
   precedes irreversible purge.
 - ilo does not diagnose sleep disorders, eating disorders, mental health conditions, or medical
   causes from ledger data.
-- It does not infer `not_completed` from silence, infer nutrition as fact from a photo, or treat a
+- It does not infer `not_completed` from silence, treat model-extracted values as facts, or treat a
   wearable estimate as clinical measurement.
 - Analytics show period, unit, sample count, missing/open/expired occurrence counts, estimation, and
   source mix. Insufficient or incompatible data produces an honest limitation instead of a score.
@@ -543,15 +549,15 @@ The first refinement pass reconciled the product with ilo's current contracts. I
 occurrences, source-scoped tracking grants, revision-safe mutations, explicit compatibility behavior,
 and a separation between prompts, deliveries, and underlying commitments.
 
-The second pass challenged the model against self-tracking research and concrete sleep/food/device
-data. It added durable check-in occurrences, versioned tracker schemas, honest missing-data states,
-append-only correction chains, overnight intervals, explicit estimates, burden controls,
-pause/resume/backfill, optional streaks, and future import identity/deduplication.
+The second pass challenged the model against self-tracking research and interval, event-log, and
+device-import edge cases. It added durable check-in occurrences, versioned tracker schemas, honest
+missing-data states, append-only correction chains, overnight intervals, explicit estimates, burden
+controls, pause/resume/backfill, optional streaks, and future import identity/deduplication.
 
-## Proposed defaults still open to review
+## Design defaults
 
-- Food v1 is a flexible qualitative event log with optional structured fields, not a full nutrient
-  database or automatic calorie tracker.
+- Tracking v1 has no food-specific vertical. Food works through the same generic event-log fields as
+  any other subject; food databases, nutrient modeling, and calorie workflows are out of scope.
 - Agent check-ins are channel-agnostic in the domain. The first implementation should use ilo's
   existing in-product agent/notification path before adding external channels.
 - Tracker goals support count, sum, average, duration, range, and manually assessed outcomes first;
@@ -583,8 +589,10 @@ pause/resume/backfill, optional streaks, and future import identity/deduplicatio
   substitute for validated clinical evaluation:
   [Consensus Sleep Diary](https://pmc.ncbi.nlm.nih.gov/articles/PMC3250369/) and
   [AASM position statement](https://aasm.org/consumer-sleep-technology-position-statement/).
-- Smartphone dietary assessment commonly combines free text, images, portions, databases, and
-  automated classification, with continuing validity and usability limitations:
+- Food was used only as a pressure test for general event logging and estimation. Smartphone dietary
+  assessment combines free text, images, portions, databases, and automated classification with
+  continuing validity and usability limitations; this supports keeping any future estimates
+  explicit rather than creating a food product now:
   [Systematic review of smartphone dietary assessment tools](https://pubmed.ncbi.nlm.nih.gov/34875978/).
 - Personal tracking can be counterproductive for some people, especially when metrics become rigid
   or anxiety-producing; associations do not establish universal causation but justify autonomy and

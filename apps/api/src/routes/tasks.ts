@@ -1,13 +1,19 @@
 import {
-  completeInputSchema,
+  cancelTaskInputSchema,
+  completeTaskInputSchema,
   createTaskInputSchema,
+  moveTaskInputSchema,
+  reopenTaskInputSchema,
+  restoreTaskInputSchema,
   taskListQuerySchema,
+  taskMovePreviewInputSchema,
+  trashTaskInputSchema,
   updateTaskInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono } from "hono";
 import type { createTaskService } from "../task-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess } from "./support.js";
+import { parseBody, parseOptionalBody, requireFeatureAccess } from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
@@ -53,20 +59,74 @@ export function registerTaskRoutes({ app, mutationContext, tasks }: TaskRouteOpt
     }),
   );
   app.delete("/v1/tasks/:id", async (context) => {
-    await tasks.delete(context.req.param("id"), mutationContext(context));
+    const id = context.req.param("id");
+    await tasks.trash(
+      id,
+      await parseOptionalBody(context, trashTaskInputSchema),
+      mutationContext(context),
+    );
+    context.header("Deprecation", "@1786492800");
+    context.header("Link", `</v1/tasks/${id}/trash>; rel="successor-version"`);
     return context.body(null, 204);
   });
   app.post("/v1/tasks/:id/complete", async (context) => {
-    const input = await parseBody(context, completeInputSchema);
+    const input = await parseBody(context, completeTaskInputSchema);
     return context.json({
-      task: await tasks.complete(
-        context.req.param("id"),
-        input.completed,
-        mutationContext(context),
-      ),
+      task: await tasks.complete(context.req.param("id"), input, mutationContext(context)),
     });
   });
+  app.post("/v1/tasks/:id/cancel", async (context) =>
+    context.json({
+      task: await tasks.cancel(
+        context.req.param("id"),
+        await parseBody(context, cancelTaskInputSchema),
+        mutationContext(context),
+      ),
+    }),
+  );
+  app.post("/v1/tasks/:id/reopen", async (context) =>
+    context.json({
+      task: await tasks.reopen(
+        context.req.param("id"),
+        await parseBody(context, reopenTaskInputSchema),
+        mutationContext(context),
+      ),
+    }),
+  );
+  app.post("/v1/tasks/:id/trash", async (context) =>
+    context.json({
+      task: await tasks.trash(
+        context.req.param("id"),
+        await parseBody(context, trashTaskInputSchema),
+        mutationContext(context),
+      ),
+    }),
+  );
   app.post("/v1/tasks/:id/restore", async (context) =>
-    context.json({ task: await tasks.restore(context.req.param("id"), mutationContext(context)) }),
+    context.json({
+      task: await tasks.restore(
+        context.req.param("id"),
+        await parseBody(context, restoreTaskInputSchema),
+        mutationContext(context),
+      ),
+    }),
+  );
+  app.post("/v1/tasks/:id/move/preview", async (context) =>
+    context.json({
+      preview: await tasks.previewMove(
+        context.req.param("id"),
+        await parseBody(context, taskMovePreviewInputSchema),
+        mutationContext(context),
+      ),
+    }),
+  );
+  app.post("/v1/tasks/:id/move", async (context) =>
+    context.json({
+      task: await tasks.move(
+        context.req.param("id"),
+        await parseBody(context, moveTaskInputSchema),
+        mutationContext(context),
+      ),
+    }),
   );
 }

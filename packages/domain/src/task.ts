@@ -21,6 +21,13 @@ const tagsSchema = z
   .transform((tags) => [...new Set(tags)]);
 const nullableTaskTextSchema = z.string().trim().max(10_000).nullable();
 const revisionSchema = z.number().int().positive();
+const taskSourceSchema = materialSourceReferenceSchema.extend({
+  accountId: z.null(),
+  provider: z.literal("local"),
+  remoteId: idSchema,
+  revision: z.string().trim().min(1),
+  sourceType: z.literal("task"),
+});
 
 const taskContentFieldsSchema = z.object({
   dueAt: isoDateTimeSchema.nullable(),
@@ -45,7 +52,6 @@ export const createTaskInputSchema = taskContentFieldsSchema
     priority: reminderPrioritySchema.default("medium"),
     projectId: idSchema.optional(),
     scheduledAt: isoDateTimeSchema.nullable().default(null),
-    source: materialSourceReferenceSchema.nullable().default(null),
     tags: tagsSchema.default([]),
     timezone: timeZoneSchema.nullable().default(null),
     why: nullableTaskTextSchema.default(null),
@@ -74,7 +80,7 @@ export const taskSchema = taskContentFieldsSchema.extend({
   listId: idSchema,
   projectId: idSchema.nullable(),
   revision: revisionSchema,
-  source: materialSourceReferenceSchema.nullable(),
+  source: taskSourceSchema,
   updatedAt: isoDateTimeSchema,
 });
 export type Task = z.infer<typeof taskSchema>;
@@ -88,6 +94,9 @@ export type CompleteTaskInput = z.infer<typeof completeTaskInputSchema>;
 
 export const cancelTaskInputSchema = taskTransitionInputSchema;
 export type CancelTaskInput = z.infer<typeof cancelTaskInputSchema>;
+
+export const reopenTaskInputSchema = taskTransitionInputSchema;
+export type ReopenTaskInput = z.infer<typeof reopenTaskInputSchema>;
 
 export const trashTaskInputSchema = taskTransitionInputSchema;
 export type TrashTaskInput = z.infer<typeof trashTaskInputSchema>;

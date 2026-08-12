@@ -75,6 +75,7 @@ import {
   reminderProfilePreferencesSchema,
   reminderSchema,
   reminderTimeZoneSchema,
+  reopenTaskInputSchema,
   resolveStoredMailRule,
   semanticVersionSchema,
   sendMailInputSchema,
@@ -941,6 +942,18 @@ describe("domain schemas", () => {
     expect(inboxCapture).not.toHaveProperty("listId");
     expect(inboxCapture).not.toHaveProperty("projectId");
     expect(
+      createTaskInputSchema.safeParse({
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: id,
+          revision: "1",
+          sourceType: "task",
+        },
+        title: "Local only",
+      }).success,
+    ).toBe(false);
+    expect(
       createTaskInputSchema.parse({
         scheduledAt: "2026-07-14T13:00:00.000Z",
         title: "Scheduled independently",
@@ -1120,7 +1133,13 @@ describe("domain schemas", () => {
       projectId: projectId,
       revision: 1,
       scheduledAt: "2026-07-14T13:00:00.000Z",
-      source: null,
+      source: {
+        accountId: null,
+        provider: "local",
+        remoteId: id,
+        revision: "1",
+        sourceType: "task",
+      },
       tags: [],
       timezone: null,
       title: "Task",
@@ -1128,11 +1147,18 @@ describe("domain schemas", () => {
       why: null,
       dueAt: null,
     });
-    expect(canonicalTask).toMatchObject({ deletedAt: null, lifecycle: "open" });
+    expect(canonicalTask).toMatchObject({
+      deletedAt: null,
+      lifecycle: "open",
+      source: { provider: "local", remoteId: id, revision: "1", sourceType: "task" },
+    });
+    expect(taskSchema.safeParse({ ...canonicalTask, source: null }).success).toBe(false);
     expect(completeTaskInputSchema.safeParse({ completed: false }).success).toBe(false);
     expect(cancelTaskInputSchema.safeParse({ cancelled: false }).success).toBe(false);
     expect(completeTaskInputSchema.parse({ expectedRevision: 1 })).toEqual({ expectedRevision: 1 });
     expect(cancelTaskInputSchema.parse({ expectedRevision: 1 })).toEqual({ expectedRevision: 1 });
+    expect(reopenTaskInputSchema.parse({ expectedRevision: 1 })).toEqual({ expectedRevision: 1 });
+    expect(reopenTaskInputSchema.safeParse({ completed: false }).success).toBe(false);
     expect(
       taskMovePreviewSchema.safeParse({
         destinationListId: listId,

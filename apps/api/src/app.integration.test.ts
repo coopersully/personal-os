@@ -1633,6 +1633,653 @@ describe.sequential("ilo API", () => {
     }, 20_000);
   });
 
+  describe("tasks", () => {
+    let taskAgentToken = "";
+    let taskInboxId = "";
+    let taskSessionToken = "";
+    let taskUserId = "";
+
+    async function taskRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Session ${taskSessionToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function taskAgentRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Bearer ${taskAgentToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function createTaskList(name: string) {
+      const response = await taskRequest("/v1/task-lists", { body: { name } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskList as { id: string; revision: number };
+    }
+
+    async function createTaskProject(listId: string, name: string) {
+      const response = await taskRequest("/v1/task-projects", { body: { listId, name } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskProject as {
+        id: string;
+        listId: string;
+        revision: number;
+      };
+    }
+
+    async function createTask(title: string, body: Record<string, unknown> = {}) {
+      const response = await taskRequest("/v1/tasks", { body: { ...body, title } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).task as {
+        cancelledAt: string | null;
+        completedAt: string | null;
+        deletedAt: string | null;
+        id: string;
+        legacyStatus: string | null;
+        lifecycle: "open" | "completed" | "cancelled";
+        listId: string;
+        projectId: string | null;
+        revision: number;
+        source: { remoteId: string; revision: string; sourceType: "task" };
+      };
+    }
+
+    beforeAll(async () => {
+      const registration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Canonical Tasks User",
+          email: "canonical-tasks@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(registration.status).toBe(201);
+      const body = await payload(registration);
+      taskSessionToken = body.sessionToken;
+      taskUserId = body.user.id;
+      const lists = await payload(await taskRequest("/v1/task-lists"));
+      taskInboxId = lists.items.find((item: { kind: string }) => item.kind === "inbox").id;
+      const tokenResponse = await taskRequest("/v1/access-tokens", {
+        body: { name: "Canonical Tasks agent", scopes: ["tasks:read", "tasks:write"] },
+      });
+      expect(tokenResponse.status).toBe(201);
+      taskAgentToken = (await payload(tokenResponse)).token.token;
+    });
+
+    it("tasks create in Inbox or an explicit same-List Project with local provenance and idempotency", async () => {
+      const missingIdempotency = await taskAgentRequest("/v1/tasks", {
+        body: { title: "Agent requires replay safety" },
+      });
+      expect(missingIdempotency.status).toBe(400);
+
+      expect(
+        (
+          await taskRequest("/v1/tasks", {
+            body: {
+              source: {
+                accountId: null,
+                provider: "local",
+                remoteId: taskInboxId,
+                revision: "99",
+                sourceType: "task",
+              },
+              title: "Reject forged Task provenance",
+            },
+          })
+        ).status,
+      ).toBe(400);
+
+      const inboxTask = await createTask("Default Inbox Task");
+      expect(inboxTask).toMatchObject({
+        cancelledAt: null,
+        completedAt: null,
+        deletedAt: null,
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        listId: taskInboxId,
+        projectId: null,
+        revision: 1,
+        source: { remoteId: inboxTask.id, revision: "1", sourceType: "task" },
+      });
+      expect(
+        await database.db
+          .select({
+            legacyStatus: reminders.status,
+            lifecycle: reminders.taskLifecycle,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, inboxTask.id)),
+      ).toEqual([
+        {
+          legacyStatus: "inbox",
+          lifecycle: "open",
+          listId: taskInboxId,
+          projectId: null,
+          revision: 1,
+        },
+      ]);
+
+      const projectList = await createTaskList("Canonical Task Project List");
+      const project = await createTaskProject(projectList.id, "Canonical Task Project");
+      const idempotencyKey = "60000000-0000-4000-8000-000000000001";
+      const input = {
+        idempotencyKey,
+        listId: projectList.id,
+        projectId: project.id,
+        scheduledAt: "2026-07-13T18:00:00.000Z",
+        title: "Reserved open Task",
+      };
+      const createdResponse = await taskAgentRequest("/v1/tasks", { body: input });
+      expect(createdResponse.status).toBe(201);
+      const explicitTask = (await payload(createdResponse)).task;
+      expect(explicitTask).toMatchObject({
+        legacyStatus: "scheduled",
+        lifecycle: "open",
+        listId: projectList.id,
+        projectId: project.id,
+        revision: 1,
+        scheduledAt: "2026-07-13T18:00:00.000Z",
+      });
+      const replay = await taskAgentRequest("/v1/tasks", { body: input });
+      expect(replay.status).toBe(201);
+      expect((await payload(replay)).task.id).toBe(explicitTask.id);
+      const mismatch = await taskAgentRequest("/v1/tasks", {
+        body: { ...input, title: "Different replay payload" },
+      });
+      expect(mismatch.status).toBe(409);
+      expect((await payload(mismatch)).error.details).toMatchObject({
+        code: "task_idempotency_mismatch",
+      });
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(
+            and(eq(auditEvents.entityId, explicitTask.id), eq(auditEvents.action, "task.created")),
+          ),
+      ).toHaveLength(1);
+
+      const anotherList = await createTaskList("Canonical Task Other List");
+      const wrongLocation = await taskRequest("/v1/tasks", {
+        body: { listId: anotherList.id, projectId: project.id, title: "Cross-List Project Task" },
+      });
+      expect(wrongLocation.status).toBe(404);
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Other Canonical Tasks User",
+          email: "other-canonical-tasks@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "UTC",
+        },
+      });
+      const otherBody = await payload(otherRegistration);
+      const otherInbox = (
+        await database.db
+          .select({ id: taskLists.id })
+          .from(taskLists)
+          .where(and(eq(taskLists.userId, otherBody.user.id), eq(taskLists.kind, "inbox")))
+      )[0];
+      expect(
+        (
+          await taskRequest("/v1/tasks", {
+            body: { listId: otherInbox?.id, title: "Cross-user Task" },
+          })
+        ).status,
+      ).toBe(404);
+      expect((await taskRequest(`/v1/tasks/${explicitTask.id}`)).status).toBe(200);
+      expect(
+        (
+          await app.request(`/v1/tasks/${explicitTask.id}`, {
+            headers: { authorization: `Session ${otherBody.sessionToken}` },
+          })
+        ).status,
+      ).toBe(404);
+    });
+
+    it("tasks preserve legacy metadata until canonical timing changes and query canonical views", async () => {
+      const [legacyTask] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "next",
+          taskLifecycle: "open",
+          taskListId: taskInboxId,
+          taskRevision: 1,
+          title: "Migrated next metadata",
+          userId: taskUserId,
+        })
+        .returning();
+      if (!legacyTask) throw new Error("Legacy Task fixture was not created.");
+
+      const contentOnly = await taskAgentRequest(`/v1/tasks/${legacyTask.id}`, {
+        body: { expectedRevision: 1, title: "Content-only edit" },
+        method: "PATCH",
+      });
+      expect(contentOnly.status).toBe(200);
+      expect((await payload(contentOnly)).task).toMatchObject({
+        legacyStatus: "next",
+        lifecycle: "open",
+        revision: 2,
+      });
+      const timingEdit = await taskAgentRequest(`/v1/tasks/${legacyTask.id}`, {
+        body: { expectedRevision: 2, scheduledAt: "2026-07-13T19:00:00.000Z" },
+        method: "PATCH",
+      });
+      expect(timingEdit.status).toBe(200);
+      expect((await payload(timingEdit)).task).toMatchObject({
+        dueAt: null,
+        legacyStatus: "scheduled",
+        lifecycle: "open",
+        revision: 3,
+        scheduledAt: "2026-07-13T19:00:00.000Z",
+      });
+      const dueEdit = await taskAgentRequest(`/v1/tasks/${legacyTask.id}`, {
+        body: { dueAt: "2026-07-15T16:00:00.000Z", expectedRevision: 3 },
+        method: "PATCH",
+      });
+      expect(dueEdit.status).toBe(200);
+      expect((await payload(dueEdit)).task).toMatchObject({
+        dueAt: "2026-07-15T16:00:00.000Z",
+        legacyStatus: "scheduled",
+        revision: 4,
+        scheduledAt: "2026-07-13T19:00:00.000Z",
+      });
+
+      const todayTask = await createTask("Today due Task", {
+        dueAt: "2026-07-13T16:00:00.000Z",
+      });
+      const upcomingTask = await createTask("Upcoming scheduled Task", {
+        scheduledAt: "2026-07-14T16:00:00.000Z",
+      });
+      const inboxView = await payload(await taskRequest(`/v1/tasks?listId=${taskInboxId}`));
+      expect(inboxView.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: todayTask.id, listId: taskInboxId }),
+        ]),
+      );
+      const todayView = await payload(await taskRequest("/v1/tasks?view=today"));
+      expect(todayView.items.map(({ id }: { id: string }) => id)).toContain(todayTask.id);
+      const upcomingView = await payload(await taskRequest("/v1/tasks?view=upcoming"));
+      expect(upcomingView.items.map(({ id }: { id: string }) => id)).toContain(upcomingTask.id);
+      const scheduledView = await payload(await taskRequest("/v1/tasks?view=scheduled"));
+      expect(scheduledView.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: legacyTask.id, lifecycle: "open" }),
+          expect.objectContaining({ id: upcomingTask.id, lifecycle: "open" }),
+        ]),
+      );
+
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${todayTask.id}`, {
+            body: { title: "Missing revision" },
+            method: "PATCH",
+          })
+        ).status,
+      ).toBe(400);
+      const auditBefore = await database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, todayTask.id));
+      const race = await Promise.all([
+        taskAgentRequest(`/v1/tasks/${todayTask.id}`, {
+          body: { expectedRevision: 1, title: "CAS winner A" },
+          method: "PATCH",
+        }),
+        taskAgentRequest(`/v1/tasks/${todayTask.id}`, {
+          body: { expectedRevision: 1, title: "CAS winner B" },
+          method: "PATCH",
+        }),
+      ]);
+      expect(race.map(({ status }) => status).sort()).toEqual([200, 409]);
+      expect(
+        await database.db
+          .select({ revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, todayTask.id)),
+      ).toEqual([{ revision: 2 }]);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(eq(auditEvents.entityId, todayTask.id)),
+      ).toHaveLength(auditBefore.length + 1);
+    });
+
+    it("tasks use focused revision-safe complete, reopen, and cancel transitions with canonical audits", async () => {
+      const task = await createTask("Lifecycle Task");
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${task.id}/complete`, {
+            body: {},
+          })
+        ).status,
+      ).toBe(400);
+      const completed = await taskAgentRequest(`/v1/tasks/${task.id}/complete`, {
+        body: { expectedRevision: 1 },
+      });
+      expect(completed.status).toBe(200);
+      expect((await payload(completed)).task).toMatchObject({
+        cancelledAt: null,
+        completedAt: "2026-07-13T12:00:00.000Z",
+        legacyStatus: "completed",
+        lifecycle: "completed",
+        revision: 2,
+        source: { revision: "2" },
+      });
+      expect(
+        (await payload(await taskRequest("/v1/tasks?view=completed"))).items.map(
+          ({ id }: { id: string }) => id,
+        ),
+      ).toContain(task.id);
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${task.id}/cancel`, {
+            body: { expectedRevision: 2 },
+          })
+        ).status,
+      ).toBe(409);
+      const reopened = await taskAgentRequest(`/v1/tasks/${task.id}/reopen`, {
+        body: { expectedRevision: 2 },
+      });
+      expect(reopened.status).toBe(200);
+      expect((await payload(reopened)).task).toMatchObject({
+        cancelledAt: null,
+        completedAt: null,
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        revision: 3,
+      });
+      const cancelled = await taskAgentRequest(`/v1/tasks/${task.id}/cancel`, {
+        body: { expectedRevision: 3 },
+      });
+      expect(cancelled.status).toBe(200);
+      expect((await payload(cancelled)).task).toMatchObject({
+        cancelledAt: "2026-07-13T12:00:00.000Z",
+        completedAt: null,
+        legacyStatus: "cancelled",
+        lifecycle: "cancelled",
+        revision: 4,
+      });
+      expect(
+        (await payload(await taskRequest("/v1/tasks?view=cancelled"))).items.map(
+          ({ id }: { id: string }) => id,
+        ),
+      ).toContain(task.id);
+      const reopenedCancelled = await taskAgentRequest(`/v1/tasks/${task.id}/reopen`, {
+        body: { expectedRevision: 4 },
+      });
+      expect(reopenedCancelled.status).toBe(200);
+      expect((await payload(reopenedCancelled)).task).toMatchObject({
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        revision: 5,
+      });
+      const audits = await database.db
+        .select({ action: auditEvents.action, after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, task.id));
+      expect(audits.map(({ action }) => action).sort()).toEqual([
+        "task.cancelled",
+        "task.completed",
+        "task.created",
+        "task.reopened",
+        "task.reopened",
+      ]);
+      const finalAudit = audits.find(
+        ({ after }) => (after as { revision?: number } | null)?.revision === 5,
+      );
+      expect(finalAudit?.after).toMatchObject({
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        revision: 5,
+        source: { remoteId: task.id, revision: "5", sourceType: "task" },
+      });
+    });
+
+    it("tasks trash and restore without changing lifecycle and DELETE advertises its successor", async () => {
+      const list = await createTaskList("Task Restore Validation List");
+      const task = await createTask("Task in soon-archived List", { listId: list.id });
+      const trashed = await taskAgentRequest(`/v1/tasks/${task.id}/trash`, {
+        body: { expectedRevision: 1 },
+      });
+      expect(trashed.status).toBe(200);
+      expect((await payload(trashed)).task).toMatchObject({
+        deletedAt: "2026-07-13T12:00:00.000Z",
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        revision: 2,
+      });
+      expect((await taskRequest(`/v1/tasks/${task.id}`)).status).toBe(404);
+      const trashView = await payload(await taskRequest("/v1/tasks?view=trash"));
+      expect(trashView.items).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: task.id, revision: 2 })]),
+      );
+      const archived = await taskRequest(`/v1/task-lists/${list.id}/archive`, {
+        body: { expectedRevision: list.revision },
+      });
+      expect(archived.status).toBe(200);
+      const restoreRejected = await taskAgentRequest(`/v1/tasks/${task.id}/restore`, {
+        body: { expectedRevision: 2 },
+      });
+      expect(restoreRejected.status).toBe(409);
+      expect((await payload(restoreRejected)).error.details).toMatchObject({
+        code: "task_destination_unavailable",
+      });
+      expect(
+        await database.db
+          .select({ deletedAt: reminders.deletedAt, lifecycle: reminders.taskLifecycle })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([{ deletedAt: new Date("2026-07-13T12:00:00.000Z"), lifecycle: "open" }]);
+
+      const agentAliasTask = await createTask("Revision-safe DELETE alias Task");
+      const agentAliasResponse = await taskAgentRequest(`/v1/tasks/${agentAliasTask.id}`, {
+        body: { expectedRevision: agentAliasTask.revision },
+        method: "DELETE",
+      });
+      expect(agentAliasResponse.status).toBe(204);
+      expect(agentAliasResponse.headers.get("deprecation")).toBe("@1786492800");
+
+      const aliasTask = await createTask("Deprecated DELETE alias Task");
+      const aliasResponse = await taskRequest(`/v1/tasks/${aliasTask.id}`, { method: "DELETE" });
+      expect(aliasResponse.status).toBe(204);
+      expect(aliasResponse.headers.get("deprecation")).toBe("@1786492800");
+      expect(aliasResponse.headers.get("link")).toBe(
+        `</v1/tasks/${aliasTask.id}/trash>; rel="successor-version"`,
+      );
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${aliasTask.id}/restore`, {
+            body: {},
+          })
+        ).status,
+      ).toBe(400);
+      const aliasRow = (
+        await database.db
+          .select({ revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, aliasTask.id))
+      )[0];
+      const restored = await taskRequest(`/v1/tasks/${aliasTask.id}/restore`, {
+        body: { expectedRevision: aliasRow?.revision },
+      });
+      expect(restored.status).toBe(200);
+      expect((await payload(restored)).task).toMatchObject({
+        deletedAt: null,
+        lifecycle: "open",
+        revision: 3,
+      });
+      const actions = await database.db
+        .select({ action: auditEvents.action })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, aliasTask.id));
+      expect(actions.map(({ action }) => action)).toEqual([
+        "task.created",
+        "task.trashed",
+        "task.restored",
+      ]);
+    });
+
+    it("tasks bind move previews to Task, List, and destination Project revisions and audit detachment", async () => {
+      const sourceList = await createTaskList("Task Move Source");
+      const destinationList = await createTaskList("Task Move Destination");
+      const sourceProject = await createTaskProject(sourceList.id, "Task Move Source Project");
+      const destinationProject = await createTaskProject(
+        destinationList.id,
+        "Task Move Destination Project",
+      );
+      const task = await createTask("Move one Task", {
+        listId: sourceList.id,
+        projectId: sourceProject.id,
+      });
+
+      const detachmentPreviewResponse = await taskAgentRequest(
+        `/v1/tasks/${task.id}/move/preview`,
+        {
+          body: { destinationListId: destinationList.id, expectedRevision: task.revision },
+        },
+      );
+      expect(detachmentPreviewResponse.status).toBe(200);
+      const detachmentPreview = (await payload(detachmentPreviewResponse)).preview;
+      expect(detachmentPreview).toMatchObject({
+        destinationListId: destinationList.id,
+        destinationListRevision: destinationList.revision,
+        destinationProjectId: null,
+        destinationProjectRevision: null,
+        detachedProjectId: sourceProject.id,
+        sourceListId: sourceList.id,
+        sourceListRevision: sourceList.revision,
+        sourceProjectId: sourceProject.id,
+        taskId: task.id,
+        taskRevision: task.revision,
+      });
+
+      const listUpdate = await taskRequest(`/v1/task-lists/${destinationList.id}`, {
+        body: { expectedRevision: destinationList.revision, name: "Revised Task Move Destination" },
+        method: "PATCH",
+      });
+      expect(listUpdate.status).toBe(200);
+      const staleListPreview = await taskAgentRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: task.revision,
+          previewToken: detachmentPreview.previewToken,
+        },
+      });
+      expect(staleListPreview.status).toBe(409);
+      expect((await payload(staleListPreview)).error.details).toMatchObject({
+        code: "task_move_preview_stale",
+      });
+
+      const destinationProjectPreview = (
+        await payload(
+          await taskAgentRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              destinationProjectId: destinationProject.id,
+              expectedRevision: task.revision,
+            },
+          }),
+        )
+      ).preview;
+      const projectUpdate = await taskRequest(`/v1/task-projects/${destinationProject.id}`, {
+        body: {
+          expectedRevision: destinationProject.revision,
+          name: "Revised Destination Project",
+        },
+        method: "PATCH",
+      });
+      expect(projectUpdate.status).toBe(200);
+      const stale = await taskAgentRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          destinationProjectId: destinationProject.id,
+          expectedRevision: task.revision,
+          previewToken: destinationProjectPreview.previewToken,
+        },
+      });
+      expect(stale.status).toBe(409);
+      expect((await payload(stale)).error.details).toMatchObject({
+        code: "task_move_preview_stale",
+      });
+
+      const freshPreview = (
+        await payload(
+          await taskAgentRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: { destinationListId: destinationList.id, expectedRevision: task.revision },
+          }),
+        )
+      ).preview;
+      const moved = await taskAgentRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: task.revision,
+          previewToken: freshPreview.previewToken,
+        },
+      });
+      expect(moved.status).toBe(200);
+      expect((await payload(moved)).task).toMatchObject({
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        listId: destinationList.id,
+        projectId: null,
+        revision: 2,
+      });
+      expect(
+        await database.db
+          .select({
+            legacyStatus: reminders.status,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          legacyStatus: "inbox",
+          listId: destinationList.id,
+          projectId: null,
+          revision: 2,
+        },
+      ]);
+      const moveAudit = (
+        await database.db
+          .select({
+            action: auditEvents.action,
+            after: auditEvents.after,
+            before: auditEvents.before,
+          })
+          .from(auditEvents)
+          .where(and(eq(auditEvents.entityId, task.id), eq(auditEvents.action, "task.moved")))
+      )[0];
+      expect(moveAudit).toMatchObject({
+        action: "task.moved",
+        after: { listId: destinationList.id, projectId: null, revision: 2 },
+        before: { listId: sourceList.id, projectId: sourceProject.id, revision: 1 },
+      });
+    });
+  });
+
   it("returns every connector callback to ilo when persistence fails unexpectedly", async () => {
     const callbackLogs = vi.fn();
     const failingDatabase = new Proxy(database.db, {
@@ -3825,229 +4472,30 @@ describe.sequential("ilo API", () => {
       auth: "session",
       method: "DELETE",
     });
-
-    expect(
-      (
-        await request("/v1/tasks", {
-          auth: "agent",
-          body: { title: "Invalid scheduled task", status: "scheduled" },
-        })
-      ).status,
-    ).toBe(400);
+    // The canonical Task contract has isolated PostgreSQL coverage in the dedicated tasks suite.
+    // These two canonical records remain as typed fixtures for the daily-brief compatibility cases
+    // later in this broad integration test.
     const task = (
       await payload(
         await request("/v1/tasks", {
-          auth: "agent",
+          auth: "session",
           body: {
             dueAt: "2026-07-14T16:00:00.000Z",
             estimateMinutes: 45,
-            notes: "Write a plan",
-            priority: "high",
-            tags: ["planning", "tomorrow"],
             scheduledAt: "2026-07-13T18:00:00.000Z",
-            status: "scheduled",
-            timezone: "America/New_York",
             title: "Plan tomorrow",
           },
         }),
       )
     ).task;
-    expect(task).toMatchObject({
-      estimateMinutes: 45,
-      scheduledAt: "2026-07-13T18:00:00.000Z",
-      status: "scheduled",
-      tags: ["planning", "tomorrow"],
-      title: "Plan tomorrow",
-    });
-    expect(
-      (await payload(await request("/v1/daily-brief", { auth: "agent" }))).brief.tasks,
-    ).toEqual([expect.objectContaining({ id: task.id })]);
-    expect((await request(`/v1/reminders/${task.id}`, { auth: "agent" })).status).toBe(404);
-    expect((await request(`/v1/tasks/${first.id}`, { auth: "agent" })).status).toBe(404);
-    expect(
-      (await payload(await request(`/v1/tasks/${task.id}`, { auth: "agent" }))).task,
-    ).toMatchObject({ id: task.id, title: "Plan tomorrow" });
     const inboxTask = (
       await payload(
         await request("/v1/tasks", {
-          auth: "agent",
+          auth: "session",
           body: { title: "Empty task" },
         }),
       )
     ).task;
-    expect(inboxTask).toMatchObject({
-      dueAt: null,
-      estimateMinutes: null,
-      scheduledAt: null,
-      status: "inbox",
-    });
-    const completedOnCreate = (
-      await payload(
-        await request("/v1/tasks", {
-          auth: "agent",
-          body: { status: "completed", title: "Complete on capture" },
-        }),
-      )
-    ).task;
-    expect(completedOnCreate).toMatchObject({
-      completedAt: expect.any(String),
-      status: "completed",
-      tags: [],
-    });
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${inboxTask.id}`, {
-            auth: "agent",
-            body: {
-              dueAt: "2026-07-15T14:00:00.000Z",
-              estimateMinutes: 30,
-              notes: "Full update",
-              priority: "low",
-              scheduledAt: "2026-07-15T13:00:00.000Z",
-              status: "scheduled",
-              tags: ["planning", "focus"],
-              timezone: "America/New_York",
-              title: "Scheduled task",
-            },
-            method: "PATCH",
-          }),
-        )
-      ).task,
-    ).toMatchObject({
-      dueAt: "2026-07-15T14:00:00.000Z",
-      estimateMinutes: 30,
-      notes: "Full update",
-      scheduledAt: "2026-07-15T13:00:00.000Z",
-      status: "scheduled",
-      tags: ["planning", "focus"],
-    });
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${inboxTask.id}`, {
-            auth: "agent",
-            body: { title: "Partially updated task" },
-            method: "PATCH",
-          }),
-        )
-      ).task,
-    ).toMatchObject({
-      estimateMinutes: 30,
-      status: "scheduled",
-      title: "Partially updated task",
-    });
-    const taskPage = await payload(
-      await request(
-        "/v1/tasks?completed=false&status=scheduled&scheduledAfter=2026-07-13T17%3A00%3A00.000Z&scheduledBefore=2026-07-13T19%3A00%3A00.000Z&query=tomorrow&limit=1",
-        { auth: "agent" },
-      ),
-    );
-    expect(taskPage).toMatchObject({ items: [expect.objectContaining({ id: task.id })] });
-    const dueTaskPage = await payload(
-      await request(
-        "/v1/tasks?completed=false&dueAfter=2026-07-14T15%3A00%3A00.000Z&dueBefore=2026-07-14T17%3A00%3A00.000Z",
-        { auth: "agent" },
-      ),
-    );
-    expect(dueTaskPage.items).toEqual([expect.objectContaining({ id: task.id })]);
-    const paginatedTasks = await payload(await request("/v1/tasks?limit=1", { auth: "agent" }));
-    expect(paginatedTasks.nextCursor).toEqual(expect.any(String));
-    expect(
-      (
-        await payload(
-          await request(
-            `/v1/tasks?limit=1&cursor=${encodeURIComponent(paginatedTasks.nextCursor)}`,
-            {
-              auth: "agent",
-            },
-          ),
-        )
-      ).items,
-    ).toHaveLength(1);
-    expect((await request("/v1/tasks?cursor=bad", { auth: "agent" })).status).toBe(400);
-    expect(
-      (
-        await request(`/v1/tasks/${task.id}`, {
-          auth: "agent",
-          body: { scheduledAt: null },
-          method: "PATCH",
-        })
-      ).status,
-    ).toBe(400);
-    const updatedTask = await payload(
-      await request(`/v1/tasks/${task.id}`, {
-        auth: "agent",
-        body: { estimateMinutes: null, status: "next", title: "Plan the next day" },
-        method: "PATCH",
-      }),
-    );
-    expect(updatedTask.task).toMatchObject({
-      estimateMinutes: null,
-      scheduledAt: "2026-07-13T18:00:00.000Z",
-      status: "next",
-      title: "Plan the next day",
-    });
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${task.id}`, {
-            auth: "agent",
-            body: { dueAt: null },
-            method: "PATCH",
-          }),
-        )
-      ).task.dueAt,
-    ).toBeNull();
-    const directlyCompletedTask = await payload(
-      await request(`/v1/tasks/${inboxTask.id}`, {
-        auth: "agent",
-        body: { status: "completed" },
-        method: "PATCH",
-      }),
-    );
-    expect(directlyCompletedTask.task).toMatchObject({
-      completedAt: expect.any(String),
-      status: "completed",
-    });
-    const completedTask = await payload(
-      await request(`/v1/tasks/${task.id}/complete`, {
-        auth: "agent",
-        body: { completed: true },
-      }),
-    );
-    expect(completedTask.task).toMatchObject({
-      completedAt: expect.any(String),
-      status: "completed",
-    });
-    expect(
-      (await payload(await request("/v1/tasks?completed=true", { auth: "agent" }))).items,
-    ).toEqual(expect.arrayContaining([expect.objectContaining({ id: task.id })]));
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${task.id}/complete`, {
-            auth: "agent",
-            body: { completed: false },
-          }),
-        )
-      ).task,
-    ).toMatchObject({ completedAt: null, status: "next" });
-    expect(
-      (await request(`/v1/tasks/${task.id}`, { auth: "agent", method: "DELETE" })).status,
-    ).toBe(204);
-    expect((await request(`/v1/tasks/${task.id}`, { auth: "agent" })).status).toBe(404);
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${task.id}/restore`, { auth: "agent", method: "POST" }),
-        )
-      ).task.id,
-    ).toBe(task.id);
-    expect(
-      (await request(`/v1/tasks/${task.id}/restore`, { auth: "agent", method: "POST" })).status,
-    ).toBe(404);
-
     const calendars = (await payload(await request("/v1/calendars", { auth: "agent" }))).calendars;
     expect(calendars).toHaveLength(1);
     const personal = calendars[0];

@@ -26,10 +26,11 @@ Read and act on one unified mailbox while retaining clear source-account and pro
   mail, Unread, Starred, and Snoozed children govern the cross-account
   conversation list; account headers use the same category pattern.
 - Mail keeps the global app bar for its identity, search, Sync, and Compose.
-  Its secondary bar appears only for a selected conversation: Reply and
-  Archive retain labels; Snooze, Star, and read state are icon controls; Delete
-  stays in the More menu. At narrow widths, the compact controls move into More
-  rather than overflowing horizontally.
+  It composes the same shared secondary app bar as Calendar only for a selected
+  conversation: Reply and Archive retain labels; Snooze, Star, and read state
+  are icon controls; Delete stays in the More menu. The bar uses the shared
+  neutral surface rather than a Mail-specific color. At narrow widths, the
+  compact controls move into More rather than overflowing horizontally.
 - Unified and account mailbox navigation remains usable with stale synchronized material.
 - A reconnect warning is scoped only to Mail-enabled accounts.
 - Manual sync gives transient toast feedback and refreshes durable health after success or failure.

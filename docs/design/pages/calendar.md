@@ -9,15 +9,19 @@ event without losing the shape of the day.
 
 - The contextual sidebar places `My calendars` before connected-provider
   account groups because local calendars are a separate first-party source.
-- The week header is a compact orientation row. It expands only for real
-  all-day material and meets the timeline without a divider.
+- Calendar composes the shared secondary app bar in every view. The day bar
+  owns all-day material, the week bar owns weekday/date controls and all-day
+  material, and the month bar owns weekday wayfinding.
+- The week secondary bar expands only for real all-day material and meets the
+  timeline without a decorative divider.
 - The persistent Calendar orientation occupies the shared workspace app bar's
   `identity` slot, with Today and the view selector in `context`. It names the
   selected day, week, or month; the calendar body begins directly with its
   spatial material and only that body scrolls.
-- Week views keep their day headers vertically pinned and their time axis
-  horizontally pinned. Month views keep weekday labels pinned while the date
-  grid scrolls. These are wayfinding anchors, not optional decoration.
+- Week views keep their shared secondary bar vertically pinned and their time
+  axis horizontally pinned. Month views keep the shared weekday bar pinned
+  while the date grid scrolls. These are wayfinding anchors, not optional
+  decoration.
 - The app-frame controls are two understandable groups: a Today action and a
   connected Day/Week/Month segmented control. They remain available on mobile;
   mobile reduces the creation action to its labelled icon so it cannot overlap
@@ -38,9 +42,9 @@ event without losing the shape of the day.
   the hour grid.
 - Day, week, and month views retain an explicit app-frame date-range heading
   at every scroll position. The Today control remains a standard action, not a
-  selected state. On narrow screens, Calendar compacts labels within the shared
-  fixed-height workspace app bar; it does not create a two-row Calendar-only
-  layout.
+  selected state. Their grid wayfinding uses the shared secondary app bar, not
+  Calendar-only chrome. On narrow screens, Calendar compacts primary-bar labels
+  while the secondary spatial bar remains horizontally aligned with its grid.
 - A Calendar-enabled account that requires renewed authorization produces one warning callout with
   a direct Connections link. Automatic retry and ilo-owned service repair remain non-destructive
   freshness state and do not interrupt the calendar with credential advice.

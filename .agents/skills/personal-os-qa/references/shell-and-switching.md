@@ -34,10 +34,17 @@
   `identity`, `context`, and `actions` slots in the same order. Its height,
   background, border, and sticky position do not change across routes,
   workspace-state changes, or while a sheet/dialog is open.
+- Every page may render the same `WorkspaceSecondaryAppBar` immediately beneath
+  the primary bar when it has persistent contextual wayfinding or tools. Its
+  `leading`, `content`, and `actions` slots stay ordered and its neutral surface
+  does not change with the workspace palette. Pages without secondary context
+  do not reserve an empty row.
 - Today keeps its date in `identity`; Calendar keeps its selected date/range in
   `identity`; the other workspaces keep compact route orientation there. Route
   controls occupy `context`, and the primary action occupies `actions`; no
-  workspace introduces a second top frame or a mobile-only transparent bar.
+  workspace introduces a custom primary frame or a mobile-only transparent bar.
+- Calendar day/week/month wayfinding and Mail selected-conversation actions use
+  the shared secondary-bar contract rather than feature-specific chrome.
 - Contextual sidebars do not repeat the workspace label below the switcher.
 - Internal links do not show external-link glyphs.
 - Active navigation uses the filled form of the same icon used in outline form
@@ -51,7 +58,8 @@
 2. Visit `/today`, `/calendar`, `/tasks`, `/mail`, and `/finances`. Confirm the
    app bar has identical 52 px geometry, an opaque surface, and no horizontal
    overflow. Confirm Calendar's range, Today action, and view controls remain
-   in the shared row rather than a taller Calendar-specific header.
+   in the shared primary row. Confirm any rendered secondary bar keeps the
+   shared neutral surface and preserves priority without document overflow.
 3. Confirm a centred **Workspace dock** names the active workspace and opens an
    ordered Today, Calendar, Tasks, Mail, and Finances menu; its separate
    **Workspace actions** bubble remains fixed beside it. No favicon trigger or

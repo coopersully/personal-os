@@ -44,6 +44,10 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "../../components/ui/sidebar.js";
+import {
+  WorkspaceSecondaryAppBar,
+  WorkspaceSecondaryAppBarActions,
+} from "../../components/workspace-secondary-app-bar.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
@@ -696,8 +700,8 @@ function MailSecondaryNavigation({
   trash: () => void;
 }) {
   return (
-    <section aria-label="Conversation actions" className="mail-secondary-nav">
-      <div className="mail-secondary-nav__actions">
+    <WorkspaceSecondaryAppBar aria-label="Conversation actions" className="mail-secondary-nav">
+      <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
         <Button onClick={reply} tone="ghost">
           <ReplyIcon aria-hidden="true" className="size-4" />
           <span>Reply</span>
@@ -769,8 +773,8 @@ function MailSecondaryNavigation({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      </div>
-    </section>
+      </WorkspaceSecondaryAppBarActions>
+    </WorkspaceSecondaryAppBar>
   );
 }
 

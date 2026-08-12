@@ -9,7 +9,7 @@
 
 ## Populated pass
 
-1. Confirm the top frame contains Search mail, Unread, Sync, and Compose.
+1. Confirm the primary top frame contains Search mail, Sync, and Compose.
 2. Confirm Unified inbox precedes provider-account mailbox groups.
 3. Confirm the provider row keeps display name, service name, unread count, and
    disclosure geometry separate.
@@ -21,8 +21,9 @@
    - Action needed: travel approval.
 6. Open Board packet for Friday. Confirm the reader retains subject, sender,
    address, timestamps, both messages, and `board-packet.pdf`.
-7. Confirm reader actions have accessible names. Do not execute reply, archive,
-   trash, snooze, or send unless that mutation is in scope.
+7. Confirm reader actions appear in the shared neutral secondary app bar and
+   have accessible names. Do not execute reply, archive, trash, snooze, or send
+   unless that mutation is in scope.
 8. Exercise search and unread filtering when Mail behavior changed.
 
 ## Empty and recovery passes

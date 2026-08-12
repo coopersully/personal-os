@@ -3398,6 +3398,9 @@ describe("ilo web app", () => {
     expect(screen.queryByRole("region", { name: "Calendar orientation" })).not.toBeInTheDocument();
     const topNavigation = screen.getByRole("navigation", { name: "Top navigation" });
     const controls = screen.getByRole("group", { name: "Calendar controls" });
+    expect(
+      await screen.findByRole("navigation", { name: "Calendar week navigation" }),
+    ).toHaveAttribute("data-slot", "workspace-secondary-app-bar");
     expect(within(topNavigation).getByRole("heading", { name: "July 12–18, 2026" })).toBeVisible();
     expect(within(topNavigation).queryByText(/^Now /)).not.toBeInTheDocument();
     expect(within(controls).getByRole("button", { name: "Today" })).not.toHaveAttribute(
@@ -3410,6 +3413,10 @@ describe("ilo web app", () => {
     });
     expect(viewSwitcher).toHaveAttribute("data-spacing", "0");
     await browser.click(within(viewSwitcher).getByRole("radio", { name: "Day" }));
+    expect(screen.getByRole("navigation", { name: "Calendar day navigation" })).toHaveAttribute(
+      "data-slot",
+      "workspace-secondary-app-bar",
+    );
     expect(
       within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("heading", {
         name: "Monday, July 13, 2026",
@@ -3417,6 +3424,10 @@ describe("ilo web app", () => {
     ).toBeVisible();
 
     await browser.click(within(viewSwitcher).getByRole("radio", { name: "Month" }));
+    expect(screen.getByRole("navigation", { name: "Calendar month navigation" })).toHaveAttribute(
+      "data-slot",
+      "workspace-secondary-app-bar",
+    );
     expect(
       within(screen.getByRole("navigation", { name: "Top navigation" })).getByRole("heading", {
         name: "July 2026",
@@ -4883,7 +4894,10 @@ describe("ilo web app", () => {
     expect(screen.queryByLabelText("Search conversations")).not.toBeInTheDocument();
     expect(screen.queryByText("Unified mail · synced every five minutes")).not.toBeInTheDocument();
     await browser.click(await screen.findByRole("button", { name: /Project update/ }));
-    expect(await screen.findByRole("region", { name: "Conversation actions" })).toBeInTheDocument();
+    expect(await screen.findByRole("navigation", { name: "Conversation actions" })).toHaveAttribute(
+      "data-slot",
+      "workspace-secondary-app-bar",
+    );
     expect(within(topNavigation).getByLabelText("Search mail")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Back to Unified inbox" })).not.toBeInTheDocument();
     expect(

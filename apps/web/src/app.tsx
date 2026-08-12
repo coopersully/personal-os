@@ -272,6 +272,10 @@ import { MobileWorkspaceDock } from "./components/mobile-workspace-dock.js";
 import { WorkspaceAppBar } from "./components/workspace-app-bar.js";
 import { WorkspaceIcon, workspaceIdForPath } from "./components/workspace-identity.js";
 import {
+  WorkspaceSecondaryAppBar,
+  WorkspaceSecondaryAppBarContent,
+} from "./components/workspace-secondary-app-bar.js";
+import {
   getWorkspaceCalendarEntry,
   workspaceCalendarSummary,
   workspaceCountSummary,
@@ -3385,7 +3389,14 @@ function DayCalendarView({
   };
   return (
     <section className={`calendar-day-view${isToday ? " is-today" : ""}`}>
-      <AllDayEvents events={allDayEvents} setEditor={setEditor} />
+      <WorkspaceSecondaryAppBar
+        aria-label="Calendar day navigation"
+        className="calendar-secondary-app-bar calendar-secondary-app-bar--day"
+      >
+        <WorkspaceSecondaryAppBarContent>
+          <AllDayEvents events={allDayEvents} setEditor={setEditor} />
+        </WorkspaceSecondaryAppBarContent>
+      </WorkspaceSecondaryAppBar>
       <div className="calendar-timeline-scroll" onScroll={handleScroll} ref={scrollContainer}>
         <div className="calendar-time-grid calendar-time-grid--day">
           <TimeAxis />
@@ -3546,36 +3557,48 @@ function WeekCalendarView({
           minWidth: 56 + days.length * 140,
         }}
       >
-        <div className="week-time-corner">All day</div>
-        {days.map((day) => {
-          const dayEvents = eventsByDay.get(localDateKey(day)) as CalendarEvent[];
-          const allDayEvents = dayEvents.filter((event) => event.allDay);
-          const isToday = sameLocalDate(day, today);
-          return (
-            <header
-              className={`week-day-header${isToday ? " is-today" : ""}`}
-              key={`header-${localDateKey(day)}`}
-            >
-              <div>
-                <span>{formatLocalWeekday(day)}</span>
-                <button
-                  aria-current={isToday ? "date" : undefined}
-                  aria-label={`View ${formatLocalDate(day, {
-                    day: "numeric",
-                    month: "long",
-                    weekday: "long",
-                    year: "numeric",
-                  })}`}
-                  onClick={() => showDay(day)}
-                  type="button"
+        <WorkspaceSecondaryAppBar
+          aria-label="Calendar week navigation"
+          className="calendar-secondary-app-bar calendar-secondary-app-bar--week"
+        >
+          <WorkspaceSecondaryAppBarContent
+            className="calendar-secondary-app-bar__week-grid"
+            style={{
+              gridTemplateColumns: `56px repeat(${days.length}, minmax(140px, 1fr))`,
+            }}
+          >
+            <div className="week-time-corner">All day</div>
+            {days.map((day) => {
+              const dayEvents = eventsByDay.get(localDateKey(day)) as CalendarEvent[];
+              const allDayEvents = dayEvents.filter((event) => event.allDay);
+              const isToday = sameLocalDate(day, today);
+              return (
+                <header
+                  className={`week-day-header${isToday ? " is-today" : ""}`}
+                  key={`header-${localDateKey(day)}`}
                 >
-                  {day.day}
-                </button>
-              </div>
-              <AllDayEvents compact events={allDayEvents} setEditor={setEditor} />
-            </header>
-          );
-        })}
+                  <div>
+                    <span>{formatLocalWeekday(day)}</span>
+                    <button
+                      aria-current={isToday ? "date" : undefined}
+                      aria-label={`View ${formatLocalDate(day, {
+                        day: "numeric",
+                        month: "long",
+                        weekday: "long",
+                        year: "numeric",
+                      })}`}
+                      onClick={() => showDay(day)}
+                      type="button"
+                    >
+                      {day.day}
+                    </button>
+                  </div>
+                  <AllDayEvents compact events={allDayEvents} setEditor={setEditor} />
+                </header>
+              );
+            })}
+          </WorkspaceSecondaryAppBarContent>
+        </WorkspaceSecondaryAppBar>
         <TimeAxis />
         {days.map((day) => {
           const layouts = layoutsByDay.get(localDateKey(day)) as TimelineEventLayout[];
@@ -3980,11 +4003,16 @@ function MonthCalendarView({
   }, [todaySnap]);
   return (
     <div className="month-calendar" ref={scrollContainer}>
-      <div className="month-weekdays" aria-hidden="true">
-        {calendarWeekdayLabels.map((label) => (
-          <span key={label}>{label}</span>
-        ))}
-      </div>
+      <WorkspaceSecondaryAppBar
+        aria-label="Calendar month navigation"
+        className="calendar-secondary-app-bar calendar-secondary-app-bar--month"
+      >
+        <WorkspaceSecondaryAppBarContent className="month-weekdays" aria-hidden="true">
+          {calendarWeekdayLabels.map((label) => (
+            <span key={label}>{label}</span>
+          ))}
+        </WorkspaceSecondaryAppBarContent>
+      </WorkspaceSecondaryAppBar>
       <div className="month-grid">
         {days.map((day) => {
           const dayEvents = eventsByDay.get(localDateKey(day)) as CalendarEvent[];

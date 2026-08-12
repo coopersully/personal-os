@@ -76,14 +76,13 @@ and the primary create action. When those controls are present in the frame,
 the page body begins with its primary material and never repeats a title,
 eyebrow, search field, or action bar.
 
-### Workspace app bar
+### Workspace app bars
 
 Today, Calendar, Tasks, Mail, Finances, and the account utility render one
-Integration-owned `WorkspaceAppBar`. It is the only top-frame primitive inside
-the application shell.
-The primitive fixes the structure, 52 px height, sticky position, semantic
-surface, contrast-led separation from its body, and 8 px internal rhythm; a
-route provides only the content of its named slots.
+Integration-owned primary `WorkspaceAppBar`. The primitive fixes the structure,
+52 px height, sticky position, semantic surface, contrast-led separation from
+its body, and 8 px internal rhythm; a route provides only the content of its
+named slots.
 
 | Slot | Required | Purpose |
 | --- | --- | --- |
@@ -91,8 +90,8 @@ route provides only the content of its named slots.
 | `context` | Always structurally present; content optional | Search, filters, freshness, or a compact mutually-exclusive view control. |
 | `actions` | Always structurally present; content optional | The primary create/action and rare platform utility. |
 
-- The structural order is always `identity | context | actions`. Do not create
-  a second header, a workspace-specific app bar, or route modifier classes to
+- The primary structural order is always `identity | context | actions`. Do not
+  create a workspace-specific primary bar or route modifier classes to
   rearrange it.
 - The app bar remains opaque, the same height, and in the same sticky position
   at desktop and narrow widths. Sheets, dialogs, route changes, loading, and
@@ -103,8 +102,7 @@ route provides only the content of its named slots.
   actions. Do not style adjacent independent buttons to impersonate a tab
   switcher.
 - Calendar's date/range is `identity`; its Today action and view selector are
-  `context`; New event is `actions`. Calendar grid wayfinding remains pinned in
-  the body, but it never owns a second application frame.
+  `context`; New event is `actions`.
 - The account utility is a tenant of the shell, not a workspace. Settings uses
   the same frame, sidebar column, and app bar as the five workspaces, with
   `Settings` as its identity and an empty context slot. It never shows a
@@ -116,6 +114,36 @@ route provides only the content of its named slots.
   replace the shell. It owns the whole viewport because there is no workspace
   to return to yet, and it must resolve before any redirect that sends an
   unfinished account into it.
+
+Every shell page may compose the Integration-owned
+`WorkspaceSecondaryAppBar` immediately beneath the primary bar when it has
+persistent contextual wayfinding or tools. An empty secondary row is never
+reserved. The shared primitive owns its accessible navigation landmark,
+semantic surface, minimum 52 px height, responsive width, and ordered slots;
+the feature owns only the meaning and behavior of the supplied content.
+
+| Secondary slot | Required | Purpose |
+| --- | --- | --- |
+| `leading` | No | A compact axis label or contextual orientation that precedes the main material. |
+| `content` | No | Scroll-synchronized wayfinding, filters, scope, or other contextual material. |
+| `actions` | No | Actions that apply to the selected or displayed material rather than the whole workspace. |
+
+- The secondary structural order is always `leading | content | actions`.
+  Features may add layout classes for spatial grids or overflow but never
+  replace the shared surface, landmark, or slot anatomy.
+- The secondary bar uses one flat semantic surface in every workspace. A
+  workspace palette never recolors it. It has no shadow, gradient, or decorative
+  divider.
+- Calendar uses the secondary bar for day all-day material, the week
+  weekday/date/all-day grid, and month weekday wayfinding. These bars remain
+  within the Calendar scroll owner so their horizontal position stays aligned
+  with the spatial grid.
+- Mail uses the secondary bar for actions on a selected conversation. Search,
+  Sync, and Compose remain in the primary bar because they apply without a
+  selection.
+- At narrow widths, features preserve the shared slot order and move lower
+  priority actions into a labelled overflow menu instead of overflowing the
+  viewport or creating another row.
 
 ### Blocks
 

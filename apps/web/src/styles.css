@@ -1244,6 +1244,27 @@ p {
   gap: 0.5rem;
   justify-content: center;
 }
+.workspace-secondary-app-bar {
+  align-items: stretch;
+  background: var(--paper);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: var(--chrome-height);
+  min-width: 0;
+  width: 100%;
+}
+.workspace-secondary-app-bar__leading,
+.workspace-secondary-app-bar__content,
+.workspace-secondary-app-bar__actions {
+  align-items: center;
+  display: flex;
+  min-width: 0;
+}
+.workspace-secondary-app-bar__actions {
+  gap: 0.125rem;
+  justify-content: flex-end;
+  padding: 0.375rem 1rem;
+}
 .workspace-app-bar__weather {
   align-items: center;
   border: 0;
@@ -2337,7 +2358,6 @@ p {
 }
 .calendar-all-day {
   align-items: start;
-  border-bottom: 1px solid var(--line);
   display: grid;
   gap: 10px;
   grid-template-columns: 56px 1fr;
@@ -2579,9 +2599,25 @@ p {
   align-self: stretch;
   background: var(--paper);
   min-height: 52px;
+}
+.calendar-secondary-app-bar--day > .workspace-secondary-app-bar__content {
+  grid-column: 1 / -1;
+}
+.calendar-secondary-app-bar--day .calendar-all-day {
+  width: 100%;
+}
+.calendar-secondary-app-bar--week {
+  grid-column: 1 / -1;
   position: sticky;
   top: 0;
   z-index: 7;
+}
+.calendar-secondary-app-bar__week-grid {
+  background: var(--line);
+  column-gap: 1px;
+  display: grid;
+  grid-column: 1 / -1;
+  width: 100%;
 }
 .week-time-corner {
   padding: 10px 8px 0 0;
@@ -2638,9 +2674,13 @@ p {
   scrollbar-width: thin;
 }
 .month-weekdays {
-  background: var(--paper);
   display: grid;
+  grid-column: 1 / -1;
   grid-template-columns: repeat(7, 1fr);
+  min-width: 760px;
+  width: 100%;
+}
+.calendar-secondary-app-bar--month {
   min-width: 760px;
   position: sticky;
   top: 0;
@@ -2887,20 +2927,8 @@ p {
   flex-wrap: wrap;
   gap: 8px;
 }
-.mail-secondary-nav {
-  align-items: center;
-  background: var(--paper-deep);
-  display: flex;
-  flex: 0 0 auto;
-  justify-content: flex-end;
-  min-height: 3rem;
-  padding: 0.375rem 1rem;
-}
 .mail-secondary-nav__actions {
-  align-items: center;
-  display: flex;
-  flex: 0 0 auto;
-  gap: 0.125rem;
+  grid-column: 3;
 }
 .mail-secondary-nav__actions .button {
   flex: 0 0 auto;
@@ -4504,9 +4532,7 @@ p {
   .workspace-skeleton__metric {
     height: 4.5rem;
   }
-  .mail-secondary-nav {
-    padding-inline: 0.75rem;
-  }
+  .mail-secondary-nav__actions { padding-inline: 0.75rem; }
   .mail-secondary-nav__actions .button { padding-inline: 0.5rem; }
   .mail-secondary-nav__actions .button > span { display: none; }
   .mail-secondary-nav__compact-action { display: none; }

@@ -2,6 +2,83 @@
 
 This log records delivered vertical slices against the master plan. It does not imply that an epic is complete until all of its listed completion criteria are met.
 
+## 2026-08-06 — Recoverable connector authorization and durable initial sync
+
+- Replaced raw Google/X callback errors with no-store `303` redirects and owner-only, allowlisted
+  authorization outcomes. Settings and Setup now show one plain-language result and one recovery
+  action without provider payloads, codes, scopes, or identities.
+- Added S256 PKCE for Google, durable thirty-minute authorization attempts, idempotent replay,
+  issuer validation, exact granted-capability checks, and fail-closed partial consent that leaves
+  existing accounts unchanged.
+- Moved Google and iCloud initial synchronization onto coalesced database triggers. The one-minute
+  scheduler drains those triggers through the existing fenced sync engine, while successful
+  accounts retain the five-minute reconciliation backstop and bounded retry policy.
+- Confirmed the production SSM Google client ID matches the authorized OAuth client and the client
+  secret remains a secure runtime parameter. Provider push remains an optional latency layer; it is
+  not required for correctness and must not be enabled without external watch/identity evidence.
+
+## 2026-08-06 — Notification-driven connector convergence
+
+- Added incremental Gmail history and capability-discovered iCloud CalDAV collection sync, with
+  bounded pagination/multiget, explicit deletion evidence, opaque cursor fencing, and controlled
+  full-reset fallback when a provider cursor is invalid or unsupported.
+- Added durable Gmail and Calendar watch renewal, authenticated/deduplicated public notifications,
+  and bounded iCloud IMAP IDLE change signals. Every signal coalesces into the same fenced sync
+  engine; five-minute reconciliation remains authoritative.
+- Added independent disabled-by-default production gates, exact-path WAF rate boundaries, privacy-
+  bounded operational events, and alarms for subscription health, renewal lag, rejected delivery,
+  trigger age, and sync freshness.
+- Kept Gmail/Calendar push disabled pending non-secret evidence of the external GCP topic IAM,
+  subscription OIDC authority/audience, Google publishing/verification, and production-equivalent
+  delivery/reconciliation/renewal checks. Repository configuration alone is not marked as proof.
+
+## 2026-08-05 — Actionable connected-account health
+
+- Replaced raw Google/X response handling and blanket iCloud credential errors with a whitelisted,
+  provider-neutral failure contract. Only positive authorization evidence asks a person to
+  reconnect; unknown/provider transport text is never persisted or returned.
+- Added durable failure category, recovery owner, attempt count, last-attempt time, and next-due
+  time. Existing external-account errors migrate to safe automatic recovery without copying legacy
+  text.
+- Scheduled Calendar-only and Mail-enabled accounts every five minutes with bounded concurrency,
+  fenced stale-claim recovery, 1/5/15/60-minute backoff, structured redacted observations, and
+  CloudWatch failure/configuration alarms.
+- Added Ready, Syncing, Retrying automatically, Reconnect required, and ilo-owned service-attention
+  states to Connections, plus direct Google/iCloud reconnect actions and Mail/Calendar callouts.
+- Made SSM Parameter Store authoritative for both Google OAuth values and made production startup
+  fail closed when either is absent.
+- Hardened production deployment preflight and recovery so a rollout validates and pins the exact
+  task definition whose unique Google secret references were inspected, proves a complete API drain
+  before recovery, and cannot launch a stale or ambiguously configured candidate.
+- Proved the hardened release on production task definition revision 64: API, MCP, web, secret
+  references, execution-role authority, rollback, autoscaling, and iCloud scheduled sync were
+  healthy. Existing Google grants were truthfully classified as revoked and reached Google's
+  reconnect boundary without exposing raw provider responses.
+- Kept Google availability incomplete for general users after live reconnect exposed Google's
+  unverified-app warning. Provider publishing, restricted-scope verification, and the Gmail
+  security-assessment gate are tracked in [issue #84](https://github.com/coopersully/personal-os/issues/84)
+  and remain production release requirements rather than being inferred from valid credentials.
+- Closed the infrastructure-evidence gap found during rollout: production deploy and hourly health
+  now fail closed unless the exact live connector failure/configuration filters and alarms match
+  their redacted patterns, metrics, thresholds, periods, missing-data policy, and notification
+  routes. A separate inline policy gives the deployment role only read access to metric-filter
+  metadata without coupling its apply to task-definition or edge-resource changes.
+
+## 2026-08-02 — Agent-owned setup protocol
+
+- Added one authenticated, server-owned setup plan with stable semantic steps,
+  observed connection evidence, exact domain scope, required tools, approval
+  ownership, and honest current/blocked/complete state.
+- Exposed the plan through `get_ilo_setup` so a connected agent can inspect Ilo,
+  ask only unresolved questions, save a draft, preserve signed-in approval
+  boundaries, and re-read the plan after every state change.
+- Reduced Agent access to the unavoidable connection handoff plus supervised
+  agent-owned setup. Skill installation and copied procedural prompts are now
+  optional protocol details rather than required user work.
+- Published the optional compatibility reference as v0.2.0 on Ilo's immutable
+  website path and added narrow migration from the prior v0.1.0 website release
+  and recognized official GitHub sources.
+
 ## 2026-07-29 — Reproducible agent handoff and core-domain readiness
 
 - Pinned the official `ilo-setup` v0.1.0 source to one Git commit and added a

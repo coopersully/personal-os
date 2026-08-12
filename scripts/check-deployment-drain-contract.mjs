@@ -9,6 +9,14 @@ const iam = readFileSync(resolve(root, "infra/iam.tf"), "utf8");
 const main = readFileSync(resolve(root, "apps/api/src/main.ts"), "utf8");
 const workflowSource = readFileSync(resolve(root, ".github/workflows/deploy.yml"), "utf8");
 const workflow = readFileSync(resolve(root, ".github/scripts/deploy-api.sh"), "utf8");
+const heartbeatWorker = readFileSync(
+  resolve(root, ".github/scripts/deployment-heartbeat-worker.py"),
+  "utf8",
+);
+const runtimeTaskDefinitionCheck = resolve(
+  root,
+  ".github/scripts/check-runtime-task-definition.mjs",
+);
 if (
   !/name: Deploy migration-capable API serially[\s\S]*?run: bash \.github\/scripts\/deploy-api\.sh/.test(
     workflowSource,
@@ -31,6 +39,117 @@ function requireOrder(earlier, later, description) {
   const laterIndex = workflow.lastIndexOf(later);
   if (earlierIndex < 0 || laterIndex < 0 || earlierIndex >= laterIndex) {
     throw new Error(`Deployment drain contract has unsafe ordering: ${description}.`);
+  }
+}
+
+function checkRuntimeTaskDefinition(taskDefinition) {
+  return spawnSync("node", [runtimeTaskDefinitionCheck], {
+    encoding: "utf8",
+    input: JSON.stringify(taskDefinition),
+  });
+}
+
+const validRuntimeTaskDefinition = {
+  containerDefinitions: [
+    {
+      name: "api",
+      environment: [{ name: "NODE_ENV", value: "production" }],
+      secrets: [
+        {
+          name: "GOOGLE_CLIENT_ID",
+          valueFrom:
+            "arn:aws:ssm:us-east-1:123456789012:parameter/personal-os/prod/GOOGLE_CLIENT_ID",
+        },
+        {
+          name: "GOOGLE_CLIENT_SECRET",
+          valueFrom:
+            "arn:aws:ssm:us-east-1:123456789012:parameter/personal-os/prod/GOOGLE_CLIENT_SECRET",
+        },
+      ],
+    },
+  ],
+};
+const validRuntimeCheck = checkRuntimeTaskDefinition(validRuntimeTaskDefinition);
+if (validRuntimeCheck.status !== 0) {
+  throw new Error(
+    `A correctly wired production task definition must pass: ${validRuntimeCheck.stderr.trim()}`,
+  );
+}
+for (const invalidDefinition of [
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        environment: [{ name: "GOOGLE_CLIENT_ID", value: "" }],
+      },
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        secrets: validRuntimeTaskDefinition.containerDefinitions[0].secrets.filter(
+          ({ name }) => name !== "GOOGLE_CLIENT_ID",
+        ),
+      },
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        secrets: validRuntimeTaskDefinition.containerDefinitions[0].secrets.map((secret) =>
+          secret.name === "GOOGLE_CLIENT_SECRET"
+            ? { ...secret, valueFrom: "plain-text-is-not-a-runtime-reference" }
+            : secret,
+        ),
+      },
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      validRuntimeTaskDefinition.containerDefinitions[0],
+      structuredClone(validRuntimeTaskDefinition.containerDefinitions[0]),
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        secrets: [
+          ...validRuntimeTaskDefinition.containerDefinitions[0].secrets,
+          structuredClone(validRuntimeTaskDefinition.containerDefinitions[0].secrets[0]),
+        ],
+      },
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        secrets: [
+          ...validRuntimeTaskDefinition.containerDefinitions[0].secrets,
+          structuredClone(validRuntimeTaskDefinition.containerDefinitions[0].secrets[1]),
+        ],
+      },
+    ],
+  },
+]) {
+  const invalidRuntimeCheck = checkRuntimeTaskDefinition(invalidDefinition);
+  if (invalidRuntimeCheck.status === 0) {
+    throw new Error("Stale or plain Google runtime wiring must fail deployment preflight.");
+  }
+  if (!invalidRuntimeCheck.stderr.includes("Google runtime configuration is not ready")) {
+    throw new Error("Runtime preflight failures must use the safe operator-facing diagnostic.");
+  }
+  if (invalidRuntimeCheck.stderr.includes("plain-text-is-not-a-runtime-reference")) {
+    throw new Error("Runtime preflight failures must not echo rejected configuration values.");
   }
 }
 
@@ -60,6 +179,11 @@ requireMatch(
   iam,
   /sid\s*=\s*"ObserveScalingStateForDrainRestore"[\s\S]*?actions\s*=\s*\["application-autoscaling:DescribeScalableTargets"\][\s\S]*?resources\s*=\s*\["\*"\]/,
   "the isolated scaling-state observation bootstrap required by the workflow",
+);
+requireMatch(
+  iam,
+  /sid\s*=\s*"PublishDeploymentHeartbeat"[\s\S]*?actions\s*=\s*\["cloudwatch:PutMetricData"\][\s\S]*?cloudwatch:namespace[\s\S]*?ilo\/Deployments/,
+  "namespace-scoped deployment heartbeat authority",
 );
 requireMatch(
   main,
@@ -108,6 +232,41 @@ requireMatch(
 );
 requireMatch(
   workflow,
+  /publish_api_deployment_state\(\)[\s\S]*?cloudwatch put-metric-data[\s\S]*?--namespace ilo\/Deployments[\s\S]*?ApiDeploymentInProgress/,
+  "an aggregate CloudWatch deployment-state publisher",
+);
+requireMatch(
+  workflow,
+  /api_deployment_heartbeat_interval_seconds="\$\{API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30\}"[\s\S]*?start_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 1[\s\S]*?python3 \.github\/scripts\/deployment-heartbeat-worker\.py[\s\S]*?api_deployment_heartbeat_ready_file[\s\S]*?api_deployment_heartbeat_failure_file/,
+  "a background-proven default-thirty-second deployment heartbeat loop with bounded refresh retries",
+);
+requireMatch(
+  heartbeatWorker,
+  /prctl\(1, signal\.SIGTERM\)[\s\S]*?MetricName=ApiDeploymentInProgress,Value=1[\s\S]*?os\.getppid\(\) != deployment_parent_pid[\s\S]*?for attempt in range\(3\)[\s\S]*?ILO_DEPLOYMENT_HEARTBEAT_WORKER[\s\S]*?time\.sleep\(interval_seconds\)/,
+  "a parent-death-bound heartbeat worker with bounded refresh retries",
+);
+requireMatch(
+  workflow,
+  /assert_api_deployment_heartbeat_healthy\(\)[\s\S]*?api_deployment_heartbeat_failure_file[\s\S]*?kill -0[\s\S]*?# Stop and drain the old binary[\s\S]*?start_api_deployment_heartbeat[\s\S]*?assert_api_deployment_heartbeat_healthy[\s\S]*?api_rollout_complete=true/,
+  "parent-visible heartbeat failure checks throughout the rollout",
+);
+requireMatch(
+  workflow,
+  /stop_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 0[\s\S]*?wait_for_api_deployment_alarm_state OK[\s\S]*?API deployment heartbeat alarm did not clear/,
+  "post-deployment proof that heartbeat suppression cleared",
+);
+requireMatch(
+  workflow,
+  /stop_api_deployment_heartbeat\(\)[\s\S]*?publish_api_deployment_state 0/,
+  "deployment heartbeat cleanup that restores incident paging",
+);
+requireMatch(
+  workflow,
+  /# Stop and drain the old binary[\s\S]*?start_api_deployment_heartbeat[\s\S]*?api_service_drain_attempted=true[\s\S]*?--desired-count 0/,
+  "deployment heartbeat proof before the availability-changing API drain",
+);
+requireMatch(
+  workflow,
   /test "\$api_minimum_healthy_percent" = "0"[\s\S]*?test "\$api_maximum_percent" = "200"/,
   "live deployment percentages matching the declared IaC configuration",
 );
@@ -115,6 +274,21 @@ requireMatch(
   workflow,
   /run_interruptible aws ecs wait tasks-stopped[\s\S]*?aws ecs describe-tasks/,
   "exact stopped-task propagation before exit evidence inspection",
+);
+requireMatch(
+  workflow,
+  /if test "\$api_recovery_entry" = "true"; then[\s\S]*?current_scaling_suspension[\s\S]*?else[\s\S]*?register-scalable-target[\s\S]*?fi[\s\S]*?if test "\$api_recovery_entry" != "true"; then[\s\S]*?aws ecs wait services-stable[\s\S]*?fi[\s\S]*?api_suspended_service_state=/,
+  "read-only recovery suspension verification without a retained-failed-deployment stability wait",
+);
+requireMatch(
+  workflow,
+  /api_suspended_desired=[\s\S]*?desiredCount[\s\S]*?api_suspended_running=[\s\S]*?runningCount[\s\S]*?api_suspended_pending=[\s\S]*?pendingCount[\s\S]*?test "\$api_recovery_entry" = "true"[\s\S]*?test "\$api_suspended_desired" = "0"[\s\S]*?test "\$api_suspended_running" = "0"[\s\S]*?test "\$api_suspended_pending" = "0"/,
+  "a second exact zero-state proof immediately before a recovery candidate can launch",
+);
+requireMatch(
+  workflow,
+  /api_service_drain_attempted=true[\s\S]*?if test "\$api_recovery_entry" != "true"; then[\s\S]*?aws ecs update-service[\s\S]*?--desired-count 0[\s\S]*?aws ecs wait services-stable[\s\S]*?fi[\s\S]*?api_counts=/,
+  "direct zero-state verification during failed-deployment recovery without an unsatisfiable generic stability wait",
 );
 requireMatch(
   workflow,
@@ -160,6 +334,11 @@ requireMatch(
   workflowSource,
   /ILO_DEPLOYMENT_RESTORE_STATE[\s\S]*?ILO_DEPLOYMENT_RECOVERY_MARKER[\s\S]*?api_is_emergency[\s\S]*?failedTaskDefinitionArn[\s\S]*?postDrainTaskDefinitionArns[\s\S]*?recoveryAuthorized = true[\s\S]*?api_candidate_recovery_marker[\s\S]*?register_task \\\n {12}"\$MCP_SERVICE"[\s\S]*?register_task \\\n {12}"\$API_SERVICE"/,
   "explicit marker-gated bounded recovery-intent inheritance",
+);
+requireMatch(
+  workflowSource,
+  /api_latest_definition="\$\([\s\S]*?describe-task-definition[\s\S]*?\)"[\s\S]*?api_latest_definition_arn="\$\([\s\S]*?\.taskDefinitionArn[\s\S]*?\)"[\s\S]*?node \.github\/scripts\/check-runtime-task-definition\.mjs <<<"\$api_latest_definition"[\s\S]*?register_task \\\n+ {12}"\$API_SERVICE" \\\n+ {12}api[\s\S]*?api_task_definition \\\n+ {12}"\$api_latest_definition_arn"/,
+  "Google runtime wiring validation bound to the exact API revision later cloned",
 );
 requireMatch(
   workflow,

@@ -1,6 +1,7 @@
 import type { CreateEventInput, UpdateEventInput } from "@personal-os/domain";
 import nodemailer from "nodemailer";
 import { z } from "zod";
+import { ConnectorError, connectorHttpError } from "./failures.js";
 import { providerFetch } from "./http.js";
 import {
   calendarAttachmentProjectionOverflow,
@@ -111,6 +112,33 @@ const gmailThreadListResponseSchema = z.object({
   nextPageToken: z.string().optional(),
   threads: z.array(z.object({ id: z.string() })).default([]),
 });
+const gmailProfileSchema = z.object({
+  historyId: z.string().min(1),
+});
+const gmailHistoryMessageSchema = z.object({
+  id: z.string(),
+  threadId: z.string(),
+});
+const gmailHistoryRecordSchema = z.object({
+  id: z.string(),
+  labelsAdded: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  labelsRemoved: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  messagesAdded: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+  messagesDeleted: z.array(z.object({ message: gmailHistoryMessageSchema })).default([]),
+});
+const gmailHistoryResponseSchema = z.object({
+  history: z.array(gmailHistoryRecordSchema).max(1_000).default([]),
+  historyId: z.string().min(1),
+  nextPageToken: z.string().optional(),
+});
+const gmailWatchResponseSchema = z.object({
+  expiration: z.string().regex(/^\d+$/u),
+  historyId: z.string().min(1),
+});
+const calendarWatchResponseSchema = z.object({
+  expiration: z.string().regex(/^\d+$/u),
+  resourceId: z.string().min(1),
+});
 const gmailHeaderSchema = z.object({ name: z.string(), value: z.string() });
 const gmailPartSchema = z.object({
   body: z
@@ -145,16 +173,6 @@ const gmailMinimalThreadSchema = z.object({
 
 type GoogleEvent = z.infer<typeof eventSchema>;
 
-export class ConnectorError extends Error {
-  public readonly status: number;
-
-  public constructor(message: string, status: number) {
-    super(message);
-    this.name = "ConnectorError";
-    this.status = status;
-  }
-}
-
 /** A local composition or credential-refresh failure before a Mail send request begins. */
 export class MailSendPreAcceptanceError extends Error {
   public override readonly cause: unknown;
@@ -174,24 +192,28 @@ type GoogleConnectorOptions = {
   redirectUri: string;
 };
 
+const MAX_GMAIL_HISTORY_PAGES = 10;
+const MAX_GMAIL_FULL_SYNC_PAGES = 10;
+const MAX_GMAIL_SYNC_THREADS = 100;
+
 export function createGoogleConnector(options: GoogleConnectorOptions): GoogleConnector {
   const request = options.fetch ?? globalThis.fetch;
   const now = options.now ?? (() => new Date());
 
   function requireConfiguration(): void {
     if (!options.clientId || !options.clientSecret) {
-      throw new ConnectorError("Google Calendar is not configured.", 503);
+      throw new ConnectorError({
+        category: "configuration",
+        code: "google_not_configured",
+        disposition: "operator",
+        message: "Google Calendar is not configured.",
+        status: 503,
+      });
     }
   }
 
   async function parseResponse(response: Response): Promise<unknown> {
-    if (!response.ok) {
-      const body = await response.text();
-      throw new ConnectorError(
-        `Google API request failed (${response.status}): ${body}`,
-        response.status,
-      );
-    }
+    if (!response.ok) throw await connectorHttpError(response, "google");
     return response.status === 204 ? null : response.json();
   }
 
@@ -325,7 +347,13 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       nextSyncToken = page.nextSyncToken ?? nextSyncToken;
     } while (pageToken);
     if (!nextSyncToken) {
-      throw new ConnectorError("Google Calendar did not return a synchronization token.", 502);
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "google_sync_token_missing",
+        disposition: "operator",
+        message: "Google Calendar did not return a synchronization token.",
+        status: 502,
+      });
     }
     return {
       credentials: currentCredentials,
@@ -333,9 +361,165 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
     };
   }
 
+  async function listMailboxes(
+    credentials: GoogleCredentials,
+    operation?: ProviderOperationOptions,
+  ): Promise<CredentialResult<RemoteMailbox[]>> {
+    const result = await authenticatedRequest(
+      credentials,
+      "https://gmail.googleapis.com/gmail/v1/users/me/labels",
+      {},
+      operation,
+    );
+    const page = labelListResponseSchema.parse(await parseResponse(result.response));
+    return {
+      credentials: result.credentials,
+      value: page.labels.map((label) => ({
+        id: label.id,
+        name: label.name,
+        role: mailboxRole(label.id),
+        totalCount: label.messagesTotal,
+        unreadCount: label.messagesUnread,
+      })),
+    };
+  }
+
+  async function fetchMailThread(
+    credentials: GoogleCredentials,
+    threadId: string,
+    operation?: ProviderOperationOptions,
+  ): Promise<CredentialResult<NormalizedRemoteMailThread | null>> {
+    const result = await authenticatedRequest(
+      credentials,
+      `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
+      {},
+      operation,
+    );
+    if (result.response.status === 404) {
+      await result.response.body?.cancel().catch(() => undefined);
+      return { credentials: result.credentials, value: null };
+    }
+    return {
+      credentials: result.credentials,
+      value: normalizeMailThread(gmailThreadSchema.parse(await parseResponse(result.response))),
+    };
+  }
+
+  async function fullMailSync(
+    credentials: GoogleCredentials,
+    mailboxes: RemoteMailbox[],
+    operation?: ProviderOperationOptions,
+  ) {
+    const profileResult = await authenticatedRequest(
+      credentials,
+      "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+      {},
+      operation,
+    );
+    const profile = gmailProfileSchema.parse(await parseResponse(profileResult.response));
+    const threadIds: string[] = [];
+    let pageToken: string | undefined;
+    const seenPageTokens = new Set<string>();
+    let pageCount = 0;
+    let currentCredentials = profileResult.credentials;
+    do {
+      throwIfProviderOperationCancelled(operation);
+      const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/threads");
+      url.searchParams.set("maxResults", String(MAX_GMAIL_SYNC_THREADS - threadIds.length));
+      if (pageToken) url.searchParams.set("pageToken", pageToken);
+      const result = await authenticatedRequest(currentCredentials, url.toString(), {}, operation);
+      currentCredentials = result.credentials;
+      const page = gmailThreadListResponseSchema.parse(await parseResponse(result.response));
+      pageCount += 1;
+      threadIds.push(
+        ...page.threads
+          .slice(0, MAX_GMAIL_SYNC_THREADS - threadIds.length)
+          .map((thread) => thread.id),
+      );
+      const nextPageToken =
+        threadIds.length < MAX_GMAIL_SYNC_THREADS ? page.nextPageToken : undefined;
+      if (
+        nextPageToken &&
+        (pageCount >= MAX_GMAIL_FULL_SYNC_PAGES || seenPageTokens.has(nextPageToken))
+      ) {
+        throw new ConnectorError({
+          category: "invalid_response",
+          code: "google_mail_page_limit_exceeded",
+          disposition: "retry",
+          message: "Google Mail pagination did not complete safely.",
+          status: 502,
+        });
+      }
+      if (nextPageToken) seenPageTokens.add(nextPageToken);
+      pageToken = nextPageToken;
+    } while (pageToken);
+    const threads: NormalizedRemoteMailThread[] = [];
+    const deletedThreadIds: string[] = [];
+    for (const threadId of threadIds) {
+      throwIfProviderOperationCancelled(operation);
+      const result = await fetchMailThread(currentCredentials, threadId, operation);
+      currentCredentials = result.credentials;
+      if (result.value) threads.push(result.value);
+      else deletedThreadIds.push(threadId);
+    }
+    return {
+      credentials: currentCredentials,
+      value: {
+        deletedThreadIds,
+        mailboxes,
+        nextSyncToken: profile.historyId,
+        reset: true,
+        threads,
+      },
+    };
+  }
+
+  function providerExpiration(value: string): string {
+    const milliseconds = Number(value);
+    const date = new Date(milliseconds);
+    if (!Number.isSafeInteger(milliseconds) || Number.isNaN(date.getTime())) {
+      throw new ConnectorError({
+        category: "invalid_response",
+        code: "google_watch_expiration_invalid",
+        disposition: "operator",
+        message: "Google returned an invalid notification expiration.",
+        status: 502,
+      });
+    }
+    return date.toISOString();
+  }
+
+  async function watchCalendar(
+    credentials: GoogleCredentials,
+    url: string,
+    channel: { address: string; id: string; token: string },
+    operation?: ProviderOperationOptions,
+  ) {
+    const result = await authenticatedRequest(
+      credentials,
+      url,
+      {
+        body: JSON.stringify({
+          address: channel.address,
+          id: channel.id,
+          token: channel.token,
+          type: "web_hook",
+        }),
+        method: "POST",
+      },
+      operation,
+    );
+    const watch = calendarWatchResponseSchema.parse(await parseResponse(result.response));
+    return {
+      credentials: result.credentials,
+      value: { expiresAt: providerExpiration(watch.expiration), resourceId: watch.resourceId },
+    };
+  }
+
   return {
     authorizationUrl(
       state: string,
+      codeChallenge: string,
       loginHint?: string,
       services: GoogleAuthorizationService[] = ["calendar", "mail"],
     ): string {
@@ -357,6 +541,8 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       url.search = new URLSearchParams({
         access_type: "offline",
         client_id: options.clientId,
+        code_challenge: codeChallenge,
+        code_challenge_method: "S256",
         include_granted_scopes: "true",
         prompt: "consent",
         redirect_uri: options.redirectUri,
@@ -388,18 +574,29 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       return result.credentials;
     },
 
-    async exchangeCode(code: string): Promise<GoogleCredentials> {
+    async exchangeCode(
+      code: string,
+      codeVerifier: string,
+      redirectUri = options.redirectUri,
+    ): Promise<GoogleCredentials> {
       const token = await exchangeToken(
         new URLSearchParams({
           client_id: options.clientId,
           client_secret: options.clientSecret,
           code,
+          code_verifier: codeVerifier,
           grant_type: "authorization_code",
-          redirect_uri: options.redirectUri,
+          redirect_uri: redirectUri,
         }),
       );
       if (!token.refresh_token) {
-        throw new ConnectorError("Google did not return an offline refresh token.", 400);
+        throw new ConnectorError({
+          category: "invalid_response",
+          code: "google_refresh_token_missing",
+          disposition: "operator",
+          message: "Google did not return an offline refresh token.",
+          status: 400,
+        });
       }
       return {
         accessToken: token.access_token,
@@ -429,6 +626,52 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
 
     listCalendars,
 
+    async watchGmail(credentials, topicName, operation) {
+      const result = await authenticatedRequest(
+        credentials,
+        "https://gmail.googleapis.com/gmail/v1/users/me/watch",
+        { body: JSON.stringify({ topicName }), method: "POST" },
+        operation,
+      );
+      const watch = gmailWatchResponseSchema.parse(await parseResponse(result.response));
+      return {
+        credentials: result.credentials,
+        value: {
+          expiresAt: providerExpiration(watch.expiration),
+          historyId: watch.historyId,
+        },
+      };
+    },
+
+    async watchCalendarList(credentials, channel, operation) {
+      return watchCalendar(
+        credentials,
+        "https://www.googleapis.com/calendar/v3/users/me/calendarList/watch",
+        channel,
+        operation,
+      );
+    },
+
+    async watchCalendarEvents(credentials, remoteCalendarId, channel, operation) {
+      return watchCalendar(
+        credentials,
+        `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(remoteCalendarId)}/events/watch`,
+        channel,
+        operation,
+      );
+    },
+
+    async stopCalendarWatch(credentials, channelId, resourceId, operation) {
+      const result = await authenticatedRequest(
+        credentials,
+        "https://www.googleapis.com/calendar/v3/channels/stop",
+        { body: JSON.stringify({ id: channelId, resourceId }), method: "POST" },
+        operation,
+      );
+      await parseResponse(result.response);
+      return result.credentials;
+    },
+
     async getMailThreadState(credentials, remoteThreadId) {
       const result = await authenticatedRequest(
         credentials,
@@ -447,29 +690,24 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       };
     },
 
-    async syncMail(credentials, operation) {
+    async syncMail(credentials, syncToken, operation) {
       throwIfProviderOperationCancelled(operation);
-      const labelResult = await authenticatedRequest(
-        credentials,
-        "https://gmail.googleapis.com/gmail/v1/users/me/labels",
-        {},
-        operation,
-      );
-      const labelPage = labelListResponseSchema.parse(await parseResponse(labelResult.response));
-      const mailboxes: RemoteMailbox[] = labelPage.labels.map((label) => ({
-        id: label.id,
-        name: label.name,
-        role: mailboxRole(label.id),
-        totalCount: label.messagesTotal,
-        unreadCount: label.messagesUnread,
-      }));
-      const threadIds: string[] = [];
+      const mailboxResult = await listMailboxes(credentials, operation);
+      if (!syncToken) {
+        return fullMailSync(mailboxResult.credentials, mailboxResult.value, operation);
+      }
+
+      const threadIds = new Set<string>();
       let pageToken: string | undefined;
-      let currentCredentials = labelResult.credentials;
+      let currentCredentials = mailboxResult.credentials;
+      let nextSyncToken = syncToken;
+      let pageCount = 0;
       do {
         throwIfProviderOperationCancelled(operation);
-        const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/threads");
-        url.searchParams.set("maxResults", String(100 - threadIds.length));
+        pageCount += 1;
+        const url = new URL("https://gmail.googleapis.com/gmail/v1/users/me/history");
+        url.searchParams.set("maxResults", "500");
+        url.searchParams.set("startHistoryId", syncToken);
         if (pageToken) url.searchParams.set("pageToken", pageToken);
         const result = await authenticatedRequest(
           currentCredentials,
@@ -478,30 +716,48 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
           operation,
         );
         currentCredentials = result.credentials;
-        const page = gmailThreadListResponseSchema.parse(await parseResponse(result.response));
-        threadIds.push(...page.threads.map((thread) => thread.id));
-        pageToken = threadIds.length < 100 ? page.nextPageToken : undefined;
+        if (result.response.status === 404) {
+          await result.response.body?.cancel().catch(() => undefined);
+          return fullMailSync(currentCredentials, mailboxResult.value, operation);
+        }
+        const page = gmailHistoryResponseSchema.parse(await parseResponse(result.response));
+        for (const history of page.history) {
+          for (const change of [
+            ...history.messagesAdded,
+            ...history.messagesDeleted,
+            ...history.labelsAdded,
+            ...history.labelsRemoved,
+          ]) {
+            threadIds.add(change.message.threadId);
+            if (threadIds.size > MAX_GMAIL_SYNC_THREADS) {
+              return fullMailSync(currentCredentials, mailboxResult.value, operation);
+            }
+          }
+        }
+        nextSyncToken = page.historyId;
+        pageToken = page.nextPageToken;
+        if (pageToken && pageCount >= MAX_GMAIL_HISTORY_PAGES) {
+          return fullMailSync(currentCredentials, mailboxResult.value, operation);
+        }
       } while (pageToken);
       const threads: NormalizedRemoteMailThread[] = [];
+      const deletedThreadIds: string[] = [];
       for (const threadId of threadIds) {
         throwIfProviderOperationCancelled(operation);
-        const result = await authenticatedRequest(
-          currentCredentials,
-          `https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}?format=full`,
-          {},
-          operation,
-        );
+        const result = await fetchMailThread(currentCredentials, threadId, operation);
         currentCredentials = result.credentials;
-        // Normalize and release each full provider response before requesting the
-        // next thread. Attachment traversal applies its per-message bounds here,
-        // so the sync never retains up to 100 raw MIME trees at once.
-        threads.push(
-          normalizeMailThread(gmailThreadSchema.parse(await parseResponse(result.response))),
-        );
+        if (result.value) threads.push(result.value);
+        else deletedThreadIds.push(threadId);
       }
       return {
         credentials: currentCredentials,
-        value: { mailboxes, threads },
+        value: {
+          deletedThreadIds,
+          mailboxes: mailboxResult.value,
+          nextSyncToken,
+          reset: false,
+          threads,
+        },
       };
     },
 
@@ -609,6 +865,26 @@ export function createGoogleConnector(options: GoogleConnectorOptions): GoogleCo
       };
     },
   };
+}
+
+export function googleGrantedServices(
+  credentials: GoogleCredentials,
+): GoogleAuthorizationService[] {
+  const scopes = new Set(credentials.scope.split(/\s+/).filter(Boolean));
+  const fullCalendar = scopes.has("https://www.googleapis.com/auth/calendar");
+  const calendarList =
+    fullCalendar ||
+    scopes.has("https://www.googleapis.com/auth/calendar.readonly") ||
+    scopes.has("https://www.googleapis.com/auth/calendar.calendarlist.readonly");
+  const calendarEvents =
+    fullCalendar || scopes.has("https://www.googleapis.com/auth/calendar.events");
+  const fullMail = scopes.has("https://mail.google.com/");
+  const mailManage = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.modify");
+  const mailSend = fullMail || scopes.has("https://www.googleapis.com/auth/gmail.send");
+  return [
+    ...(calendarList && calendarEvents ? (["calendar"] as const) : []),
+    ...(mailManage && mailSend ? (["mail"] as const) : []),
+  ];
 }
 
 function mailboxRole(id: string): RemoteMailbox["role"] {
@@ -763,7 +1039,13 @@ function normalizeChange(event: GoogleEvent, fallbackTimezone: string): RemoteEv
 
 function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): NormalizedRemoteEvent {
   if (!event.start || !event.end) {
-    throw new ConnectorError("Google returned an event without start or end data.", 502);
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "google_event_range_missing",
+      disposition: "operator",
+      message: "Google returned an event without start or end data.",
+      status: 502,
+    });
   }
   const allDay = Boolean(event.start.date);
   const startValue =
@@ -772,7 +1054,13 @@ function normalizeEvent(event: GoogleEvent, fallbackTimezone: string): Normalize
   const startsAt = new Date(startValue);
   const endsAt = new Date(endValue);
   if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime())) {
-    throw new ConnectorError("Google returned an event with invalid dates.", 502);
+    throw new ConnectorError({
+      category: "invalid_response",
+      code: "google_event_range_invalid",
+      disposition: "operator",
+      message: "Google returned an event with invalid dates.",
+      status: 502,
+    });
   }
   return {
     allDay,

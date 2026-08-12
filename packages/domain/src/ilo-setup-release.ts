@@ -3,9 +3,12 @@ import { semanticVersionSchema } from "./common.js";
 import releaseManifest from "./ilo-setup-release.json" with { type: "json" };
 
 const iloSetupReleaseSchema = z.object({
-  legacySourceUrl: z.url(),
+  legacySourcePaths: z.array(z.string().startsWith("/")).min(1),
+  legacySourceUrls: z.array(z.url()).min(1),
+  legacyRevisions: z.array(z.string().trim().min(1).max(128)),
+  legacyVersions: z.array(semanticVersionSchema),
   revision: z.string().trim().min(1).max(128),
-  sourceUrl: z.url(),
+  sourcePath: z.string().startsWith("/").endsWith("/SKILL.md"),
   version: semanticVersionSchema,
 });
 

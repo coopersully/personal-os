@@ -51,6 +51,7 @@ import {
   createCalendarProviderEffectLedger,
 } from "./calendar-provider-effects.js";
 import type { ConnectedEventGateway } from "./connector-service.js";
+import { connectionHealthForAccount } from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import { auditSnapshot, serializeCalendar, serializeEvent } from "./serialization.js";
@@ -353,6 +354,7 @@ function serializeCalendarSource(
     ...serializeCalendar(calendar),
     source: {
       accountLabel: account.label,
+      health: connectionHealthForAccount(account),
       remoteCalendarId: calendar.remoteCalendarId,
       syncError: account.syncError
         ? "The connected account needs attention. Synchronize Calendar or review Connections."

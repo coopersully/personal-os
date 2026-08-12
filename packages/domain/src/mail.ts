@@ -8,6 +8,7 @@ import {
   upsertDomainProfileInputSchema,
 } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
+import { connectedAccountHealthSchema, connectorSyncStatusSchema } from "./connection.js";
 import type { AgentMutationPolicy } from "./feature-contracts.js";
 
 export const MAIL_RULE_EXECUTION_LIMIT_PER_RUN = 6;
@@ -49,11 +50,14 @@ export const mailSetupAccountSchema = z.object({
   automaticRuleExecution: z.boolean(),
   email: z.email().nullable(),
   label: z.string().trim().min(1).max(200),
+  health: connectedAccountHealthSchema,
+  lastSyncAttemptAt: isoDateTimeSchema.nullable(),
   lastSyncedAt: isoDateTimeSchema.nullable(),
   mailboxes: z.array(mailboxSchema),
   provider: mailProviderSchema,
+  nextSyncAt: isoDateTimeSchema.nullable(),
   syncError: z.string().nullable(),
-  syncStatus: z.enum(["idle", "syncing", "error"]),
+  syncStatus: connectorSyncStatusSchema,
 });
 export type MailSetupAccount = z.infer<typeof mailSetupAccountSchema>;
 

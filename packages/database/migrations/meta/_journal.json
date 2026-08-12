@@ -351,6 +351,34 @@
       "when": 1786935600000,
       "tag": "0049_attention_item_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1786939200000,
+      "tag": "0050_connector_sync_health",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1786942800000,
+      "tag": "0051_connector_authorization_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1786946400000,
+      "tag": "0052_connector_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1786950000000,
+      "tag": "0053_oauth_states_expiry_index",
+      "breakpoints": true
     }
   ]
 }

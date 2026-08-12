@@ -22,6 +22,9 @@ Credentials
 Movement
 ├── one primary submit action
 └── one explicit route to the alternate access flow
+
+Product context
+└── decorative inverse EventCard composed from the shared event-summary slots
 ```
 
 ## Field contracts
@@ -48,6 +51,10 @@ Movement
 - Submit remains disabled until every visible field satisfies the same domain
   contract enforced by the API. Server errors remain visible because client
   validation is not an authorization boundary.
+- The desktop product-introduction panel demonstrates tangible material with
+  the shared compound `EventCard` in its inverse tone. It is decorative and
+  hidden from assistive technology; it does not maintain auth-only event
+  markup or define a separate event-card anatomy.
 
 ## Verification
 
@@ -62,3 +69,5 @@ Movement
 6. Confirm keyboard entry and pasted invitation codes populate all OTP slots.
 7. Inspect every focused auth control for one flat boundary and inspect desktop
    and 390 × 844 layouts without horizontal overflow.
+8. Confirm the desktop event example uses the same time, indicator, body, and
+   aside geometry as a Today event summary while remaining decorative.

@@ -82,6 +82,10 @@ History (collapsed)
 
 ## Interaction contract
 
+- The Today sidebar keeps Today, Goals, and Motives available. Calendar, Tasks,
+  Mail, and Finances are workspace destinations owned by the workspace switcher
+  and mobile primary navigation; do not duplicate them in this sidebar.
+  Reminders remains a Tasks destination rather than a separate workspace.
 - Opening an event, task, or reminder preserves the user’s place and opens the
   established inspector/dialog.
 - Completing a row updates the queue and moves the item into Done today without
@@ -96,8 +100,8 @@ History (collapsed)
 
 | System concept | Current implementation |
 | --- | --- |
-| `moment` | `TodayPage` + `.today-moment-block` |
-| `sequence` | `TodayPage` + `.today-sequence` and `EventCard` |
+| `moment` | `TodayPage` + `.today-moment-block` + shared compound `EventCard` |
+| `sequence` | `TodayPage` + `.today-sequence` + shared compound `EventCard` |
 | `queue` | `TodayPage` + `.today-queue` and the reminder/task groups |
 | `history` | `TodayPage` + `.today-history` using shadcn `Collapsible` |
 | orientation | `TodayNavigationTitle` and `TodayWeatherTopbar` |

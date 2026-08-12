@@ -1,15 +1,30 @@
 ---
 name: personal-os-frontend
-description: Build accessible, domain-owned ilo React PWA features. Use when changing `apps/web`, adding a feature page or view state, composing shadcn primitives, changing API queries, or refactoring the application shell.
+description: Build and refine accessible, domain-owned ilo React PWA experiences. Use when changing `apps/web`, critiquing or refining a screen, translating UX feedback into shared rules, adding a feature page or view state, composing shadcn primitives, changing API queries, or refactoring the application shell.
 ---
 
 # ilo frontend
 
-Follow `apps/web/src/features/README.md`, `docs/design/system.md`, the relevant
-page specification in `docs/design/pages`, and
-`docs/engineering/feature-ownership.md`. Apply the installed `shadcn` skill
-for component lifecycle and the available React best-practices guidance for
+Follow `docs/design/foundations.md`, `docs/design/governance.md`,
+`docs/design/system.md`, the relevant page specification in
+`docs/design/pages`, `apps/web/src/features/README.md`, and
+`docs/engineering/feature-ownership.md`. Apply the installed `shadcn` skill for
+component lifecycle and the available React best-practices guidance for
 performance work.
+
+## Diagnose refinement before editing
+
+- Record the visible symptom, conditions, and user or system cost without
+  embedding the requested fix.
+- Walk the governance diagnosis ladder: user outcome → information hierarchy →
+  pattern → primitive → token → composition → defect.
+- Fix the earliest stable layer responsible for the failure. Do not turn one
+  preference into a global invariant or hide a shared cause behind a page-only
+  override.
+- State the proposed invariant or trial hypothesis, maturity, owner, affected
+  surfaces/states, and verification. Keep exceptions explicit and contained.
+- Treat implementation and automated tests as behavior evidence, not as proof
+  of comprehension, visual quality, or user validation.
 
 ## Structure feature work
 
@@ -40,8 +55,23 @@ performance work.
   design-system block grammar before adding layout.
 - Compose existing shadcn primitives. Do not add feature-specific replacements
   for Card, Item, Alert, Collapsible, Empty, or Sonner.
+- Compose the shared compound `EventCard` for non-spatial event summaries and
+  previews. Fill or omit its named slots instead of creating page-specific
+  event-card markup. Calendar grid blocks remain a separate spatial pattern
+  because their position and size encode time.
 - Use one raised primary block at most. Do not wrap every page group in a card;
   use an open sequence or a quiet queue for ordered material.
+- When four or more diagnostic rows answer one readiness question, show one
+  product/object overview with the shared `ReadinessPanel`, an honest aggregate
+  state, and the next unresolved check. Show determinate progress only after all
+  required reads settle. The closed overview has a hard two-row maximum: put
+  identity, status, and a one-line focus on row one, then count, progress, and
+  evidence access on row two. The focus replaces the normal description; never
+  add a focus callout, nested `Item`, action, or third row. Open the complete
+  vertical `ItemGroup`, including per-check actions, in a labelled dialog;
+  diagnostic review must never expand the overview. Promote an actionable
+  failure as **Next step**, but call a non-actionable failure **Current
+  constraint**. Do not make diagnostics a default dashboard grid.
 - Apply the interface-copy contract: delete helper text that restates an
   obvious label, and use a preview when the result can be shown more clearly
   than it can be explained.
@@ -57,6 +87,16 @@ performance work.
 - Keep navigation icon geometry stable across states: use the regular and
   filled weights of the same icon, with fill reserved for the active
   destination.
+- Treat Calendar, Tasks, Mail, and Finances as the only colored workspace
+  identities. Read their label, route, and glyph from the shared workspace
+  registry and render the framed `WorkspaceIcon` whenever representing the
+  whole workspace. Keep its frame and palette stable across selection; use the
+  control surface for active state. Keep every palette high-chroma and distinct
+  at peripheral glance in both themes; do not mute workspace identity toward
+  gray in the name of calmness. Never copy workspace palette values into a
+  feature, apply them to a whole page, or use them as status. Today stays
+  neutral, Reminders stays inside Tasks, and ordinary actions, records, views,
+  and providers use unframed functional icons.
 - Combine only attributes that answer the same user question into one compact
   trigger and detail surface. Keep a neighbouring control when it represents a
   distinct action—for example, weather icon + temperature combine, while the
@@ -72,9 +112,10 @@ performance work.
   selection-marker space so selection does not shift content; anchor card
   information at the top/start and stretch any preview at the inline end.
 - Treat review feedback as a system input: convert it into a named invariant in
-  `docs/design/system.md`, assign it to the shared primitive or token layer,
-  and add focused coverage or live QA before closing the work. Do not solve a
-  recurring observation with a page-only exception.
+  `docs/design/system.md` when governance criteria justify cross-product scope,
+  assign it to the responsible shared layer, and add focused coverage plus live
+  QA before closing the work. Keep page-specific rules in the page spec and
+  unproven preferences as trial hypotheses.
 - Keep source, freshness, capability, policy, and action result visible at the
   smallest useful level. Keep raw metadata, history, rare controls, and verbose
   configuration behind labelled disclosure.
@@ -88,8 +129,21 @@ For provider-backed material, expose freshness and failure instead of silently
 presenting a projection as current. Make destructive actions deliberate and
 surface API policy or permission failures clearly.
 
+For agent-driven setup, render the authenticated server plan as the source of
+truth for current, blocked, and complete state. Ask the person only for the
+connection, preference decisions, or approvals Ilo cannot perform. Keep hosted
+skills and procedural prompts as optional compatibility references; never make
+the person copy setup instructions between Ilo and an agent after the agent can
+call Ilo.
+
 ## Verify interaction behavior
 
 Add focused Testing Library coverage for feature behavior. Use Playwright when
 the change crosses routing, responsive layout, or a user-visible flow. Keep
 the generated shadcn sources as vendor primitives; test product composition.
+
+Target WCAG 2.2 AA across the complete flow. Prefer native HTML and established
+shared primitives; follow WAI-ARIA APG keyboard conventions for composite
+widgets. Automated checks do not replace keyboard, focus, zoom, reduced-motion,
+responsive, realistic-state, and assistive-technology inspection appropriate
+to the change.

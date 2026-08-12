@@ -27,6 +27,12 @@ const app = createApp({
 });
 const server = serve({ fetch: app.fetch, port: config.port });
 const scheduler = setInterval(() => {
+  runtimeLifecycle.startBackgroundTask("scheduled-connector-sync", async () => {
+    await app.syncDueConnectors().catch(() => {
+      process.stderr.write("[personal-os] scheduled connector sync failed\n");
+      throw new Error("Scheduled connector sync failed.");
+    });
+  });
   runtimeLifecycle.startBackgroundTask("scheduled-automation-dispatch", async () => {
     await app.dispatchDueAutomations().catch((error: unknown) => {
       process.stderr.write(
@@ -42,6 +48,15 @@ const scheduler = setInterval(() => {
     dispatchFinanceSetupIntegrity,
   );
 }, 60_000);
+runtimeLifecycle.startBackgroundTask("startup-connector-sync", async () => {
+  await app.syncDueConnectors().catch(() => {
+    process.stderr.write("[personal-os] startup connector sync failed\n");
+    throw new Error("Startup connector sync failed.");
+  });
+});
+runtimeLifecycle.startBackgroundTask("icloud-mail-idle-supervisor", () =>
+  app.superviseICloudMail(),
+);
 runtimeLifecycle.startBackgroundTask("startup-automation-dispatch", async () => {
   await app.dispatchDueAutomations().catch((error: unknown) => {
     process.stderr.write(`[personal-os] scheduled automation dispatch failed: ${String(error)}\n`);

@@ -189,10 +189,45 @@ data "aws_iam_policy_document" "github_deploy" {
     ]
     resources = ["*"]
   }
+
+  statement {
+    sid       = "PublishDeploymentHeartbeat"
+    actions   = ["cloudwatch:PutMetricData"]
+    resources = ["*"]
+
+    condition {
+      test     = "StringEquals"
+      variable = "cloudwatch:namespace"
+      values   = ["ilo/Deployments"]
+    }
+  }
 }
 
 resource "aws_iam_role_policy" "github_deploy" {
   name   = "${local.name}-deploy"
   role   = aws_iam_role.github_deploy.id
   policy = data.aws_iam_policy_document.github_deploy.json
+}
+
+data "aws_iam_policy_document" "github_connector_observability" {
+  statement {
+    sid       = "ReadConnectorMetricFilters"
+    actions   = ["logs:DescribeMetricFilters"]
+    resources = ["arn:aws:logs:${var.aws_region}:${data.aws_caller_identity.current.account_id}:log-group:/ecs/${local.name}-api:*"]
+  }
+
+  statement {
+    sid = "ReadConnectorAlarmResources"
+    actions = [
+      "elasticloadbalancing:DescribeLoadBalancers",
+      "elasticloadbalancing:DescribeTargetGroups",
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_role_policy" "github_connector_observability" {
+  name   = "${local.name}-connector-observability-read"
+  role   = aws_iam_role.github_deploy.id
+  policy = data.aws_iam_policy_document.github_connector_observability.json
 }

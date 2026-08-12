@@ -1,6 +1,12 @@
 {
-  "legacySourceUrl": "https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup",
-  "revision": "d8c27c725d18827829a3f99534d5d6dfbe715360",
-  "sourceUrl": "https://github.com/coopersully/personal-os/tree/d8c27c725d18827829a3f99534d5d6dfbe715360/skills/ilo-setup",
-  "version": "0.1.0"
+  "legacySourceUrls": [
+    "https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup",
+    "https://github.com/coopersully/personal-os/tree/d8c27c725d18827829a3f99534d5d6dfbe715360/skills/ilo-setup"
+  ],
+  "legacySourcePaths": ["/skills/ilo-setup/v0.1.0/SKILL.md"],
+  "legacyRevisions": ["d8c27c725d18827829a3f99534d5d6dfbe715360", "v0.1.0"],
+  "legacyVersions": ["0.1.0"],
+  "revision": "v0.2.0",
+  "sourcePath": "/skills/ilo-setup/v0.2.0/SKILL.md",
+  "version": "0.2.0"
 }

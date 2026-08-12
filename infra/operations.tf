@@ -13,11 +13,6 @@ locals {
       path          = "/health/ready"
       search_string = "\"ready\""
     }
-    mcp = {
-      fqdn          = local.mcp_domain
-      path          = "/health/live"
-      search_string = "\"ok\""
-    }
   }
 
   ecs_services = {
@@ -222,8 +217,33 @@ resource "aws_cloudwatch_metric_alarm" "public_health" {
     HealthCheckId = each.value.id
   }
 
+  alarm_actions = each.key == "api" ? [] : local.alarm_actions
+}
+
+resource "aws_cloudwatch_metric_alarm" "api_deployment_in_progress" {
+  alarm_name          = "${local.name}-api-deployment-in-progress"
+  alarm_description   = "The serial API deployment heartbeat is active; raw API availability alarms remain diagnostic until it clears."
+  namespace           = "ilo/Deployments"
+  metric_name         = "ApiDeploymentInProgress"
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  period              = 60
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+}
+
+resource "aws_cloudwatch_composite_alarm" "api_availability_actionable" {
+  alarm_name        = "${local.name}-api-availability-actionable"
+  alarm_description = "The public API is unavailable without an active serial deployment heartbeat."
+  alarm_rule = format(
+    "ALARM(\"%s\") AND NOT ALARM(\"%s\")",
+    aws_cloudwatch_metric_alarm.public_health["api"].alarm_name,
+    aws_cloudwatch_metric_alarm.api_deployment_in_progress.alarm_name,
+  )
+
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
@@ -239,7 +259,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
   period              = 60
   evaluation_periods  = 5
   datapoints_to_alarm = 5
-  treat_missing_data  = "breaching"
+  treat_missing_data  = "notBreaching"
 
   dimensions = {
     ClusterName = aws_ecs_cluster.main.name
@@ -247,7 +267,6 @@ resource "aws_cloudwatch_metric_alarm" "ecs_cpu_high" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
@@ -263,7 +282,7 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
   period              = 60
   evaluation_periods  = 5
   datapoints_to_alarm = 5
-  treat_missing_data  = "breaching"
+  treat_missing_data  = "notBreaching"
 
   dimensions = {
     ClusterName = aws_ecs_cluster.main.name
@@ -271,7 +290,6 @@ resource "aws_cloudwatch_metric_alarm" "ecs_memory_high" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "target_unhealthy" {
@@ -287,15 +305,14 @@ resource "aws_cloudwatch_metric_alarm" "target_unhealthy" {
   period              = 60
   evaluation_periods  = 2
   datapoints_to_alarm = 2
-  treat_missing_data  = "breaching"
+  treat_missing_data  = "notBreaching"
 
   dimensions = {
     LoadBalancer = aws_lb.public.arn_suffix
     TargetGroup  = each.value.target_group.arn_suffix
   }
 
-  alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
+  alarm_actions = each.key == "api" ? [] : local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "target_5xx" {
@@ -319,7 +336,6 @@ resource "aws_cloudwatch_metric_alarm" "target_5xx" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "target_latency" {
@@ -343,7 +359,6 @@ resource "aws_cloudwatch_metric_alarm" "target_latency" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
@@ -363,7 +378,6 @@ resource "aws_cloudwatch_metric_alarm" "alb_5xx" {
   dimensions = {
     LoadBalancer = aws_lb.public.arn_suffix
   }
-
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
@@ -384,7 +398,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_cpu_high" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_storage_low" {
@@ -405,7 +418,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_storage_low" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_memory_low" {
@@ -426,7 +438,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_memory_low" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "rds_connections_high" {
@@ -447,49 +458,6 @@ resource "aws_cloudwatch_metric_alarm" "rds_connections_high" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
-}
-
-resource "aws_cloudwatch_metric_alarm" "nat_port_errors" {
-  alarm_name          = "${local.name}-nat-port-errors"
-  alarm_description   = "The NAT gateway cannot allocate an outbound source port."
-  namespace           = "AWS/NATGateway"
-  metric_name         = "ErrorPortAllocation"
-  statistic           = "Sum"
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = 0
-  period              = 300
-  evaluation_periods  = 1
-  datapoints_to_alarm = 1
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    NatGatewayId = aws_nat_gateway.application.id
-  }
-
-  alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
-}
-
-resource "aws_cloudwatch_metric_alarm" "nat_packet_drops" {
-  alarm_name          = "${local.name}-nat-packet-drops"
-  alarm_description   = "The NAT gateway dropped outbound packets."
-  namespace           = "AWS/NATGateway"
-  metric_name         = "PacketsDropCount"
-  statistic           = "Sum"
-  comparison_operator = "GreaterThanThreshold"
-  threshold           = 0
-  period              = 300
-  evaluation_periods  = 2
-  datapoints_to_alarm = 2
-  treat_missing_data  = "notBreaching"
-
-  dimensions = {
-    NatGatewayId = aws_nat_gateway.application.id
-  }
-
-  alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_metric_alarm" "cloudfront_5xx" {
@@ -511,7 +479,6 @@ resource "aws_cloudwatch_metric_alarm" "cloudfront_5xx" {
   }
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 }
 
 resource "aws_cloudwatch_log_metric_filter" "api_5xx" {
@@ -540,9 +507,236 @@ resource "aws_cloudwatch_metric_alarm" "api_log_5xx" {
   treat_missing_data  = "notBreaching"
 
   alarm_actions = local.alarm_actions
-  ok_actions    = local.alarm_actions
 
   depends_on = [aws_cloudwatch_log_metric_filter.api_5xx]
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_sync_failure" {
+  name           = "${local.name}-connector-sync-failure"
+  pattern        = "{ $.event = \"connector_sync_failed\" }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorSyncFailureCount"
+    namespace = "ilo/Connectors"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_configuration_failure" {
+  name           = "${local.name}-connector-configuration-failure"
+  pattern        = "{ $.event = \"connector_sync_failed\" && $.category = \"configuration\" }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorConfigurationFailureCount"
+    namespace = "ilo/Connectors"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_subscription_failure" {
+  name           = "${local.name}-connector-subscription-failure"
+  pattern        = "{ $.event = \"connector_subscription_failed\" }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorSubscriptionFailureCount"
+    namespace = "ilo/Connectors"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_subscription_expired" {
+  name           = "${local.name}-connector-subscription-expired"
+  pattern        = "{ $.event = \"connector_subscription_expired\" }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorSubscriptionExpiredCount"
+    namespace = "ilo/Connectors"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_renewal_lag" {
+  name           = "${local.name}-connector-renewal-lag"
+  pattern        = "{ $.event = \"connector_subscription_renewed\" && $.renewalLagMs = * }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorRenewalLagMs"
+    namespace = "ilo/Connectors"
+    value     = "$.renewalLagMs"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_notification_rejected" {
+  name           = "${local.name}-connector-notification-rejected"
+  pattern        = "{ $.event = \"connector_notification_received\" && $.notificationDisposition = \"rejected\" }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorNotificationRejectedCount"
+    namespace = "ilo/Connectors"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_trigger_age" {
+  name           = "${local.name}-connector-trigger-age"
+  pattern        = "{ $.event = \"connector_trigger_dispatched\" && $.ageMs = * }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorTriggerAgeMs"
+    namespace = "ilo/Connectors"
+    value     = "$.ageMs"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "connector_sync_freshness_age" {
+  name           = "${local.name}-connector-sync-freshness-age"
+  pattern        = "{ $.event = \"connector_sync_freshness_observed\" && $.freshnessAgeMs = * }"
+  log_group_name = aws_cloudwatch_log_group.api.name
+
+  metric_transformation {
+    name      = "ConnectorSyncFreshnessAgeMs"
+    namespace = "ilo/Connectors"
+    value     = "$.freshnessAgeMs"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_configuration_failure" {
+  alarm_name          = "${local.name}-connector-configuration-failure"
+  alarm_description   = "A connector failed because production provider configuration needs operator repair."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorConfigurationFailureCount"
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = local.alarm_actions
+
+  depends_on = [aws_cloudwatch_log_metric_filter.connector_configuration_failure]
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_sync_failure_volume" {
+  alarm_name          = "${local.name}-connector-sync-failure-volume"
+  alarm_description   = "At least five connector synchronizations failed within fifteen minutes."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorSyncFailureCount"
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 5
+  period              = 900
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions = local.alarm_actions
+
+  depends_on = [aws_cloudwatch_log_metric_filter.connector_sync_failure]
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_subscription_failure" {
+  alarm_name          = "${local.name}-connector-subscription-failure"
+  alarm_description   = "A live connector subscription failed to register or renew."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorSubscriptionFailureCount"
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  depends_on          = [aws_cloudwatch_log_metric_filter.connector_subscription_failure]
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_subscription_expired" {
+  alarm_name          = "${local.name}-connector-subscription-expired"
+  alarm_description   = "A non-stopped connector subscription reached expiry before renewal."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorSubscriptionExpiredCount"
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 1
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  depends_on          = [aws_cloudwatch_log_metric_filter.connector_subscription_expired]
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_renewal_lag" {
+  alarm_name          = "${local.name}-connector-renewal-lag"
+  alarm_description   = "A connector watch renewed more than five minutes after its renewal deadline."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorRenewalLagMs"
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 300000
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  depends_on          = [aws_cloudwatch_log_metric_filter.connector_renewal_lag]
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_notification_rejected" {
+  alarm_name          = "${local.name}-connector-notification-rejected"
+  alarm_description   = "At least twenty authenticated connector notifications were rejected in five minutes."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorNotificationRejectedCount"
+  statistic           = "Sum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 20
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  depends_on          = [aws_cloudwatch_log_metric_filter.connector_notification_rejected]
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_trigger_age" {
+  alarm_name          = "${local.name}-connector-trigger-age"
+  alarm_description   = "A durable connector trigger waited at least five minutes before dispatch."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorTriggerAgeMs"
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 300000
+  period              = 300
+  evaluation_periods  = 1
+  datapoints_to_alarm = 1
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = local.alarm_actions
+  depends_on          = [aws_cloudwatch_log_metric_filter.connector_trigger_age]
+}
+
+resource "aws_cloudwatch_metric_alarm" "connector_sync_freshness" {
+  alarm_name          = "${local.name}-connector-sync-freshness"
+  alarm_description   = "Current eligible connector freshness was at least ten minutes old in three of five one-minute observations, or observations stopped."
+  namespace           = "ilo/Connectors"
+  metric_name         = "ConnectorSyncFreshnessAgeMs"
+  statistic           = "Maximum"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  threshold           = 600000
+  period              = 60
+  evaluation_periods  = 5
+  datapoints_to_alarm = 3
+  treat_missing_data  = "breaching"
+  alarm_actions       = local.alarm_actions
+  depends_on          = [aws_cloudwatch_log_metric_filter.connector_sync_freshness_age]
 }
 
 resource "aws_appautoscaling_target" "ecs" {
@@ -673,6 +867,14 @@ resource "aws_cloudwatch_dashboard" "operations" {
               aws_cloudwatch_metric_alarm.rds_storage_low.arn,
               aws_cloudwatch_metric_alarm.rds_memory_low.arn,
               aws_cloudwatch_metric_alarm.cloudfront_5xx.arn,
+              aws_cloudwatch_metric_alarm.connector_configuration_failure.arn,
+              aws_cloudwatch_metric_alarm.connector_notification_rejected.arn,
+              aws_cloudwatch_metric_alarm.connector_renewal_lag.arn,
+              aws_cloudwatch_metric_alarm.connector_subscription_expired.arn,
+              aws_cloudwatch_metric_alarm.connector_subscription_failure.arn,
+              aws_cloudwatch_metric_alarm.connector_sync_freshness.arn,
+              aws_cloudwatch_metric_alarm.connector_sync_failure_volume.arn,
+              aws_cloudwatch_metric_alarm.connector_trigger_age.arn,
             ],
           )
         }

@@ -1,5 +1,5 @@
-import { Search } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
+import { SearchIcon } from "@/components/icons";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
 
 export function WorkspaceSearch({
@@ -27,7 +27,7 @@ export function WorkspaceSearch({
   return (
     <InputGroup className="workspace-topbar__search">
       <InputGroupAddon>
-        <Search aria-hidden="true" />
+        <SearchIcon aria-hidden="true" />
       </InputGroupAddon>
       <InputGroupInput
         aria-label={label}

@@ -379,7 +379,13 @@ function addLoadedWorkspace(
     mailEnabled: true,
     provider: "google",
     providerAccountId: `fixture-google-${account.key}`,
-    syncError: degraded ? "Authorization expired. Reconnect this fixture account." : null,
+    syncError: degraded
+      ? "Google authorization is no longer valid. Reconnect to resume syncing."
+      : null,
+    syncErrorCategory: degraded ? "authorization" : null,
+    syncErrorCode: degraded ? "fixture_google_authorization_failed" : null,
+    syncFailureCount: degraded ? 1 : 0,
+    syncRecovery: degraded ? "reconnect" : null,
     syncStatus: degraded ? "error" : "idle",
     updatedAt: now,
     userId: account.id,

@@ -1,7 +1,8 @@
-import { hostHeaderValidation } from "@modelcontextprotocol/sdk/server/middleware/hostHeaderValidation.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { createApiClient } from "@personal-os/api-client";
+import { hostHeaderValidation } from "@modelcontextprotocol/express";
+import { toNodeHandler } from "@modelcontextprotocol/node";
+import { type AuthInfo, createMcpHandler } from "@modelcontextprotocol/server";
+import { ApiClientError, createApiClient } from "@personal-os/api-client";
+import type { IloAgentContext } from "@personal-os/domain";
 import express, { type Request, type Response } from "express";
 import {
   createFixedWindowRateLimiter,
@@ -13,9 +14,12 @@ import {
 import { createPersonalOsMcpServer } from "./server.js";
 
 const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8788";
+const appBaseUrl = (process.env.APP_BASE_URL ?? "http://localhost:8081").replace(/\/$/, "");
 const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 8789);
 const publicUrl = (process.env.MCP_PUBLIC_URL ?? `http://${host}:${port}`).replace(/\/$/, "");
+const resourceUrl = new URL(`${publicUrl}/mcp`);
+const resourceMetadataUrl = `${publicUrl}/.well-known/oauth-protected-resource/mcp`;
 const authorizationServer = (
   process.env.OAUTH_AUTHORIZATION_SERVER_URL ??
   process.env.PERSONAL_OS_API_URL ??
@@ -26,18 +30,89 @@ const rateLimiter = createFixedWindowRateLimiter({
   maxRequests: security.rateLimitMaxRequests,
   windowMs: security.rateLimitWindowMs,
 });
+
+type IloAuthExtra = {
+  context: IloAgentContext;
+  readOnly: boolean;
+  timeZone: string;
+};
+
+const handler = createMcpHandler(
+  ({ authInfo }) => {
+    if (!authInfo) throw new Error("Authenticated MCP context is required.");
+    const extra = authInfo.extra as IloAuthExtra | undefined;
+    if (!extra?.context) throw new Error("Validated Ilo context is required.");
+    return createPersonalOsMcpServer({
+      api: apiClient(authInfo.token),
+      appBaseUrl,
+      includeCompatibilityTools: process.env.MCP_INCLUDE_COMPATIBILITY_TOOLS === "true",
+      readOnly: extra.readOnly,
+      scopes: new Set(extra.context.access.grantedScopes),
+      timeZone: extra.timeZone,
+    });
+  },
+  {
+    legacy: "stateless",
+    onerror(error) {
+      process.stderr.write(`[ilo-mcp] ${error.name}: ${error.message}\n`);
+    },
+  },
+);
+const nodeHandler = toNodeHandler(handler, {
+  onerror(error) {
+    process.stderr.write(`[ilo-mcp] adapter ${error.name}: ${error.message}\n`);
+  },
+});
+
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json());
 
 app.get("/health/live", (_request, response) => response.json({ status: "ok" }));
 app.use(hostHeaderValidation([new URL(publicUrl).hostname]));
+const protectedResourceMetadata = {
+  authorization_servers: [authorizationServer],
+  resource: resourceUrl.href,
+  resource_documentation: `${appBaseUrl}/settings?section=agents`,
+  resource_name: "ilo",
+  scopes_supported: [
+    "tasks:read",
+    "tasks:write",
+    "reminders:read",
+    "reminders:write",
+    "calendar:read",
+    "calendar:write",
+    "mail:read",
+    "mail:write",
+    "goals:read",
+    "goals:write",
+    "automations:read",
+    "automations:write",
+    "audit:read",
+    "finances:read",
+    "finances:write",
+    "bookmarks:read",
+  ],
+};
 app.get("/.well-known/oauth-protected-resource", (_request, response) =>
-  response.json({ authorization_servers: [authorizationServer], resource: `${publicUrl}/mcp` }),
+  response.json(protectedResourceMetadata),
 );
-app.get("/mcp", methodNotAllowed);
-app.delete("/mcp", methodNotAllowed);
-app.post("/mcp", async (request, response) => {
+app.get("/.well-known/oauth-protected-resource/mcp", (_request, response) =>
+  response.json(protectedResourceMetadata),
+);
+
+for (const path of ["/mcp", "/mcp/readonly"]) {
+  app.get(path, methodNotAllowed);
+  app.delete(path, methodNotAllowed);
+}
+app.post("/mcp", (request, response) => serveMcp(request, response, false));
+app.post("/mcp/readonly", (request, response) => serveMcp(request, response, true));
+
+const listener = app.listen(port, host, () => {
+  process.stderr.write(`ilo MCP listening at http://${host}:${port}/mcp\n`);
+});
+
+async function serveMcp(request: Request, response: Response, readOnly: boolean): Promise<void> {
   if (!isAllowedOrigin(request.header("origin"), security.allowedOrigins)) {
     response.status(403).json({
       error: { code: -32_001, message: "This browser origin is not allowed." },
@@ -49,14 +124,11 @@ app.post("/mcp", async (request, response) => {
 
   const token = bearerToken(request);
   if (!token) {
-    response.setHeader(
-      "www-authenticate",
-      `Bearer resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`,
-    );
+    response.setHeader("www-authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`);
     response.status(401).json({
-      error: "An ilo bearer token is required.",
-      jsonrpc: "2.0",
+      error: "An Ilo bearer token is required.",
       id: null,
+      jsonrpc: "2.0",
     });
     return;
   }
@@ -74,31 +146,30 @@ app.post("/mcp", async (request, response) => {
     return;
   }
 
-  const server = createPersonalOsMcpServer({
-    api: createApiClient({
-      baseUrl: apiUrl,
-      headers: {
-        "x-personal-os-mcp-key": process.env.MCP_INTERNAL_SECRET ?? "",
-        "x-personal-os-mcp-resource": `${publicUrl}/mcp`,
-      },
-      token,
-    }),
-    timeZone: request.header("x-personal-os-timezone") ?? process.env.PERSONAL_OS_TIMEZONE ?? "UTC",
-  });
-  const transport = new StreamableHTTPServerTransport();
-  response.on("close", () => {
-    void transport.close();
-    void server.close();
-  });
-
   try {
-    // SDK 1.29's accessor declarations conflict with exactOptionalPropertyTypes even
-    // though the transport implements the SDK's Transport interface at runtime.
-    await server.connect(transport as unknown as Transport);
-    await transport.handleRequest(request, response, request.body);
+    const context = await apiClient(token).getIloContext();
+    const timeZone = request.header("x-personal-os-timezone") ?? context.time.timezone ?? "UTC";
+    const auth: AuthInfo = {
+      clientId: "ilo-mcp-client",
+      extra: { context, readOnly, timeZone } satisfies IloAuthExtra,
+      resource: resourceUrl,
+      scopes: context.access.grantedScopes,
+      token,
+    };
+    (request as Request & { auth?: AuthInfo }).auth = auth;
+    await nodeHandler(request, response, request.body);
   } catch (error) {
+    if (error instanceof ApiClientError) {
+      response.setHeader("www-authenticate", `Bearer resource_metadata="${resourceMetadataUrl}"`);
+      response.status(error.status === 403 ? 403 : 401).json({
+        error: "The Ilo bearer token could not be authorized.",
+        id: null,
+        jsonrpc: "2.0",
+      });
+      return;
+    }
     process.stderr.write(
-      `[personal-os-mcp] request failed: ${error instanceof Error ? error.name : "unknown error"}\n`,
+      `[ilo-mcp] request failed: ${error instanceof Error ? error.name : "unknown error"}\n`,
     );
     if (!response.headersSent) {
       response.status(500).json({
@@ -108,14 +179,18 @@ app.post("/mcp", async (request, response) => {
       });
     }
   }
-});
+}
 
-const listener = app.listen(port, host, () => {
-  process.stderr.write(`ilo MCP listening at http://${host}:${port}/mcp\n`);
-});
-
-process.on("SIGINT", () => listener.close(() => process.exit(0)));
-process.on("SIGTERM", () => listener.close(() => process.exit(0)));
+function apiClient(token: string) {
+  return createApiClient({
+    baseUrl: apiUrl,
+    headers: {
+      "x-personal-os-mcp-key": process.env.MCP_INTERNAL_SECRET ?? "",
+      "x-personal-os-mcp-resource": resourceUrl.href,
+    },
+    token,
+  });
+}
 
 function bearerToken(request: Request): string | null {
   const authorization = request.header("authorization");
@@ -129,3 +204,11 @@ function methodNotAllowed(_request: Request, response: Response): void {
     jsonrpc: "2.0",
   });
 }
+
+async function shutdown(): Promise<void> {
+  await handler.close();
+  listener.close(() => process.exit(0));
+}
+
+process.on("SIGINT", () => void shutdown());
+process.on("SIGTERM", () => void shutdown());

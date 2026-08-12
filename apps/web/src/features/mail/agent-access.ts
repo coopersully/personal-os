@@ -37,7 +37,10 @@ export function mailAgentAccessReadiness({
           )
         : {
             ...(setup.data.accounts.length === 0
-              ? { action: { label: "Connect Mail", to: "/settings?section=connections" } }
+              ? {
+                  action: { label: "Connect Mail", to: "/settings?section=connections" },
+                  nextStep: "Connect a Mail account",
+                }
               : {}),
             complete: setup.data.accounts.length > 0,
             description:
@@ -65,6 +68,10 @@ export function mailAgentAccessReadiness({
               setup.data.automation.reconciliationCount === 0 &&
               setup.data.automation.failedCount === 0,
             description: formatMailAutomationStatus(setup.data.automation),
+            ...(setup.data.automation.reconciliationCount > 0 ||
+            setup.data.automation.failedCount > 0
+              ? { nextStep: "Review stopped or unreconciled Mail automation" }
+              : {}),
             title: "Mail automation",
           };
   const commitmentIntake =

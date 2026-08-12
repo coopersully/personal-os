@@ -81,7 +81,7 @@ variable "alert_email" {
 variable "monthly_budget_usd" {
   description = "Account-wide monthly AWS cost budget in USD."
   type        = number
-  default     = 100
+  default     = 50
 
   validation {
     condition     = var.monthly_budget_usd >= 10
@@ -111,12 +111,6 @@ variable "email_from" {
   type        = string
 }
 
-variable "google_client_id" {
-  description = "Production Google OAuth client ID. The secret remains in Parameter Store."
-  type        = string
-  default     = ""
-}
-
 variable "plaid_enabled" {
   description = "Inject the Plaid runtime secret only when the production Plaid integration is enabled."
   type        = bool
@@ -138,6 +132,64 @@ variable "x_enabled" {
   description = "Inject the X OAuth client credentials when the production X bookmarks integration is enabled."
   type        = bool
   default     = false
+}
+
+variable "google_gmail_push_enabled" {
+  description = "Enable Gmail Pub/Sub push only after its external GCP authority and delivery path have production evidence."
+  type        = bool
+  default     = false
+}
+
+variable "google_gmail_pubsub_topic" {
+  description = "Fully qualified GCP Pub/Sub topic used by Gmail watch registration. This is a non-secret identifier."
+  type        = string
+  default     = ""
+}
+
+variable "google_gmail_pubsub_subscription" {
+  description = "Fully qualified GCP push subscription expected in authenticated Gmail envelopes. This is a non-secret identifier."
+  type        = string
+  default     = ""
+}
+
+variable "google_gmail_push_service_account" {
+  description = "Exact GCP service-account email allowed to sign Gmail Pub/Sub push requests. This is a non-secret identity."
+  type        = string
+  default     = ""
+}
+
+variable "google_calendar_push_enabled" {
+  description = "Enable Google Calendar push only after watch creation and public callback delivery have production evidence."
+  type        = bool
+  default     = false
+}
+
+variable "icloud_mail_idle_enabled" {
+  description = "Enable bounded iCloud IMAP IDLE listeners while retaining scheduled reconciliation."
+  type        = bool
+  default     = false
+}
+
+variable "icloud_mail_idle_concurrency" {
+  description = "Maximum concurrent iCloud IMAP IDLE sessions per API task."
+  type        = number
+  default     = 5
+
+  validation {
+    condition     = var.icloud_mail_idle_concurrency >= 1 && var.icloud_mail_idle_concurrency <= 25
+    error_message = "icloud_mail_idle_concurrency must be between 1 and 25."
+  }
+}
+
+check "gmail_push_configuration" {
+  assert {
+    condition = !var.google_gmail_push_enabled || (
+      can(regex("^projects/[^/]+/topics/[^/]+$", var.google_gmail_pubsub_topic)) &&
+      can(regex("^projects/[^/]+/subscriptions/[^/]+$", var.google_gmail_pubsub_subscription)) &&
+      can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.iam\\.gserviceaccount\\.com$", var.google_gmail_push_service_account))
+    )
+    error_message = "Gmail push requires a qualified topic, subscription, and exact GCP service-account identity."
+  }
 }
 
 variable "ssm_parameter_prefix" {
@@ -197,4 +249,15 @@ variable "edge_rate_limit" {
   description = "Maximum requests per source IP in a five-minute WAF window."
   type        = number
   default     = 1000
+}
+
+variable "connector_webhook_rate_limit" {
+  description = "Maximum requests per source IP to exact authenticated connector webhook paths in a five-minute WAF window."
+  type        = number
+  default     = 10000
+
+  validation {
+    condition     = var.connector_webhook_rate_limit >= var.edge_rate_limit
+    error_message = "connector_webhook_rate_limit must be at least edge_rate_limit."
+  }
 }

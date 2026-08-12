@@ -2,6 +2,7 @@ import {
   type AgentConnectionGuide,
   type AssistantDomain,
   assistantDomainSchema,
+  assistantSetupPlanQuerySchema,
   attentionItemQuerySchema,
   createAttentionItemInputSchema,
   featureAccessPolicies,
@@ -32,8 +33,19 @@ export function registerAssistantRoutes({
   mutationContext,
 }: AssistantRouteOptions) {
   app.get("/v1/assistant/connection-guide", (context) => context.json({ guide: connectionGuide }));
+  app.get("/v1/assistant/context", async (context) =>
+    context.json({ context: await assistant.getContext(context.get("principal")) }),
+  );
   app.get("/v1/assistant/setup-status", async (context) =>
     context.json({ setup: await assistant.getSetupStatus(context.get("principal")) }),
+  );
+  app.get("/v1/assistant/setup-plan", async (context) =>
+    context.json({
+      plan: await assistant.getSetupPlan(
+        context.get("principal"),
+        assistantSetupPlanQuerySchema.parse(context.req.query()),
+      ),
+    }),
   );
   app.get("/v1/assistant/profiles/:domain", async (context) => {
     const domain = assistantDomainSchema.parse(context.req.param("domain"));

@@ -12,6 +12,26 @@ import {
   strongestMailRuleProviderEffect,
 } from "./mail-rule-work.js";
 
+function connectorError(status: number): ConnectorError {
+  const authorization = status === 401 || status === 403;
+  const retry = status === 408 || status === 429 || status >= 500;
+  return new ConnectorError({
+    category: authorization
+      ? "authorization"
+      : status === 404
+        ? "not_found"
+        : status === 429
+          ? "rate_limited"
+          : retry
+            ? "temporary"
+            : "rejected",
+    code: `test_connector_${status}`,
+    disposition: authorization ? "reconnect" : retry ? "retry" : "operator",
+    message: "secret",
+    status,
+  });
+}
+
 describe("durable Mail rule work helpers", () => {
   it("builds a stable identity from the complete action snapshot", () => {
     const action = { afterDays: 1, mailboxId: null, type: "trash" as const };
@@ -111,33 +131,29 @@ describe("durable Mail rule work helpers", () => {
   });
 
   it("classifies every provider failure without exposing provider messages", () => {
-    expect(classifyMailRuleProviderFailure(new ConnectorError("secret", 429))).toMatchObject({
+    expect(classifyMailRuleProviderFailure(connectorError(429))).toMatchObject({
       code: "provider_rate_limited",
       disposition: "retry",
       effect: "rejected",
     });
     for (const status of [401, 403]) {
-      expect(classifyMailRuleProviderFailure(new ConnectorError("secret", status))).toMatchObject({
+      expect(classifyMailRuleProviderFailure(connectorError(status))).toMatchObject({
         code: "provider_authorization_failed",
         disposition: "failed",
         effect: "rejected",
       });
     }
-    expect(classifyMailRuleProviderFailure(new ConnectorError("secret", 404))).toMatchObject({
+    expect(classifyMailRuleProviderFailure(connectorError(404))).toMatchObject({
       code: "provider_source_missing",
       disposition: "failed",
       effect: "rejected",
     });
-    expect(classifyMailRuleProviderFailure(new ConnectorError("secret", 400))).toMatchObject({
+    expect(classifyMailRuleProviderFailure(connectorError(400))).toMatchObject({
       code: "provider_rejected",
       disposition: "failed",
       effect: "rejected",
     });
-    for (const error of [
-      new ConnectorError("secret", 408),
-      new ConnectorError("secret", 500),
-      new Error("secret"),
-    ]) {
+    for (const error of [connectorError(408), connectorError(500), new Error("secret")]) {
       expect(classifyMailRuleProviderFailure(error)).toMatchObject({
         code: "provider_effect_indeterminate",
         disposition: "reconcile",

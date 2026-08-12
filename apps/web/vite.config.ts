@@ -1,8 +1,67 @@
+import { cp, readFile } from "node:fs/promises";
+import { dirname, extname, relative, resolve } from "node:path";
 import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
-import { defineConfig, loadEnv } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+
+const agentSkillRelease = JSON.parse(
+  await readFile(
+    fileURLToPath(new URL("../../packages/domain/src/ilo-setup-release.json", import.meta.url)),
+    "utf8",
+  ),
+) as { sourcePath: string };
+const agentSkillSourceDirectory = fileURLToPath(new URL("../../skills/ilo-setup", import.meta.url));
+const agentSkillPublicDirectory = dirname(agentSkillRelease.sourcePath).replace(/^\/+/, "");
+
+function agentSkillSitePlugin(): Plugin {
+  return {
+    name: "publish-ilo-agent-skill",
+    configureServer(server) {
+      server.middlewares.use(async (request, response, next) => {
+        const pathname = new URL(request.url ?? "/", "http://ilo.local").pathname;
+        const prefix = `/${agentSkillPublicDirectory}/`;
+        if (!pathname.startsWith(prefix)) {
+          next();
+          return;
+        }
+        const requestedPath = decodeURIComponent(pathname.slice(prefix.length));
+        const sourcePath = resolve(agentSkillSourceDirectory, requestedPath);
+        if (
+          requestedPath.length === 0 ||
+          relative(agentSkillSourceDirectory, sourcePath).startsWith("..")
+        ) {
+          response.statusCode = 404;
+          response.end();
+          return;
+        }
+        try {
+          const body = await readFile(sourcePath);
+          const contentType =
+            extname(sourcePath) === ".md"
+              ? "text/markdown; charset=utf-8"
+              : extname(sourcePath) === ".yaml"
+                ? "application/yaml; charset=utf-8"
+                : "application/octet-stream";
+          response.setHeader("Cache-Control", "no-store");
+          response.setHeader("Content-Type", contentType);
+          response.end(body);
+        } catch {
+          response.statusCode = 404;
+          response.end();
+        }
+      });
+    },
+    async closeBundle() {
+      await cp(
+        agentSkillSourceDirectory,
+        resolve(process.cwd(), "dist", agentSkillPublicDirectory),
+        { recursive: true },
+      );
+    },
+  };
+}
 
 export default defineConfig(({ mode }) => {
   const environment = loadEnv(mode, process.cwd(), "");
@@ -42,10 +101,14 @@ export default defineConfig(({ mode }) => {
           icons: [
             { sizes: "any", src: "/icon.svg", type: "image/svg+xml" },
             { sizes: "192x192", src: "/icon-192.png", type: "image/png" },
+            { purpose: "any", sizes: "512x512", src: "/icon-512.png", type: "image/png" },
+            // Android crops maskable icons to a circle, so this variant keeps the framed mark
+            // inside the safe zone instead of losing its corners. It is a separate entry because
+            // one full-bleed asset cannot satisfy both `any` and `maskable` correctly.
             {
-              purpose: "any maskable",
+              purpose: "maskable",
               sizes: "512x512",
-              src: "/icon-512.png",
+              src: "/icon-512-maskable.png",
               type: "image/png",
             },
           ],
@@ -66,6 +129,7 @@ export default defineConfig(({ mode }) => {
           ],
         },
       }),
+      agentSkillSitePlugin(),
     ],
     resolve: {
       alias: {

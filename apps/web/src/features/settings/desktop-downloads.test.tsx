@@ -6,6 +6,7 @@ import {
   configuredDesktopDownloads,
   DesktopDownloadsSettings,
   detectedDesktopPlatform,
+  hasDesktopDownloads,
 } from "./desktop-downloads.js";
 
 describe("desktop download settings", () => {
@@ -39,9 +40,40 @@ describe("desktop download settings", () => {
   it("does not expose malformed or insecure configured links", () => {
     expect(
       configuredDesktopDownloads({
-        VITE_DESKTOP_DOWNLOAD_MACOS_URL: "javascript:alert(1)",
+        VITE_DESKTOP_DOWNLOAD_MACOS_URL: "not a URL",
         VITE_DESKTOP_DOWNLOAD_WINDOWS_URL: "http://downloads.example.com/ilo.exe",
       }),
     ).toEqual({ macos: null, windows: null });
+  });
+
+  it("hides the settings surface when no installer is configured", () => {
+    const downloads = configuredDesktopDownloads({});
+
+    expect(downloads).toEqual({ macos: null, windows: null });
+    expect(hasDesktopDownloads(downloads)).toBe(false);
+
+    const { container } = render(
+      <DesktopDownloadsSettings
+        downloads={downloads}
+        userAgent="Mozilla/5.0 (X11; Linux x86_64)"
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("offers a sole installer without claiming it matches an unsupported platform", () => {
+    render(
+      <DesktopDownloadsSettings
+        downloads={{ macos: "https://downloads.example.com/ilo-macos.dmg", windows: null }}
+        userAgent="Mozilla/5.0 (X11; Linux x86_64)"
+      />,
+    );
+
+    expect(screen.getByText("ilo for macOS")).toBeInTheDocument();
+    expect(screen.queryByText(/Recommended for/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
+      "href",
+      "https://downloads.example.com/ilo-macos.dmg",
+    );
   });
 });

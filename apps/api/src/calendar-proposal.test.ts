@@ -15,6 +15,7 @@ const localDestination: Calendar = {
   provider: "local",
   source: {
     accountLabel: "Local",
+    health: { message: null, nextSyncAt: null, recovery: null, state: "ready" },
     remoteCalendarId: null,
     syncError: null,
     syncStatus: "idle",
@@ -133,6 +134,7 @@ describe("Calendar commitment proposal policy", () => {
         provider: "google",
         source: {
           accountLabel: "Google",
+          health: { message: null, nextSyncAt: null, recovery: null, state: "ready" },
           remoteCalendarId: "remote-calendar",
           syncError: null,
           syncStatus: "idle",
@@ -198,6 +200,12 @@ describe("Calendar commitment proposal policy", () => {
       provider: "google",
       source: {
         accountLabel: "Google",
+        health: {
+          message: "Reconnect required",
+          nextSyncAt: null,
+          recovery: "reconnect",
+          state: "reconnect",
+        },
         remoteCalendarId: "remote-calendar",
         syncError: "Reconnect required",
         syncStatus: "error",

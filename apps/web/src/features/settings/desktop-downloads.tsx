@@ -1,4 +1,4 @@
-import { Download, MonitorDown } from "lucide-react";
+import { DownloadIcon, MonitorIcon } from "@/components/icons";
 import { Button } from "../../components/ui/button.js";
 import {
   Card,
@@ -122,7 +122,7 @@ function DownloadItem({
   return (
     <Item variant="outline">
       <ItemMedia variant="icon">
-        <MonitorDown />
+        <MonitorIcon />
       </ItemMedia>
       <ItemContent>
         <ItemTitle>{recommended ? `Recommended for ${name}` : `ilo for ${name}`}</ItemTitle>
@@ -132,7 +132,7 @@ function DownloadItem({
         <Button asChild size="sm">
           <a href={url}>
             Download
-            <Download data-icon="inline-end" />
+            <DownloadIcon data-icon="inline-end" />
           </a>
         </Button>
       </ItemActions>

@@ -51,7 +51,7 @@ export function classifyMailRuleProviderFailure(error: unknown): {
           "The Mail provider no longer authorizes this operation; reconnect the account before accepting a new rule revision.",
       };
     }
-    if (error.status < 500 && error.status !== 408) {
+    if (error.status !== null && error.status < 500 && error.status !== 408) {
       return {
         code: error.status === 404 ? "provider_source_missing" : "provider_rejected",
         disposition: "failed",

@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  id-token: write
   issues: write
 
 concurrency:
@@ -18,7 +19,30 @@ jobs:
     name: Verify public production
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    environment:
+      name: production
+      url: ${{ vars.APP_URL }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
+      ECS_CLUSTER: ${{ vars.ECS_CLUSTER }}
     steps:
+      - name: Require production observation configuration
+        run: |
+          for variable in AWS_REGION AWS_ROLE_ARN ECS_CLUSTER; do
+            test -n "${!variable}" || {
+              echo "::error::Missing GitHub production variable: ${variable}"
+              exit 1
+            }
+          done
+
+      - uses: actions/checkout@v7
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+
       - name: Check ilo public surfaces
         run: |
           check() {
@@ -40,6 +64,9 @@ jobs:
           check api https://api.ilo.coopersully.me/health/ready
           check mcp https://mcp.ilo.coopersully.me/health/live
 
+      - name: Check connector observability
+        run: node .github/scripts/check-connector-observability.mjs
+
       - name: Record health summary
         if: always()
         env:
@@ -52,6 +79,7 @@ jobs:
             echo "- App: https://app.ilo.coopersully.me"
             echo "- API: https://api.ilo.coopersully.me/health/ready"
             echo "- MCP: https://mcp.ilo.coopersully.me/health/live"
+            echo "- Connector observability: exact production filters and alarms"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Open or resolve the health incident

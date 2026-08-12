@@ -12,6 +12,12 @@ import type {
   AutomationRunStatus,
   AutomationTemplate,
   CalendarProvider,
+  ConnectorFailureCategory,
+  ConnectorSubscriptionKind,
+  ConnectorSubscriptionStatus,
+  ConnectorSyncRecovery,
+  ConnectorSyncStatus,
+  ConnectorSyncTriggerReason,
   DomainProfile,
   FinanceProvider,
   GoogleConnectionService,
@@ -447,6 +453,23 @@ export const oauthStates = pgTable(
     tokenHash: text("token_hash").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    status: text("status")
+      .$type<
+        | "pending"
+        | "processing"
+        | "connected"
+        | "cancelled"
+        | "expired"
+        | "permission_incomplete"
+        | "failed"
+      >()
+      .notNull()
+      .default("pending"),
+    outcomeCode: text("outcome_code"),
+    connectedAccountId: uuid("connected_account_id"),
+    redirectUri: text("redirect_uri"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    requestId: text("request_id"),
     targetAccountId: uuid("target_account_id"),
     requestedServices: jsonb("requested_services").$type<GoogleConnectionService[]>(),
     returnPath: text("return_path"),
@@ -455,6 +478,21 @@ export const oauthStates = pgTable(
   (table) => [
     uniqueIndex("oauth_states_token_hash_idx").on(table.tokenHash),
     index("oauth_states_user_idx").on(table.userId),
+    index("oauth_states_status_expiry_idx").on(table.status, table.expiresAt),
+    index("oauth_states_expiry_idx").on(table.expiresAt),
+    index("oauth_states_user_created_idx").on(table.userId, table.createdAt),
+    check(
+      "oauth_states_status_check",
+      sql`${table.status} IN ('pending', 'processing', 'connected', 'cancelled', 'expired', 'permission_incomplete', 'failed')`,
+    ),
+    check(
+      "oauth_states_lifecycle_check",
+      sql`(
+        (${table.status} = 'pending' AND ${table.consumedAt} IS NULL AND ${table.completedAt} IS NULL)
+        OR (${table.status} = 'processing' AND ${table.consumedAt} IS NOT NULL AND ${table.completedAt} IS NULL)
+        OR (${table.status} IN ('connected', 'cancelled', 'expired', 'permission_incomplete', 'failed') AND ${table.consumedAt} IS NOT NULL AND ${table.completedAt} IS NOT NULL)
+      )`,
+    ),
   ],
 );
 
@@ -480,24 +518,43 @@ export const calendarAccounts = pgTable(
     encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>(),
     calendarEnabled: boolean("calendar_enabled").notNull().default(true),
     mailEnabled: boolean("mail_enabled").notNull().default(false),
-    syncStatus: text("sync_status").$type<"idle" | "syncing" | "error">().notNull().default("idle"),
+    mailSyncToken: text("mail_sync_token"),
+    syncStatus: text("sync_status").$type<ConnectorSyncStatus>().notNull().default("idle"),
     syncGeneration: integer("sync_generation").notNull().default(0),
     syncClaimId: uuid("sync_claim_id"),
     syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("calendar_accounts_user_idx").on(table.userId),
+    index("calendar_accounts_sync_due_idx").on(table.syncStatus, table.nextSyncAt),
     uniqueIndex("calendar_accounts_remote_idx").on(
       table.userId,
       table.provider,
       table.providerAccountId,
     ),
     check("calendar_accounts_sync_generation_check", sql`${table.syncGeneration} >= 0`),
+    check("calendar_accounts_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
     check(
       "calendar_accounts_sync_claim_check",
       sql`(${table.syncStatus} = 'syncing') = (${table.syncClaimId} IS NOT NULL)`,
+    ),
+    check(
+      "calendar_accounts_sync_recovery_check",
+      sql`(
+        ${table.provider} = 'local'
+        OR
+        (${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('automatic', 'operator', 'reconnect'))
+      )`,
     ),
   ],
 );
@@ -999,6 +1056,94 @@ export const calendars = pgTable(
   (table) => [
     index("calendars_user_idx").on(table.userId),
     uniqueIndex("calendars_remote_idx").on(table.accountId, table.remoteCalendarId),
+  ],
+);
+
+export const connectorSubscriptions = pgTable(
+  "connector_subscriptions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"google" | "icloud">().notNull(),
+    kind: text("kind").$type<ConnectorSubscriptionKind>().notNull(),
+    calendarId: uuid("calendar_id").references(() => calendars.id, { onDelete: "cascade" }),
+    channelId: text("channel_id"),
+    remoteResourceId: text("remote_resource_id"),
+    remoteIdentityHash: text("remote_identity_hash"),
+    verificationTokenHash: text("verification_token_hash"),
+    providerCursor: text("provider_cursor"),
+    status: text("status").$type<ConnectorSubscriptionStatus>().notNull().default("pending"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    renewAfter: timestamp("renew_after", { withTimezone: true }),
+    lastNotificationAt: timestamp("last_notification_at", { withTimezone: true }),
+    lastVerifiedAt: timestamp("last_verified_at", { withTimezone: true }),
+    failureCount: integer("failure_count").notNull().default(0),
+    safeFailureCode: text("safe_failure_code"),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    leaseClaimId: uuid("lease_claim_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("connector_subscriptions_identity_idx").on(
+      table.accountId,
+      table.kind,
+      sql`COALESCE(${table.calendarId}, '00000000-0000-0000-0000-000000000000'::uuid)`,
+    ),
+    uniqueIndex("connector_subscriptions_channel_idx").on(table.channelId),
+    index("connector_subscriptions_due_idx").on(table.status, table.nextAttemptAt),
+    check("connector_subscriptions_provider_check", sql`${table.provider} IN ('google', 'icloud')`),
+    check(
+      "connector_subscriptions_kind_check",
+      sql`${table.kind} IN ('gmail_mailbox', 'google_calendar_list', 'google_calendar_events', 'icloud_mail_idle')`,
+    ),
+    check(
+      "connector_subscriptions_status_check",
+      sql`${table.status} IN ('pending', 'active', 'renewing', 'expired', 'failed', 'stopped')`,
+    ),
+    check("connector_subscriptions_failure_count_check", sql`${table.failureCount} >= 0`),
+    check(
+      "connector_subscriptions_lease_check",
+      sql`(${table.leaseClaimId} IS NULL) = (${table.leaseExpiresAt} IS NULL)`,
+    ),
+  ],
+);
+
+export const connectorSyncTriggers = pgTable(
+  "connector_sync_triggers",
+  {
+    accountId: uuid("account_id")
+      .primaryKey()
+      .references(() => calendarAccounts.id, { onDelete: "cascade" }),
+    reason: text("reason").$type<ConnectorSyncTriggerReason>().notNull(),
+    firstTriggeredAt: timestamp("first_triggered_at", { withTimezone: true }).notNull(),
+    lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }).notNull(),
+    notificationCount: integer("notification_count").notNull().default(1),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull(),
+    claimId: uuid("claim_id"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("connector_sync_triggers_due_idx").on(table.availableAt),
+    check(
+      "connector_sync_triggers_reason_check",
+      sql`${table.reason} IN ('initial', 'notification', 'reconciliation', 'manual', 'retry', 'recovery')`,
+    ),
+    check(
+      "connector_sync_triggers_count_check",
+      sql`${table.notificationCount} BETWEEN 1 AND 1000000`,
+    ),
+    check(
+      "connector_sync_triggers_time_check",
+      sql`${table.firstTriggeredAt} <= ${table.lastTriggeredAt}`,
+    ),
+    check(
+      "connector_sync_triggers_claim_check",
+      sql`(${table.claimId} IS NULL) = (${table.claimExpiresAt} IS NULL)`,
+    ),
   ],
 );
 

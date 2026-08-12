@@ -9,6 +9,13 @@ api_scaling_suspension=""
 api_service_drain_attempted=false
 api_suspension_attempted=false
 api_rollout_complete=false
+api_deployment_heartbeat_pid=""
+api_deployment_heartbeat_started=false
+api_deployment_heartbeat_interval_seconds="${API_DEPLOYMENT_HEARTBEAT_INTERVAL_SECONDS:-30}"
+api_deployment_heartbeat_retry_seconds="${API_DEPLOYMENT_HEARTBEAT_RETRY_SECONDS:-5}"
+api_deployment_heartbeat_background_enabled="${API_DEPLOYMENT_HEARTBEAT_BACKGROUND_ENABLED:-true}"
+api_deployment_heartbeat_failure_file=""
+api_deployment_heartbeat_ready_file=""
 api_recovery_entry=false
 api_recovery_marker_persisted=false
 api_recovery_cleanup_persisted=false
@@ -59,6 +66,120 @@ run_interruptible() {
     command_exit_code="$?"
     api_active_child_pid=""
     return "$command_exit_code"
+  fi
+}
+
+publish_api_deployment_state() {
+  deployment_state="$1"
+  AWS_MAX_ATTEMPTS=3 aws cloudwatch put-metric-data \
+    --namespace ilo/Deployments \
+    --metric-data "MetricName=ApiDeploymentInProgress,Value=${deployment_state},Unit=Count" \
+    --region "$AWS_REGION" \
+    --cli-connect-timeout 5 \
+    --cli-read-timeout 10
+}
+
+wait_for_api_deployment_alarm_state() {
+  expected_state="$1"
+  refresh_deployment_state="${2:-}"
+  for alarm_state_delay in 0 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5; do
+    if test "$alarm_state_delay" != "0"; then
+      sleep "$alarm_state_delay"
+    fi
+    if test -n "$refresh_deployment_state"; then
+      publish_api_deployment_state "$refresh_deployment_state" || continue
+    fi
+    observed_state="$(
+      AWS_MAX_ATTEMPTS=2 aws cloudwatch describe-alarms \
+        --alarm-names "${ECS_CLUSTER}-api-deployment-in-progress" \
+        --query 'MetricAlarms[0].StateValue' \
+        --output text \
+        --region "$AWS_REGION" \
+        --cli-connect-timeout 5 \
+        --cli-read-timeout 10
+    )" || continue
+    if test "$observed_state" = "$expected_state"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+start_api_deployment_heartbeat() {
+  publish_api_deployment_state 1
+  api_deployment_heartbeat_started=true
+  if test "$api_deployment_heartbeat_background_enabled" = "true"; then
+    api_deployment_heartbeat_failure_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-heartbeat.XXXXXX")"
+    api_deployment_heartbeat_ready_file="$(mktemp "${RUNNER_TEMP:-/tmp}/ilo-api-heartbeat-ready.XXXXXX")"
+    python3 .github/scripts/deployment-heartbeat-worker.py \
+      "$AWS_REGION" \
+      "$api_deployment_heartbeat_interval_seconds" \
+      "$api_deployment_heartbeat_retry_seconds" \
+      "$api_deployment_heartbeat_ready_file" \
+      "$api_deployment_heartbeat_failure_file" &
+    api_deployment_heartbeat_pid="$!"
+    for _ in {1..600}; do
+      if test -s "$api_deployment_heartbeat_ready_file"; then
+        break
+      fi
+      assert_api_deployment_heartbeat_healthy || return 1
+      /bin/sleep 0.1
+    done
+    if test ! -s "$api_deployment_heartbeat_ready_file"; then
+      echo "::error::The API deployment heartbeat worker did not become ready; aborting the rollout."
+      return 1
+    fi
+  fi
+  if ! wait_for_api_deployment_alarm_state ALARM; then
+    stop_api_deployment_heartbeat || true
+    echo "::error::The API deployment heartbeat alarm did not become active before drain."
+    return 1
+  fi
+}
+
+assert_api_deployment_heartbeat_healthy() {
+  if {
+    test -n "$api_deployment_heartbeat_failure_file" &&
+      test -s "$api_deployment_heartbeat_failure_file"
+  }; then
+    echo "::error::The API deployment heartbeat could not be refreshed; aborting the rollout."
+    return 1
+  fi
+  if {
+    test "$api_deployment_heartbeat_background_enabled" = "true" &&
+      test -n "$api_deployment_heartbeat_pid" &&
+      ! kill -0 "$api_deployment_heartbeat_pid" 2>/dev/null
+  }; then
+    echo "::error::The API deployment heartbeat stopped unexpectedly; aborting the rollout."
+    return 1
+  fi
+}
+
+stop_api_deployment_heartbeat() {
+  local heartbeat_alarm_cleared=true
+  if test -n "$api_deployment_heartbeat_pid"; then
+    kill -TERM "$api_deployment_heartbeat_pid" 2>/dev/null || true
+    wait "$api_deployment_heartbeat_pid" 2>/dev/null || true
+    api_deployment_heartbeat_pid=""
+  fi
+  if test "$api_deployment_heartbeat_started" = "true"; then
+    publish_api_deployment_state 0
+    api_deployment_heartbeat_started=false
+    if ! wait_for_api_deployment_alarm_state OK 0; then
+      heartbeat_alarm_cleared=false
+    fi
+  fi
+  if test -n "$api_deployment_heartbeat_failure_file"; then
+    rm -f "$api_deployment_heartbeat_failure_file"
+    api_deployment_heartbeat_failure_file=""
+  fi
+  if test -n "$api_deployment_heartbeat_ready_file"; then
+    rm -f "$api_deployment_heartbeat_ready_file"
+    api_deployment_heartbeat_ready_file=""
+  fi
+  if test "$heartbeat_alarm_cleared" != "true"; then
+    echo "::error::The API deployment heartbeat alarm did not clear; paging remains suppressed."
+    return 1
   fi
 }
 
@@ -348,6 +469,7 @@ fail_closed_api_deployment() {
     fi
     persist_failed_rollout_marker || true
   fi
+  stop_api_deployment_heartbeat || true
   trap - ERR EXIT INT TERM
   exit "$deployment_exit_code"
 }
@@ -384,7 +506,10 @@ cleanup_api_deployment() {
     }; then
       echo "::error::Pre-drain failure preserved the old service but could not prove exact scaling-state restoration."
     fi
+    stop_api_deployment_heartbeat || true
     trap - ERR EXIT INT TERM
+  elif test "$api_deployment_heartbeat_started" = "true"; then
+    stop_api_deployment_heartbeat || true
   fi
 }
 
@@ -432,6 +557,7 @@ cancel_api_deployment() {
       >/dev/null ||
       true
   fi
+  stop_api_deployment_heartbeat || true
   exit "$cancellation_exit_code"
 }
 
@@ -822,32 +948,58 @@ api_iac_deployment_configuration="$(
 # Stop and drain the old binary before the new task runs migrations.
 # Connector lifecycle migrations invalidate cached authority and cannot
 # safely coexist with a pre-fence process that is still in provider I/O.
-api_suspension_attempted=true
-run_interruptible aws application-autoscaling register-scalable-target \
-  --service-namespace ecs \
-  --resource-id "$api_scaling_resource" \
-  --scalable-dimension ecs:service:DesiredCount \
-  --suspended-state "$api_all_suspended_state" \
-  >/dev/null
-current_scaling_suspension
+start_api_deployment_heartbeat
+assert_api_deployment_heartbeat_healthy
+if test "$api_recovery_entry" = "true"; then
+  # RegisterScalableTarget may enforce MinCapacity even when the request also
+  # carries an all-suspended state. Recovery already entered from a proven
+  # zero/all-suspended posture, so mutating the target here could restart the
+  # failed primary before the corrected migration-capable definition launches.
+  current_scaling_suspension
+else
+  api_suspension_attempted=true
+  run_interruptible aws application-autoscaling register-scalable-target \
+    --service-namespace ecs \
+    --resource-id "$api_scaling_resource" \
+    --scalable-dimension ecs:service:DesiredCount \
+    --suspended-state "$api_all_suspended_state" \
+    >/dev/null
+  current_scaling_suspension
+fi
 if test "$api_scaling_suspension" != "$api_all_suspended_state"; then
   echo "::error::Could not prove all API scaling modes are suspended before drain."
   false
 fi
-run_interruptible aws ecs wait services-stable \
-  --cluster "$ECS_CLUSTER" \
-  --services "$API_SERVICE"
+if test "$api_recovery_entry" != "true"; then
+  run_interruptible aws ecs wait services-stable \
+    --cluster "$ECS_CLUSTER" \
+    --services "$API_SERVICE"
+fi
 capture_interruptible aws ecs describe-services \
   --cluster "$ECS_CLUSTER" \
   --services "$API_SERVICE" \
   --output json
 api_suspended_service_state="$api_captured_output"
+api_suspended_desired="$(
+  jq -r '.services[0].desiredCount' <<<"$api_suspended_service_state"
+)"
 api_suspended_running="$(
   jq -r '.services[0].runningCount' <<<"$api_suspended_service_state"
 )"
 api_suspended_pending="$(
   jq -r '.services[0].pendingCount' <<<"$api_suspended_service_state"
 )"
+if {
+  test "$api_recovery_entry" = "true" &&
+    ! {
+      test "$api_suspended_desired" = "0" &&
+        test "$api_suspended_running" = "0" &&
+        test "$api_suspended_pending" = "0"
+    }
+}; then
+  echo "::error::The API left its proven zero state before recovery drain capture; refusing to launch the candidate."
+  false
+fi
 if test "$api_suspended_pending" != "0"; then
   echo "::error::The API service gained pending work before exact drain capture."
   false
@@ -909,14 +1061,16 @@ if test "$api_pre_drain_task_count" -gt 100; then
 fi
 
 api_service_drain_attempted=true
-run_interruptible aws ecs update-service \
-  --cluster "$ECS_CLUSTER" \
-  --service "$API_SERVICE" \
-  --desired-count 0 \
-  >/dev/null
-run_interruptible aws ecs wait services-stable \
-  --cluster "$ECS_CLUSTER" \
-  --services "$API_SERVICE"
+if test "$api_recovery_entry" != "true"; then
+  run_interruptible aws ecs update-service \
+    --cluster "$ECS_CLUSTER" \
+    --service "$API_SERVICE" \
+    --desired-count 0 \
+    >/dev/null
+  run_interruptible aws ecs wait services-stable \
+    --cluster "$ECS_CLUSTER" \
+    --services "$API_SERVICE"
+fi
 capture_interruptible aws ecs describe-services \
   --cluster "$ECS_CLUSTER" \
   --services "$API_SERVICE" \
@@ -1041,6 +1195,7 @@ run_interruptible aws ecs update-service \
 run_interruptible aws ecs wait services-stable \
   --cluster "$ECS_CLUSTER" \
   --services "$API_SERVICE"
+assert_api_deployment_heartbeat_healthy
 api_primary_completed=false
 # ECS's services-stable waiter can return after desired/running counts converge but
 # before the deployment control plane publishes rolloutState=COMPLETED. Keep the
@@ -1049,6 +1204,7 @@ for api_primary_completion_delay in 0 1 2 4 8 16 30 30 30 30; do
   if test "$api_primary_completion_delay" != "0"; then
     run_interruptible sleep "$api_primary_completion_delay"
   fi
+  assert_api_deployment_heartbeat_healthy
   capture_interruptible aws ecs describe-services \
     --cluster "$ECS_CLUSTER" \
     --services "$API_SERVICE" \
@@ -1166,6 +1322,8 @@ if test "$api_recovery_authorized" = "true"; then
   clear_successful_recovery_marker
 fi
 
+assert_api_deployment_heartbeat_healthy
+
 run_interruptible aws application-autoscaling register-scalable-target \
   --service-namespace ecs \
   --resource-id "$api_scaling_resource" \
@@ -1178,4 +1336,5 @@ if test "$api_scaling_suspension" != "$api_original_suspended_state"; then
   false
 fi
 api_rollout_complete=true
+stop_api_deployment_heartbeat
 trap - ERR EXIT INT TERM

@@ -13,6 +13,7 @@ import type {
 import {
   ConnectorError,
   createICloudConnector,
+  googleGrantedServices,
   MailSendPreAcceptanceError,
 } from "@personal-os/connectors";
 import {
@@ -50,11 +51,11 @@ import {
   and,
   asc,
   eq,
-  gt,
   inArray,
   isNotNull,
   isNull,
   lt,
+  lte,
   ne,
   notExists,
   notInArray,
@@ -63,6 +64,15 @@ import {
 } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { invalidateCalendarProfileSources } from "./calendar-profile.js";
+import { createConnectorAuthorizationService } from "./connector-authorization-service.js";
+import { createConnectorNotificationService } from "./connector-notification-service.js";
+import {
+  type ConnectorSyncFailure,
+  classifyConnectorSyncFailure,
+  connectionHealthForAccount,
+  connectorRetryAt,
+  connectorSyncAppError,
+} from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import {
@@ -79,18 +89,18 @@ import {
   mailRuleActionIsApplied,
   strongestMailRuleProviderEffect,
 } from "./mail-rule-work.js";
-import { decryptJson, encryptJson, generateToken, hashToken } from "./security.js";
+import { decryptJson, encryptJson } from "./security.js";
 import {
   auditAttentionItemMetadata,
   auditDomainProfileMetadata,
   auditSnapshot,
   domainProfileChangedFields,
 } from "./serialization.js";
+import type { RequestLog } from "./types.js";
 
-const GOOGLE_OAUTH_STATE_TTL_MS = 30 * 60_000;
 const CONNECTOR_SYNC_LEASE_MS = 30 * 60_000;
 const CONNECTOR_SYNC_INTERRUPTED_ERROR =
-  "Synchronization was interrupted by API shutdown and will retry.";
+  "Synchronization was interrupted. ilo will retry automatically.";
 const MAIL_RULE_WORK_CONCURRENCY = 2;
 const MAIL_RULE_WORK_CLAIM_LEASE_MS = 10 * 60_000;
 const MAIL_RULE_WORK_MAX_ATTEMPTS = 5;
@@ -113,7 +123,10 @@ function calendarProviderMutationError(
 ): AppError {
   if (error instanceof AppError) return error;
   const definitiveStatus =
-    error instanceof ConnectorError && error.status < 500 && error.status !== 408;
+    error instanceof ConnectorError &&
+    error.status !== null &&
+    error.status < 500 &&
+    error.status !== 408;
   if (definitiveStatus) {
     const code =
       error.status === 401 || error.status === 403
@@ -303,7 +316,13 @@ type ConnectorServiceOptions = {
   db: Database;
   encryptionKey: string;
   google: GoogleConnector;
+  googleCalendarWebhookUrl?: string;
+  googleGmailTopicName?: string;
+  googleRedirectUri?: string;
   icloud?: ICloudConnector;
+  icloudMailIdleConcurrency?: number;
+  icloudMailIdleEnabled?: boolean;
+  log?: (entry: RequestLog) => void;
   now: () => Date;
   observeRecoveryFailure?: (entry: {
     claimId: string;
@@ -319,11 +338,30 @@ export function createConnectorService({
   db,
   encryptionKey,
   google,
+  googleCalendarWebhookUrl,
+  googleGmailTopicName,
+  googleRedirectUri = "https://api.ilo.invalid/v1/connectors/google/callback",
   icloud = createICloudConnector(),
+  icloudMailIdleConcurrency,
+  icloudMailIdleEnabled,
+  log,
   now,
   observeRecoveryFailure,
   shutdown,
 }: ConnectorServiceOptions) {
+  const authorization = createConnectorAuthorizationService({ db, encryptionKey, now });
+  const notifications = createConnectorNotificationService({
+    db,
+    encryptionKey,
+    google,
+    icloud,
+    ...(log ? { log } : {}),
+    now,
+    ...(googleCalendarWebhookUrl ? { calendarWebhookUrl: googleCalendarWebhookUrl } : {}),
+    ...(googleGmailTopicName ? { gmailTopicName: googleGmailTopicName } : {}),
+    ...(icloudMailIdleConcurrency ? { icloudMailIdleConcurrency } : {}),
+    ...(icloudMailIdleEnabled ? { icloudMailIdleEnabled } : {}),
+  });
   function syncOperation(): ProviderOperationOptions | undefined {
     if (!shutdown) return undefined;
     const deadlineMs = shutdown.deadlineMs();
@@ -696,16 +734,19 @@ export function createConnectorService({
     options: { skipMail?: boolean } = {},
   ): Promise<{ changed: number }> {
     throwIfQuiescing();
+    const startedAt = Date.now();
     const staleBefore = new Date(now().getTime() - CONNECTOR_SYNC_LEASE_MS);
     const syncClaimId = randomUUID();
+    const attemptedAt = now();
     const [claimedAccount] = await db
       .update(calendarAccounts)
       .set({
         syncClaimId,
-        syncError: null,
         syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+        lastSyncAttemptAt: attemptedAt,
+        nextSyncAt: null,
         syncStatus: "syncing",
-        updatedAt: now(),
+        updatedAt: attemptedAt,
       })
       .where(
         and(
@@ -746,7 +787,13 @@ export function createConnectorService({
     try {
       throwIfQuiescing();
       if (!claimedAccount.encryptedCredentials) {
-        throw new AppError("not_found", "The connected account was not found.");
+        throw new ConnectorError({
+          category: "configuration",
+          code: "connector_credentials_missing",
+          disposition: "operator",
+          message: "Connected account credentials are unavailable.",
+          status: 503,
+        });
       }
       const account: AccountRow = {
         ...claimedAccount,
@@ -819,7 +866,11 @@ export function createConnectorService({
       if (account.mailEnabled && !options.skipMail) {
         let mail: MailSyncResult["value"];
         if (account.provider === "google" && googleCredentials && google.syncMail) {
-          const result = await google.syncMail(googleCredentials, syncOperation());
+          const result = await google.syncMail(
+            googleCredentials,
+            account.mailSyncToken,
+            syncOperation(),
+          );
           googleCredentials = await saveGoogleCredentials(
             account.id,
             result.credentials,
@@ -829,9 +880,15 @@ export function createConnectorService({
           mailCredentialsPersisted = true;
           mail = result.value;
         } else if (account.provider === "icloud" && icloudCredentials) {
-          mail = await icloud.syncMail(icloudCredentials, syncOperation());
+          mail = await icloud.syncMail(icloudCredentials, account.mailSyncToken, syncOperation());
         } else {
-          throw new AppError("internal_error", "Mail credentials are unavailable.");
+          throw new ConnectorError({
+            category: "configuration",
+            code: "connector_mail_capability_unavailable",
+            disposition: "operator",
+            message: "Connected Mail capability is unavailable.",
+            status: 503,
+          });
         }
         throwIfQuiescing();
         const projected = await projectMail(
@@ -847,17 +904,23 @@ export function createConnectorService({
         googleCredentials = projected.credentials ?? googleCredentials;
       }
       throwIfQuiescing();
+      const completedAt = now();
       const [completedAccount] = await db
         .update(calendarAccounts)
         .set({
           ...(googleCredentials && !mailCredentialsPersisted
             ? { encryptedCredentials: encryptJson(googleCredentials, encryptionKey) }
             : {}),
-          lastSyncedAt: now(),
+          lastSyncedAt: completedAt,
+          nextSyncAt: new Date(completedAt.getTime() + 5 * 60_000),
           syncClaimId: null,
           syncError: null,
+          syncErrorCategory: null,
+          syncErrorCode: null,
+          syncFailureCount: 0,
+          syncRecovery: null,
           syncStatus: "idle",
-          updatedAt: now(),
+          updatedAt: completedAt,
         })
         .where(
           and(
@@ -873,21 +936,72 @@ export function createConnectorService({
           "The connector synchronization claim was superseded before completion.",
         );
       }
+      log?.({
+        accountId: claimedAccount.id,
+        durationMs: Date.now() - startedAt,
+        event: "connector_sync_completed",
+        freshnessAgeMs: Math.max(
+          0,
+          completedAt.getTime() - (claimedAccount.lastSyncedAt?.getTime() ?? attemptedAt.getTime()),
+        ),
+        method: "CONNECTOR",
+        path: "/internal/connectors/sync",
+        provider: claimedAccount.provider === "icloud" ? "icloud" : "google",
+        requestId,
+        status: 200,
+      });
+      if (claimedAccount.syncFailureCount > 0) {
+        log?.({
+          accountId: claimedAccount.id,
+          durationMs: Date.now() - startedAt,
+          event: "connector_sync_recovered",
+          failureCount: claimedAccount.syncFailureCount,
+          method: "CONNECTOR",
+          path: `/internal/connectors/${claimedAccount.id}/sync`,
+          provider: claimedAccount.provider === "icloud" ? "icloud" : "google",
+          requestId,
+          status: 200,
+        });
+      }
       return { changed };
     } catch (error) {
       const interrupted = shutdown?.signal.aborted === true;
+      const failureCount = claimedAccount.syncFailureCount + 1;
+      const provider = claimedAccount.provider === "icloud" ? "icloud" : "google";
+      const failure: ConnectorSyncFailure = interrupted
+        ? {
+            category: "temporary",
+            code: "connector_sync_interrupted",
+            message: CONNECTOR_SYNC_INTERRUPTED_ERROR,
+            recovery: "automatic",
+            retryAfterMs: null,
+            status: null,
+          }
+        : classifyConnectorSyncFailure(error, provider);
+      const failedAt = now();
+      const nextSyncAt = interrupted
+        ? failedAt
+        : failure.recovery === "reconnect"
+          ? null
+          : connectorRetryAt({
+              accountId: claimedAccount.id,
+              failureCount,
+              now: failedAt,
+              retryAfterMs: failure.retryAfterMs,
+            });
       try {
-        await db
+        const [settledAccount] = await db
           .update(calendarAccounts)
           .set({
-            syncError: interrupted
-              ? CONNECTOR_SYNC_INTERRUPTED_ERROR
-              : error instanceof Error
-                ? error.message
-                : "Unknown connector error",
+            nextSyncAt,
             syncClaimId: null,
+            syncError: failure.message,
+            syncErrorCategory: failure.category,
+            syncErrorCode: failure.code,
+            syncFailureCount: failureCount,
+            syncRecovery: failure.recovery,
             syncStatus: interrupted ? "idle" : "error",
-            updatedAt: now(),
+            updatedAt: failedAt,
           })
           .where(
             and(
@@ -895,7 +1009,25 @@ export function createConnectorService({
               eq(calendarAccounts.syncGeneration, syncClaim.generation),
               eq(calendarAccounts.syncClaimId, syncClaim.id),
             ),
-          );
+          )
+          .returning({ id: calendarAccounts.id });
+        if (settledAccount) {
+          log?.({
+            accountId: claimedAccount.id,
+            category: failure.category,
+            code: failure.code,
+            disposition: failure.recovery,
+            durationMs: Date.now() - startedAt,
+            event: "connector_sync_failed",
+            failureCount,
+            method: "CONNECTOR",
+            nextSyncAt: nextSyncAt?.toISOString() ?? null,
+            path: `/internal/connectors/${claimedAccount.id}/sync`,
+            provider,
+            requestId,
+            status: failure.status ?? 503,
+          });
+        }
       } catch {
         if (interrupted) {
           throw new AppError(
@@ -910,7 +1042,9 @@ export function createConnectorService({
         // Terminal status is best-effort and must not mask a structured
         // provider partial-effect/reconciliation contract.
       }
-      throw interrupted ? (shutdown?.signal.reason ?? error) : error;
+      if (interrupted) throw shutdown?.signal.reason ?? error;
+      if (error instanceof AppError && error.code === "conflict") throw error;
+      throw connectorSyncAppError(failure, claimedAccount.id, provider, nextSyncAt);
     }
   }
 
@@ -1622,6 +1756,19 @@ export function createConnectorService({
         .set({ deletedAt: now(), updatedAt: now() })
         .where(and(...staleMailboxConditions));
 
+      if (value.deletedThreadIds.length > 0) {
+        await transaction
+          .update(mailThreads)
+          .set({ deletedAt: now(), updatedAt: now() })
+          .where(
+            and(
+              eq(mailThreads.accountId, account.id),
+              inArray(mailThreads.remoteThreadId, value.deletedThreadIds),
+              isNull(mailThreads.deletedAt),
+            ),
+          );
+      }
+
       for (const thread of value.threads) {
         const [storedThread] = await transaction
           .insert(mailThreads)
@@ -1719,6 +1866,17 @@ export function createConnectorService({
           });
         }
       }
+      await transaction
+        .update(calendarAccounts)
+        .set({ mailSyncToken: value.nextSyncToken, updatedAt: now() })
+        .where(
+          and(
+            eq(calendarAccounts.id, account.id),
+            eq(calendarAccounts.userId, account.userId),
+            eq(calendarAccounts.syncGeneration, syncClaim.generation),
+            eq(calendarAccounts.syncClaimId, syncClaim.id),
+          ),
+        );
       return true;
     });
     if (!sourceProjectionApplied) {
@@ -2612,10 +2770,13 @@ export function createConnectorService({
         const trash = notApplied.find(({ action }) => action.type === "trash");
         if (trash) {
           if (!google.trashMailThread || notApplied.length !== 1) {
-            throw new ConnectorError(
-              "Recoverable Trash must be the only provider action in this work item.",
-              400,
-            );
+            throw new ConnectorError({
+              category: "rejected",
+              code: "mail_rule_trash_contract_invalid",
+              disposition: "operator",
+              message: "Recoverable Trash must be the only provider action in this work item.",
+              status: 400,
+            });
           }
           currentCredentials = await google.trashMailThread(
             currentCredentials,
@@ -2623,7 +2784,13 @@ export function createConnectorService({
           );
         } else {
           if (!google.updateMailThread) {
-            throw new ConnectorError("Google Mail write-through is unavailable.", 501);
+            throw new ConnectorError({
+              category: "configuration",
+              code: "google_mail_write_unavailable",
+              disposition: "operator",
+              message: "Google Mail write-through is unavailable.",
+              status: 501,
+            });
           }
           const addMailboxIds = new Set<string>();
           const removeMailboxIds = new Set<string>();
@@ -2950,57 +3117,128 @@ export function createConnectorService({
     };
   }
 
-  return {
-    async completeGoogleAuthorization(state: string, code: string) {
-      const [oauthState] = await db
-        .update(oauthStates)
-        .set({ consumedAt: now() })
-        .where(
-          and(
-            eq(oauthStates.tokenHash, hashToken(state)),
-            eq(oauthStates.provider, "google"),
-            isNull(oauthStates.consumedAt),
-            gt(oauthStates.expiresAt, now()),
-          ),
-        )
-        .returning();
-      if (!oauthState) {
-        throw new AppError(
-          "invalid_request",
-          "The Google authorization state is invalid or expired.",
-        );
-      }
-      let googleCredentials = await google.exchangeCode(code);
+  const safeReturnPath = (value: string | null): "/setup" | "/settings?section=connections" =>
+    value === "/setup" || value === "/settings?section=connections"
+      ? value
+      : "/settings?section=connections";
+
+  async function handleGoogleAuthorizationCallback(input: {
+    code?: string;
+    error?: string;
+    issuer?: string;
+    requestId: string;
+    state: string;
+  }): Promise<{
+    attemptId: string | null;
+    returnPath: "/setup" | "/settings?section=connections";
+    status: "pending" | "connected" | "cancelled" | "expired" | "permission_incomplete" | "failed";
+  }> {
+    const consumed = await authorization.consume("google", input.state, input.requestId);
+    if (consumed.kind === "invalid") {
+      return {
+        attemptId: null,
+        returnPath: "/settings?section=connections",
+        status: "failed",
+      };
+    }
+    const returnPath = safeReturnPath(consumed.attempt.returnPath);
+    if (consumed.kind === "expired") {
+      return { attemptId: consumed.attempt.id, returnPath, status: "expired" };
+    }
+    if (consumed.kind === "processing") {
+      return { attemptId: consumed.attempt.id, returnPath, status: "pending" };
+    }
+    if (consumed.kind === "closed") {
+      return {
+        attemptId: consumed.attempt.id,
+        returnPath,
+        status:
+          consumed.attempt.status === "processing" || consumed.attempt.status === "pending"
+            ? "pending"
+            : consumed.attempt.status,
+      };
+    }
+
+    const close = async (
+      status: "cancelled" | "permission_incomplete" | "failed",
+      outcomeCode: string,
+    ) => {
+      await authorization.close({
+        accountId: null,
+        attemptId: consumed.attempt.id,
+        outcomeCode,
+        status,
+      });
+      return { attemptId: consumed.attempt.id, returnPath, status };
+    };
+
+    if (input.issuer && input.issuer !== "https://accounts.google.com") {
+      return close("failed", "authorization_issuer_invalid");
+    }
+    if (input.error) {
+      return input.error === "access_denied"
+        ? close("cancelled", "authorization_cancelled")
+        : close("failed", "provider_authorization_failed");
+    }
+    if (!input.code) return close("failed", "authorization_code_missing");
+
+    try {
+      let googleCredentials = await google.exchangeCode(
+        input.code,
+        consumed.codeVerifier,
+        consumed.attempt.redirectUri ?? googleRedirectUri,
+      );
       const profileResult = await google.getProfile(googleCredentials);
       googleCredentials = profileResult.credentials;
-      const requestedServices = oauthState.requestedServices ?? ["calendar", "mail"];
-      const target = oauthState.targetAccountId
-        ? await getAccount(oauthState.userId, oauthState.targetAccountId)
+      const requestedServices = consumed.attempt.requestedServices ?? ["calendar", "mail"];
+      const grantedServices = googleGrantedServices(googleCredentials);
+      const target = consumed.attempt.targetAccountId
+        ? await getAccount(consumed.attempt.userId, consumed.attempt.targetAccountId)
         : null;
-      if (target) {
-        if (
-          target.provider !== "google" ||
-          (target.providerAccountId && target.providerAccountId !== profileResult.value.id)
-        ) {
-          throw new AppError("invalid_request", "Authorize the same Google account you selected.");
-        }
+      if (
+        target &&
+        (target.provider !== "google" ||
+          (target.providerAccountId && target.providerAccountId !== profileResult.value.id))
+      ) {
+        return close("failed", "account_mismatch");
       }
-      const account = await db.transaction(async (transaction) => {
+      const [matchedAccount] = await db
+        .select({
+          calendarEnabled: calendarAccounts.calendarEnabled,
+          mailEnabled: calendarAccounts.mailEnabled,
+        })
+        .from(calendarAccounts)
+        .where(
+          and(
+            eq(calendarAccounts.userId, consumed.attempt.userId),
+            eq(calendarAccounts.provider, "google"),
+            eq(calendarAccounts.providerAccountId, profileResult.value.id),
+          ),
+        )
+        .limit(1);
+      const requiredServices = new Set(requestedServices);
+      if ((target ?? matchedAccount)?.calendarEnabled) requiredServices.add("calendar");
+      if ((target ?? matchedAccount)?.mailEnabled) requiredServices.add("mail");
+      if ([...requiredServices].some((service) => !grantedServices.includes(service))) {
+        return close("permission_incomplete", "required_permission_missing");
+      }
+
+      await db.transaction(async (transaction) => {
         const requestedCalendar = requestedServices.includes("calendar");
-        const requestedMail =
-          requestedServices.includes("mail") && hasGoogleMailScope(googleCredentials);
+        const requestedMail = requestedServices.includes("mail");
         await transaction
           .insert(calendarAccounts)
           .values({
-            calendarEnabled: requestedCalendar,
             avatarUrl: profileResult.value.pictureUrl,
+            calendarEnabled: requestedCalendar,
             email: profileResult.value.email,
             encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
             label: profileResult.value.name ?? profileResult.value.email,
             mailEnabled: requestedMail,
+            nextSyncAt: now(),
             provider: "google",
             providerAccountId: profileResult.value.id,
-            userId: oauthState.userId,
+            userId: consumed.attempt.userId,
           })
           .onConflictDoNothing({
             target: [
@@ -3016,7 +3254,7 @@ export function createConnectorService({
               .from(calendarAccounts)
               .where(
                 and(
-                  eq(calendarAccounts.userId, oauthState.userId),
+                  eq(calendarAccounts.userId, consumed.attempt.userId),
                   eq(calendarAccounts.provider, "google"),
                   eq(calendarAccounts.providerAccountId, profileResult.value.id),
                 ),
@@ -3032,22 +3270,25 @@ export function createConnectorService({
             "The selected Google account changed while authorization was completing.",
           );
         }
-        const calendarEnabled = lockedMatchedAccount.calendarEnabled || requestedCalendar;
-        const mailEnabled = lockedMatchedAccount.mailEnabled || requestedMail;
         const updatedAccount = requireDatabaseRecord(
           (
             await transaction
               .update(calendarAccounts)
               .set({
                 avatarUrl: profileResult.value.pictureUrl,
-                calendarEnabled,
+                calendarEnabled: lockedMatchedAccount.calendarEnabled || requestedCalendar,
                 email: profileResult.value.email,
                 encryptedCredentials: encryptJson(googleCredentials, encryptionKey),
                 label: profileResult.value.name ?? profileResult.value.email,
-                mailEnabled,
+                mailEnabled: lockedMatchedAccount.mailEnabled || requestedMail,
+                nextSyncAt: now(),
                 syncClaimId: null,
                 syncError: null,
+                syncErrorCategory: null,
+                syncErrorCode: null,
+                syncFailureCount: 0,
                 syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+                syncRecovery: null,
                 syncStatus: "idle",
                 updatedAt: now(),
               })
@@ -3090,27 +3331,76 @@ export function createConnectorService({
                 entityId: updatedAccount.id,
                 entityType: "mail_account",
                 principal: {
-                  actorId: oauthState.userId,
+                  actorId: consumed.attempt.userId,
                   actorType: "user",
-                  userId: oauthState.userId,
+                  userId: consumed.attempt.userId,
                 },
-                requestId: randomUUID(),
+                requestId: input.requestId,
               }),
             );
           }
         }
-        return updatedAccount;
+        await authorization.close(
+          {
+            accountId: updatedAccount.id,
+            attemptId: consumed.attempt.id,
+            outcomeCode: "connected",
+            status: "connected",
+          },
+          transaction,
+        );
+        await notifications.enqueue(updatedAccount.id, "initial", now(), transaction);
       });
+      return { attemptId: consumed.attempt.id, returnPath, status: "connected" };
+    } catch (error) {
+      const outcomeCode =
+        error instanceof ConnectorError &&
+        (error.category === "temporary" || error.category === "transport")
+          ? "provider_temporarily_unavailable"
+          : "authorization_failed";
+      try {
+        return await close("failed", outcomeCode);
+      } catch {
+        return { attemptId: consumed.attempt.id, returnPath, status: "failed" };
+      }
+    }
+  }
+
+  return {
+    async completeGoogleAuthorization(state: string, code: string) {
+      const result = await handleGoogleAuthorizationCallback({
+        code,
+        requestId: randomUUID(),
+        state,
+      });
+      if (result.status !== "connected" || !result.attemptId) {
+        throw new AppError("invalid_request", "Google authorization could not be completed.");
+      }
+      const [attempt] = await db
+        .select()
+        .from(oauthStates)
+        .where(eq(oauthStates.id, result.attemptId))
+        .limit(1);
+      if (!attempt?.connectedAccountId) {
+        throw new AppError("invalid_request", "Google authorization could not be completed.");
+      }
+      const account = await getAccount(attempt.userId, attempt.connectedAccountId);
       return {
         accountId: account.id,
         email: account.email,
-        returnPath:
-          oauthState.returnPath === "/setup" ||
-          oauthState.returnPath === "/settings?section=connections"
-            ? oauthState.returnPath
-            : "/settings?section=connections",
-        userId: oauthState.userId,
+        returnPath: result.returnPath,
+        userId: attempt.userId,
       };
+    },
+
+    handleGoogleAuthorizationCallback,
+
+    authorizationOutcome(userId: string, attemptId: string) {
+      return authorization.publicOutcome(userId, attemptId);
+    },
+
+    purgeExpiredAuthorizationAttempts() {
+      return authorization.purgeExpired();
     },
 
     async connectICloud(
@@ -3172,7 +3462,7 @@ export function createConnectorService({
         if (existing.calendarEnabled && !input.calendar) {
           await disableCalendarAccount(transaction, existing, requestId);
         }
-        return requireDatabaseRecord(
+        const updatedAccount = requireDatabaseRecord(
           (
             await transaction
               .update(calendarAccounts)
@@ -3180,9 +3470,14 @@ export function createConnectorService({
                 calendarEnabled: input.calendar,
                 encryptedCredentials: encryptJson(icloudCredentials, encryptionKey),
                 mailEnabled: input.mail,
+                nextSyncAt: now(),
                 syncClaimId: null,
                 syncError: null,
+                syncErrorCategory: null,
+                syncErrorCode: null,
+                syncFailureCount: 0,
                 syncGeneration: sql`${calendarAccounts.syncGeneration} + 1`,
+                syncRecovery: null,
                 syncStatus: "idle",
                 updatedAt: now(),
               })
@@ -3191,6 +3486,8 @@ export function createConnectorService({
           )[0],
           "The iCloud account could not be saved.",
         );
+        await notifications.enqueue(updatedAccount.id, "initial", now(), transaction);
+        return updatedAccount;
       });
       return { accountId: account.id, email: account.email, userId };
     },
@@ -3266,9 +3563,12 @@ export function createConnectorService({
         email: record.email,
         id: record.id,
         label: record.label,
+        health: connectionHealthForAccount(record),
+        lastSyncAttemptAt: record.lastSyncAttemptAt?.toISOString() ?? null,
         lastSyncedAt: record.lastSyncedAt?.toISOString() ?? null,
         mailEnabled: record.mailEnabled,
         provider: record.provider,
+        nextSyncAt: record.nextSyncAt?.toISOString() ?? null,
         syncError: record.syncError,
         syncStatus: record.syncStatus,
       }));
@@ -3285,51 +3585,134 @@ export function createConnectorService({
       if (target && target.provider !== "google") {
         throw new AppError("invalid_request", "Only Google accounts use Google authorization.");
       }
-      const state = generateToken("oauth");
+      const attempt = await authorization.create({
+        provider: "google",
+        redirectUri: googleRedirectUri,
+        requestedServices: input.services,
+        returnPath: input.returnTo,
+        targetAccountId: target?.id ?? null,
+        userId,
+      });
       let url: string;
       try {
-        url = google.authorizationUrl(state, target?.email ?? undefined, input.services);
+        url = google.authorizationUrl(
+          attempt.state,
+          attempt.codeChallenge,
+          target?.email ?? undefined,
+          input.services,
+        );
       } catch (error) {
         if (error instanceof ConnectorError) {
           throw new AppError("service_unavailable", error.message);
         }
         throw error;
       }
-      await db.insert(oauthStates).values({
-        expiresAt: new Date(now().getTime() + GOOGLE_OAUTH_STATE_TTL_MS),
-        provider: "google",
-        requestedServices: input.services,
-        returnPath: input.returnTo,
-        targetAccountId: target?.id,
-        tokenHash: hashToken(state),
-        userId,
-      });
       return url;
     },
 
-    syncAccount,
-    async syncStaleAccounts(intervalMs = 5 * 60_000): Promise<void> {
-      throwIfQuiescing();
-      const threshold = new Date(now().getTime() - intervalMs);
-      const staleLeaseThreshold = new Date(
-        now().getTime() - Math.max(intervalMs, CONNECTOR_SYNC_LEASE_MS),
+    dispatchTriggeredSyncs(options: { concurrency?: number; limit?: number } = {}) {
+      return notifications.dispatchTriggeredSyncs(syncAccount, options);
+    },
+
+    enqueueSyncTrigger(
+      accountId: string,
+      reason: "initial" | "notification" | "reconciliation" | "manual" | "retry" | "recovery",
+    ) {
+      return notifications.enqueue(accountId, reason);
+    },
+
+    renewSubscriptions(options: { concurrency?: number; limit?: number } = {}) {
+      return notifications.renewDueSubscriptions(options);
+    },
+
+    receiveGmailNotification(mailboxIdentity: string, historyId: string) {
+      return notifications.receiveGmailNotification(mailboxIdentity, historyId);
+    },
+
+    receiveCalendarNotification(input: {
+      channelId: string;
+      messageNumber: string;
+      resourceId: string;
+      resourceState: "exists" | "not_exists" | "sync";
+      token: string;
+    }) {
+      return notifications.receiveCalendarNotification(input);
+    },
+
+    runICloudIdlePass() {
+      return notifications.runICloudIdlePass(
+        shutdown?.signal ? { signal: shutdown.signal } : undefined,
       );
+    },
+
+    syncAccount,
+    async observeSyncFreshness(): Promise<{
+      eligibleAccountCount: number;
+      freshnessAgeMs: number;
+    }> {
+      const observedAt = now();
       const accounts = await db
-        .select({ id: calendarAccounts.id, userId: calendarAccounts.userId })
+        .select({
+          createdAt: calendarAccounts.createdAt,
+          lastSyncedAt: calendarAccounts.lastSyncedAt,
+        })
         .from(calendarAccounts)
         .where(
           and(
             ne(calendarAccounts.provider, "local"),
+            or(eq(calendarAccounts.calendarEnabled, true), eq(calendarAccounts.mailEnabled, true)),
+            or(
+              isNull(calendarAccounts.syncRecovery),
+              eq(calendarAccounts.syncRecovery, "automatic"),
+            ),
+          ),
+        );
+      return {
+        eligibleAccountCount: accounts.length,
+        freshnessAgeMs: accounts.reduce(
+          (maximumAge, account) =>
+            Math.max(
+              maximumAge,
+              Math.max(
+                0,
+                observedAt.getTime() - (account.lastSyncedAt ?? account.createdAt).getTime(),
+              ),
+            ),
+          0,
+        ),
+      };
+    },
+    async syncDueAccounts(options: { concurrency?: number; limit?: number } = {}): Promise<{
+      attempted: number;
+      failed: number;
+      recovered: number;
+      skipped: number;
+      succeeded: number;
+    }> {
+      throwIfQuiescing();
+      const selectedAt = now();
+      const staleLeaseThreshold = new Date(selectedAt.getTime() - CONNECTOR_SYNC_LEASE_MS);
+      const limit = Math.max(1, Math.min(options.limit ?? 25, 100));
+      const concurrency = Math.max(1, Math.min(options.concurrency ?? 3, 10));
+      const accounts = await db
+        .select({
+          id: calendarAccounts.id,
+          syncFailureCount: calendarAccounts.syncFailureCount,
+          userId: calendarAccounts.userId,
+        })
+        .from(calendarAccounts)
+        .where(
+          and(
+            ne(calendarAccounts.provider, "local"),
+            or(eq(calendarAccounts.calendarEnabled, true), eq(calendarAccounts.mailEnabled, true)),
             or(
               and(
-                eq(calendarAccounts.syncStatus, "idle"),
+                ne(calendarAccounts.syncStatus, "syncing"),
+                isNotNull(calendarAccounts.nextSyncAt),
+                lte(calendarAccounts.nextSyncAt, selectedAt),
                 or(
-                  eq(calendarAccounts.syncError, CONNECTOR_SYNC_INTERRUPTED_ERROR),
-                  isNull(calendarAccounts.lastSyncedAt),
-                  and(
-                    eq(calendarAccounts.mailEnabled, true),
-                    lt(calendarAccounts.lastSyncedAt, threshold),
-                  ),
+                  isNull(calendarAccounts.syncRecovery),
+                  ne(calendarAccounts.syncRecovery, "reconnect"),
                 ),
               ),
               and(
@@ -3338,10 +3721,39 @@ export function createConnectorService({
               ),
             ),
           ),
-        );
+        )
+        .orderBy(asc(calendarAccounts.nextSyncAt), asc(calendarAccounts.updatedAt))
+        .limit(limit);
+      const result = {
+        attempted: accounts.length,
+        failed: 0,
+        recovered: 0,
+        skipped: 0,
+        succeeded: 0,
+      };
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < accounts.length) {
+          const account = accounts[cursor];
+          cursor += 1;
+          if (!account) continue;
+          try {
+            await syncAccount(account.userId, account.id);
+            result.succeeded += 1;
+            if (account.syncFailureCount > 0) result.recovered += 1;
+          } catch (error) {
+            if (error instanceof AppError && error.code === "conflict") result.skipped += 1;
+            else result.failed += 1;
+          }
+        }
+      };
       await Promise.all(
-        accounts.map((account) => syncAccount(account.userId, account.id).catch(() => {})),
+        Array.from({ length: Math.min(concurrency, accounts.length) }, async () => worker()),
       );
+      return result;
+    },
+    async syncStaleAccounts(_intervalMs = 5 * 60_000): Promise<void> {
+      await this.syncDueAccounts();
     },
   };
 
@@ -3456,15 +3868,6 @@ export function createConnectorService({
       });
     });
   }
-}
-
-function hasGoogleMailScope(credentials: GoogleCredentials): boolean {
-  const scopes = new Set(credentials.scope.split(/\s+/));
-  return [
-    "https://mail.google.com/",
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.modify",
-  ].some((scope) => scopes.has(scope));
 }
 
 function remoteEventValues(

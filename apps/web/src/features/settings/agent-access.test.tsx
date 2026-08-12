@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { AgentAccessSettings } from "./agent-access.js";
@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   deleteAccessToken: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
+  getIloSetup: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
   getMailSetupContext: vi.fn(),
   listAccessTokens: vi.fn(),
@@ -22,7 +23,7 @@ const mocks = vi.hoisted(() => ({
   listCalendars: vi.fn(),
   listMailRules: vi.fn(),
   listOAuthClients: vi.fn(),
-  listReminders: vi.fn(),
+  listTasks: vi.fn(),
   previewSavedMailRule: vi.fn(),
   revokeOAuthClient: vi.fn(),
   toastError: vi.fn(),
@@ -48,6 +49,14 @@ function renderSettings() {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+}
+
+function readinessOverview(label: string) {
+  const panel = screen.getByText(`${label} readiness`).closest('[data-slot="item"]');
+  if (!(panel instanceof HTMLElement)) {
+    throw new Error(`${label} readiness overview was not rendered.`);
+  }
+  return within(panel);
 }
 
 describe("agent access settings", () => {
@@ -95,13 +104,14 @@ describe("agent access settings", () => {
       mcpUrl: "https://mcp.example.com/mcp",
       skill: {
         displayName: "Ilo Guided Setup",
-        installPrompt: "Install the Ilo Guided Setup skill from https://example.com/ilo-setup.",
+        installPrompt:
+          "Install the ilo-setup skill from https://app.example.com/skills/ilo-setup/v0.2.0/SKILL.md.",
         invocation: "$ilo-setup",
         name: "ilo-setup",
-        revision: "release-0.1.0",
+        revision: "v0.2.0",
         setupPrompt: "Use $ilo-setup to set up Ilo.",
-        sourceUrl: "https://example.com/ilo-setup",
-        version: "0.1.0",
+        sourceUrl: "https://app.example.com/skills/ilo-setup/v0.2.0/SKILL.md",
+        version: "0.2.0",
       },
     });
     mocks.getAssistantSetupStatus.mockResolvedValue({
@@ -141,12 +151,96 @@ describe("agent access settings", () => {
           approvedProfileVersion: null,
           canRead: true,
           canWrite: true,
-          domain: "reminders",
+          domain: "tasks",
           pendingDraftVersion: null,
           profileStatus: "active",
           profileVersion: 4,
         },
       ],
+    });
+    mocks.getIloSetup.mockImplementation(async ({ domain }: { domain?: string } = {}) => {
+      const selectedDomain = domain ?? "mail";
+      const active = selectedDomain === "mail" || selectedDomain === "tasks";
+      const draft = selectedDomain === "finances";
+      const currentStepId = active ? "complete" : draft ? "review_guidance" : "learn_preferences";
+      const stepState = (id: string) => {
+        if (id === "connect_agent") return "complete";
+        if (id === "learn_preferences") return active || draft ? "complete" : "current";
+        if (id === "review_guidance") return active ? "complete" : draft ? "current" : "blocked";
+        return active ? "complete" : "blocked";
+      };
+      return {
+        access: { canRead: true, canWrite: true },
+        connection: { lastObservedAt: now, observed: true },
+        currentStepId,
+        domain: selectedDomain,
+        nextAction: active
+          ? `${selectedDomain} setup is active.`
+          : draft
+            ? `Review ${selectedDomain} draft version 3 and accept or revise it.`
+            : `The agent should inspect ${selectedDomain} material and save a draft profile.`,
+        profile: {
+          approvedStatus: draft ? "active" : null,
+          approvedVersion: draft ? 2 : null,
+          pendingDraftVersion: draft ? 3 : null,
+          status: active ? "active" : draft ? "draft" : null,
+          version: active ? 1 : draft ? 3 : null,
+        },
+        progress: { completed: active ? 4 : draft ? 2 : 1, total: 4 },
+        protocolVersion: "1.0",
+        selectedStepId: currentStepId,
+        status: active ? "complete" : draft ? "needs_input" : "in_progress",
+        steps: [
+          {
+            completionEvidence: ["This authenticated MCP caller reached Ilo."],
+            description: "Authorize one MCP host.",
+            id: "connect_agent",
+            instructions: [],
+            order: 1,
+            owner: "person",
+            requiredTools: [],
+            state: stepState("connect_agent"),
+            title: "Connect an agent",
+            userAction: null,
+          },
+          {
+            completionEvidence: active || draft ? ["Guidance exists at profile version 1."] : [],
+            description: "Inspect existing Ilo material and ask only about unresolved preferences.",
+            id: "learn_preferences",
+            instructions: [],
+            order: 2,
+            owner: "agent",
+            requiredTools: ["get_domain_profile"],
+            state: stepState("learn_preferences"),
+            title: `Learn ${selectedDomain} preferences`,
+            userAction: null,
+          },
+          {
+            completionEvidence: active ? ["Guidance is active."] : [],
+            description: "Show what the guidance covers and preserve approval.",
+            id: "review_guidance",
+            instructions: [],
+            order: 3,
+            owner: "person",
+            requiredTools: [],
+            state: stepState("review_guidance"),
+            title: "Review the proposed guidance",
+            userAction: null,
+          },
+          {
+            completionEvidence: active ? ["Setup is confirmed."] : [],
+            description: "Ilo confirms setup.",
+            id: "complete",
+            instructions: [],
+            order: 4,
+            owner: "ilo",
+            requiredTools: ["get_ilo_setup"],
+            state: stepState("complete"),
+            title: "Confirm setup",
+            userAction: null,
+          },
+        ],
+      };
     });
     mocks.listAttentionItems.mockImplementation(async ({ domain }: { domain: string }) =>
       domain === "calendar"
@@ -171,8 +265,8 @@ describe("agent access settings", () => {
         source: { syncStatus: "error" },
       },
     ]);
-    mocks.listReminders.mockResolvedValue({
-      items: [{ id: "reminder-1" }],
+    mocks.listTasks.mockResolvedValue({
+      items: [{ id: "task-1" }],
       nextCursor: null,
     });
     mocks.getFinanceGuidedSetup.mockResolvedValue({
@@ -388,32 +482,80 @@ describe("agent access settings", () => {
     mocks.revokeOAuthClient.mockResolvedValue(undefined);
   });
 
-  it("connects a host, installs the skill, selects a domain, and manages fallback access", async () => {
+  it("connects a host, shows agent-owned setup progress, selects a domain, and manages fallback access", async () => {
     const browser = userEvent.setup();
     renderSettings();
 
     expect(await screen.findByRole("heading", { name: "Connect an agent" })).toBeInTheDocument();
-    expect(await screen.findByText("3 connected")).toBeInTheDocument();
-    expect(await screen.findByText(/1 active approved Mail rule · profile v1/)).toBeInTheDocument();
+    expect(await screen.findByText("2 connected")).toBeInTheDocument();
+    const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');
+    expect(claudeHost?.querySelector('[data-slot="item-media"] svg.reicon')).not.toBeNull();
+    for (const domain of ["Mail", "Finances", "Calendar", "Tasks"] as const) {
+      const control = screen.getByRole("radio", { name: domain });
+      expect(control.querySelector(`[data-workspace="${domain.toLowerCase()}"]`)).not.toBeNull();
+    }
+    expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Set up");
+    expect(screen.getByRole("radio", { name: "Finances" })).toHaveTextContent("Needs review");
+    expect(screen.getByRole("radio", { name: "Calendar" })).toHaveTextContent("Not set up");
+    expect(screen.getByRole("radio", { name: "Tasks" })).toHaveTextContent("Set up");
+    expect(await screen.findByText("Mail readiness")).toBeInTheDocument();
+    expect(await screen.findByText("5 of 6 checks ready")).toBeInTheDocument();
+    expect(screen.getByText("Needs attention")).toBeInTheDocument();
+    expect(screen.getByText("Current constraint:").closest("p")).toHaveTextContent(
+      "Current constraint: Mail commitment intake",
+    );
+    expect(screen.queryByRole("list", { name: "Mail readiness checks" })).not.toBeInTheDocument();
+    const readinessDisclosure = screen.getByRole("button", { name: "View checks" });
+    readinessDisclosure.focus();
+    await browser.keyboard("{Enter}");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    const mailChecks = within(screen.getByRole("dialog"));
+    expect(mailChecks.getByRole("list", { name: "Mail readiness checks" })).toBeInTheDocument();
     expect(
-      screen.getByText(
-        "3 connected hosts can read Mail; 2 can manage Mail through scoped actions.",
+      await mailChecks.findByText(/1 active approved Mail rule · profile v1/),
+    ).toBeInTheDocument();
+    expect(
+      mailChecks.getByText(
+        "2 connected hosts can read Mail; 1 can manage Mail through scoped actions.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText("Ilo Guided Setup v0.1.0")).toBeInTheDocument();
-    expect(screen.getByText(/Source revision release-0.1.0/)).toBeInTheDocument();
-    expect(await screen.findByText(/Oldest due:/)).toBeInTheDocument();
-    expect(await screen.findByText(/Last completed:/)).toBeInTheDocument();
+    expect(await mailChecks.findByText(/Oldest due:/)).toBeInTheDocument();
+    expect(await mailChecks.findByText(/Last completed:/)).toBeInTheDocument();
     expect(
-      await screen.findByText(
+      await mailChecks.findByText(
         /3 Mail accounts · person@example.com, iCloud \+1 · 1 needs reconnect/,
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(
+      mailChecks.getByText(
         /2 preview-only calendar attachment candidates; 0 server-verified.*Automatic Calendar creation is not enabled/,
       ),
     ).toBeInTheDocument();
+    await browser.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.getByText("MCP connection confirmed by Ilo.")).toBeInTheDocument();
+    expect(screen.getByText("mail setup is active.")).toBeInTheDocument();
+    const connectStep = screen.getByRole("button", {
+      name: /Connect an agent/,
+    });
+    const setupStep = screen.getByRole("button", {
+      name: /Let the agent set up Ilo/,
+    });
+    for (const trigger of [connectStep, setupStep]) {
+      const initiallyOpen = trigger.getAttribute("aria-expanded") === "true";
+      await browser.click(trigger);
+      expect(trigger).toHaveAttribute("aria-expanded", initiallyOpen ? "false" : "true");
+      if (initiallyOpen) await browser.click(trigger);
+    }
+    expect(screen.getByText("Learn mail preferences")).toBeInTheDocument();
+    expect(screen.getAllByText("Done")).toHaveLength(4);
+    await browser.click(screen.getByRole("button", { name: "Setup protocol details" }));
+    expect(screen.getByText("Optional setup reference v0.2.0")).toBeInTheDocument();
+    expect(screen.getByText(/Protocol 1.0 · source revision v0.2.0/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /View skill source/ })).toHaveAttribute(
+      "href",
+      "https://app.example.com/skills/ilo-setup/v0.2.0/SKILL.md",
+    );
     expect(screen.getAllByText(/Not used yet/)).toHaveLength(2);
     await browser.click(screen.getByRole("button", { name: "Review" }));
     expect(await screen.findByText("Weekly news")).toBeInTheDocument();
@@ -433,44 +575,62 @@ describe("agent access settings", () => {
     await browser.click(screen.getByRole("button", { name: "Copy Ilo MCP URL" }));
     await expect(navigator.clipboard.readText()).resolves.toBe("https://mcp.example.com/mcp");
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Clipboard denied"));
-    await browser.click(screen.getByRole("button", { name: "Copy skill install request" }));
+    await browser.click(screen.getByRole("button", { name: "Copy agent setup request" }));
     await waitFor(() =>
-      expect(mocks.toastError).toHaveBeenCalledWith("Could not copy skill install request."),
+      expect(mocks.toastError).toHaveBeenCalledWith("Could not copy agent setup request."),
     );
 
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
-    expect(screen.getByText("Calendar preferences and commitment previews")).toBeInTheDocument();
+    expect(await screen.findByText("Calendar readiness")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    const calendarChecks = within(screen.getByRole("dialog"));
     expect(
-      await screen.findByText(/2 calendars · 1 selected · 1 writable · 1 needs reconnect/),
+      await calendarChecks.findByText(/2 calendars · 1 selected · 1 writable · 1 needs reconnect/),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/1 writable destination.*automatic creation is not enabled/),
+      calendarChecks.getByText(/1 writable destination.*automatic creation is not enabled/),
     ).toBeInTheDocument();
-    expect(screen.getByText("1 open Calendar attention item.")).toBeInTheDocument();
-    expect(screen.getByText("No connected host has Calendar read permission.")).toBeInTheDocument();
-    expect(screen.getByLabelText<HTMLTextAreaElement>("Calendar setup prompt").value).toContain(
-      "set up my Calendar",
-    );
+    expect(calendarChecks.getByText("1 open Calendar attention item.")).toBeInTheDocument();
+    expect(
+      calendarChecks.getByText("No connected host has Calendar read permission."),
+    ).toBeInTheDocument();
+    await browser.keyboard("{Escape}");
+    expect(await screen.findAllByText("Learn calendar preferences")).toHaveLength(2);
+    expect(
+      screen.getByText("The agent should inspect calendar material and save a draft profile."),
+    ).toBeInTheDocument();
 
-    await browser.click(screen.getByRole("radio", { name: "Reminders" }));
-    expect(await screen.findByText("1 open Reminder in Ilo.")).toBeInTheDocument();
+    await browser.click(screen.getByRole("radio", { name: "Tasks" }));
+    expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    const taskChecks = within(screen.getByRole("dialog"));
+    expect(await taskChecks.findByText("1 open Task in Ilo.")).toBeInTheDocument();
     expect(
-      screen.getByText(/Ilo supports bounded single-item Reminder actions/),
+      taskChecks.getByText(/Ilo supports capture, prioritization, scheduling/),
     ).toBeInTheDocument();
-    expect(screen.getByText("Profile v4 is active.")).toBeInTheDocument();
+    expect(taskChecks.getByText("Profile v4 is active.")).toBeInTheDocument();
     expect(
-      screen.getByText("No connected host has Reminders read permission."),
+      taskChecks.getByText("No connected host has Tasks read permission."),
     ).toBeInTheDocument();
+    await browser.keyboard("{Escape}");
 
     await browser.click(screen.getByRole("radio", { name: "Finances" }));
-    expect(await screen.findByText("2 Finance accounts · 1 stale")).toBeInTheDocument();
+    expect(await screen.findByText("Finances readiness")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    const financeChecks = within(screen.getByRole("dialog"));
+    expect(await financeChecks.findByText("2 Finance accounts · 1 stale")).toBeInTheDocument();
     expect(
-      screen.getByText(/2 guidance or review workflows available · 3 items need signed-in review/),
+      financeChecks.getByText(
+        /2 guidance or review workflows available · 3 items need signed-in review/,
+      ),
     ).toBeInTheDocument();
     expect(
-      await screen.findByText(/Active approved guidance is version 2, with draft version 3/),
+      financeChecks.getByText("No connected host has Finances read permission."),
     ).toBeInTheDocument();
-    expect(screen.getByText("No connected host has Finances read permission.")).toBeInTheDocument();
+    await browser.keyboard("{Escape}");
+    expect(
+      await screen.findByText("Review finances draft version 3 and accept or revise it."),
+    ).toBeInTheDocument();
 
     await browser.click(screen.getByRole("button", { name: "Revoke Claude" }));
     await waitFor(() => expect(mocks.revokeOAuthClient.mock.calls[0]?.[0]).toBe(id));
@@ -494,7 +654,7 @@ describe("agent access settings", () => {
     await waitFor(() => expect(mocks.deleteAccessToken.mock.calls[0]?.[0]).toBe(id));
     await browser.click(screen.getByRole("button", { name: "Revoked tokens · 1" }));
     expect(screen.getByText("Old agent")).toBeInTheDocument();
-  });
+  }, 15_000);
 
   it("allows reviewed one-day recoverable Trash rules to activate durably", async () => {
     const browser = userEvent.setup();
@@ -571,6 +731,7 @@ describe("agent access settings", () => {
   });
 
   it("keeps missing sources and connection-guide failures actionable", async () => {
+    const browser = userEvent.setup();
     mocks.getAgentConnectionGuide.mockRejectedValue(new Error("Connection guide unavailable"));
     mocks.getAssistantSetupStatus.mockResolvedValue({
       domains: [
@@ -615,11 +776,20 @@ describe("agent access settings", () => {
     mocks.listOAuthClients.mockResolvedValue([]);
     renderSettings();
 
+    await browser.click(await screen.findByRole("button", { name: /Connect an agent/ }));
+
     expect(await screen.findByText("Connection guide unavailable")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Mail" })).toBeDisabled();
-    expect(screen.getByText("Mail readiness unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Unavailable");
+    expect(screen.getByText("Mail readiness")).toBeInTheDocument();
+    expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText("Mail guided setup is not published by this deployment."),
+    ).toBeInTheDocument();
     expect(screen.getByText("Not connected")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy Mail setup prompt" })).toBeDisabled();
+    expect(
+      screen.queryByRole("button", { name: "Copy agent setup request" }),
+    ).not.toBeInTheDocument();
   });
 
   it("keeps empty core domains truthful without inventing connected material", async () => {
@@ -641,7 +811,7 @@ describe("agent access settings", () => {
           approvedProfileVersion: null,
           canRead: true,
           canWrite: false,
-          domain: "reminders",
+          domain: "tasks",
           pendingDraftVersion: null,
           profileStatus: null,
           profileVersion: null,
@@ -659,7 +829,7 @@ describe("agent access settings", () => {
       ],
     });
     mocks.listCalendars.mockResolvedValue([]);
-    mocks.listReminders.mockResolvedValue({ items: [], nextCursor: null });
+    mocks.listTasks.mockResolvedValue({ items: [], nextCursor: null });
     mocks.getFinanceGuidedSetup.mockResolvedValue({
       accountSources: [],
       ledgerHealth: { staleAccounts: 0 },
@@ -674,27 +844,42 @@ describe("agent access settings", () => {
     renderSettings();
 
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
-    expect(await screen.findByRole("link", { name: "Open Calendar" })).toBeInTheDocument();
+    expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
+      "Next step: Select a calendar for Ilo to use",
+    );
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    expect(screen.getByRole("link", { name: "Open Calendar" })).toBeInTheDocument();
     expect(
       screen.getByText("A selected writable calendar is required for commitment previews."),
     ).toBeInTheDocument();
+    await browser.keyboard("{Escape}");
 
-    await browser.click(screen.getByRole("radio", { name: "Reminders" }));
-    expect(await screen.findByRole("link", { name: "Open Reminders" })).toBeInTheDocument();
+    await browser.click(screen.getByRole("radio", { name: "Tasks" }));
+    expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
+      "Next step: Teach Ilo your Tasks preferences",
+    );
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    expect(screen.getByRole("link", { name: "Open Tasks" })).toBeInTheDocument();
     expect(
-      screen.getByText("No open Reminders. Local capture is available whenever you need it."),
+      screen.getByText("No open Tasks. Local capture is available whenever you need it."),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("No connected host has Reminders read permission."),
-    ).toBeInTheDocument();
+    expect(screen.getByText("No connected host has Tasks read permission.")).toBeInTheDocument();
+    await browser.keyboard("{Escape}");
 
     await browser.click(screen.getByRole("radio", { name: "Finances" }));
-    expect(await screen.findByRole("link", { name: "Open Finances" })).toBeInTheDocument();
-    expect(screen.getByText("0 Finance accounts")).toBeInTheDocument();
+    expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
+      "Next step: Connect a Finance account",
+    );
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    const financeChecks = within(screen.getByRole("dialog"));
+    expect(financeChecks.getByRole("link", { name: "Open Finances" })).toBeInTheDocument();
+    expect(financeChecks.getByText("0 Finance accounts")).toBeInTheDocument();
     expect(
-      screen.getByText("0 guidance or review workflows available · 0 items need signed-in review."),
+      financeChecks.getByText(
+        "0 guidance or review workflows available · 0 items need signed-in review.",
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText("100+ open Finances attention items.")).toBeInTheDocument();
+    expect(financeChecks.getByText("100+ open Finances attention items.")).toBeInTheDocument();
   });
 
   it("isolates a selected-domain readiness failure from the connection handoff", async () => {
@@ -704,20 +889,37 @@ describe("agent access settings", () => {
 
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
     expect(await screen.findByText("Calendar readiness unavailable")).toBeInTheDocument();
+    const connectStep = screen.getByRole("button", {
+      name: /Connect an agent/,
+    });
+    const setupStep = screen.getByRole("button", {
+      name: /Let the agent set up Ilo/,
+    });
+    if (connectStep.getAttribute("aria-expanded") !== "true") await browser.click(connectStep);
+    if (setupStep.getAttribute("aria-expanded") !== "true") await browser.click(setupStep);
     expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp");
-    expect(screen.getByRole("button", { name: "Copy skill install request" })).toBeEnabled();
+    await browser.click(screen.getByRole("button", { name: "Setup protocol details" }));
+    expect(screen.getByRole("button", { name: "Copy agent setup request" })).toBeEnabled();
   });
 
   it("keeps pending and failed readiness distinct from a successful empty result", async () => {
     mocks.getAssistantSetupStatus.mockReturnValue(new Promise(() => {}));
     renderSettings();
-    expect(await screen.findByText("Mail preferences are loading.")).toBeInTheDocument();
+    expect(await screen.findByText("Mail readiness")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Checking");
+    expect(readinessOverview("Mail").getByText("Checking")).toBeInTheDocument();
+    expect(
+      screen.getByText("Checking Mail material, preferences, workflows, and agent access."),
+    ).toBeInTheDocument();
   });
 
   it("does not turn failed rules or setup status into zero and absent claims", async () => {
+    const browser = userEvent.setup();
     mocks.listMailRules.mockRejectedValue(new Error("Mail rules unavailable"));
     renderSettings();
     expect(await screen.findByText("Mail rules unavailable")).toBeInTheDocument();
+    expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
     expect(
       screen.getByText("Mail rules are unavailable, so Ilo cannot report an approved-rule count."),
     ).toBeInTheDocument();
@@ -725,9 +927,13 @@ describe("agent access settings", () => {
   });
 
   it("reports unavailable profile state when setup status fails", async () => {
+    const browser = userEvent.setup();
     mocks.getAssistantSetupStatus.mockRejectedValue(new Error("Setup status unavailable"));
     renderSettings();
     expect(await screen.findByText("Setup status unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Unavailable");
+    expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
     expect(
       await screen.findByText("Mail preferences are unavailable until setup status can be loaded."),
     ).toBeInTheDocument();
@@ -740,16 +946,17 @@ describe("agent access settings", () => {
     mocks.getAgentConnectionGuide.mockResolvedValue({
       ...guide,
       domains: guide.domains
-        .filter((item: { domain: string }) => item.domain !== "reminders")
+        .filter((item: { domain: string }) => item.domain !== "tasks")
         .map((item: { domain: string; support: string }) =>
           item.domain === "calendar" ? { ...item, support: "executable_rules" } : item,
         ),
     });
     renderSettings();
 
-    expect(await screen.findByRole("radio", { name: "Reminders" })).toBeDisabled();
+    expect(await screen.findByRole("radio", { name: "Tasks" })).toBeDisabled();
+    await browser.click(screen.getByRole("button", { name: /Let the agent set up Ilo/ }));
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
-    expect(screen.getByText("Calendar profiles, previews, and rules")).toBeInTheDocument();
+    expect(await screen.findAllByText("Learn calendar preferences")).toHaveLength(2);
     expect(screen.getByText(/Calendar-owned executable rules/)).toBeInTheDocument();
     expect(screen.queryByText(/inbox|recoverable Trash/)).not.toBeInTheDocument();
   });

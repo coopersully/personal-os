@@ -1,21 +1,28 @@
-import type { AccessScope, MailRulePreview, MailSetupAccount } from "@personal-os/domain";
+import type {
+  AccessScope,
+  AssistantSetupStatus,
+  AssistantSetupStep,
+  MailRulePreview,
+  MailSetupAccount,
+} from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  CheckCircle2,
-  ChevronDown,
-  Circle,
-  Clipboard,
-  ExternalLink,
-  KeyRound,
-  Plug,
-  ShieldCheck,
-  Trash2,
-  X,
-} from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
+import {
+  ChevronDownIcon,
+  CircleCheckIcon,
+  CircleIcon,
+  ClipboardIcon,
+  ExternalLinkIcon,
+  KeyIcon,
+  PlugIcon,
+  ShieldCheckIcon,
+  TrashIcon,
+  XIcon,
+} from "@/components/icons";
 import { api, errorMessage } from "../../api.js";
+import { ReadinessPanel } from "../../components/readiness-panel.js";
 import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
@@ -60,6 +67,7 @@ import {
 } from "../../components/ui/item.js";
 import { Textarea } from "../../components/ui/textarea.js";
 import { ToggleGroup, ToggleGroupItem } from "../../components/ui/toggle-group.js";
+import { WorkspaceIcon } from "../../components/workspace-identity.js";
 import {
   type ConnectedHostAuthority,
   type DomainCapability,
@@ -80,10 +88,7 @@ import {
   financeAgentAccessReadiness,
 } from "../finances/agent-access.js";
 import { mailAgentAccessCapability, mailAgentAccessReadiness } from "../mail/agent-access.js";
-import {
-  reminderAgentAccessCapability,
-  reminderAgentAccessReadiness,
-} from "../reminders/agent-access.js";
+import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/agent-access.js";
 
 const scopeLabels: Record<AccessScope, string> = {
   "audit:read": "Read activity",
@@ -167,6 +172,12 @@ export function AgentAccessSettings() {
     queryFn: api.getAssistantSetupStatus,
     queryKey: ["assistant-setup-status"],
   });
+  const setupPlan = useQuery({
+    enabled: selectedDomainEnabled,
+    queryFn: () => api.getIloSetup({ domain: selectedDomain }),
+    queryKey: ["ilo-setup-plan", selectedDomain],
+    refetchInterval: 10_000,
+  });
   const mailSetup = useQuery({
     enabled: selectedDomain === "mail" && selectedDomainEnabled,
     queryFn: api.getMailSetupContext,
@@ -182,10 +193,10 @@ export function AgentAccessSettings() {
     queryFn: api.listCalendars,
     queryKey: ["calendars"],
   });
-  const reminders = useQuery({
-    enabled: selectedDomain === "reminders" && selectedDomainEnabled,
-    queryFn: () => api.listReminders({ completed: false, limit: 100 }),
-    queryKey: ["reminders", "agent-access", "open"],
+  const tasks = useQuery({
+    enabled: selectedDomain === "tasks" && selectedDomainEnabled,
+    queryFn: () => api.listTasks({ completed: false, limit: 100 }),
+    queryKey: ["tasks", "agent-access", "open"],
   });
   const financeSetup = useQuery({
     enabled: selectedDomain === "finances" && selectedDomainEnabled,
@@ -214,7 +225,8 @@ export function AgentAccessSettings() {
       token.revokedAt === null &&
       (token.expiresAt === null || new Date(token.expiresAt).getTime() > currentTime),
   );
-  const connectedAgentCount = activeTokens.length + (oauthClients.data?.length ?? 0);
+  const usedActiveTokens = activeTokens.filter((token) => token.lastUsedAt !== null);
+  const connectedAgentCount = usedActiveTokens.length + (oauthClients.data?.length ?? 0);
   const connectionCountUnavailable = tokens.isError || oauthClients.isError;
   const connectionCountLoading = tokens.isPending || oauthClients.isPending;
   const mailSources = mailSetup.data?.accounts ?? [];
@@ -229,6 +241,8 @@ export function AgentAccessSettings() {
   const attentionResource = queryLoadable(attention);
   const selectedLabel = setupDomainLabels[selectedDomain];
   const selectedSupport: DomainSupport = selectedGuide?.support ?? "unsupported";
+  const mcpConnectionComplete = setupPlan.data?.connection.observed ?? false;
+  const guidedSetupComplete = setupPlan.data?.status === "complete";
   const capability = domainCapability(
     selectedDomain,
     selectedSupport,
@@ -244,12 +258,27 @@ export function AgentAccessSettings() {
         mailRules: queryLoadable(rules),
         mailSetup: queryLoadable(mailSetup),
         profile: selectedProfile,
-        reminders: queryLoadable(reminders),
+        tasks: queryLoadable(tasks),
       })
     : [];
+  const readinessPending =
+    guide.isPending ||
+    setup.isPending ||
+    tokens.isPending ||
+    oauthClients.isPending ||
+    (selectedDomainEnabled &&
+      (attention.isPending ||
+        (selectedDomain === "mail"
+          ? mailSetup.isPending || rules.isPending
+          : selectedDomain === "calendar"
+            ? calendars.isPending
+            : selectedDomain === "tasks"
+              ? tasks.isPending
+              : financeSetup.isPending)));
   const blockingError = guide.error;
   const selectedDomainError =
     setup.error ??
+    setupPlan.error ??
     attention.error ??
     tokens.error ??
     oauthClients.error ??
@@ -257,8 +286,8 @@ export function AgentAccessSettings() {
       ? (mailSetup.error ?? rules.error)
       : selectedDomain === "calendar"
         ? calendars.error
-        : selectedDomain === "reminders"
-          ? reminders.error
+        : selectedDomain === "tasks"
+          ? tasks.error
           : selectedDomain === "finances"
             ? financeSetup.error
             : null);
@@ -271,8 +300,8 @@ export function AgentAccessSettings() {
             <h2>Connect an agent</h2>
           </CardTitle>
           <CardDescription>
-            Use the same three-step handoff in Claude, Codex, or another MCP-compatible host, then
-            teach Ilo how you want each core domain handled.
+            Connect once. Ilo gives the agent its identity, available work surface, current setup
+            step, evidence, and next tools so the agent can do the setup work itself.
           </CardDescription>
           <CardAction>
             <Badge
@@ -295,14 +324,14 @@ export function AgentAccessSettings() {
         <CardContent className="settings-section__body agent-access__body">
           {blockingError ? (
             <Alert variant="destructive">
-              <X />
+              <XIcon />
               <AlertTitle>Agent connection details could not be loaded</AlertTitle>
               <AlertDescription>{errorMessage(blockingError)}</AlertDescription>
             </Alert>
           ) : null}
 
           <FieldSet>
-            <FieldLegend variant="label">Readiness for</FieldLegend>
+            <FieldLegend variant="label">Product setup</FieldLegend>
             <ToggleGroup
               aria-label="Domain to set up"
               className="agent-access__domains"
@@ -317,13 +346,30 @@ export function AgentAccessSettings() {
                 const domainGuide = guide.data?.domains.find(
                   (item) => item.domain === option.domain,
                 );
+                const setupPhase = domainSetupPhase({
+                  domain: option.domain,
+                  guideLoading: guide.isPending,
+                  published: domainGuide !== undefined && domainGuide.support !== "unsupported",
+                  setup: setupResource,
+                });
                 return (
                   <ToggleGroupItem
+                    className="agent-access__domain"
                     disabled={!domainGuide || domainGuide.support === "unsupported"}
                     key={option.domain}
                     value={option.domain}
                   >
-                    {option.shortLabel}
+                    <WorkspaceIcon size="md" workspace={option.domain} />
+                    <span className="agent-access__domain-copy">
+                      <span>{option.shortLabel}</span>
+                      <span aria-hidden="true" className="agent-access__domain-phase">
+                        {setupPhase}
+                      </span>
+                    </span>
+                    <CircleCheckIcon
+                      aria-hidden="true"
+                      className="agent-access__domain-selection"
+                    />
                   </ToggleGroupItem>
                 );
               })}
@@ -332,35 +378,21 @@ export function AgentAccessSettings() {
 
           {selectedDomainError ? (
             <Alert variant="destructive">
-              <X />
+              <XIcon />
               <AlertTitle>{selectedLabel} readiness could not be loaded</AlertTitle>
               <AlertDescription>{errorMessage(selectedDomainError)}</AlertDescription>
             </Alert>
           ) : null}
 
-          <ItemGroup className="agent-access__readiness">
-            {readiness.map((item) => (
-              <ReadinessItem
-                complete={item.complete}
-                description={item.description}
-                key={item.title}
-                title={item.title}
-              >
-                {item.action ? (
-                  <Button asChild size="sm" variant="outline">
-                    <Link to={item.action.to}>{item.action.label}</Link>
-                  </Button>
-                ) : null}
-              </ReadinessItem>
-            ))}
-            {!guide.isPending && !selectedDomainEnabled ? (
-              <ReadinessItem
-                complete={false}
-                description={`${selectedLabel} guided setup is not published by this deployment.`}
-                title={`${selectedLabel} readiness unavailable`}
-              />
-            ) : null}
-          </ItemGroup>
+          <DomainReadinessPanel
+            domain={selectedDomain}
+            enabled={selectedDomainEnabled}
+            error={selectedDomainError !== null}
+            key={selectedDomain}
+            label={selectedLabel}
+            loading={readinessPending}
+            readiness={readiness}
+          />
 
           {selectedDomain === "mail" && selectedDomainEnabled ? (
             <MailRuleReview
@@ -378,9 +410,20 @@ export function AgentAccessSettings() {
 
           <div className="agent-access__steps">
             <ConnectionStep
-              description="Open your agent host, add this remote MCP URL, and authorize Ilo when the host supports OAuth. Provider credentials stay in Ilo."
+              complete={mcpConnectionComplete}
+              defaultOpen={!mcpConnectionComplete}
+              description="Add this remote MCP URL to the host and authorize Ilo. This is the only setup handoff the person must complete. Provider credentials stay in Ilo."
               number="1"
-              title="Open your agent host and connect Ilo"
+              status={
+                setupPlan.isPending
+                  ? "Checking for a connected host…"
+                  : setupPlan.isError
+                    ? "Connection status is unavailable."
+                    : mcpConnectionComplete
+                      ? "MCP connection confirmed by Ilo."
+                      : "Waiting for a host to connect."
+              }
+              title="Connect an agent"
             >
               <CopyInput
                 label="Ilo MCP URL"
@@ -390,76 +433,86 @@ export function AgentAccessSettings() {
             </ConnectionStep>
 
             <ConnectionStep
-              description="Copy this request into the host. Installation varies by host; the request identifies one immutable skill version and personal preferences stay in Ilo."
+              complete={guidedSetupComplete}
+              defaultOpen={mcpConnectionComplete && !guidedSetupComplete}
+              description="After connection, the agent calls get_ilo_context to orient itself, then get_ilo_setup for the current semantic step, domain context, required tools, and approval boundary. A separately installed skill is not required."
               number="2"
-              title="Ask the host to install guided setup"
-            >
-              <CopyPrompt
-                copyLabel="Copy skill install request"
-                label="Skill install request"
-                loading={guide.isPending}
-                value={guide.data?.skill.installPrompt ?? ""}
-              />
-              {guide.data ? (
-                <Item size="xs" variant="muted">
-                  <ItemMedia variant="icon">
-                    <ShieldCheck />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>
-                      {guide.data.skill.displayName} v{guide.data.skill.version}
-                    </ItemTitle>
-                    <ItemDescription>Source revision {guide.data.skill.revision}</ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button asChild size="sm" variant="ghost">
-                      <a href={guide.data.skill.sourceUrl} rel="noreferrer" target="_blank">
-                        View skill source
-                        <ExternalLink data-icon="inline-end" />
-                      </a>
-                    </Button>
-                  </ItemActions>
-                </Item>
-              ) : null}
-            </ConnectionStep>
-
-            <ConnectionStep
-              description={
-                selectedDomainEnabled
-                  ? `After the host confirms $ilo-setup is available, copy this ${selectedLabel} prompt into the same conversation.`
-                  : `${selectedLabel} setup is not published by this deployment, so there is no starter prompt to copy.`
+              status={
+                setupPlan.isPending
+                  ? `Checking ${selectedLabel} setup…`
+                  : setupPlan.isError
+                    ? `${selectedLabel} setup status is unavailable.`
+                    : (setupPlan.data?.nextAction ?? "Waiting for the setup protocol.")
               }
-              number="3"
-              title="Start the shortest useful setup"
+              title="Let the agent set up Ilo"
             >
               <Alert role="status" variant="info">
-                <ShieldCheck />
+                <ShieldCheckIcon />
                 <AlertTitle>
-                  {guide.isPending ? `Loading ${selectedLabel} capabilities` : capability.title}
+                  {setupPlan.data
+                    ? (setupPlan.data.steps.find(
+                        (step) => step.id === setupPlan.data?.currentStepId,
+                      )?.title ?? capability.title)
+                    : `Loading ${selectedLabel} setup`}
                 </AlertTitle>
                 <AlertDescription>
-                  {guide.isPending
-                    ? "Ilo is checking the configured agent handoff and domain support."
-                    : capability.description}
-                  {!guide.isPending &&
-                  selectedProfile.state === "ready" &&
-                  selectedProfile.data?.approvedProfileStatus === "active"
-                    ? selectedProfile.data.pendingDraftVersion
-                      ? ` Active approved guidance is version ${selectedProfile.data.approvedProfileVersion}, with draft version ${selectedProfile.data.pendingDraftVersion} waiting for review.`
-                      : ` Your approved profile is active at version ${selectedProfile.data.approvedProfileVersion}.`
-                    : !guide.isPending &&
-                        selectedProfile.state === "ready" &&
-                        selectedProfile.data?.profileStatus
-                      ? ` Your current profile is ${selectedProfile.data.profileStatus}.`
-                      : ""}
+                  {setupPlan.data?.nextAction ??
+                    "Ilo is checking the authenticated setup plan and domain state."}{" "}
+                  {!guide.isPending ? capability.description : ""}
                 </AlertDescription>
               </Alert>
-              <CopyPrompt
-                copyLabel={`Copy ${selectedLabel} setup prompt`}
-                label={`${selectedLabel} setup prompt`}
-                loading={guide.isPending}
-                value={capability.setupPrompt ?? ""}
-              />
+
+              {setupPlan.data ? (
+                <ItemGroup className="agent-access__protocol-steps">
+                  {setupPlan.data.steps.map((step) => (
+                    <SetupProtocolStep key={step.id} step={step} />
+                  ))}
+                </ItemGroup>
+              ) : null}
+
+              <Collapsible>
+                <CollapsibleTrigger asChild>
+                  <Button className="agent-access__protocol-trigger" size="sm" variant="ghost">
+                    Setup protocol details
+                    <ChevronDownIcon data-icon="inline-end" />
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="agent-access__protocol-details">
+                  <p>
+                    Most hosts can begin from the tool description. If yours waits for a request,
+                    send this one sentence. The hosted skill remains an optional reference for hosts
+                    that support skills.
+                  </p>
+                  <CopyPrompt
+                    copyLabel="Copy agent setup request"
+                    label="Agent setup request"
+                    loading={guide.isPending}
+                    value={guide.data?.skill.setupPrompt ?? ""}
+                  />
+                  {guide.data ? (
+                    <Item size="xs" variant="muted">
+                      <ItemMedia variant="icon">
+                        <ShieldCheckIcon />
+                      </ItemMedia>
+                      <ItemContent>
+                        <ItemTitle>Optional setup reference v{guide.data.skill.version}</ItemTitle>
+                        <ItemDescription>
+                          Protocol {setupPlan.data?.protocolVersion ?? "1.0"} · source revision{" "}
+                          {guide.data.skill.revision}
+                        </ItemDescription>
+                      </ItemContent>
+                      <ItemActions>
+                        <Button asChild size="sm" variant="ghost">
+                          <a href={guide.data.skill.sourceUrl} rel="noreferrer" target="_blank">
+                            View skill source
+                            <ExternalLinkIcon data-icon="inline-end" />
+                          </a>
+                        </Button>
+                      </ItemActions>
+                    </Item>
+                  ) : null}
+                </CollapsibleContent>
+              </Collapsible>
             </ConnectionStep>
           </div>
         </CardContent>
@@ -480,7 +533,8 @@ export function AgentAccessSettings() {
               {oauthClients.data?.map((client) => (
                 <Item key={client.id} variant="outline">
                   <ItemMedia variant="icon">
-                    <Plug />
+                    {/* OAuth client names are self-asserted, not verified provider identities. */}
+                    <PlugIcon />
                   </ItemMedia>
                   <ItemContent>
                     <ItemTitle>{client.name}</ItemTitle>
@@ -498,7 +552,7 @@ export function AgentAccessSettings() {
                       type="button"
                       variant="ghost"
                     >
-                      <Trash2 />
+                      <TrashIcon />
                     </Button>
                   </ItemActions>
                 </Item>
@@ -564,7 +618,7 @@ function MailRuleReview({
   if (unavailable) {
     return (
       <Alert variant="destructive">
-        <X />
+        <XIcon />
         <AlertTitle>Mail rules are unavailable</AlertTitle>
         <AlertDescription>
           Ilo cannot report an approved-rule count or open rule review until Mail rules load.
@@ -612,7 +666,7 @@ function MailRuleReview({
       {reviewed ? (
         <div className="agent-access__rule-preview">
           <Alert role="status" variant={reviewed.preview.window.truncated ? "warning" : "info"}>
-            <ShieldCheck />
+            <ShieldCheckIcon />
             <AlertTitle>
               {reviewed.preview.matchedCount} current match
               {reviewed.preview.matchedCount === 1 ? "" : "es"}
@@ -644,7 +698,7 @@ function MailRuleReview({
           ) : null}
           {!profileActive ? (
             <Alert variant="warning">
-              <ShieldCheck />
+              <ShieldCheckIcon />
               <AlertTitle>
                 {profileLoading
                   ? "Mail profile status is loading"
@@ -711,54 +765,151 @@ function formatCandidateActions(actions: MailRulePreview["candidates"][number]["
     .join("; ");
 }
 
-function ReadinessItem({
-  children,
-  complete,
-  description,
-  title,
+function DomainReadinessPanel({
+  domain,
+  enabled,
+  error,
+  label,
+  loading,
+  readiness,
 }: {
-  children?: React.ReactNode;
-  complete: boolean;
-  description: string;
-  title: string;
+  domain: SetupDomain;
+  enabled: boolean;
+  error: boolean;
+  label: string;
+  loading: boolean;
+  readiness: DomainReadinessItem[];
 }) {
+  const priority = readiness.find((item) => !item.complete);
+  const recommended = readiness.find(
+    (item) => !item.complete && (item.nextStep !== undefined || item.action !== undefined),
+  );
+  const focus = recommended ?? priority;
+  const summary = error
+    ? `${label} readiness could not be loaded.`
+    : loading
+      ? `Checking ${label} material, preferences, workflows, and agent access.`
+      : !enabled
+        ? `${label} guided setup is not published by this deployment.`
+        : priority
+          ? `${label} is partially ready for agent use.`
+          : `Everything Ilo checks for ${label} is ready.`;
+
   return (
-    <Item size="sm" variant="muted">
+    <ReadinessPanel
+      checks={readiness.map((item) => ({
+        action: item.action ? (
+          <Button asChild size="sm" variant="outline">
+            <Link to={item.action.to}>{item.action.label}</Link>
+          </Button>
+        ) : undefined,
+        complete: item.complete,
+        description: item.description,
+        id: item.title,
+        title: item.title,
+      }))}
+      description={summary}
+      detailsLabel={`${label} readiness checks`}
+      {...(!loading && !error && enabled && focus
+        ? {
+            focus: {
+              label: recommended ? ("Next step" as const) : ("Current constraint" as const),
+              title: focus.nextStep ?? focus.title,
+            },
+          }
+        : {})}
+      icon={<WorkspaceIcon size="md" workspace={domain} />}
+      loading={loading}
+      title={`${label} readiness`}
+      unavailable={error || (!loading && !enabled)}
+    />
+  );
+}
+
+function domainSetupPhase({
+  domain,
+  guideLoading,
+  published,
+  setup,
+}: {
+  domain: SetupDomain;
+  guideLoading: boolean;
+  published: boolean;
+  setup: Loadable<AssistantSetupStatus>;
+}): string {
+  if (guideLoading || setup.state === "loading") return "Checking";
+  if (!published || setup.state === "unavailable") return "Unavailable";
+  const profile = setup.data.domains.find((item) => item.domain === domain);
+  if (profile?.pendingDraftVersion || profile?.profileStatus === "draft") return "Needs review";
+  if (profile?.approvedProfileStatus === "active" || profile?.profileStatus === "active") {
+    return "Set up";
+  }
+  return "Not set up";
+}
+
+function SetupProtocolStep({ step }: { step: AssistantSetupStep }) {
+  const status =
+    step.state === "complete" ? "Done" : step.state === "current" ? "Current" : "Waiting";
+  const description = step.completionEvidence[0] ?? step.description;
+  return (
+    <Item size="xs" variant={step.state === "current" ? "outline" : "muted"}>
       <ItemMedia variant="icon">
-        {complete ? <CheckCircle2 aria-hidden="true" /> : <Circle aria-hidden="true" />}
+        {step.state === "complete" ? <CircleCheckIcon /> : <CircleIcon />}
       </ItemMedia>
       <ItemContent>
-        <ItemTitle>{title}</ItemTitle>
+        <ItemTitle>{step.title}</ItemTitle>
         <ItemDescription>{description}</ItemDescription>
       </ItemContent>
-      {children ? <ItemActions>{children}</ItemActions> : null}
+      <ItemActions>
+        <Badge variant={step.state === "current" ? "default" : "secondary"}>{status}</Badge>
+      </ItemActions>
     </Item>
   );
 }
 
 function ConnectionStep({
   children,
+  complete,
+  defaultOpen,
   description,
   number,
+  status,
   title,
 }: {
   children: React.ReactNode;
+  complete: boolean;
+  defaultOpen: boolean;
   description: string;
   number: string;
+  status: string;
   title: string;
 }) {
   return (
-    <section className="agent-access__step">
-      <div className="agent-access__step-number" aria-hidden="true">
-        {number}
-      </div>
-      <div className="agent-access__step-content">
-        <div>
-          <h3>{title}</h3>
-          <p>{description}</p>
+    <section className="agent-access__step" data-complete={complete || undefined}>
+      <Collapsible defaultOpen={defaultOpen}>
+        <div className="agent-access__step-layout">
+          <div className="agent-access__step-number" aria-hidden="true">
+            {complete ? <CircleCheckIcon /> : number}
+          </div>
+          <div className="agent-access__step-content">
+            <h3>
+              <CollapsibleTrigger asChild>
+                <Button className="agent-access__step-trigger" type="button" variant="ghost">
+                  <span>
+                    <span className="agent-access__step-title">{title}</span>
+                    <span className="agent-access__step-status">{status}</span>
+                  </span>
+                  <ChevronDownIcon data-icon="inline-end" />
+                </Button>
+              </CollapsibleTrigger>
+            </h3>
+            <CollapsibleContent className="agent-access__step-details">
+              <p>{description}</p>
+              {children}
+            </CollapsibleContent>
+          </div>
         </div>
-        {children}
-      </div>
+      </Collapsible>
     </section>
   );
 }
@@ -789,7 +940,7 @@ function CopyInput({
             onClick={() => void copyToClipboard(value, label)}
             size="icon-xs"
           >
-            <Clipboard />
+            <ClipboardIcon />
           </InputGroupButton>
         </InputGroupAddon>
       </InputGroup>
@@ -826,7 +977,7 @@ function CopyPrompt({
         type="button"
         variant="outline"
       >
-        <Clipboard data-icon="inline-start" />
+        <ClipboardIcon data-icon="inline-start" />
         {copyLabel}
       </Button>
     </Field>
@@ -890,9 +1041,9 @@ function TokenAccess({
         <Collapsible onOpenChange={setOpen} open={open}>
           <CollapsibleTrigger asChild>
             <Button className="settings-disclosure__trigger" type="button" variant="outline">
-              <KeyRound data-icon="inline-start" />
+              <KeyIcon data-icon="inline-start" />
               {open ? "Hide token setup" : "Set up a local token"}
-              <ChevronDown data-icon="inline-end" />
+              <ChevronDownIcon data-icon="inline-end" />
             </Button>
           </CollapsibleTrigger>
           <CollapsibleContent className="agent-access__token-content">
@@ -936,7 +1087,7 @@ function TokenAccess({
                 <CollapsibleTrigger asChild>
                   <Button className="settings-disclosure__trigger" type="button" variant="outline">
                     Fine-tune permissions · {scopes.length} selected
-                    <ChevronDown data-icon="inline-end" />
+                    <ChevronDownIcon data-icon="inline-end" />
                   </Button>
                 </CollapsibleTrigger>
                 <CollapsibleContent className="settings-disclosure__content">
@@ -970,13 +1121,13 @@ function TokenAccess({
                 onClick={() => create.mutate()}
                 type="button"
               >
-                <KeyRound data-icon="inline-start" />
+                <KeyIcon data-icon="inline-start" />
                 Create local token
               </Button>
             </FieldGroup>
             {secret ? (
               <Alert role="status">
-                <KeyRound />
+                <KeyIcon />
                 <AlertTitle>Copy this token now</AlertTitle>
                 <AlertDescription>
                   It will not be shown again. <code>{secret}</code>
@@ -1000,7 +1151,7 @@ function TokenAccess({
             {activeTokens.map((token) => (
               <Item key={token.id} variant="outline">
                 <ItemMedia variant="icon">
-                  <KeyRound />
+                  <KeyIcon />
                 </ItemMedia>
                 <ItemContent>
                   <ItemTitle>{token.name}</ItemTitle>
@@ -1018,7 +1169,7 @@ function TokenAccess({
                     type="button"
                     variant="ghost"
                   >
-                    <Trash2 />
+                    <TrashIcon />
                   </Button>
                 </ItemActions>
               </Item>
@@ -1031,7 +1182,7 @@ function TokenAccess({
             <CollapsibleTrigger asChild>
               <Button type="button" variant="ghost">
                 Revoked tokens · {revokedTokens.length}
-                <ChevronDown data-icon="inline-end" />
+                <ChevronDownIcon data-icon="inline-end" />
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent>
@@ -1060,7 +1211,7 @@ function domainCapability(
 ): DomainCapability {
   if (domain === "mail") return mailAgentAccessCapability(support, invocation);
   if (domain === "calendar") return calendarAgentAccessCapability(support, invocation);
-  if (domain === "reminders") return reminderAgentAccessCapability(support, invocation);
+  if (domain === "tasks") return taskAgentAccessCapability(support, invocation);
   return financeAgentAccessCapability(support, invocation);
 }
 
@@ -1073,7 +1224,7 @@ function domainReadiness({
   mailRules,
   mailSetup,
   profile,
-  reminders,
+  tasks,
 }: {
   attention: Parameters<typeof mailAgentAccessReadiness>[0]["attention"];
   calendars: Parameters<typeof calendarAgentAccessReadiness>[0]["calendars"];
@@ -1083,7 +1234,7 @@ function domainReadiness({
   mailRules: Parameters<typeof mailAgentAccessReadiness>[0]["rules"];
   mailSetup: Parameters<typeof mailAgentAccessReadiness>[0]["setup"];
   profile: Parameters<typeof mailAgentAccessReadiness>[0]["profile"];
-  reminders: Parameters<typeof reminderAgentAccessReadiness>[0]["reminders"];
+  tasks: Parameters<typeof taskAgentAccessReadiness>[0]["tasks"];
 }): DomainReadinessItem[] {
   if (domain === "mail") {
     return mailAgentAccessReadiness({
@@ -1097,8 +1248,8 @@ function domainReadiness({
   if (domain === "calendar") {
     return calendarAgentAccessReadiness({ attention, calendars, hosts, profile });
   }
-  if (domain === "reminders") {
-    return reminderAgentAccessReadiness({ attention, hosts, profile, reminders });
+  if (domain === "tasks") {
+    return taskAgentAccessReadiness({ attention, hosts, profile, tasks });
   }
   return financeAgentAccessReadiness({ attention, hosts, profile, setup: financeSetup });
 }
@@ -1140,6 +1291,7 @@ function connectedHostAuthorities(
         .filter(
           (token) =>
             token.revokedAt === null &&
+            token.lastUsedAt !== null &&
             (token.expiresAt === null || new Date(token.expiresAt).getTime() > currentTime),
         )
         .map((token) => ({ name: token.name, scopes: token.scopes })),

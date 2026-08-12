@@ -7,6 +7,8 @@ import {
   agentMutationPolicies,
   apiErrorSchema,
   applyFinanceCategorizationsInputSchema,
+  assistantSetupPlanQuerySchema,
+  assistantSetupPlanSchema,
   automationRoutineSchema,
   automationRunSchema,
   bulkUpdateMailInputSchema,
@@ -15,7 +17,9 @@ import {
   calendarProfilePreferencesSchema,
   calendarProviderSchema,
   calendarSchema,
+  connectedAccountHealthSchema,
   connectICloudInputSchema,
+  connectorAuthorizationOutcomeSchema,
   connectorCapabilities,
   createAccessTokenInputSchema,
   createAttentionItemInputSchema,
@@ -157,6 +161,43 @@ describe("domain schemas", () => {
         },
       }),
     ).toMatchObject({ domains: [{ domain: "mail", support: "executable_rules" }] });
+    expect(
+      assistantSetupPlanQuerySchema.parse({ domain: "mail", stepId: "learn_preferences" }),
+    ).toEqual({ domain: "mail", stepId: "learn_preferences" });
+    expect(
+      assistantSetupPlanSchema.parse({
+        access: { canRead: true, canWrite: true },
+        connection: { lastObservedAt: "2026-07-28T12:00:00.000Z", observed: true },
+        currentStepId: "learn_preferences",
+        domain: "mail",
+        nextAction: "Inspect Mail and save a draft.",
+        profile: {
+          approvedStatus: null,
+          approvedVersion: null,
+          pendingDraftVersion: null,
+          status: null,
+          version: null,
+        },
+        progress: { completed: 1, total: 4 },
+        protocolVersion: "1.0",
+        selectedStepId: "learn_preferences",
+        status: "in_progress",
+        steps: [
+          {
+            completionEvidence: [],
+            description: "Inspect existing material.",
+            id: "learn_preferences",
+            instructions: ["Read the current profile."],
+            order: 2,
+            owner: "agent",
+            requiredTools: ["get_domain_profile"],
+            state: "current",
+            title: "Learn Mail preferences",
+            userAction: null,
+          },
+        ],
+      }),
+    ).toMatchObject({ currentStepId: "learn_preferences", protocolVersion: "1.0" });
     expect(semanticVersionSchema.parse("1.2.3-rc.1+build.7")).toBe("1.2.3-rc.1+build.7");
     expect(() => semanticVersionSchema.parse("1.2.3-01")).toThrow();
     expect(
@@ -1169,5 +1210,96 @@ describe("time-zone ranges", () => {
       from: "2026-03-08T05:00:00.000Z",
       to: "2026-03-09T04:00:00.000Z",
     });
+  });
+});
+
+describe("connected account health", () => {
+  it("parses retrying account health with automatic recovery", () => {
+    expect(
+      connectedAccountHealthSchema.parse({
+        message: "Google is temporarily unavailable. ilo will retry automatically.",
+        nextSyncAt: "2026-08-05T20:05:00.000Z",
+        recovery: "automatic",
+        state: "retrying",
+      }),
+    ).toMatchObject({ state: "retrying", recovery: "automatic" });
+  });
+
+  it("rejects provider-sized health messages", () => {
+    expect(
+      connectedAccountHealthSchema.safeParse({
+        message: "x".repeat(301),
+        nextSyncAt: null,
+        recovery: "operator",
+        state: "service_attention",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("connector authorization outcomes", () => {
+  it("keeps only the provider-neutral browser outcome", () => {
+    expect(
+      connectorAuthorizationOutcomeSchema.parse({
+        accountId: null,
+        code: "authorization-code-canary",
+        email: "person@example.com",
+        provider: "google",
+        providerMessage: "provider-message-canary",
+        requestId: "request-canary",
+        retryable: true,
+        scope: "scope-canary",
+        state: "state-canary",
+        status: "failed",
+      }),
+    ).toEqual({
+      accountId: null,
+      provider: "google",
+      retryable: true,
+      status: "failed",
+    });
+  });
+
+  it("rejects identities outside the closed connector outcome contract", () => {
+    expect(
+      connectorAuthorizationOutcomeSchema.safeParse({
+        accountId: "not-a-uuid",
+        provider: "icloud",
+        retryable: false,
+        status: "connected",
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe("connector notification contracts", () => {
+  it("keeps subscription lifecycle and trigger reasons closed", async () => {
+    const {
+      connectorSubscriptionKindSchema,
+      connectorSubscriptionStatusSchema,
+      connectorSyncTriggerReasonSchema,
+    } = await import("./connection.js");
+    expect(connectorSubscriptionKindSchema.options).toEqual([
+      "gmail_mailbox",
+      "google_calendar_list",
+      "google_calendar_events",
+      "icloud_mail_idle",
+    ]);
+    expect(connectorSubscriptionStatusSchema.options).toEqual([
+      "pending",
+      "active",
+      "renewing",
+      "expired",
+      "failed",
+      "stopped",
+    ]);
+    expect(connectorSyncTriggerReasonSchema.options).toEqual([
+      "initial",
+      "notification",
+      "reconciliation",
+      "manual",
+      "retry",
+      "recovery",
+    ]);
   });
 });

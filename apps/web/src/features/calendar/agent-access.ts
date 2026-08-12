@@ -46,7 +46,12 @@ export function calendarAgentAccessReadiness({
   ).length;
   return [
     {
-      ...(selected.length === 0 ? { action: { label: "Open Calendar", to: "/calendar" } } : {}),
+      ...(selected.length === 0
+        ? {
+            action: { label: "Open Calendar", to: "/calendar" },
+            nextStep: "Select a calendar for Ilo to use",
+          }
+        : {}),
       complete: selected.length > 0,
       description: `${calendars.data.length} calendar${calendars.data.length === 1 ? "" : "s"} · ${selected.length} selected · ${writable.length} writable${sourceErrors > 0 ? ` · ${sourceErrors} ${sourceErrors === 1 ? "needs" : "need"} reconnect` : ""}`,
       title: "Calendar material",
@@ -58,6 +63,7 @@ export function calendarAgentAccessReadiness({
         writable.length > 0
           ? `${writable.length} writable destination${writable.length === 1 ? "" : "s"}. Ilo can preview strong-evidence commitments; automatic creation is not enabled.`
           : "A selected writable calendar is required for commitment previews.",
+      ...(writable.length === 0 ? { nextStep: "Select a writable calendar" } : {}),
       title: "Calendar workflow",
     },
     attentionReadiness("Calendar", attention),

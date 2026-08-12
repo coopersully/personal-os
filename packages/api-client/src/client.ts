@@ -4,6 +4,7 @@ import type {
   AutomationRun,
   ConfirmEmailVerificationInput,
   ConnectICloudInput,
+  ConnectorAuthorizationOutcome,
   CreateAccessTokenInput,
   CreateAutomationRoutineInput,
   CreateInvitationInput,
@@ -25,6 +26,12 @@ import type {
   WeatherCoordinates,
   WeatherLocationOption,
   WeatherSnapshot,
+} from "@personal-os/domain";
+import {
+  type ConnectedAccountHealth,
+  type ConnectorSyncStatus,
+  connectedAccountHealthSchema,
+  connectorAuthorizationOutcomeSchema,
 } from "@personal-os/domain";
 import { createAssistantApiClient } from "./features/assistant.js";
 import { createCalendarApiClient } from "./features/calendar.js";
@@ -82,13 +89,16 @@ export type CalendarAccount = {
   avatarUrl?: string | null;
   calendarEnabled: boolean;
   email: string | null;
+  health: ConnectedAccountHealth;
   id: string;
   label: string;
+  lastSyncAttemptAt: string | null;
   lastSyncedAt: string | null;
   mailEnabled: boolean;
   provider: string;
+  nextSyncAt: string | null;
   syncError: string | null;
-  syncStatus: string;
+  syncStatus: ConnectorSyncStatus;
 };
 
 export type XBookmarkAccount = {
@@ -274,6 +284,13 @@ export function createApiClient(options: ClientOptions) {
       return response.url;
     },
 
+    async getConnectorAuthorizationAttempt(id: string): Promise<ConnectorAuthorizationOutcome> {
+      const response = await request<{ attempt: unknown }>(
+        `/v1/connectors/authorization-attempts/${encodeURIComponent(id)}`,
+      );
+      return connectorAuthorizationOutcomeSchema.parse(response.attempt);
+    },
+
     async getXBookmarkAuthorizationUrl(): Promise<string> {
       const response = await request<{ url: string }>("/v1/x-bookmarks/connect/start", {
         method: "POST",
@@ -337,7 +354,10 @@ export function createApiClient(options: ClientOptions) {
 
     async listConnectors(): Promise<CalendarAccount[]> {
       const response = await request<{ accounts: CalendarAccount[] }>("/v1/connectors");
-      return response.accounts;
+      return response.accounts.map((account) => ({
+        ...account,
+        health: connectedAccountHealthSchema.parse(account.health),
+      }));
     },
 
     async listXBookmarkFolders(): Promise<XBookmarkFolder[]> {

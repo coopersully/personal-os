@@ -11,9 +11,18 @@
 | `API_SHUTDOWN_TIMEOUT_MS` | Bounded API quiesce budget in milliseconds; production uses `105000` inside ECS `stopTimeout = 120` |
 | `ALLOWED_ORIGINS` | Comma-separated browser and Tauri origins |
 | `APP_ENCRYPTION_KEY` | Base64-encoded 32-byte key for OAuth credentials |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret |
+| `GOOGLE_CLIENT_ID` | Google OAuth client ID; required in production and injected from Parameter Store |
+| `GOOGLE_CLIENT_SECRET` | Google OAuth client secret; required in production and injected from Parameter Store |
 | `GOOGLE_REDIRECT_URI` | Exact registered Google OAuth callback |
+| `GOOGLE_GMAIL_PUSH_ENABLED` | Independent Gmail push gate; defaults off and fails closed unless every Pub/Sub value below is present |
+| `GOOGLE_GMAIL_PUBSUB_TOPIC` | Fully qualified Gmail watch topic (`projects/.../topics/...`) |
+| `GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION` | Exact push subscription expected in each envelope (`projects/.../subscriptions/...`) |
+| `GOOGLE_GMAIL_PUSH_AUDIENCE` | Exact HTTPS Gmail notification endpoint used as the Pub/Sub OIDC audience |
+| `GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT` | Exact service-account email allowed to sign Pub/Sub pushes |
+| `GOOGLE_CALENDAR_PUSH_ENABLED` | Independent Calendar watch gate; defaults off |
+| `GOOGLE_CALENDAR_WEBHOOK_URL` | Exact API Calendar notification endpoint; no query or fragment |
+| `ICLOUD_MAIL_IDLE_ENABLED` | Independent bounded IMAP IDLE signal gate; defaults off |
+| `ICLOUD_MAIL_IDLE_CONCURRENCY` | Per-task IDLE concurrency, from 1 through 25 (default: 5) |
 | `RESEND_API_KEY` | Resend API key used only for account verification and password recovery email |
 | `AUTH_RATE_LIMIT_MAX_REQUESTS` | Maximum register/login/recovery attempts per source and endpoint window (default: `20`) |
 | `AUTH_RATE_LIMIT_WINDOW_SECONDS` | Auth request rate-limit window in seconds (default: `300`) |
@@ -25,8 +34,8 @@
 | `MCP_PUBLIC_URL` | Canonical public MCP origin, for example `https://mcp.example.com` |
 | `MCP_RESOURCE_URL` | Canonical MCP resource URI, normally `https://mcp.example.com/mcp` |
 | `MCP_INTERNAL_SECRET` | Random 32+ character secret shared only by the API and MCP containers |
-| `AGENT_SKILL_SOURCE_URL` | Public install source for the Ilo guided-setup skill. It must contain the configured immutable revision. |
-| `AGENT_SKILL_VERSION` | Semantic version advertised for the exact guided-setup artifact |
+| `AGENT_SKILL_SOURCE_URL` | Optional public source override for the Ilo setup compatibility reference. Blank derives the versioned website URL from `APP_BASE_URL`; an override must contain the configured immutable revision. |
+| `AGENT_SKILL_VERSION` | Semantic version advertised for the exact optional setup reference |
 | `AGENT_SKILL_REVISION` | Immutable source identifier embedded in `AGENT_SKILL_SOURCE_URL`, such as a Git commit or release digest |
 | `REGISTRATION_MODE` | Must be `invite` in production; the API refuses to boot in open mode |
 | `OWNER_EMAILS` | Comma-separated email addresses allowed to issue invitations |
@@ -39,6 +48,16 @@
 Generate the encryption key outside the repository and store it in the deployment platform's secret manager. Rotating it requires reauthorizing currently connected accounts.
 
 Hosted deployments should set both `EMAIL_FROM` and `RESEND_API_KEY`. Without them, development safely suppresses transactional email, but users cannot complete email verification or recover a password.
+
+Production also refuses to start without both Google OAuth values. Store them under the configured
+SSM prefix as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; ECS injects both through task-definition
+secret references. Do not duplicate the client ID in Terraform variables or task environment
+values. Verify the references without printing either value:
+
+```bash
+aws ecs describe-task-definition --task-definition personal-os-prod-api \
+  --query 'taskDefinition.containerDefinitions[].secrets[?name==`GOOGLE_CLIENT_ID` || name==`GOOGLE_CLIENT_SECRET`].[name,valueFrom]'
+```
 
 Production requires invite-only sign-up and refuses to start in open mode or
 without at least one `OWNER_EMAILS` address. An owner signs in, opens Settings →
@@ -85,15 +104,18 @@ The MCP image binds to all container interfaces, requires an ilo bearer token fo
 The public MCP endpoint publishes protected-resource metadata and directs clients to ilo's OAuth authorization server. A person signs in to ilo once and consents to the MCP client; Google, iCloud, and other connected services remain internal to that ilo account. The consent screen names the registered client and translates every requested scope into a user-facing permission. OAuth clients use dynamic registration, exact redirect-URI matching, S256 PKCE, five-minute one-time authorization codes, one-hour MCP audience-bound access tokens, and rotating refresh tokens. Do not reuse `MCP_INTERNAL_SECRET` outside the API and MCP containers, and use distinct values per environment.
 
 The authenticated connection-guide API derives its MCP URL from
-`MCP_RESOURCE_URL` and its skill install link from
-`AGENT_SKILL_SOURCE_URL`. It publishes `AGENT_SKILL_VERSION` and
-`AGENT_SKILL_REVISION` beside that link and refuses a source URL that does not
-contain its revision. The defaults identify the official `ilo-setup` v0.1.0
-directory at one Git commit rather than the mutable `main` branch. A
-self-hosted deployment must publish its own public, immutable artifact URL and
-matching version/revision as one release unit. Keep the MCP and skill addresses
-aligned with the deployed environment so Settings never teaches a host to use a
-staging, local, or changing endpoint.
+`MCP_RESOURCE_URL` and its optional skill-reference link from
+`APP_BASE_URL` plus the checked release path when `AGENT_SKILL_SOURCE_URL` is
+blank. It publishes `AGENT_SKILL_VERSION` and `AGENT_SKILL_REVISION` beside that
+link and refuses an override that does not contain its revision. The web build
+copies the repository-owned skill tree to
+`/skills/ilo-setup/v0.2.0/`, with `SKILL.md` as the advertised entrypoint. A
+self-contained release path is served read-only and cached as immutable by the
+production web edge; publishing changed bytes requires a new release path. A
+self-hosted deployment may publish its own public, immutable artifact URL and
+matching version/revision as one release unit. Keep the app, MCP, and optional
+skill override aligned with the deployed environment so Settings never teaches
+a host to use a staging, local, or changing endpoint.
 
 The checked release identity lives in
 `packages/domain/src/ilo-setup-release.json`. Runtime defaults read that
@@ -101,16 +123,17 @@ manifest, and `pnpm lint` fails if `.env.example` or Compose advertises a
 different tuple. Change the manifest and both deployment projections together
 for every release.
 
-### Upgrade from the mutable official URL
+### Upgrade from an earlier official release
 
-Older local installs may retain the former authoritative value
-`https://github.com/coopersully/personal-os/tree/main/skills/ilo-setup` in
-`.env`. Setup and Start recognize only that exact legacy official line when
-skill version and revision are absent or already match the official release.
-They atomically replace it with the manifest release tuple before synchronizing
-worktrees. The migration is idempotent. The API applies the same narrow
-compatibility normalization so a container or production process that does not
-use the Codex lifecycle can boot during rollout.
+Older local installs may retain either former authoritative GitHub URL in
+`.env`: the mutable `main` directory, the first commit-pinned directory, or the
+Ilo-hosted v0.1.0 path. Setup and Start recognize only those exact legacy
+official values or a blank derived source paired with known legacy metadata.
+They remove the override and write the current manifest version/revision so the
+URL follows the environment's canonical `APP_BASE_URL`. The migration is
+idempotent. The API applies the same narrow compatibility normalization so a
+container or production process that does not use the Codex lifecycle can boot
+during rollout.
 
 Custom URLs, including custom URLs ending in `/main` or `/latest`, are never
 rewritten as an Ilo release. Deployments with a custom source must set all three
@@ -119,25 +142,28 @@ configuration continues to fail startup. A legacy official URL paired with
 explicit, conflicting version metadata is also preserved for validation rather
 than silently overwritten.
 
-### Guided-setup skill distribution boundary
+### Optional setup-reference distribution boundary
 
-Ilo publishes the configured artifact identity but does not fetch or install it.
-The agent host performs one public HTTPS read after the person copies the
-request. No Ilo credential crosses that boundary, and copying the request is not
-an installation commit point. A denied, unreachable, rate-limited, or malformed
-source must fail in the host before `$ilo-setup` is available; it cannot grant
-more Ilo scope or activate a profile or rule. The host owns its download
-timeout, cache, and installation error, while the deployment owner repairs the
-published artifact or rolls the guide back to a prior immutable release.
+Ilo setup is driven by the authenticated `get_ilo_setup` MCP tool. The hosted
+skill is an optional compatibility reference, not a prerequisite or completion
+signal. Ilo publishes its configured artifact identity but does not fetch or
+install it. A host may read the versioned website tree over public HTTPS without
+an Ilo credential. A denied, unreachable, rate-limited, or malformed reference
+must not block a host that can call `get_ilo_setup`; it cannot grant more Ilo
+scope or activate a profile or rule. The host owns its download timeout, cache,
+and installation error, while the deployment owner repairs the published
+artifact or advances to a new immutable release.
 
 Configuration validation proves that the guide names a source, semantic
 version, and revision and that the URL embeds the revision. For the official
-release, the Git commit URL supplies immutable source identity. A custom server
-can still return different bytes at a version-looking URL, so local tests and
-API readiness do not prove custom-host immutability, public reachability, or
-compatible-host installation. Release evidence must separately record an HTTPS
-fetch from outside the runtime and one least-privileged install/invocation in a
-supported host.
+release, the versioned website path is an append-only release artifact copied
+from the repository skill tree during the web build. A server can still return
+different bytes at a version-looking URL, so local tests and API readiness do
+not prove immutability, public reachability, or compatible-host installation.
+Release evidence must separately record an HTTPS fetch from outside the runtime
+and one least-privileged `get_ilo_setup` invocation in a supported host. A skill
+install smoke is useful compatibility evidence, but it is not required setup
+evidence.
 
 Build with the public API address compiled into the PWA:
 
@@ -161,6 +187,15 @@ timeout. It then calls the live `/health/ready` endpoint and requires that exact
 protocol header.
 Legacy or mixed task sets fail before drain; lifecycle readiness must be shipped
 and verified separately before a migration-required release can use this path.
+
+Before the first availability-changing mutation, deployment publishes
+`ilo/Deployments/ApiDeploymentInProgress = 1`, starts a 30-second heartbeat, and proves the
+`<cluster>-api-deployment-in-progress` alarm is active. The raw Route 53 API health alarm remains
+visible, but human paging comes from an availability composite that requires public-health failure
+without that heartbeat. Every handled success, failure, and cancellation stops the heartbeat and
+publishes zero. Abrupt runner loss stops new samples; missing heartbeat data is non-breaching, so a
+continuing public outage becomes actionable within the next alarm evaluation instead of remaining
+suppressed. Heartbeat publication or state proof failure before drain preserves the healthy service.
 
 After that gate, the production workflow scales the API service to zero and waits for the
 current tasks to stop before starting the new migration-capable task. It suspends ECS
@@ -219,6 +254,14 @@ exact recovered primary is healthy, rollback and intended capacity are
 restored, deployment registers and verifies a marker-cleared normal-metadata
 revision before autoscaling resumes. Cleanup failure stops the service and
 publishes a new marker. Normal registration resets authorization and history.
+Recovery treats its already-proven zero/all-suspended control-plane state as
+read-only until the corrected API task is launched. It must not call
+`RegisterScalableTarget` again at that boundary: Application Auto Scaling can
+enforce the target's minimum capacity even when the same request asks to suspend
+all scaling, which would restart the failed primary. It also verifies direct
+`desired/running/pending = 0/0/0` counts instead of waiting for generic ECS
+service stability; ECS deliberately retains the failed deployment record, so
+the generic waiter cannot converge while the service is correctly stopped.
 The unique history is
 capped at 100 entries. During retry, only stopped tasks on those exact
 post-drain definitions are treated as failed rollout evidence; every other
@@ -287,6 +330,8 @@ scaling or drains all API tasks:
 A later serial-drain rollout must fail before suspending scaling unless all of the following
 production evidence is captured from fresh AWS/API reads:
 
+- the latest API task definition passes the runtime-configuration preflight: both Google credentials
+  are unique SSM-backed ECS secret references and no plain `GOOGLE_CLIENT_ID` entry exists;
 - `describe-services` reports exactly one deployment, with `status = PRIMARY`,
   `rolloutState = COMPLETED`, and the expected task-definition ARN;
 - `list-tasks` followed by `describe-tasks` enumerates every exact active API task, and every task
@@ -301,6 +346,12 @@ or missing the marker, keep scaling active and stop. Only after this gate may a 
 suspend scaling and begin a drain. This prerequisite supplies the application protocol; it does not
 prove production IAM authority, apply infrastructure, or perform a production drain.
 
+When the runtime preflight fails, apply the reviewed Terraform configuration first. The application
+deployment intentionally clones the latest task-definition configuration; merging Terraform source
+does not apply it. Retry the same full `release_sha` after the task execution role and latest task
+definition contain the expected SSM references. The preflight reports only safe configuration names
+and never reads or prints parameter values.
+
 ## Health and logs
 
 - `GET /health/live` proves the process is running.
@@ -309,7 +360,31 @@ prove production IAM authority, apply infrastructure, or perform a production dr
 - API request logs are one-line JSON with request ID, method, path, status, and duration.
 - Connector account rows expose last sync time, current sync state, and redacted failure text.
 
+The exact public `/health/live` and `/health/ready` paths are excluded from only the AWS managed IP
+reputation rule. Deployment and Route 53 health probes can originate from shared infrastructure
+that appears on that managed list, so applying the reputation block to those intentionally public,
+unauthenticated paths can prevent a healthy release from proving readiness. The shared edge rate
+limit and managed bad-input protection still apply. Do not broaden this exception to other paths
+or use it as evidence that an authenticated application route is reachable.
+
+When either Google push mode is enabled, WAF gives only the two exact notification paths a distinct
+high-volume IP rate boundary and removes them from the lower shared rate rule. Managed bad-input and
+IP-reputation rules still apply, and application-level OIDC/channel-token authentication remains
+mandatory. There is no Google IP allowlist or provider-wide bypass.
+
 Forward `X-Request-Id` from the edge when present. Do not log authorization headers, cookies, OAuth codes, encrypted credentials, or raw provider payloads.
+
+The existence of connector alarms in Terraform is not evidence that they are active in production.
+Before publishing images, the production deploy reads the live API log group and fails closed unless
+the exact connector failure/configuration metric filters and alarms are present with their expected
+patterns, transformations, thresholds, periods, missing-data behavior, and notification actions.
+The hourly production-health workflow repeats the same read-only check so later infrastructure drift
+uses the existing production-health incident path. If this preflight fails, apply and review the
+production Terraform before retrying the application deploy; do not bypass the check or infer
+coverage from a successful API health request. Each AWS inventory read has a 30-second deadline,
+which tolerates cold GitHub-runner credential and CLI startup while keeping both sequential reads
+well inside the hourly health job's five-minute budget. A timeout fails closed with the same safe,
+provider-output-free operator message as another AWS read failure.
 
 ## Connector configuration
 
@@ -333,11 +408,64 @@ The application security group must allow the transports used by enabled connect
 
 Register the exact public `GOOGLE_REDIRECT_URI` in Google Cloud. Request Calendar read/write and user email scopes. OAuth state is random, user-bound, one-time-use, and expires after ten minutes. Use separate OAuth clients and encryption keys for development and production.
 
+Treat a working client ID and secret as configuration evidence, not proof that Google OAuth is
+ready for people outside the development team. Before enabling Google connections in production:
+
+- use a dedicated production Google Cloud project and OAuth client, set the consent screen to
+  **In production**, and configure support/developer contacts plus verified application, privacy,
+  and terms URLs on owned domains;
+- reconcile the consent-screen scope inventory with the exact scopes requested by the API, then
+  obtain Google's approval for every sensitive or restricted scope;
+- when Gmail restricted-scope data is accessed or stored by ilo's servers, complete Google's
+  required security assessment and assign an owner and renewal date for its annual recurrence;
+- retain non-secret evidence of the production project, publishing status, approved scopes,
+  verification decision, assessment status, owner, and renewal date in the release record; and
+- prove with an account that is not a configured test user that the standard Google consent screen
+  appears without a **Google hasn't verified this app** warning, the callback returns to ilo, and
+  both Mail and Calendar reach **Ready**.
+
+An unverified-app click-through is useful only for explicitly authorized development/test access.
+It is a production release blocker, even when the client credentials, callback, and connector sync
+all work. Follow Google's current [OAuth app verification
+requirements](https://support.google.com/cloud/answer/13464321) and [restricted-scope production
+readiness guidance](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification).
+
 The OAuth callback persists the authorized account and returns to the browser before initial
 Calendar discovery and provider synchronization complete. Initial sync continues asynchronously;
 provider failures remain visible on the connector account and can be retried manually. Keep the
 callback itself below the public edge timeout instead of extending the timeout to cover provider
 bootstrap work.
+
+#### Gmail and Calendar low-latency signals
+
+Keep `google_gmail_push_enabled` and `google_calendar_push_enabled` false until their independent
+production evidence is complete. Gmail requires all of the following in the same production Google
+Cloud project:
+
+1. a Pub/Sub topic with `gmail-api-push@system.gserviceaccount.com` granted only
+   `roles/pubsub.publisher` on that topic;
+2. a push subscription targeting the exact
+   `https://api.<domain>/v1/connectors/google/gmail/notifications` endpoint;
+3. Pub/Sub authenticated push configured with one dedicated service account, permission for the
+   Pub/Sub service agent to mint its OIDC token, and the exact endpoint URL as audience;
+4. the qualified topic, subscription, audience, and service-account identity entered as Terraform
+   inputs/non-secret runtime values; and
+5. OAuth publishing, restricted-scope verification, and any required Gmail security assessment
+   completed for the same project.
+
+Calendar push requires the exact public Calendar notification URL and successful watch creation for
+the calendar list plus every selected calendar. Google does not sign Calendar webhook bodies, so ilo
+accepts only an exact durable channel ID, resource ID, hashed random channel token, and strictly newer
+message number. Both webhook handlers acknowledge only after their coalesced trigger commits.
+
+Before enabling either gate, record non-secret command/output evidence for topic IAM, subscription
+push/OIDC configuration, expected audience/service-account identity, the deployed task environment
+names, TLS reachability, one controlled change converging through a notification trigger, one
+dropped signal converging through five-minute reconciliation, renewal before expiry, and redacted
+CloudWatch events. Never record OAuth tokens, channel tokens, mailbox addresses, payloads, or secret
+values. At the time of this implementation, repository/AWS declarations are complete but the live
+GCP resources and authority have not yet been evidenced; therefore both production push gates must
+remain disabled.
 
 ### Apple iCloud
 
@@ -347,6 +475,12 @@ CalDAV over HTTPS; Mail reads use IMAP over TLS on port 993 and sends use SMTP s
 and Mail sync run asynchronously. Invalid credentials or unavailable Apple services leave the
 account visible with an error so the person can retry or reconnect without holding the original
 request open.
+
+When `icloud_mail_idle_enabled` is true, each claimed account receives a bounded 25-minute IMAP IDLE
+session subject to the configured per-task concurrency. IDLE events only enqueue durable work;
+transport failure retries the listener without changing account health, while positive Apple
+authentication rejection requests reconnect. Prove listener renewal, shutdown closure, a controlled
+Mail change, and scheduled fallback before enabling this gate in production.
 
 ### X Bookmarks
 

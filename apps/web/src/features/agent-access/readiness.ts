@@ -6,7 +6,7 @@ import type {
   AttentionItem,
 } from "@personal-os/domain";
 
-export type SetupDomain = Extract<AssistantDomain, "mail" | "finances" | "calendar" | "reminders">;
+export type SetupDomain = Extract<AssistantDomain, "mail" | "finances" | "calendar" | "tasks">;
 export type DomainSupport = AgentDomainSupport["support"];
 export type DomainSetupStatus = AssistantSetupStatus["domains"][number];
 
@@ -24,6 +24,7 @@ export type DomainReadinessItem = {
   action?: { label: string; to: string };
   complete: boolean;
   description: string;
+  nextStep?: string;
   title: string;
 };
 
@@ -41,7 +42,7 @@ export const setupDomainOptions: Array<{
   { domain: "mail", label: "Mail", shortLabel: "Mail" },
   { domain: "finances", label: "Finances", shortLabel: "Finances" },
   { domain: "calendar", label: "Calendar", shortLabel: "Calendar" },
-  { domain: "reminders", label: "Reminders", shortLabel: "Reminders" },
+  { domain: "tasks", label: "Tasks", shortLabel: "Tasks" },
 ];
 
 export const setupDomainLabels: Record<SetupDomain, string> = Object.fromEntries(
@@ -85,12 +86,14 @@ export function profileReadiness(
     return {
       complete: false,
       description: `Draft profile v${profile.data.profileVersion} is waiting for review.`,
+      nextStep: `Review the draft ${label} profile`,
       title: `${label} preferences`,
     };
   }
   return {
     complete: false,
     description: `Run the guided interview to teach Ilo your ${label} preferences.`,
+    nextStep: `Teach Ilo your ${label} preferences`,
     title: `${label} preferences`,
   };
 }
@@ -146,6 +149,7 @@ export function hostPermissionReadiness({
     return {
       complete: false,
       description: `No connected host has ${label} read permission.`,
+      nextStep: `Connect an agent with ${label} read access`,
       title: `${label} agent access`,
     };
   }
@@ -155,6 +159,7 @@ export function hostPermissionReadiness({
       writers.length > 0
         ? `${readers.length} connected host${readers.length === 1 ? "" : "s"} can read ${label}; ${writers.length} can ${writeCapability}.`
         : `${readers.length} connected host${readers.length === 1 ? "" : "s"} can read ${label}; none has ${label} write permission.`,
+    ...(writers.length === 0 ? { nextStep: `Give a connected agent ${label} write access` } : {}),
     title: `${label} agent access`,
   };
 }

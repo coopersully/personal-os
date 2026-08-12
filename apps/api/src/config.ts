@@ -18,14 +18,26 @@ const configSchema = z
       .max(128)
       .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/)
       .default(officialAgentSkill.revision),
-    AGENT_SKILL_SOURCE_URL: z.url().default(officialAgentSkill.sourceUrl),
+    AGENT_SKILL_SOURCE_URL: z.preprocess(
+      (value) => (value === "" ? undefined : value),
+      z.url().optional(),
+    ),
     AGENT_SKILL_VERSION: semanticVersionSchema.default(officialAgentSkill.version),
     APP_ENCRYPTION_KEY: z.string().min(1),
     DATABASE_URL: z.string().min(1),
     EMAIL_FROM: z.string().default(""),
     GOOGLE_CLIENT_ID: z.string().default(""),
     GOOGLE_CLIENT_SECRET: z.string().default(""),
+    GOOGLE_CALENDAR_PUSH_ENABLED: z.enum(["true", "false"]).default("false"),
+    GOOGLE_CALENDAR_WEBHOOK_URL: z.string().default(""),
+    GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION: z.string().default(""),
+    GOOGLE_GMAIL_PUBSUB_TOPIC: z.string().default(""),
+    GOOGLE_GMAIL_PUSH_AUDIENCE: z.string().default(""),
+    GOOGLE_GMAIL_PUSH_ENABLED: z.enum(["true", "false"]).default("false"),
+    GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT: z.string().default(""),
     GOOGLE_REDIRECT_URI: z.url(),
+    ICLOUD_MAIL_IDLE_CONCURRENCY: z.coerce.number().int().min(1).max(25).default(5),
+    ICLOUD_MAIL_IDLE_ENABLED: z.enum(["true", "false"]).default("false"),
     LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
     MCP_RESOURCE_URL: z.url().optional(),
     MCP_INTERNAL_SECRET: z.string().min(32).optional(),
@@ -45,7 +57,10 @@ const configSchema = z
     X_REDIRECT_URI: z.url(),
   })
   .superRefine((value, context) => {
-    if (!sourceIdentifiesRevision(value.AGENT_SKILL_SOURCE_URL, value.AGENT_SKILL_REVISION)) {
+    const sourceUrl =
+      value.AGENT_SKILL_SOURCE_URL ??
+      new URL(officialAgentSkill.sourcePath, value.APP_BASE_URL).href;
+    if (!sourceIdentifiesRevision(sourceUrl, value.AGENT_SKILL_REVISION)) {
       context.addIssue({
         code: "custom",
         message:
@@ -53,7 +68,74 @@ const configSchema = z
         path: ["AGENT_SKILL_SOURCE_URL"],
       });
     }
+    if (value.GOOGLE_GMAIL_PUSH_ENABLED === "true") {
+      for (const key of [
+        "GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION",
+        "GOOGLE_GMAIL_PUBSUB_TOPIC",
+        "GOOGLE_GMAIL_PUSH_AUDIENCE",
+        "GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT",
+      ] as const) {
+        if (!value[key].trim()) {
+          context.addIssue({
+            code: "custom",
+            message: `${key} is required when Gmail push is enabled.`,
+            path: [key],
+          });
+        }
+      }
+      try {
+        const url = new URL(value.GOOGLE_GMAIL_PUSH_AUDIENCE);
+        const api = new URL(value.API_BASE_URL);
+        if (
+          url.protocol !== "https:" ||
+          url.origin !== api.origin ||
+          url.pathname !== "/v1/connectors/google/gmail/notifications" ||
+          url.search ||
+          url.hash
+        ) {
+          throw new Error();
+        }
+      } catch {
+        context.addIssue({
+          code: "custom",
+          message:
+            "GOOGLE_GMAIL_PUSH_AUDIENCE must be the exact HTTPS Gmail notification route on API_BASE_URL.",
+          path: ["GOOGLE_GMAIL_PUSH_AUDIENCE"],
+        });
+      }
+    }
+    if (value.GOOGLE_CALENDAR_PUSH_ENABLED === "true") {
+      try {
+        const url = new URL(value.GOOGLE_CALENDAR_WEBHOOK_URL);
+        const api = new URL(value.API_BASE_URL);
+        if (
+          url.protocol !== "https:" ||
+          url.origin !== api.origin ||
+          url.pathname !== "/v1/connectors/google/calendar/notifications" ||
+          url.search ||
+          url.hash
+        ) {
+          throw new Error();
+        }
+      } catch {
+        context.addIssue({
+          code: "custom",
+          message:
+            "GOOGLE_CALENDAR_WEBHOOK_URL must be the exact HTTPS Calendar notification route on API_BASE_URL.",
+          path: ["GOOGLE_CALENDAR_WEBHOOK_URL"],
+        });
+      }
+    }
     if (value.NODE_ENV !== "production") return;
+    for (const key of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"] as const) {
+      if (!value[key].trim()) {
+        context.addIssue({
+          code: "custom",
+          message: `Production requires ${key}.`,
+          path: [key],
+        });
+      }
+    }
     if (!value.EMAIL_FROM) {
       context.addIssue({
         code: "custom",
@@ -117,7 +199,16 @@ export type AppConfig = {
   encryptionKey: string;
   googleClientId: string;
   googleClientSecret: string;
+  googleCalendarPushEnabled?: boolean;
+  googleCalendarWebhookUrl?: string;
+  googleGmailPubsubSubscription?: string;
+  googleGmailPubsubTopic?: string;
+  googleGmailPushAudience?: string;
+  googleGmailPushEnabled?: boolean;
+  googleGmailPushServiceAccount?: string;
   googleRedirectUri: string;
+  icloudMailIdleConcurrency?: number;
+  icloudMailIdleEnabled?: boolean;
   logLevel: "debug" | "info" | "warn" | "error";
   mcpResourceUrl?: string;
   mcpInternalSecret?: string;
@@ -141,7 +232,9 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
   const value = configSchema.parse(migrateLegacyOfficialAgentSkill(environment));
   return {
     agentSkillRevision: value.AGENT_SKILL_REVISION,
-    agentSkillSourceUrl: value.AGENT_SKILL_SOURCE_URL,
+    agentSkillSourceUrl:
+      value.AGENT_SKILL_SOURCE_URL ??
+      new URL(officialAgentSkill.sourcePath, value.APP_BASE_URL).href,
     agentSkillVersion: value.AGENT_SKILL_VERSION,
     allowedOrigins: value.ALLOWED_ORIGINS
       ? [
@@ -161,7 +254,16 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
     encryptionKey: value.APP_ENCRYPTION_KEY,
     googleClientId: value.GOOGLE_CLIENT_ID,
     googleClientSecret: value.GOOGLE_CLIENT_SECRET,
+    googleCalendarPushEnabled: value.GOOGLE_CALENDAR_PUSH_ENABLED === "true",
+    googleCalendarWebhookUrl: value.GOOGLE_CALENDAR_WEBHOOK_URL,
+    googleGmailPubsubSubscription: value.GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION,
+    googleGmailPubsubTopic: value.GOOGLE_GMAIL_PUBSUB_TOPIC,
+    googleGmailPushAudience: value.GOOGLE_GMAIL_PUSH_AUDIENCE,
+    googleGmailPushEnabled: value.GOOGLE_GMAIL_PUSH_ENABLED === "true",
+    googleGmailPushServiceAccount: value.GOOGLE_GMAIL_PUSH_SERVICE_ACCOUNT,
     googleRedirectUri: value.GOOGLE_REDIRECT_URI,
+    icloudMailIdleConcurrency: value.ICLOUD_MAIL_IDLE_CONCURRENCY,
+    icloudMailIdleEnabled: value.ICLOUD_MAIL_IDLE_ENABLED === "true",
     logLevel: value.LOG_LEVEL,
     mcpResourceUrl: value.MCP_RESOURCE_URL ?? `${value.API_BASE_URL}/mcp`,
     ...(value.MCP_INTERNAL_SECRET ? { mcpInternalSecret: value.MCP_INTERNAL_SECRET } : {}),
@@ -185,25 +287,46 @@ export function loadConfig(environment: NodeJS.ProcessEnv): AppConfig {
 }
 
 function migrateLegacyOfficialAgentSkill(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  if (environment.AGENT_SKILL_SOURCE_URL !== officialAgentSkill.legacySourceUrl) {
+  const sourceUrl = environment.AGENT_SKILL_SOURCE_URL;
+  const sourceIsLegacy =
+    !!sourceUrl &&
+    (officialAgentSkill.legacySourceUrls.includes(sourceUrl) ||
+      officialAgentSkill.legacySourcePaths.includes(urlPathname(sourceUrl) ?? ""));
+  const metadataIsLegacy =
+    (!!environment.AGENT_SKILL_VERSION &&
+      officialAgentSkill.legacyVersions.includes(environment.AGENT_SKILL_VERSION)) ||
+    (!!environment.AGENT_SKILL_REVISION &&
+      officialAgentSkill.legacyRevisions.includes(environment.AGENT_SKILL_REVISION));
+  if ((!sourceIsLegacy && !!sourceUrl) || (!sourceUrl && !metadataIsLegacy)) {
     return environment;
   }
   if (
     environment.AGENT_SKILL_VERSION &&
-    environment.AGENT_SKILL_VERSION !== officialAgentSkill.version
+    environment.AGENT_SKILL_VERSION !== officialAgentSkill.version &&
+    !officialAgentSkill.legacyVersions.includes(environment.AGENT_SKILL_VERSION)
   ) {
     return environment;
   }
   if (
     environment.AGENT_SKILL_REVISION &&
-    environment.AGENT_SKILL_REVISION !== officialAgentSkill.revision
+    environment.AGENT_SKILL_REVISION !== officialAgentSkill.revision &&
+    !officialAgentSkill.legacyRevisions.includes(environment.AGENT_SKILL_REVISION)
   ) {
     return environment;
   }
-  return {
+  const migrated: NodeJS.ProcessEnv = {
     ...environment,
     AGENT_SKILL_REVISION: officialAgentSkill.revision,
-    AGENT_SKILL_SOURCE_URL: officialAgentSkill.sourceUrl,
     AGENT_SKILL_VERSION: officialAgentSkill.version,
   };
+  delete migrated.AGENT_SKILL_SOURCE_URL;
+  return migrated;
+}
+
+function urlPathname(value: string): string | null {
+  try {
+    return new URL(value).pathname;
+  } catch {
+    return null;
+  }
 }

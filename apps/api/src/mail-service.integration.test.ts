@@ -136,6 +136,10 @@ describe.sequential("mail service", () => {
       "0047_icloud_uidvalidity_identity",
       "0048_connector_sync_generation",
       "0049_attention_item_versions",
+      "0050_connector_sync_health",
+      "0051_connector_authorization_attempts",
+      "0052_connector_notifications",
+      "0053_oauth_states_expiry_index",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -170,6 +174,10 @@ describe.sequential("mail service", () => {
       "0047_icloud_uidvalidity_identity",
       "0048_connector_sync_generation",
       "0049_attention_item_versions",
+      "0050_connector_sync_health",
+      "0051_connector_authorization_attempts",
+      "0052_connector_notifications",
+      "0053_oauth_states_expiry_index",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(
@@ -1908,6 +1916,7 @@ describe.sequential("mail service", () => {
             expect.objectContaining({ id: inboxId, role: "inbox" }),
           ]),
           provider: "google",
+          health: expect.objectContaining({ state: "ready" }),
           syncStatus: "idle",
         },
         {

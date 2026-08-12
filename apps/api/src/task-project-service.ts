@@ -18,7 +18,7 @@ import {
   type TaskProjectMovePreviewInput,
   type UpdateTaskProjectInput,
 } from "@personal-os/domain";
-import { and, count, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
@@ -44,6 +44,16 @@ type TaskProjectQuery = {
 type ProjectRow = typeof taskProjects.$inferSelect;
 type TaskRow = typeof reminders.$inferSelect;
 type ListRow = typeof taskLists.$inferSelect;
+type DbTransaction = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+type MoveTaskTokenState = {
+  deletedAt: string | null;
+  id: string;
+  lifecycle: string | null;
+  listId: string | null;
+  projectId: string | null;
+  revision: number | null;
+};
 
 const completionResolutions = [
   "complete_open_tasks",
@@ -96,6 +106,7 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
 
   function moveToken(input: {
     affectedTaskCount: number;
+    affectedTasks: MoveTaskTokenState[];
     destinationListId: string;
     destinationListRevision: number;
     sourceListId: string;
@@ -104,6 +115,57 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
     taskProjectRevision: number;
   }): string {
     return createHash("sha256").update(JSON.stringify(input)).digest("hex");
+  }
+
+  function moveTaskTokenState(rows: TaskRow[]): MoveTaskTokenState[] {
+    return rows
+      .map((row) => ({
+        deletedAt: row.deletedAt?.toISOString() ?? null,
+        id: row.id,
+        lifecycle: row.taskLifecycle,
+        listId: row.taskListId,
+        projectId: row.taskProjectId,
+        revision: row.taskRevision,
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  async function lockLists(
+    transaction: DbTransaction,
+    userId: string,
+    ids: string[],
+  ): Promise<ListRow[]> {
+    return transaction
+      .select()
+      .from(taskLists)
+      .where(
+        and(
+          inArray(taskLists.id, [...new Set(ids)].sort()),
+          eq(taskLists.userId, userId),
+          isNull(taskLists.deletedAt),
+        ),
+      )
+      .orderBy(taskLists.id)
+      .for("update");
+  }
+
+  async function lockProjects(
+    transaction: DbTransaction,
+    userId: string,
+    ids: string[],
+  ): Promise<ProjectRow[]> {
+    return transaction
+      .select()
+      .from(taskProjects)
+      .where(
+        and(
+          inArray(taskProjects.id, [...new Set(ids)].sort()),
+          eq(taskProjects.userId, userId),
+          isNull(taskProjects.deletedAt),
+        ),
+      )
+      .orderBy(taskProjects.id)
+      .for("update");
   }
 
   function revisionConflict(currentRevision: number | null): AppError {
@@ -226,7 +288,7 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
   }
 
   async function insertTaskAudits(
-    transaction: Parameters<Parameters<Database["transaction"]>[0]>[0],
+    transaction: DbTransaction,
     beforeRows: TaskRow[],
     afterRows: TaskRow[],
     action: string,
@@ -375,28 +437,26 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
       context: MutationContext,
     ): Promise<TaskProject> {
       requireAgentRevision(context, input.expectedRevision);
+      const observed = await findCurrent(context.principal.userId, id);
+      assertExpectedRevision(observed, input.expectedRevision);
       const row = await db.transaction(async (transaction) => {
-        const requestedProjectIds = [
+        const lockedLists = await lockLists(
+          transaction,
+          observed.userId,
+          [observed.listId, input.destinationListId].filter(
+            (value): value is string => value !== undefined,
+          ),
+        );
+        const lockedProjects = await lockProjects(transaction, observed.userId, [
           id,
           ...(input.resolution === "move_open_tasks" && input.destinationProjectId
             ? [input.destinationProjectId]
             : []),
-        ].sort();
-        const lockedProjects = await transaction
-          .select()
-          .from(taskProjects)
-          .where(
-            and(
-              inArray(taskProjects.id, requestedProjectIds),
-              eq(taskProjects.userId, context.principal.userId),
-              isNull(taskProjects.deletedAt),
-            ),
-          )
-          .orderBy(taskProjects.id)
-          .for("update");
+        ]);
         const before = lockedProjects.find((project) => project.id === id);
         if (!before) throw new AppError("not_found", "The task Project was not found.");
         assertExpectedRevision(before, input.expectedRevision);
+        if (before.listId !== observed.listId) throw revisionConflict(before.revision);
         assertMutableProject(before);
         if (before.lifecycle !== "open") {
           throw new AppError("conflict", "Only an open task Project can be completed.", {
@@ -405,21 +465,6 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
           });
         }
 
-        const requestedListIds = [before.listId, input.destinationListId]
-          .filter((value): value is string => Boolean(value))
-          .sort();
-        const lockedLists = await transaction
-          .select()
-          .from(taskLists)
-          .where(
-            and(
-              inArray(taskLists.id, requestedListIds),
-              eq(taskLists.userId, before.userId),
-              isNull(taskLists.deletedAt),
-            ),
-          )
-          .orderBy(taskLists.id)
-          .for("update");
         const sourceList = lockedLists.find((list) => list.id === before.listId);
         if (!sourceList) throw new AppError("not_found", "The source task List was not found.");
         const destinationList = input.destinationListId
@@ -687,38 +732,20 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
       context: MutationContext,
     ): Promise<TaskProject> {
       requireAgentRevision(context, input.expectedRevision);
+      const observed = await findCurrent(context.principal.userId, id);
+      assertExpectedRevision(observed, input.expectedRevision);
       try {
         const row = await db.transaction(async (transaction) => {
-          const before = (
-            await transaction
-              .select()
-              .from(taskProjects)
-              .where(
-                and(
-                  eq(taskProjects.id, id),
-                  eq(taskProjects.userId, context.principal.userId),
-                  isNull(taskProjects.deletedAt),
-                ),
-              )
-              .for("update")
-          )[0];
+          const lists = await lockLists(transaction, observed.userId, [
+            observed.listId,
+            input.destinationListId,
+          ]);
+          const before = (await lockProjects(transaction, observed.userId, [id]))[0];
           if (!before) throw new AppError("not_found", "The task Project was not found.");
           assertExpectedRevision(before, input.expectedRevision);
+          if (before.listId !== observed.listId) throw revisionConflict(before.revision);
           assertMutableProject(before);
 
-          const listIds = [before.listId, input.destinationListId].sort();
-          const lists = await transaction
-            .select()
-            .from(taskLists)
-            .where(
-              and(
-                inArray(taskLists.id, listIds),
-                eq(taskLists.userId, before.userId),
-                isNull(taskLists.deletedAt),
-              ),
-            )
-            .orderBy(taskLists.id)
-            .for("update");
           const source = lists.find((list) => list.id === before.listId);
           const destination = lists.find((list) => list.id === input.destinationListId);
           if (!source) throw new AppError("not_found", "The source task List was not found.");
@@ -739,13 +766,13 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
                 eq(reminders.userId, before.userId),
                 eq(reminders.kind, "task"),
                 eq(reminders.taskProjectId, before.id),
-                isNull(reminders.deletedAt),
               ),
             )
             .orderBy(reminders.id)
             .for("update");
           const previewValues = {
             affectedTaskCount: beforeTasks.length,
+            affectedTasks: moveTaskTokenState(beforeTasks),
             destinationListId: destination.id,
             destinationListRevision: destination.revision,
             sourceListId: source.id,
@@ -856,19 +883,20 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
           code: "task_project_destination_unavailable",
         });
       }
-      const [taskCount] = await db
-        .select({ value: count() })
+      const affectedTasks = await db
+        .select()
         .from(reminders)
         .where(
           and(
             eq(reminders.userId, project.userId),
             eq(reminders.kind, "task"),
             eq(reminders.taskProjectId, project.id),
-            isNull(reminders.deletedAt),
           ),
-        );
-      const values = {
-        affectedTaskCount: taskCount?.value ?? 0,
+        )
+        .orderBy(reminders.id);
+      const tokenValues = {
+        affectedTaskCount: affectedTasks.length,
+        affectedTasks: moveTaskTokenState(affectedTasks),
         destinationListId: destination.id,
         destinationListRevision: destination.revision,
         sourceListId: source.id,
@@ -876,7 +904,8 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
         taskProjectId: project.id,
         taskProjectRevision: project.revision,
       };
-      return { ...values, previewToken: moveToken(values) };
+      const { affectedTasks: _, ...preview } = tokenValues;
+      return { ...preview, previewToken: moveToken(tokenValues) };
     },
 
     async update(

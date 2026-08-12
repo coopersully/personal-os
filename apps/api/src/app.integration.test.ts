@@ -790,6 +790,23 @@ describe.sequential("ilo API", () => {
       return task;
     }
 
+    async function waitForTaskOrganizationLockWaiters(expected: number) {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const result = await database.pool.query<{ count: string }>(`
+          SELECT count(*)::text AS count
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND query LIKE '%task_lists%'
+            AND query NOT LIKE '%pg_stat_activity%'
+        `);
+        if (Number(result.rows[0]?.count ?? 0) >= expected) return;
+        await new Promise<void>((resolveWait) => setTimeout(resolveWait, 20));
+      }
+      throw new Error(`Expected at least ${expected} Task organization lock waiter(s).`);
+    }
+
     beforeAll(async () => {
       const registration = await request("/v1/auth/register", {
         auth: "none",
@@ -1298,6 +1315,322 @@ describe.sequential("ilo API", () => {
       expect(staleRevision.status).toBe(409);
       expect((await payload(staleRevision)).error.details).toMatchObject({ currentRevision: 2 });
     });
+
+    it("task project move previews reject same-count Task replacement", async () => {
+      const sourceList = await createProjectList("Exact Preview Source");
+      const destinationList = await createProjectList("Exact Preview Destination");
+      const replacementProject = await createProject(sourceList.id, "Exact Set Project");
+      const originalTask = await insertProjectTask(replacementProject, "Original Exact Set Task");
+      const replacementPreview = (
+        await payload(
+          await projectRequest(`/v1/task-projects/${replacementProject.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              expectedRevision: replacementProject.revision,
+            },
+          }),
+        )
+      ).preview;
+      await database.db.delete(reminders).where(eq(reminders.id, originalTask.id));
+      const replacementTask = await insertProjectTask(
+        replacementProject,
+        "Replacement Exact Set Task",
+      );
+      const replaced = await projectRequest(`/v1/task-projects/${replacementProject.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: replacementProject.revision,
+          previewToken: replacementPreview.previewToken,
+        },
+      });
+      expect(replaced.status).toBe(409);
+      expect((await payload(replaced)).error.details).toMatchObject({
+        code: "task_project_move_preview_stale",
+      });
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId })
+          .from(reminders)
+          .where(eq(reminders.id, replacementTask.id)),
+      ).toEqual([{ listId: sourceList.id }]);
+    });
+
+    it("task project move previews reject Task revision drift without a count change", async () => {
+      const sourceList = await createProjectList("Revision Preview Source");
+      const destinationList = await createProjectList("Revision Preview Destination");
+      const revisionProject = await createProject(sourceList.id, "Revision Drift Project");
+      const revisionTask = await insertProjectTask(revisionProject, "Revision Drift Task");
+      const revisionPreview = (
+        await payload(
+          await projectRequest(`/v1/task-projects/${revisionProject.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              expectedRevision: revisionProject.revision,
+            },
+          }),
+        )
+      ).preview;
+      await database.db
+        .update(reminders)
+        .set({ taskRevision: 2 })
+        .where(eq(reminders.id, revisionTask.id));
+      const revised = await projectRequest(`/v1/task-projects/${revisionProject.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: revisionProject.revision,
+          previewToken: revisionPreview.previewToken,
+        },
+      });
+      expect(revised.status).toBe(409);
+      expect((await payload(revised)).error.details).toMatchObject({
+        code: "task_project_move_preview_stale",
+      });
+    });
+
+    it("task project moves include soft-deleted Tasks and preserve their deletion state", async () => {
+      const sourceList = await createProjectList("Trashed Task Move Source");
+      const destinationList = await createProjectList("Trashed Task Move Destination");
+      const project = await createProject(sourceList.id, "Trashed Task Project");
+      const task = await insertProjectTask(project, "Trashed Project Task");
+      const deletedAt = new Date("2026-07-12T12:00:00.000Z");
+      await database.db.update(reminders).set({ deletedAt }).where(eq(reminders.id, task.id));
+
+      const previewResponse = await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+        body: { destinationListId: destinationList.id, expectedRevision: project.revision },
+      });
+      expect(previewResponse.status).toBe(200);
+      const preview = (await payload(previewResponse)).preview;
+      expect(preview.affectedTaskCount).toBe(1);
+      const moved = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: project.revision,
+          previewToken: preview.previewToken,
+        },
+      });
+      expect(moved.status).toBe(200);
+      expect(
+        await database.db
+          .select({
+            deletedAt: reminders.deletedAt,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          deletedAt,
+          listId: destinationList.id,
+          projectId: project.id,
+          revision: 2,
+        },
+      ]);
+    });
+
+    it("task project move rollback restores every Task and audit after a post-detach failure", async () => {
+      const sourceList = await createProjectList("Rollback Move Source");
+      const destinationList = await createProjectList("Rollback Move Destination");
+      const project = await createProject(sourceList.id, "Rollback Move Project");
+      const tasks = await Promise.all([
+        insertProjectTask(project, "Rollback First Task"),
+        insertProjectTask(project, "Rollback Second Task"),
+      ]);
+      const preview = (
+        await payload(
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: { destinationListId: destinationList.id, expectedRevision: project.revision },
+          }),
+        )
+      ).preview;
+      const auditBefore = await database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(inArray(auditEvents.entityId, [project.id, ...tasks.map(({ id }) => id)]));
+
+      await database.pool.query(`
+        CREATE OR REPLACE FUNCTION fail_rollback_task_project_move()
+        RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF OLD.name = 'Rollback Move Project' AND NEW.list_id IS DISTINCT FROM OLD.list_id THEN
+            RAISE EXCEPTION 'forced post-detach Project move failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER fail_rollback_task_project_move_trigger
+        BEFORE UPDATE OF list_id ON task_projects
+        FOR EACH ROW EXECUTE FUNCTION fail_rollback_task_project_move();
+      `);
+      try {
+        const failed = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: project.revision,
+            previewToken: preview.previewToken,
+          },
+        });
+        expect(failed.status).toBe(500);
+      } finally {
+        await database.pool.query(`
+          DROP TRIGGER IF EXISTS fail_rollback_task_project_move_trigger ON task_projects;
+          DROP FUNCTION IF EXISTS fail_rollback_task_project_move();
+        `);
+      }
+
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, project.id)),
+      ).toEqual([{ listId: sourceList.id, revision: 1 }]);
+      expect(
+        await database.db
+          .select({
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(
+            inArray(
+              reminders.id,
+              tasks.map(({ id }) => id),
+            ),
+          ),
+      ).toEqual([
+        { listId: sourceList.id, projectId: project.id, revision: 1 },
+        { listId: sourceList.id, projectId: project.id, revision: 1 },
+      ]);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(inArray(auditEvents.entityId, [project.id, ...tasks.map(({ id }) => id)])),
+      ).toHaveLength(auditBefore.length);
+    });
+
+    it.each([
+      "move",
+      "complete",
+    ] as const)("task project %s and List move-active-contents archive avoid deadlock and preserve location", async (operation) => {
+      const sourceList = await createProjectList(`Concurrent ${operation} Source`);
+      const destinationList = await createProjectList(`Concurrent ${operation} Destination`);
+      const project = await createProject(sourceList.id, `Concurrent ${operation} Project`);
+      const task = await insertProjectTask(project, `Concurrent ${operation} Task`);
+      const preview =
+        operation === "move"
+          ? (
+              await payload(
+                await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+                  body: {
+                    destinationListId: destinationList.id,
+                    expectedRevision: project.revision,
+                  },
+                }),
+              )
+            ).preview
+          : null;
+      const blocker = await database.pool.connect();
+      let archiveRequest: Promise<Response> | undefined;
+      let projectOperation: Promise<Response> | undefined;
+      let projectOperationResult: number | undefined;
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query(
+          "SELECT id FROM task_lists WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+          [[sourceList.id, destinationList.id]],
+        );
+        archiveRequest = projectRequest(`/v1/task-lists/${sourceList.id}/archive`, {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: sourceList.revision,
+            resolution: "move_active_contents",
+          },
+        });
+        void archiveRequest.catch(() => undefined);
+        await waitForTaskOrganizationLockWaiters(1);
+        projectOperation =
+          operation === "move"
+            ? projectRequest(`/v1/task-projects/${project.id}/move`, {
+                body: {
+                  destinationListId: destinationList.id,
+                  expectedRevision: project.revision,
+                  previewToken: preview.previewToken,
+                },
+              })
+            : projectRequest(`/v1/task-projects/${project.id}/complete`, {
+                body: { expectedRevision: project.revision, resolution: "complete_open_tasks" },
+              });
+        void projectOperation.catch(() => undefined);
+        await waitForTaskOrganizationLockWaiters(2);
+        await blocker.query("COMMIT");
+        const [archiveResponse, operationResponse] = await Promise.all([
+          archiveRequest,
+          projectOperation,
+        ]);
+        expect(archiveResponse.status).toBe(200);
+        expect([200, 409]).toContain(operationResponse.status);
+        projectOperationResult = operationResponse.status;
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+        await Promise.allSettled(
+          [archiveRequest, projectOperation].filter(
+            (candidate): candidate is Promise<Response> => candidate !== undefined,
+          ),
+        );
+      }
+      expect(
+        await database.db
+          .select({
+            lifecycle: taskProjects.lifecycle,
+            listId: taskProjects.listId,
+            revision: taskProjects.revision,
+          })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, project.id)),
+      ).toEqual([
+        {
+          lifecycle:
+            operation === "complete" && projectOperationResult === 200 ? "completed" : "open",
+          listId:
+            operation === "complete" && projectOperationResult === 200
+              ? sourceList.id
+              : destinationList.id,
+          revision: 2,
+        },
+      ]);
+      expect(
+        await database.db
+          .select({
+            lifecycle: reminders.taskLifecycle,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          lifecycle:
+            operation === "complete" && projectOperationResult === 200 ? "completed" : "open",
+          listId:
+            operation === "complete" && projectOperationResult === 200
+              ? sourceList.id
+              : destinationList.id,
+          projectId: project.id,
+          revision: 2,
+        },
+      ]);
+      expect(
+        await database.db
+          .select({ availability: taskLists.availability })
+          .from(taskLists)
+          .where(eq(taskLists.id, sourceList.id)),
+      ).toEqual([{ availability: "archived" }]);
+    }, 20_000);
   });
 
   it("returns every connector callback to ilo when persistence fails unexpectedly", async () => {

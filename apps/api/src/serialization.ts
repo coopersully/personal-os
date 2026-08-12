@@ -5,6 +5,7 @@ import type {
   mailboxes,
   mailThreads,
   reminders,
+  taskLists,
   users,
 } from "@personal-os/database";
 import type {
@@ -16,12 +17,14 @@ import type {
   MailThread,
   Reminder,
   Task,
+  TaskList,
   User,
 } from "@personal-os/domain";
 
 type UserRow = typeof users.$inferSelect;
 type AttentionItemRow = typeof attentionItems.$inferSelect;
 type ReminderRow = typeof reminders.$inferSelect;
+type TaskListRow = typeof taskLists.$inferSelect;
 type CalendarEventRow = typeof calendarEvents.$inferSelect;
 type CalendarRow = typeof calendars.$inferSelect;
 type MailboxRow = typeof mailboxes.$inferSelect;
@@ -107,6 +110,23 @@ export function serializeTask(row: ReminderRow): Task {
     tags: row.tags,
     timezone: row.timezone,
     title: row.title,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTaskList(row: TaskListRow): TaskList {
+  return {
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    availability: row.availability,
+    color: row.color,
+    createdAt: row.createdAt.toISOString(),
+    deletedAt: row.deletedAt?.toISOString() ?? null,
+    description: row.description,
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    revision: row.revision,
+    source: null,
     updatedAt: row.updatedAt.toISOString(),
   };
 }

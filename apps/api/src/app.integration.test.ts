@@ -19,10 +19,11 @@ import {
   mailThreads,
   migrateDatabase,
   reminders,
+  taskProjects,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { createAuthService } from "./auth-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
@@ -195,6 +196,368 @@ describe.sequential("ilo API", () => {
   async function payload(response: Response) {
     return response.status === 204 ? null : response.json();
   }
+
+  describe("task lists", () => {
+    let listSessionToken = "";
+    let listUserId = "";
+
+    async function listRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Session ${listSessionToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function createList(name: string) {
+      const response = await listRequest("/v1/task-lists", { body: { name } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskList as {
+        availability: "active" | "archived";
+        id: string;
+        name: string;
+        revision: number;
+      };
+    }
+
+    beforeAll(async () => {
+      const registration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Task Lists User",
+          email: "task-lists@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(registration.status).toBe(201);
+      const body = await payload(registration);
+      listSessionToken = body.sessionToken;
+      listUserId = body.user.id;
+    });
+
+    it("task lists retrieve the protected Inbox only for its authenticated owner", async () => {
+      expect((await request("/v1/task-lists", { auth: "none" })).status).toBe(401);
+
+      const response = await listRequest("/v1/task-lists");
+      expect(response.status).toBe(200);
+      const result = await payload(response);
+      expect(result).toEqual({
+        items: [
+          expect.objectContaining({
+            archivedAt: null,
+            availability: "active",
+            deletedAt: null,
+            kind: "inbox",
+            name: "Inbox",
+            revision: 1,
+          }),
+        ],
+        nextCursor: null,
+      });
+      expect(
+        (await payload(await listRequest(`/v1/task-lists/${result.items[0].id}`))).taskList,
+      ).toEqual(result.items[0]);
+    });
+
+    it("task lists reject reserved and colliding names while preserving user and idempotency boundaries", async () => {
+      const reserved = await listRequest("/v1/task-lists", {
+        body: { name: "  Ｔｏｄａｙ  " },
+      });
+      expect(reserved.status).toBe(409);
+      expect((await payload(reserved)).error).toMatchObject({ code: "conflict" });
+
+      const canonical = await createList("Ｆｏｃｕｓ　 Plan");
+      const collision = await listRequest("/v1/task-lists", {
+        body: { name: "  focus   plan " },
+      });
+      expect(collision.status).toBe(409);
+      expect((await payload(collision)).error).toMatchObject({
+        code: "conflict",
+        details: { code: "task_list_name_conflict" },
+      });
+
+      const idempotencyKey = "11111111-1111-4111-8111-111111111111";
+      const createInput = {
+        color: "blue",
+        description: "Stable replay",
+        idempotencyKey,
+        name: "Replay List",
+      };
+      const created = await listRequest("/v1/task-lists", { body: createInput });
+      const replayed = await listRequest("/v1/task-lists", { body: createInput });
+      expect(created.status).toBe(201);
+      expect(replayed.status).toBe(201);
+      expect((await payload(replayed)).taskList).toEqual((await payload(created)).taskList);
+      const mismatch = await listRequest("/v1/task-lists", {
+        body: { ...createInput, description: "Different material" },
+      });
+      expect(mismatch.status).toBe(409);
+      expect((await payload(mismatch)).error).toMatchObject({
+        code: "conflict",
+        details: { code: "task_list_idempotency_mismatch" },
+      });
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Other Task Lists User",
+          email: "task-lists-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(otherRegistration.status).toBe(201);
+      const otherSessionToken = (await payload(otherRegistration)).sessionToken as string;
+      expect(
+        (
+          await app.request(`/v1/task-lists/${canonical.id}`, {
+            headers: { authorization: `Session ${otherSessionToken}` },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await app.request("/v1/task-lists", {
+            body: JSON.stringify({ name: "focus plan" }),
+            headers: {
+              authorization: `Session ${otherSessionToken}`,
+              "content-type": "application/json",
+            },
+            method: "POST",
+          })
+        ).status,
+      ).toBe(201);
+
+      const firstPage = await payload(await listRequest("/v1/task-lists?limit=1"));
+      expect(firstPage.items).toHaveLength(1);
+      expect(firstPage.nextCursor).toEqual(expect.any(String));
+      expect(
+        (
+          await payload(
+            await listRequest(
+              `/v1/task-lists?limit=1&cursor=${encodeURIComponent(firstPage.nextCursor)}`,
+            ),
+          )
+        ).items,
+      ).toHaveLength(1);
+    });
+
+    it("task lists guard revisions and Inbox mutation choices and audit successful mutations", async () => {
+      const inbox = (await payload(await listRequest("/v1/task-lists"))).items.find(
+        (item: { kind: string }) => item.kind === "inbox",
+      );
+      const inboxRename = await listRequest(`/v1/task-lists/${inbox.id}`, {
+        body: { expectedRevision: inbox.revision, name: "Renamed Inbox" },
+        method: "PATCH",
+      });
+      expect(inboxRename.status).toBe(409);
+      expect((await payload(inboxRename)).error).toMatchObject({
+        code: "conflict",
+        details: {
+          code: "task_list_inbox_protected",
+          resolutions: ["keep_inbox", "choose_another_list"],
+        },
+      });
+      const inboxArchive = await listRequest(`/v1/task-lists/${inbox.id}/archive`, {
+        body: { expectedRevision: inbox.revision },
+      });
+      expect(inboxArchive.status).toBe(409);
+      expect((await payload(inboxArchive)).error.details).toEqual({
+        code: "task_list_inbox_protected",
+        currentRevision: 1,
+        resolutions: ["keep_inbox", "choose_another_list"],
+      });
+
+      const mutable = await createList("Revision Guard");
+      const updatedResponse = await listRequest(`/v1/task-lists/${mutable.id}`, {
+        body: {
+          color: "violet",
+          description: "Revised once",
+          expectedRevision: mutable.revision,
+        },
+        method: "PATCH",
+      });
+      expect(updatedResponse.status).toBe(200);
+      const updated = (await payload(updatedResponse)).taskList;
+      expect(updated).toMatchObject({
+        color: "violet",
+        description: "Revised once",
+        revision: 2,
+      });
+      const stale = await listRequest(`/v1/task-lists/${mutable.id}`, {
+        body: { expectedRevision: mutable.revision, name: "Stale write" },
+        method: "PATCH",
+      });
+      expect(stale.status).toBe(409);
+      expect((await payload(stale)).error).toMatchObject({
+        code: "conflict",
+        details: { currentRevision: 2 },
+      });
+
+      const archivedResponse = await listRequest(`/v1/task-lists/${mutable.id}/archive`, {
+        body: { expectedRevision: updated.revision },
+      });
+      expect(archivedResponse.status).toBe(200);
+      const archived = (await payload(archivedResponse)).taskList;
+      expect(archived).toMatchObject({
+        archivedAt: "2026-07-13T12:00:00.000Z",
+        availability: "archived",
+        revision: 3,
+      });
+      expect(
+        (
+          await payload(
+            await listRequest(`/v1/task-lists/${mutable.id}/archive`, {
+              body: { expectedRevision: updated.revision },
+            }),
+          )
+        ).error,
+      ).toMatchObject({ code: "conflict", details: { currentRevision: 3 } });
+
+      const audit = await database.db
+        .select({ action: auditEvents.action })
+        .from(auditEvents)
+        .where(and(eq(auditEvents.userId, listUserId), eq(auditEvents.entityId, mutable.id)));
+      expect(audit.map(({ action }) => action)).toEqual([
+        "task_list.created",
+        "task_list.updated",
+        "task_list.archived",
+      ]);
+    });
+
+    it("task lists resolve active-content archive conflicts without implicit mutation", async () => {
+      const source = await createList("Move Source");
+      const destination = await createList("Move Destination");
+      const [project] = await database.db
+        .insert(taskProjects)
+        .values({
+          listId: source.id,
+          name: "Move Project",
+          normalizedName: "move project",
+          userId: listUserId,
+        })
+        .returning();
+      if (!project) throw new Error("Project fixture was not created.");
+      const [task] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: source.id,
+          taskProjectId: project.id,
+          taskRevision: 1,
+          title: "Move Task",
+          userId: listUserId,
+        })
+        .returning();
+      if (!task) throw new Error("Task fixture was not created.");
+
+      const preview = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+        body: { expectedRevision: source.revision },
+      });
+      expect(preview.status).toBe(409);
+      expect((await payload(preview)).error).toMatchObject({
+        code: "conflict",
+        details: {
+          code: "task_list_has_active_contents",
+          currentRevisions: {
+            destinationList: null,
+            project: null,
+            sourceList: 1,
+            task: null,
+          },
+          openContentCounts: { projects: 1, tasks: 1 },
+          resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
+        },
+      });
+
+      const cancelled = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+        body: { expectedRevision: source.revision, resolution: "cancel" },
+      });
+      expect(cancelled.status).toBe(200);
+      expect((await payload(cancelled)).taskList).toMatchObject({
+        availability: "active",
+        revision: 1,
+      });
+      expect(
+        await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, source.id)),
+      ).toHaveLength(1);
+
+      const moved = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+        body: {
+          destinationListId: destination.id,
+          expectedRevision: source.revision,
+          resolution: "move_active_contents",
+        },
+      });
+      expect(moved.status).toBe(200);
+      expect((await payload(moved)).taskList).toMatchObject({
+        availability: "archived",
+        revision: 2,
+      });
+      expect(
+        await database.db.select().from(taskProjects).where(eq(taskProjects.id, project.id)),
+      ).toEqual([expect.objectContaining({ listId: destination.id, revision: 2 })]);
+      expect(await database.db.select().from(reminders).where(eq(reminders.id, task.id))).toEqual([
+        expect.objectContaining({ taskListId: destination.id, taskRevision: 2 }),
+      ]);
+
+      const together = await createList("Archive Together");
+      const [togetherProject] = await database.db
+        .insert(taskProjects)
+        .values({
+          listId: together.id,
+          name: "Stay Project",
+          normalizedName: "stay project",
+          userId: listUserId,
+        })
+        .returning();
+      if (!togetherProject) throw new Error("Together Project fixture was not created.");
+      const [togetherTask] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: together.id,
+          taskProjectId: togetherProject.id,
+          taskRevision: 1,
+          title: "Stay Task",
+          userId: listUserId,
+        })
+        .returning();
+      if (!togetherTask) throw new Error("Together Task fixture was not created.");
+      const archivedTogether = await listRequest(`/v1/task-lists/${together.id}/archive`, {
+        body: {
+          expectedRevision: together.revision,
+          resolution: "archive_contents_together",
+        },
+      });
+      expect(archivedTogether.status).toBe(200);
+      expect((await payload(archivedTogether)).taskList).toMatchObject({
+        availability: "archived",
+        revision: 2,
+      });
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, togetherProject.id)),
+      ).toEqual([{ listId: together.id, revision: 1 }]);
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId, revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, togetherTask.id)),
+      ).toEqual([{ listId: together.id, revision: 1 }]);
+    });
+  });
 
   it("returns every connector callback to ilo when persistence fails unexpectedly", async () => {
     const callbackLogs = vi.fn();

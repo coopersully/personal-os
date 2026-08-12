@@ -3466,6 +3466,20 @@ describe("ilo web app", () => {
     finances.unmount();
   });
 
+  it("switches Mail list scopes without retaining a selected conversation", async () => {
+    const browser = userEvent.setup();
+    const view = setup("/mail?thread=f1000000-0000-4000-8000-000000000136");
+
+    const scope = await screen.findByRole("radiogroup", { name: "Mail list scope" });
+    await browser.click(within(scope).getByRole("radio", { name: "Starred" }));
+
+    expect(view.location.value).toBe("/mail?view=starred");
+    expect(within(scope).getByRole("radio", { name: "All mail" })).toBeInTheDocument();
+    expect(within(scope).getByRole("radio", { name: "Unread" })).toBeInTheDocument();
+    expect(within(scope).getByRole("radio", { name: "Snoozed" })).toBeInTheDocument();
+    view.unmount();
+  });
+
   it("describes task material with scheduled, note-only, and blank states", async () => {
     mocks.listTasks.mockResolvedValueOnce({
       items: [

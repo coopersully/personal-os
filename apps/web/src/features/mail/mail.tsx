@@ -41,6 +41,33 @@ import { formatRelativeTime } from "../../lib/time-format.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
+export const mailListScopes = ["all", "unread", "starred", "snoozed"] as const;
+export type MailListScope = (typeof mailListScopes)[number];
+
+export function isMailListScope(value: string): value is MailListScope {
+  return mailListScopes.some((scope) => scope === value);
+}
+
+export function mailListScopeFromSearch(params: URLSearchParams): MailListScope {
+  const view = params.get("view");
+  if (view === "starred" || view === "snoozed") return view;
+  return params.get("unread") === "1" ? "unread" : "all";
+}
+
+export function mailListScopeParams(scope: MailListScope) {
+  if (scope === "unread") return { unread: "1", view: null };
+  if (scope === "starred") return { unread: null, view: "starred" };
+  if (scope === "snoozed") return { unread: null, view: "snoozed" };
+  return { unread: null, view: null };
+}
+
+function mailListScopeQuery(scope: MailListScope) {
+  if (scope === "unread") return { unread: true };
+  if (scope === "starred") return { starred: true };
+  if (scope === "snoozed") return { snoozed: true };
+  return {};
+}
+
 const googleMailboxNames: Record<string, string> = {
   ALL: "All mail",
   CATEGORY_FORUMS: "Forums",
@@ -323,7 +350,7 @@ export function MailPage({ user }: { user: User }) {
   const accountId = params.get("account");
   const selectedId = params.get("thread");
   const search = params.get("q")?.trim() ?? "";
-  const unreadOnly = params.get("unread") === "1";
+  const listScope = mailListScopeFromSearch(params);
   const composing = params.get("compose") === "1";
   const [composeThread, setComposeThread] = useState<MailThread | null>(null);
   const composeFormRef = useRef<HTMLFormElement>(null);
@@ -344,9 +371,9 @@ export function MailPage({ user }: { user: User }) {
         ...(accountId && !mailboxId ? { accountIds: [accountId] } : {}),
         ...(mailboxId ? { mailboxId } : {}),
         ...(search ? { query: search } : {}),
-        ...(unreadOnly ? { unread: true } : {}),
+        ...mailListScopeQuery(listScope),
       }),
-    queryKey: ["mail-threads", accountId, mailboxId, search, unreadOnly],
+    queryKey: ["mail-threads", accountId, mailboxId, search, listScope],
     refetchInterval: 60_000,
   });
   const drafts = useQuery({
@@ -546,13 +573,13 @@ export function MailPage({ user }: { user: User }) {
             <>
               <div className="mail-thread-list__summary">
                 <span>{threads.data.length} conversations</span>
-                {unreadOnly ? <Badge>Unread</Badge> : null}
+                {listScope === "all" ? null : <Badge>{listScope}</Badge>}
               </div>
               {threads.data.map((thread) => (
                 <ThreadRow
                   active={selected?.id === thread.id}
                   key={thread.id}
-                  select={() => update({ thread: thread.id, view: null })}
+                  select={() => update({ thread: thread.id })}
                   thread={thread}
                 />
               ))}

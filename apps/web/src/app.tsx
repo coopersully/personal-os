@@ -136,6 +136,7 @@ import {
   SearchIcon,
   SettingsIcon,
   SparklesIcon,
+  StarIcon,
   SunIcon,
   TargetIcon,
   TrashIcon,
@@ -303,8 +304,11 @@ import {
 } from "./features/finances/navigation.js";
 import { FinancesPage } from "./features/finances/page.js";
 import {
+  isMailListScope,
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
+  mailListScopeFromSearch,
+  mailListScopeParams,
 } from "./features/mail/mail.js";
 import {
   ReminderRow,
@@ -4372,7 +4376,7 @@ function MotivesPage() {
 function MailTopbarControls() {
   const [searchParams, setSearchParams] = useSearchParams();
   const search = searchParams.get("q")?.trim() ?? "";
-  const unreadOnly = searchParams.get("unread") === "1";
+  const listScope = mailListScopeFromSearch(searchParams);
   const [searchDraft, setSearchDraft] = useState(search);
 
   useEffect(() => setSearchDraft(search), [search]);
@@ -4393,7 +4397,7 @@ function MailTopbarControls() {
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          updateMailState({ q: searchDraft.trim() || null, thread: null, view: null });
+          updateMailState({ q: searchDraft.trim() || null, thread: null });
         }}
       >
         <InputGroup className="mail-topbar__search">
@@ -4409,16 +4413,36 @@ function MailTopbarControls() {
           />
         </InputGroup>
       </form>
-      <ShadcnButton
-        aria-pressed={unreadOnly}
-        onClick={() =>
-          updateMailState({ thread: null, unread: unreadOnly ? null : "1", view: null })
-        }
+      <ShadcnToggleGroup
+        aria-label="Mail list scope"
+        className="mail-topbar__scope-switch"
+        onValueChange={(value) => {
+          if (isMailListScope(value))
+            updateMailState({ thread: null, ...mailListScopeParams(value) });
+        }}
         size="sm"
-        variant={unreadOnly ? "secondary" : "ghost"}
+        spacing={0}
+        type="single"
+        value={listScope}
+        variant="outline"
       >
-        Unread
-      </ShadcnButton>
+        <ShadcnToggleGroupItem aria-label="All mail" value="all">
+          <MailIcon aria-hidden="true" data-icon="inline-start" />
+          <span className="mail-topbar__scope-label">All mail</span>
+        </ShadcnToggleGroupItem>
+        <ShadcnToggleGroupItem aria-label="Unread" value="unread">
+          <EyeIcon aria-hidden="true" data-icon="inline-start" />
+          <span className="mail-topbar__scope-label">Unread</span>
+        </ShadcnToggleGroupItem>
+        <ShadcnToggleGroupItem aria-label="Starred" value="starred">
+          <StarIcon aria-hidden="true" data-icon="inline-start" />
+          <span className="mail-topbar__scope-label">Starred</span>
+        </ShadcnToggleGroupItem>
+        <ShadcnToggleGroupItem aria-label="Snoozed" value="snoozed">
+          <ClockIcon aria-hidden="true" data-icon="inline-start" />
+          <span className="mail-topbar__scope-label">Snoozed</span>
+        </ShadcnToggleGroupItem>
+      </ShadcnToggleGroup>
     </div>
   );
 }

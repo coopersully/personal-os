@@ -466,6 +466,13 @@ describe.sequential("mail service", () => {
     await expect(service.listThreads(userId, { limit: 100, mailboxId: inboxId })).resolves.toEqual([
       expect.objectContaining({ id: threadId }),
     ]);
+    await expect(service.listThreads(userId, { limit: 100, starred: true })).resolves.toEqual([
+      expect.objectContaining({ id: threadId }),
+    ]);
+    await service.snoozeThread(userId, threadId, new Date("2026-07-18T12:00:00.000Z"));
+    await expect(service.listThreads(userId, { limit: 100, snoozed: true })).resolves.toEqual([
+      expect.objectContaining({ id: threadId }),
+    ]);
     await expect(
       service.listThreads(userId, { limit: 100, mailboxId: disabledAccountId }),
     ).rejects.toMatchObject({ code: "not_found" });

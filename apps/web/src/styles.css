@@ -2896,6 +2896,7 @@ p {
 .mail-topbar-controls form { min-width: 0; }
 .workspace-topbar__search,
 .mail-topbar__search { width: min(15rem, 24vw); }
+.mail-topbar__scope-switch { flex: 0 1 auto; min-width: 0; }
 .mail-reader__back {
   display: none;
 }
@@ -4478,6 +4479,7 @@ p {
   }
   .workspace-topbar__search,
   .mail-topbar__search { width: min(10rem, 32vw); }
+  .mail-topbar__scope-label { display: none; }
   .mail-send-recovery {
     border-radius: 12px;
     padding: 14px;

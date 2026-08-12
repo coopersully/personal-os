@@ -215,6 +215,14 @@ export const mailListQuerySchema = z.object({
     .optional(),
   mailboxId: idSchema.optional(),
   query: z.string().trim().min(1).max(200).optional(),
+  snoozed: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
+  starred: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .optional(),
   unread: z
     .enum(["true", "false"])
     .transform((value) => value === "true")

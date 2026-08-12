@@ -1718,15 +1718,15 @@ export function createMailService({
 
     async listThreads(userId: string, query: MailListQuery): Promise<MailThread[]> {
       const conditions = [eq(mailThreads.userId, userId), isNull(mailThreads.deletedAt)];
-      conditions.push(
-        sql`not exists (
-          select 1 from ${mailSnoozes}
-          where ${mailSnoozes.threadId} = ${mailThreads.id}
-            and ${mailSnoozes.until} > ${now()}
-        )`,
-      );
+      const activeSnooze = sql`exists (
+        select 1 from ${mailSnoozes}
+        where ${mailSnoozes.threadId} = ${mailThreads.id}
+          and ${mailSnoozes.until} > ${now()}
+      )`;
+      conditions.push(query.snoozed ? activeSnooze : sql`not ${activeSnooze}`);
       if (query.accountIds?.length)
         conditions.push(inArray(mailThreads.accountId, query.accountIds));
+      if (query.starred !== undefined) conditions.push(eq(mailThreads.starred, query.starred));
       if (query.unread !== undefined) conditions.push(eq(mailThreads.unread, query.unread));
       if (query.query) {
         const pattern = `%${query.query}%`;

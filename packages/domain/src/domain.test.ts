@@ -1200,6 +1200,10 @@ describe("domain schemas", () => {
       }),
     ).toMatchObject({ accountIds: [accountId], limit: 25, unread: true });
     expect(mailListQuerySchema.parse({ unread: "false" }).unread).toBe(false);
+    expect(mailListQuerySchema.parse({ snoozed: "true", starred: "true" })).toMatchObject({
+      snoozed: true,
+      starred: true,
+    });
     expect(
       connectICloudInputSchema.parse({
         appSpecificPassword: "xxxx-xxxx",

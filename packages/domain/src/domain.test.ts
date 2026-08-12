@@ -959,6 +959,18 @@ describe("domain schemas", () => {
       }).success,
     ).toBe(false);
     expect(
+      createTaskListInputSchema.safeParse({
+        name: "Local only",
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: listId,
+          revision: "1",
+          sourceType: "task_list",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
       createTaskProjectInputSchema.safeParse({
         childProject: { name: "Nested" },
         listId,
@@ -1029,10 +1041,27 @@ describe("domain schemas", () => {
       kind: "inbox",
       name: "Inbox",
       revision: 1,
-      source: null,
+      source: {
+        accountId: null,
+        provider: "local",
+        remoteId: listId,
+        revision: "1",
+        sourceType: "task_list",
+      },
       updatedAt: start,
     });
-    expect(taskList).toMatchObject({ deletedAt: null, kind: "inbox" });
+    expect(taskList).toMatchObject({
+      deletedAt: null,
+      kind: "inbox",
+      source: { provider: "local", remoteId: listId, revision: "1" },
+    });
+    expect(taskListSchema.safeParse({ ...taskList, source: null }).success).toBe(false);
+    expect(
+      taskListSchema.safeParse({
+        ...taskList,
+        source: { ...taskList.source, accountId: id, provider: "google" },
+      }).success,
+    ).toBe(false);
     const taskProject = taskProjectSchema.parse({
       archivedAt: null,
       availability: "active",

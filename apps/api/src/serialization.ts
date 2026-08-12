@@ -126,7 +126,13 @@ export function serializeTaskList(row: TaskListRow): TaskList {
     kind: row.kind,
     name: row.name,
     revision: row.revision,
-    source: null,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: String(row.revision),
+      sourceType: "task_list",
+    },
     updatedAt: row.updatedAt.toISOString(),
   };
 }

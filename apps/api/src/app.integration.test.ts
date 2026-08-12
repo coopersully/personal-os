@@ -198,8 +198,11 @@ describe.sequential("ilo API", () => {
   }
 
   describe("task lists", () => {
+    let listAgentToken = "";
+    let listReadToken = "";
     let listSessionToken = "";
     let listUserId = "";
+    let listWriteToken = "";
 
     async function listRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
       const headers = new Headers(options.headers);
@@ -221,7 +224,36 @@ describe.sequential("ilo API", () => {
         id: string;
         name: string;
         revision: number;
+        source: {
+          accountId: null;
+          provider: "local";
+          remoteId: string;
+          revision: string;
+          sourceType: "task_list";
+        };
       };
+    }
+
+    async function agentListRequest(
+      token: string,
+      path: string,
+      options: Omit<RequestOptions, "auth"> = {},
+    ) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Bearer ${token}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function createListAgentToken(name: string, scopes: string[]) {
+      const response = await listRequest("/v1/access-tokens", { body: { name, scopes } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).token.token as string;
     }
 
     beforeAll(async () => {
@@ -238,6 +270,12 @@ describe.sequential("ilo API", () => {
       const body = await payload(registration);
       listSessionToken = body.sessionToken;
       listUserId = body.user.id;
+      listAgentToken = await createListAgentToken("Task Lists agent", [
+        "tasks:read",
+        "tasks:write",
+      ]);
+      listReadToken = await createListAgentToken("Task Lists reader", ["tasks:read"]);
+      listWriteToken = await createListAgentToken("Task Lists writer", ["tasks:write"]);
     });
 
     it("task lists retrieve the protected Inbox only for its authenticated owner", async () => {
@@ -255,6 +293,13 @@ describe.sequential("ilo API", () => {
             kind: "inbox",
             name: "Inbox",
             revision: 1,
+            source: {
+              accountId: null,
+              provider: "local",
+              remoteId: expect.any(String),
+              revision: "1",
+              sourceType: "task_list",
+            },
           }),
         ],
         nextCursor: null,
@@ -272,6 +317,29 @@ describe.sequential("ilo API", () => {
       expect((await payload(reserved)).error).toMatchObject({ code: "conflict" });
 
       const canonical = await createList("Ｆｏｃｕｓ　 Plan");
+      expect(canonical.source).toEqual({
+        accountId: null,
+        provider: "local",
+        remoteId: canonical.id,
+        revision: "1",
+        sourceType: "task_list",
+      });
+      expect(
+        (
+          await listRequest("/v1/task-lists", {
+            body: {
+              name: "Forged provenance",
+              source: {
+                accountId: null,
+                provider: "local",
+                remoteId: canonical.id,
+                revision: "1",
+                sourceType: "task_list",
+              },
+            },
+          })
+        ).status,
+      ).toBe(400);
       const collision = await listRequest("/v1/task-lists", {
         body: { name: "  focus   plan " },
       });
@@ -388,6 +456,21 @@ describe.sequential("ilo API", () => {
         color: "violet",
         description: "Revised once",
         revision: 2,
+        source: {
+          provider: "local",
+          remoteId: mutable.id,
+          revision: "2",
+          sourceType: "task_list",
+        },
+      });
+      expect(
+        (await payload(await listRequest(`/v1/task-lists/${mutable.id}`))).taskList.source,
+      ).toEqual({
+        accountId: null,
+        provider: "local",
+        remoteId: mutable.id,
+        revision: "2",
+        sourceType: "task_list",
       });
       const stale = await listRequest(`/v1/task-lists/${mutable.id}`, {
         body: { expectedRevision: mutable.revision, name: "Stale write" },
@@ -420,7 +503,11 @@ describe.sequential("ilo API", () => {
       ).toMatchObject({ code: "conflict", details: { currentRevision: 3 } });
 
       const audit = await database.db
-        .select({ action: auditEvents.action })
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          before: auditEvents.before,
+        })
         .from(auditEvents)
         .where(and(eq(auditEvents.userId, listUserId), eq(auditEvents.entityId, mutable.id)));
       expect(audit.map(({ action }) => action)).toEqual([
@@ -428,6 +515,68 @@ describe.sequential("ilo API", () => {
         "task_list.updated",
         "task_list.archived",
       ]);
+      expect(audit.find(({ action }) => action === "task_list.created")?.after).toMatchObject({
+        source: { provider: "local", remoteId: mutable.id, revision: "1" },
+      });
+      expect(audit.find(({ action }) => action === "task_list.updated")).toMatchObject({
+        after: { source: { provider: "local", remoteId: mutable.id, revision: "2" } },
+        before: { source: { provider: "local", remoteId: mutable.id, revision: "1" } },
+      });
+      expect(audit.find(({ action }) => action === "task_list.archived")).toMatchObject({
+        after: { source: { provider: "local", remoteId: mutable.id, revision: "3" } },
+        before: { source: { provider: "local", remoteId: mutable.id, revision: "2" } },
+      });
+    });
+
+    it("task lists enforce scoped-token permissions and agent mutation guards", async () => {
+      expect(
+        (
+          await agentListRequest(listReadToken, "/v1/task-lists", {
+            body: { name: "Read cannot create" },
+          })
+        ).status,
+      ).toBe(403);
+      expect((await agentListRequest(listWriteToken, "/v1/task-lists")).status).toBe(403);
+
+      const missingKey = await agentListRequest(listAgentToken, "/v1/task-lists", {
+        body: { name: "Agent missing key" },
+      });
+      expect(missingKey.status).toBe(400);
+      expect((await payload(missingKey)).error).toMatchObject({ code: "invalid_request" });
+
+      const agentInput = {
+        idempotencyKey: "22222222-2222-4222-8222-222222222222",
+        name: "Agent List",
+      };
+      const createdResponse = await agentListRequest(listAgentToken, "/v1/task-lists", {
+        body: agentInput,
+      });
+      expect(createdResponse.status).toBe(201);
+      const created = (await payload(createdResponse)).taskList;
+      const replayResponse = await agentListRequest(listAgentToken, "/v1/task-lists", {
+        body: agentInput,
+      });
+      expect(replayResponse.status).toBe(201);
+      expect((await payload(replayResponse)).taskList).toEqual(created);
+
+      const missingUpdateRevision = await agentListRequest(
+        listAgentToken,
+        `/v1/task-lists/${created.id}`,
+        { body: { name: "Agent update without revision" }, method: "PATCH" },
+      );
+      expect(missingUpdateRevision.status).toBe(400);
+      expect((await payload(missingUpdateRevision)).error).toMatchObject({
+        code: "invalid_request",
+      });
+      const missingArchiveRevision = await agentListRequest(
+        listAgentToken,
+        `/v1/task-lists/${created.id}/archive`,
+        { body: {} },
+      );
+      expect(missingArchiveRevision.status).toBe(400);
+      expect((await payload(missingArchiveRevision)).error).toMatchObject({
+        code: "invalid_request",
+      });
     });
 
     it("task lists resolve active-content archive conflicts without implicit mutation", async () => {

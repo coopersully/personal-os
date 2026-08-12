@@ -48,7 +48,6 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
           color: input.color,
           description: input.description,
           name: normalizedName,
-          source: input.source,
         }),
       )
       .digest("hex");

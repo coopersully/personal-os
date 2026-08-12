@@ -35,6 +35,13 @@ const taskContainerNameSchema = z.string().trim().min(1).max(240);
 const nullableTaskContainerTextSchema = z.string().trim().max(10_000).nullable();
 const nullableTaskContainerColorSchema = z.string().trim().min(1).max(32).nullable();
 const nullableSourceSchema = materialSourceReferenceSchema.nullable();
+const taskListSourceSchema = materialSourceReferenceSchema.extend({
+  accountId: z.null(),
+  provider: z.literal("local"),
+  remoteId: idSchema,
+  revision: z.string().trim().min(1),
+  sourceType: z.literal("task_list"),
+});
 const revisionSchema = z.number().int().positive();
 const optionalExpectedRevisionSchema = revisionSchema.optional();
 const optionalIdempotencyKeySchema = z.uuid().optional();
@@ -53,7 +60,7 @@ export const taskListSchema = taskListFieldsSchema.extend({
   id: idSchema,
   kind: taskListKindSchema,
   revision: revisionSchema,
-  source: nullableSourceSchema,
+  source: taskListSourceSchema,
   updatedAt: isoDateTimeSchema,
 });
 export type TaskList = z.infer<typeof taskListSchema>;
@@ -63,7 +70,6 @@ export const createTaskListInputSchema = taskListFieldsSchema
     description: nullableTaskContainerTextSchema.default(null),
     color: nullableTaskContainerColorSchema.default(null),
     idempotencyKey: optionalIdempotencyKeySchema,
-    source: nullableSourceSchema.default(null),
   })
   .strict();
 export type CreateTaskListInput = z.infer<typeof createTaskListInputSchema>;

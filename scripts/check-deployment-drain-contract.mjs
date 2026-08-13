@@ -200,6 +200,16 @@ requireMatch(
   /api_stopped_preflight_details=[\s\S]*?api_proven_stopped_before=[\s\S]*?api_active_stopping_before=[\s\S]*?api_stopped_inventory_stable=[\s\S]*?api_drain_task_arns=/,
   "complete task capture across running, stopping, replacement, and drain states",
 );
+requireMatch(
+  workflowSource,
+  /--arg app_url "\$APP_URL"[\s\S]*?\.name != "APP_BASE_URL"[\s\S]*?\{name: "APP_BASE_URL", value: \$app_url\}/,
+  "canonical APP_BASE_URL rendering for every MCP task definition",
+);
+requireMatch(
+  workflowSource,
+  /select\(\.name == "APP_BASE_URL" and \.value == \$app_url\)[\s\S]*?Rendered MCP task definition is missing the canonical APP_BASE_URL/,
+  "post-render validation of the MCP application origin",
+);
 if (workflow.includes("--desired-status PENDING")) {
   throw new Error(
     "Deployment drain contract must not use ECS desired-status PENDING; desired RUNNING includes lastStatus PENDING.",

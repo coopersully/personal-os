@@ -2475,7 +2475,7 @@ describe("ilo web app", () => {
     const workspaceMenu = screen.getByRole("menu", { name: "Switch workspace" });
     await waitFor(() => {
       expect(mocks.listEvents).toHaveBeenCalled();
-      expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open" });
+      expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open", limit: 100 });
       expect(mocks.listMailThreads).toHaveBeenCalledWith({});
     });
     expect(mocks.getFinanceWealthSummary).not.toHaveBeenCalled();
@@ -2486,7 +2486,7 @@ describe("ilo web app", () => {
     expect(within(workspaceMenu).getByText("1 open")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("1 unread")).toBeInTheDocument();
     expect(within(workspaceMenu).getByText("1 to review")).toBeInTheDocument();
-    expect(view.queryClient.getQueryData(["tasks", "preview", "open"])).toEqual({
+    expect(view.queryClient.getQueryData(["tasks", "open", "all"])).toEqual({
       items: [task],
       nextCursor: null,
     });
@@ -2589,7 +2589,9 @@ describe("ilo web app", () => {
     await screen.findByRole("heading", { name: "Your commitments" });
 
     await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
-    await waitFor(() => expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open" }));
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open", limit: 100 }),
+    );
     const taskEntryCallsBeforeNavigation = mocks.listTasks.mock.calls.filter(
       ([query]) => query?.listId === id,
     ).length;
@@ -2850,16 +2852,23 @@ describe("ilo web app", () => {
     await browser.click(within(sidebar).getByRole("button", { name: "Manage Work" }));
     await browser.click(screen.getByRole("button", { name: "Archive List" }));
     expect(await screen.findByText(/1 open Projects and 3 open Tasks/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Move active contents to another List before archiving this List.",
+    );
     expect(screen.getByRole("button", { name: "Move active contents" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Archive contents together" })).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Keep List active" }));
+    expect(
+      screen.queryByRole("button", { name: "Archive contents together" }),
+    ).not.toBeInTheDocument();
+    await browser.selectOptions(screen.getByLabelText("Destination List"), id);
+    await browser.click(screen.getByRole("button", { name: "Move active contents" }));
     await waitFor(() =>
       expect(mocks.archiveTaskList).toHaveBeenLastCalledWith(secondId, {
+        destinationListId: id,
         expectedRevision: 9,
-        resolution: "cancel",
+        resolution: "move_active_contents",
       }),
     );
-    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 
     await browser.click(within(sidebar).getByRole("button", { name: "New Project" }));
     mocks.createTaskProject.mockRejectedValueOnce(
@@ -2971,7 +2980,7 @@ describe("ilo web app", () => {
     archiveView.unmount();
   });
 
-  it("applies each List archive resolution with the server revision", async () => {
+  it("applies the recoverable List archive resolution with the server revision", async () => {
     const browser = userEvent.setup();
     const conflict = {
       code: "task_list_has_active_contents" as const,
@@ -3004,20 +3013,6 @@ describe("ilo web app", () => {
       }),
     );
     moveView.unmount();
-
-    rejectWithConflict();
-    const archiveView = setup(`/tasks?list=${secondId}`);
-    await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Manage Work" }));
-    await browser.click(screen.getByRole("button", { name: "Archive List" }));
-    await browser.click(screen.getByRole("button", { name: "Archive contents together" }));
-    await waitFor(() =>
-      expect(mocks.archiveTaskList).toHaveBeenLastCalledWith(secondId, {
-        expectedRevision: 9,
-        resolution: "archive_contents_together",
-      }),
-    );
-    archiveView.unmount();
   });
 
   it("resolves Project completion without inventing child outcomes", async () => {
@@ -3556,12 +3551,15 @@ describe("ilo web app", () => {
       | ((value: { items: (typeof task)[]; nextCursor: null }) => void)
       | undefined;
     mocks.listTasks.mockImplementation((query) => {
-      if (query.cursor === "tasks-next") {
+      if (query.cursor === "tasks-next" && query.listId === id) {
         return new Promise((resolve) => {
           resolveNextPage = resolve;
         });
       }
-      return Promise.resolve({ items: [task], nextCursor: "tasks-next" });
+      return Promise.resolve({
+        items: [task],
+        nextCursor: query.listId === id ? "tasks-next" : null,
+      });
     });
     const view = setup("/tasks");
     await screen.findByText("Draft brief");
@@ -3573,6 +3571,44 @@ describe("ilo web app", () => {
     });
     expect(await screen.findByText("Next page Task")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Load more Tasks" })).not.toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("keeps loaded Tasks visible and retries a failed next page", async () => {
+    const browser = userEvent.setup();
+    let nextPageAttempts = 0;
+    mocks.listTasks.mockImplementation((query) => {
+      if (query.cursor === "tasks-next" && query.listId === id) {
+        nextPageAttempts += 1;
+        return nextPageAttempts === 1
+          ? Promise.reject(new Error("More Tasks are temporarily unavailable"))
+          : Promise.resolve({
+              items: [{ ...task, id: thirdId, title: "Recovered next page Task" }],
+              nextCursor: null,
+            });
+      }
+      return Promise.resolve({
+        items: [task],
+        nextCursor: query.listId === id ? "tasks-next" : null,
+      });
+    });
+
+    const view = setup("/tasks");
+    await screen.findByText("Draft brief");
+    await browser.click(screen.getByRole("button", { name: "Load more Tasks" }));
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenCalledWith(
+        expect.objectContaining({ cursor: "tasks-next", listId: id }),
+      ),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "More Tasks are temporarily unavailable",
+    );
+    expect(screen.getByText("Draft brief")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Retry loading more Tasks" }));
+    expect(await screen.findByText("Recovered next page Task")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry loading more Tasks" })).toBeNull();
     view.unmount();
   });
 
@@ -3732,16 +3768,15 @@ describe("ilo web app", () => {
 
   it("keeps Tasks views useful when loading fails or there is nothing to organize", async () => {
     mocks.listTasks.mockImplementationOnce(() => new Promise(() => undefined));
-    const loading = setup("/tasks");
+    const loading = setup("/tasks?view=today");
     expect(await screen.findByRole("status", { name: "Loading tasks" })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.listTasks).toHaveBeenCalledWith({ limit: 100, view: "today" }),
+    );
     loading.unmount();
 
-    mocks.listTasks.mockImplementation((query) =>
-      query.listId
-        ? Promise.reject(new Error("Tasks are temporarily unavailable"))
-        : Promise.resolve({ items: [task], nextCursor: null }),
-    );
-    const failed = setup("/tasks");
+    mocks.listTasks.mockRejectedValue(new Error("Tasks are temporarily unavailable"));
+    const failed = setup("/tasks?view=upcoming");
     expect(await screen.findByRole("alert")).toHaveTextContent("Tasks are temporarily unavailable");
     failed.unmount();
 
@@ -3816,9 +3851,40 @@ describe("ilo web app", () => {
     mixed.unmount();
   });
 
-  it("keeps terminal Tasks Projects out of ordinary navigation and destinations", async () => {
+  it("keeps unavailable Tasks Projects out of ordinary navigation and destinations", async () => {
+    const archivedList = { ...workTaskList, archivedAt: now, availability: "archived" as const };
     mocks.listTaskProjects.mockResolvedValue({
-      items: [{ ...launchTaskProject, completedAt: now, lifecycle: "completed" }],
+      items: [
+        launchTaskProject,
+        {
+          ...launchTaskProject,
+          archivedAt: now,
+          availability: "archived" as const,
+          id: "44444444-4444-4444-8444-444444444444",
+          listId: id,
+          name: "Archived Project",
+        },
+        {
+          ...launchTaskProject,
+          completedAt: now,
+          id: "55555555-5555-4555-8555-555555555555",
+          lifecycle: "completed" as const,
+          listId: id,
+          name: "Completed Project",
+        },
+        {
+          ...launchTaskProject,
+          cancelledAt: now,
+          id: "66666666-6666-4666-8666-666666666666",
+          lifecycle: "cancelled" as const,
+          listId: id,
+          name: "Cancelled Project",
+        },
+      ],
+      nextCursor: null,
+    });
+    mocks.listTaskLists.mockResolvedValue({
+      items: [inboxTaskList, archivedList],
       nextCursor: null,
     });
     const browser = userEvent.setup();
@@ -3826,12 +3892,51 @@ describe("ilo web app", () => {
     await screen.findByText("Draft brief");
     await waitFor(() => expect(view.location.value).toBe("/tasks"));
     const sidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
-    expect(within(sidebar).queryByRole("link", { name: "Launch" })).not.toBeInTheDocument();
-    await browser.click(within(sidebar).getByRole("link", { name: "Work" }));
-    expect(within(sidebar).queryByRole("link", { name: "Launch" })).not.toBeInTheDocument();
+    for (const name of ["Launch", "Archived Project", "Completed Project", "Cancelled Project"]) {
+      expect(within(sidebar).queryByRole("link", { name })).not.toBeInTheDocument();
+    }
     await browser.click(screen.getByRole("button", { name: "New task" }));
-    expect(screen.getByLabelText("Project")).not.toHaveTextContent("Launch");
+    for (const name of ["Launch", "Archived Project", "Completed Project", "Cancelled Project"]) {
+      expect(screen.getByLabelText("Project")).not.toHaveTextContent(name);
+    }
+    expect(mocks.listTasks).not.toHaveBeenCalledWith(
+      expect.objectContaining({ listId: archivedList.id }),
+    );
     view.unmount();
+  });
+
+  it("retries named Tasks workspace dependencies after initial load failures", async () => {
+    const browser = userEvent.setup();
+
+    mocks.listTaskLists.mockRejectedValueOnce(new Error("Lists are temporarily unavailable"));
+    const listFailure = setup("/tasks");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Lists are temporarily unavailable");
+    await browser.click(screen.getByRole("button", { name: "Retry Lists" }));
+    expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    listFailure.unmount();
+
+    mocks.listTaskProjects.mockRejectedValueOnce(new Error("Projects are temporarily unavailable"));
+    const projectFailure = setup("/tasks");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Projects are temporarily unavailable",
+    );
+    await browser.click(screen.getByRole("button", { name: "Retry Projects" }));
+    expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    projectFailure.unmount();
+
+    let failedTaskPage = false;
+    mocks.listTasks.mockImplementation((query) => {
+      if (query.listId === id && !failedTaskPage) {
+        failedTaskPage = true;
+        return Promise.reject(new Error("Tasks are temporarily unavailable"));
+      }
+      return Promise.resolve({ items: [task], nextCursor: null });
+    });
+    const taskFailure = setup("/tasks");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Tasks are temporarily unavailable");
+    await browser.click(screen.getByRole("button", { name: "Retry Tasks" }));
+    expect(await screen.findByText("Draft brief")).toBeInTheDocument();
+    taskFailure.unmount();
   });
 
   it("shows Tasks capture dependency failures by name", async () => {
@@ -4985,12 +5090,19 @@ describe("ilo web app", () => {
       id: "66666666-6666-4666-8666-666666666666",
       scheduledAt: "2026-07-13T14:00:00.000Z",
       status: "scheduled" as const,
+      title: "Reserved today",
     };
     const suggestedTask = {
       ...task,
       dueAt: null,
       id: "88888888-8888-4888-8888-888888888889",
       title: "Suggested follow-up",
+    };
+    const futureTask = {
+      ...task,
+      dueAt: "2026-07-14T16:00:00.000Z",
+      id: "99999999-9999-4999-8999-999999999999",
+      title: "Future task",
     };
     const completedTask = {
       ...task,
@@ -5015,7 +5127,7 @@ describe("ilo web app", () => {
           urgency: "next" as const,
         },
       ],
-      tasks: [overdueTask, task, scheduledTask, suggestedTask],
+      tasks: [overdueTask, task, scheduledTask, suggestedTask, futureTask],
       timeZone: "UTC",
       today: [],
       tomorrow: [],
@@ -5029,13 +5141,13 @@ describe("ilo web app", () => {
     expect(screen.getByRole("heading", { name: "Your commitments" })).toBeInTheDocument();
     expect(screen.getByText(/No free time before/)).toBeInTheDocument();
     expect(screen.getByText("Overdue tasks")).toBeInTheDocument();
-    expect(screen.getByText("Due today")).toBeInTheDocument();
-    expect(screen.getByText("Next tasks")).toBeInTheDocument();
-    expect(
-      screen.getByText("Ready next · fits in the remaining planning window"),
-    ).toBeInTheDocument();
+    const todayTasks = screen.getByText("Today tasks").closest("section") as HTMLElement;
+    expect(within(todayTasks).getByText("Draft brief")).toBeInTheDocument();
+    expect(within(todayTasks).getByText("Reserved today")).toBeInTheDocument();
+    expect(screen.queryByText("Suggested follow-up")).not.toBeInTheDocument();
+    expect(screen.queryByText("Future task")).not.toBeInTheDocument();
     await browser.click(
-      within(screen.getByText("Next tasks").closest("section") as HTMLElement).getByRole("button", {
+      within(todayTasks).getByRole("button", {
         name: "Open Draft brief",
       }),
     );

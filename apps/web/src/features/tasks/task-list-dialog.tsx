@@ -56,9 +56,7 @@ export function TaskListDialog({
     onSuccess: () => finish(list ? "List updated." : "List created."),
   });
   const archive = useMutation({
-    mutationFn: async (
-      resolution?: "archive_contents_together" | "cancel" | "move_active_contents",
-    ) => {
+    mutationFn: async (resolution?: "cancel" | "move_active_contents") => {
       if (!list) throw new Error("Create the List before archiving it.");
       return api.archiveTaskList(list.id, {
         ...(destinationListId ? { destinationListId } : {}),
@@ -172,7 +170,7 @@ function ListArchiveConflict({
   destinations: TaskList[];
   onCancel: () => void;
   onDestinationChange: (id: string) => void;
-  onResolve: (resolution: "archive_contents_together" | "move_active_contents") => void;
+  onResolve: (resolution: "move_active_contents") => void;
   pending: boolean;
 }) {
   return (
@@ -181,7 +179,8 @@ function ListArchiveConflict({
         <AlertTitle>Choose what happens to active contents</AlertTitle>
         <AlertDescription>
           This List has {conflict.openContentCounts.projects} open Projects and{" "}
-          {conflict.openContentCounts.tasks} open Tasks.
+          {conflict.openContentCounts.tasks} open Tasks. Move active contents to another List before
+          archiving this List.
         </AlertDescription>
       </Alert>
       {conflict.resolutions.includes("move_active_contents") ? (
@@ -207,15 +206,6 @@ function ListArchiveConflict({
             Move active contents
           </Button>
         </Field>
-      ) : null}
-      {conflict.resolutions.includes("archive_contents_together") ? (
-        <Button
-          disabled={pending}
-          onClick={() => onResolve("archive_contents_together")}
-          variant="destructive"
-        >
-          Archive contents together
-        </Button>
       ) : null}
       {conflict.resolutions.includes("cancel") ? (
         <Button disabled={pending} onClick={onCancel} variant="outline">

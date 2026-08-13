@@ -42,8 +42,10 @@ derived from reserved time; Completed and Cancelled derive from lifecycle.
 - Task selection has one canonical URL representation. `view` excludes `list` and `project`; a
   `project` implies its `list`; a List excludes `view` and `project`; Inbox is `/tasks` without its
   generated ID. Search is preserved while selection normalizes.
-- Invalid, archived, terminal, or cross-List selections return to canonical Inbox. Archived Lists
-  and terminal/archived Projects are not ordinary navigation or capture destinations.
+- A valid Project is authoritative: a missing or mismatched `list` parameter rewrites to the
+  Project's actual List. Invalid, archived, or terminal selections return to canonical Inbox.
+  Archived Lists and terminal/archived Projects are not ordinary navigation or capture
+  destinations.
 - The Task editor chooses one List (Inbox by default) and an optional active, open Project in that
   List. It edits content, `why`, priority, estimate, tags, deadline, and reserved time. Deadline and
   reserved time are independent controls.

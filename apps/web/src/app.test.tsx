@@ -2686,6 +2686,21 @@ describe("ilo web app", () => {
     );
   });
 
+  it("keeps Reminders directly reachable from the Tasks contextual sidebar", async () => {
+    const browser = userEvent.setup();
+    const view = setup("/tasks");
+    await screen.findByText("Draft brief");
+    const taskSidebar = screen.getByRole("complementary", { name: "Tasks Sidebar" });
+    const related = within(taskSidebar).getByRole("navigation", {
+      name: "Related commitments",
+    });
+    const reminders = within(related).getByRole("link", { name: "Reminders" });
+    expect(reminders).toHaveAttribute("href", "/reminders");
+    await browser.click(reminders);
+    expect(view.location.value).toBe("/reminders");
+    expect(await screen.findByRole("heading", { name: "Reminders" })).toBeInTheDocument();
+  });
+
   it("requires an explicit Tasks move confirmation when a List change detaches a Project", async () => {
     const browser = userEvent.setup();
     const placedTask = { ...task, listId: secondId, projectId: thirdId };
@@ -3561,7 +3576,7 @@ describe("ilo web app", () => {
     view.unmount();
   });
 
-  it("canonicalizes an explicit Inbox URL and summarizes a selected Project", async () => {
+  it("canonicalizes Inbox and rewrites a mismatched List to the selected Project's List", async () => {
     const browser = userEvent.setup();
     const inboxView = setup(`/tasks?list=${id}`);
     await screen.findByText("Draft brief");
@@ -3570,8 +3585,11 @@ describe("ilo web app", () => {
 
     const projectTask = { ...task, listId: secondId, projectId: thirdId };
     mocks.listTasks.mockResolvedValue({ items: [projectTask], nextCursor: null });
-    const projectView = setup(`/tasks?list=${secondId}&project=${thirdId}`);
+    const projectView = setup(`/tasks?list=${id}&project=${thirdId}`);
     await screen.findByText("Draft brief");
+    await waitFor(() =>
+      expect(projectView.location.value).toBe(`/tasks?list=${secondId}&project=${thirdId}`),
+    );
     await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
     expect(screen.getByLabelText("List")).toHaveValue(secondId);
     expect(screen.getByLabelText("Project")).toHaveValue(thirdId);

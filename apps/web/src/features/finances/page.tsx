@@ -3,7 +3,6 @@ import type {
   FinanceBudgetPacePeriod,
   FinanceBudgetStatus,
   FinanceForecast,
-  FinanceGuidedSetupContext,
   FinanceLedgerHealth,
   FinanceRecurringObligation,
   FinanceReviewCase,
@@ -93,22 +92,6 @@ import { formatMoney } from "./format.js";
 import { financeSectionFromPath } from "./navigation.js";
 import { PlaidConnectButton } from "./plaid-connect.js";
 
-const financeHumanOnlyActionLabels = {
-  add_manual_transaction: "add manual transactions",
-  apply_categorization: "apply category decisions",
-  confirm_ambiguous_transfer: "confirm ambiguous transfers",
-  connect_or_disconnect_source: "connect or disconnect sources",
-  create_merchant_rule: "create permanent merchant rules",
-  import_transactions: "import transactions",
-  manage_accounts: "manage accounts",
-  manage_budgets: "manage budgets",
-  manage_financial_profile: "manage the financial profile",
-  manage_merchants: "rename or merge merchants",
-  refresh_provider_data: "refresh provider data",
-  resolve_alert: "resolve or dismiss alerts",
-  review_recurring_obligation: "change recurring-obligation review state",
-} satisfies Record<FinanceGuidedSetupContext["humanOnlyActions"][number], string>;
-
 export function FinancesPage() {
   const location = useLocation();
   const section = financeSectionFromPath(location.pathname);
@@ -117,23 +100,6 @@ export function FinancesPage() {
   const [budgetMonth, setBudgetMonth] = useState(currentMonth);
   const [budgetPacePeriod, setBudgetPacePeriod] = useState<FinanceBudgetPacePeriod>("week");
   const [accountScopes, setAccountScopes] = useState<Record<string, string[]>>({});
-  const [profileForm, setProfileForm] = useState({
-    effectiveDate: `${currentMonth}-01`,
-    employer: "",
-    employmentType: "" as
-      | ""
-      | "contract"
-      | "full_time"
-      | "part_time"
-      | "self_employed"
-      | "unemployed",
-    expectedNetPay: "",
-    grossAnnualIncome: "",
-    nextPayday: "",
-    payAccountId: "",
-    payFrequency: "" as "" | "biweekly" | "irregular" | "monthly" | "semimonthly" | "weekly",
-    role: "",
-  });
   const overview = useQuery({
     queryFn: () =>
       section === "budgets"
@@ -168,46 +134,12 @@ export function FinancesPage() {
     queryKey: ["finance-ledger-health"],
   });
   const profile = useQuery({
-    enabled: section === "profile" || section === "cashflow" || section === "overview",
+    enabled: section === "cashflow" || section === "overview",
     queryFn: api.getFinanceProfile,
     queryKey: ["finance-profile"],
   });
-  const agentSetup = useQuery({
-    enabled: section === "profile",
-    queryFn: () => api.getFinanceGuidedSetup(),
-    queryKey: ["finance-guided-setup"],
-  });
-  const agentProfile = useQuery({
-    enabled: section === "profile",
-    queryFn: () => api.getDomainProfile("finances"),
-    queryKey: ["domain-profile", "finances"],
-  });
-  const activateAgentProfile = useMutation({
-    mutationFn: async () => {
-      const current = agentProfile.data;
-      if (!current) throw new Error("No Finance guidance draft is available to activate.");
-      return api.upsertDomainProfile({
-        categories: current.categories,
-        domain: "finances",
-        expectedVersion: current.version,
-        instructions: current.instructions,
-        objective: current.objective,
-        preferences: current.preferences,
-        sourceContexts: current.sourceContexts,
-        status: "active",
-        summary: current.summary,
-      });
-    },
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["domain-profile", "finances"] }),
-        queryClient.invalidateQueries({ queryKey: ["finance-guided-setup"] }),
-        queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
-      ]);
-    },
-  });
   const incomeStreams = useQuery({
-    enabled: section === "cashflow" || section === "profile" || section === "overview",
+    enabled: section === "cashflow" || section === "overview",
     queryFn: api.listFinanceIncomeStreams,
     queryKey: ["finance-income-streams"],
   });
@@ -334,23 +266,6 @@ export function FinancesPage() {
       return refresh();
     },
   });
-  const saveProfile = useMutation({
-    mutationFn: () =>
-      api.updateFinanceProfile({
-        effectiveDate: profileForm.effectiveDate,
-        employer: profileForm.employer.trim() || null,
-        employmentType: profileForm.employmentType || null,
-        expectedNetPay: profileForm.expectedNetPay ? Number(profileForm.expectedNetPay) : null,
-        grossAnnualIncome: profileForm.grossAnnualIncome
-          ? Number(profileForm.grossAnnualIncome)
-          : null,
-        nextPayday: profileForm.nextPayday || null,
-        payAccountId: profileForm.payAccountId || null,
-        payFrequency: profileForm.payFrequency || null,
-        role: profileForm.role.trim() || null,
-      }),
-    onSuccess: refresh,
-  });
   const updateRecurring = useMutation({
     mutationFn: ({ id, status }: { id: string; status: "active" | "cancelled" | "paused" }) =>
       api.updateFinanceRecurringObligation(id, { status }),
@@ -370,20 +285,6 @@ export function FinancesPage() {
     mutationFn: api.refreshFinanceInsights,
     onSuccess: refresh,
   });
-  useEffect(() => {
-    if (!profile.data) return;
-    setProfileForm({
-      effectiveDate: profile.data.effectiveDate,
-      employer: profile.data.employer ?? "",
-      employmentType: profile.data.employmentType ?? "",
-      expectedNetPay: profile.data.expectedNetPay?.toString() ?? "",
-      grossAnnualIncome: profile.data.grossAnnualIncome?.toString() ?? "",
-      nextPayday: profile.data.nextPayday ?? "",
-      payAccountId: profile.data.payAccountId ?? "",
-      payFrequency: profile.data.payFrequency ?? "",
-      role: profile.data.role ?? "",
-    });
-  }, [profile.data]);
   const addTransaction = useMutation({
     mutationFn: () =>
       api.createFinanceTransaction({
@@ -546,28 +447,6 @@ export function FinancesPage() {
           </div>
         </div>
       ) : null}
-      {section === "profile" ? (
-        <>
-          <FinanceAgentGuidancePanel
-            activating={activateAgentProfile.isPending}
-            activationEligible={
-              agentProfile.data?.status === "draft" && agentProfile.data.sourceContexts.length > 0
-            }
-            error={agentSetup.error ?? agentProfile.error ?? activateAgentProfile.error}
-            loading={agentSetup.isPending || agentProfile.isPending}
-            onActivate={() => activateAgentProfile.mutate()}
-            profileStatus={agentProfile.data?.status ?? null}
-            setup={agentSetup.data}
-          />
-          <FinancialProfilePanel
-            accounts={overview.data?.accounts ?? []}
-            form={profileForm}
-            onChange={setProfileForm}
-            onSave={() => saveProfile.mutate()}
-            saving={saveProfile.isPending}
-          />
-        </>
-      ) : null}
       {section === "cashflow" ? (
         <CashflowPanel
           alerts={alerts.data ?? []}
@@ -620,7 +499,6 @@ export function FinancesPage() {
         }
         hidden={
           section === "overview" ||
-          section === "profile" ||
           section === "cashflow" ||
           section === "subscriptions"
         }
@@ -1942,386 +1820,6 @@ function FinanceBudgetDetailDialog({
   );
 }
 
-function FinanceAgentGuidancePanel({
-  activating,
-  activationEligible,
-  error,
-  loading,
-  onActivate,
-  profileStatus,
-  setup,
-}: {
-  activating: boolean;
-  activationEligible: boolean;
-  error: Error | null;
-  loading: boolean;
-  onActivate: () => void;
-  profileStatus: "active" | "draft" | null;
-  setup: FinanceGuidedSetupContext | undefined;
-}) {
-  const approvedProfile = setup?.guidance.approvedProfile ?? null;
-  const draftProposal = setup?.guidance.draftProposal ?? null;
-  const guidanceStatus =
-    approvedProfile && draftProposal
-      ? "Active + draft"
-      : approvedProfile
-        ? "Active"
-        : draftProposal || profileStatus === "draft"
-          ? "Draft"
-          : "Not configured";
-  const availableWorkflows =
-    setup?.suggestedWorkflows.filter((workflow) => workflow.available).length ?? 0;
-  const humanOnlyActionLabels =
-    setup?.humanOnlyActions
-      .map((action) => financeHumanOnlyActionLabels[action])
-      .filter((label): label is string => Boolean(label)) ?? [];
-  return (
-    <ShadcnCard>
-      <ShadcnCardHeader>
-        <ShadcnCardTitle>Agent guidance</ShadcnCardTitle>
-        <ShadcnCardDescription>
-          Durable source meanings, review preferences, terminology, thresholds, and safety
-          constraints for Claude, Codex, and other scoped hosts.
-        </ShadcnCardDescription>
-        <ShadcnCardAction>
-          <ShadcnBadge variant={approvedProfile ? "default" : "secondary"}>
-            {guidanceStatus}
-          </ShadcnBadge>
-        </ShadcnCardAction>
-      </ShadcnCardHeader>
-      <ShadcnCardContent className="flex flex-col gap-4">
-        {loading ? <Spinner label="Loading Finance agent guidance" /> : null}
-        {error ? <InlineError error={error} /> : null}
-        {setup ? (
-          <ShadcnItemGroup>
-            <ShadcnItem size="sm" variant="muted">
-              <ShadcnItemContent>
-                <ShadcnItemTitle>Sources ready</ShadcnItemTitle>
-                <ShadcnItemDescription>
-                  {setup.accountSources.length} account
-                  {setup.accountSources.length === 1 ? "" : "s"} available for a short,
-                  example-based interview. Profile source meanings guide interpretation; they do not
-                  restrict the accounts an authorized token can read.
-                </ShadcnItemDescription>
-              </ShadcnItemContent>
-            </ShadcnItem>
-            <ShadcnItem size="sm" variant="muted">
-              <ShadcnItemContent>
-                <ShadcnItemTitle>Suggested workflows</ShadcnItemTitle>
-                <ShadcnItemDescription>
-                  {availableWorkflows} available now. Ledger health and evidence come before
-                  categorization, cash-flow, or monthly-review guidance.
-                </ShadcnItemDescription>
-              </ShadcnItemContent>
-            </ShadcnItem>
-            <ShadcnItem size="sm" variant="muted">
-              <ShadcnItemContent>
-                <ShadcnItemTitle>Human-only boundaries</ShadcnItemTitle>
-                <ShadcnItemDescription>
-                  {humanOnlyActionLabels.length > 0
-                    ? `${humanOnlyActionLabels.join(", ")} stay in Finance.`
-                    : "Consequential finance actions stay in Finance."}
-                </ShadcnItemDescription>
-              </ShadcnItemContent>
-              <ShadcnItemActions>
-                <ShadcnButton asChild size="sm" variant="outline">
-                  <Link to="/settings?section=agent-connections">Connect an agent</Link>
-                </ShadcnButton>
-              </ShadcnItemActions>
-            </ShadcnItem>
-            {approvedProfile ? (
-              <ShadcnItem size="sm" variant="muted">
-                <ShadcnItemContent>
-                  <ShadcnItemTitle>Active approved guidance</ShadcnItemTitle>
-                  <ShadcnItemDescription>
-                    This signed-in-user-approved snapshot remains operative
-                    {draftProposal ? " while the pending draft is reviewed." : "."}
-                  </ShadcnItemDescription>
-                  <FinanceGuidanceDetails
-                    legend="Active approved Finance guidance contents"
-                    profile={approvedProfile}
-                  />
-                </ShadcnItemContent>
-              </ShadcnItem>
-            ) : null}
-            {draftProposal || profileStatus === "draft" ? (
-              <ShadcnItem size="sm" variant="muted">
-                <ShadcnItemContent>
-                  <ShadcnItemTitle>Draft activation</ShadcnItemTitle>
-                  <ShadcnItemDescription>
-                    {activationEligible
-                      ? "Review the recorded source meanings, thresholds, terminology, and safety constraints before activating this guidance."
-                      : "Add at least one owned account source to the draft before activation."}
-                  </ShadcnItemDescription>
-                  {draftProposal ? (
-                    <FinanceGuidanceDetails
-                      legend="Finance guidance draft contents"
-                      profile={draftProposal}
-                    />
-                  ) : null}
-                </ShadcnItemContent>
-                <ShadcnItemActions>
-                  <ShadcnButton
-                    disabled={!activationEligible || activating}
-                    onClick={onActivate}
-                    size="sm"
-                  >
-                    {activating ? "Activating…" : "Activate guidance"}
-                  </ShadcnButton>
-                </ShadcnItemActions>
-              </ShadcnItem>
-            ) : null}
-          </ShadcnItemGroup>
-        ) : null}
-      </ShadcnCardContent>
-    </ShadcnCard>
-  );
-}
-
-function withOccurrenceKeys(values: string[]) {
-  const occurrences = new Map<string, number>();
-  return values.map((value) => {
-    const occurrence = (occurrences.get(value) ?? 0) + 1;
-    occurrences.set(value, occurrence);
-    return { key: `${value}:${occurrence}`, value };
-  });
-}
-
-function FinanceGuidanceDetails({
-  legend,
-  profile,
-}: {
-  legend: string;
-  profile: NonNullable<FinanceGuidedSetupContext["guidance"]["approvedProfile"]>;
-}) {
-  return (
-    <fieldset className="mt-3 grid gap-3 text-sm">
-      <legend className="sr-only">{legend}</legend>
-      <div>
-        <p className="font-medium">Objective</p>
-        <p className="text-muted-foreground">{profile.objective}</p>
-      </div>
-      <div>
-        <p className="font-medium">Summary</p>
-        <p className="text-muted-foreground">{profile.summary}</p>
-      </div>
-      <div>
-        <p className="font-medium">Safety and operating instructions</p>
-        {profile.instructions.length > 0 ? (
-          <ul className="list-disc pl-5 text-muted-foreground">
-            {withOccurrenceKeys(profile.instructions).map(({ key, value }) => (
-              <li key={key}>{value}</li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground">None recorded.</p>
-        )}
-      </div>
-      <div>
-        <p className="font-medium">Account meanings</p>
-        {profile.sourceContexts.length > 0 ? (
-          <ul className="list-disc pl-5 text-muted-foreground">
-            {profile.sourceContexts.map((source) => (
-              <li key={source.sourceId}>
-                {source.sourceLabel} — {source.purpose}
-                {source.notes ? ` — ${source.notes}` : ""}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-muted-foreground">None recorded.</p>
-        )}
-      </div>
-      <div>
-        <p className="font-medium">Categories</p>
-        <p className="text-muted-foreground">
-          {profile.categories.length > 0
-            ? profile.categories
-                .map((category) => `${category.label}: ${category.description}`)
-                .join("; ")
-            : "None recorded."}
-        </p>
-      </div>
-      <div>
-        <p className="font-medium">Preferences</p>
-        <p className="text-muted-foreground">
-          {Object.keys(profile.preferences).length > 0
-            ? Object.entries(profile.preferences)
-                .map(([key, value]) => `${key}: ${String(value)}`)
-                .join("; ")
-            : "None recorded."}
-        </p>
-      </div>
-    </fieldset>
-  );
-}
-
-function FinancialProfilePanel({
-  accounts,
-  form,
-  onChange,
-  onSave,
-  saving,
-}: {
-  accounts: FinanceAccount[];
-  form: {
-    effectiveDate: string;
-    employer: string;
-    employmentType: "" | "contract" | "full_time" | "part_time" | "self_employed" | "unemployed";
-    expectedNetPay: string;
-    grossAnnualIncome: string;
-    nextPayday: string;
-    payAccountId: string;
-    payFrequency: "" | "biweekly" | "irregular" | "monthly" | "semimonthly" | "weekly";
-    role: string;
-  };
-  onChange: React.Dispatch<React.SetStateAction<typeof form>>;
-  onSave: () => void;
-  saving: boolean;
-}) {
-  return (
-    <ShadcnCard>
-      <ShadcnCardHeader>
-        <ShadcnCardTitle>Financial profile</ShadcnCardTitle>
-        <ShadcnCardDescription>
-          Your private baseline for paycheck and cash-flow checks. It is never inferred as a job
-          change without your confirmation.
-        </ShadcnCardDescription>
-        <ShadcnCardAction>
-          <ShadcnButton disabled={saving} onClick={onSave}>
-            {saving ? "Saving…" : "Save profile"}
-          </ShadcnButton>
-        </ShadcnCardAction>
-      </ShadcnCardHeader>
-      <ShadcnCardContent>
-        <ShadcnFieldGroup className="grid gap-4 md:grid-cols-2">
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-employer">Employer</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-employer"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, employer: event.target.value }))
-              }
-              value={form.employer}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-role">Role</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-role"
-              onChange={(event) => onChange((value) => ({ ...value, role: event.target.value }))}
-              value={form.role}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-employment-type">Employment type</ShadcnFieldLabel>
-            <ShadcnNativeSelect
-              id="finance-employment-type"
-              onChange={(event) =>
-                onChange((value) => ({
-                  ...value,
-                  employmentType: event.target.value as typeof form.employmentType,
-                }))
-              }
-              value={form.employmentType}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              <NativeSelectOption value="full_time">Full time</NativeSelectOption>
-              <NativeSelectOption value="part_time">Part time</NativeSelectOption>
-              <NativeSelectOption value="contract">Contract</NativeSelectOption>
-              <NativeSelectOption value="self_employed">Self-employed</NativeSelectOption>
-              <NativeSelectOption value="unemployed">Not employed</NativeSelectOption>
-            </ShadcnNativeSelect>
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-effective-date">Effective date</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-effective-date"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, effectiveDate: event.target.value }))
-              }
-              type="date"
-              value={form.effectiveDate}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-gross-income">Gross annual income</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-gross-income"
-              inputMode="decimal"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, grossAnnualIncome: event.target.value }))
-              }
-              placeholder="0.00"
-              value={form.grossAnnualIncome}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-net-pay">Expected net paycheck</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-net-pay"
-              inputMode="decimal"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, expectedNetPay: event.target.value }))
-              }
-              placeholder="0.00"
-              value={form.expectedNetPay}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-pay-frequency">Pay frequency</ShadcnFieldLabel>
-            <ShadcnNativeSelect
-              id="finance-pay-frequency"
-              onChange={(event) =>
-                onChange((value) => ({
-                  ...value,
-                  payFrequency: event.target.value as typeof form.payFrequency,
-                }))
-              }
-              value={form.payFrequency}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              <NativeSelectOption value="weekly">Weekly</NativeSelectOption>
-              <NativeSelectOption value="biweekly">Every two weeks</NativeSelectOption>
-              <NativeSelectOption value="semimonthly">Twice monthly</NativeSelectOption>
-              <NativeSelectOption value="monthly">Monthly</NativeSelectOption>
-              <NativeSelectOption value="irregular">Irregular</NativeSelectOption>
-            </ShadcnNativeSelect>
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-next-payday">Next payday</ShadcnFieldLabel>
-            <ShadcnInput
-              id="finance-next-payday"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, nextPayday: event.target.value }))
-              }
-              type="date"
-              value={form.nextPayday}
-            />
-          </ShadcnField>
-          <ShadcnField>
-            <ShadcnFieldLabel htmlFor="finance-pay-account">Pay account</ShadcnFieldLabel>
-            <ShadcnNativeSelect
-              id="finance-pay-account"
-              onChange={(event) =>
-                onChange((value) => ({ ...value, payAccountId: event.target.value }))
-              }
-              value={form.payAccountId}
-            >
-              <NativeSelectOption value="">Not set</NativeSelectOption>
-              {accounts.map((account) => (
-                <NativeSelectOption key={account.id} value={account.id}>
-                  {account.institution} · {account.name}
-                </NativeSelectOption>
-              ))}
-            </ShadcnNativeSelect>
-          </ShadcnField>
-        </ShadcnFieldGroup>
-      </ShadcnCardContent>
-    </ShadcnCard>
-  );
-}
-
 function CashflowPanel({
   alerts,
   forecast,
@@ -2573,7 +2071,7 @@ function FinanceOverviewLinks({ reviewCount }: { reviewCount: number }) {
     {
       description: "Set your expected income, pay cadence, and private employment baseline.",
       label: "Financial profile",
-      path: "/finances/profile",
+      path: "/settings?section=finances#guidance",
     },
     {
       description:

@@ -5,7 +5,6 @@ import {
   type Icon,
   ReceiptIcon,
   ShieldCheckIcon,
-  SliderHorizontalIcon,
   WalletIcon,
 } from "@/components/icons";
 
@@ -16,7 +15,6 @@ export type FinanceSection =
   | "health"
   | "imports"
   | "overview"
-  | "profile"
   | "review"
   | "subscriptions"
   | "transactions";
@@ -33,7 +31,6 @@ const navigation: Array<{
       { icon: WalletIcon, id: "budgets", label: "Budgets" },
       { icon: ReceiptIcon, id: "subscriptions", label: "Subscriptions" },
       { icon: ShieldCheckIcon, id: "health", label: "Ledger health" },
-      { icon: SliderHorizontalIcon, id: "profile", label: "Financial profile" },
     ],
     label: "Finances",
   },
@@ -49,7 +46,6 @@ export function financeSectionFromPath(pathname: string): FinanceSection {
       "health",
       "imports",
       "overview",
-      "profile",
       "review",
       "subscriptions",
       "transactions",

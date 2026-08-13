@@ -3004,24 +3004,22 @@ describe("ilo web app", () => {
       ["/finances/health", "Ledger health"],
       ["/finances/review", "Review queue"],
       ["/finances/subscriptions", "Subscriptions"],
-      ["/finances/profile", "Financial profile"],
     ] as const) {
       const view = setup(path);
       expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
-      if (path === "/finances/profile") {
-        expect(await screen.findByText("Agent guidance")).toBeInTheDocument();
-        expect(await screen.findByText("1 available now.", { exact: false })).toBeInTheDocument();
-        expect(screen.getByText("Human-only boundaries")).toBeInTheDocument();
-        expect(
-          screen.getByText("connect or disconnect sources", { exact: false }),
-        ).toBeInTheDocument();
-        expect(screen.getByRole("link", { name: "Connect an agent" })).toHaveAttribute(
-          "href",
-          "/settings?section=agent-connections",
-        );
-      }
       view.unmount();
     }
+  });
+
+  it("moves the legacy financial profile route into Finance settings", async () => {
+    configureFinanceWorkspace();
+    const view = setup("/finances/profile");
+    await waitFor(() => expect(view.location.value).toBe("/settings?section=finances#guidance"));
+    expect(await screen.findByRole("heading", { name: "Finances settings" })).toBeVisible();
+    expect(screen.getByText("Agent guidance")).toBeVisible();
+    expect(await screen.findByText("Human-only boundaries")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Financial profile" })).not.toBeInTheDocument();
+    view.unmount();
   });
 
   it("activates a Finance guidance draft only through the signed-in Finance surface", async () => {
@@ -3059,7 +3057,7 @@ describe("ilo web app", () => {
       },
     });
 
-    const view = setup("/finances/profile");
+    const view = setup("/settings?section=finances");
     const invalidateQueries = vi.spyOn(view.queryClient, "invalidateQueries");
     expect(await screen.findByText(draft.objective)).toBeVisible();
     expect(screen.getByText(draft.summary)).toBeVisible();
@@ -3127,7 +3125,7 @@ describe("ilo web app", () => {
       },
     });
 
-    const view = setup("/finances/profile");
+    const view = setup("/settings?section=finances");
     expect(await screen.findByText("Active + draft")).toBeVisible();
     expect(screen.getByText("Active approved guidance")).toBeVisible();
     expect(screen.getByText(approved.objective)).toBeVisible();
@@ -4517,7 +4515,7 @@ describe("ilo web app", () => {
     });
     const settingsNavigation = within(settingsSidebar);
     expect(settingsNavigation.queryByRole("link", { name: "Invitations" })).not.toBeInTheDocument();
-    await browser.click(settingsNavigation.getByRole("link", { name: "Calendars" }));
+    await browser.click(settingsNavigation.getByRole("link", { name: "Calendar" }));
     await browser.click(screen.getByRole("checkbox", { name: "Hide Personal" }));
     await waitFor(() => expect(mocks.setCalendarSelected).toHaveBeenCalledWith(id, false));
     await browser.click(screen.getByRole("button", { name: "Delete Personal" }));
@@ -5396,7 +5394,7 @@ describe("ilo web app", () => {
       }),
     );
     const settingsView = setup("/settings");
-    await browser.click(await findSettingsLink("Calendars"));
+    await browser.click(await findSettingsLink("Calendar"));
     expect(await screen.findByText(/iCloud Calendar/)).toBeInTheDocument();
     await browser.click(await findSettingsLink("Connections"));
     await browser.click(screen.getByRole("button", { name: "Connect" }));

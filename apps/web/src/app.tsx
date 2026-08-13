@@ -303,6 +303,7 @@ import {
   financeSectionFromPath,
 } from "./features/finances/navigation.js";
 import { FinancesPage } from "./features/finances/page.js";
+import { FinanceSettings } from "./features/finances/settings.js";
 import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
@@ -318,6 +319,7 @@ import { ReviewsPage } from "./features/reviews/page.js";
 import {
   ConnectedAgentsSettings,
   WorkspaceAccessSettings,
+  WorkspaceSettings,
 } from "./features/settings/agent-access.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
 import { SetupPage } from "./features/setup/page.js";
@@ -1320,6 +1322,10 @@ function WorkspaceRoutes({
       <Route path="/reviews" element={<ReviewsPage />} />
       <Route path="/goals" element={<GoalsPage />} />
       <Route path="/motives" element={<MotivesPage />} />
+      <Route
+        path="/finances/profile"
+        element={<Navigate replace to="/settings?section=finances#guidance" />}
+      />
       <Route path="/finances/*" element={<FinancesPage />} />
       <Route path="/settings" element={<SettingsPage setEditor={setEditor} user={user} />} />
       <Route path="*" element={<Navigate replace to="/today" />} />
@@ -2374,7 +2380,6 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/finances/cashflow") return "Cash flow";
   if (pathname === "/finances/health") return "Ledger health";
   if (pathname === "/finances/imports") return "Import history";
-  if (pathname === "/finances/profile") return "Financial profile";
   if (pathname === "/finances/review") return "Review queue";
   if (pathname === "/finances/subscriptions") return "Subscriptions";
   if (pathname === "/finances/transactions") return "Transactions";
@@ -4296,11 +4301,14 @@ function MailComposeButton({ onSelect }: { onSelect?: () => void }) {
 type SettingsSectionId =
   | "agent-connections"
   | "appearance"
-  | "calendars"
+  | "calendar"
   | "connections"
+  | "finances"
   | "invitations"
+  | "mail"
   | "profile"
   | "sessions"
+  | "tasks"
   | "wallpaper"
   | "workspace-access";
 
@@ -4324,10 +4332,16 @@ const settingsNavigation: Array<{
     ],
   },
   {
-    label: "Workspace",
+    label: "Sources",
+    items: [{ icon: CloudIcon, id: "connections", label: "Connections" }],
+  },
+  {
+    label: "Workspaces",
     items: [
-      { icon: CloudIcon, id: "connections", label: "Connections" },
-      { icon: CalendarIcon, id: "calendars", label: "Calendars" },
+      { icon: MailIcon, id: "mail", label: "Mail" },
+      { icon: BankIcon, id: "finances", label: "Finances" },
+      { icon: CalendarIcon, id: "calendar", label: "Calendar" },
+      { icon: ListChecksIcon, id: "tasks", label: "Tasks" },
     ],
   },
   {
@@ -4347,11 +4361,13 @@ function settingsSectionFromSearch(search: string): SettingsSectionId {
   const requestedSection = new URLSearchParams(search).get("section");
   return requestedSection === "account"
     ? "profile"
-    : requestedSection === "agents" || requestedSection === "automations"
-      ? "workspace-access"
-      : settingsSectionIds.has(requestedSection as SettingsSectionId)
-        ? (requestedSection as SettingsSectionId)
-        : "profile";
+    : requestedSection === "calendars"
+      ? "calendar"
+      : requestedSection === "agents" || requestedSection === "automations"
+        ? "workspace-access"
+        : settingsSectionIds.has(requestedSection as SettingsSectionId)
+          ? (requestedSection as SettingsSectionId)
+          : "profile";
 }
 
 export function settingsSectionPath(section: SettingsSectionId): string {
@@ -4419,6 +4435,11 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
     next.set("section", "workspace-access");
     return <Navigate replace to={`/settings?${next.toString()}`} />;
   }
+  if (requestedSection === "calendars") {
+    const next = new URLSearchParams(location.search);
+    next.set("section", "calendar");
+    return <Navigate replace to={`/settings?${next.toString()}`} />;
+  }
   const section = settingsSectionFromSearch(location.search);
   if (section === "invitations" && user.canManageInvitations !== true) {
     return <Navigate replace to="/settings?section=profile" />;
@@ -4426,7 +4447,20 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
   return (
     <div className="narrow-page settings-page">
       <section aria-live="polite" className="settings-panel" key={section}>
-        {section === "calendars" ? <CalendarsSettings setEditor={setEditor} /> : null}
+        {section === "mail" ? <WorkspaceSettings domain="mail" /> : null}
+        {section === "finances" ? (
+          <div className="flex flex-col gap-6">
+            <WorkspaceSettings domain="finances" />
+            <FinanceSettings />
+          </div>
+        ) : null}
+        {section === "calendar" ? (
+          <div className="flex flex-col gap-6">
+            <WorkspaceSettings domain="calendar" />
+            <CalendarsSettings setEditor={setEditor} />
+          </div>
+        ) : null}
+        {section === "tasks" ? <WorkspaceSettings domain="tasks" /> : null}
         {section === "connections" ? <ConnectorsSettings /> : null}
         {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
         {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
@@ -4462,7 +4496,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
         </ShadcnButton>
       }
       description="Choose what appears in your unified view."
-      title="Calendars"
+      title="Calendar sources"
     >
       {calendarGroups.length ? (
         <ShadcnItemGroup className="calendar-settings__groups">

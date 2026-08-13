@@ -14,7 +14,6 @@ import {
   MailIcon,
   ReceiptIcon,
   ShieldCheckIcon,
-  SliderHorizontalIcon,
   TargetIcon,
   WalletIcon,
 } from "../components/icons.js";
@@ -50,7 +49,6 @@ const mobileWorkspacePagesByWorkspace: Record<WorkspaceId, MobileWorkspacePage[]
     { icon: WalletIcon, label: "Budgets", path: "/finances/budgets" },
     { icon: ReceiptIcon, label: "Subscriptions", path: "/finances/subscriptions" },
     { icon: ShieldCheckIcon, label: "Ledger health", path: "/finances/health" },
-    { icon: SliderHorizontalIcon, label: "Financial profile", path: "/finances/profile" },
   ],
 };
 

@@ -11,6 +11,7 @@ import type {
   PinterestWallpaperSettings,
   Reminder,
   Task,
+  TaskListQuery,
   Theme,
   User,
   WeatherCoordinates,
@@ -439,6 +440,55 @@ function workspaceDirection(
 }
 
 const ignorePreviewNavigation = () => undefined;
+
+const maximumTaskPagesPerSurface = 100;
+
+export async function loadAllTaskPages(
+  loadPage: (query: Partial<TaskListQuery>) => Promise<{
+    items: Task[];
+    nextCursor: string | null;
+  }>,
+  query: Partial<TaskListQuery>,
+): Promise<{ items: Task[]; nextCursor: null }> {
+  const items: Task[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (let pageNumber = 0; pageNumber < maximumTaskPagesPerSurface; pageNumber += 1) {
+    const page = await loadPage({ ...query, limit: 100, ...(cursor ? { cursor } : {}) });
+    items.push(...page.items);
+    if (page.nextCursor === null) return { items, nextCursor: null };
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("Task pagination returned a repeated cursor.");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+  throw new Error(`Task pagination exceeded ${maximumTaskPagesPerSurface} pages.`);
+}
+
+export function selectTodayTasks(
+  tasks: Task[],
+  current: Date,
+  timeZone: string,
+): { overdue: Task[]; today: Task[] } {
+  const today = localDateAt(current, timeZone);
+  const overdue: Task[] = [];
+  const relevantToday: Task[] = [];
+  for (const task of tasks) {
+    if (task.lifecycle !== "open" || task.deletedAt !== null) continue;
+    if (task.dueAt !== null && new Date(task.dueAt).getTime() < current.getTime()) {
+      overdue.push(task);
+      continue;
+    }
+    const dueToday =
+      task.dueAt !== null && sameLocalDate(localDateAt(new Date(task.dueAt), timeZone), today);
+    const scheduledToday =
+      task.scheduledAt !== null &&
+      sameLocalDate(localDateAt(new Date(task.scheduledAt), timeZone), today);
+    if (dueToday || scheduledToday) relevantToday.push(task);
+  }
+  return { overdue, today: relevantToday };
+}
 
 export function App() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
@@ -1597,8 +1647,8 @@ function WorkspaceSwitcher({
   });
   const taskInbox = useQuery({
     enabled: menuOpen,
-    queryFn: () => api.listTasks({ lifecycle: "open" }),
-    queryKey: ["tasks", "preview", "open"],
+    queryFn: () => loadAllTaskPages(api.listTasks, { lifecycle: "open" }),
+    queryKey: ["tasks", "open", "all"],
     staleTime: workspaceIntentStaleTime,
   });
   const mailThreads = useQuery({
@@ -1922,19 +1972,10 @@ function TodayPage({
   const openTasks = agenda.tasks.filter(
     (task) => task.lifecycle === "open" && task.deletedAt === null,
   );
-  const overdueTasks = openTasks.filter(
-    (task) => task.dueAt !== null && new Date(task.dueAt).getTime() < currentTime.getTime(),
-  );
-  const todayTasks = openTasks.filter(
-    (task) =>
-      task.dueAt !== null &&
-      new Date(task.dueAt).getTime() >= currentTime.getTime() &&
-      sameLocalDate(localDateAt(new Date(task.dueAt), user.planningTimezone), today),
-  );
-  const nextTasks = openTasks.filter(
-    (task) =>
-      !overdueTasks.some((candidate) => candidate.id === task.id) &&
-      !todayTasks.some((candidate) => candidate.id === task.id),
+  const { overdue: overdueTasks, today: todayTasks } = selectTodayTasks(
+    openTasks,
+    currentTime,
+    user.planningTimezone,
   );
   const recommendedTasks = new Map(
     (agenda.recommendedTasks ?? []).map((recommendation) => [
@@ -1942,16 +1983,17 @@ function TodayPage({
       recommendation,
     ]),
   );
-  nextTasks.sort(
-    (left, right) => Number(recommendedTasks.has(right.id)) - Number(recommendedTasks.has(left.id)),
-  );
   const doneTasksToday = agenda.completedTasks.filter(
     (task) =>
       task.completedAt !== null &&
       sameLocalDate(localDateAt(new Date(task.completedAt), user.planningTimezone), today),
   );
   const remainingCount =
-    overdueReminders.length + todayReminders.length + anytimeReminders.length + openTasks.length;
+    overdueReminders.length +
+    todayReminders.length +
+    anytimeReminders.length +
+    overdueTasks.length +
+    todayTasks.length;
   return (
     <div className="today-layout" data-page="today">
       <section className="day-column">
@@ -2077,8 +2119,7 @@ function TodayPage({
         ) : (
           overdueReminders.length === 0 &&
           overdueTasks.length === 0 &&
-          todayTasks.length === 0 &&
-          nextTasks.length === 0 && (
+          todayTasks.length === 0 && (
             <EmptyState icon={<CircleCheckIcon />} title="Nothing pulling at you">
               Add a reminder when something deserves your attention.
             </EmptyState>
@@ -2103,19 +2144,10 @@ function TodayPage({
         ) : null}
         {todayTasks.length > 0 ? (
           <TaskGroup
-            label="Due today"
+            label="Today tasks"
             recommendations={recommendedTasks}
             setEditor={setEditor}
             tasks={todayTasks}
-            timeZone={user.planningTimezone}
-          />
-        ) : null}
-        {nextTasks.length > 0 ? (
-          <TaskGroup
-            label="Next tasks"
-            recommendations={recommendedTasks}
-            setEditor={setEditor}
-            tasks={nextTasks}
             timeZone={user.planningTimezone}
           />
         ) : null}

@@ -353,7 +353,7 @@ function projectItems({
       items.push({
         action: {
           label: "Review rule",
-          to: `/settings?section=workspace-access&workspace=mail&reviewRule=${rule.id}`,
+          to: `/settings?section=mail&reviewRule=${rule.id}`,
         },
         actionAt: null,
         domain: "mail",

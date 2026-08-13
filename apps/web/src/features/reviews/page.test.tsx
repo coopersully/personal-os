@@ -43,7 +43,7 @@ describe("Reviews", () => {
         {
           action: {
             label: "Review rule",
-            to: "/settings?section=workspace-access&workspace=mail",
+            to: "/settings?section=mail&reviewRule=one",
           },
           actionAt: null,
           domain: "mail",
@@ -88,7 +88,7 @@ describe("Reviews", () => {
     expect(screen.queryByRole("radio", { name: "Setup" })).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Review rule" })).toHaveAttribute(
       "href",
-      "/settings?section=workspace-access&workspace=mail",
+      "/settings?section=mail&reviewRule=one",
     );
     expect(screen.queryByText("Legacy setup item")).not.toBeInTheDocument();
 

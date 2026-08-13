@@ -262,6 +262,17 @@ describe.sequential("Agent Access work-item projection", () => {
     const reviews = await service.list(principal, { kind: "review", limit: 10 }, publishedDomains);
     expect(reviews.items).toHaveLength(3);
     expect(reviews.items.every((item) => item.kind === "review")).toBe(true);
+    expect(reviews.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: expect.objectContaining({
+            label: "Review rule",
+            to: expect.stringMatching(/^\/settings\?section=mail&reviewRule=/),
+          }),
+          title: "Review Statements",
+        }),
+      ]),
+    );
     expect(reviews.filteredTotal).toBe(3);
     expect(reviews.summary.total).toBe(30);
     const persistedSnapshots = await database.db

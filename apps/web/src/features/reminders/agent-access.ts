@@ -70,6 +70,14 @@ export function reminderAgentAccessCapability(
 ): DomainCapability {
   if (support === "unsupported") return unsupportedCapability("Reminders");
   return {
+    allowed: [
+      "Read Reminders",
+      "Create and update individual Reminders",
+      "Preview exact overdue deferrals",
+    ],
+    approvalRequired: ["Approve profile guidance", "Approve any published Reminder-owned rule"],
+    sourceScope:
+      "Reminder permission applies to the Ilo Reminder workspace; per-list credentials are not available.",
     description:
       support === "executable_rules"
         ? "This deployment publishes Reminder preferences, bounded actions, previews, and Reminder-owned executable rules. Setup does not install notifications."
@@ -79,5 +87,6 @@ export function reminderAgentAccessCapability(
       support === "executable_rules"
         ? "Reminder preferences, actions, and rules"
         : "Reminder preferences, actions, and previews",
+    unavailable: ["Notification delivery", "Bulk destructive changes"],
   };
 }

@@ -192,7 +192,7 @@ requireMatch(
 );
 requireMatch(
   main,
-  /runtimeLifecycle\.startBackgroundTask\("scheduled-automation-dispatch"/,
+  /runtimeLifecycle\.startBackgroundTask\("scheduled-mail-rule-dispatch"/,
   "tracked scheduler work",
 );
 requireMatch(

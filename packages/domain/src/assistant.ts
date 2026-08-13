@@ -136,6 +136,82 @@ export const attentionItemQuerySchema = z.object({
 });
 export type AttentionItemQuery = z.infer<typeof attentionItemQuerySchema>;
 
+export const agentAccessDomains = ["mail", "finances", "calendar", "tasks"] as const;
+export const agentAccessDomainSchema = z.enum(agentAccessDomains);
+export type AgentAccessDomain = z.infer<typeof agentAccessDomainSchema>;
+
+export const agentAccessWorkItemKindSchema = z.enum(["review", "attention"]);
+export type AgentAccessWorkItemKind = z.infer<typeof agentAccessWorkItemKindSchema>;
+
+export const agentAccessWorkItemPrioritySchema = z.enum([
+  "person_review",
+  "blocked",
+  "critical",
+  "high",
+  "normal",
+  "low",
+]);
+export type AgentAccessWorkItemPriority = z.infer<typeof agentAccessWorkItemPrioritySchema>;
+
+export const agentAccessWorkItemQuerySchema = z.object({
+  cursor: z.string().trim().min(1).max(4_000).optional(),
+  domain: agentAccessDomainSchema.optional(),
+  kind: agentAccessWorkItemKindSchema.optional(),
+  limit: z.coerce.number().int().min(1).max(10).default(10),
+});
+export type AgentAccessWorkItemQuery = z.infer<typeof agentAccessWorkItemQuerySchema>;
+
+export const agentAccessWorkItemSchema = z.object({
+  action: z
+    .object({
+      label: z.string().trim().min(1).max(120),
+      to: z
+        .string()
+        .trim()
+        .min(1)
+        .max(500)
+        .regex(/^\/(?![\\/])/),
+    })
+    .nullable(),
+  actionAt: isoDateTimeSchema.nullable(),
+  domain: agentAccessDomainSchema.nullable(),
+  id: z.string().trim().min(1).max(300),
+  kind: agentAccessWorkItemKindSchema,
+  priority: agentAccessWorkItemPrioritySchema,
+  source: materialSourceReferenceSchema.nullable(),
+  summary: z.string().trim().min(1).max(1_000),
+  title: z.string().trim().min(1).max(240),
+  updatedAt: isoDateTimeSchema,
+});
+export type AgentAccessWorkItem = z.infer<typeof agentAccessWorkItemSchema>;
+
+const agentAccessWorkItemCountSchema = z.int().nonnegative().nullable();
+
+export const agentAccessWorkItemSummarySchema = z.object({
+  byDomain: z.object({
+    calendar: agentAccessWorkItemCountSchema,
+    finances: agentAccessWorkItemCountSchema,
+    mail: agentAccessWorkItemCountSchema,
+    tasks: agentAccessWorkItemCountSchema,
+  }),
+  byKind: z.object({
+    attention: agentAccessWorkItemCountSchema,
+    review: agentAccessWorkItemCountSchema,
+  }),
+  total: agentAccessWorkItemCountSchema,
+});
+export type AgentAccessWorkItemSummary = z.infer<typeof agentAccessWorkItemSummarySchema>;
+
+export const agentAccessWorkItemPageSchema = z.object({
+  filteredTotal: agentAccessWorkItemCountSchema,
+  items: z.array(agentAccessWorkItemSchema).max(10),
+  nextCursor: z.string().trim().min(1).max(4_000).nullable(),
+  snapshotAt: isoDateTimeSchema,
+  summary: agentAccessWorkItemSummarySchema,
+  unavailableDomains: z.array(agentAccessDomainSchema).max(agentAccessDomains.length),
+});
+export type AgentAccessWorkItemPage = z.infer<typeof agentAccessWorkItemPageSchema>;
+
 export const updateAttentionItemInputSchema = z.object({
   expectedVersion: z.int().positive(),
   status: attentionItemStatusSchema,

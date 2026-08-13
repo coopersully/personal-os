@@ -87,7 +87,6 @@ const protectedResourceMetadata = {
     "goals:read",
     "goals:write",
     "automations:read",
-    "automations:write",
     "audit:read",
     "finances:read",
     "finances:write",

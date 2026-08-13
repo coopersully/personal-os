@@ -29,9 +29,13 @@ export type DomainReadinessItem = {
 };
 
 export type DomainCapability = {
+  allowed: string[];
+  approvalRequired: string[];
   description: string;
+  sourceScope: string;
   setupPrompt: string | null;
   title: string;
+  unavailable: string[];
 };
 
 export const setupDomainOptions: Array<{
@@ -174,8 +178,12 @@ export function unavailableReadiness(title: string, description: string): Domain
 
 export function unsupportedCapability(label: string): DomainCapability {
   return {
+    allowed: [],
+    approvalRequired: [],
     description: `${label} guided setup is not published by this Ilo deployment.`,
+    sourceScope: `No ${label} sources are available to agents.`,
     setupPrompt: null,
     title: `${label} setup unavailable`,
+    unavailable: ["Agent access is unavailable in this deployment."],
   };
 }

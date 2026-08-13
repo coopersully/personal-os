@@ -7,7 +7,7 @@ import type {
 } from "@personal-os/domain";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ChevronDownIcon,
@@ -40,6 +40,14 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog.js";
 import {
   Field,
   FieldContent,
@@ -92,8 +100,8 @@ import { taskAgentAccessCapability, taskAgentAccessReadiness } from "../tasks/ag
 
 const scopeLabels: Record<AccessScope, string> = {
   "audit:read": "Read activity",
-  "automations:read": "Read automations",
-  "automations:write": "Run automations",
+  "automations:read": "Read daily brief",
+  "automations:write": "Legacy automation access (inactive)",
   "bookmarks:read": "Read X bookmarks",
   "calendar:read": "Read calendar",
   "calendar:write": "Manage calendar",
@@ -110,6 +118,9 @@ const scopeLabels: Record<AccessScope, string> = {
 };
 
 const defaultTokenScopes: AccessScope[] = ["mail:read", "mail:write"];
+const selectableScopes = (Object.keys(scopeLabels) as AccessScope[]).filter(
+  (scope) => scope !== "automations:write",
+);
 const tokenPresets: Array<{ description: string; name: string; scopes: AccessScope[] }> = [
   {
     description: "Learn your inbox preferences, preview rules, and run approved Mail rules.",
@@ -130,7 +141,7 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
     ],
   },
   {
-    description: "Read your agenda, mail, and routine results without changing them.",
+    description: "Read your agenda, mail, and generated daily brief without changing them.",
     name: "Daily brief",
     scopes: ["calendar:read", "reminders:read", "mail:read", "automations:read"],
   },
@@ -151,16 +162,43 @@ const tokenPresets: Array<{ description: string; name: string; scopes: AccessSco
       "goals:read",
       "goals:write",
       "automations:read",
-      "automations:write",
       "audit:read",
       "bookmarks:read",
     ],
   },
 ];
 
-export function AgentAccessSettings() {
+export function ConnectedAgentsSettings() {
+  return <AgentAccessSettings view="connections" />;
+}
+
+export function WorkspaceAccessSettings() {
+  return <AgentAccessSettings view="workspaces" />;
+}
+
+function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
   const queryClient = useQueryClient();
-  const [selectedDomain, setSelectedDomain] = useState<SetupDomain>("mail");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [oauthClientToRevoke, setOauthClientToRevoke] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const requestedWorkspace = searchParams.get("workspace");
+  const selectedDomain: SetupDomain = setupDomainOptions.some(
+    (option) => option.domain === requestedWorkspace,
+  )
+    ? (requestedWorkspace as SetupDomain)
+    : "mail";
+  const reviewRuleId = searchParams.get("reviewRule");
+
+  function updateSearchParam(name: string, value: string | null) {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (value === null) next.delete(name);
+      else next.set(name, value);
+      return next;
+    });
+  }
   const guide = useQuery({
     queryFn: api.getAgentConnectionGuide,
     queryKey: ["agent-connection-guide"],
@@ -169,42 +207,43 @@ export function AgentAccessSettings() {
   const selectedDomainEnabled =
     guide.isSuccess && selectedGuide !== undefined && selectedGuide.support !== "unsupported";
   const setup = useQuery({
+    enabled: view === "workspaces",
     queryFn: api.getAssistantSetupStatus,
     queryKey: ["assistant-setup-status"],
   });
   const setupPlan = useQuery({
-    enabled: selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomainEnabled,
     queryFn: () => api.getIloSetup({ domain: selectedDomain }),
     queryKey: ["ilo-setup-plan", selectedDomain],
     refetchInterval: 10_000,
   });
   const mailSetup = useQuery({
-    enabled: selectedDomain === "mail" && selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomain === "mail" && selectedDomainEnabled,
     queryFn: api.getMailSetupContext,
     queryKey: ["mail-setup-context"],
   });
   const rules = useQuery({
-    enabled: selectedDomain === "mail" && selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomain === "mail" && selectedDomainEnabled,
     queryFn: api.listMailRules,
     queryKey: ["mail-rules"],
   });
   const calendars = useQuery({
-    enabled: selectedDomain === "calendar" && selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomain === "calendar" && selectedDomainEnabled,
     queryFn: api.listCalendars,
     queryKey: ["calendars"],
   });
   const tasks = useQuery({
-    enabled: selectedDomain === "tasks" && selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomain === "tasks" && selectedDomainEnabled,
     queryFn: () => api.listTasks({ completed: false, limit: 100 }),
     queryKey: ["tasks", "agent-access", "open"],
   });
   const financeSetup = useQuery({
-    enabled: selectedDomain === "finances" && selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomain === "finances" && selectedDomainEnabled,
     queryFn: api.getFinanceGuidedSetup,
     queryKey: ["finances", "guided-setup"],
   });
   const attention = useQuery({
-    enabled: selectedDomainEnabled,
+    enabled: view === "workspaces" && selectedDomainEnabled,
     queryFn: () => api.listAttentionItems({ domain: selectedDomain, limit: 100, status: "open" }),
     queryKey: ["assistant-attention", selectedDomain, "open"],
   });
@@ -215,6 +254,7 @@ export function AgentAccessSettings() {
     onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => {
       toast.success("Agent connection revoked.");
+      setOauthClientToRevoke(null);
       return queryClient.invalidateQueries({ queryKey: ["oauth-clients"] });
     },
   });
@@ -241,7 +281,6 @@ export function AgentAccessSettings() {
   const attentionResource = queryLoadable(attention);
   const selectedLabel = setupDomainLabels[selectedDomain];
   const selectedSupport: DomainSupport = selectedGuide?.support ?? "unsupported";
-  const mcpConnectionComplete = setupPlan.data?.connection.observed ?? false;
   const guidedSetupComplete = setupPlan.data?.status === "complete";
   const capability = domainCapability(
     selectedDomain,
@@ -294,16 +333,232 @@ export function AgentAccessSettings() {
 
   return (
     <div className="agent-access">
-      <Card className="settings-section agent-access__hero">
-        <CardHeader>
-          <CardTitle>
-            <h2>Connect an agent</h2>
-          </CardTitle>
-          <CardDescription>
-            Connect once. Ilo gives the agent its identity, available work surface, current setup
-            step, evidence, and next tools so the agent can do the setup work itself.
-          </CardDescription>
-          <CardAction>
+      {view === "workspaces" ? (
+        <>
+          <Card className="settings-section agent-access__workspaces">
+            <CardHeader>
+              <CardTitle>
+                <h2>Workspace access</h2>
+              </CardTitle>
+              <CardDescription>
+                See exactly what agents can read, change, and never do in each workspace.
+              </CardDescription>
+              <CardAction>
+                <Button asChild size="sm" variant="outline">
+                  <Link to="/settings?section=agent-connections">Connected agents</Link>
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent className="settings-section__body agent-access__body">
+              {blockingError ? (
+                <Alert variant="destructive">
+                  <XIcon />
+                  <AlertTitle>Agent connection details could not be loaded</AlertTitle>
+                  <AlertDescription>{errorMessage(blockingError)}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              <FieldSet>
+                <FieldLegend className="sr-only" variant="label">
+                  Choose an agent workspace
+                </FieldLegend>
+                <ToggleGroup
+                  aria-label="Agent workspaces"
+                  className="agent-access__domains"
+                  onValueChange={(value) => {
+                    if (value) updateSearchParam("workspace", value);
+                  }}
+                  type="single"
+                  value={selectedDomain}
+                  variant="outline"
+                >
+                  {setupDomainOptions.map((option) => {
+                    const domainGuide = guide.data?.domains.find(
+                      (item) => item.domain === option.domain,
+                    );
+                    const setupPhase = domainSetupPhase({
+                      domain: option.domain,
+                      guideLoading: guide.isPending,
+                      published: domainGuide !== undefined && domainGuide.support !== "unsupported",
+                      setup: setupResource,
+                    });
+                    return (
+                      <ToggleGroupItem
+                        className="agent-access__domain"
+                        disabled={!domainGuide || domainGuide.support === "unsupported"}
+                        key={option.domain}
+                        value={option.domain}
+                      >
+                        <WorkspaceIcon size="md" workspace={option.domain} />
+                        <span className="agent-access__domain-copy">
+                          <span>{option.shortLabel}</span>
+                          <span aria-hidden="true" className="agent-access__domain-phase">
+                            {setupPhase}
+                          </span>
+                        </span>
+                        <CircleCheckIcon
+                          aria-hidden="true"
+                          className="agent-access__domain-selection"
+                        />
+                      </ToggleGroupItem>
+                    );
+                  })}
+                </ToggleGroup>
+              </FieldSet>
+
+              <section
+                aria-labelledby="workspace-capability-heading"
+                className="agent-access__capability"
+              >
+                <div className="agent-access__capability-heading">
+                  <WorkspaceIcon size="md" workspace={selectedDomain} />
+                  <div>
+                    <h3 id="workspace-capability-heading">{capability.title}</h3>
+                    <p>{capability.description}</p>
+                  </div>
+                </div>
+                <p className="agent-access__source-scope">{capability.sourceScope}</p>
+                <div className="agent-access__capability-lists">
+                  <CapabilityList items={capability.allowed} label="Allowed" />
+                  <CapabilityList items={capability.approvalRequired} label="Needs your approval" />
+                  <CapabilityList items={capability.unavailable} label="Not allowed" />
+                </div>
+              </section>
+
+              {selectedDomainError ? (
+                <Alert variant="destructive">
+                  <XIcon />
+                  <AlertTitle>{selectedLabel} readiness could not be loaded</AlertTitle>
+                  <AlertDescription>{errorMessage(selectedDomainError)}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              <DomainReadinessPanel
+                domain={selectedDomain}
+                enabled={selectedDomainEnabled}
+                error={selectedDomainError !== null}
+                key={selectedDomain}
+                label={selectedLabel}
+                loading={readinessPending}
+                readiness={readiness}
+              />
+
+              <div className="agent-access__steps">
+                <ConnectionStep
+                  complete={guidedSetupComplete}
+                  defaultOpen={!guidedSetupComplete}
+                  description="After connection, the agent calls get_ilo_context to orient itself, then get_ilo_setup for the current semantic step, domain context, required tools, and approval boundary. A separately installed skill is not required."
+                  number="1"
+                  status={
+                    setupPlan.isPending
+                      ? `Checking ${selectedLabel} setup…`
+                      : setupPlan.isError
+                        ? `${selectedLabel} setup status is unavailable.`
+                        : (setupPlan.data?.nextAction ?? "Waiting for the setup protocol.")
+                  }
+                  title="Let the agent set up Ilo"
+                >
+                  <Alert role="status" variant="info">
+                    <ShieldCheckIcon />
+                    <AlertTitle>
+                      {setupPlan.data
+                        ? (setupPlan.data.steps.find(
+                            (step) => step.id === setupPlan.data?.currentStepId,
+                          )?.title ?? capability.title)
+                        : `Loading ${selectedLabel} setup`}
+                    </AlertTitle>
+                    <AlertDescription>
+                      {setupPlan.data?.nextAction ??
+                        "Ilo is checking the authenticated setup plan and domain state."}{" "}
+                      {!guide.isPending ? capability.description : ""}
+                    </AlertDescription>
+                  </Alert>
+
+                  {setupPlan.data ? (
+                    <ItemGroup className="agent-access__protocol-steps">
+                      {setupPlan.data.steps.map((step) => (
+                        <SetupProtocolStep key={step.id} step={step} />
+                      ))}
+                    </ItemGroup>
+                  ) : null}
+
+                  <Collapsible>
+                    <CollapsibleTrigger asChild>
+                      <Button className="agent-access__protocol-trigger" size="sm" variant="ghost">
+                        Setup protocol details
+                        <ChevronDownIcon data-icon="inline-end" />
+                      </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="agent-access__protocol-details">
+                      <p>
+                        Most hosts can begin from the tool description. If yours waits for a
+                        request, send this one sentence. The hosted skill remains an optional
+                        reference for hosts that support skills.
+                      </p>
+                      <CopyPrompt
+                        copyLabel="Copy agent setup request"
+                        label="Agent setup request"
+                        loading={guide.isPending}
+                        value={guide.data?.skill.setupPrompt ?? ""}
+                      />
+                      {guide.data ? (
+                        <Item size="xs" variant="muted">
+                          <ItemMedia variant="icon">
+                            <ShieldCheckIcon />
+                          </ItemMedia>
+                          <ItemContent>
+                            <ItemTitle>
+                              Optional setup reference v{guide.data.skill.version}
+                            </ItemTitle>
+                            <ItemDescription>
+                              Protocol {setupPlan.data?.protocolVersion ?? "1.0"} · source revision{" "}
+                              {guide.data.skill.revision}
+                            </ItemDescription>
+                          </ItemContent>
+                          <ItemActions>
+                            <Button asChild size="sm" variant="ghost">
+                              <a href={guide.data.skill.sourceUrl} rel="noreferrer" target="_blank">
+                                View skill source
+                                <ExternalLinkIcon data-icon="inline-end" />
+                              </a>
+                            </Button>
+                          </ItemActions>
+                        </Item>
+                      ) : null}
+                    </CollapsibleContent>
+                  </Collapsible>
+                </ConnectionStep>
+              </div>
+            </CardContent>
+          </Card>
+
+          {selectedDomain === "mail" && selectedDomainEnabled ? (
+            <MailRuleReviewDialog
+              accounts={mailSources}
+              onClose={() => updateSearchParam("reviewRule", null)}
+              profileActive={
+                mailProfile.state === "ready" && mailProfile.data?.profileStatus === "active"
+              }
+              profileLoading={mailProfile.state === "loading"}
+              profileUnavailable={mailProfile.state === "unavailable"}
+              reviewRuleId={reviewRuleId}
+              rules={rules.data ?? []}
+              unavailable={rules.isError}
+            />
+          ) : null}
+        </>
+      ) : null}
+
+      {view === "connections" ? (
+        <>
+          <header className="agent-access__page-heading">
+            <div>
+              <h2>Connected agents</h2>
+              <p>
+                See every host and local credential that can act in Ilo, then revoke access in one
+                place.
+              </p>
+            </div>
             <Badge
               variant={
                 !connectionCountLoading && !connectionCountUnavailable && connectedAgentCount > 0
@@ -315,285 +570,134 @@ export function AgentAccessSettings() {
                 ? "Checking connections"
                 : connectionCountUnavailable
                   ? "Connections unavailable"
-                  : connectedAgentCount > 0
-                    ? `${connectedAgentCount} connected`
-                    : "Not connected"}
+                  : `${connectedAgentCount} connected`}
             </Badge>
-          </CardAction>
-        </CardHeader>
-        <CardContent className="settings-section__body agent-access__body">
-          {blockingError ? (
-            <Alert variant="destructive">
-              <XIcon />
-              <AlertTitle>Agent connection details could not be loaded</AlertTitle>
-              <AlertDescription>{errorMessage(blockingError)}</AlertDescription>
-            </Alert>
-          ) : null}
+          </header>
 
-          <FieldSet>
-            <FieldLegend variant="label">Product setup</FieldLegend>
-            <ToggleGroup
-              aria-label="Domain to set up"
-              className="agent-access__domains"
-              onValueChange={(value) => {
-                if (value) setSelectedDomain(value as SetupDomain);
-              }}
-              type="single"
-              value={selectedDomain}
-              variant="outline"
-            >
-              {setupDomainOptions.map((option) => {
-                const domainGuide = guide.data?.domains.find(
-                  (item) => item.domain === option.domain,
-                );
-                const setupPhase = domainSetupPhase({
-                  domain: option.domain,
-                  guideLoading: guide.isPending,
-                  published: domainGuide !== undefined && domainGuide.support !== "unsupported",
-                  setup: setupResource,
-                });
-                return (
-                  <ToggleGroupItem
-                    className="agent-access__domain"
-                    disabled={!domainGuide || domainGuide.support === "unsupported"}
-                    key={option.domain}
-                    value={option.domain}
-                  >
-                    <WorkspaceIcon size="md" workspace={option.domain} />
-                    <span className="agent-access__domain-copy">
-                      <span>{option.shortLabel}</span>
-                      <span aria-hidden="true" className="agent-access__domain-phase">
-                        {setupPhase}
-                      </span>
-                    </span>
-                    <CircleCheckIcon
-                      aria-hidden="true"
-                      className="agent-access__domain-selection"
-                    />
-                  </ToggleGroupItem>
-                );
-              })}
-            </ToggleGroup>
-          </FieldSet>
-
-          {selectedDomainError ? (
-            <Alert variant="destructive">
-              <XIcon />
-              <AlertTitle>{selectedLabel} readiness could not be loaded</AlertTitle>
-              <AlertDescription>{errorMessage(selectedDomainError)}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          <DomainReadinessPanel
-            domain={selectedDomain}
-            enabled={selectedDomainEnabled}
-            error={selectedDomainError !== null}
-            key={selectedDomain}
-            label={selectedLabel}
-            loading={readinessPending}
-            readiness={readiness}
-          />
-
-          {selectedDomain === "mail" && selectedDomainEnabled ? (
-            <MailRuleReview
-              accounts={mailSources}
-              loading={rules.isPending}
-              profileActive={
-                mailProfile.state === "ready" && mailProfile.data?.profileStatus === "active"
-              }
-              profileLoading={mailProfile.state === "loading"}
-              profileUnavailable={mailProfile.state === "unavailable"}
-              rules={rules.data ?? []}
-              unavailable={rules.isError}
-            />
-          ) : null}
-
-          <div className="agent-access__steps">
-            <ConnectionStep
-              complete={mcpConnectionComplete}
-              defaultOpen={!mcpConnectionComplete}
-              description="Add this remote MCP URL to the host and authorize Ilo. This is the only setup handoff the person must complete. Provider credentials stay in Ilo."
-              number="1"
-              status={
-                setupPlan.isPending
-                  ? "Checking for a connected host…"
-                  : setupPlan.isError
-                    ? "Connection status is unavailable."
-                    : mcpConnectionComplete
-                      ? "MCP connection confirmed by Ilo."
-                      : "Waiting for a host to connect."
-              }
-              title="Connect an agent"
-            >
+          <Card className="settings-section" size="sm">
+            <CardHeader>
+              <CardTitle>
+                <h3>Connect an agent host</h3>
+              </CardTitle>
+              <CardDescription>
+                Add Ilo’s MCP endpoint to a compatible host. Provider credentials stay in Ilo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
               <CopyInput
                 label="Ilo MCP URL"
                 loading={guide.isPending}
                 value={guide.data?.mcpUrl ?? ""}
               />
-            </ConnectionStep>
+            </CardContent>
+          </Card>
 
-            <ConnectionStep
-              complete={guidedSetupComplete}
-              defaultOpen={mcpConnectionComplete && !guidedSetupComplete}
-              description="After connection, the agent calls get_ilo_context to orient itself, then get_ilo_setup for the current semantic step, domain context, required tools, and approval boundary. A separately installed skill is not required."
-              number="2"
-              status={
-                setupPlan.isPending
-                  ? `Checking ${selectedLabel} setup…`
-                  : setupPlan.isError
-                    ? `${selectedLabel} setup status is unavailable.`
-                    : (setupPlan.data?.nextAction ?? "Waiting for the setup protocol.")
-              }
-              title="Let the agent set up Ilo"
-            >
-              <Alert role="status" variant="info">
-                <ShieldCheckIcon />
-                <AlertTitle>
-                  {setupPlan.data
-                    ? (setupPlan.data.steps.find(
-                        (step) => step.id === setupPlan.data?.currentStepId,
-                      )?.title ?? capability.title)
-                    : `Loading ${selectedLabel} setup`}
-                </AlertTitle>
-                <AlertDescription>
-                  {setupPlan.data?.nextAction ??
-                    "Ilo is checking the authenticated setup plan and domain state."}{" "}
-                  {!guide.isPending ? capability.description : ""}
-                </AlertDescription>
-              </Alert>
+          <section
+            aria-labelledby="access-management-heading"
+            className="agent-access__access"
+            id="access-management"
+          >
+            <div className="agent-access__section-heading">
+              <h2 id="access-management-heading">Access management</h2>
+              <p>Review connected hosts and least-privilege local credentials.</p>
+            </div>
 
-              {setupPlan.data ? (
-                <ItemGroup className="agent-access__protocol-steps">
-                  {setupPlan.data.steps.map((step) => (
-                    <SetupProtocolStep key={step.id} step={step} />
-                  ))}
-                </ItemGroup>
-              ) : null}
+            {(oauthClients.data?.length ?? 0) > 0 ? (
+              <Card className="settings-section" size="sm">
+                <CardHeader>
+                  <CardTitle>
+                    <h3>Connected hosts</h3>
+                  </CardTitle>
+                  <CardDescription>
+                    OAuth connections can be revoked without affecting Ilo sessions.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <ItemGroup>
+                    {oauthClients.data?.map((client) => (
+                      <Item key={client.id} variant="outline">
+                        <ItemMedia variant="icon">
+                          {/* OAuth client names are self-asserted, not verified provider identities. */}
+                          <PlugIcon />
+                        </ItemMedia>
+                        <ItemContent>
+                          <ItemTitle>{client.name}</ItemTitle>
+                          <ItemDescription>
+                            {client.scopes.map((scope) => scopeLabels[scope]).join(" · ")} ·{" "}
+                            {client.lastUsedAt ? "Used recently" : "Not used yet"}
+                          </ItemDescription>
+                        </ItemContent>
+                        <ItemActions>
+                          <Button
+                            aria-label={`Revoke ${client.name}`}
+                            disabled={revokeOAuthClient.isPending}
+                            onClick={() =>
+                              setOauthClientToRevoke({ id: client.id, name: client.name })
+                            }
+                            size="icon"
+                            type="button"
+                            variant="ghost"
+                          >
+                            <TrashIcon />
+                          </Button>
+                        </ItemActions>
+                      </Item>
+                    ))}
+                  </ItemGroup>
+                </CardContent>
+              </Card>
+            ) : null}
 
-              <Collapsible>
-                <CollapsibleTrigger asChild>
-                  <Button className="agent-access__protocol-trigger" size="sm" variant="ghost">
-                    Setup protocol details
-                    <ChevronDownIcon data-icon="inline-end" />
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="agent-access__protocol-details">
-                  <p>
-                    Most hosts can begin from the tool description. If yours waits for a request,
-                    send this one sentence. The hosted skill remains an optional reference for hosts
-                    that support skills.
-                  </p>
-                  <CopyPrompt
-                    copyLabel="Copy agent setup request"
-                    label="Agent setup request"
-                    loading={guide.isPending}
-                    value={guide.data?.skill.setupPrompt ?? ""}
-                  />
-                  {guide.data ? (
-                    <Item size="xs" variant="muted">
-                      <ItemMedia variant="icon">
-                        <ShieldCheckIcon />
-                      </ItemMedia>
-                      <ItemContent>
-                        <ItemTitle>Optional setup reference v{guide.data.skill.version}</ItemTitle>
-                        <ItemDescription>
-                          Protocol {setupPlan.data?.protocolVersion ?? "1.0"} · source revision{" "}
-                          {guide.data.skill.revision}
-                        </ItemDescription>
-                      </ItemContent>
-                      <ItemActions>
-                        <Button asChild size="sm" variant="ghost">
-                          <a href={guide.data.skill.sourceUrl} rel="noreferrer" target="_blank">
-                            View skill source
-                            <ExternalLinkIcon data-icon="inline-end" />
-                          </a>
-                        </Button>
-                      </ItemActions>
-                    </Item>
-                  ) : null}
-                </CollapsibleContent>
-              </Collapsible>
-            </ConnectionStep>
-          </div>
-        </CardContent>
-      </Card>
-
-      {(oauthClients.data?.length ?? 0) > 0 ? (
-        <Card className="settings-section" size="sm">
-          <CardHeader>
-            <CardTitle>
-              <h2>Connected hosts</h2>
-            </CardTitle>
-            <CardDescription>
-              OAuth connections can be revoked without affecting Ilo sessions.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ItemGroup>
-              {oauthClients.data?.map((client) => (
-                <Item key={client.id} variant="outline">
-                  <ItemMedia variant="icon">
-                    {/* OAuth client names are self-asserted, not verified provider identities. */}
-                    <PlugIcon />
-                  </ItemMedia>
-                  <ItemContent>
-                    <ItemTitle>{client.name}</ItemTitle>
-                    <ItemDescription>
-                      {client.scopes.length} permissions ·{" "}
-                      {client.lastUsedAt ? "Used recently" : "Not used yet"}
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button
-                      aria-label={`Revoke ${client.name}`}
-                      disabled={revokeOAuthClient.isPending}
-                      onClick={() => revokeOAuthClient.mutate(client.id)}
-                      size="icon"
-                      type="button"
-                      variant="ghost"
-                    >
-                      <TrashIcon />
-                    </Button>
-                  </ItemActions>
-                </Item>
-              ))}
-            </ItemGroup>
-          </CardContent>
-        </Card>
+            <TokenAccess
+              activeTokens={activeTokens}
+              currentTime={currentTime}
+              inactiveTokens={(tokens.data ?? []).filter(
+                (token) => !activeTokens.some((active) => active.id === token.id),
+              )}
+              loading={tokens.isPending}
+            />
+          </section>
+          <RevokeAccessDialog
+            description="This host will immediately lose its Ilo access. Your Ilo sessions and provider connections will not be changed."
+            name={oauthClientToRevoke?.name ?? null}
+            onConfirm={() => {
+              if (oauthClientToRevoke) revokeOAuthClient.mutate(oauthClientToRevoke.id);
+            }}
+            onOpenChange={(open) => {
+              if (!open && !revokeOAuthClient.isPending) setOauthClientToRevoke(null);
+            }}
+            pending={revokeOAuthClient.isPending}
+          />
+        </>
       ) : null}
-
-      <TokenAccess
-        activeTokens={activeTokens}
-        loading={tokens.isPending}
-        revokedTokens={(tokens.data ?? []).filter((token) => token.revokedAt !== null)}
-      />
     </div>
   );
 }
 
-function MailRuleReview({
+function MailRuleReviewDialog({
   accounts,
-  loading,
+  onClose,
   profileActive,
   profileLoading,
   profileUnavailable,
+  reviewRuleId,
   rules,
   unavailable,
 }: {
   accounts: MailSetupAccount[];
-  loading: boolean;
+  onClose: () => void;
   profileActive: boolean;
   profileLoading: boolean;
   profileUnavailable: boolean;
+  reviewRuleId: string | null;
   rules: Awaited<ReturnType<typeof api.listMailRules>>;
   unavailable: boolean;
 }) {
   const queryClient = useQueryClient();
-  const [reviewed, setReviewed] = useState<{ id: string; preview: MailRulePreview } | null>(null);
-  const review = useMutation({
-    mutationFn: api.previewSavedMailRule,
-    onError: (error) => toast.error(errorMessage(error)),
-    onSuccess: (preview, id) => setReviewed({ id, preview }),
+  const preview = useQuery({
+    enabled: reviewRuleId !== null,
+    queryFn: () => api.previewSavedMailRule(reviewRuleId as string),
+    queryKey: ["mail-rule-preview", reviewRuleId],
   });
   const activate = useMutation({
     mutationFn: ({ id, preview }: { id: string; preview: MailRulePreview }) =>
@@ -605,137 +709,144 @@ function MailRuleReview({
       }),
     onError: (error) => toast.error(errorMessage(error)),
     onSuccess: async () => {
-      setReviewed(null);
       toast.success("Mail rule activated.");
+      onClose();
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["mail-rules"] }),
         queryClient.invalidateQueries({ queryKey: ["mail-setup-context"] }),
+        queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
         queryClient.invalidateQueries({ queryKey: ["assistant-setup-status"] }),
       ]);
     },
   });
-  if (loading) return null;
-  if (unavailable) {
-    return (
-      <Alert variant="destructive">
-        <XIcon />
-        <AlertTitle>Mail rules are unavailable</AlertTitle>
-        <AlertDescription>
-          Ilo cannot report an approved-rule count or open rule review until Mail rules load.
-        </AlertDescription>
-      </Alert>
-    );
-  }
-  if (rules.length === 0) return null;
   const accountNames = new Map(
     accounts.map((account) => [account.accountId, account.email ?? account.label]),
   );
-  const reviewedRule = reviewed ? rules.find((rule) => rule.id === reviewed.id) : null;
+  const reviewedRule = reviewRuleId ? rules.find((rule) => rule.id === reviewRuleId) : null;
+  const reviewed = preview.data;
+
   return (
-    <section aria-labelledby="mail-rule-review-heading" className="agent-access__rule-review">
-      <div>
-        <h3 id="mail-rule-review-heading">Review Mail rules</h3>
-        <p>Agents can draft rules. Only you can activate one after reviewing its current sample.</p>
-      </div>
-      <ItemGroup>
-        {rules.map((rule) => (
-          <Item key={rule.id} size="sm" variant="outline">
-            <ItemContent>
-              <ItemTitle>{rule.name}</ItemTitle>
-              <ItemDescription>
-                {describeMailRule(rule)} ·{" "}
-                {rule.enabled && rule.policy === "approved_rule" ? "Active" : "Draft"}
-              </ItemDescription>
-            </ItemContent>
-            {!rule.enabled ? (
-              <ItemActions>
-                <Button
-                  disabled={review.isPending}
-                  onClick={() => review.mutate(rule.id)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Review
-                </Button>
-              </ItemActions>
-            ) : null}
-          </Item>
-        ))}
-      </ItemGroup>
-      {reviewed ? (
-        <div className="agent-access__rule-preview">
-          <Alert role="status" variant={reviewed.preview.window.truncated ? "warning" : "info"}>
-            <ShieldCheckIcon />
-            <AlertTitle>
-              {reviewed.preview.matchedCount} current match
-              {reviewed.preview.matchedCount === 1 ? "" : "es"}
-            </AlertTitle>
+    <Dialog
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      open={reviewRuleId !== null}
+    >
+      <DialogContent className="agent-access__rule-dialog">
+        <DialogHeader>
+          <DialogTitle>
+            {reviewedRule ? `Review ${reviewedRule.name}` : "Review Mail rule"}
+          </DialogTitle>
+          <DialogDescription>
+            Review the current bounded sample before activating this agent-drafted rule.
+          </DialogDescription>
+        </DialogHeader>
+
+        {unavailable ? (
+          <Alert variant="destructive">
+            <XIcon />
+            <AlertTitle>Mail rules are unavailable</AlertTitle>
             <AlertDescription>
-              Reviewed {formatPreviewWindow(reviewed.preview)}. This is a bounded recent sample; the
-              rule condition will also govern future matching Mail. Activation rechecks this sample,
-              due states, rule version, and fingerprint.
-              {reviewedRule
-                ? ` Rule scope: ${formatRuleSources(reviewedRule.sourceIds, accountNames)}.`
-                : ""}
+              Reload Mail rules before making an activation decision.
             </AlertDescription>
           </Alert>
-          {reviewed.preview.candidates.length > 0 ? (
-            <ItemGroup aria-label="Exact Mail rule matches">
-              {reviewed.preview.candidates.map((candidate) => (
-                <Item key={candidate.id} size="xs" variant="muted">
-                  <ItemContent>
-                    <ItemTitle>{candidate.subject || "(No subject)"}</ItemTitle>
-                    <ItemDescription>
-                      {candidate.from.address} ·{" "}
-                      {accountNames.get(candidate.accountId) ?? "Unknown account"} ·{" "}
-                      {formatCandidateActions(candidate.actions)}
-                    </ItemDescription>
-                  </ItemContent>
-                </Item>
-              ))}
-            </ItemGroup>
-          ) : null}
-          {!profileActive ? (
-            <Alert variant="warning">
+        ) : null}
+
+        {preview.isPending ? (
+          <Alert role="status" variant="info">
+            <ShieldCheckIcon />
+            <AlertTitle>Checking current matches</AlertTitle>
+            <AlertDescription>
+              Ilo is rebuilding the bounded preview for this rule.
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {preview.isError ? (
+          <Alert variant="destructive">
+            <XIcon />
+            <AlertTitle>Rule preview could not be loaded</AlertTitle>
+            <AlertDescription>{errorMessage(preview.error)}</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {reviewed ? (
+          <div className="agent-access__rule-preview">
+            <Alert role="status" variant={reviewed.window.truncated ? "warning" : "info"}>
               <ShieldCheckIcon />
               <AlertTitle>
-                {profileLoading
-                  ? "Mail profile status is loading"
-                  : profileUnavailable
-                    ? "Mail profile status is unavailable"
-                    : "Activate your Mail profile first"}
+                {reviewed.matchedCount} current match
+                {reviewed.matchedCount === 1 ? "" : "es"}
               </AlertTitle>
               <AlertDescription>
-                {profileLoading
-                  ? "Wait for setup status before deciding whether this rule can be activated."
-                  : profileUnavailable
-                    ? "Reload setup status before deciding whether this rule can be activated."
-                    : "Review and accept the profile summary in your agent conversation before activating a rule."}
+                Reviewed {formatPreviewWindow(reviewed)}. This is a bounded recent sample; the rule
+                condition will also govern future matching Mail. Activation rechecks this sample,
+                due states, rule version, and fingerprint.
+                {reviewedRule
+                  ? ` Rule scope: ${formatRuleSources(reviewedRule.sourceIds, accountNames)}.`
+                  : ""}
               </AlertDescription>
             </Alert>
-          ) : null}
+            {reviewed.candidates.length > 0 ? (
+              <ItemGroup aria-label="Exact Mail rule matches">
+                {reviewed.candidates.map((candidate) => (
+                  <Item key={candidate.id} size="xs" variant="muted">
+                    <ItemContent>
+                      <ItemTitle>{candidate.subject || "(No subject)"}</ItemTitle>
+                      <ItemDescription>
+                        {candidate.from.address} ·{" "}
+                        {accountNames.get(candidate.accountId) ?? "Unknown account"} ·{" "}
+                        {formatCandidateActions(candidate.actions)}
+                      </ItemDescription>
+                    </ItemContent>
+                  </Item>
+                ))}
+              </ItemGroup>
+            ) : null}
+            {!profileActive ? (
+              <Alert variant="warning">
+                <ShieldCheckIcon />
+                <AlertTitle>
+                  {profileLoading
+                    ? "Mail profile status is loading"
+                    : profileUnavailable
+                      ? "Mail profile status is unavailable"
+                      : "Activate your Mail profile first"}
+                </AlertTitle>
+                <AlertDescription>
+                  {profileLoading
+                    ? "Wait for setup status before deciding whether this rule can be activated."
+                    : profileUnavailable
+                      ? "Reload setup status before deciding whether this rule can be activated."
+                      : "Review and accept the profile summary in your agent conversation before activating a rule."}
+                </AlertDescription>
+              </Alert>
+            ) : null}
+          </div>
+        ) : null}
+
+        <DialogFooter showCloseButton>
           <Button
-            disabled={activate.isPending || !profileActive || reviewed.preview.ruleVersion === null}
-            onClick={() => activate.mutate(reviewed)}
+            disabled={
+              !reviewRuleId ||
+              !reviewed ||
+              activate.isPending ||
+              unavailable ||
+              !profileActive ||
+              reviewed.ruleVersion === null
+            }
+            onClick={() => {
+              if (reviewRuleId && reviewed)
+                activate.mutate({ id: reviewRuleId, preview: reviewed });
+            }}
             type="button"
           >
             Activate reviewed rule
           </Button>
-        </div>
-      ) : null}
-    </section>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
-}
-
-function describeMailRule(rule: Awaited<ReturnType<typeof api.listMailRules>>[number]): string {
-  const action = rule.actions
-    .map(
-      (item) =>
-        `${item.type.replaceAll("_", " ")}${item.afterDays ? ` after ${item.afterDays}d` : ""}`,
-    )
-    .join(", ");
-  return `${rule.condition.field} ${rule.condition.operator.replaceAll("_", " ")} “${rule.condition.value}” → ${action}`;
 }
 
 function formatPreviewWindow(preview: MailRulePreview): string {
@@ -763,6 +874,19 @@ function formatCandidateActions(actions: MailRulePreview["candidates"][number]["
       return `${label}${delay} — ${action.due ? "due now" : "retained until due"}`;
     })
     .join("; ");
+}
+
+function CapabilityList({ items, label }: { items: string[]; label: string }) {
+  return (
+    <div>
+      <h4>{label}</h4>
+      <ul>
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function DomainReadinessPanel({
@@ -986,17 +1110,22 @@ function CopyPrompt({
 
 function TokenAccess({
   activeTokens,
+  currentTime,
+  inactiveTokens,
   loading,
-  revokedTokens,
 }: {
   activeTokens: Awaited<ReturnType<typeof api.listAccessTokens>>;
+  currentTime: number;
+  inactiveTokens: Awaited<ReturnType<typeof api.listAccessTokens>>;
   loading: boolean;
-  revokedTokens: Awaited<ReturnType<typeof api.listAccessTokens>>;
 }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [secret, setSecret] = useState<string | null>(null);
+  const [tokenToRevoke, setTokenToRevoke] = useState<
+    Awaited<ReturnType<typeof api.listAccessTokens>>[number] | null
+  >(null);
   const [tokenName, setTokenName] = useState("Local agent");
   const [scopes, setScopes] = useState<AccessScope[]>(defaultTokenScopes);
   const create = useMutation({
@@ -1005,7 +1134,10 @@ function TokenAccess({
     onSuccess: (token) => {
       setSecret(token.token);
       toast.success("Local agent token created.");
-      return queryClient.invalidateQueries({ queryKey: ["tokens"] });
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tokens"] }),
+        queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
+      ]);
     },
   });
   const remove = useMutation({
@@ -1013,7 +1145,11 @@ function TokenAccess({
     onError: (error) => toast.error(errorMessage(error)),
     onSuccess: () => {
       toast.success("Agent token revoked.");
-      return queryClient.invalidateQueries({ queryKey: ["tokens"] });
+      setTokenToRevoke(null);
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["tokens"] }),
+        queryClient.invalidateQueries({ queryKey: ["agent-access-work-items"] }),
+      ]);
     },
   });
   const selectedPreset =
@@ -1054,7 +1190,9 @@ function TokenAccess({
                   <FieldDescription>Name the host or device that will use it.</FieldDescription>
                 </FieldContent>
                 <Input
+                  autoComplete="off"
                   id="token-name"
+                  name="token-name"
                   onChange={(event) => setTokenName(event.target.value)}
                   value={tokenName}
                 />
@@ -1096,7 +1234,7 @@ function TokenAccess({
                       Fine-tune permissions
                     </FieldLegend>
                     <FieldGroup className="token-permissions">
-                      {(Object.keys(scopeLabels) as AccessScope[]).map((scope) => (
+                      {selectableScopes.map((scope) => (
                         <Field key={scope} orientation="horizontal">
                           <Checkbox
                             checked={scopes.includes(scope)}
@@ -1156,7 +1294,8 @@ function TokenAccess({
                 <ItemContent>
                   <ItemTitle>{token.name}</ItemTitle>
                   <ItemDescription>
-                    {token.scopes.length} permissions ·{" "}
+                    {tokenScopeSummary(token.scopes)}
+                    {" · "}
                     {token.lastUsedAt ? "Used recently" : "Not used yet"}
                   </ItemDescription>
                 </ItemContent>
@@ -1164,7 +1303,7 @@ function TokenAccess({
                   <Button
                     aria-label={`Revoke ${token.name}`}
                     disabled={remove.isPending}
-                    onClick={() => remove.mutate(token.id)}
+                    onClick={() => setTokenToRevoke(token)}
                     size="icon"
                     type="button"
                     variant="ghost"
@@ -1177,30 +1316,102 @@ function TokenAccess({
           </ItemGroup>
         ) : null}
 
-        {revokedTokens.length > 0 ? (
+        {inactiveTokens.length > 0 ? (
           <Collapsible className="agent-access__revoked">
             <CollapsibleTrigger asChild>
               <Button type="button" variant="ghost">
-                Revoked tokens · {revokedTokens.length}
+                Inactive tokens · {inactiveTokens.length}
                 <ChevronDownIcon data-icon="inline-end" />
               </Button>
             </CollapsibleTrigger>
             <CollapsibleContent>
               <ItemGroup>
-                {revokedTokens.map((token) => (
+                {inactiveTokens.map((token) => (
                   <Item key={token.id} size="xs" variant="muted">
                     <ItemContent>
                       <ItemTitle>{token.name}</ItemTitle>
-                      <ItemDescription>Revoked</ItemDescription>
+                      <ItemDescription>
+                        {token.revokedAt
+                          ? "Revoked"
+                          : token.expiresAt && new Date(token.expiresAt).getTime() <= currentTime
+                            ? `Expired · ${tokenScopeSummary(token.scopes)}`
+                            : "Inactive"}
+                      </ItemDescription>
                     </ItemContent>
+                    {!token.revokedAt ? (
+                      <ItemActions>
+                        <Button
+                          aria-label={`Revoke ${token.name}`}
+                          disabled={remove.isPending}
+                          onClick={() => setTokenToRevoke(token)}
+                          size="icon-xs"
+                          type="button"
+                          variant="ghost"
+                        >
+                          <TrashIcon />
+                        </Button>
+                      </ItemActions>
+                    ) : null}
                   </Item>
                 ))}
               </ItemGroup>
             </CollapsibleContent>
           </Collapsible>
         ) : null}
+        <RevokeAccessDialog
+          description="This local credential will immediately stop working. Existing Ilo sessions and connected providers will not be changed."
+          name={tokenToRevoke?.name ?? null}
+          onConfirm={() => {
+            if (tokenToRevoke) remove.mutate(tokenToRevoke.id);
+          }}
+          onOpenChange={(open) => {
+            if (!open && !remove.isPending) setTokenToRevoke(null);
+          }}
+          pending={remove.isPending}
+        />
       </CardContent>
     </Card>
+  );
+}
+
+function tokenScopeSummary(scopes: AccessScope[]): string {
+  const currentScopes = scopes
+    .filter((scope) => scope !== "automations:write")
+    .map((scope) => scopeLabels[scope]);
+  if (scopes.includes("automations:write")) currentScopes.push("Legacy inactive permission");
+  return currentScopes.join(" · ");
+}
+
+function RevokeAccessDialog({
+  description,
+  name,
+  onConfirm,
+  onOpenChange,
+  pending,
+}: {
+  description: string;
+  name: string | null;
+  onConfirm: () => void;
+  onOpenChange: (open: boolean) => void;
+  pending: boolean;
+}) {
+  return (
+    <Dialog onOpenChange={onOpenChange} open={name !== null}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{name ? `Revoke ${name}?` : "Revoke access?"}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button disabled={pending} onClick={() => onOpenChange(false)} variant="outline">
+            Cancel
+          </Button>
+          <Button disabled={pending} onClick={onConfirm} variant="destructive">
+            {pending ? "Revoking…" : "Revoke access"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

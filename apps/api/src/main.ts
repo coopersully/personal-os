@@ -33,11 +33,9 @@ const scheduler = setInterval(() => {
       throw new Error("Scheduled connector sync failed.");
     });
   });
-  runtimeLifecycle.startBackgroundTask("scheduled-automation-dispatch", async () => {
-    await app.dispatchDueAutomations().catch((error: unknown) => {
-      process.stderr.write(
-        `[personal-os] scheduled automation dispatch failed: ${String(error)}\n`,
-      );
+  runtimeLifecycle.startBackgroundTask("scheduled-mail-rule-dispatch", async () => {
+    await app.dispatchDueMailRuleWork().catch((error: unknown) => {
+      process.stderr.write(`[personal-os] scheduled Mail rule dispatch failed: ${String(error)}\n`);
       throw error;
     });
   });
@@ -57,9 +55,9 @@ runtimeLifecycle.startBackgroundTask("startup-connector-sync", async () => {
 runtimeLifecycle.startBackgroundTask("icloud-mail-idle-supervisor", () =>
   app.superviseICloudMail(),
 );
-runtimeLifecycle.startBackgroundTask("startup-automation-dispatch", async () => {
-  await app.dispatchDueAutomations().catch((error: unknown) => {
-    process.stderr.write(`[personal-os] scheduled automation dispatch failed: ${String(error)}\n`);
+runtimeLifecycle.startBackgroundTask("startup-mail-rule-dispatch", async () => {
+  await app.dispatchDueMailRuleWork().catch((error: unknown) => {
+    process.stderr.write(`[personal-os] scheduled Mail rule dispatch failed: ${String(error)}\n`);
     throw error;
   });
 });

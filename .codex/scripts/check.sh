@@ -16,5 +16,7 @@ for file in "${required_files[@]}"; do
 done
 
 bash -n ./.codex/scripts/environment.sh
+bash -n ./.codex/scripts/environment.test-docker.sh
+bash ./.codex/scripts/environment.test.sh
 
 echo "Codex local environment check passed."

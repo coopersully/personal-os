@@ -8,8 +8,6 @@ import type {
 } from "@personal-os/connectors";
 import {
   auditEvents,
-  automationRoutines,
-  automationRuns,
   calendarAccounts,
   calendarEvents,
   connectorSubscriptions,
@@ -27,7 +25,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { eq, inArray } from "drizzle-orm";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { createAuthService } from "./auth-service.js";
-import { createAutomationService } from "./automation-service.js";
+import { createDailyBriefService } from "./daily-brief-service.js";
 import type { EmailMessage } from "./email-delivery.js";
 import { GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { DEMO_QA_PASSWORD, loadQaFixtures, qaFixtureAccounts } from "./qa-fixtures.js";
@@ -823,7 +821,7 @@ describe.sequential("ilo API", () => {
   });
 
   it("serves health, registration, sessions, tokens, reminders, calendars, events, and audit", async () => {
-    await app.dispatchDueAutomations();
+    await app.dispatchDueMailRuleWork();
     const live = await request("/health/live", { auth: "none" });
     expect(await payload(live)).toEqual({
       status: "ok",
@@ -1517,7 +1515,6 @@ describe.sequential("ilo API", () => {
             "goals:write",
             "audit:read",
             "automations:read",
-            "automations:write",
             "bookmarks:read",
           ],
         },
@@ -1525,6 +1522,13 @@ describe.sequential("ilo API", () => {
     );
     agentToken = createdToken.token.token;
     expect(agentToken).toMatch(/^pos_/);
+    expect(
+      (
+        await request("/v1/access-tokens", {
+          body: { name: "Legacy writer", scopes: ["automations:write"] },
+        })
+      ).status,
+    ).toBe(400);
     expect((await payload(await request("/v1/access-tokens"))).tokens).toHaveLength(1);
     expect((await request("/v1/connectors", { auth: "agent" })).status).toBe(403);
     const financeGuidanceDraft = {
@@ -1860,157 +1864,10 @@ describe.sequential("ilo API", () => {
     expect(redactedBrief.brief.completedTasks).toEqual([]);
     agentToken = fullAgentToken;
 
-    const routine = (
-      await payload(
-        await request("/v1/automations", {
-          body: {
-            schedule: "Weekdays at 8:00 AM",
-            template: "morning_brief",
-            timezone: "America/New_York",
-          },
-        }),
-      )
-    ).routine;
-    expect(routine.title).toBe("Morning Brief");
-    expect(
-      (
-        await request("/v1/automations", {
-          body: {
-            schedule: "Weekdays at 8:00 AM",
-            template: "morning_brief",
-            timezone: "America/New_York",
-          },
-        })
-      ).status,
-    ).toBe(409);
-    const updatedRoutine = await payload(
-      await request(`/v1/automations/${routine.id}`, {
-        body: { enabled: false, schedule: "Weekdays at 9:00 AM" },
-        method: "PATCH",
-      }),
-    );
-    expect(updatedRoutine.routine).toMatchObject({
-      enabled: false,
-      schedule: "Weekdays at 9:00 AM",
-      timezone: "America/New_York",
-    });
-    expect(
-      (
-        await request(`/v1/automations/${routine.id}`, {
-          auth: "agent",
-          body: { enabled: true },
-          method: "PATCH",
-        })
-      ).status,
-    ).toBe(403);
-    expect(
-      (
-        await request(`/v1/automations/${routine.id}`, {
-          body: {},
-          method: "PATCH",
-        })
-      ).status,
-    ).toBe(400);
-    expect((await request("/v1/automations", { auth: "agent" })).status).toBe(200);
+    expect((await request("/v1/automations")).status).toBe(404);
+
     const dailyBrief = await payload(await request("/v1/daily-brief", { auth: "agent" }));
     expect(dailyBrief.brief.timeZone).toBe("America/New_York");
-    expect((await payload(await request("/v1/automations/runs", { auth: "agent" }))).runs).toEqual(
-      [],
-    );
-    const dryRun = await payload(
-      await request(`/v1/automations/${routine.id}/runs`, {
-        auth: "agent",
-        body: { dryRun: true },
-      }),
-    );
-    expect(dryRun.run.status).toBe("dry_run");
-    const completedRun = await payload(
-      await request(`/v1/automations/${routine.id}/runs`, {
-        auth: "agent",
-        body: { dryRun: false },
-      }),
-    );
-    expect(completedRun.run.status).toBe("completed");
-    expect(
-      (
-        await payload(
-          await request(`/v1/automations/runs?routineId=${routine.id}`, { auth: "agent" }),
-        )
-      ).runs,
-    ).toHaveLength(2);
-    expect(
-      (
-        await request(`/v1/automations/${crypto.randomUUID()}/runs`, {
-          auth: "agent",
-          body: { dryRun: false },
-        })
-      ).status,
-    ).toBe(404);
-    await database.db.insert(automationRuns).values({
-      brief: null,
-      completedAt: null,
-      routineId: routine.id,
-      startedAt: new Date("2026-07-13T11:00:00.000Z"),
-      status: "failed",
-      summary: "A failed test run.",
-      userId: registrationBody.user.id,
-    });
-    await database.db.insert(automationRuns).values({
-      // Simulate a run stored before task/capacity fields were introduced.
-      brief: { generatedAt: "2026-07-13T11:00:00.000Z" } as never,
-      completedAt: new Date("2026-07-13T11:05:00.000Z"),
-      routineId: routine.id,
-      startedAt: new Date("2026-07-13T11:00:00.000Z"),
-      status: "completed",
-      summary: "A legacy test run.",
-      userId: registrationBody.user.id,
-    });
-    await database.db.insert(automationRuns).values({
-      // Older records may predate the generated-at timestamp too.
-      brief: {} as never,
-      completedAt: new Date("2026-07-13T11:05:00.000Z"),
-      routineId: routine.id,
-      startedAt: new Date("2026-07-13T10:00:00.000Z"),
-      status: "completed",
-      summary: "An oldest legacy test run.",
-      userId: registrationBody.user.id,
-    });
-    expect(
-      (await payload(await request("/v1/automations/runs", { auth: "agent" }))).runs.some(
-        (run: { brief: unknown; completedAt: unknown; status: string }) =>
-          run.status === "failed" && run.brief === null && run.completedAt === null,
-      ),
-    ).toBe(true);
-    expect(
-      (await payload(await request("/v1/automations/runs", { auth: "agent" }))).runs.find(
-        (run: { summary: string }) => run.summary === "A legacy test run.",
-      ),
-    ).toMatchObject({
-      brief: {
-        capacity: {
-          availableMinutes: 0,
-          flexibleTaskMinutes: 0,
-          scheduledTaskMinutes: 0,
-        },
-        completedTasks: [],
-        tasks: [],
-      },
-    });
-    expect(
-      (await payload(await request("/v1/automations/runs", { auth: "agent" }))).runs.find(
-        (run: { summary: string }) => run.summary === "An oldest legacy test run.",
-      ),
-    ).toMatchObject({
-      brief: {
-        capacity: {
-          workdayEndsAt: "2026-07-13T10:00:00.000Z",
-          workdayStartsAt: "2026-07-13T10:00:00.000Z",
-        },
-      },
-    });
-    expect(
-      (await payload(await request("/v1/automations", { auth: "agent" }))).routines[0].lastRunAt,
-    ).toBe("2026-07-13T12:00:00.000Z");
 
     const first = (
       await payload(
@@ -2206,9 +2063,6 @@ describe.sequential("ilo API", () => {
       auth: "agent",
       body: { expectedUpdatedAt: cutoffBoundary.updatedAt },
     });
-    await expect(
-      request(`/v1/automations/${routine.id}/runs`, { auth: "agent", body: { dryRun: true } }),
-    ).resolves.toMatchObject({ status: 201 });
     const second = (
       await payload(
         await request("/v1/reminders", { auth: "agent", body: { title: "Second reminder" } }),
@@ -3237,75 +3091,7 @@ describe.sequential("ilo API", () => {
     await expect(directAuth.getUser(crypto.randomUUID())).rejects.toMatchObject({
       code: "not_found",
     });
-    const directAutomations = createAutomationService({
-      db: database.db,
-      listEvents: async () => [],
-      listReminders: async () => [],
-      listTasks: async () => [],
-      now: () => new Date("2026-07-13T12:00:00.000Z"),
-    });
-    await expect(
-      directAutomations.create(crypto.randomUUID(), {
-        schedule: "Daily",
-        template: "nightly_review",
-        timezone: "UTC",
-      }),
-    ).rejects.toBeTruthy();
-    const brokenAutomations = createAutomationService({
-      db: {
-        insert: () => {
-          throw "unexpected database failure";
-        },
-      } as never,
-      listEvents: async () => [],
-      listReminders: async () => [],
-      listTasks: async () => [],
-      now: () => new Date("2026-07-13T12:00:00.000Z"),
-    });
-    await expect(
-      brokenAutomations.create(registrationBody.user.id, {
-        schedule: "Daily",
-        template: "nightly_review",
-        timezone: "UTC",
-      }),
-    ).rejects.toBe("unexpected database failure");
-    const scheduledUser = (
-      await database.db
-        .insert(users)
-        .values({
-          displayName: "Scheduler Test",
-          email: "scheduler@example.com",
-          passwordHash: "not-used-by-scheduler",
-          planningTimezone: "UTC",
-        })
-        .returning()
-    )[0];
-    if (!scheduledUser) throw new Error("Scheduler test user was not created.");
-    const scheduledRoutine = (
-      await database.db
-        .insert(automationRoutines)
-        .values({
-          schedule: "Daily at 11:00 AM",
-          template: "morning_brief",
-          timezone: "UTC",
-          title: "Morning Brief",
-          userId: scheduledUser.id,
-        })
-        .returning()
-    )[0];
-    if (!scheduledRoutine) throw new Error("Scheduler test routine was not created.");
-    const dispatchAutomations = createAutomationService({
-      db: database.db,
-      listEvents: async () => [],
-      listReminders: async () => [],
-      listTasks: async () => [],
-      now: () => new Date("2026-07-13T12:00:00.000Z"),
-    });
-    expect(await dispatchAutomations.dispatchDue()).toEqual([
-      expect.objectContaining({ routineId: scheduledRoutine.id, status: "completed" }),
-    ]);
-    expect(await dispatchAutomations.dispatchDue()).toEqual([]);
-    const nowBriefAutomations = createAutomationService({
+    const nowBrief = createDailyBriefService({
       db: database.db,
       listEvents: async () => [
         {
@@ -3318,11 +3104,11 @@ describe.sequential("ilo API", () => {
       listTasks: async () => [],
       now: () => new Date("2026-07-13T12:00:00.000Z"),
     });
-    const timeAwareBrief = await nowBriefAutomations.dailyBrief(registrationBody.user.id, "UTC");
+    const timeAwareBrief = await nowBrief.dailyBrief(registrationBody.user.id, "UTC");
     expect(timeAwareBrief.now).toHaveLength(1);
     expect(timeAwareBrief.capacity).toMatchObject({ availableMinutes: 300, busyMinutes: 60 });
 
-    const capacityAutomations = createAutomationService({
+    const capacityBriefService = createDailyBriefService({
       db: database.db,
       listEvents: async () => [
         { ...createdEvent, allDay: true },
@@ -3368,7 +3154,7 @@ describe.sequential("ilo API", () => {
       ],
       now: () => new Date("2026-07-13T12:00:00.000Z"),
     });
-    const allDayBrief = await capacityAutomations.dailyBrief(registrationBody.user.id, "UTC");
+    const allDayBrief = await capacityBriefService.dailyBrief(registrationBody.user.id, "UTC");
     expect(allDayBrief.capacity).toMatchObject({
       availableMinutes: 0,
       busyMinutes: 360,
@@ -3383,7 +3169,7 @@ describe.sequential("ilo API", () => {
       ]),
     );
 
-    const reservedCapacityAutomations = createAutomationService({
+    const reservedCapacityBriefService = createDailyBriefService({
       db: database.db,
       listEvents: async () => [
         {
@@ -3410,7 +3196,7 @@ describe.sequential("ilo API", () => {
       ],
       now: () => new Date("2026-07-13T12:00:00.000Z"),
     });
-    const reservedCapacityBrief = await reservedCapacityAutomations.dailyBrief(
+    const reservedCapacityBrief = await reservedCapacityBriefService.dailyBrief(
       registrationBody.user.id,
       "UTC",
     );
@@ -3421,7 +3207,7 @@ describe.sequential("ilo API", () => {
       scheduledTaskMinutes: 60,
     });
 
-    const recommendationAutomations = createAutomationService({
+    const recommendationBriefService = createDailyBriefService({
       db: database.db,
       listEvents: async () => [],
       listReminders: async () => [],
@@ -3471,10 +3257,10 @@ describe.sequential("ilo API", () => {
     });
     expect(
       (
-        await recommendationAutomations.dailyBrief(registrationBody.user.id, "UTC")
+        await recommendationBriefService.dailyBrief(registrationBody.user.id, "UTC")
       ).recommendedTasks.map((recommendation) => recommendation.urgency),
     ).toEqual(["overdue", "due_today", "next", "next", "next"]);
-    const fallbackPlanningBrief = await capacityAutomations.dailyBrief(crypto.randomUUID(), "UTC");
+    const fallbackPlanningBrief = await capacityBriefService.dailyBrief(crypto.randomUUID(), "UTC");
     expect(fallbackPlanningBrief.capacity.workdayStartsAt).toBe("2026-07-13T09:00:00.000Z");
 
     const googleCredentials: GoogleCredentials = {

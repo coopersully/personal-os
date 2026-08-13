@@ -89,19 +89,6 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         delete: { security, responses: { 204: { description: "Motive deleted" } } },
         patch: { security, responses: { 200: { description: "Motive updated" } } },
       },
-      "/v1/automations": {
-        get: { security, responses: { 200: { description: "Installed automation routines" } } },
-        post: { security, responses: { 201: { description: "Automation routine installed" } } },
-      },
-      "/v1/automations/runs": {
-        get: { security, responses: { 200: { description: "Automation run history" } } },
-      },
-      "/v1/automations/{id}": {
-        patch: { security, responses: { 200: { description: "Automation routine updated" } } },
-      },
-      "/v1/automations/{id}/runs": {
-        post: { security, responses: { 201: { description: "Automation routine run" } } },
-      },
       "/v1/reminders": {
         get: { security, responses: { 200: { description: "Reminder page" } } },
         post: { security, responses: { 201: { description: "Reminder created" } } },

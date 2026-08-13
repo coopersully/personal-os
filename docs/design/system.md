@@ -7,7 +7,7 @@ without hiding where information came from or asking them to surrender control
 to an agent. The interface should feel like a well-made personal instrument:
 quiet by default, direct when needed, and detailed only at the point of use.
 
-The visual character is soft neutral paper, soft charcoal, modest elevation, and a
+The visual character is soft neutral paper, soft charcoal, flat surfaces, and a
 monochrome primary scale. It is not a generic dashboard, a collection of
 unrelated cards, or an AI chat surface.
 
@@ -76,6 +76,75 @@ and the primary create action. When those controls are present in the frame,
 the page body begins with its primary material and never repeats a title,
 eyebrow, search field, or action bar.
 
+### Workspace app bars
+
+Today, Calendar, Tasks, Mail, Finances, and the account utility render one
+Integration-owned primary `WorkspaceAppBar`. The primitive fixes the structure,
+52 px height, sticky position, semantic surface, contrast-led separation from
+its body, and 8 px internal rhythm; a route provides only the content of its
+named slots.
+
+| Slot | Required | Purpose |
+| --- | --- | --- |
+| `identity` | Yes | Compact orientation: a workspace/page title, or Calendar's selected date/range. It truncates before it can displace controls. |
+| `context` | Always structurally present; content optional | Search, filters, freshness, or a compact mutually-exclusive view control. |
+| `actions` | Always structurally present; content optional | The primary create/action and rare platform utility. |
+
+- The primary structural order is always `identity | context | actions`. Do not
+  create a workspace-specific primary bar or route modifier classes to
+  rearrange it.
+- The app bar remains opaque, the same height, and in the same sticky position
+  at desktop and narrow widths. Sheets, dialogs, route changes, loading, and
+  selection never change its geometry. A control may compact its own content at
+  narrow width, but it must stay in its slot instead of making a new row.
+- Use shadcn `ToggleGroup` for mutually exclusive view state (for example,
+  Calendar Day/Week/Month). Use independent shadcn Buttons for independent
+  actions. Do not style adjacent independent buttons to impersonate a tab
+  switcher.
+- Calendar's date/range is `identity`; its Today action and view selector are
+  `context`; New event is `actions`.
+- The account utility is a tenant of the shell, not a workspace. Settings uses
+  the same frame, sidebar column, and app bar as the five workspaces, with
+  `Settings` as its identity and an empty context slot. It never shows a
+  `WorkspaceIcon`, workspace palette, workspace switcher, or switcher entry,
+  and it never participates in workspace preview or prefetch. Its sidebar
+  header is a `Back to <workspace>` control that restores the workspace the
+  utility was opened from.
+- A standalone flow — currently account setup — is the only surface that may
+  replace the shell. It owns the whole viewport because there is no workspace
+  to return to yet, and it must resolve before any redirect that sends an
+  unfinished account into it.
+
+Every shell page may compose the Integration-owned
+`WorkspaceSecondaryAppBar` immediately beneath the primary bar when it has
+persistent contextual wayfinding or tools. An empty secondary row is never
+reserved. The shared primitive owns its accessible navigation landmark,
+semantic surface, minimum 52 px height, responsive width, and ordered slots;
+the feature owns only the meaning and behavior of the supplied content.
+
+| Secondary slot | Required | Purpose |
+| --- | --- | --- |
+| `leading` | No | A compact axis label or contextual orientation that precedes the main material. |
+| `content` | No | Scroll-synchronized wayfinding, filters, scope, or other contextual material. |
+| `actions` | No | Actions that apply to the selected or displayed material rather than the whole workspace. |
+
+- The secondary structural order is always `leading | content | actions`.
+  Features may add layout classes for spatial grids or overflow but never
+  replace the shared surface, landmark, or slot anatomy.
+- The secondary bar uses one flat semantic surface in every workspace. A
+  workspace palette never recolors it. It has no shadow, gradient, or decorative
+  divider.
+- Calendar uses the secondary bar for day all-day material, the week
+  weekday/date/all-day grid, and month weekday wayfinding. These bars remain
+  within the Calendar scroll owner so their horizontal position stays aligned
+  with the spatial grid.
+- Mail uses the secondary bar for actions on a selected conversation. Search,
+  Sync, and Compose remain in the primary bar because they apply without a
+  selection.
+- At narrow widths, features preserve the shared slot order and move lower
+  priority actions into a labelled overflow menu instead of overflowing the
+  viewport or creating another row.
+
 ### Blocks
 
 A block is a named product pattern with a stable purpose, not merely a rounded
@@ -118,6 +187,11 @@ Rules:
 - A `connection` never substitutes a demonstration or skeleton for provider
   state. Existing accounts are material rows, and the action launches the same
   production connection used elsewhere in the product.
+- Tasks and reminders compose the shared slot-based commitment-item family:
+  completion is a named native checkbox; the primary action opens the material;
+  description, metadata, tags, and secondary actions are optional sibling
+  slots. Never make the whole row one target when it contains completion or
+  destructive actions.
 
 ### Readiness overviews and diagnostic disclosure
 
@@ -145,13 +219,20 @@ the checks a dashboard grid. Use the shared `ReadinessPanel`, composed from
 - keep loading, unavailable, incomplete, empty, and complete distinct. A
   partial read never becomes a successful zero or a confident readiness score.
 
+On a cross-domain supervision surface, actionable person-owned work precedes
+diagnostic status. Use one Integration-owned read model to order and paginate
+that work, keep workspace identity visible on each row, and route the one
+explicit action back to its owning domain. Never duplicate domain mutations in
+the global queue, present healthy evidence as work, or convert a partial source
+failure into a successful zero.
+
 Keep product selection outside the overview. A small mutually exclusive set
 uses one icon-labelled control family; selection changes which overview is
 shown. When setup phase helps selection, each option may add one stable phase:
 **Checking**, **Not set up**, **Needs review**, **Set up**, or **Unavailable**.
 Setup phase is not readiness progress and must not use a percentage. Product
 identity comes from the established icon, label, and material, not a feature
-color. This pattern is established for Agent access and should be reused only
+color. This pattern is established for Workspace access and should be reused only
 when several checks genuinely support one decision.
 
 ### Event summary cards
@@ -353,6 +434,18 @@ durations page by page.
   divider borders between the sidebar, top navigation, and body. A workspace
   selector may use the semantic secondary surface to remain discoverable
   without reintroducing a hard seam.
+- Default to flat material: no decorative gradients or shadows. Use a border
+  only when it identifies an interactive control, ordered-row boundary,
+  modal/sheet edge, or semantic state boundary. Connected material may flow
+  together when hierarchy, spacing, and semantic background already express
+  its relationship.
+- At widths of 900 px and below, replace the sidebar drawer with the centred,
+  safe-area-aware mobile workspace dock. Its workspace trigger names the active
+  workspace and opens the five manifest-ordered destinations; its separate
+  Actions control opens a labelled modal bottom sheet of current-workspace
+  pages and account utilities. Do not add a hamburger control, favicon trigger,
+  destination bottom bar, or a direct-create action in the dock. Page-specific
+  actions remain available in the top navigation.
 - Contextual navigation rails compose the shared Sidebar group, menu,
   collapsible, and sub-menu primitives. Account identities are bounded
   disclosure rows; their child destinations are separate, indented rows with
@@ -363,10 +456,19 @@ durations page by page.
   switcher or its first navigation group. Internal destinations never carry an
   external-link glyph; reserve that affordance for actions that actually open
   a new browsing context.
-- Represent Calendar, Tasks, Mail, and Finances as whole workspaces with the
-  shared `WorkspaceIcon`. Its registry owns label, route, and glyph; theme
-  blocks own its semantic accent tokens. Do not reproduce workspace maps or
-  palette values in a page. Use unframed functional icons below workspace level.
+- Represent the five workspace identities—Today, Calendar, Tasks, Mail, and
+  Finances—from the shared navigation manifest. Calendar, Tasks, Mail, and
+  Finances use `WorkspaceIcon`; Today remains neutral. The manifest owns label,
+  default route, and glyph. Do not reproduce workspace maps or palette values
+  in a page. Use unframed functional icons below workspace level.
+- A route's navigation owner is explicit and stable: Today owns Today, Goals,
+  Motives, and Activity; Tasks owns Tasks and Reminders. Account-only routes
+  render the account utility's own local navigation in the shell sidebar, not a
+  workspace sidebar, switcher, or workspace identity.
+- On narrow layouts the account utility keeps the dock so its sections stay
+  reachable. The dock names the current surface and lists the account sections
+  in its sheet, while its switcher still offers exactly the five workspaces
+  with none of them marked current.
 - When a shared moving selection surface already makes keyboard focus
   unmistakable, do not add a duplicate per-item treatment. Focus must remain at
   least as clear as hover and current-page selection.

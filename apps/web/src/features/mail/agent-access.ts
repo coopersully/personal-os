@@ -110,17 +110,35 @@ export function mailAgentAccessCapability(
   if (support === "unsupported") return unsupportedCapability("Mail");
   if (support === "executable_rules") {
     return {
+      allowed: [
+        "Read connected inboxes",
+        "Create source-linked attention",
+        "Draft disabled Mail rules",
+      ],
+      approvalRequired: ["Activate a proposed rule", "Expand a rule’s source scope"],
+      sourceScope:
+        "Mail permission applies to every connected Mail source; per-inbox agent credentials are not available.",
       description:
         "Mail setup maps every inbox before sampling it, records important conversations as source-linked attention, and captures delayed archive or recoverable Trash preferences. Approved work is bounded, durable, and activated by the signed-in person.",
-      setupPrompt: `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Explain any pending, reconciliation, or failed automation shown in setup context. Treat commitment intake as preview-only whenever automaticCreationEnabled is false; do not promise Mail-to-Calendar creation from cached prose or attachment metadata. After I explicitly accept a rule summary, use review_mail_rule, then tell me to activate it myself in Ilo Settings → Agent access → Review Mail rules. Reviewed Google rules use bounded durable execution; Trash is recoverable and permanent deletion is unavailable.`,
+      setupPrompt: `Use ${invocation} to set up my Mail in Ilo. Start with get_mail_setup_context, map the purpose of each inbox, and inspect only a small recent sample. Ask how important email should become attention and how long likely noise should remain before review, archive, or recoverable Trash—including a one-day preference. Save a draft profile, create source-linked attention items, and save proposed rules disabled. Show the preview window, truncation state, exact matches, actions, source scope, and recovery path. Explain any pending, reconciliation, or failed Mail rule work shown in setup context. Treat commitment intake as preview-only whenever automaticCreationEnabled is false; do not promise Mail-to-Calendar creation from cached prose or attachment metadata. After I explicitly accept a rule summary, use review_mail_rule, then tell me to activate it myself in Ilo Settings → Workspace access → Mail. Reviewed Google rules use bounded durable execution; Trash is recoverable and permanent deletion is unavailable.`,
       title: "Mail profiles, previews, and approved rules",
+      unavailable: [
+        "Permanent deletion",
+        "Unreviewed rule activation",
+        "Automatic Calendar creation from cached Mail content",
+      ],
     };
   }
   return {
+    allowed: ["Read connected inboxes", "Create source-linked attention", "Draft Mail preferences"],
+    approvalRequired: ["Approve profile guidance"],
+    sourceScope:
+      "Mail permission applies to every connected Mail source; per-inbox agent credentials are not available.",
     description:
       "This deployment publishes Mail preferences and attention setup, but not executable Mail rules.",
     setupPrompt: `Use ${invocation} to set up my Mail preferences and attention in Ilo. Inspect connected inboxes, ask the shortest useful interview, save a draft profile, and do not claim executable rules are available.`,
     title: "Mail preferences and attention",
+    unavailable: ["Executable Mail rules", "Permanent deletion"],
   };
 }
 

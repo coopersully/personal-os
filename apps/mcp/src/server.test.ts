@@ -1,8 +1,6 @@
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { ApiClientError, type PersonalOsApiClient } from "@personal-os/api-client";
 import type {
-  AutomationRoutine,
-  AutomationRun,
   Calendar,
   CalendarEvent,
   DailyBrief,
@@ -181,17 +179,6 @@ const mailRule = {
   updatedAt: now,
   version: 1,
 };
-const automation: AutomationRoutine = {
-  id,
-  template: "morning_brief",
-  title: "Morning brief",
-  schedule: "Weekdays at 8:00 AM",
-  timezone: "America/New_York",
-  enabled: true,
-  lastRunAt: null,
-  createdAt: now,
-  updatedAt: now,
-};
 const brief: DailyBrief = {
   allDay: [],
   anytime: [reminder],
@@ -215,15 +202,6 @@ const brief: DailyBrief = {
   completedTasks: [],
   today: [],
   tomorrow: [],
-};
-const automationRun: AutomationRun = {
-  id: accountId,
-  routineId: id,
-  status: "dry_run",
-  summary: "Morning brief previewed.",
-  brief,
-  startedAt: now,
-  completedAt: now,
 };
 
 function mockApi() {
@@ -620,8 +598,6 @@ function mockApi() {
       },
     ]),
     getDailyBrief: vi.fn(async () => brief),
-    listAutomations: vi.fn(async () => [automation]),
-    runAutomation: vi.fn(async () => automationRun),
     listXBookmarks: vi.fn(async () => []),
     syncXBookmarks: vi.fn(async () => 0),
   };
@@ -661,10 +637,8 @@ describe("ilo MCP server", () => {
         "ilo/stage": expect.any(String),
       });
     }
-    expect(tools.tools.find((tool) => tool.name === "run_automation")?.annotations).toMatchObject({
-      idempotentHint: false,
-      readOnlyHint: false,
-    });
+    expect(tools.tools.find((tool) => tool.name === "list_automations")).toBeUndefined();
+    expect(tools.tools.find((tool) => tool.name === "run_automation")).toBeUndefined();
     expect(tools.tools.find((tool) => tool.name === "sync_x_bookmarks")?.annotations).toMatchObject(
       {
         readOnlyHint: false,
@@ -1258,8 +1232,6 @@ describe("ilo MCP server", () => {
     });
     await client.callTool({ name: "list_activity", arguments: {} });
     await client.callTool({ name: "get_daily_brief", arguments: {} });
-    await client.callTool({ name: "list_automations", arguments: {} });
-    await client.callTool({ name: "run_automation", arguments: { id, dryRun: true } });
 
     expect(api.createReminder).toHaveBeenCalledWith({
       title: "Test",
@@ -1338,7 +1310,6 @@ describe("ilo MCP server", () => {
       }),
     );
     expect(api.listActivity).toHaveBeenCalledWith(50);
-    expect(api.runAutomation).toHaveBeenCalledWith(id, true);
     expect(api.proposeFinanceCategorizations).toHaveBeenCalledWith({
       cursor: "next-review-page",
       limit: 50,

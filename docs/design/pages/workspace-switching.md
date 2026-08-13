@@ -18,6 +18,17 @@ The sidebar remains stable throughout the interaction. The preview replaces
 only the workspace surface, is inert until selection, and uses a quiet inner
 glow to distinguish this ephemeral state from committed navigation.
 
+The active sidebar is determined by the route's workspace owner, not by the
+leaf page. Today therefore remains visible for Goals, Motives, and Activity;
+Tasks remains visible for Reminders. Settings and setup are account utilities
+outside this interaction and never appear in the workspace switcher.
+
+At 900 px and below the switcher/sidebar is replaced by a bottom workspace
+dock. Its active-workspace trigger opens the same manifest-ordered five
+destinations; the separate Actions control opens a modal sheet for the active
+workspace's pages and account utilities. The sheet does not create material
+directly on open.
+
 ## Interaction contract
 
 1. Opening the menu starts the bounded default-route queries for all five

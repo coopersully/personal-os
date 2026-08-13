@@ -1,4 +1,6 @@
 import type {
+  AgentAccessWorkItemPage,
+  AgentAccessWorkItemQuery,
   AgentConnectionGuide,
   AssistantDomain,
   AssistantSetupPlan,
@@ -12,6 +14,7 @@ import type {
   UpdateAttentionItemInput,
   UpsertDomainProfileInput,
 } from "@personal-os/domain";
+import { agentAccessWorkItemPageSchema } from "@personal-os/domain";
 
 type Request = <T>(path: string, init?: RequestInit) => Promise<T>;
 type ToQuery = (query: object) => string;
@@ -46,6 +49,14 @@ export function createAssistantApiClient(request: Request, toQuery: ToQuery) {
         "/v1/assistant/connection-guide",
       );
       return response.guide;
+    },
+    async listAgentAccessWorkItems(
+      query: AgentAccessWorkItemQuery = { limit: 10 },
+    ): Promise<AgentAccessWorkItemPage> {
+      const response = await request<AgentAccessWorkItemPage>(
+        `/v1/assistant/work-items?${toQuery(query)}`,
+      );
+      return agentAccessWorkItemPageSchema.parse(response);
     },
     async getDomainProfile(domain: AssistantDomain): Promise<DomainProfile | null> {
       const response = await request<{ profile: DomainProfile | null }>(

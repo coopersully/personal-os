@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { createAgentAccessWorkItemService } from "../agent-access-work-items.js";
 import type { createAssistantService } from "../assistant-service.js";
 import type { AppEnv } from "../types.js";
 import { registerAssistantRoutes } from "./assistant.js";
@@ -66,6 +67,20 @@ describe("assistant setup routes", () => {
       updateAttentionItem: vi.fn(async () => ({ ...item, status: "resolved" as const })),
       upsertProfile: vi.fn(async () => profile),
     };
+    const workItems = {
+      list: vi.fn(async () => ({
+        filteredTotal: 0,
+        items: [],
+        nextCursor: null,
+        snapshotAt: now,
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
+          byKind: { attention: 0, review: 0 },
+          total: 0,
+        },
+        unavailableDomains: [],
+      })),
+    };
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
@@ -83,7 +98,14 @@ describe("assistant setup routes", () => {
       app,
       assistant: assistant as unknown as ReturnType<typeof createAssistantService>,
       connectionGuide: {
-        domains: [],
+        domains: [
+          {
+            domain: "mail",
+            readScope: "mail:read",
+            support: "executable_rules",
+            writeScope: "mail:write",
+          },
+        ],
         mcpUrl: "https://mcp.example.com/mcp",
         skill: {
           displayName: "Ilo Guided Setup",
@@ -100,12 +122,25 @@ describe("assistant setup routes", () => {
         principal: context.get("principal"),
         requestId: context.get("requestId"),
       }),
+      workItems: workItems as unknown as ReturnType<typeof createAgentAccessWorkItemService>,
     });
     const json = { headers: { "content-type": "application/json" } };
 
     expect((await app.request("/v1/assistant/connection-guide")).status).toBe(200);
     expect((await app.request("/v1/assistant/context")).status).toBe(200);
     expect((await app.request("/v1/assistant/setup-status")).status).toBe(200);
+    expect(
+      (await app.request("/v1/assistant/work-items?cursor=opaque-next&kind=review&limit=10"))
+        .status,
+    ).toBe(200);
+    expect(workItems.list).toHaveBeenCalledWith(
+      expect.objectContaining({ actorType: "agent", userId: id }),
+      { cursor: "opaque-next", kind: "review", limit: 10 },
+      expect.arrayContaining([expect.objectContaining({ domain: "mail" })]),
+    );
+    const oversizedPage = await app.request("/v1/assistant/work-items?limit=11");
+    expect(oversizedPage.status).toBe(403);
+    expect((await oversizedPage.json()).error).toContain("10");
     expect(
       (await app.request("/v1/assistant/setup-plan?domain=mail&stepId=learn_preferences")).status,
     ).toBe(200);

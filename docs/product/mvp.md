@@ -65,10 +65,11 @@ provider internals.
   setup, bounded exact Mail-rule previews with drift-checked activation, durable Google Mail
   retention work with exact provider reconciliation, Finance readiness and proposal-first review
   workflows, and a server-owned setup plan for scoped MCP hosts.
-- A deployment-aware Agent access handoff with remote MCP OAuth, readable
+- Deployment-aware Connected agents and Workspace access settings with remote MCP OAuth, readable
   consent, semantic setup steps, observed completion evidence, core-domain
-  readiness, an optional immutable skill reference, revocation, and advanced
-  personal-token fallback.
+  readiness, explicit per-workspace authority boundaries, an optional immutable skill reference,
+  revocation, and advanced personal-token fallback.
+- A Today-owned Reviews destination for paginated, filterable review and attention work.
 - Unified agenda and calendar views.
 - Current conditions in Today, preferring transient device location after the
   browser grants permission and falling back to an account-saved place selected

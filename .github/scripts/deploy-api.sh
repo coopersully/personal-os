@@ -82,9 +82,9 @@ publish_api_deployment_state() {
 wait_for_api_deployment_alarm_state() {
   expected_state="$1"
   refresh_deployment_state="${2:-}"
-  for alarm_state_delay in 0 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5 5; do
-    if test "$alarm_state_delay" != "0"; then
-      sleep "$alarm_state_delay"
+  for ((alarm_state_attempt = 0; alarm_state_attempt < 36; alarm_state_attempt += 1)); do
+    if test "$alarm_state_attempt" != "0"; then
+      sleep 5
     fi
     if test -n "$refresh_deployment_state"; then
       publish_api_deployment_state "$refresh_deployment_state" || continue

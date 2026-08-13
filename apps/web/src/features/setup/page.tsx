@@ -284,7 +284,7 @@ export function SetupPage({ user }: { user: User }) {
         {currentStep === "ready" ? (
           <ReadyStep
             complete={() => completeSetup()}
-            connectAgent={() => completeSetup("/settings?section=agents")}
+            connectAgent={() => completeSetup("/settings?section=agent-connections")}
             connectedAccounts={connectors.data?.length ?? 0}
             financeAccounts={finances.data?.accounts.length ?? 0}
             pending={save.isPending}
@@ -806,7 +806,7 @@ function ReadyStep({
         </Item>
         <Item>
           <ItemContent>
-            <ItemTitle>Agent access</ItemTitle>
+            <ItemTitle>Connected agents</ItemTitle>
             <ItemDescription>
               Ready when you connect Ilo from an MCP-compatible agent host.
             </ItemDescription>

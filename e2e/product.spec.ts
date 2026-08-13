@@ -17,7 +17,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await expect(page.getByRole("row", { name: /Sq Unknown Popup Uncategorized/ })).toBeVisible();
 });
 
-test("Agent Access prioritizes paginated work and keeps setup contextual", async ({
+test("Reviews and agent controls separate decisions from configuration", async ({
   baseURL,
   page,
 }) => {
@@ -26,34 +26,14 @@ test("Agent Access prioritizes paginated work and keeps setup contextual", async
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
   await page.getByRole("button", { name: "Open ilo" }).click();
   await expect(page.getByRole("heading", { name: "Your commitments" })).toBeVisible();
-  await page.goto("/settings?section=agents");
-  await expect(page.getByRole("heading", { name: "Agent access", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Your action queue" })).toBeVisible();
-  await expect(page.getByText("1–10 of 11")).toBeVisible();
-  const firstPageRows = page.locator("[data-work-item-id]");
-  const firstPageIds = await firstPageRows.evaluateAll((rows) =>
-    rows.map((row) => row.getAttribute("data-work-item-id")),
-  );
-  expect(firstPageIds).toHaveLength(10);
-  expect(new Set(firstPageIds).size).toBe(10);
-  await expect(firstPageRows.nth(0)).toHaveAttribute("data-work-item-priority", "person_review");
-  await page.getByRole("button", { name: "Next page" }).click();
-  await expect(page.getByText("11–11 of 11")).toBeVisible();
-  const secondPageIds = await page
-    .locator("[data-work-item-id]")
-    .evaluateAll((rows) => rows.map((row) => row.getAttribute("data-work-item-id")));
-  expect(secondPageIds).toHaveLength(1);
-  expect(secondPageIds.some((id) => firstPageIds.includes(id))).toBe(false);
-
+  await page.goto("/reviews");
+  await expect(page.getByRole("heading", { level: 2, name: "Reviews", exact: true })).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Review" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Attention" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: "Setup" })).toHaveCount(0);
   await page.getByRole("radio", { name: "Attention" }).click();
-  await expect(page.getByText("1–8 of 8")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Next page" })).toBeDisabled();
-  await page.getByRole("radio", { name: "All" }).click();
-  await expect(page.getByText("1–10 of 11")).toBeVisible();
-  await page.getByRole("button", { name: "Next page" }).click();
-  await expect(page.getByText("11–11 of 11")).toBeVisible();
-  await page.getByRole("button", { name: "Previous page" }).click();
-  await expect(page.getByText("1–10 of 11")).toBeVisible();
+  await expect(page).toHaveURL(/kind=attention/);
+  await page.getByRole("radio", { name: "All work" }).click();
   const mailReview = page.getByRole("listitem").filter({ hasText: "Review Fixture newsletters" });
   await mailReview.getByRole("link", { name: "Review rule" }).click();
   await expect(page.getByRole("dialog", { name: "Review Fixture newsletters" })).toBeVisible();
@@ -63,29 +43,20 @@ test("Agent Access prioritizes paginated work and keeps setup contextual", async
     page.getByRole("dialog").getByRole("button", { name: "Activate reviewed rule" }),
   ).toBeEnabled();
   await page.getByRole("dialog").getByRole("button", { name: "Close" }).last().click();
-  await expect(page).toHaveURL(/settings\?section=agents&workspace=mail$/);
+  await expect(page).toHaveURL(/settings\?section=workspace-access&workspace=mail$/);
+  await expect(page.getByRole("heading", { name: "Workspace access" })).toBeVisible();
+  await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Needs your approval", { exact: true })).toBeVisible();
+  await expect(page.getByText("Not allowed", { exact: true })).toBeVisible();
 
   await page.getByRole("radio", { name: "Calendar" }).click();
   await expect(page).toHaveURL(/workspace=calendar/);
   await expect(page.getByText("Calendar readiness")).toBeVisible();
   await page.getByRole("radio", { name: "Mail" }).click();
 
-  const connectTrigger = page.getByRole("button", {
-    name: /Connect an agent/,
-  });
   const setupTrigger = page.getByRole("button", {
     name: /Let the agent set up Ilo/,
   });
-  const stepTriggers = [connectTrigger, setupTrigger];
-  for (const trigger of stepTriggers) {
-    const initialState = await trigger.getAttribute("aria-expanded");
-    await trigger.click();
-    await expect(trigger).toHaveAttribute(
-      "aria-expanded",
-      initialState === "true" ? "false" : "true",
-    );
-  }
-
   if ((await setupTrigger.getAttribute("aria-expanded")) !== "true") await setupTrigger.click();
   await page.getByRole("button", { name: "Setup protocol details" }).click();
   const source = page.getByRole("link", { name: "View skill source" });
@@ -103,19 +74,20 @@ test("Agent Access prioritizes paginated work and keeps setup contextual", async
     await route.fulfill({
       contentType: "application/json",
       json: {
+        filteredTotal: 0,
         items: [],
         nextCursor: null,
         snapshotAt: new Date().toISOString(),
         summary: {
           byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
-          byKind: { attention: 0, review: 0, setup: 0 },
+          byKind: { attention: 0, review: 0 },
           total: 0,
         },
         unavailableDomains: [],
       },
     });
   });
-  await page.reload();
+  await page.goto("/reviews");
   await expect(page.getByText("You’re caught up")).toBeVisible();
 });
 
@@ -300,22 +272,14 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await page.reload();
   await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Dark" })).toBeChecked();
-  await openSettingsSection("Agent access");
-  await expect(page.getByRole("heading", { name: "Agent access", exact: true })).toBeVisible();
-  const connectionTrigger = page.getByRole("button", { name: /Connect an agent/ });
-  if ((await connectionTrigger.getAttribute("aria-expanded")) !== "true") {
-    await connectionTrigger.click();
-  }
-  const agentSetupTrigger = page.getByRole("button", {
-    name: /Let the agent set up Ilo/,
-  });
-  if ((await agentSetupTrigger.getAttribute("aria-expanded")) !== "true") {
-    await agentSetupTrigger.click();
-  }
+  await openSettingsSection("Connected agents");
+  await expect(page.getByRole("heading", { name: "Connected agents", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ilo MCP URL" })).toHaveValue(/\/mcp$/);
+  await openSettingsSection("Workspace access");
   await page.getByRole("button", { name: "Setup protocol details" }).click();
   await expect(page.getByRole("link", { name: "View skill source" })).toBeVisible();
   await expect(page.getByRole("radio", { name: "Mail", checked: true })).toBeVisible();
+  await openSettingsSection("Connected agents");
   await page.getByRole("button", { name: "Set up a local token" }).click();
   await expect(
     page.getByRole("radio", {

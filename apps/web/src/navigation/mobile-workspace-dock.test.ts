@@ -5,6 +5,7 @@ describe("mobile workspace dock content", () => {
   it("keeps Today's personal pages together", () => {
     expect(mobileWorkspacePages("today").map((item) => item.label)).toEqual([
       "Today",
+      "Reviews",
       "Goals",
       "Motives",
       "Activity",

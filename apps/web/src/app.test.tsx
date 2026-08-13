@@ -240,7 +240,6 @@ const mocks = vi.hoisted(() => ({
   deleteTask: vi.fn(),
   deleteGoal: vi.fn(),
   deleteMotive: vi.fn(),
-  createAutomation: vi.fn(),
   getDailyBrief: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
@@ -259,8 +258,6 @@ const mocks = vi.hoisted(() => ({
   isTauri: vi.fn(),
   listAccessTokens: vi.fn(),
   listActivity: vi.fn(),
-  listAutomations: vi.fn(),
-  listAutomationRuns: vi.fn(),
   listCalendars: vi.fn(),
   listConnectors: vi.fn(),
   listXBookmarkFolders: vi.fn(),
@@ -321,7 +318,6 @@ const mocks = vi.hoisted(() => ({
   resolveFinanceReview: vi.fn(),
   restoreEvent: vi.fn(),
   restoreReminder: vi.fn(),
-  runAutomation: vi.fn(),
   revokeSession: vi.fn(),
   revokeOAuthClient: vi.fn(),
   setCalendarSelected: vi.fn(),
@@ -334,7 +330,6 @@ const mocks = vi.hoisted(() => ({
   updateMailThread: vi.fn(),
   updateEvent: vi.fn(),
   updateEventBlock: vi.fn(),
-  updateAutomation: vi.fn(),
   updateAccountSetup: vi.fn(),
   updateReminder: vi.fn(),
   updateTask: vi.fn(),
@@ -465,7 +460,6 @@ function defaults() {
       timezone: "America/New_York",
     },
   ]);
-  mocks.listAutomations.mockResolvedValue([]);
   mocks.listGoals.mockResolvedValue([]);
   mocks.listMotives.mockResolvedValue([]);
   mocks.getFinanceOverview.mockResolvedValue({
@@ -610,7 +604,6 @@ function defaults() {
   mocks.getFinanceReviewQueue.mockResolvedValue([]);
   mocks.listFinanceTransactions.mockResolvedValue({ items: [], nextCursor: null });
   mocks.getPlaidStatus.mockResolvedValue({ available: false });
-  mocks.listAutomationRuns.mockResolvedValue([]);
   mocks.listActivity.mockResolvedValue([
     {
       id: "1",
@@ -867,17 +860,6 @@ function defaults() {
   ]);
   mocks.createReminder.mockResolvedValue(reminder);
   mocks.createTask.mockResolvedValue(task);
-  mocks.createAutomation.mockResolvedValue({
-    id,
-    template: "morning_brief",
-    title: "Morning brief",
-    schedule: "Weekdays at 8:00 AM",
-    timezone: "UTC",
-    enabled: true,
-    lastRunAt: null,
-    createdAt: now,
-    updatedAt: now,
-  });
   mocks.updateReminder.mockResolvedValue(reminder);
   mocks.updateTask.mockResolvedValue(task);
   mocks.completeReminder.mockResolvedValue(reminder);
@@ -888,17 +870,6 @@ function defaults() {
   mocks.createEventBlock.mockResolvedValue(event);
   mocks.updateEvent.mockResolvedValue(event);
   mocks.updateEventBlock.mockResolvedValue(event);
-  mocks.updateAutomation.mockResolvedValue({
-    createdAt: now,
-    enabled: false,
-    id,
-    lastRunAt: null,
-    schedule: "Weekdays at 9:00 AM",
-    template: "morning_brief",
-    timezone: "UTC",
-    title: "Morning Brief",
-    updatedAt: now,
-  });
   mocks.deleteEvent.mockResolvedValue(undefined);
   mocks.deleteEventBlock.mockResolvedValue(event);
   mocks.createCalendar.mockResolvedValue(calendar);
@@ -1019,15 +990,6 @@ function defaults() {
       },
     }),
   );
-  mocks.runAutomation.mockResolvedValue({
-    id: secondId,
-    routineId: id,
-    status: "completed",
-    summary: "Done",
-    brief: null,
-    startedAt: now,
-    completedAt: now,
-  });
   mocks.logout.mockResolvedValue(undefined);
 }
 
@@ -1689,7 +1651,7 @@ describe("ilo web app", () => {
       ),
     );
     expect(
-      await screen.findByRole("heading", { name: "Agent access" }, { timeout: 3_000 }),
+      await screen.findByRole("heading", { name: "Connected agents" }, { timeout: 3_000 }),
     ).toBeInTheDocument();
   });
 
@@ -2559,14 +2521,14 @@ describe("ilo web app", () => {
     const browser = userEvent.setup();
     const first = setup("/tasks");
     await screen.findByText("Draft brief");
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     expect(await screen.findByRole("dialog")).toHaveTextContent("Refine task");
     expect(screen.getByLabelText("Task")).toHaveValue("Draft brief");
     expect(screen.getByLabelText("Notes")).toHaveValue("Keep it concise");
     expect(screen.getByLabelText("Tags")).toHaveValue("planning");
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Edit Draft brief" }));
+    await browser.click(screen.getByRole("button", { name: "Open Draft brief" }));
     mocks.updateTask.mockRejectedValueOnce(new Error("Task update failed"));
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Task update failed");
@@ -2675,7 +2637,7 @@ describe("ilo web app", () => {
     mocks.completeReminder.mockRejectedValueOnce(new Error("Reminder completion failed"));
     const completionView = setup("/reminders");
     await screen.findByText("Test reminder");
-    await browser.click(screen.getByRole("button", { name: "Complete Test reminder" }));
+    await browser.click(screen.getByRole("checkbox", { name: "Complete Test reminder" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Reminder completion failed");
     completionView.unmount();
 
@@ -2712,6 +2674,15 @@ describe("ilo web app", () => {
   it("keeps the legacy account settings URL compatible", async () => {
     const view = setup("/settings?section=account");
     expect(await screen.findByRole("heading", { name: "Profile" })).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("does not advertise placeholder automation routines in Settings", async () => {
+    const view = setup("/settings?section=profile");
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
+    expect(within(sidebar).queryByRole("link", { name: "Automations" })).not.toBeInTheDocument();
     view.unmount();
   });
 
@@ -3046,7 +3017,7 @@ describe("ilo web app", () => {
         ).toBeInTheDocument();
         expect(screen.getByRole("link", { name: "Connect an agent" })).toHaveAttribute(
           "href",
-          "/settings?section=agents",
+          "/settings?section=agent-connections",
         );
       }
       view.unmount();
@@ -3507,7 +3478,8 @@ describe("ilo web app", () => {
       nextCursor: null,
     });
     const view = setup("/tasks");
-    expect(await screen.findByText("No date or estimate yet")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Open Draft brief" })).toBeInTheDocument();
+    expect(screen.queryByText("No date or estimate yet")).not.toBeInTheDocument();
     expect(screen.getByText(/Reserved Jul 13/)).toBeInTheDocument();
     view.unmount();
   });
@@ -3762,7 +3734,7 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
     await browser.click(
       within(screen.getByText("Next tasks").closest("section") as HTMLElement).getByRole("button", {
-        name: "Edit Draft brief",
+        name: "Open Draft brief",
       }),
     );
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
@@ -3781,115 +3753,6 @@ describe("ilo web app", () => {
     const view = setup();
     expect(await screen.findByRole("alert")).toHaveTextContent("Completed reminders unavailable");
     view.unmount();
-  });
-
-  it("installs, previews, and runs scoped automation routines", async () => {
-    const browser = userEvent.setup();
-    const empty = setup("/automations");
-    expect(await screen.findByText("No routines yet")).toBeInTheDocument();
-    await browser.click(screen.getAllByRole("button", { name: "Install" })[0] as HTMLElement);
-    await waitFor(() =>
-      expect(mocks.createAutomation).toHaveBeenCalledWith({
-        schedule: "Weekdays at 8:00 AM",
-        template: "morning_brief",
-        timezone: "UTC",
-      }),
-    );
-    mocks.createAutomation.mockRejectedValueOnce(new Error("install unavailable"));
-    await browser.click(screen.getAllByRole("button", { name: "Install" })[1] as HTMLElement);
-    expect(await screen.findByRole("alert")).toHaveTextContent("install unavailable");
-    empty.unmount();
-
-    const routine = {
-      id,
-      template: "morning_brief" as const,
-      title: "Morning Brief",
-      schedule: "Weekdays at 8:00 AM",
-      timezone: "UTC",
-      enabled: true,
-      lastRunAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const nightlyRoutine = {
-      ...routine,
-      id: thirdId,
-      schedule: "Daily at 8:00 PM",
-      template: "nightly_review" as const,
-      title: "Nightly Review",
-    };
-    const unrunRoutine = {
-      ...routine,
-      id: "55555555-5555-4555-8555-555555555555",
-      title: "Unrun routine",
-    };
-    mocks.listAutomations.mockResolvedValue([routine, nightlyRoutine, unrunRoutine]);
-    mocks.listAutomationRuns.mockResolvedValue([
-      {
-        id: secondId,
-        routineId: id,
-        status: "dry_run" as const,
-        summary: "Previewed",
-        brief: null,
-        startedAt: now,
-        completedAt: now,
-      },
-      {
-        id: "44444444-4444-4444-8444-444444444444",
-        routineId: thirdId,
-        status: "completed" as const,
-        summary: "Completed",
-        brief: null,
-        startedAt: now,
-        completedAt: now,
-      },
-    ]);
-    const installed = setup("/automations");
-    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
-    expect(await screen.findByText("Morning Brief")).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Installed" })[0]).toBeDisabled();
-    await browser.clear(screen.getByLabelText("Morning Brief schedule"));
-    expect(screen.getAllByRole("button", { name: "Save" })[0]).toBeDisabled();
-    await browser.type(screen.getByLabelText("Morning Brief schedule"), "Weekdays at 9:00 AM");
-    await browser.click(screen.getAllByRole("checkbox")[0] as HTMLElement);
-    mocks.updateAutomation.mockRejectedValueOnce(new Error("schedule unavailable"));
-    await browser.click(screen.getAllByRole("button", { name: "Save" })[0] as HTMLElement);
-    await waitFor(() =>
-      expect(mocks.updateAutomation).toHaveBeenCalledWith(id, {
-        enabled: false,
-        schedule: "Weekdays at 9:00 AM",
-        timezone: "UTC",
-      }),
-    );
-    expect(await screen.findByRole("alert")).toHaveTextContent("schedule unavailable");
-    expect(screen.getAllByRole("button", { name: "Preview" })[0]).toBeDisabled();
-    await browser.click(screen.getAllByRole("checkbox")[0] as HTMLElement);
-    await browser.click(screen.getAllByRole("button", { name: "Save" })[0] as HTMLElement);
-    await waitFor(() =>
-      expect(mocks.updateAutomation).toHaveBeenLastCalledWith(id, {
-        enabled: true,
-        schedule: "Weekdays at 9:00 AM",
-        timezone: "UTC",
-      }),
-    );
-    await browser.click(screen.getAllByRole("button", { name: "Preview" })[0] as HTMLElement);
-    await waitFor(() => expect(mocks.runAutomation).toHaveBeenCalledWith(id, true));
-    await browser.click(screen.getAllByRole("button", { name: "Run now" })[0] as HTMLElement);
-    await waitFor(() => expect(mocks.runAutomation).toHaveBeenCalledWith(id, false));
-    mocks.runAutomation.mockRejectedValueOnce(new Error("run unavailable"));
-    await browser.click(screen.getAllByRole("button", { name: "Run now" })[1] as HTMLElement);
-    expect(await screen.findByText("run unavailable")).toBeInTheDocument();
-    installed.unmount();
-
-    mocks.listAutomations.mockRejectedValueOnce(new Error("routines unavailable"));
-    const failed = setup("/automations");
-    expect(await screen.findByRole("alert")).toHaveTextContent("routines unavailable");
-    failed.unmount();
-
-    mocks.listAutomationRuns.mockRejectedValueOnce(new Error("runs unavailable"));
-    const runsFailed = setup("/automations");
-    expect(await screen.findByRole("alert")).toHaveTextContent("runs unavailable");
-    runsFailed.unmount();
   });
 
   it("directly manipulates reminders and events from today", async () => {
@@ -3925,12 +3788,12 @@ describe("ilo web app", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    await browser.click(screen.getByRole("button", { name: /^Test reminder Jul/ }));
+    await browser.click(screen.getByRole("button", { name: "Open Test reminder" }));
     await browser.clear(screen.getByLabelText("What needs attention?"));
     await browser.type(screen.getByLabelText("What needs attention?"), "Refined reminder");
     await browser.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(mocks.updateReminder).toHaveBeenCalled());
-    await browser.click(screen.getByRole("button", { name: "Complete Test reminder" }));
+    await browser.click(screen.getByRole("checkbox", { name: "Complete Test reminder" }));
     await waitFor(() => expect(mocks.completeReminder).toHaveBeenCalledWith(id, true));
     await browser.click(screen.getByRole("button", { name: "Delete Test reminder" }));
     await waitFor(() => expect(mocks.deleteReminder).toHaveBeenCalledWith(id));
@@ -3958,7 +3821,7 @@ describe("ilo web app", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
     await browser.click(screen.getByText("Done today"));
-    await browser.click(screen.getByRole("button", { name: "Reopen Finished reminder" }));
+    await browser.click(screen.getByRole("checkbox", { name: "Reopen Finished reminder" }));
     await waitFor(() => expect(mocks.completeReminder).toHaveBeenCalledWith(secondId, false));
 
     Object.defineProperty(window.navigator, "onLine", { configurable: true, value: false });
@@ -4623,7 +4486,7 @@ describe("ilo web app", () => {
       }),
     );
     expect(await screen.findByRole("heading", { name: "Reminders" })).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: /^Test reminder Jul/ }));
+    await browser.click(screen.getByRole("button", { name: "Open Test reminder" }));
     await browser.click(screen.getByRole("button", { name: "Cancel" }));
 
     await browser.click(screen.getByRole("button", { name: "Switch workspace" }));
@@ -4674,7 +4537,7 @@ describe("ilo web app", () => {
       expect(mocks.deleteConnector).toHaveBeenCalledWith(secondId, expect.anything()),
     );
 
-    await browser.click(settingsNavigation.getByRole("link", { name: "Agent access" }));
+    await browser.click(settingsNavigation.getByRole("link", { name: "Connected agents" }));
     expect(await screen.findByDisplayValue("https://mcp.example.com/mcp")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
     await browser.clear(screen.getByLabelText("Token name"));
@@ -4698,6 +4561,7 @@ describe("ilo web app", () => {
     expect(await screen.findByText("pos_secret")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Dismiss token" }));
     await browser.click(screen.getByRole("button", { name: "Revoke Active agent" }));
+    await browser.click(screen.getByRole("button", { name: "Revoke access" }));
     await waitFor(() =>
       expect(mocks.deleteAccessToken).toHaveBeenCalledWith(id, expect.anything()),
     );
@@ -5341,8 +5205,6 @@ describe("ilo web app", () => {
     await browser.click(screen.getByRole("button", { name: /iCloud note/ }));
     expect((await screen.findAllByText("iCloud Mail")).length).toBeGreaterThan(0);
     expect(screen.getByText("You")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "Inbox" }));
-
     const iCloudToggle = screen.getByRole("button", { name: /icloud@example.com iCloud Mail/ });
     await browser.click(iCloudToggle);
     await browser.click(screen.getAllByRole("button", { name: "All mail" })[2] as HTMLElement);

@@ -2025,7 +2025,7 @@ function FinanceAgentGuidancePanel({
               </ShadcnItemContent>
               <ShadcnItemActions>
                 <ShadcnButton asChild size="sm" variant="outline">
-                  <Link to="/settings?section=agents">Connect an agent</Link>
+                  <Link to="/settings?section=agent-connections">Connect an agent</Link>
                 </ShadcnButton>
               </ShadcnItemActions>
             </ShadcnItem>

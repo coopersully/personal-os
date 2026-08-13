@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { AgentAccessSettings } from "./agent-access.js";
+import { ConnectedAgentsSettings, WorkspaceAccessSettings } from "./agent-access.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const now = "2026-07-28T12:00:00.000Z";
@@ -44,14 +44,24 @@ function LocationProbe() {
   return <output aria-label="Current location">{`${location.pathname}${location.search}`}</output>;
 }
 
-function renderSettings(initialEntry = "/settings?section=agents") {
+function SettingsDestination() {
+  const location = useLocation();
+  const section = new URLSearchParams(location.search).get("section");
+  return section === "agent-connections" ? (
+    <ConnectedAgentsSettings />
+  ) : (
+    <WorkspaceAccessSettings />
+  );
+}
+
+function renderSettings(initialEntry = "/settings?section=workspace-access") {
   const queryClient = new QueryClient({
     defaultOptions: { mutations: { retry: false }, queries: { retry: false, gcTime: 0 } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[initialEntry]}>
-        <AgentAccessSettings />
+        <SettingsDestination />
         <LocationProbe />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -447,7 +457,7 @@ describe("agent access settings", () => {
         lastUsedAt: null,
         name: "Local Codex",
         revokedAt: null,
-        scopes: ["mail:read", "mail:write"],
+        scopes: ["mail:read", "mail:write", "automations:write"],
       },
       {
         createdAt: now,
@@ -457,6 +467,24 @@ describe("agent access settings", () => {
         name: "Old agent",
         revokedAt: now,
         scopes: ["mail:read"],
+      },
+      {
+        createdAt: now,
+        expiresAt: "2099-08-12T12:00:00.000Z",
+        id: "88888888-8888-4888-8888-888888888888",
+        lastUsedAt: null,
+        name: "Future agent",
+        revokedAt: null,
+        scopes: ["mail:read"],
+      },
+      {
+        createdAt: now,
+        expiresAt: "2020-08-12T12:00:00.000Z",
+        id: "99999999-9999-4999-8999-999999999999",
+        lastUsedAt: null,
+        name: "Expired agent",
+        revokedAt: null,
+        scopes: ["automations:write"],
       },
     ]);
     mocks.listOAuthClients.mockResolvedValue([
@@ -488,52 +516,52 @@ describe("agent access settings", () => {
     mocks.deleteAccessToken.mockResolvedValue(undefined);
     mocks.revokeOAuthClient.mockResolvedValue(undefined);
     mocks.listAgentAccessWorkItems.mockResolvedValue({
+      filteredTotal: 0,
       items: [],
       nextCursor: null,
       snapshotAt: now,
       summary: {
         byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
-        byKind: { attention: 0, review: 0, setup: 0 },
+        byKind: { attention: 0, review: 0 },
         total: 0,
       },
       unavailableDomains: [],
     });
   });
 
-  it("puts actions before workspace detail and keeps workspace/setup state in the URL", async () => {
+  it("keeps workspace selection in the URL and separates connected agents", async () => {
     const browser = userEvent.setup();
-    renderSettings("/settings?section=agents&workspace=calendar&setup=connect");
+    renderSettings("/settings?section=workspace-access&workspace=calendar");
 
-    const headings = [
-      await screen.findByRole("heading", { name: "Agent access" }),
-      screen.getByRole("heading", { name: "Your action queue" }),
-      screen.getByRole("heading", { name: "Agent workspaces" }),
-      screen.getByRole("heading", { name: "Access management" }),
-    ];
-    for (let index = 0; index < headings.length - 1; index += 1) {
-      expect(headings[index]?.compareDocumentPosition(headings[index + 1] as Node)).toBe(
-        Node.DOCUMENT_POSITION_FOLLOWING,
-      );
-    }
+    expect(await screen.findByRole("heading", { name: "Workspace access" })).toBeInTheDocument();
+    expect(screen.queryByText("Your action queue")).not.toBeInTheDocument();
+    expect(screen.queryByText("Access management")).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Calendar" })).toBeChecked();
-    await waitFor(() =>
-      expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp"),
-    );
 
     await browser.click(screen.getByRole("radio", { name: "Tasks" }));
     expect(screen.getByLabelText("Current location")).toHaveTextContent(
-      "/settings?section=agents&workspace=tasks&setup=connect",
+      "/settings?section=workspace-access&workspace=tasks",
     );
+    await browser.click(screen.getByRole("link", { name: "Connected agents" }));
+    expect(await screen.findByRole("heading", { name: "Connected agents" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp");
+  });
+
+  it("reports unavailable connection inventory without inventing a count", async () => {
+    mocks.listAccessTokens.mockRejectedValueOnce(new Error("Token inventory unavailable"));
+    renderSettings("/settings?section=agent-connections");
+
+    expect(await screen.findByText("Connections unavailable")).toBeInTheDocument();
+    expect(screen.queryByText(/\d+ connected/)).not.toBeInTheDocument();
   });
 
   it("connects a host, shows agent-owned setup progress, selects a domain, and manages fallback access", async () => {
     const browser = userEvent.setup();
     renderSettings(
-      "/settings?section=agents&workspace=mail&reviewRule=33333333-3333-4333-8333-333333333333",
+      "/settings?section=workspace-access&workspace=mail&reviewRule=33333333-3333-4333-8333-333333333333",
     );
 
-    expect(await screen.findByRole("heading", { name: "Agent access" })).toBeInTheDocument();
-    expect(await screen.findByText("2 connected")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Workspace access" })).toBeInTheDocument();
     expect(await screen.findByText("Weekly news")).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: person@example.com/)).toBeInTheDocument();
     expect(screen.getByText(/mark read — due now/)).toBeInTheDocument();
@@ -548,12 +576,10 @@ describe("agent access settings", () => {
     );
     await waitFor(() => expect(mocks.getMailSetupContext).toHaveBeenCalledTimes(2));
     expect(screen.getByLabelText("Current location")).toHaveTextContent(
-      "/settings?section=agents&workspace=mail",
+      "/settings?section=workspace-access&workspace=mail",
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByText("Routine orders")).not.toBeInTheDocument();
-    const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');
-    expect(claudeHost?.querySelector('[data-slot="item-media"] svg.reicon')).not.toBeNull();
     for (const domain of ["Mail", "Finances", "Calendar", "Tasks"] as const) {
       const control = screen.getByRole("radio", { name: domain });
       expect(control.querySelector(`[data-workspace="${domain.toLowerCase()}"]`)).not.toBeNull();
@@ -597,15 +623,11 @@ describe("agent access settings", () => {
     ).toBeInTheDocument();
     await browser.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText("MCP connection confirmed by Ilo.")).toBeInTheDocument();
     expect(screen.getByText("mail setup is active.")).toBeInTheDocument();
-    const connectStep = screen.getByRole("button", {
-      name: /Connect an agent/,
-    });
     const setupStep = screen.getByRole("button", {
       name: /Let the agent set up Ilo/,
     });
-    for (const trigger of [connectStep, setupStep]) {
+    for (const trigger of [setupStep]) {
       const initiallyOpen = trigger.getAttribute("aria-expanded") === "true";
       await browser.click(trigger);
       expect(trigger).toHaveAttribute("aria-expanded", initiallyOpen ? "false" : "true");
@@ -620,9 +642,6 @@ describe("agent access settings", () => {
       "href",
       "https://app.example.com/skills/ilo-setup/v0.2.0/SKILL.md",
     );
-    expect(screen.getAllByText(/Not used yet/)).toHaveLength(2);
-    await browser.click(screen.getByRole("button", { name: "Copy Ilo MCP URL" }));
-    await expect(navigator.clipboard.readText()).resolves.toBe("https://mcp.example.com/mcp");
     vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Clipboard denied"));
     await browser.click(screen.getByRole("button", { name: "Copy agent setup request" }));
     await waitFor(() =>
@@ -681,7 +700,28 @@ describe("agent access settings", () => {
       await screen.findByText("Review finances draft version 3 and accept or revise it."),
     ).toBeInTheDocument();
 
+    await browser.click(screen.getByRole("link", { name: "Connected agents" }));
+    expect(await screen.findByText("2 connected")).toBeInTheDocument();
+    expect(screen.getByText(/Legacy inactive permission/)).toBeInTheDocument();
+    const claudeHost = (await screen.findByText("Claude")).closest('[data-slot="item"]');
+    expect(claudeHost?.querySelector('[data-slot="item-media"] svg.reicon')).not.toBeNull();
+    await browser.click(screen.getByRole("button", { name: "Copy Ilo MCP URL" }));
+    await expect(navigator.clipboard.readText()).resolves.toBe("https://mcp.example.com/mcp");
+
     await browser.click(screen.getByRole("button", { name: "Revoke Claude" }));
+    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    let resolveRevoke!: () => void;
+    mocks.revokeOAuthClient.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRevoke = resolve;
+        }),
+    );
+    await browser.click(screen.getByRole("button", { name: "Revoke Claude" }));
+    await browser.click(screen.getByRole("button", { name: "Revoke access" }));
+    expect(screen.getByRole("button", { name: "Revoking…" })).toBeDisabled();
+    resolveRevoke();
     await waitFor(() => expect(mocks.revokeOAuthClient.mock.calls[0]?.[0]).toBe(id));
 
     await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
@@ -700,9 +740,12 @@ describe("agent access settings", () => {
     expect(await screen.findByText("pos_once")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Dismiss token" }));
     await browser.click(screen.getByRole("button", { name: "Revoke Local Codex" }));
+    await browser.click(screen.getByRole("button", { name: "Revoke access" }));
     await waitFor(() => expect(mocks.deleteAccessToken.mock.calls[0]?.[0]).toBe(id));
-    await browser.click(screen.getByRole("button", { name: "Revoked tokens · 1" }));
+    await browser.click(screen.getByRole("button", { name: "Inactive tokens · 2" }));
     expect(screen.getByText("Old agent")).toBeInTheDocument();
+    expect(screen.getByText("Expired agent")).toBeInTheDocument();
+    expect(screen.getByText("Expired · Legacy inactive permission")).toBeInTheDocument();
   }, 15_000);
 
   it("allows reviewed one-day recoverable Trash rules to activate durably", async () => {
@@ -758,7 +801,7 @@ describe("agent access settings", () => {
         truncated: true,
       },
     });
-    renderSettings(`/settings?section=agents&workspace=mail&reviewRule=${ruleId}`);
+    renderSettings(`/settings?section=workspace-access&workspace=mail&reviewRule=${ruleId}`);
     expect(await screen.findByText("(No subject)")).toBeInTheDocument();
     expect(screen.getByText(/Unknown account/)).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: no explicit account selected/)).toBeInTheDocument();
@@ -779,7 +822,6 @@ describe("agent access settings", () => {
   });
 
   it("keeps missing sources and connection-guide failures actionable", async () => {
-    const browser = userEvent.setup();
     mocks.getAgentConnectionGuide.mockRejectedValue(new Error("Connection guide unavailable"));
     mocks.getAssistantSetupStatus.mockResolvedValue({
       domains: [
@@ -824,8 +866,6 @@ describe("agent access settings", () => {
     mocks.listOAuthClients.mockResolvedValue([]);
     renderSettings();
 
-    await browser.click(await screen.findByRole("button", { name: /Connect an agent/ }));
-
     expect(await screen.findByText("Connection guide unavailable")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Mail" })).toBeDisabled();
     expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Unavailable");
@@ -834,7 +874,6 @@ describe("agent access settings", () => {
     expect(
       screen.getByText("Mail guided setup is not published by this deployment."),
     ).toBeInTheDocument();
-    expect(screen.getByText("Not connected")).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Copy agent setup request" }),
     ).not.toBeInTheDocument();
@@ -930,22 +969,18 @@ describe("agent access settings", () => {
     expect(financeChecks.getByText("100+ open Finances attention items.")).toBeInTheDocument();
   }, 10_000);
 
-  it("isolates a selected-domain readiness failure from the connection handoff", async () => {
+  it("isolates a selected-domain readiness failure from agent connection management", async () => {
     const browser = userEvent.setup();
     mocks.listCalendars.mockRejectedValue(new Error("Calendar readiness unavailable"));
     renderSettings();
 
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
     expect(await screen.findByText("Calendar readiness unavailable")).toBeInTheDocument();
-    const connectStep = screen.getByRole("button", {
-      name: /Connect an agent/,
-    });
     const setupStep = screen.getByRole("button", {
       name: /Let the agent set up Ilo/,
     });
-    if (connectStep.getAttribute("aria-expanded") !== "true") await browser.click(connectStep);
     if (setupStep.getAttribute("aria-expanded") !== "true") await browser.click(setupStep);
-    expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp");
+    expect(screen.getByRole("link", { name: "Connected agents" })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Setup protocol details" }));
     expect(screen.getByRole("button", { name: "Copy agent setup request" })).toBeEnabled();
   });
@@ -1002,10 +1037,9 @@ describe("agent access settings", () => {
     renderSettings();
 
     expect(await screen.findByRole("radio", { name: "Tasks" })).toBeDisabled();
-    await browser.click(screen.getByRole("button", { name: /Let the agent set up Ilo/ }));
     await browser.click(screen.getByRole("radio", { name: "Calendar" }));
-    expect(await screen.findAllByText("Learn calendar preferences")).toHaveLength(2);
-    expect(screen.getByText(/Calendar-owned executable rules/)).toBeInTheDocument();
+    expect(await screen.findByText("Calendar profiles, previews, and rules")).toBeInTheDocument();
+    expect(screen.getAllByText(/Calendar-owned executable rules/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/inbox|recoverable Trash/)).not.toBeInTheDocument();
   });
 
@@ -1058,7 +1092,7 @@ describe("agent access settings", () => {
         truncated: false,
       },
     });
-    renderSettings(`/settings?section=agents&workspace=mail&reviewRule=${ruleId}`);
+    renderSettings(`/settings?section=workspace-access&workspace=mail&reviewRule=${ruleId}`);
     expect(await screen.findByText(/Reviewed 0 of 200 recent conversations/)).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: Unknown account/)).toBeInTheDocument();
     expect(screen.getByText("Activate your Mail profile first")).toBeInTheDocument();

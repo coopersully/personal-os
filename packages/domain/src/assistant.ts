@@ -140,7 +140,7 @@ export const agentAccessDomains = ["mail", "finances", "calendar", "tasks"] as c
 export const agentAccessDomainSchema = z.enum(agentAccessDomains);
 export type AgentAccessDomain = z.infer<typeof agentAccessDomainSchema>;
 
-export const agentAccessWorkItemKindSchema = z.enum(["review", "attention", "setup"]);
+export const agentAccessWorkItemKindSchema = z.enum(["review", "attention"]);
 export type AgentAccessWorkItemKind = z.infer<typeof agentAccessWorkItemKindSchema>;
 
 export const agentAccessWorkItemPrioritySchema = z.enum([
@@ -197,13 +197,13 @@ export const agentAccessWorkItemSummarySchema = z.object({
   byKind: z.object({
     attention: agentAccessWorkItemCountSchema,
     review: agentAccessWorkItemCountSchema,
-    setup: agentAccessWorkItemCountSchema,
   }),
   total: agentAccessWorkItemCountSchema,
 });
 export type AgentAccessWorkItemSummary = z.infer<typeof agentAccessWorkItemSummarySchema>;
 
 export const agentAccessWorkItemPageSchema = z.object({
+  filteredTotal: agentAccessWorkItemCountSchema,
   items: z.array(agentAccessWorkItemSchema).max(10),
   nextCursor: z.string().trim().min(1).max(4_000).nullable(),
   snapshotAt: isoDateTimeSchema,

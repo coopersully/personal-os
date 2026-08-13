@@ -1,8 +1,6 @@
 import {
   attentionItems,
   auditEvents,
-  automationRoutines,
-  automationRuns,
   calendarAccounts,
   calendarEvents,
   calendars,
@@ -162,8 +160,6 @@ export const qaFixtureAccounts = [
 type FixtureData = {
   attentionItems: Array<typeof attentionItems.$inferInsert>;
   auditEvents: Array<typeof auditEvents.$inferInsert>;
-  automationRoutines: Array<typeof automationRoutines.$inferInsert>;
-  automationRuns: Array<typeof automationRuns.$inferInsert>;
   calendarAccounts: Array<typeof calendarAccounts.$inferInsert>;
   calendarEvents: Array<typeof calendarEvents.$inferInsert>;
   calendars: Array<typeof calendars.$inferInsert>;
@@ -198,8 +194,6 @@ function emptyFixtureData(): FixtureData {
   return {
     attentionItems: [],
     auditEvents: [],
-    automationRoutines: [],
-    automationRuns: [],
     calendarAccounts: [],
     calendarEvents: [],
     calendars: [],
@@ -691,29 +685,6 @@ function addLoadedWorkspace(
       userId: account.id,
     },
   );
-  const routineId = fixtureId(account, 220);
-  data.automationRoutines.push({
-    createdAt: ago(24 * 14),
-    enabled: true,
-    id: routineId,
-    lastRunAt: at(today, 8 * 60),
-    schedule: "Weekdays at 8:00 AM",
-    template: "morning_brief",
-    timezone,
-    title: "Morning brief",
-    updatedAt: now,
-    userId: account.id,
-  });
-  data.automationRuns.push({
-    completedAt: at(today, 8 * 60 + 1),
-    id: fixtureId(account, 221),
-    routineId,
-    startedAt: at(today, 8 * 60),
-    status: "completed",
-    summary: "3 calendar commitments, 2 priority tasks, and 1 overdue reminder.",
-    userId: account.id,
-  });
-
   data.mailboxes.push(
     {
       accountId: connectedAccountId,
@@ -1471,19 +1442,6 @@ function addLoadedWorkspace(
       requestId: `fixture-${account.key}-finance`,
       userId: account.id,
     },
-    {
-      action: "automation.completed",
-      actorId: routineId,
-      actorType: "system",
-      after: { summary: "Morning brief generated" },
-      before: null,
-      createdAt: at(today, 8 * 60 + 1),
-      entityId: routineId,
-      entityType: "automation_routine",
-      id: fixtureId(account, 502),
-      requestId: `fixture-${account.key}-automation`,
-      userId: account.id,
-    },
   );
 }
 
@@ -1530,10 +1488,6 @@ export async function loadQaFixtures(
     if (data.reminders.length) await transaction.insert(reminders).values(data.reminders);
     if (data.goals.length) await transaction.insert(goals).values(data.goals);
     if (data.motives.length) await transaction.insert(motives).values(data.motives);
-    if (data.automationRoutines.length)
-      await transaction.insert(automationRoutines).values(data.automationRoutines);
-    if (data.automationRuns.length)
-      await transaction.insert(automationRuns).values(data.automationRuns);
     if (data.mailboxes.length) await transaction.insert(mailboxes).values(data.mailboxes);
     if (data.mailThreads.length) await transaction.insert(mailThreads).values(data.mailThreads);
     if (data.mailMessages.length) await transaction.insert(mailMessages).values(data.mailMessages);

@@ -69,12 +69,13 @@ describe("assistant setup routes", () => {
     };
     const workItems = {
       list: vi.fn(async () => ({
+        filteredTotal: 0,
         items: [],
         nextCursor: null,
         snapshotAt: now,
         summary: {
           byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
-          byKind: { attention: 0, review: 0, setup: 0 },
+          byKind: { attention: 0, review: 0 },
           total: 0,
         },
         unavailableDomains: [],

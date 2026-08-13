@@ -1,6 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import {
-  accessTokens,
+  agentAccessWorkItemSnapshots,
   attentionItems,
   calendarAccounts,
   type Database,
@@ -19,7 +19,7 @@ import {
   agentAccessDomains,
   featureAccessPolicies,
 } from "@personal-os/domain";
-import { and, eq, gt, isNotNull, isNull, lte, or } from "drizzle-orm";
+import { and, eq, gt, lte, or } from "drizzle-orm";
 import { z } from "zod";
 import { AppError } from "./errors.js";
 import type { Principal } from "./types.js";
@@ -28,7 +28,6 @@ type SourceInput = { snapshotAt: Date; userId: string };
 type SourceReaders = {
   accounts: (input: SourceInput) => Promise<Array<typeof calendarAccounts.$inferSelect>>;
   attention: (input: SourceInput) => Promise<Array<typeof attentionItems.$inferSelect>>;
-  credentials: (input: SourceInput) => Promise<Array<typeof accessTokens.$inferSelect>>;
   financeReviews: (input: SourceInput) => Promise<Array<typeof financeReviewCases.$inferSelect>>;
   mailRules: (input: SourceInput) => Promise<Array<typeof mailRules.$inferSelect>>;
   profiles: (input: SourceInput) => Promise<Array<typeof domainProfiles.$inferSelect>>;
@@ -38,7 +37,6 @@ type SourceKey = keyof SourceReaders;
 type SourceResult = {
   accounts: Awaited<ReturnType<SourceReaders["accounts"]>>;
   attention: Awaited<ReturnType<SourceReaders["attention"]>>;
-  credentials: Awaited<ReturnType<SourceReaders["credentials"]>>;
   financeReviews: Awaited<ReturnType<SourceReaders["financeReviews"]>>;
   mailRules: Awaited<ReturnType<SourceReaders["mailRules"]>>;
   profiles: Awaited<ReturnType<SourceReaders["profiles"]>>;
@@ -57,8 +55,9 @@ const cursorSchema = z.object({
   domain: z.enum(agentAccessDomains).nullable(),
   effectiveAt: z.iso.datetime({ offset: true }),
   id: z.string().min(1).max(300),
-  kind: z.enum(["review", "attention", "setup"]).nullable(),
+  kind: z.enum(["review", "attention"]).nullable(),
   priority: z.enum(["person_review", "blocked", "critical", "high", "normal", "low"]),
+  snapshotId: z.uuid(),
   snapshotAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
 });
@@ -72,10 +71,6 @@ const sourceImpact: Record<
   attention: {
     domains: [...agentAccessDomains],
     kinds: ["attention"],
-  },
-  credentials: {
-    domains: [...agentAccessDomains],
-    kinds: ["setup"],
   },
   financeReviews: { domains: ["finances"], kinds: ["review"] },
   mailRules: { domains: ["mail"], kinds: ["review"] },
@@ -124,19 +119,6 @@ export function createAgentAccessWorkItemService({
             eq(attentionItems.userId, userId),
             eq(attentionItems.status, "open"),
             lte(attentionItems.updatedAt, snapshotAt),
-          ),
-        ),
-    credentials: async ({ snapshotAt, userId }) =>
-      db
-        .select()
-        .from(accessTokens)
-        .where(
-          and(
-            eq(accessTokens.userId, userId),
-            isNull(accessTokens.revokedAt),
-            isNotNull(accessTokens.lastUsedAt),
-            lte(accessTokens.lastUsedAt, snapshotAt),
-            or(isNull(accessTokens.expiresAt), gt(accessTokens.expiresAt, snapshotAt)),
           ),
         ),
     financeReviews: async ({ snapshotAt, userId }) =>
@@ -191,7 +173,8 @@ export function createAgentAccessWorkItemService({
           "The Agent Access cursor does not match the active filters.",
         );
       }
-      const snapshotAt = cursor ? new Date(cursor.snapshotAt) : now();
+      const requestTime = now();
+      const snapshotAt = cursor ? new Date(cursor.snapshotAt) : requestTime;
       const accessibleDomains = new Set(
         domains
           .filter(
@@ -202,6 +185,46 @@ export function createAgentAccessWorkItemService({
           )
           .map((entry) => entry.domain),
       );
+      if (cursor) {
+        const [snapshot] = await db
+          .select()
+          .from(agentAccessWorkItemSnapshots)
+          .where(
+            and(
+              eq(agentAccessWorkItemSnapshots.id, cursor.snapshotId),
+              eq(agentAccessWorkItemSnapshots.userId, principal.userId),
+              eq(agentAccessWorkItemSnapshots.actorId, principal.actorId),
+              eq(agentAccessWorkItemSnapshots.actorType, principal.actorType),
+              gt(agentAccessWorkItemSnapshots.expiresAt, requestTime),
+            ),
+          )
+          .limit(1);
+        if (!snapshot) {
+          throw new AppError("invalid_request", "The Agent Access cursor has expired.");
+        }
+        const remaining = snapshot.items.filter((item) => compareItemToCursor(item, cursor) > 0);
+        const pageItems = remaining.slice(0, query.limit);
+        const last = pageItems.at(-1);
+        return {
+          filteredTotal: snapshot.filteredTotal,
+          items: pageItems,
+          nextCursor:
+            remaining.length > query.limit && last
+              ? encodeCursor(
+                  last,
+                  snapshot.createdAt,
+                  snapshot.id,
+                  snapshot.domain,
+                  snapshot.kind,
+                  cursorSigningKey,
+                )
+              : null,
+          snapshotAt: snapshot.createdAt.toISOString(),
+          summary: snapshot.summary,
+          unavailableDomains: snapshot.unavailableDomains,
+        };
+      }
+
       const input = { snapshotAt, userId: principal.userId };
       const entries = Object.entries(sourceReaders) as Array<[SourceKey, SourceReaders[SourceKey]]>;
       const settled = await Promise.allSettled(entries.map(([, reader]) => reader(input)));
@@ -220,7 +243,6 @@ export function createAgentAccessWorkItemService({
       const items = projectItems({
         accessibleDomains,
         results,
-        snapshotAt,
       }).toSorted(compareItems);
       const unavailableDomains = [
         ...new Set([...failedSources].flatMap((source) => sourceImpact[source].domains)),
@@ -238,19 +260,57 @@ export function createAgentAccessWorkItemService({
       const filtered = items.filter(
         (item) =>
           (query.domain === undefined || item.domain === query.domain) &&
-          (query.kind === undefined || item.kind === query.kind) &&
-          (cursor === null || compareItemToCursor(item, cursor) > 0),
+          (query.kind === undefined || item.kind === query.kind),
       );
+      const filteredCountUnavailable = query.domain
+        ? unavailableDomains.includes(query.domain)
+        : query.kind
+          ? failedKinds.has(query.kind)
+          : unavailableDomains.length > 0 || failedKinds.size > 0;
+      const filteredTotal = filteredCountUnavailable ? null : filtered.length;
+      await db
+        .delete(agentAccessWorkItemSnapshots)
+        .where(
+          and(
+            eq(agentAccessWorkItemSnapshots.userId, principal.userId),
+            lte(agentAccessWorkItemSnapshots.expiresAt, requestTime),
+          ),
+        );
+      const snapshot =
+        filtered.length > query.limit
+          ? (
+              await db
+                .insert(agentAccessWorkItemSnapshots)
+                .values({
+                  actorId: principal.actorId,
+                  actorType: principal.actorType,
+                  domain: query.domain ?? null,
+                  expiresAt: new Date(requestTime.getTime() + 15 * 60_000),
+                  filteredTotal,
+                  items: filtered,
+                  kind: query.kind ?? null,
+                  summary,
+                  unavailableDomains,
+                  userId: principal.userId,
+                })
+                .returning()
+            )[0]
+          : null;
+      if (filtered.length > query.limit && !snapshot) {
+        throw new AppError("internal_error", "Could not preserve review pagination.");
+      }
       const pageItems = filtered.slice(0, query.limit);
       const last = pageItems.at(-1);
 
       return {
+        filteredTotal,
         items: pageItems,
         nextCursor:
-          filtered.length > query.limit && last
+          filtered.length > query.limit && last && snapshot
             ? encodeCursor(
                 last,
-                snapshotAt,
+                snapshot.createdAt,
+                snapshot.id,
                 query.domain ?? null,
                 query.kind ?? null,
                 cursorSigningKey,
@@ -267,60 +327,11 @@ export function createAgentAccessWorkItemService({
 function projectItems({
   accessibleDomains,
   results,
-  snapshotAt,
 }: {
   accessibleDomains: Set<AgentAccessDomain>;
   results: Partial<SourceResult>;
-  snapshotAt: Date;
 }): AgentAccessWorkItem[] {
   const items: AgentAccessWorkItem[] = [];
-  const credentials = results.credentials;
-  if (credentials) {
-    const observedScopes = new Set(credentials.flatMap((credential) => credential.scopes));
-    if (credentials.length === 0) {
-      items.push({
-        action: {
-          label: "Connect an agent",
-          to: "/settings?section=agents&setup=connect",
-        },
-        actionAt: null,
-        domain: null,
-        id: "setup:connect-agent",
-        kind: "setup",
-        priority: "blocked",
-        source: null,
-        summary: "Authorize one compatible host so Ilo can observe its scoped access.",
-        title: "Connect an agent",
-        updatedAt: snapshotAt.toISOString(),
-      });
-    } else {
-      for (const domain of accessibleDomains) {
-        const access = featureAccessPolicies[domain];
-        const missingRead = !observedScopes.has(access.readScope);
-        const missingWrite = !observedScopes.has(access.writeScope);
-        if (!missingRead && !missingWrite) continue;
-        const missing = [...(missingRead ? ["read"] : []), ...(missingWrite ? ["write"] : [])].join(
-          " and ",
-        );
-        items.push({
-          action: {
-            label: "Manage access",
-            to: `/settings?section=agents&workspace=${domain}#access-management`,
-          },
-          actionAt: null,
-          domain,
-          id: `setup:${domain}:agent-authority`,
-          kind: "setup",
-          priority: "blocked",
-          source: null,
-          summary: `No observed host has the required ${missing} access for this workspace.`,
-          title: `Update ${workspaceLabel(domain)} agent access`,
-          updatedAt: snapshotAt.toISOString(),
-        });
-      }
-    }
-  }
-
   for (const item of results.attention ?? []) {
     if (!isAgentAccessDomain(item.domain) || !accessibleDomains.has(item.domain)) continue;
     items.push({
@@ -342,7 +353,7 @@ function projectItems({
       items.push({
         action: {
           label: "Review rule",
-          to: `/settings?section=agents&workspace=mail&reviewRule=${rule.id}`,
+          to: `/settings?section=workspace-access&workspace=mail&reviewRule=${rule.id}`,
         },
         actionAt: null,
         domain: "mail",
@@ -434,7 +445,6 @@ function summarizeItems(
     byKind: {
       attention: failedKinds.has("attention") ? null : count((item) => item.kind === "attention"),
       review: failedKinds.has("review") ? null : count((item) => item.kind === "review"),
-      setup: failedKinds.has("setup") ? null : count((item) => item.kind === "setup"),
     },
     total: unavailableDomains.size > 0 ? null : items.length,
   };
@@ -469,6 +479,7 @@ function effectiveAt(item: AgentAccessWorkItem): string {
 function encodeCursor(
   item: AgentAccessWorkItem,
   snapshotAt: Date,
+  snapshotId: string,
   domain: AgentAccessDomain | null,
   kind: AgentAccessWorkItemKind | null,
   cursorSigningKey: string,
@@ -479,6 +490,7 @@ function encodeCursor(
     id: item.id,
     kind,
     priority: item.priority,
+    snapshotId,
     snapshotAt: snapshotAt.toISOString(),
     updatedAt: item.updatedAt,
   } satisfies Cursor;

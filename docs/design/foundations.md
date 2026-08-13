@@ -146,8 +146,8 @@ unrelated tools.
   Motives, and Activity while summarizing the other workspaces. Reminders
   belong within Tasks and do not receive a separate workspace palette.
 - The only workspace identities are Today, Calendar, Tasks, Mail, and Finances.
-  Account utilities (profile, setup, connections, security, agents, and
-  automations) are full-page utilities, never a sixth workspace.
+  Account utilities (profile, setup, connections, security, connected agents, and workspace
+  access) are full-page utilities, never a sixth workspace. Reviews belongs to Today.
 
 ### Typography
 

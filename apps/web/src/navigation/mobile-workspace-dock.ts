@@ -29,6 +29,7 @@ export type MobileWorkspacePage = {
 const mobileWorkspacePagesByWorkspace: Record<WorkspaceId, MobileWorkspacePage[]> = {
   today: [
     { icon: HouseIcon, label: "Today", path: "/today" },
+    { icon: ShieldCheckIcon, label: "Reviews", path: "/reviews" },
     { icon: TargetIcon, label: "Goals", path: "/goals" },
     { icon: CompassIcon, label: "Motives", path: "/motives" },
     { icon: ActivityIcon, label: "Activity", path: "/activity" },

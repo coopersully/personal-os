@@ -14,7 +14,6 @@ import { generateToken, hashToken } from "./security.js";
 const allScopes = new Set<AccessScope>([
   "audit:read",
   "automations:read",
-  "automations:write",
   "bookmarks:read",
   "calendar:read",
   "calendar:write",
@@ -79,30 +78,52 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
     getAuthorizationClient,
     async listAuthorizedClients(userId: string) {
       const records = await db
-        .select({ client: oauthClients, token: accessTokens })
-        .from(accessTokens)
+        .select({ client: oauthClients, refresh: oauthRefreshTokens, token: accessTokens })
+        .from(oauthRefreshTokens)
+        .innerJoin(accessTokens, eq(oauthRefreshTokens.accessTokenId, accessTokens.id))
         .innerJoin(oauthClients, eq(accessTokens.clientId, oauthClients.id))
         .where(
           and(
-            eq(accessTokens.userId, userId),
+            eq(oauthRefreshTokens.userId, userId),
             eq(accessTokens.audience, resource),
             isNull(accessTokens.revokedAt),
+            isNull(oauthRefreshTokens.replacedAt),
+            gt(oauthRefreshTokens.expiresAt, now()),
           ),
         );
-      return [
-        ...new Map(
-          records.map(({ client, token }) => [
-            client.id,
-            {
-              id: client.id,
-              name: client.name,
-              redirectUris: client.redirectUris,
-              lastUsedAt: token.lastUsedAt?.toISOString() ?? null,
-              scopes: token.scopes,
-            },
-          ]),
-        ).values(),
-      ];
+      const activeRecords = records.filter(
+        (record) => record.refresh.replacedAt === null && record.refresh.expiresAt > now(),
+      );
+      activeRecords.sort(
+        (left, right) =>
+          (right.token.lastUsedAt?.getTime() ?? 0) - (left.token.lastUsedAt?.getTime() ?? 0) ||
+          right.refresh.expiresAt.getTime() - left.refresh.expiresAt.getTime(),
+      );
+      const clients = new Map<
+        string,
+        {
+          id: string;
+          lastUsedAt: string | null;
+          name: string;
+          redirectUris: string[];
+          scopes: AccessScope[];
+        }
+      >();
+      for (const { client, token } of activeRecords) {
+        const existing = clients.get(client.id);
+        if (existing) {
+          existing.scopes = [...new Set([...existing.scopes, ...token.scopes])];
+          continue;
+        }
+        clients.set(client.id, {
+          id: client.id,
+          lastUsedAt: token.lastUsedAt?.toISOString() ?? null,
+          name: client.name,
+          redirectUris: client.redirectUris,
+          scopes: token.scopes,
+        });
+      }
+      return [...clients.values()];
     },
     async revokeAuthorizedClient(userId: string, clientId: string) {
       const current = now();

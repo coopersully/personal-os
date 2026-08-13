@@ -232,7 +232,7 @@ shown. When setup phase helps selection, each option may add one stable phase:
 **Checking**, **Not set up**, **Needs review**, **Set up**, or **Unavailable**.
 Setup phase is not readiness progress and must not use a percentage. Product
 identity comes from the established icon, label, and material, not a feature
-color. This pattern is established for Agent access and should be reused only
+color. This pattern is established for Workspace access and should be reused only
 when several checks genuinely support one decision.
 
 ### Event summary cards

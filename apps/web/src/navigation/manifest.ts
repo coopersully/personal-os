@@ -45,7 +45,7 @@ export const workspaceDefinitions: WorkspaceDefinition[] = [
 export function navigationOwnerForLocation(pathname: string): NavigationOwner {
   if (pathname === "/setup") return { kind: "standalone-flow" };
   if (pathname === "/settings") return { kind: "account-utility" };
-  if (["/today", "/goals", "/motives", "/activity"].includes(pathname)) {
+  if (["/today", "/reviews", "/goals", "/motives", "/activity"].includes(pathname)) {
     return { kind: "workspace", workspace: "today" };
   }
   if (pathname === "/reminders" || pathname === "/tasks") {

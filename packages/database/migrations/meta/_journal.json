@@ -379,6 +379,13 @@
       "when": 1786950000000,
       "tag": "0053_oauth_states_expiry_index",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1786953600000,
+      "tag": "0054_agent_access_work_item_snapshots",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,5 @@
 import type { CalendarAccount, Session, XBookmarkAccount } from "@personal-os/api-client";
 import type {
-  AutomationRoutine,
   Calendar,
   CalendarEvent,
   DailyBrief,
@@ -90,7 +89,6 @@ import {
 } from "@/components/event-card";
 import {
   ActivityIcon,
-  AgentIcon,
   ArrowLeftIcon,
   BankIcon,
   CalendarIcon,
@@ -115,7 +113,6 @@ import {
   HouseIcon,
   type Icon,
   ImageIcon,
-  KeyIcon,
   LayersIcon,
   ListChecksIcon,
   ListTodoIcon,
@@ -129,11 +126,13 @@ import {
   PaintBrushIcon,
   PanelTopIcon,
   PinIcon,
+  PlugIcon,
   PlusIcon,
   PulseIcon,
   RefreshIcon,
   ScissorsIcon,
   SettingsIcon,
+  ShieldCheckIcon,
   SparklesIcon,
   SunIcon,
   TargetIcon,
@@ -315,7 +314,11 @@ import {
   RemindersPage,
   RemindersTopbarControls,
 } from "./features/reminders/page.js";
-import { AgentAccessSettings } from "./features/settings/agent-access.js";
+import { ReviewsPage } from "./features/reviews/page.js";
+import {
+  ConnectedAgentsSettings,
+  WorkspaceAccessSettings,
+} from "./features/settings/agent-access.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
 import { SetupPage } from "./features/setup/page.js";
 import { tasksNavigationItem } from "./features/tasks/manifest.js";
@@ -402,6 +405,7 @@ const _planNavigationItems: NavigationItemDefinition[] = [
 ];
 
 const lifeNavigationItems: NavigationItemDefinition[] = [
+  { icon: ShieldCheckIcon, label: "Reviews", path: "/reviews" },
   { icon: TargetIcon, label: "Goals", path: "/goals" },
   { icon: CompassIcon, label: "Motives", path: "/motives" },
   // Today owns Activity. It left the account menu with the workspace-ownership
@@ -1158,7 +1162,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                   data-direction={workspacePreview.direction}
                   data-workspace={workspacePreview.path.slice(1)}
                   inert
-                  key={workspacePreview.path}
+                  key={`preview:${workspacePreview.path}`}
                 >
                   <WorkspacePreviewNavigationBoundary>
                     <WorkspaceRoutes
@@ -1310,9 +1314,10 @@ function WorkspaceRoutes({
       <Route path="/mail" element={<MailFeaturePage user={user} />} />
       <Route
         path="/automations"
-        element={<Navigate replace to="/settings?section=automations" />}
+        element={<Navigate replace to="/settings?section=workspace-access" />}
       />
       <Route path="/activity" element={<ActivityPage />} />
+      <Route path="/reviews" element={<ReviewsPage />} />
       <Route path="/goals" element={<GoalsPage />} />
       <Route path="/motives" element={<MotivesPage />} />
       <Route path="/finances/*" element={<FinancesPage />} />
@@ -1349,9 +1354,8 @@ function SidebarNavigationItem({
 }
 
 const navigationIcons = {
-  "Agent access": KeyIcon,
+  "Connected agents": PlugIcon,
   Appearance: PaintBrushIcon,
-  Automations: AgentIcon,
   Calendar: CalendarIcon,
   Calendars: CalendarIcon,
   Connections: CloudIcon,
@@ -1367,7 +1371,9 @@ const navigationIcons = {
   Tasks: ListChecksIcon,
   Today: HouseIcon,
   Wallpaper: ImageIcon,
+  "Workspace access": ShieldCheckIcon,
   Activity: PulseIcon,
+  Reviews: ShieldCheckIcon,
 } as const;
 
 function NavigationIcon({
@@ -2373,6 +2379,7 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/finances/subscriptions") return "Subscriptions";
   if (pathname === "/finances/transactions") return "Transactions";
   if (pathname === "/activity") return "Activity";
+  if (pathname === "/reviews") return "Reviews";
   if (pathname === "/settings") return "Settings";
   return null;
 }
@@ -2412,188 +2419,6 @@ function TodayWeatherPopover({
         {content}
       </ShadcnPopoverContent>
     </ShadcnPopover>
-  );
-}
-
-function AutomationsPage({ user }: { user: User }) {
-  const queryClient = useQueryClient();
-  const routines = useQuery({ queryFn: api.listAutomations, queryKey: ["automations"] });
-  const runs = useQuery({ queryFn: () => api.listAutomationRuns(), queryKey: ["automation-runs"] });
-  const install = useMutation({
-    mutationFn: (template: "morning_brief" | "nightly_review") =>
-      api.createAutomation({
-        schedule: template === "morning_brief" ? "Weekdays at 8:00 AM" : "Daily at 8:00 PM",
-        template,
-        timezone: user.planningTimezone,
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["automations"] }),
-  });
-  const run = useMutation({
-    mutationFn: ({ dryRun, id }: { dryRun: boolean; id: string }) => api.runAutomation(id, dryRun),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["automation-runs"] });
-      queryClient.invalidateQueries({ queryKey: ["automations"] });
-      queryClient.invalidateQueries({ queryKey: ["daily-brief"] });
-    },
-  });
-  const update = useMutation({
-    mutationFn: ({
-      id,
-      input,
-    }: {
-      id: string;
-      input: Parameters<typeof api.updateAutomation>[1];
-    }) => api.updateAutomation(id, input),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["automations"] }),
-  });
-  if (routines.isPending || runs.isPending) return <PageLoading />;
-  if (routines.isError) return <InlineError error={routines.error} />;
-  if (runs.isError) return <InlineError error={runs.error} />;
-  const installed = new Set(routines.data.map((routine) => routine.template));
-  const content = (
-    <>
-      <section className="automation-catalog" aria-label="Routine catalog">
-        <AutomationTemplateCard
-          description="Prepare a concise, time-aware view of what is happening now, what is next, and what needs attention."
-          disabled={installed.has("morning_brief") || install.isPending}
-          install={() => install.mutate("morning_brief")}
-          title="Morning brief"
-        />
-        <AutomationTemplateCard
-          description="Capture the same material at the end of the day so an agent can help close loops and prepare tomorrow."
-          disabled={installed.has("nightly_review") || install.isPending}
-          install={() => install.mutate("nightly_review")}
-          title="Nightly review"
-        />
-      </section>
-      {install.isError ? <InlineError error={install.error} /> : null}
-      <section className="automation-routines" aria-label="Installed routines">
-        <div className="section-heading">
-          <div>
-            <p className="eyebrow">Installed</p>
-            <h2>Your routines</h2>
-          </div>
-        </div>
-        {routines.data.length === 0 ? (
-          <EmptyState icon={<AgentIcon />} title="No routines yet">
-            Install a starter routine above. It never receives more authority than the token you
-            give an agent.
-          </EmptyState>
-        ) : (
-          routines.data.map((routine) => (
-            <AutomationRoutineCard
-              key={routine.id}
-              latestRun={runs.data.find((item) => item.routineId === routine.id)}
-              routine={routine}
-              run={(dryRun) => run.mutate({ dryRun, id: routine.id })}
-              runPending={run.isPending}
-              save={(input) => update.mutate({ id: routine.id, input })}
-              savePending={update.isPending}
-            />
-          ))
-        )}
-      </section>
-      {run.isError ? <InlineError error={run.error} /> : null}
-      {update.isError ? <InlineError error={update.error} /> : null}
-    </>
-  );
-  return (
-    <SettingsSection
-      action={<Badge>{routines.data.length} installed</Badge>}
-      description="Install and manage routines. Agents can use them only within the authority you grant."
-      title="Automations"
-    >
-      {content}
-    </SettingsSection>
-  );
-}
-
-function AutomationRoutineCard({
-  latestRun,
-  routine,
-  run,
-  runPending,
-  save,
-  savePending,
-}: {
-  latestRun: { startedAt: string; status: string } | undefined;
-  routine: AutomationRoutine;
-  run: (dryRun: boolean) => void;
-  runPending: boolean;
-  save: (input: { enabled: boolean; schedule: string; timezone: string }) => void;
-  savePending: boolean;
-}) {
-  const [enabled, setEnabled] = useState(routine.enabled);
-  const [schedule, setSchedule] = useState(routine.schedule);
-  const changed = enabled !== routine.enabled || schedule !== routine.schedule;
-  return (
-    <article className="automation-routine">
-      <div>
-        <h3>{routine.title}</h3>
-        <small>
-          {latestRun
-            ? `${latestRun.status === "dry_run" ? "Previewed" : "Ran"} ${formatRelative(latestRun.startedAt)}`
-            : "Not run yet"}
-        </small>
-      </div>
-      <div className="automation-routine__controls">
-        <label>
-          Schedule
-          <input
-            aria-label={`${routine.title} schedule`}
-            onChange={(event) => setSchedule(event.target.value)}
-            value={schedule}
-          />
-        </label>
-        <label className="switch-field">
-          <input
-            checked={enabled}
-            onChange={(event) => setEnabled(event.target.checked)}
-            type="checkbox"
-          />
-          Enabled
-        </label>
-        <span>{routine.timezone}</span>
-        <Button
-          disabled={!changed || savePending || schedule.trim().length === 0}
-          onClick={() => save({ enabled, schedule: schedule.trim(), timezone: routine.timezone })}
-          tone="ghost"
-        >
-          Save
-        </Button>
-      </div>
-      <div className="automation-routine__actions">
-        <Button disabled={runPending || !enabled} onClick={() => run(true)} tone="ghost">
-          Preview
-        </Button>
-        <Button disabled={runPending || !enabled} onClick={() => run(false)}>
-          Run now
-        </Button>
-      </div>
-    </article>
-  );
-}
-
-function AutomationTemplateCard({
-  description,
-  disabled,
-  install,
-  title,
-}: {
-  description: string;
-  disabled: boolean;
-  install: () => void;
-  title: string;
-}) {
-  return (
-    <article className="automation-template">
-      <AgentIcon aria-hidden="true" className="size-5" />
-      <h2>{title}</h2>
-      <p>{description}</p>
-      <Button disabled={disabled} onClick={install} tone={disabled ? "ghost" : "accent"}>
-        {disabled ? "Installed" : "Install"}
-      </Button>
-    </article>
   );
 }
 
@@ -4469,15 +4294,15 @@ function MailComposeButton({ onSelect }: { onSelect?: () => void }) {
 }
 
 type SettingsSectionId =
-  | "agents"
-  | "automations"
+  | "agent-connections"
   | "appearance"
   | "calendars"
   | "connections"
   | "invitations"
   | "profile"
   | "sessions"
-  | "wallpaper";
+  | "wallpaper"
+  | "workspace-access";
 
 const settingsNavigation: Array<{
   items: Array<{ icon: Icon; id: SettingsSectionId; label: string }>;
@@ -4506,10 +4331,10 @@ const settingsNavigation: Array<{
     ],
   },
   {
-    label: "Automation",
+    label: "Agents",
     items: [
-      { icon: AgentIcon, id: "automations", label: "Automations" },
-      { icon: KeyIcon, id: "agents", label: "Agent access" },
+      { icon: PlugIcon, id: "agent-connections", label: "Connected agents" },
+      { icon: ShieldCheckIcon, id: "workspace-access", label: "Workspace access" },
     ],
   },
 ];
@@ -4522,9 +4347,11 @@ function settingsSectionFromSearch(search: string): SettingsSectionId {
   const requestedSection = new URLSearchParams(search).get("section");
   return requestedSection === "account"
     ? "profile"
-    : settingsSectionIds.has(requestedSection as SettingsSectionId)
-      ? (requestedSection as SettingsSectionId)
-      : "profile";
+    : requestedSection === "agents" || requestedSection === "automations"
+      ? "workspace-access"
+      : settingsSectionIds.has(requestedSection as SettingsSectionId)
+        ? (requestedSection as SettingsSectionId)
+        : "profile";
 }
 
 export function settingsSectionPath(section: SettingsSectionId): string {
@@ -4586,6 +4413,12 @@ function SettingsSidebarNavigation({
 
 function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void; user: User }) {
   const location = useLocation();
+  const requestedSection = new URLSearchParams(location.search).get("section");
+  if (requestedSection === "agents" || requestedSection === "automations") {
+    const next = new URLSearchParams(location.search);
+    next.set("section", "workspace-access");
+    return <Navigate replace to={`/settings?${next.toString()}`} />;
+  }
   const section = settingsSectionFromSearch(location.search);
   if (section === "invitations" && user.canManageInvitations !== true) {
     return <Navigate replace to="/settings?section=profile" />;
@@ -4595,8 +4428,8 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
       <section aria-live="polite" className="settings-panel" key={section}>
         {section === "calendars" ? <CalendarsSettings setEditor={setEditor} /> : null}
         {section === "connections" ? <ConnectorsSettings /> : null}
-        {section === "agents" ? <AgentAccessSettings /> : null}
-        {section === "automations" ? <AutomationsPage user={user} /> : null}
+        {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
+        {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
         {section === "appearance" ? <ThemeSettings user={user} /> : null}
         {section === "profile" ? <ProfileSettings user={user} /> : null}
         {section === "invitations" ? <InvitationsSettings /> : null}

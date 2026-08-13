@@ -10,7 +10,6 @@ import {
   confirmEmailVerificationInputSchema,
   connectICloudInputSchema,
   createAccessTokenInputSchema,
-  createAutomationRoutineInputSchema,
   createInvitationInputSchema,
   featureAccessPolicies,
   loginInputSchema,
@@ -19,7 +18,6 @@ import {
   resetPasswordInputSchema,
   startGoogleAuthorizationInputSchema,
   updateAccountSetupInputSchema,
-  updateAutomationRoutineInputSchema,
   updatePinterestWallpaperSettingsInputSchema,
   updateUserInputSchema,
   validateInvitationInputSchema,
@@ -36,11 +34,11 @@ import { createAgentAccessWorkItemService } from "./agent-access-work-items.js";
 import { createAssistantService } from "./assistant-service.js";
 import { createAuditService } from "./audit.js";
 import { createAuthService } from "./auth-service.js";
-import { createAutomationService } from "./automation-service.js";
 import { calendarProviderReconciliationLog } from "./calendar-provider-log.js";
 import { createCalendarService } from "./calendar-service.js";
 import { officialAgentSkill } from "./config.js";
 import { createConnectorService } from "./connector-service.js";
+import { createDailyBriefService } from "./daily-brief-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createFinanceService } from "./finance-service.js";
@@ -89,7 +87,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
     profilesDemoted: number;
     userRowsScanned: number;
   }>;
-  dispatchDueAutomations: () => Promise<void>;
+  dispatchDueMailRuleWork: () => Promise<void>;
   superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
     attempted: number;
@@ -102,8 +100,6 @@ export type PersonalOsApp = Hono<AppEnv> & {
 };
 
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
-const automationRunsQuerySchema = z.object({ routineId: z.uuid().optional() });
-const runAutomationInputSchema = z.object({ dryRun: z.boolean().default(false) });
 const googleCallbackSchema = z.object({
   code: z.string().min(1).optional(),
   error: z.string().min(1).optional(),
@@ -351,7 +347,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         status: entry.status,
       }),
   });
-  const automations = createAutomationService({
+  const dailyBrief = createDailyBriefService({
     db: dependencies.db,
     listEvents: calendar.listEvents,
     listReminders: async (userId) =>
@@ -825,8 +821,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/daily-brief", authenticate, requireScope("automations:read"));
   app.use("/v1/weather", authenticate, requireHuman);
   app.use("/v1/weather/*", authenticate, requireHuman);
-  app.use("/v1/automations", authenticate);
-  app.use("/v1/automations/*", authenticate);
   app.use("/v1/assistant/*", authenticate);
   const requireVerifiedEmail: MiddlewareHandler<AppEnv> = async (context, next) => {
     if (!(await auth.getUser(context.get("principal").userId)).emailVerified)
@@ -1038,7 +1032,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.get("/v1/daily-brief", async (context) => {
     const user = await auth.getUser(context.get("principal").userId);
     return context.json({
-      brief: await automations.dailyBrief(
+      brief: await dailyBrief.dailyBrief(
         user.id,
         user.planningTimezone,
         context.get("principal").scopes,
@@ -1066,46 +1060,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }),
     });
   });
-
-  app.get("/v1/automations", requireScope("automations:read"), async (context) =>
-    context.json({ routines: await automations.list(context.get("principal").userId) }),
-  );
-  app.post("/v1/automations", requireHuman, async (context) => {
-    const routine = await automations.create(
-      context.get("principal").userId,
-      await parseBody(context, createAutomationRoutineInputSchema),
-    );
-    return context.json({ routine }, 201);
-  });
-  app.patch("/v1/automations/:id", requireHuman, async (context) =>
-    context.json({
-      routine: await automations.update(
-        context.req.param("id"),
-        await parseBody(context, updateAutomationRoutineInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
-  app.get("/v1/automations/runs", requireScope("automations:read"), async (context) =>
-    context.json({
-      runs: await automations.listRuns(
-        context.get("principal").userId,
-        automationRunsQuerySchema.parse(context.req.query()).routineId,
-      ),
-    }),
-  );
-  app.post("/v1/automations/:id/runs", requireScope("automations:write"), async (context) =>
-    context.json(
-      {
-        run: await automations.run(
-          context.req.param("id"),
-          (await parseBody(context, runAutomationInputSchema)).dryRun,
-          mutationContext(context),
-        ),
-      },
-      201,
-    ),
-  );
 
   registerMailRoutes({ app, mail, mutationContext });
 
@@ -1166,7 +1120,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     async backfillFinanceSetupIntegrity() {
       return finances.backfillSetupIntegrity();
     },
-    async dispatchDueAutomations() {
+    async dispatchDueMailRuleWork() {
       const mailDispatchStartedAt = Date.now();
       await connectors.dispatchDueMailRuleWork().catch((error: unknown) => {
         dependencies.log?.({
@@ -1179,7 +1133,6 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         });
         throw error;
       });
-      await automations.dispatchDue();
     },
     async syncDueConnectors() {
       const observeFreshness = async () => {
@@ -1289,8 +1242,8 @@ function escapeHtml(value: string): string {
 
 const oauthScopeLabels: Record<string, string> = {
   "audit:read": "Read Ilo activity history",
-  "automations:read": "Read automations",
-  "automations:write": "Run approved automations",
+  "automations:read": "Read the generated daily brief",
+  "automations:write": "Legacy automation access (inactive)",
   "bookmarks:read": "Read synchronized bookmarks",
   "calendar:read": "Read calendars and events",
   "calendar:write": "Create and manage events",

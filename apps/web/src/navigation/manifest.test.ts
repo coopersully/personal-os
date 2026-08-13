@@ -19,6 +19,10 @@ describe("workspace navigation ownership", () => {
       kind: "workspace",
       workspace: "today",
     });
+    expect(navigationOwnerForLocation("/reviews")).toEqual({
+      kind: "workspace",
+      workspace: "today",
+    });
     expect(navigationOwnerForLocation("/reminders")).toEqual({
       kind: "workspace",
       workspace: "tasks",

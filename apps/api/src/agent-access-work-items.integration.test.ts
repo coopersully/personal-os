@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import {
-  accessTokens,
+  agentAccessWorkItemSnapshots,
   attentionItems,
   calendarAccounts,
   createDatabaseClient,
@@ -98,13 +98,6 @@ describe.sequential("Agent Access work-item projection", () => {
       userId: otherUser.id,
     };
 
-    await database.db.insert(accessTokens).values({
-      lastUsedAt: new Date("2026-08-11T17:00:00.000Z"),
-      name: "Mail host",
-      scopes: ["mail:read", "mail:write"],
-      tokenHash: "queue-observed-token",
-      userId: user.id,
-    });
     await database.db.insert(domainProfiles).values({
       categories: [],
       createdAt: new Date("2026-08-11T10:00:00.000Z"),
@@ -179,7 +172,7 @@ describe.sequential("Agent Access work-item projection", () => {
       userId: user.id,
     });
     await database.db.insert(attentionItems).values([
-      ...Array.from({ length: 13 }, (_, index) => ({
+      ...Array.from({ length: 25 }, (_, index) => ({
         createdAt: new Date(`2026-08-11T12:${String(index).padStart(2, "0")}:00.000Z`),
         domain: index === 0 ? ("mail" as const) : ("tasks" as const),
         importance: index === 0 ? ("critical" as const) : ("normal" as const),
@@ -228,8 +221,14 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(first.items.some((item) => item.title === "Reconnect Work for Mail")).toBe(true);
     expect(first.items.some((item) => item.title === "Reconnect Work for Calendar")).toBe(true);
     expect(first.summary.byKind.review).toBe(3);
-    expect(first.summary.total).toBe(21);
+    expect(first.summary.total).toBe(30);
+    expect(first.filteredTotal).toBe(30);
     expect(first.nextCursor).toEqual(expect.any(String));
+
+    await database.db
+      .update(attentionItems)
+      .set({ status: "resolved", updatedAt: new Date("2026-08-11T19:00:00.000Z") })
+      .where(eq(attentionItems.title, "Queue attention 12"));
 
     const second = await service.list(
       principal,
@@ -237,20 +236,39 @@ describe.sequential("Agent Access work-item projection", () => {
       publishedDomains,
     );
     expect(second.items).toHaveLength(10);
-    expect(new Set([...first.items, ...second.items].map((item) => item.id)).size).toBe(20);
     expect(second.nextCursor).toEqual(expect.any(String));
     const third = await service.list(
       principal,
       { cursor: second.nextCursor as string, limit: 10 },
       publishedDomains,
     );
-    expect(third.items).toHaveLength(1);
+    expect(third.items).toHaveLength(10);
+    expect(
+      new Set([...first.items, ...second.items, ...third.items].map((item) => item.id)).size,
+    ).toBe(30);
     expect(third.nextCursor).toBeNull();
+    await expect(
+      service.list(
+        { ...principal, actorId: "another-agent", actorType: "agent" },
+        { cursor: first.nextCursor as string, limit: 10 },
+        publishedDomains,
+      ),
+    ).rejects.toBeInstanceOf(AppError);
+    await database.db
+      .update(attentionItems)
+      .set({ status: "open", updatedAt: new Date("2026-08-11T12:12:00.000Z") })
+      .where(eq(attentionItems.title, "Queue attention 12"));
 
     const reviews = await service.list(principal, { kind: "review", limit: 10 }, publishedDomains);
     expect(reviews.items).toHaveLength(3);
     expect(reviews.items.every((item) => item.kind === "review")).toBe(true);
-    expect(reviews.summary.total).toBe(21);
+    expect(reviews.filteredTotal).toBe(3);
+    expect(reviews.summary.total).toBe(30);
+    const persistedSnapshots = await database.db
+      .select()
+      .from(agentAccessWorkItemSnapshots)
+      .where(eq(agentAccessWorkItemSnapshots.userId, principal.userId));
+    expect(persistedSnapshots).toHaveLength(1);
 
     const mail = await service.list(principal, { domain: "mail", limit: 10 }, publishedDomains);
     expect(mail.items.every((item) => item.domain === "mail")).toBe(true);
@@ -273,9 +291,31 @@ describe.sequential("Agent Access work-item projection", () => {
     await expect(
       service.list(principal, { cursor: tamperedCursor, limit: 10 }, publishedDomains),
     ).rejects.toBeInstanceOf(AppError);
+
+    const laterService = createAgentAccessWorkItemService({
+      cursorSigningKey: "agent-access-test-signing-key",
+      db: database.db,
+      now: () => new Date(snapshot.getTime() + 16 * 60_000),
+    });
+    await laterService.list(principal, { kind: "review", limit: 10 }, publishedDomains);
+    const snapshotsAfterCleanup = await database.db
+      .select()
+      .from(agentAccessWorkItemSnapshots)
+      .where(eq(agentAccessWorkItemSnapshots.userId, principal.userId));
+    expect(snapshotsAfterCleanup).toHaveLength(0);
+    await expect(
+      laterService.list(
+        principal,
+        { cursor: first.nextCursor as string, limit: 10 },
+        publishedDomains,
+      ),
+    ).rejects.toMatchObject({
+      code: "invalid_request",
+      message: "The Agent Access cursor has expired.",
+    });
   });
 
-  it("shows one account-level connection action without leaking other-user work", async () => {
+  it("does not leak other-user work", async () => {
     const service = createAgentAccessWorkItemService({
       cursorSigningKey: "agent-access-test-signing-key",
       db: database.db,
@@ -283,12 +323,6 @@ describe.sequential("Agent Access work-item projection", () => {
     });
     const page = await service.list(otherPrincipal, { limit: 10 }, publishedDomains);
 
-    expect(page.items[0]).toMatchObject({
-      domain: null,
-      id: "setup:connect-agent",
-      kind: "setup",
-      title: "Connect an agent",
-    });
     expect(page.items.map((item) => item.title)).toContain("Other user attention");
     expect(page.items.map((item) => item.title)).not.toContain("Statements");
   });
@@ -309,17 +343,12 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(page.items.length).toBeGreaterThan(0);
     expect(page.unavailableDomains).toContain("mail");
     expect(page.summary.total).toBeNull();
+    expect(page.filteredTotal).toBeNull();
     expect(page.summary.byDomain.mail).toBeNull();
     expect(page.summary.byDomain.tasks).toBeGreaterThan(0);
   });
 
   it("projects mixed authority and source edge cases without inventing work", async () => {
-    const [credential] = await database.db
-      .select()
-      .from(accessTokens)
-      .where(eq(accessTokens.userId, principal.userId))
-      .orderBy(asc(accessTokens.id))
-      .limit(1);
     const [attention] = await database.db
       .select()
       .from(attentionItems)
@@ -344,7 +373,7 @@ describe.sequential("Agent Access work-item projection", () => {
       .where(eq(calendarAccounts.userId, principal.userId))
       .orderBy(asc(calendarAccounts.id))
       .limit(1);
-    if (!credential || !attention || !rule || !profile || !account) {
+    if (!attention || !rule || !profile || !account) {
       throw new Error("Agent Access edge-case fixtures were not found.");
     }
 
@@ -368,12 +397,6 @@ describe.sequential("Agent Access work-item projection", () => {
             occursAt: new Date("2026-08-11T13:00:00.000Z"),
           },
         ],
-        credentials: async () => [
-          {
-            ...credential,
-            scopes: ["mail:read", "finances:write", "tasks:read", "tasks:write"],
-          },
-        ],
         financeReviews: async () => [],
         mailRules: async () => [{ ...rule, description: "" }],
         profiles: async () => [{ ...profile, domain: "mail" }],
@@ -392,9 +415,6 @@ describe.sequential("Agent Access work-item projection", () => {
           actionAt: "2026-08-11T13:00:00.000Z",
           id: `attention:${attention.id}-scheduled`,
         }),
-        expect.objectContaining({ domain: "mail", id: "setup:mail:agent-authority" }),
-        expect.objectContaining({ domain: "finances", id: "setup:finances:agent-authority" }),
-        expect.objectContaining({ domain: "calendar", id: "setup:calendar:agent-authority" }),
       ]),
     );
     expect(page.items.some((item) => item.id.startsWith("profile:"))).toBe(false);
@@ -411,9 +431,6 @@ describe.sequential("Agent Access work-item projection", () => {
         attention: async () => {
           throw new Error("Attention unavailable");
         },
-        credentials: async () => {
-          throw new Error("Credentials unavailable");
-        },
       },
     });
     const page = await service.list(principal, { limit: 10 }, publishedDomains);
@@ -421,7 +438,7 @@ describe.sequential("Agent Access work-item projection", () => {
     expect(page.unavailableDomains).toEqual(["calendar", "finances", "mail", "tasks"]);
     expect(page.summary).toMatchObject({
       byDomain: { calendar: null, finances: null, mail: null, tasks: null },
-      byKind: { attention: null, setup: null },
+      byKind: { attention: null },
       total: null,
     });
   });

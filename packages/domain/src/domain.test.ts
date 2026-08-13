@@ -11,8 +11,6 @@ import {
   applyFinanceCategorizationsInputSchema,
   assistantSetupPlanQuerySchema,
   assistantSetupPlanSchema,
-  automationRoutineSchema,
-  automationRunSchema,
   bulkUpdateMailInputSchema,
   calendarCommitmentCandidateSchema,
   calendarEventSchema,
@@ -25,7 +23,6 @@ import {
   connectorCapabilities,
   createAccessTokenInputSchema,
   createAttentionItemInputSchema,
-  createAutomationRoutineInputSchema,
   createEventBlockInputSchema,
   createEventInputSchema,
   createGoalInputSchema,
@@ -81,7 +78,6 @@ import {
   taskStatusSchema,
   timeZoneSchema,
   updateAccountSetupInputSchema,
-  updateAutomationRoutineInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
   updateFinanceTransactionInputSchema,
@@ -112,24 +108,13 @@ const end = "2026-07-13T14:00:00.000Z";
 describe("domain schemas", () => {
   it("validates paginated Agent Access work items and local actions", () => {
     const page = agentAccessWorkItemPageSchema.parse({
+      filteredTotal: 1,
       items: [
         {
           action: {
-            label: "Connect an agent",
-            to: "/settings?section=agents&setup=connect",
+            label: "Review Mail rule",
+            to: `/settings?section=workspace-access&reviewRule=${id}`,
           },
-          actionAt: null,
-          domain: null,
-          id: "setup:connect-agent",
-          kind: "setup",
-          priority: "blocked",
-          source: null,
-          summary: "Authorize one compatible host.",
-          title: "Connect an agent",
-          updatedAt: start,
-        },
-        {
-          action: { label: "Review Mail rule", to: `/settings?section=agents&reviewRule=${id}` },
           actionAt: start,
           domain: "mail",
           id: `mail-rule:${id}`,
@@ -151,13 +136,13 @@ describe("domain schemas", () => {
       snapshotAt: start,
       summary: {
         byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
-        byKind: { attention: 0, review: 1, setup: 1 },
-        total: 2,
+        byKind: { attention: 0, review: 1 },
+        total: 1,
       },
       unavailableDomains: [],
     });
 
-    expect(page.summary).toMatchObject({ total: 2 });
+    expect(page.summary).toMatchObject({ total: 1 });
     expect(agentAccessWorkItemQuerySchema.parse({})).toEqual({ limit: 10 });
     expect(
       agentAccessWorkItemQuerySchema.parse({ cursor: "opaque-next", kind: "review", limit: "10" }),
@@ -170,6 +155,7 @@ describe("domain schemas", () => {
     expect(agentAccessWorkItemQuerySchema.safeParse({ cursor: "" }).success).toBe(false);
     expect(
       agentAccessWorkItemPageSchema.safeParse({
+        filteredTotal: 1,
         items: [
           {
             action: { label: "Unsafe route", to: "/\\\\untrusted.example" },
@@ -188,7 +174,7 @@ describe("domain schemas", () => {
         snapshotAt: start,
         summary: {
           byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
-          byKind: { attention: 0, review: 1, setup: 0 },
+          byKind: { attention: 0, review: 1 },
           total: 1,
         },
         unavailableDomains: [],
@@ -196,6 +182,7 @@ describe("domain schemas", () => {
     ).toBe(false);
     expect(
       agentAccessWorkItemPageSchema.safeParse({
+        filteredTotal: 1,
         items: [
           {
             action: { label: "Leave Ilo", to: "https://example.com" },
@@ -214,7 +201,7 @@ describe("domain schemas", () => {
         snapshotAt: start,
         summary: {
           byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
-          byKind: { attention: 1, review: 0, setup: 0 },
+          byKind: { attention: 1, review: 0 },
           total: 1,
         },
         unavailableDomains: [],
@@ -819,9 +806,6 @@ describe("domain schemas", () => {
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
         .scopes,
     ).toEqual(["audit:read"]);
-    expect(
-      createAutomationRoutineInputSchema.parse({ template: "morning_brief", timezone: "UTC" }),
-    ).toMatchObject({ schedule: "Weekdays at 8:00 AM" });
     const brief = dailyBriefSchema.parse({
       allDay: [],
       anytime: [],
@@ -845,30 +829,7 @@ describe("domain schemas", () => {
       today: [],
       tomorrow: [],
     });
-    expect(
-      automationRoutineSchema.parse({
-        createdAt: start,
-        enabled: true,
-        id,
-        lastRunAt: null,
-        schedule: "Daily",
-        template: "morning_brief",
-        timezone: "UTC",
-        title: "Morning brief",
-        updatedAt: start,
-      }).title,
-    ).toBe("Morning brief");
-    expect(
-      automationRunSchema.parse({
-        brief,
-        completedAt: start,
-        id: accountId,
-        routineId: id,
-        startedAt: start,
-        status: "completed",
-        summary: "Done",
-      }).brief,
-    ).toEqual(brief);
+    expect(brief.timeZone).toBe("UTC");
 
     expect(reminderPrioritySchema.parse("high")).toBe("high");
     expect(createReminderInputSchema.parse({ title: " Test " })).toEqual({
@@ -1087,10 +1048,6 @@ describe("domain schemas", () => {
         defaultTimezone: "Eastern",
       }).success,
     ).toBe(false);
-    expect(updateAutomationRoutineInputSchema.safeParse({}).success).toBe(false);
-    expect(
-      updateAutomationRoutineInputSchema.parse({ enabled: false, schedule: "Daily at 8:00 PM" }),
-    ).toEqual({ enabled: false, schedule: "Daily at 8:00 PM" });
     expect(createGoalInputSchema.parse({ title: "Protect focus" })).toMatchObject({
       progress: 0,
       description: null,

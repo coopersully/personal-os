@@ -3617,6 +3617,23 @@ describe.sequential("ilo API", () => {
         expect.objectContaining({ deletedAt: expect.any(Date), taskLifecycle: "open" }),
       ]),
     );
+    const draftTask = demoTasks.find((task) => task.title === "Draft weekly product update");
+    expect(
+      await database.db
+        .select({
+          action: auditEvents.action,
+          entityType: auditEvents.entityType,
+          requestId: auditEvents.requestId,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, draftTask?.id ?? "")),
+    ).toEqual([
+      {
+        action: "task.created",
+        entityType: "task",
+        requestId: "fixture-demo-full-task",
+      },
+    ]);
     const sameListMoveTask = demoTasks.find(
       (task) => task.title === "Prepare launch follow-through",
     );

@@ -1574,16 +1574,16 @@ function addLoadedWorkspace(
   });
   data.auditEvents.push(
     {
-      action: "reminder.created",
+      action: "task.created",
       actorId: account.id,
       actorType: "user",
       after: { title: "Draft weekly product update" },
       before: null,
       createdAt: ago(48),
       entityId: fixtureId(account, 201),
-      entityType: "reminder",
+      entityType: "task",
       id: fixtureId(account, 500),
-      requestId: `fixture-${account.key}-reminder`,
+      requestId: `fixture-${account.key}-task`,
       userId: account.id,
     },
     {

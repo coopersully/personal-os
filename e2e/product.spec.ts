@@ -270,10 +270,14 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByRole("button", { name: "Setup protocol details" })).toHaveCount(0);
   await openSettingsSection("Mail");
   await expect(page.getByRole("heading", { name: "Mail settings" })).toBeVisible();
-  const setupTrigger = page.getByRole("button", {
-    name: /Let the agent set up Ilo|Finish Mail setup/,
-  });
-  if ((await setupTrigger.getAttribute("aria-expanded")) !== "true") await setupTrigger.click();
+  const mailAction = page
+    .locator("main")
+    .getByRole("status")
+    .filter({ hasText: "Action required" });
+  await expect(mailAction).toContainText("Connect an MCP-compatible agent host to Ilo.");
+  await expect(mailAction.getByRole("link", { name: "Connect agent" })).toBeVisible();
+  await expect(page.getByText("Operational review")).toHaveCount(0);
+  await expect(page.getByText("Connect an agent", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Setup protocol details" }).click();
   await expect(page.getByRole("link", { name: "View skill source" })).toBeVisible();
   await openSettingsSection("Connected agents");

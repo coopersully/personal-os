@@ -2214,6 +2214,10 @@ describe("ilo web app", () => {
       "href",
       "/settings?section=appearance",
     );
+    expect(await screen.findByRole("link", { name: "Mail: Action required" })).toHaveAttribute(
+      "href",
+      "/settings?section=mail",
+    );
     await browser.keyboard("{Escape}");
 
     // The switcher still offers exactly the five workspaces, none of them current.
@@ -2225,6 +2229,50 @@ describe("ilo web app", () => {
         .getAllByRole("menuitem")
         .filter((item) => item.getAttribute("aria-current") === "page"),
     ).toHaveLength(0);
+  });
+
+  it("marks only workspace settings with a current person-owned action", async () => {
+    const basePlan = await mocks.getIloSetup();
+    mocks.getIloSetup.mockImplementation(
+      async ({ domain = "mail" }: { domain?: "calendar" | "finances" | "mail" | "tasks" } = {}) =>
+        domain === "mail"
+          ? { ...basePlan, domain }
+          : {
+              ...basePlan,
+              connection: { lastObservedAt: now, observed: true },
+              currentStepId: "complete",
+              domain,
+              nextAction: `${domain} setup is active.`,
+              progress: { completed: 4, total: 4 },
+              selectedStepId: "complete",
+              status: "complete",
+              steps: [
+                {
+                  ...basePlan.steps[0],
+                  id: "complete",
+                  owner: "ilo",
+                  state: "complete",
+                  title: "Confirm setup",
+                  userAction: null,
+                },
+              ],
+            },
+    );
+
+    setup("/settings?section=profile");
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
+    const mailItem = within(sidebar).getByRole("link", { name: "Mail" }).closest("li");
+    if (!(mailItem instanceof HTMLElement)) throw new Error("Mail settings item was not rendered.");
+    expect(
+      await within(mailItem).findByRole("status", { name: "Mail: Action required" }),
+    ).toBeVisible();
+    const financesItem = within(sidebar).getByRole("link", { name: "Finances" }).closest("li");
+    if (!(financesItem instanceof HTMLElement)) {
+      throw new Error("Finances settings item was not rendered.");
+    }
+    expect(within(financesItem).queryByText("Action required")).not.toBeInTheDocument();
   });
 
   it("applies the account section permission rule to the sidebar and the dock alike", async () => {

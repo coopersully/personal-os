@@ -93,6 +93,12 @@ The stable Settings URLs are:
 The legacy `/settings?section=calendars` URL redirects with replace semantics
 to the Calendar Settings page and preserves any supported editor state.
 
+Workspace Settings destinations show an **Action required** badge when the
+server-owned setup plan's current step belongs to the signed-in person. The
+same setup-plan query drives the badge and the page action so navigation never
+contradicts the destination. Unknown, unavailable, agent-owned, and completed
+states do not receive an action badge.
+
 ## Workspace access
 
 **Workspace access** answers one question: **What can my connected agents
@@ -130,23 +136,16 @@ centralizing domain policy.
 
 ### 1. Action summary
 
-The first region answers **Do I need to do anything in Settings?** with exactly
-one of:
+The first region answers **Do I need to do anything in Settings?** It renders
+one **Action required** alert only when the server-owned current setup step
+belongs to the signed-in person. The alert names that one next action and links
+directly to its control when a dedicated destination exists.
 
-- **No settings action needed** — configuration is complete and required
-  sources are available;
-- **Action required** — one or more configuration decisions belong to the
-  signed-in person;
-- **Setup in progress** — the agent can perform the current step and no person
-  action is presently required;
-- **Unavailable** — status could not be loaded, with a retry action;
-- **Source attention needed** — a required external source must be connected
-  or repaired.
-
-The summary names the next action and its owner. It never labels agent-owned
-work as something the person must review. When multiple person-owned
-configuration actions exist, it shows the highest-priority action and a count;
-the actions themselves appear immediately below.
+Completed setup and agent-owned progress do not create reassurance banners or
+task-like panels. Their absence means there is no person-owned setup action;
+the readiness summary directly below remains the place to inspect workspace
+health. Loading and unavailable setup states remain explicit, but they never
+become a false action badge.
 
 ### 2. Configuration and guidance
 
@@ -174,14 +173,14 @@ scheduler returns an actual persisted schedule and next-run state.
 
 ### 3. Setup and sources
 
-The page shows the server-owned setup plan only while a workspace is not
-complete. Each visible step states whether the next actor is **You** or **Your
-agent**. Agent protocol details remain collapsed unless troubleshooting is
-needed.
+The page never renders the setup plan as a checklist. It shows only the current
+person-owned action; completed and blocked future steps remain hidden. Agent
+protocol details remain one collapsed troubleshooting disclosure while setup
+is incomplete.
 
-Once setup is complete, setup instructions disappear and the page reports the
-completion state in one line. **Let the agent set up Ilo** is never a permanent
-section on a completed workspace.
+Once setup is complete, both setup instructions and the troubleshooting
+disclosure disappear. **No settings action needed**, **Let the agent set up
+Ilo**, completed steps, and waiting steps are not permanent page sections.
 
 Required source health and connection state live here because they determine
 whether this workspace works. Provider authorization and reconnection actions
@@ -191,9 +190,10 @@ move from the former **Calendars** Settings page into this section of
 
 ### 4. Operational work
 
-Settings summarizes operational work but does not host it. A summary may say
-that transactions, messages, events, or tasks need review and provides one
-labelled link to the owning workspace or filtered **Reviews** destination.
+Settings neither summarizes nor hosts operational work. Transactions,
+messages, events, and tasks that need judgment remain visible in their owning
+workspace or the shared **Reviews** destination. Their counts are not setup
+evidence and cannot create a workspace Settings action badge.
 
 - Finance transfer, duplicate, categorization, and transaction decisions stay
   in Finances.
@@ -242,7 +242,6 @@ type WorkspaceSettingsState = {
   action: WorkspaceConfigurationAction | null;
   checks: DomainReadinessItem[];
   configuration: DomainConfigurationSummary;
-  operationalReview: { count: number | null; to: string } | null;
   setup: DomainSetupState;
   sources: DomainSourceStatus[];
   status:

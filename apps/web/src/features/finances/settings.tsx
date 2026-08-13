@@ -2,7 +2,6 @@ import type { FinanceAccount, FinanceGuidedSetupContext } from "@personal-os/dom
 import { Spinner } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -253,11 +252,6 @@ function FinanceAgentGuidancePanel({
                     : "Consequential finance actions stay in Finance."}
                 </ItemDescription>
               </ItemContent>
-              <ItemActions>
-                <Button asChild size="sm" variant="outline">
-                  <Link to="/settings?section=agent-connections">Connect an agent</Link>
-                </Button>
-              </ItemActions>
             </Item>
             {monthlyReviewGuidance ? (
               <Item size="sm" variant="muted">

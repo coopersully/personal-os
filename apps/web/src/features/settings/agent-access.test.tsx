@@ -562,25 +562,29 @@ describe("agent access settings", () => {
     expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp");
   });
 
-  it("puts setup status, diagnostics, and person-owned actions on workspace settings", async () => {
-    renderSettings("/settings?section=finances");
+  it("shows one person-owned action without repeating setup or operational review state", async () => {
+    const finance = renderSettings("/settings?section=finances");
 
     expect(await screen.findByRole("heading", { name: "Finances settings" })).toBeInTheDocument();
-    expect(await screen.findByText("Action required")).toBeInTheDocument();
+    expect(await screen.findAllByText("Action required")).toHaveLength(1);
+    expect(
+      screen.getByText("Review finances draft version 3 and accept or revise it."),
+    ).toBeInTheDocument();
     expect(screen.getByText("Finances readiness")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Review 3 Finance items" })).toHaveAttribute(
-      "href",
-      "/finances/review",
-    );
-    expect(screen.getByRole("button", { name: /Finish Finances setup/ })).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Let the agent set up Ilo/ }),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Next step:")).not.toBeInTheDocument();
+    expect(screen.queryByText("Operational review")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Review 3 Finance items" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Finish Finances setup/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Connect an agent")).not.toBeInTheDocument();
+    expect(screen.queryByText("Confirm setup")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Setup protocol details" })).toBeInTheDocument();
 
+    finance.unmount();
     renderSettings("/settings?section=mail");
-    expect(await screen.findByText("No settings action needed")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Mail settings" })).toBeInTheDocument();
+    expect(screen.queryByText("No settings action needed")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /Let the agent set up Ilo/ }),
+      screen.queryByRole("button", { name: "Setup protocol details" }),
     ).not.toBeInTheDocument();
   });
 
@@ -666,9 +670,9 @@ describe("agent access settings", () => {
     ).toBeInTheDocument();
     await browser.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText("No settings action needed")).toBeInTheDocument();
+    expect(screen.queryByText("No settings action needed")).not.toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /Let the agent set up Ilo/ }),
+      screen.queryByRole("button", { name: "Setup protocol details" }),
     ).not.toBeInTheDocument();
 
     await browser.click(screen.getByRole("link", { name: "Workspace access" }));
@@ -900,10 +904,11 @@ describe("agent access settings", () => {
     );
     let view = renderSettings("/settings?section=calendar");
 
+    expect(await screen.findByText("Calendar readiness")).toBeInTheDocument();
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
       "Next step: Select a calendar for Ilo to use",
     );
-    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    await browser.click(await screen.findByRole("button", { name: "View checks" }));
     expect(screen.getByRole("link", { name: "Open Calendar" })).toBeInTheDocument();
     expect(
       screen.getByText("A selected writable calendar is required for commitment previews."),
@@ -912,10 +917,11 @@ describe("agent access settings", () => {
 
     view.unmount();
     view = renderSettings("/settings?section=tasks");
+    expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
       "Next step: Teach Ilo your Tasks preferences",
     );
-    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    await browser.click(await screen.findByRole("button", { name: "View checks" }));
     expect(screen.getByRole("link", { name: "Open Tasks" })).toBeInTheDocument();
     expect(
       screen.getByText("No open Tasks. Local capture is available whenever you need it."),
@@ -925,10 +931,9 @@ describe("agent access settings", () => {
 
     view.unmount();
     renderSettings("/settings?section=finances");
-    expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
-      "Next step: Connect a Finance account",
-    );
-    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    expect(await screen.findByText("Finances readiness")).toBeInTheDocument();
+    expect(screen.queryByText("Next step:")).not.toBeInTheDocument();
+    await browser.click(await screen.findByRole("button", { name: "View checks" }));
     const financeChecks = within(screen.getByRole("dialog"));
     expect(financeChecks.getByRole("link", { name: "Open Finances" })).toBeInTheDocument();
     expect(financeChecks.getByText("0 Finance accounts")).toBeInTheDocument();
@@ -946,10 +951,6 @@ describe("agent access settings", () => {
     renderSettings("/settings?section=calendar");
 
     expect(await screen.findByText("Calendar readiness unavailable")).toBeInTheDocument();
-    const setupStep = screen.getByRole("button", {
-      name: /Let the agent set up Ilo/,
-    });
-    if (setupStep.getAttribute("aria-expanded") !== "true") await browser.click(setupStep);
     expect(screen.getByRole("link", { name: "Workspace access" })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Setup protocol details" }));
     expect(screen.getByRole("button", { name: "Copy agent setup request" })).toBeEnabled();

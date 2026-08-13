@@ -1,17 +1,16 @@
 import type {
   AccessScope,
-  AssistantSetupStep,
+  AssistantSetupPlan,
   MailRulePreview,
   MailSetupAccount,
 } from "@personal-os/domain";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   ChevronDownIcon,
   CircleCheckIcon,
-  CircleIcon,
   ClipboardIcon,
   ExternalLinkIcon,
   KeyIcon,
@@ -22,7 +21,7 @@ import {
 } from "@/components/icons";
 import { api, errorMessage } from "../../api.js";
 import { ReadinessPanel } from "../../components/readiness-panel.js";
-import { Alert, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "../../components/ui/alert.js";
 import { Badge } from "../../components/ui/badge.js";
 import { Button } from "../../components/ui/button.js";
 import {
@@ -179,6 +178,31 @@ export function WorkspaceSettings({ domain }: { domain: SetupDomain }) {
   return <AgentAccessSettings domain={domain} view="workspaces" />;
 }
 
+export type WorkspaceSettingsActions = Partial<Record<SetupDomain, boolean>>;
+
+export function workspaceSetupNeedsPersonAction(plan: AssistantSetupPlan | undefined): boolean {
+  if (!plan || plan.status === "complete") return false;
+  return plan.steps.find((step) => step.id === plan.currentStepId)?.owner === "person";
+}
+
+export function useWorkspaceSettingsActions(enabled: boolean): WorkspaceSettingsActions {
+  const results = useQueries({
+    queries: setupDomainOptions.map(({ domain }) => ({
+      enabled,
+      queryFn: () => api.getIloSetup({ domain }),
+      queryKey: ["ilo-setup-plan", domain],
+      refetchInterval: 10_000,
+    })),
+  });
+
+  return Object.fromEntries(
+    setupDomainOptions.map(({ domain }, index) => [
+      domain,
+      workspaceSetupNeedsPersonAction(results[index]?.data),
+    ]),
+  ) as WorkspaceSettingsActions;
+}
+
 function AgentAccessSettings({
   domain,
   view,
@@ -312,9 +336,6 @@ function AgentAccessSettings({
         tasks: queryLoadable(tasks),
       })
     : [];
-  const operationalReviewCount =
-    selectedDomain === "finances" ? financeSetup.data?.reviewSummary.count : attention.data?.length;
-  const operationalReviewLabel = selectedDomain === "finances" ? "Finance" : selectedLabel;
   const readinessPending =
     guide.isPending ||
     setup.isPending ||
@@ -330,9 +351,8 @@ function AgentAccessSettings({
               ? tasks.isPending
               : financeSetup.isPending)));
   const blockingError = guide.error;
-  const selectedDomainError =
+  const readinessError =
     setup.error ??
-    setupPlan.error ??
     attention.error ??
     tokens.error ??
     oauthClients.error ??
@@ -463,152 +483,30 @@ function AgentAccessSettings({
               ) : null}
 
               <WorkspaceSettingsStatus
-                error={selectedDomainError}
+                error={setupPlan.error}
                 label={selectedLabel}
                 loading={setupPlan.isPending}
-                nextAction={setupPlan.data?.nextAction}
-                setupComplete={guidedSetupComplete}
+                plan={setupPlan.data}
                 step={currentSetupStep}
               />
 
               <DomainReadinessPanel
                 domain={selectedDomain}
                 enabled={selectedDomainEnabled}
-                error={selectedDomainError !== null}
+                error={readinessError}
                 key={selectedDomain}
                 label={selectedLabel}
                 loading={readinessPending}
                 readiness={readiness}
+                suppressFocus={currentSetupStep?.owner === "person"}
               />
 
-              {operationalReviewCount && operationalReviewCount > 0 ? (
-                <Item variant="muted">
-                  <ItemContent>
-                    <ItemTitle>Operational review</ItemTitle>
-                    <ItemDescription>
-                      {operationalReviewCount}
-                      {selectedDomain !== "finances" && operationalReviewCount >= 100 ? "+" : ""}{" "}
-                      {operationalReviewLabel} item{operationalReviewCount === 1 ? "" : "s"} need
-                      review in their workspace.
-                    </ItemDescription>
-                  </ItemContent>
-                  <ItemActions>
-                    <Button asChild size="sm" variant="outline">
-                      <Link
-                        to={
-                          selectedDomain === "finances"
-                            ? "/finances/review"
-                            : `/reviews?workspace=${selectedDomain}`
-                        }
-                      >
-                        Review {operationalReviewCount}
-                        {selectedDomain !== "finances" && operationalReviewCount >= 100 ? "+" : ""}{" "}
-                        {operationalReviewLabel} item{operationalReviewCount === 1 ? "" : "s"}
-                      </Link>
-                    </Button>
-                  </ItemActions>
-                </Item>
-              ) : null}
-
-              {!guidedSetupComplete ? (
-                <div className="agent-access__steps">
-                  <ConnectionStep
-                    complete={guidedSetupComplete}
-                    defaultOpen={!guidedSetupComplete}
-                    description="After connection, the agent calls get_ilo_context to orient itself, then get_ilo_setup for the current semantic step, domain context, required tools, and approval boundary. A separately installed skill is not required."
-                    number="1"
-                    status={
-                      setupPlan.isPending
-                        ? `Checking ${selectedLabel} setup…`
-                        : setupPlan.isError
-                          ? `${selectedLabel} setup status is unavailable.`
-                          : (setupPlan.data?.nextAction ?? "Waiting for the setup protocol.")
-                    }
-                    title={
-                      currentSetupStep?.owner === "person"
-                        ? `Finish ${selectedLabel} setup`
-                        : "Let the agent set up Ilo"
-                    }
-                  >
-                    <Alert role="status" variant="info">
-                      <ShieldCheckIcon />
-                      <AlertTitle>
-                        {setupPlan.data
-                          ? (setupPlan.data.steps.find(
-                              (step) => step.id === setupPlan.data?.currentStepId,
-                            )?.title ?? capability.title)
-                          : `Loading ${selectedLabel} setup`}
-                      </AlertTitle>
-                      <AlertDescription>
-                        {setupPlan.data?.nextAction ??
-                          "Ilo is checking the authenticated setup plan and domain state."}{" "}
-                        {!guide.isPending ? capability.description : ""}
-                      </AlertDescription>
-                    </Alert>
-
-                    {setupPlan.data ? (
-                      <ItemGroup className="agent-access__protocol-steps">
-                        {setupPlan.data.steps.map((step) => (
-                          <SetupProtocolStep key={step.id} step={step} />
-                        ))}
-                      </ItemGroup>
-                    ) : null}
-
-                    <Collapsible>
-                      <CollapsibleTrigger asChild>
-                        <Button
-                          className="agent-access__protocol-trigger"
-                          size="sm"
-                          variant="ghost"
-                        >
-                          Setup protocol details
-                          <ChevronDownIcon data-icon="inline-end" />
-                        </Button>
-                      </CollapsibleTrigger>
-                      <CollapsibleContent className="agent-access__protocol-details">
-                        <p>
-                          Most hosts can begin from the tool description. If yours waits for a
-                          request, send this one sentence. The hosted skill remains an optional
-                          reference for hosts that support skills.
-                        </p>
-                        <CopyPrompt
-                          copyLabel="Copy agent setup request"
-                          label="Agent setup request"
-                          loading={guide.isPending}
-                          value={guide.data?.skill.setupPrompt ?? ""}
-                        />
-                        {guide.data ? (
-                          <Item size="xs" variant="muted">
-                            <ItemMedia variant="icon">
-                              <ShieldCheckIcon />
-                            </ItemMedia>
-                            <ItemContent>
-                              <ItemTitle>
-                                Optional setup reference v{guide.data.skill.version}
-                              </ItemTitle>
-                              <ItemDescription>
-                                Protocol {setupPlan.data?.protocolVersion ?? "1.0"} · source
-                                revision {guide.data.skill.revision}
-                              </ItemDescription>
-                            </ItemContent>
-                            <ItemActions>
-                              <Button asChild size="sm" variant="ghost">
-                                <a
-                                  href={guide.data.skill.sourceUrl}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                >
-                                  View skill source
-                                  <ExternalLinkIcon data-icon="inline-end" />
-                                </a>
-                              </Button>
-                            </ItemActions>
-                          </Item>
-                        ) : null}
-                      </CollapsibleContent>
-                    </Collapsible>
-                  </ConnectionStep>
-                </div>
+              {setupPlan.data && !guidedSetupComplete ? (
+                <SetupProtocolDetails
+                  guide={guide.data}
+                  guideLoading={guide.isPending}
+                  plan={setupPlan.data}
+                />
               ) : null}
             </CardContent>
           </Card>
@@ -974,38 +872,42 @@ function WorkspaceSettingsStatus({
   error,
   label,
   loading,
-  nextAction,
-  setupComplete,
+  plan,
   step,
 }: {
   error: Error | null;
   label: string;
   loading: boolean;
-  nextAction: string | undefined;
-  setupComplete: boolean;
-  step: AssistantSetupStep | undefined;
+  plan: AssistantSetupPlan | undefined;
+  step: AssistantSetupPlan["steps"][number] | undefined;
 }) {
-  const title = error
-    ? "Unavailable"
-    : loading
-      ? "Checking settings"
-      : setupComplete
-        ? "No settings action needed"
-        : step?.owner === "person"
-          ? "Action required"
-          : "Setup in progress";
+  if (!error && !loading && (!plan || plan.status === "complete" || step?.owner !== "person")) {
+    return null;
+  }
+  const title = error ? "Setup unavailable" : loading ? "Checking settings" : "Action required";
   const description = error
     ? errorMessage(error)
     : loading
-      ? `Ilo is checking ${label} configuration and source health.`
-      : setupComplete
-        ? `${label} setup is complete.`
-        : (nextAction ?? step?.description ?? `${label} setup has not started.`);
+      ? `Ilo is checking ${label} configuration.`
+      : (step?.userAction ?? plan?.nextAction ?? `${label} setup has not started.`);
+  const action =
+    !error && !loading && step?.id === "connect_agent"
+      ? { label: "Connect agent", to: "/settings?section=agent-connections" }
+      : !error && !loading && step?.id === "review_guidance" && plan?.domain === "finances"
+        ? { label: "Review guidance", to: "/settings?section=finances#guidance" }
+        : null;
   return (
-    <Alert role="status" variant={error ? "destructive" : setupComplete ? "default" : "info"}>
-      {setupComplete ? <CircleCheckIcon /> : error ? <XIcon /> : <ShieldCheckIcon />}
+    <Alert role="status" variant={error ? "destructive" : "info"}>
+      {error ? <XIcon /> : <ShieldCheckIcon />}
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription>{description}</AlertDescription>
+      {action ? (
+        <AlertAction>
+          <Button asChild size="sm" variant="outline">
+            <Link to={action.to}>{action.label}</Link>
+          </Button>
+        </AlertAction>
+      ) : null}
     </Alert>
   );
 }
@@ -1017,13 +919,15 @@ function DomainReadinessPanel({
   label,
   loading,
   readiness,
+  suppressFocus,
 }: {
   domain: SetupDomain;
   enabled: boolean;
-  error: boolean;
+  error: Error | null;
   label: string;
   loading: boolean;
   readiness: DomainReadinessItem[];
+  suppressFocus: boolean;
 }) {
   const priority = readiness.find((item) => !item.complete);
   const recommended = readiness.find(
@@ -1031,7 +935,7 @@ function DomainReadinessPanel({
   );
   const focus = recommended ?? priority;
   const summary = error
-    ? `${label} readiness could not be loaded.`
+    ? errorMessage(error)
     : loading
       ? `Checking ${label} material, preferences, workflows, and agent access.`
       : !enabled
@@ -1055,7 +959,7 @@ function DomainReadinessPanel({
       }))}
       description={summary}
       detailsLabel={`${label} readiness checks`}
-      {...(!loading && !error && enabled && focus
+      {...(!suppressFocus && !loading && !error && enabled && focus
         ? {
             focus: {
               label: recommended ? ("Next step" as const) : ("Current constraint" as const),
@@ -1066,7 +970,7 @@ function DomainReadinessPanel({
       icon={<WorkspaceIcon size="md" workspace={domain} />}
       loading={loading}
       title={`${label} readiness`}
-      unavailable={error || (!loading && !enabled)}
+      unavailable={error !== null || (!loading && !enabled)}
     />
   );
 }
@@ -1090,70 +994,57 @@ function domainAuthorityLabel(
   return "No access";
 }
 
-function SetupProtocolStep({ step }: { step: AssistantSetupStep }) {
-  const status =
-    step.state === "complete" ? "Done" : step.state === "current" ? "Current" : "Waiting";
-  const description = step.completionEvidence[0] ?? step.description;
-  return (
-    <Item size="xs" variant={step.state === "current" ? "outline" : "muted"}>
-      <ItemMedia variant="icon">
-        {step.state === "complete" ? <CircleCheckIcon /> : <CircleIcon />}
-      </ItemMedia>
-      <ItemContent>
-        <ItemTitle>{step.title}</ItemTitle>
-        <ItemDescription>{description}</ItemDescription>
-      </ItemContent>
-      <ItemActions>
-        <Badge variant={step.state === "current" ? "default" : "secondary"}>{status}</Badge>
-      </ItemActions>
-    </Item>
-  );
-}
-
-function ConnectionStep({
-  children,
-  complete,
-  defaultOpen,
-  description,
-  number,
-  status,
-  title,
+function SetupProtocolDetails({
+  guide,
+  guideLoading,
+  plan,
 }: {
-  children: React.ReactNode;
-  complete: boolean;
-  defaultOpen: boolean;
-  description: string;
-  number: string;
-  status: string;
-  title: string;
+  guide: Awaited<ReturnType<typeof api.getAgentConnectionGuide>> | undefined;
+  guideLoading: boolean;
+  plan: AssistantSetupPlan | undefined;
 }) {
   return (
-    <section className="agent-access__step" data-complete={complete || undefined}>
-      <Collapsible defaultOpen={defaultOpen}>
-        <div className="agent-access__step-layout">
-          <div className="agent-access__step-number" aria-hidden="true">
-            {complete ? <CircleCheckIcon /> : number}
-          </div>
-          <div className="agent-access__step-content">
-            <h3>
-              <CollapsibleTrigger asChild>
-                <Button className="agent-access__step-trigger" type="button" variant="ghost">
-                  <span>
-                    <span className="agent-access__step-title">{title}</span>
-                    <span className="agent-access__step-status">{status}</span>
-                  </span>
-                  <ChevronDownIcon data-icon="inline-end" />
-                </Button>
-              </CollapsibleTrigger>
-            </h3>
-            <CollapsibleContent className="agent-access__step-details">
-              <p>{description}</p>
-              {children}
-            </CollapsibleContent>
-          </div>
-        </div>
-      </Collapsible>
-    </section>
+    <Collapsible>
+      <CollapsibleTrigger asChild>
+        <Button className="agent-access__protocol-trigger" size="sm" variant="ghost">
+          Setup protocol details
+          <ChevronDownIcon data-icon="inline-end" />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="agent-access__protocol-details">
+        <p>
+          Connected agents read the current setup step from Ilo. If a host waits for a request, send
+          this one sentence; the hosted skill is optional.
+        </p>
+        <CopyPrompt
+          copyLabel="Copy agent setup request"
+          label="Agent setup request"
+          loading={guideLoading}
+          value={guide?.skill.setupPrompt ?? ""}
+        />
+        {guide ? (
+          <Item size="xs" variant="muted">
+            <ItemMedia variant="icon">
+              <ShieldCheckIcon />
+            </ItemMedia>
+            <ItemContent>
+              <ItemTitle>Optional setup reference v{guide.skill.version}</ItemTitle>
+              <ItemDescription>
+                Protocol {plan?.protocolVersion ?? "1.0"} · source revision {guide.skill.revision}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              <Button asChild size="sm" variant="ghost">
+                <a href={guide.skill.sourceUrl} rel="noreferrer" target="_blank">
+                  View skill source
+                  <ExternalLinkIcon data-icon="inline-end" />
+                </a>
+              </Button>
+            </ItemActions>
+          </Item>
+        ) : null}
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

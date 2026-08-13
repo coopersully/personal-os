@@ -139,6 +139,7 @@ describe("Finance settings", () => {
     expect(screen.getByText("Monthly review guidance")).toBeVisible();
     expect(screen.getByText(/No recurring schedule has been created\./)).toBeVisible();
     expect(screen.queryByText("Scheduled automation")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Connect an agent" })).not.toBeInTheDocument();
 
     await userEvent.setup().click(screen.getByRole("button", { name: "Activate guidance" }));
     await waitFor(() =>

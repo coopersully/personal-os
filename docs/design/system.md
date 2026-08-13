@@ -173,6 +173,14 @@ Rules:
   separate live material from its surroundings.
 - A `summary` belongs inside the block that gives it meaning. Counts and badges
   do not become standalone metrics.
+- A navigation **Action required** badge mirrors one current person-owned
+  action on its destination. It is never derived from completed history,
+  agent-owned progress, or an operational queue count. Use the installed
+  `SidebarMenuBadge` and `Badge` primitives and preserve the same accessible
+  label in narrow-layout navigation.
+- Render a person-owned setup action once as an `attention` block. Do not also
+  render completed setup steps, blocked future steps, a second setup callout,
+  or a reassurance banner when setup is complete.
 - `detail` is progressive disclosure, not a dumping ground. Its trigger names
   the content it reveals, and its closed state still exposes the resulting
   setting or count when that affects the person.
@@ -209,6 +217,9 @@ the checks a dashboard grid. Use the shared `ReadinessPanel`, composed from
   place it on the first row in place of the normal description. When no user
   action can resolve the first failed diagnostic, label it **Current
   constraint** instead of inventing a next step. Clamp this focus to one line;
+- suppress that focus when a preceding `attention` block already owns the same
+  person action. The overview remains diagnostic evidence, not a second copy of
+  the task;
 - keep the closed overview to exactly two compact rows: identity, status, and
   focus on row one; completed-check count, progress, and **View checks** on row
   two. Never add a focus callout, nested `Item`, recovery action, or any other

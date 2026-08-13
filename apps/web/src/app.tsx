@@ -319,6 +319,10 @@ import {
   ConnectedAgentsSettings,
   WorkspaceAccessSettings,
 } from "./features/settings/agent-access.js";
+import {
+  DesktopDownloadsSettings,
+  hasDesktopDownloads,
+} from "./features/settings/desktop-downloads.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
 import { SetupPage } from "./features/setup/page.js";
 import { tasksNavigationItem } from "./features/tasks/manifest.js";
@@ -4298,6 +4302,7 @@ type SettingsSectionId =
   | "appearance"
   | "calendars"
   | "connections"
+  | "desktop"
   | "invitations"
   | "profile"
   | "sessions"
@@ -4314,6 +4319,7 @@ const settingsNavigation: Array<{
       { icon: UserIcon, id: "profile", label: "Profile" },
       { icon: PaintBrushIcon, id: "appearance", label: "Appearance" },
       { icon: ImageIcon, id: "wallpaper", label: "Wallpaper" },
+      { icon: MonitorIcon, id: "desktop", label: "Desktop app" },
     ],
   },
   {
@@ -4363,7 +4369,11 @@ function visibleSettingsNavigation(canManageInvitations: boolean) {
   return settingsNavigation
     .map((group) => ({
       ...group,
-      items: group.items.filter((item) => item.id !== "invitations" || canManageInvitations),
+      items: group.items.filter(
+        (item) =>
+          (item.id !== "invitations" || canManageInvitations) &&
+          (item.id !== "desktop" || (hasDesktopDownloads() && !isTauri())),
+      ),
     }))
     .filter((group) => group.items.length > 0);
 }
@@ -4423,11 +4433,15 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
   if (section === "invitations" && user.canManageInvitations !== true) {
     return <Navigate replace to="/settings?section=profile" />;
   }
+  if (section === "desktop" && (!hasDesktopDownloads() || isTauri())) {
+    return <Navigate replace to="/settings?section=profile" />;
+  }
   return (
     <div className="narrow-page settings-page">
       <section aria-live="polite" className="settings-panel" key={section}>
         {section === "calendars" ? <CalendarsSettings setEditor={setEditor} /> : null}
         {section === "connections" ? <ConnectorsSettings /> : null}
+        {section === "desktop" ? <DesktopDownloadsSettings /> : null}
         {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
         {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
         {section === "appearance" ? <ThemeSettings user={user} /> : null}

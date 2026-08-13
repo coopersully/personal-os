@@ -240,6 +240,7 @@ const mocks = vi.hoisted(() => ({
   deleteTask: vi.fn(),
   deleteGoal: vi.fn(),
   deleteMotive: vi.fn(),
+  desktopDownloadsAvailable: false,
   getDailyBrief: vi.fn(),
   getAgentConnectionGuide: vi.fn(),
   getAssistantSetupStatus: vi.fn(),
@@ -363,6 +364,24 @@ vi.mock("./api.js", () => ({
   errorMessage: (error: unknown) => (error instanceof Error ? error.message : "Fallback error"),
   isUnauthorized: (error: unknown) => error instanceof Error && error.message === "unauthorized",
 }));
+
+vi.mock("./features/settings/desktop-downloads.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./features/settings/desktop-downloads.js")>();
+  return {
+    ...actual,
+    DesktopDownloadsSettings: () =>
+      mocks.desktopDownloadsAvailable
+        ? actual.DesktopDownloadsSettings({
+            downloads: {
+              macos: "https://downloads.example.com/ilo.dmg",
+              windows: null,
+            },
+            userAgent: "Mozilla/5.0 (Macintosh)",
+          })
+        : null,
+    hasDesktopDownloads: () => mocks.desktopDownloadsAvailable,
+  };
+});
 
 function setup(path = "/today") {
   const queryClient = new QueryClient({
@@ -1128,6 +1147,7 @@ beforeEach(() => {
   // queued one-off implementations, which made later calendar tests render an
   // unrelated prior state instead of their documented defaults.
   vi.resetAllMocks();
+  mocks.desktopDownloadsAvailable = false;
   const NativeDate = Date;
   class TestDate extends NativeDate {
     constructor(value?: string | number | Date) {
@@ -1157,6 +1177,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("ilo web app", () => {
@@ -5408,6 +5429,21 @@ describe("ilo web app", () => {
     resolveConnect({ accountId: secondId, email: "new@icloud.com" });
     await waitFor(() => expect(mocks.connectICloud).toHaveBeenCalled());
     settingsView.unmount();
+  });
+
+  it("shows desktop downloads in web settings and hides them inside the desktop app", async () => {
+    mocks.desktopDownloadsAvailable = true;
+
+    const webView = setup("/settings?section=desktop");
+    expect(await findSettingsLink("Desktop app")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Desktop app" })).toBeInTheDocument();
+    webView.unmount();
+
+    mocks.isTauri.mockReturnValue(true);
+    const desktopView = setup("/settings?section=desktop");
+    await waitFor(() => expect(desktopView.location.value).toBe("/settings?section=profile"));
+    expect(screen.queryByRole("link", { name: "Desktop app" })).not.toBeInTheDocument();
+    desktopView.unmount();
   });
 
   it("shows pending mutations, desktop pinning, redirects, and page-level alternatives", async () => {

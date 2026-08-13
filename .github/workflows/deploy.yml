@@ -79,6 +79,8 @@ jobs:
       MCP_ECR_REPOSITORY: ${{ vars.MCP_ECR_REPOSITORY }}
       MCP_SERVICE: ${{ vars.MCP_SERVICE }}
       MCP_URL: ${{ vars.MCP_URL }}
+      VITE_DESKTOP_DOWNLOAD_MACOS_URL: ${{ vars.DESKTOP_DOWNLOAD_MACOS_URL }}
+      VITE_DESKTOP_DOWNLOAD_WINDOWS_URL: ${{ vars.DESKTOP_DOWNLOAD_WINDOWS_URL }}
       WEB_BUCKET: ${{ vars.WEB_BUCKET }}
       WEB_DISTRIBUTION_ID: ${{ vars.WEB_DISTRIBUTION_ID }}
     steps:
@@ -226,6 +228,8 @@ jobs:
       - name: Build web application
         env:
           VITE_API_BASE_URL: ${{ env.API_URL }}
+          VITE_DESKTOP_DOWNLOAD_MACOS_URL: ${{ env.VITE_DESKTOP_DOWNLOAD_MACOS_URL }}
+          VITE_DESKTOP_DOWNLOAD_WINDOWS_URL: ${{ env.VITE_DESKTOP_DOWNLOAD_WINDOWS_URL }}
         run: pnpm --filter @personal-os/web build
 
       - name: Register immutable task definitions

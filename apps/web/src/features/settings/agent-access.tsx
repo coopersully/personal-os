@@ -173,10 +173,20 @@ export function ConnectedAgentsSettings() {
 }
 
 export function WorkspaceAccessSettings() {
-  return <AgentAccessSettings view="workspaces" />;
+  return <AgentAccessSettings view="access" />;
 }
 
-function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
+export function WorkspaceSettings({ domain }: { domain: SetupDomain }) {
+  return <AgentAccessSettings domain={domain} view="workspaces" />;
+}
+
+function AgentAccessSettings({
+  domain,
+  view,
+}: {
+  domain?: SetupDomain;
+  view: "access" | "connections" | "workspaces";
+}) {
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const [oauthClientToRevoke, setOauthClientToRevoke] = useState<{
@@ -184,11 +194,11 @@ function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
     name: string;
   } | null>(null);
   const requestedWorkspace = searchParams.get("workspace");
-  const selectedDomain: SetupDomain = setupDomainOptions.some(
-    (option) => option.domain === requestedWorkspace,
-  )
-    ? (requestedWorkspace as SetupDomain)
-    : "mail";
+  const selectedDomain: SetupDomain =
+    domain ??
+    (setupDomainOptions.some((option) => option.domain === requestedWorkspace)
+      ? (requestedWorkspace as SetupDomain)
+      : "mail");
   const reviewRuleId = searchParams.get("reviewRule");
 
   function updateSearchParam(name: string, value: string | null) {
@@ -282,6 +292,9 @@ function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
   const selectedLabel = setupDomainLabels[selectedDomain];
   const selectedSupport: DomainSupport = selectedGuide?.support ?? "unsupported";
   const guidedSetupComplete = setupPlan.data?.status === "complete";
+  const currentSetupStep = setupPlan.data?.steps.find(
+    (step) => step.id === setupPlan.data?.currentStepId,
+  );
   const capability = domainCapability(
     selectedDomain,
     selectedSupport,
@@ -300,6 +313,11 @@ function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
         tasks: queryLoadable(tasks),
       })
     : [];
+  const operationalReviewCount =
+    selectedDomain === "finances"
+      ? financeSetup.data?.reviewSummary.count
+      : attention.data?.length;
+  const operationalReviewLabel = selectedDomain === "finances" ? "Finance" : selectedLabel;
   const readinessPending =
     guide.isPending ||
     setup.isPending ||
@@ -333,19 +351,108 @@ function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
 
   return (
     <div className="agent-access">
+      {view === "access" ? (
+        <Card className="settings-section agent-access__workspaces">
+          <CardHeader>
+            <CardTitle>
+              <h2>Workspace access</h2>
+            </CardTitle>
+            <CardDescription>
+              See what connected agents can read and prepare in each workspace.
+            </CardDescription>
+            <CardAction>
+              <Button asChild size="sm" variant="outline">
+                <Link to="/settings?section=agent-connections">Connected agents</Link>
+              </Button>
+            </CardAction>
+          </CardHeader>
+          <CardContent className="settings-section__body agent-access__body">
+            {blockingError ? (
+              <Alert variant="destructive">
+                <XIcon />
+                <AlertTitle>Workspace access could not be loaded</AlertTitle>
+                <AlertDescription>{errorMessage(blockingError)}</AlertDescription>
+              </Alert>
+            ) : null}
+
+            <FieldSet>
+              <FieldLegend className="sr-only" variant="label">
+                Choose an agent workspace
+              </FieldLegend>
+              <ToggleGroup
+                aria-label="Agent workspaces"
+                className="agent-access__domains"
+                onValueChange={(value) => {
+                  if (value) updateSearchParam("workspace", value);
+                }}
+                type="single"
+                value={selectedDomain}
+                variant="outline"
+              >
+                {setupDomainOptions.map((option) => {
+                  const domainGuide = guide.data?.domains.find(
+                    (item) => item.domain === option.domain,
+                  );
+                  return (
+                    <ToggleGroupItem
+                      className="agent-access__domain"
+                      disabled={!domainGuide || domainGuide.support === "unsupported"}
+                      key={option.domain}
+                      value={option.domain}
+                    >
+                      <WorkspaceIcon size="md" workspace={option.domain} />
+                      <span className="agent-access__domain-copy">
+                        <span>{option.shortLabel}</span>
+                        <span aria-hidden="true" className="agent-access__domain-phase">
+                          {domainAuthorityLabel(domainGuide, hostAuthorities)}
+                        </span>
+                      </span>
+                      <CircleCheckIcon
+                        aria-hidden="true"
+                        className="agent-access__domain-selection"
+                      />
+                    </ToggleGroupItem>
+                  );
+                })}
+              </ToggleGroup>
+            </FieldSet>
+
+            <section
+              aria-labelledby="workspace-capability-heading"
+              className="agent-access__capability"
+            >
+              <div className="agent-access__capability-heading">
+                <WorkspaceIcon size="md" workspace={selectedDomain} />
+                <div>
+                  <h3 id="workspace-capability-heading">{capability.title}</h3>
+                  <p>{capability.description}</p>
+                </div>
+              </div>
+              <p className="agent-access__source-scope">{capability.sourceScope}</p>
+              <div className="agent-access__capability-lists">
+                <CapabilityList items={capability.allowed} label="Allowed" />
+                <CapabilityList items={capability.approvalRequired} label="Needs your approval" />
+                <CapabilityList items={capability.unavailable} label="Not allowed" />
+              </div>
+            </section>
+          </CardContent>
+        </Card>
+      ) : null}
+
       {view === "workspaces" ? (
         <>
           <Card className="settings-section agent-access__workspaces">
             <CardHeader>
               <CardTitle>
-                <h2>Workspace access</h2>
+                <h2>{selectedLabel} settings</h2>
               </CardTitle>
               <CardDescription>
-                See exactly what agents can read, change, and never do in each workspace.
+                Configure {selectedLabel}, understand its setup state, and see whether you need to
+                act.
               </CardDescription>
               <CardAction>
                 <Button asChild size="sm" variant="outline">
-                  <Link to="/settings?section=agent-connections">Connected agents</Link>
+                  <Link to="/settings?section=workspace-access">Workspace access</Link>
                 </Button>
               </CardAction>
             </CardHeader>
@@ -358,80 +465,14 @@ function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
                 </Alert>
               ) : null}
 
-              <FieldSet>
-                <FieldLegend className="sr-only" variant="label">
-                  Choose an agent workspace
-                </FieldLegend>
-                <ToggleGroup
-                  aria-label="Agent workspaces"
-                  className="agent-access__domains"
-                  onValueChange={(value) => {
-                    if (value) updateSearchParam("workspace", value);
-                  }}
-                  type="single"
-                  value={selectedDomain}
-                  variant="outline"
-                >
-                  {setupDomainOptions.map((option) => {
-                    const domainGuide = guide.data?.domains.find(
-                      (item) => item.domain === option.domain,
-                    );
-                    const setupPhase = domainSetupPhase({
-                      domain: option.domain,
-                      guideLoading: guide.isPending,
-                      published: domainGuide !== undefined && domainGuide.support !== "unsupported",
-                      setup: setupResource,
-                    });
-                    return (
-                      <ToggleGroupItem
-                        className="agent-access__domain"
-                        disabled={!domainGuide || domainGuide.support === "unsupported"}
-                        key={option.domain}
-                        value={option.domain}
-                      >
-                        <WorkspaceIcon size="md" workspace={option.domain} />
-                        <span className="agent-access__domain-copy">
-                          <span>{option.shortLabel}</span>
-                          <span aria-hidden="true" className="agent-access__domain-phase">
-                            {setupPhase}
-                          </span>
-                        </span>
-                        <CircleCheckIcon
-                          aria-hidden="true"
-                          className="agent-access__domain-selection"
-                        />
-                      </ToggleGroupItem>
-                    );
-                  })}
-                </ToggleGroup>
-              </FieldSet>
-
-              <section
-                aria-labelledby="workspace-capability-heading"
-                className="agent-access__capability"
-              >
-                <div className="agent-access__capability-heading">
-                  <WorkspaceIcon size="md" workspace={selectedDomain} />
-                  <div>
-                    <h3 id="workspace-capability-heading">{capability.title}</h3>
-                    <p>{capability.description}</p>
-                  </div>
-                </div>
-                <p className="agent-access__source-scope">{capability.sourceScope}</p>
-                <div className="agent-access__capability-lists">
-                  <CapabilityList items={capability.allowed} label="Allowed" />
-                  <CapabilityList items={capability.approvalRequired} label="Needs your approval" />
-                  <CapabilityList items={capability.unavailable} label="Not allowed" />
-                </div>
-              </section>
-
-              {selectedDomainError ? (
-                <Alert variant="destructive">
-                  <XIcon />
-                  <AlertTitle>{selectedLabel} readiness could not be loaded</AlertTitle>
-                  <AlertDescription>{errorMessage(selectedDomainError)}</AlertDescription>
-                </Alert>
-              ) : null}
+              <WorkspaceSettingsStatus
+                error={selectedDomainError}
+                label={selectedLabel}
+                loading={setupPlan.isPending}
+                nextAction={setupPlan.data?.nextAction}
+                setupComplete={guidedSetupComplete}
+                step={currentSetupStep}
+              />
 
               <DomainReadinessPanel
                 domain={selectedDomain}
@@ -443,7 +484,38 @@ function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
                 readiness={readiness}
               />
 
-              <div className="agent-access__steps">
+              {operationalReviewCount && operationalReviewCount > 0 ? (
+                <Item variant="muted">
+                  <ItemContent>
+                    <ItemTitle>Operational review</ItemTitle>
+                    <ItemDescription>
+                      {operationalReviewCount}
+                      {selectedDomain !== "finances" && operationalReviewCount >= 100 ? "+" : ""}{" "}
+                      {operationalReviewLabel} item{operationalReviewCount === 1 ? "" : "s"} need
+                      review in their workspace.
+                    </ItemDescription>
+                  </ItemContent>
+                  <ItemActions>
+                    <Button asChild size="sm" variant="outline">
+                      <Link
+                        to={
+                          selectedDomain === "finances"
+                            ? "/finances/review"
+                            : `/reviews?workspace=${selectedDomain}`
+                        }
+                      >
+                        Review {operationalReviewCount}
+                        {selectedDomain !== "finances" && operationalReviewCount >= 100
+                          ? "+"
+                          : ""}{" "}
+                        {operationalReviewLabel} item{operationalReviewCount === 1 ? "" : "s"}
+                      </Link>
+                    </Button>
+                  </ItemActions>
+                </Item>
+              ) : null}
+
+              {!guidedSetupComplete ? <div className="agent-access__steps">
                 <ConnectionStep
                   complete={guidedSetupComplete}
                   defaultOpen={!guidedSetupComplete}
@@ -456,7 +528,11 @@ function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
                         ? `${selectedLabel} setup status is unavailable.`
                         : (setupPlan.data?.nextAction ?? "Waiting for the setup protocol.")
                   }
-                  title="Let the agent set up Ilo"
+                  title={
+                    currentSetupStep?.owner === "person"
+                      ? `Finish ${selectedLabel} setup`
+                      : "Let the agent set up Ilo"
+                  }
                 >
                   <Alert role="status" variant="info">
                     <ShieldCheckIcon />
@@ -528,7 +604,7 @@ function AgentAccessSettings({ view }: { view: "connections" | "workspaces" }) {
                     </CollapsibleContent>
                   </Collapsible>
                 </ConnectionStep>
-              </div>
+              </div> : null}
             </CardContent>
           </Card>
 
@@ -889,6 +965,46 @@ function CapabilityList({ items, label }: { items: string[]; label: string }) {
   );
 }
 
+function WorkspaceSettingsStatus({
+  error,
+  label,
+  loading,
+  nextAction,
+  setupComplete,
+  step,
+}: {
+  error: Error | null;
+  label: string;
+  loading: boolean;
+  nextAction: string | undefined;
+  setupComplete: boolean;
+  step: AssistantSetupStep | undefined;
+}) {
+  const title = error
+    ? "Unavailable"
+    : loading
+      ? "Checking settings"
+      : setupComplete
+        ? "No settings action needed"
+        : step?.owner === "person"
+          ? "Action required"
+          : "Setup in progress";
+  const description = error
+    ? errorMessage(error)
+    : loading
+      ? `Ilo is checking ${label} configuration and source health.`
+      : setupComplete
+        ? `${label} setup is complete.`
+        : (nextAction ?? step?.description ?? `${label} setup has not started.`);
+  return (
+    <Alert role="status" variant={error ? "destructive" : setupComplete ? "default" : "info"}>
+      {setupComplete ? <CircleCheckIcon /> : error ? <XIcon /> : <ShieldCheckIcon />}
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription>{description}</AlertDescription>
+    </Alert>
+  );
+}
+
 function DomainReadinessPanel({
   domain,
   enabled,
@@ -948,6 +1064,27 @@ function DomainReadinessPanel({
       unavailable={error || (!loading && !enabled)}
     />
   );
+}
+
+function domainAuthorityLabel(
+  guide:
+    | Awaited<ReturnType<typeof api.getAgentConnectionGuide>>["domains"][number]
+    | undefined,
+  hosts: Loadable<ConnectedHostAuthority[]>,
+): string {
+  if (!guide || guide.support === "unsupported" || hosts.state === "unavailable") {
+    return "Unavailable";
+  }
+  if (hosts.state === "loading") return "Checking";
+  const readers = hosts.data.filter((host) =>
+    host.scopes.includes(guide.readScope as AccessScope),
+  ).length;
+  const writers = guide.writeScope
+    ? hosts.data.filter((host) => host.scopes.includes(guide.writeScope as AccessScope)).length
+    : 0;
+  if (writers > 0) return "Read & prepare";
+  if (readers > 0) return "Read only";
+  return "No access";
 }
 
 function domainSetupPhase({

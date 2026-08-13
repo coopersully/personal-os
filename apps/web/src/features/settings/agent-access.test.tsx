@@ -4,7 +4,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { ConnectedAgentsSettings, WorkspaceAccessSettings } from "./agent-access.js";
+import {
+  ConnectedAgentsSettings,
+  WorkspaceAccessSettings,
+  WorkspaceSettings,
+} from "./agent-access.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 const now = "2026-07-28T12:00:00.000Z";
@@ -47,11 +51,12 @@ function LocationProbe() {
 function SettingsDestination() {
   const location = useLocation();
   const section = new URLSearchParams(location.search).get("section");
-  return section === "agent-connections" ? (
-    <ConnectedAgentsSettings />
-  ) : (
-    <WorkspaceAccessSettings />
-  );
+  if (section === "agent-connections") return <ConnectedAgentsSettings />;
+  if (section === "workspace-access") return <WorkspaceAccessSettings />;
+  if (section === "finances" || section === "mail" || section === "calendar" || section === "tasks") {
+    return <WorkspaceSettings domain={section} />;
+  }
+  return <WorkspaceAccessSettings />;
 }
 
 function renderSettings(initialEntry = "/settings?section=workspace-access") {
@@ -529,7 +534,7 @@ describe("agent access settings", () => {
     });
   });
 
-  it("keeps workspace selection in the URL and separates connected agents", async () => {
+  it("keeps workspace access limited to agent authority and separates connected agents", async () => {
     const browser = userEvent.setup();
     renderSettings("/settings?section=workspace-access&workspace=calendar");
 
@@ -537,6 +542,9 @@ describe("agent access settings", () => {
     expect(screen.queryByText("Your action queue")).not.toBeInTheDocument();
     expect(screen.queryByText("Access management")).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Calendar" })).toBeChecked();
+    expect(screen.queryByText("Calendar readiness")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Let the agent set up Ilo/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "Calendar" })).not.toHaveTextContent("Not set up");
 
     await browser.click(screen.getByRole("radio", { name: "Tasks" }));
     expect(screen.getByLabelText("Current location")).toHaveTextContent(
@@ -545,6 +553,24 @@ describe("agent access settings", () => {
     await browser.click(screen.getByRole("link", { name: "Connected agents" }));
     expect(await screen.findByRole("heading", { name: "Connected agents" })).toBeInTheDocument();
     expect(screen.getByLabelText("Ilo MCP URL")).toHaveValue("https://mcp.example.com/mcp");
+  });
+
+  it("puts setup status, diagnostics, and person-owned actions on workspace settings", async () => {
+    renderSettings("/settings?section=finances");
+
+    expect(await screen.findByRole("heading", { name: "Finances settings" })).toBeInTheDocument();
+    expect(await screen.findByText("Action required")).toBeInTheDocument();
+    expect(screen.getByText("Finances readiness")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Review 3 Finance items" })).toHaveAttribute(
+      "href",
+      "/finances/review",
+    );
+    expect(screen.getByRole("button", { name: /Finish Finances setup/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Let the agent set up Ilo/ })).not.toBeInTheDocument();
+
+    renderSettings("/settings?section=mail");
+    expect(await screen.findByText("No settings action needed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Let the agent set up Ilo/ })).not.toBeInTheDocument();
   });
 
   it("reports unavailable connection inventory without inventing a count", async () => {
@@ -576,10 +602,10 @@ describe("agent access settings", () => {
   it("connects a host, shows agent-owned setup progress, selects a domain, and manages fallback access", async () => {
     const browser = userEvent.setup();
     renderSettings(
-      "/settings?section=workspace-access&workspace=mail&reviewRule=33333333-3333-4333-8333-333333333333",
+      "/settings?section=mail&reviewRule=33333333-3333-4333-8333-333333333333",
     );
 
-    expect(await screen.findByRole("heading", { name: "Workspace access" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Mail settings" })).toBeInTheDocument();
     expect(await screen.findByText("Weekly news")).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: person@example.com/)).toBeInTheDocument();
     expect(screen.getByText(/mark read — due now/)).toBeInTheDocument();
@@ -594,18 +620,10 @@ describe("agent access settings", () => {
     );
     await waitFor(() => expect(mocks.getMailSetupContext).toHaveBeenCalledTimes(2));
     expect(screen.getByLabelText("Current location")).toHaveTextContent(
-      "/settings?section=workspace-access&workspace=mail",
+      "/settings?section=mail",
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
     expect(screen.queryByText("Routine orders")).not.toBeInTheDocument();
-    for (const domain of ["Mail", "Finances", "Calendar", "Tasks"] as const) {
-      const control = screen.getByRole("radio", { name: domain });
-      expect(control.querySelector(`[data-workspace="${domain.toLowerCase()}"]`)).not.toBeNull();
-    }
-    expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Set up");
-    expect(screen.getByRole("radio", { name: "Finances" })).toHaveTextContent("Needs review");
-    expect(screen.getByRole("radio", { name: "Calendar" })).toHaveTextContent("Not set up");
-    expect(screen.getByRole("radio", { name: "Tasks" })).toHaveTextContent("Set up");
     expect(await screen.findByText("Mail readiness")).toBeInTheDocument();
     expect(await screen.findByText("5 of 6 checks ready")).toBeInTheDocument();
     expect(screen.getByText("Needs attention")).toBeInTheDocument();
@@ -641,83 +659,10 @@ describe("agent access settings", () => {
     ).toBeInTheDocument();
     await browser.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(screen.getByText("mail setup is active.")).toBeInTheDocument();
-    const setupStep = screen.getByRole("button", {
-      name: /Let the agent set up Ilo/,
-    });
-    for (const trigger of [setupStep]) {
-      const initiallyOpen = trigger.getAttribute("aria-expanded") === "true";
-      await browser.click(trigger);
-      expect(trigger).toHaveAttribute("aria-expanded", initiallyOpen ? "false" : "true");
-      if (initiallyOpen) await browser.click(trigger);
-    }
-    expect(screen.getByText("Learn mail preferences")).toBeInTheDocument();
-    expect(screen.getAllByText("Done")).toHaveLength(4);
-    await browser.click(screen.getByRole("button", { name: "Setup protocol details" }));
-    expect(screen.getByText("Optional setup reference v0.2.0")).toBeInTheDocument();
-    expect(screen.getByText(/Protocol 1.0 · source revision v0.2.0/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /View skill source/ })).toHaveAttribute(
-      "href",
-      "https://app.example.com/skills/ilo-setup/v0.2.0/SKILL.md",
-    );
-    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValueOnce(new Error("Clipboard denied"));
-    await browser.click(screen.getByRole("button", { name: "Copy agent setup request" }));
-    await waitFor(() =>
-      expect(mocks.toastError).toHaveBeenCalledWith("Could not copy agent setup request."),
-    );
+    expect(screen.getByText("No settings action needed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Let the agent set up Ilo/ })).not.toBeInTheDocument();
 
-    await browser.click(screen.getByRole("radio", { name: "Calendar" }));
-    expect(await screen.findByText("Calendar readiness")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "View checks" }));
-    const calendarChecks = within(screen.getByRole("dialog"));
-    expect(
-      await calendarChecks.findByText(/2 calendars · 1 selected · 1 writable · 1 needs reconnect/),
-    ).toBeInTheDocument();
-    expect(
-      calendarChecks.getByText(/1 writable destination.*automatic creation is not enabled/),
-    ).toBeInTheDocument();
-    expect(calendarChecks.getByText("1 open Calendar attention item.")).toBeInTheDocument();
-    expect(
-      calendarChecks.getByText("No connected host has Calendar read permission."),
-    ).toBeInTheDocument();
-    await browser.keyboard("{Escape}");
-    expect(await screen.findAllByText("Learn calendar preferences")).toHaveLength(2);
-    expect(
-      screen.getByText("The agent should inspect calendar material and save a draft profile."),
-    ).toBeInTheDocument();
-
-    await browser.click(screen.getByRole("radio", { name: "Tasks" }));
-    expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "View checks" }));
-    const taskChecks = within(screen.getByRole("dialog"));
-    expect(await taskChecks.findByText("1 open Task in Ilo.")).toBeInTheDocument();
-    expect(
-      taskChecks.getByText(/Ilo supports capture, prioritization, scheduling/),
-    ).toBeInTheDocument();
-    expect(taskChecks.getByText("Profile v4 is active.")).toBeInTheDocument();
-    expect(
-      taskChecks.getByText("No connected host has Tasks read permission."),
-    ).toBeInTheDocument();
-    await browser.keyboard("{Escape}");
-
-    await browser.click(screen.getByRole("radio", { name: "Finances" }));
-    expect(await screen.findByText("Finances readiness")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "View checks" }));
-    const financeChecks = within(screen.getByRole("dialog"));
-    expect(await financeChecks.findByText("2 Finance accounts · 1 stale")).toBeInTheDocument();
-    expect(
-      financeChecks.getByText(
-        /2 guidance or review workflows available · 3 items need signed-in review/,
-      ),
-    ).toBeInTheDocument();
-    expect(
-      financeChecks.getByText("No connected host has Finances read permission."),
-    ).toBeInTheDocument();
-    await browser.keyboard("{Escape}");
-    expect(
-      await screen.findByText("Review finances draft version 3 and accept or revise it."),
-    ).toBeInTheDocument();
-
+    await browser.click(screen.getByRole("link", { name: "Workspace access" }));
     await browser.click(screen.getByRole("link", { name: "Connected agents" }));
     expect(await screen.findByText("2 connected")).toBeInTheDocument();
     expect(screen.getByText(/Legacy inactive permission/)).toBeInTheDocument();
@@ -819,7 +764,7 @@ describe("agent access settings", () => {
         truncated: true,
       },
     });
-    renderSettings(`/settings?section=workspace-access&workspace=mail&reviewRule=${ruleId}`);
+    renderSettings(`/settings?section=mail&reviewRule=${ruleId}`);
     expect(await screen.findByText("(No subject)")).toBeInTheDocument();
     expect(screen.getByText(/Unknown account/)).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: no explicit account selected/)).toBeInTheDocument();
@@ -882,11 +827,9 @@ describe("agent access settings", () => {
     mocks.listMailRules.mockResolvedValue([]);
     mocks.listAccessTokens.mockResolvedValue([]);
     mocks.listOAuthClients.mockResolvedValue([]);
-    renderSettings();
+    renderSettings("/settings?section=mail");
 
     expect(await screen.findByText("Connection guide unavailable")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Mail" })).toBeDisabled();
-    expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Unavailable");
     expect(screen.getByText("Mail readiness")).toBeInTheDocument();
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     expect(
@@ -946,9 +889,8 @@ describe("agent access settings", () => {
         ? Array.from({ length: 100 }, (_, index) => ({ id: `attention-${index}` }))
         : [],
     );
-    renderSettings();
+    let view = renderSettings("/settings?section=calendar");
 
-    await browser.click(screen.getByRole("radio", { name: "Calendar" }));
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
       "Next step: Select a calendar for Ilo to use",
     );
@@ -959,7 +901,8 @@ describe("agent access settings", () => {
     ).toBeInTheDocument();
     await browser.keyboard("{Escape}");
 
-    await browser.click(screen.getByRole("radio", { name: "Tasks" }));
+    view.unmount();
+    view = renderSettings("/settings?section=tasks");
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
       "Next step: Teach Ilo your Tasks preferences",
     );
@@ -971,7 +914,8 @@ describe("agent access settings", () => {
     expect(screen.getByText("No connected host has Tasks read permission.")).toBeInTheDocument();
     await browser.keyboard("{Escape}");
 
-    await browser.click(screen.getByRole("radio", { name: "Finances" }));
+    view.unmount();
+    renderSettings("/settings?section=finances");
     expect((await screen.findByText("Next step:")).closest("p")).toHaveTextContent(
       "Next step: Connect a Finance account",
     );
@@ -990,24 +934,23 @@ describe("agent access settings", () => {
   it("isolates a selected-domain readiness failure from agent connection management", async () => {
     const browser = userEvent.setup();
     mocks.listCalendars.mockRejectedValue(new Error("Calendar readiness unavailable"));
-    renderSettings();
+    renderSettings("/settings?section=calendar");
 
-    await browser.click(screen.getByRole("radio", { name: "Calendar" }));
     expect(await screen.findByText("Calendar readiness unavailable")).toBeInTheDocument();
     const setupStep = screen.getByRole("button", {
       name: /Let the agent set up Ilo/,
     });
     if (setupStep.getAttribute("aria-expanded") !== "true") await browser.click(setupStep);
-    expect(screen.getByRole("link", { name: "Connected agents" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Workspace access" })).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "Setup protocol details" }));
     expect(screen.getByRole("button", { name: "Copy agent setup request" })).toBeEnabled();
   });
 
   it("keeps pending and failed readiness distinct from a successful empty result", async () => {
     mocks.getAssistantSetupStatus.mockReturnValue(new Promise(() => {}));
-    renderSettings();
+    renderSettings("/settings?section=mail");
     expect(await screen.findByText("Mail readiness")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Checking");
+    expect(screen.getByText("Checking settings")).toBeInTheDocument();
     expect(readinessOverview("Mail").getByText("Checking")).toBeInTheDocument();
     expect(
       screen.getByText("Checking Mail material, preferences, workflows, and agent access."),
@@ -1017,7 +960,7 @@ describe("agent access settings", () => {
   it("does not turn failed rules or setup status into zero and absent claims", async () => {
     const browser = userEvent.setup();
     mocks.listMailRules.mockRejectedValue(new Error("Mail rules unavailable"));
-    renderSettings();
+    renderSettings("/settings?section=mail");
     expect(await screen.findByText("Mail rules unavailable")).toBeInTheDocument();
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "View checks" }));
@@ -1030,9 +973,8 @@ describe("agent access settings", () => {
   it("reports unavailable profile state when setup status fails", async () => {
     const browser = userEvent.setup();
     mocks.getAssistantSetupStatus.mockRejectedValue(new Error("Setup status unavailable"));
-    renderSettings();
+    renderSettings("/settings?section=mail");
     expect(await screen.findByText("Setup status unavailable")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Mail" })).toHaveTextContent("Unavailable");
     expect(readinessOverview("Mail").getByText("Unavailable")).toBeInTheDocument();
     await browser.click(screen.getByRole("button", { name: "View checks" }));
     expect(
@@ -1110,7 +1052,7 @@ describe("agent access settings", () => {
         truncated: false,
       },
     });
-    renderSettings(`/settings?section=workspace-access&workspace=mail&reviewRule=${ruleId}`);
+    renderSettings(`/settings?section=mail&reviewRule=${ruleId}`);
     expect(await screen.findByText(/Reviewed 0 of 200 recent conversations/)).toBeInTheDocument();
     expect(screen.getByText(/Rule scope: Unknown account/)).toBeInTheDocument();
     expect(screen.getByText("Activate your Mail profile first")).toBeInTheDocument();

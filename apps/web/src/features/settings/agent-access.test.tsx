@@ -555,6 +555,24 @@ describe("agent access settings", () => {
     expect(screen.queryByText(/\d+ connected/)).not.toBeInTheDocument();
   });
 
+  it("keeps failed access changes visible and reports their errors", async () => {
+    const browser = userEvent.setup();
+    mocks.revokeOAuthClient.mockRejectedValueOnce(new Error("Could not revoke host"));
+    mocks.createAccessToken.mockRejectedValueOnce(new Error("Could not create token"));
+    renderSettings("/settings?section=agent-connections");
+
+    await browser.click(await screen.findByRole("button", { name: "Revoke Claude" }));
+    await browser.click(screen.getByRole("button", { name: "Revoke access" }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Could not revoke host"));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await browser.click(screen.getByRole("button", { name: "Set up a local token" }));
+    await browser.click(screen.getByRole("button", { name: "Create local token" }));
+    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Could not create token"));
+    expect(screen.queryByText("Copy this token now")).not.toBeInTheDocument();
+  });
+
   it("connects a host, shows agent-owned setup progress, selects a domain, and manages fallback access", async () => {
     const browser = userEvent.setup();
     renderSettings(

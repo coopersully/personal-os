@@ -83,6 +83,10 @@ export function financeAgentAccessCapability(
 ): DomainCapability {
   if (support === "unsupported") return unsupportedCapability("Finance");
   return {
+    allowed: ["Read connected Finance material", "Inspect source health", "Draft Finance guidance"],
+    approvalRequired: ["Resolve Finance review cases", "Approve profile guidance"],
+    sourceScope:
+      "Finance permission applies to all connected Finance sources; per-account agent credentials are not available.",
     description:
       support === "executable_rules"
         ? "This deployment publishes Finance guidance, signed-in review, and Finance-owned executable rules."
@@ -92,5 +96,10 @@ export function financeAgentAccessCapability(
       support === "executable_rules"
         ? "Finance guidance, review, and rules"
         : "Finance guidance and signed-in review",
+    unavailable: [
+      "Transaction-edit authority",
+      "Moving money",
+      "Guessing decisions that require signed-in review",
+    ],
   };
 }

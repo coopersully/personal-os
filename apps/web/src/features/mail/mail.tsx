@@ -7,13 +7,14 @@ import { useSearchParams } from "react-router-dom";
 import {
   ArchiveIcon,
   ChevronDownIcon,
-  ChevronLeftIcon,
   ClockIcon,
   EyeIcon,
   EyeOffIcon,
   InboxIcon,
   MailIcon,
+  MoreHorizontalIcon,
   ReplyIcon,
+  SearchIcon,
   StarIcon,
   TrashIcon,
 } from "@/components/icons";
@@ -25,22 +26,60 @@ import {
   CollapsibleTrigger,
 } from "../../components/ui/collapsible.js";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../../components/ui/dropdown-menu.js";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "../../components/ui/input-group.js";
+import {
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "../../components/ui/sidebar.js";
+import {
+  WorkspaceSecondaryAppBar,
+  WorkspaceSecondaryAppBarActions,
+} from "../../components/workspace-secondary-app-bar.js";
 import { WorkspaceSkeleton } from "../../components/workspace-skeleton.js";
 import { formatRelativeTime } from "../../lib/time-format.js";
 import { ConnectionRecoveryAlert, visibleConnectorRefreshInterval } from "../connections/health.js";
 
 type MailboxSection = "categories" | "labels" | "more" | "primary";
+export const mailListScopes = ["all", "unread", "starred", "snoozed"] as const;
+export type MailListScope = (typeof mailListScopes)[number];
+
+export function isMailListScope(value: string): value is MailListScope {
+  return mailListScopes.some((scope) => scope === value);
+}
+
+export function mailListScopeFromSearch(params: URLSearchParams): MailListScope {
+  const view = params.get("view");
+  if (view === "starred" || view === "snoozed") return view;
+  return params.get("unread") === "1" ? "unread" : "all";
+}
+
+export function mailListScopeParams(scope: MailListScope) {
+  if (scope === "unread") return { unread: "1", view: null };
+  if (scope === "starred") return { unread: null, view: "starred" };
+  if (scope === "snoozed") return { unread: null, view: "snoozed" };
+  return { unread: null, view: null };
+}
+
+function mailListScopeQuery(scope: MailListScope) {
+  if (scope === "unread") return { unread: true };
+  if (scope === "starred") return { starred: true };
+  if (scope === "snoozed") return { snoozed: true };
+  return {};
+}
+
 const googleMailboxNames: Record<string, string> = {
   ALL: "All mail",
   CATEGORY_FORUMS: "Forums",
@@ -129,6 +168,45 @@ function initials(name: string) {
     .join("")
     .toUpperCase();
 }
+
+export function MailTopbarSearch() {
+  const [params, setParams] = useSearchParams();
+  const search = params.get("q")?.trim() ?? "";
+  const [searchDraft, setSearchDraft] = useState(search);
+
+  useEffect(() => setSearchDraft(search), [search]);
+
+  return (
+    <form
+      className="mail-topbar__search"
+      onSubmit={(event) => {
+        event.preventDefault();
+        setParams((current) => {
+          const next = new URLSearchParams(current);
+          const query = searchDraft.trim();
+          if (query) next.set("q", query);
+          else next.delete("q");
+          next.delete("thread");
+          return next;
+        });
+      }}
+    >
+      <InputGroup>
+        <InputGroupAddon>
+          <SearchIcon aria-hidden="true" />
+        </InputGroupAddon>
+        <InputGroupInput
+          aria-label="Search mail"
+          onChange={(event) => setSearchDraft(event.currentTarget.value)}
+          placeholder="Search mail"
+          type="search"
+          value={searchDraft}
+        />
+      </InputGroup>
+    </form>
+  );
+}
+
 function mailDate(value: string, timeZone: string) {
   return new Intl.DateTimeFormat("en", {
     dateStyle: "medium",
@@ -234,6 +312,8 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
   const activeAccountId = selectedMailbox?.accountId ?? accountId;
   const totalInboxUnread = inboxUnreadCount(mailboxes.data ?? []);
   const [expanded, setExpanded] = useState<string[]>([]);
+  const [unifiedExpanded, setUnifiedExpanded] = useState(true);
+  const listScope = mailListScopeFromSearch(params);
   useEffect(() => {
     const first = activeAccountId ?? enabled[0]?.id;
     if (first) setExpanded((current) => (current.includes(first) ? current : [...current, first]));
@@ -265,19 +345,13 @@ export function MailSidebar({ onNavigate }: { onNavigate: () => void }) {
             <p className="context-sidebar__empty">Connect a mailbox in Settings to see it here.</p>
           ) : (
             <SidebarMenu className="mail-sidebar__menu">
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  aria-pressed={!mailboxId && !accountId}
-                  isActive={!mailboxId && !accountId}
-                  onClick={() => select({})}
-                >
-                  <InboxIcon aria-hidden="true" />
-                  <span>Unified inbox</span>
-                </SidebarMenuButton>
-                {totalInboxUnread > 0 ? (
-                  <SidebarMenuBadge>{totalInboxUnread}</SidebarMenuBadge>
-                ) : null}
-              </SidebarMenuItem>
+              <UnifiedInboxNavigation
+                expanded={unifiedExpanded}
+                listScope={listScope}
+                selectScope={(scope) => select(mailListScopeParams(scope))}
+                toggle={() => setUnifiedExpanded((current) => !current)}
+                unreadCount={totalInboxUnread}
+              />
               {enabled.map((account) => (
                 <MailboxAccount
                   account={account}
@@ -323,7 +397,7 @@ export function MailPage({ user }: { user: User }) {
   const accountId = params.get("account");
   const selectedId = params.get("thread");
   const search = params.get("q")?.trim() ?? "";
-  const unreadOnly = params.get("unread") === "1";
+  const listScope = mailListScopeFromSearch(params);
   const composing = params.get("compose") === "1";
   const [composeThread, setComposeThread] = useState<MailThread | null>(null);
   const composeFormRef = useRef<HTMLFormElement>(null);
@@ -344,9 +418,9 @@ export function MailPage({ user }: { user: User }) {
         ...(accountId && !mailboxId ? { accountIds: [accountId] } : {}),
         ...(mailboxId ? { mailboxId } : {}),
         ...(search ? { query: search } : {}),
-        ...(unreadOnly ? { unread: true } : {}),
+        ...mailListScopeQuery(listScope),
       }),
-    queryKey: ["mail-threads", accountId, mailboxId, search, unreadOnly],
+    queryKey: ["mail-threads", accountId, mailboxId, search, listScope],
     refetchInterval: 60_000,
   });
   const drafts = useQuery({
@@ -534,6 +608,33 @@ export function MailPage({ user }: { user: User }) {
           </div>
         </form>
       ) : null}
+      {selected ? (
+        <MailSecondaryNavigation
+          archive={() =>
+            updateThread.mutate({
+              id: selected.id,
+              mailboxIds: selected.mailboxIds.filter(
+                (id) => mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
+              ),
+            })
+          }
+          pending={updateThread.isPending}
+          reply={() => {
+            setComposeThread(selected);
+            update({ compose: "1" });
+          }}
+          selected={selected}
+          snooze={() => snoozeThread.mutate(selected.id)}
+          toggleStar={() => updateThread.mutate({ id: selected.id, starred: !selected.starred })}
+          toggleUnread={() => updateThread.mutate({ id: selected.id, unread: !selected.unread })}
+          trash={() => {
+            const trash = mailboxes.data.find(
+              (mailbox) => mailbox.accountId === selected.accountId && mailbox.role === "trash",
+            );
+            if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
+          }}
+        />
+      ) : null}
       <div className={`mail-workspace mail-workspace--${selectedId ? "reader" : "list"}`}>
         <section aria-label="Conversations" className="mail-thread-list">
           {threads.isError ? (
@@ -546,13 +647,13 @@ export function MailPage({ user }: { user: User }) {
             <>
               <div className="mail-thread-list__summary">
                 <span>{threads.data.length} conversations</span>
-                {unreadOnly ? <Badge>Unread</Badge> : null}
+                {listScope === "all" ? null : <Badge>{listScope}</Badge>}
               </div>
               {threads.data.map((thread) => (
                 <ThreadRow
                   active={selected?.id === thread.id}
                   key={thread.id}
-                  select={() => update({ thread: thread.id, view: null })}
+                  select={() => update({ thread: thread.id })}
                   thread={thread}
                 />
               ))}
@@ -562,36 +663,9 @@ export function MailPage({ user }: { user: User }) {
         <section aria-label="Message reader" className="mail-reader">
           {selected ? (
             <Reader
-              archive={() =>
-                updateThread.mutate({
-                  id: selected.id,
-                  mailboxIds: selected.mailboxIds.filter(
-                    (id) => mailboxes.data.find((mailbox) => mailbox.id === id)?.role !== "inbox",
-                  ),
-                })
-              }
-              back={() => update({ thread: null })}
-              pending={updateThread.isPending}
               messages={messages.data ?? []}
-              reply={() => {
-                setComposeThread(selected);
-                update({ compose: "1" });
-              }}
-              snooze={() => snoozeThread.mutate(selected.id)}
               thread={selected}
               timeZone={user.planningTimezone}
-              toggleStar={() =>
-                updateThread.mutate({ id: selected.id, starred: !selected.starred })
-              }
-              toggleUnread={() =>
-                updateThread.mutate({ id: selected.id, unread: !selected.unread })
-              }
-              trash={() => {
-                const trash = mailboxes.data.find(
-                  (mailbox) => mailbox.accountId === selected.accountId && mailbox.role === "trash",
-                );
-                if (trash) updateThread.mutate({ id: selected.id, mailboxIds: [trash.id] });
-              }}
             />
           ) : selectedId && loaded.isPending ? (
             <PageLoading />
@@ -603,6 +677,172 @@ export function MailPage({ user }: { user: User }) {
         </section>
       </div>
     </div>
+  );
+}
+
+function MailSecondaryNavigation({
+  archive,
+  pending,
+  reply,
+  selected,
+  snooze,
+  toggleStar,
+  toggleUnread,
+  trash,
+}: {
+  archive: () => void;
+  pending: boolean;
+  reply: () => void;
+  selected: MailThread;
+  snooze: () => void;
+  toggleStar: () => void;
+  toggleUnread: () => void;
+  trash: () => void;
+}) {
+  return (
+    <WorkspaceSecondaryAppBar aria-label="Conversation actions" className="mail-secondary-nav">
+      <WorkspaceSecondaryAppBarActions className="mail-secondary-nav__actions">
+        <Button onClick={reply} tone="ghost">
+          <ReplyIcon aria-hidden="true" className="size-4" />
+          <span>Reply</span>
+        </Button>
+        <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
+          <ArchiveIcon aria-hidden="true" className="size-4" />
+          <span>Archive</span>
+        </Button>
+        <Button
+          aria-label="Snooze conversation until tomorrow"
+          className="mail-secondary-nav__compact-action"
+          onClick={snooze}
+          tone="ghost"
+        >
+          <ClockIcon aria-hidden="true" className="size-4" />
+        </Button>
+        <Button
+          aria-label={selected.starred ? "Unstar conversation" : "Star conversation"}
+          className="mail-secondary-nav__compact-action"
+          disabled={pending}
+          onClick={toggleStar}
+          tone="ghost"
+        >
+          <StarIcon
+            aria-hidden="true"
+            className="size-4"
+            weight={selected.starred ? "Filled" : "Outline"}
+          />
+        </Button>
+        <Button
+          aria-label={selected.unread ? "Mark conversation read" : "Mark conversation unread"}
+          className="mail-secondary-nav__compact-action"
+          disabled={pending}
+          onClick={toggleUnread}
+          tone="ghost"
+        >
+          {selected.unread ? (
+            <EyeIcon aria-hidden="true" className="size-4" />
+          ) : (
+            <EyeOffIcon aria-hidden="true" className="size-4" />
+          )}
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button aria-label="More conversation actions" disabled={pending} tone="ghost">
+              <MoreHorizontalIcon aria-hidden="true" className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={snooze}>
+              <ClockIcon aria-hidden="true" />
+              Snooze until tomorrow
+            </DropdownMenuItem>
+            <DropdownMenuItem className="mail-secondary-nav__overflow-action" onSelect={toggleStar}>
+              <StarIcon aria-hidden="true" weight={selected.starred ? "Filled" : "Outline"} />
+              {selected.starred ? "Unstar" : "Star"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="mail-secondary-nav__overflow-action"
+              onSelect={toggleUnread}
+            >
+              {selected.unread ? <EyeIcon aria-hidden="true" /> : <EyeOffIcon aria-hidden="true" />}
+              {selected.unread ? "Mark read" : "Mark unread"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="mail-secondary-nav__overflow-separator" />
+            <DropdownMenuItem onSelect={trash} variant="destructive">
+              <TrashIcon aria-hidden="true" />
+              Delete conversation
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </WorkspaceSecondaryAppBarActions>
+    </WorkspaceSecondaryAppBar>
+  );
+}
+
+function UnifiedInboxNavigation({
+  expanded,
+  listScope,
+  selectScope,
+  toggle,
+  unreadCount,
+}: {
+  expanded: boolean;
+  listScope: MailListScope;
+  selectScope: (scope: MailListScope) => void;
+  toggle: () => void;
+  unreadCount: number;
+}) {
+  const panelId = "unified-mailbox-navigation";
+  const scopes: Array<{ icon: typeof MailIcon; label: string; value: MailListScope }> = [
+    { icon: MailIcon, label: "All mail", value: "all" },
+    { icon: EyeIcon, label: "Unread", value: "unread" },
+    { icon: StarIcon, label: "Starred", value: "starred" },
+    { icon: ClockIcon, label: "Snoozed", value: "snoozed" },
+  ];
+
+  return (
+    <Collapsible asChild onOpenChange={toggle} open={expanded}>
+      <SidebarMenuItem className="mail-sidebar__account mail-sidebar__unified">
+        <CollapsibleTrigger asChild>
+          <SidebarMenuButton
+            aria-controls={panelId}
+            aria-label="Toggle Unified inbox mailboxes"
+            className="mail-sidebar__account-trigger"
+            size="lg"
+          >
+            <span className="mail-sidebar__unified-icon">
+              <InboxIcon aria-hidden="true" />
+            </span>
+            <span className="mail-sidebar__account-copy">
+              <span className="mail-sidebar__account-name">Unified inbox</span>
+              <span className="mail-sidebar__account-email">All connected mail</span>
+            </span>
+            {unreadCount > 0 ? (
+              <span className="mail-sidebar__account-count">{unreadCount}</span>
+            ) : null}
+            <ChevronDownIcon aria-hidden="true" className="mail-sidebar__chevron" />
+          </SidebarMenuButton>
+        </CollapsibleTrigger>
+        <CollapsibleContent id={panelId}>
+          <SidebarMenuSub className="mail-sidebar__account-body">
+            {scopes.map(({ icon: Icon, label, value }) => (
+              <SidebarMenuSubItem key={value}>
+                <SidebarMenuSubButton asChild isActive={listScope === value}>
+                  <button
+                    aria-pressed={listScope === value}
+                    className="mail-sidebar__mailbox-link"
+                    onClick={() => selectScope(value)}
+                    type="button"
+                  >
+                    <Icon aria-hidden="true" />
+                    <span>{label}</span>
+                  </button>
+                </SidebarMenuSubButton>
+              </SidebarMenuSubItem>
+            ))}
+          </SidebarMenuSub>
+        </CollapsibleContent>
+      </SidebarMenuItem>
+    </Collapsible>
   );
 }
 
@@ -763,29 +1003,13 @@ function ThreadRow({
   );
 }
 function Reader({
-  archive,
-  back,
-  pending,
   messages,
-  reply,
-  snooze,
   thread,
   timeZone,
-  toggleStar,
-  toggleUnread,
-  trash,
 }: {
-  archive: () => void;
-  back: () => void;
-  pending: boolean;
   messages: MailMessage[];
-  reply: () => void;
-  snooze: () => void;
   thread: MailThread;
   timeZone: string;
-  toggleStar: () => void;
-  toggleUnread: () => void;
-  trash: () => void;
 }) {
   const fallbackMessage: MailMessage = {
     attachments: [],
@@ -805,44 +1029,6 @@ function Reader({
 
   return (
     <article className="mail-reader__article">
-      <div className="mail-reader__toolbar">
-        <Button className="mail-reader__back" onClick={back} tone="ghost">
-          <ChevronLeftIcon className="size-4" /> Inbox
-        </Button>
-        <Button onClick={reply} tone="ghost">
-          <ReplyIcon className="size-4" /> Reply
-        </Button>
-        <Button aria-label="Snooze conversation until tomorrow" onClick={snooze} tone="ghost">
-          <ClockIcon className="size-4" /> Snooze
-        </Button>
-        <Button aria-label="Archive conversation" disabled={pending} onClick={archive} tone="ghost">
-          <ArchiveIcon className="size-4" />
-        </Button>
-        <Button
-          aria-label="Move conversation to trash"
-          disabled={pending}
-          onClick={trash}
-          tone="ghost"
-        >
-          <TrashIcon className="size-4" />
-        </Button>
-        <Button
-          aria-label={thread.starred ? "Unstar conversation" : "Star conversation"}
-          disabled={pending}
-          onClick={toggleStar}
-          tone="ghost"
-        >
-          <StarIcon className="size-4" weight={thread.starred ? "Filled" : "Outline"} />
-        </Button>
-        <Button
-          aria-label={thread.unread ? "Mark conversation read" : "Mark conversation unread"}
-          disabled={pending}
-          onClick={toggleUnread}
-          tone="ghost"
-        >
-          {thread.unread ? <EyeIcon className="size-4" /> : <EyeOffIcon className="size-4" />}
-        </Button>
-      </div>
       <header>
         <p className="eyebrow">{thread.provider === "google" ? "Google Mail" : "iCloud Mail"}</p>
         <h2>{thread.subject}</h2>

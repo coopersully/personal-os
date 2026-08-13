@@ -1,12 +1,9 @@
 import type {
   AccessScope,
-  AutomationRoutine,
-  AutomationRun,
   ConfirmEmailVerificationInput,
   ConnectICloudInput,
   ConnectorAuthorizationOutcome,
   CreateAccessTokenInput,
-  CreateAutomationRoutineInput,
   CreateInvitationInput,
   DailyBrief,
   Invitation,
@@ -18,7 +15,6 @@ import type {
   ResetPasswordInput,
   StartGoogleAuthorizationInput,
   UpdateAccountSetupInput,
-  UpdateAutomationRoutineInput,
   UpdatePinterestWallpaperSettingsInput,
   UpdateUserInput,
   User,
@@ -244,14 +240,6 @@ export function createApiClient(options: ClientOptions) {
       return response.invitation;
     },
 
-    async createAutomation(input: CreateAutomationRoutineInput): Promise<AutomationRoutine> {
-      const response = await request<{ routine: AutomationRoutine }>("/v1/automations", {
-        body: JSON.stringify(input),
-        method: "POST",
-      });
-      return response.routine;
-    },
-
     async deleteAccessToken(id: string): Promise<void> {
       await request<void>(`/v1/access-tokens/${id}`, { method: "DELETE" });
     },
@@ -334,17 +322,6 @@ export function createApiClient(options: ClientOptions) {
     async listActivity(limit = 50): Promise<AuditEvent[]> {
       const response = await request<{ events: AuditEvent[] }>(`/v1/audit?limit=${limit}`);
       return response.events;
-    },
-
-    async listAutomations(): Promise<AutomationRoutine[]> {
-      const response = await request<{ routines: AutomationRoutine[] }>("/v1/automations");
-      return response.routines;
-    },
-
-    async listAutomationRuns(routineId?: string): Promise<AutomationRun[]> {
-      const query = routineId ? `?routineId=${encodeURIComponent(routineId)}` : "";
-      const response = await request<{ runs: AutomationRun[] }>(`/v1/automations/runs${query}`);
-      return response.runs;
     },
 
     async listInvitations(): Promise<Invitation[]> {
@@ -458,14 +435,6 @@ export function createApiClient(options: ClientOptions) {
       await request<void>("/v1/auth/email-verification", { method: "POST" });
     },
 
-    async runAutomation(id: string, dryRun = false): Promise<AutomationRun> {
-      const response = await request<{ run: AutomationRun }>(`/v1/automations/${id}/runs`, {
-        body: JSON.stringify({ dryRun }),
-        method: "POST",
-      });
-      return response.run;
-    },
-
     async revokeSession(id: string): Promise<void> {
       await request<void>(`/v1/sessions/${id}`, { method: "DELETE" });
     },
@@ -490,17 +459,6 @@ export function createApiClient(options: ClientOptions) {
         method: "POST",
       });
       return response.result.changed;
-    },
-
-    async updateAutomation(
-      id: string,
-      input: UpdateAutomationRoutineInput,
-    ): Promise<AutomationRoutine> {
-      const response = await request<{ routine: AutomationRoutine }>(`/v1/automations/${id}`, {
-        body: JSON.stringify(input),
-        method: "PATCH",
-      });
-      return response.routine;
     },
 
     async updateUser(input: UpdateUserInput): Promise<User> {

@@ -108,11 +108,6 @@ export const iloToolCatalog = {
   create_motive: write("goals", ["goals:write"]),
   list_activity: read("activity", ["audit:read"], "verify"),
   get_daily_brief: read("today", ["automations:read"], "context", { ui: true }),
-  list_automations: read("automations", ["automations:read"]),
-  run_automation: write("automations", ["automations:write"], {
-    idempotent: false,
-    policy: "approved_rule",
-  }),
 
   list_calendars: read("calendar", ["calendar:read"]),
   list_events: read("calendar", ["calendar:read"]),

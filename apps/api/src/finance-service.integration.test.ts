@@ -334,6 +334,7 @@ describe.sequential("finance service", () => {
       "0051_connector_authorization_attempts",
       "0052_connector_notifications",
       "0053_oauth_states_expiry_index",
+      "0054_agent_access_work_item_snapshots",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

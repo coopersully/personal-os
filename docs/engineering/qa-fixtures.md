@@ -22,7 +22,7 @@ for a real account.
 
 | Scenario | Email | Password | Intended coverage |
 | --- | --- | --- | --- |
-| Polished demo | `demo+full@ilo.test` | `#%YxqD2Kz%8S#3` | Every workspace with polished calendar, task, mail, finance, goal, automation, activity, and preference data |
+| Polished demo | `demo+full@ilo.test` | `#%YxqD2Kz%8S#3` | Every workspace with polished calendar, task, mail, finance, goal, review, activity, and preference data |
 | Loaded workspace | `qa+loaded@ilo.test` | `Testing12345!` | A second broadly populated account for mutation-heavy QA |
 | New onboarding | `qa+onboarding-new@ilo.test` | `Testing12345!` | Unverified, `not_started` account at the welcome step |
 | Google onboarding | `qa+onboarding-google@ilo.test` | `Testing12345!` | Verified, `in_progress` account at Google setup with Calendar and Mail selected |

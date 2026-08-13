@@ -101,15 +101,20 @@ person, hide uncertainty, or narrate ordinary interface mechanics.
 ## Visual expression
 
 The interface resembles a well-made personal instrument: neutral material,
-soft charcoal, modest elevation, stable geometry, and precise information. It
-is not a generic dashboard, a pile of cards, or a chat surface wrapped around
+soft charcoal, flat surfaces, stable geometry, and precise information. It is
+not a generic dashboard, a pile of cards, or a chat surface wrapped around
 unrelated tools.
 
 ### Material and color
 
 - Use the semantic material ladder `canvas` → `surface` → `surface-raised`.
-  Elevation represents a bounded action, state, or current material—not
-  decoration.
+  Contrast and spacing distinguish related regions before a divider does; a
+  raised surface represents a bounded action, state, or current material—not
+  decorative elevation.
+- Keep ordinary surfaces flat. Do not use gradients or shadows as decoration
+  or interaction feedback. A border must communicate a control, ordered row,
+  modal/sheet edge, or semantic state boundary; adjoining regions do not earn
+  a border merely because they meet.
 - Icons come from one pack, reicon, reached through the shared registry. Its
   Outline and Filled weights are the vocabulary for active state; a second pack
   is never the answer to a glyph that is missing or reads wrong.
@@ -137,8 +142,12 @@ unrelated tools.
   never communicates readiness, selection, warning, or completion. Each accent
   must remain immediately distinguishable at peripheral glance in both themes;
   muddy, gray-shifted variants are not a calmer substitute for workspace identity.
-- Today is ilo's neutral cross-workspace surface. Reminders belong within the
-  Tasks workspace and do not receive a fifth workspace palette.
+- Today is ilo's neutral personal pseudo-workspace: it owns Today, Goals,
+  Motives, and Activity while summarizing the other workspaces. Reminders
+  belong within Tasks and do not receive a separate workspace palette.
+- The only workspace identities are Today, Calendar, Tasks, Mail, and Finances.
+  Account utilities (profile, setup, connections, security, connected agents, and workspace
+  access) are full-page utilities, never a sixth workspace. Reviews belongs to Today.
 
 ### Typography
 

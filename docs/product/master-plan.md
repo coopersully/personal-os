@@ -21,7 +21,7 @@
 | --- | --- |
 | Domain/API | Schemas, policy evaluation, source links, audit, OpenAPI, idempotency, migrations. |
 | Connectors | Google, iCloud, Plaid capability contracts, write-through sync, reconciliation, conflict handling. |
-| Automation platform | Scheduler, queue, workers, run store, approvals, routine/skill registry, notifications. |
+| Agent controls | Workspace capability policy, review queues, daily-brief projection, and bounded domain-owned workers. |
 | Web/desktop/mobile | Shared shadcn blocks, responsive app, Tauri overlay, widgets, accessibility. |
 | Security/privacy | Credentials, encryption, consent, retention, export/delete, session/token lifecycle. |
 | Quality/operations | Test fixtures, deterministic environment actions, E2E, visual/accessibility checks, observability, recovery runbooks. |
@@ -35,16 +35,16 @@ flowchart TD
   C --> D[3. Task/commitment material]
   C --> E[4. Writable mail]
   C --> F[5. Calendar collaboration]
-  B --> G[6. Automation execution platform]
+  B --> G[6. Agent policy & review controls]
   D --> H[7. Capacity-aware Today]
   D --> I[8. Goals, motives, habits]
   C --> K[10. Plaid finance]
-  E --> L[11. Mail routines]
-  F --> M[12. Schedule routines]
+  E --> L[11. Mail rule work]
+  F --> M[12. Schedule assistance]
   G --> L
   G --> M
   H --> N[13. Overlay, widgets & notifications]
-  K --> P[15. Finance routines]
+  K --> P[15. Finance review workflows]
   L --> Q[16. Full-product hardening & launch]
   M --> Q
   N --> Q
@@ -158,23 +158,22 @@ flowchart TD
 - No send/delete/spam/unsubscribe can occur through a missing confirmation/policy branch.
 - Bulk selections, wrong provider capability, lost connection, and stale revision produce stable, understandable outcomes.
 
-### Epic 6 — Automation runtime, skills, approvals, and operational controls
+### Epic 6 — Agent policy, reviews, and bounded execution
 
 **Implement**
 
-- Add durable scheduler, queue, worker leases, concurrency/rate/tool/time budgets, idempotency, cancellation, retry classification, dead letters, run state machine, and safe resumability.
-- Treat every runner as an adapter: a run has a stable input snapshot, scoped short-lived credential, expected structured result, timeout, cancellation path, and replay/duplicate-delivery behavior independent of the runner host.
-- Add routine/template/skill registry with repository-backed packages, semantic versions, source checksum, release notes, input schema, scopes, policy defaults, and compatibility checks.
-- Add manual, cron/timezone, new mail, event/calendar, finance transaction, deadline, and notification-action triggers.
-- Build dry run, run preview, exact candidate set, approval inbox, approval expiry, batch homogeneity rules, emergency stop, pause/resume/edit/version/clone/revoke, and activity/run detail UI.
-- Expand MCP tools/resources to match all domain actions while making scope/policy/capability failures structured and comprehensible. Ensure MCP never owns business rules.
-- Build deterministic schedules for sync/notification/cleanup independent of the agent host; agents receive a bounded invocation payload and return structured plans/results. The ilo owns trigger evaluation, queueing, idempotency, approvals, run state, retries, recovery, and emergency stop. Codex and Claude adapters are optional, independently revocable runners—not the scheduler or policy authority.
+- Publish a Workspace access surface that names what agents may read, change, propose, and never do in every domain.
+- Publish Connected agents with exact scopes, last-use evidence, and confirmation before revocation. Keep legacy scope names compatible without offering inactive permissions on new credentials.
+- Compose Review and Attention work into the Today-owned Reviews destination with workspace/type filters, honest partial availability, stable pagination, and deep links back to the owning domain.
+- Keep the daily brief as a generated projection over current material. It is not an installable routine and has no generic lifecycle UI.
+- Give a durable scheduler or queue only to a domain workflow that needs it, such as approved delayed Mail rule work. The owning domain defines trigger, policy, idempotency, retry, recovery, evidence, and stop behavior.
+- Expand MCP tools/resources to match domain actions while making scope/policy/capability failures structured and comprehensible. MCP never owns business rules.
 
 **Done when**
 
-- Each run is inspectable/replayable in a non-mutating mode and terminally accounted for.
-- A killed/revoked routine cannot make another provider mutation.
-- Skills can be installed into Claude/Codex with the same product token/policy boundary and version evidence.
+- Every connected agent and workspace capability is inspectable and immediately revocable.
+- Review work remains visible until its owning domain reports a terminal outcome.
+- Every durable domain worker is terminally accounted for and stops making provider mutations after authority is revoked.
 
 ### Epic 7 — Capacity-aware Today and daily planning
 
@@ -237,13 +236,13 @@ flowchart TD
 - Offline local mutations reconcile visibly without overwriting newer provider data.
 - macOS, Windows, mobile PWA, and narrow browser tests pass for each shared daily workflow.
 
-### Epic 11 — Full routine catalog
+### Epic 11 — Domain-owned assisted workflows
 
-**Implement every template below as a versioned skill plus product routine:**
+**Implement these as domain features or generated views, never as a generic installable routine catalog:**
 
-| Routine | Inputs | Outputs/actions |
+| Workflow | Inputs | Outputs/actions |
 | --- | --- | --- |
-| Morning brief | schedule, selected sources, privacy | Now/Next/remaining/triage, schedule health, chosen priorities. |
+| Daily brief | schedule, selected sources, privacy | Now/Next/remaining/triage, schedule health, chosen priorities. |
 | Midday reset | capacity, focus state | re-plan remaining work, preserve hard commitments, low-friction reset. |
 | Nightly cleanup | completed/unfinished material | task deferral proposal, inbox cleanup preview, tomorrow prep. |
 | Daily mail triage | unread mail/rules | categories, digest, archive/label/unsubscribe/reply/task/event proposals. |
@@ -254,7 +253,7 @@ flowchart TD
 | Weekly review | selected consented domains | completed work, time allocation, goals/habits, inbox/finance open loops, next-week plan. |
 | Monthly finance close | financial data/budget | uncategorized reconciliation, recurring changes, budget/cash-flow report, review queue. |
 
-**Done when** each routine has source/schema/policy docs, preview output snapshot tests, failure/retry behavior, product UI configuration, activity evidence, stop/revoke, and at least one end-to-end run against deterministic fixtures.
+**Done when** each workflow has an explicit domain owner, source/schema/policy docs, preview tests where it proposes mutations, failure/recovery behavior, activity evidence, and deterministic end-to-end coverage. A workflow that does not need durable execution remains an ordinary view or action.
 
 ### Epic 12 — Reliability, security, accessibility, and launch operations
 
@@ -266,7 +265,7 @@ flowchart TD
 - Complete contract, unit, integration, connector, migration, E2E, desktop/mobile, accessibility, visual regression, offline, load, chaos/failure, and security test suites. Accessibility acceptance explicitly covers WCAG 2.2 AA focus-not-obscured, target-size, accessible authentication, and keyboard alternatives to every drag interaction.
 - Add adversarial policy fixtures proving that untrusted email/event/attachment/web content cannot select a recipient, expand scope, create an authorization rule, or cause a cross-domain sensitive mutation. Add forced-reset, duplicate-webhook, runner-unavailable, approval-expiry, and offline-conflict recovery fixtures.
 - Expand deterministic `env:start`, `env:stop`, `env:status`, `env:logs`, `env:restart`, and `pnpm verify` actions to include workers, fixtures, connector simulators, E2E, and full product acceptance.
-- Write user documentation: setup, permissions, privacy, provider limitations, automation policies, routine templates, recovery, export/delete, and accessibility.
+- Write user documentation: setup, permissions, privacy, provider limitations, agent policy, domain workflows, recovery, export/delete, and accessibility.
 
 **Done when**
 

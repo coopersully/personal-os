@@ -47,7 +47,7 @@ The primary user is an individual with multiple Google/iCloud accounts, variable
 11. **A sync reset only resets projections.** A provider-required full resync may replace its disposable normalized projection and cursor, but never user-authored links, local annotations, approvals, rules, or immutable audit evidence.
 12. **Untrusted content cannot authorize an action.** Mail bodies, event text, attachments, webpages, and imported content are data, not instructions. They cannot grant scopes, choose an external recipient, escalate a policy, or silently cause cross-domain disclosure.
 13. **Unification is a graph, not a generic record.** Mail, calendar, commitments, and finance retain native models and source semantics. Typed links, annotations, search, activity, and Today create the unified experience without flattening provider behavior into lossy nullable fields.
-14. **Every automation has a viable manual and degraded path.** A runner, webhook, native widget, or paid connector may enhance an action, but cannot be its only recovery path. The user can inspect, pause, repair, complete, or defer work when that dependency is unavailable.
+14. **Every durable domain workflow has a viable manual and degraded path.** A runner, webhook, native widget, or paid connector may enhance an action, but cannot be its only recovery path. The user can inspect, pause, repair, complete, or defer work when that dependency is unavailable.
 
 ## 4. Information architecture
 
@@ -61,7 +61,7 @@ App
 ├── Reminders & Tasks
 ├── Goals & Motives
 ├── Finances
-├── Automations
+├── Reviews
 ├── Activity
 └── Account menu
     ├── Profile
@@ -74,7 +74,7 @@ Settings
 ├── Personal: Profile, Appearance, Locale & time
 ├── Security: Sessions, recovery, privacy, exports
 ├── Workspace: Connections, calendars, mail, notifications, widgets
-└── Automation: Agent access, routines, rules, approvals, audit retention
+└── Agents: Connected agents, Workspace access
 ```
 
 ### 4.1 Shared chrome
@@ -115,7 +115,7 @@ Every object has `id`, owner, origin/provider, creator/actor, timestamps, access
 5. iCloud connection prefers Apple Account authorization when the platform supports it and otherwise accepts an app-specific password through an encrypted credential flow. Mail and CalDAV calendar are independently enabled, discovered, health-checked, and designed for revocation when an Apple password reset invalidates app passwords.
 6. Plaid uses Link, explains read-only access and data freshness, lets the user select institutions/accounts, and requires a finance-specific consent screen before the first sync.
 7. Source selection lets the user include/exclude individual calendars, mailboxes, and financial accounts; it also defines busy-mirror destinations and notification privacy.
-8. The finishing screen creates a private local calendar/reminder inbox, offers the first Morning Brief routine in preview mode, and clearly states that no agent has access until a token is created.
+8. The finishing screen creates a private local calendar/reminder inbox, previews the generated daily brief, and clearly states that no agent has access until a token is created.
 
 Failure UX: expired OAuth, app-password rejection, partial capability grant, unsupported provider, stale sync, duplicate account, and connector reconnection each retain progress, explain consequence, and provide one retry/reconnect action.
 
@@ -130,7 +130,7 @@ Now
 ├── Remaining today: committed blocks, hard deadlines, and a short, feasible task queue
 ├── Needs triage: mail, finance, RSVP, approvals, and unscheduled commitments requiring a decision
 ├── Tomorrow / upcoming: only items worth preparing for
-└── Done: collapsed by default; completed tasks, processed mail, and automation outcomes
+└── Done: collapsed by default; completed tasks, processed mail, and resolved review outcomes
 ```
 
 - Calculate current time in the displayed timezone; show ongoing multi-hour and all-day events distinctly.
@@ -210,21 +210,19 @@ Mail policy tiers:
 - Pending and posted transactions are separate states. Pending categorization is provisional, cannot create durable merchant rules or definitive budget/"safe to spend" claims, and must reconcile against provider removals/replacements before becoming settled data.
 - Finance data uses stronger consent, redaction, retention, export/delete, no-notification-content defaults, an explicit warning before sharing with an agent, and a visible last-refresh/provider-freshness indicator.
 
-### 6.8 Agent access, routines, and activity
+### 6.8 Agent controls, Reviews, and activity
 
-**Guided setup:** after connecting sources, the Ready step and Settings → Agent access provide the deployment's remote MCP URL and supervise one server-owned setup plan. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. After authentication the agent calls `get_ilo_setup`, which returns the actual semantic step, observed evidence, exact scope, required tools, domain instructions, and approval boundary. The agent reads any existing profile, inspects a bounded representative sample, asks only unresolved questions, saves a draft, previews consequential behavior, and calls the plan again after every save or signed-in approval. The person handles only the unavoidable connection, genuine preference decisions, and consequential approval. A versioned Ilo-hosted `ilo-setup` skill remains an optional compatibility reference, not a required install or parallel source of completion state. Agent Access composes Mail, Finance, Calendar, and Reminder readiness from each domain's authoritative material, profile, workflow, and attention APIs. Personal preferences live in Ilo rather than in a host skill or conversation memory.
+**Guided setup:** after connecting sources, the Ready step and Settings → Connected agents provide the deployment's remote MCP URL. Hosted OAuth with plain-language consent is primary; scoped personal tokens are an advanced local fallback. Settings → Workspace access then explains the actual read, write, approval, source-scope, and unavailable boundaries for Mail, Calendar, Tasks, and Finances while supervising one server-owned setup plan. After authentication the agent calls `get_ilo_setup`, which returns the current semantic step, observed evidence, exact scope, required tools, domain instructions, and approval boundary. The agent reads any existing profile, inspects a bounded representative sample, asks only unresolved questions, saves a draft, previews consequential behavior, and calls the plan again after every save or signed-in approval. The person handles only the unavoidable connection, genuine preference decisions, and consequential approval. A versioned Ilo-hosted `ilo-setup` skill remains an optional compatibility reference, not a required install or parallel source of completion state. Personal preferences live in Ilo rather than in a host skill or conversation memory.
 
 Domain profiles use one shared envelope for objectives, source meanings, categories, durable instructions, preferences, status, and version. Attention items use one shared envelope for important, upcoming, follow-up, and post-run summary material. Rules share version, policy, profile/source selection, confidence, and enabled state while retaining domain-owned conditions, actions, validation, and execution.
 
-**Token/scopes:** `mail:read`, `mail:write`, `calendar:read`, `calendar:write`, `calendar:rsvp`, `reminders:read`, `reminders:write`, `tasks:write`, `goals:read/write`, `finance:read`, `finance:categorize`, `automation:read/run`, and `audit:read`. Scopes are paired with account/source selections and policy tiers.
+**Token/scopes:** new credentials use domain read/write scopes plus audit and bookmark reads. `automations:read` remains a compatibility label for reading the daily brief. `automations:write` is inactive and unavailable on new tokens. Workspace permissions currently apply at the workspace level except where a provider-selected destination is explicitly enforced; the UI must not invent per-source credential controls.
 
-**Presets:** Read my day; Calendar manager; Reminder/task manager; Mail triage (preview); Mail manager; Goals coach; Finance categorizer (preview); Morning routine; Midday reset; Nightly cleanup; Weekly review; Monthly finance close.
+**Reviews:** `/reviews` is a Today-owned operational destination containing only review and attention work. Kind and workspace filters are URL-owned, results are cursor-paginated, and every action routes to the domain that owns the decision. Setup and access configuration never appear as queue work.
 
-**Routine lifecycle:** choose template → choose optional host/skill/model runner → select scope and sources → set trigger/schedule/timezone → set approval policy → test dry run on bounded data → inspect result → enable → inspect/pause/edit/version/revoke later. ilo owns the routine definition, trigger, policy, run state, approval, and recovery lifecycle; a host such as Codex or Claude receives only a bounded invocation and cannot become the policy authority.
+Ilo does not publish a generic routine catalog, routine-run API, or routine scheduler. Durable background behavior is domain-owned—for example, reviewed Mail rule work—and must expose domain-specific pending, success, reconciliation, and failure state.
 
-Triggers include cron/calendar time, new mail, calendar changes, new finance transactions, a reminder deadline, manual run, and platform notification action. Runs are queued, idempotent, bounded by concurrency/time/tool-call limits, resumable only where safe, and never overlap unless declared safe.
-
-The Activity view filters by material, actor, routine, source, result, date, and reversible state. Every event links to the affected material and source evidence. An approval inbox groups proposed changes, gives bulk approval only for homogeneous low-risk actions, and records rejection feedback for future rules.
+The Activity view filters by material, actor, source, result, date, and reversible state. Every event links to the affected material and source evidence.
 
 ### 6.9 Desktop overlay, widgets, notifications, and mobile
 

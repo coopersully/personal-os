@@ -77,6 +77,17 @@ export function calendarAgentAccessCapability(
 ): DomainCapability {
   if (support === "unsupported") return unsupportedCapability("Calendar");
   return {
+    allowed: [
+      "Read selected calendars",
+      "Preview strong-evidence commitments",
+      "Use scoped Calendar actions",
+    ],
+    approvalRequired: [
+      "Approve profile guidance",
+      "Confirm changes outside an approved Calendar rule",
+    ],
+    sourceScope:
+      "Calendar permission applies to selected calendars; writable destinations remain limited by provider access.",
     description:
       support === "executable_rules"
         ? "This deployment publishes Calendar profiles, commitment previews, and Calendar-owned executable rules."
@@ -86,6 +97,7 @@ export function calendarAgentAccessCapability(
       support === "executable_rules"
         ? "Calendar profiles, previews, and rules"
         : "Calendar preferences and commitment previews",
+    unavailable: ["Automatic event creation from cached prose", "Writing to read-only calendars"],
   };
 }
 

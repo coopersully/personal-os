@@ -4,13 +4,15 @@ import type {
   AccountSetupStep,
   AccountSetupWorkspace,
   ActorType,
+  AgentAccessDomain,
+  AgentAccessWorkItem,
+  AgentAccessWorkItemKind,
+  AgentAccessWorkItemSummary,
   AgentMutationPolicy,
   AssistantDomain,
   AttentionItemImportance,
   AttentionItemKind,
   AttentionItemStatus,
-  AutomationRunStatus,
-  AutomationTemplate,
   CalendarProvider,
   ConnectorFailureCategory,
   ConnectorSubscriptionKind,
@@ -254,7 +256,7 @@ export const automationRoutines = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    template: text("template").$type<AutomationTemplate>().notNull(),
+    template: text("template").$type<"morning_brief" | "nightly_review">().notNull(),
     title: text("title").notNull(),
     schedule: text("schedule").notNull(),
     timezone: text("timezone").notNull(),
@@ -278,7 +280,7 @@ export const automationRuns = pgTable(
     routineId: uuid("routine_id")
       .notNull()
       .references(() => automationRoutines.id, { onDelete: "cascade" }),
-    status: text("status").$type<AutomationRunStatus>().notNull(),
+    status: text("status").$type<"completed" | "dry_run" | "failed">().notNull(),
     summary: text("summary").notNull(),
     brief: jsonb("brief").$type<StoredDailyBrief>(),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
@@ -375,6 +377,32 @@ export const financeSetupBackfillState = pgTable("finance_setup_backfill_state",
   userCursor: uuid("user_cursor"),
   ...timestamps,
 });
+
+export const agentAccessWorkItemSnapshots = pgTable(
+  "agent_access_work_item_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    actorId: text("actor_id").notNull(),
+    actorType: text("actor_type").$type<Extract<ActorType, "agent" | "user">>().notNull(),
+    domain: text("domain").$type<AgentAccessDomain>(),
+    kind: text("kind").$type<AgentAccessWorkItemKind>(),
+    items: jsonb("items").$type<AgentAccessWorkItem[]>().notNull(),
+    filteredTotal: integer("filtered_total"),
+    summary: jsonb("summary").$type<AgentAccessWorkItemSummary>().notNull(),
+    unavailableDomains: jsonb("unavailable_domains")
+      .$type<AgentAccessDomain[]>()
+      .notNull()
+      .default([]),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("agent_access_work_item_snapshots_user_expiry_idx").on(table.userId, table.expiresAt),
+  ],
+);
 
 export const attentionItems = pgTable(
   "attention_items",

@@ -14,10 +14,12 @@ the user explicitly asks for the specific GitHub write after reviewing the propo
 1. Use `$ilo-knowledge-base` to read the current product scope, relevant architecture and
    engineering constraints, and implementation log. Read the narrowest relevant sections; current
    docs define product truth.
-2. Use `github-work-context` and live GitHub issue/PR search. Search exact goal terms, distinctive
-   domain terms, linked issues/PRs, then open and recently closed work. GitHub is the delivery-work
-   source of truth: local branches, commits, worktrees, and uncommitted files are not duplicate or
-   delivery evidence.
+2. Use `github-work-context` and live GitHub issue/PR search after confirming that the target
+   repository is public. Search exact goal terms, distinctive domain terms, linked issues/PRs, then
+   open and recently closed work in that public repository. Discard private or restricted issue and
+   PR content and URLs before duplicate checks, dependency analysis, retention, or proposal output.
+   GitHub is the delivery-work source of truth: local branches, commits, worktrees, and uncommitted
+   files are not duplicate or delivery evidence.
 3. Prefer a confident existing issue or PR over a new proposal. If a match is ambiguous, report it
    as an ambiguity and do not invent a relationship or duplicate.
 4. Reduce the goal to public behavior and evidenced constraints. Never include personal mail,

@@ -48,17 +48,39 @@ await withFixture(async (root) => {
 });
 
 await withFixture(async (root) => {
-  const privateDir = path.join(root, ".agents", "skills", "my-issues");
+  const privateDir = path.join(root, ".agents", "skills", "maintainer-workflow");
   await mkdir(privateDir, { recursive: true });
   await writeFile(path.join(privateDir, "SKILL.md"), "# private\n");
+  const nestedReference = path.join(
+    root,
+    ".agents",
+    "skills",
+    "create-pr",
+    "references",
+    "example.md",
+  );
+  await mkdir(path.dirname(nestedReference), { recursive: true });
+  await writeFile(nestedReference, "Use cooper/example.\n");
+  const errors = (await validatePublicAgentSkills(root)).join("\n");
+  assert.match(errors, /Unapproved skill directory must not be published: maintainer-workflow/);
+  assert.match(errors, /references a personal branch prefix in references\/example\.md/);
+});
+
+await withFixture(async (root) => {
   const createPr = path.join(root, ".agents", "skills", "create-pr", "SKILL.md");
+  await writeFile(createPr, '---\nname: create-pr\ndescription: "unclosed\n---\n\n# create-pr\n');
+  const errors = (await validatePublicAgentSkills(root)).join("\n");
+  assert.match(errors, /Invalid YAML in create-pr\/SKILL\.md frontmatter/);
+});
+
+await withFixture(async (root) => {
+  const metadata = path.join(root, ".agents", "skills", "create-pr", "agents", "openai.yaml");
   await writeFile(
-    createPr,
-    "---\nname: create-pr\ndescription: Use this Personal OS workflow.\n---\n\nUse cooper/example.\n",
+    metadata,
+    'interface:\n  display_name: "Personal OS\n  short_description: "A public workflow."\n  default_prompt: "Use this workflow."\n',
   );
   const errors = (await validatePublicAgentSkills(root)).join("\n");
-  assert.match(errors, /Private-only skill must not be published: my-issues/);
-  assert.match(errors, /references a personal branch prefix/);
+  assert.match(errors, /Invalid YAML in create-pr\/agents\/openai\.yaml/);
 });
 
 console.log("Public agent skills validator tests passed.");

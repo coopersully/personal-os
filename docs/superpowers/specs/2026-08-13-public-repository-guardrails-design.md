@@ -58,16 +58,87 @@ GitHub Actions updates into one PR. Major updates remain separate so they receiv
 
 ## Reliability and failure behavior
 
-GitHub, CodeRabbit, the OpenSSF service, and action release artifacts are external boundaries. The
-committed configuration proves declared policy and static syntax only. GitHub-hosted execution will
-prove token authority, dependency-graph availability, SARIF upload, and OpenSSF publication after
-the branch is pushed. Scanner outages fail their own jobs without changing application runtime or
-deployment state.
+The committed configuration proves declared policy and static syntax only. These records make each
+external boundary and its remaining failure modes auditable.
+
+### GitHub Actions and security services
+
+- **Capability and owner:** GitHub owns hosted workflow execution, the dependency graph, tokens,
+  Checks, and code-scanning ingestion; repository maintainers own workflow policy.
+- **Authority and transport:** Event-scoped `GITHUB_TOKEN` permissions authorize HTTPS GitHub API
+  and SARIF uploads. No long-lived repository secret is introduced.
+- **Time and capacity:** Individual jobs use GitHub-hosted runner limits; CodeRabbit check polling is
+  bounded to 15 minutes. Queuing, rate limits, or service incidents can delay evidence.
+- **Commit point and delivery semantics:** A completed check run or accepted SARIF upload is the
+  durable observation. Event delivery is at-least-once, so workflows and uploads must be safe to
+  rerun for the same commit.
+- **Degraded behavior, recovery, and observation:** A missing dependency graph, denied token, runner
+  outage, or rejected upload fails or omits only its security evidence; it does not alter application
+  runtime. Maintainers inspect Actions and Security, then rerun the failed job after correcting
+  authority or service availability.
+- **Evidence and production-disconfirming case:** Green PR-side Dependency Review, zizmor, and SARIF
+  checks prove this branch's event path. Local syntax can still pass while repository permissions,
+  dependency-graph data, or code-scanning ingestion fail on a later event.
+
+### CodeRabbit
+
+- **Capability and owner:** CodeRabbit owns PR ingestion and review generation; maintainers own the
+  versioned `.coderabbit.yaml` policy and GitHub App installation.
+- **Authority and transport:** The installed GitHub App reads public PR content and publishes review
+  and Check results over provider-managed HTTPS. Repository secrets are not supplied.
+- **Time and capacity:** GitHub Check polling is bounded to 15 minutes; provider queues and rate
+  limits can delay or omit a review.
+- **Commit point and delivery semantics:** A GitHub review or completed Check is the durable result.
+  Delivery may be retried or superseded by incremental reviews, so the PR head SHA remains the
+  correlation key.
+- **Degraded behavior, recovery, and observation:** Provider failure leaves the review absent or
+  failed without blocking application runtime. Maintainers inspect the PR Check and CodeRabbit
+  review, then request a new review after configuration or provider recovery.
+- **Evidence and production-disconfirming case:** A review that reports `.coderabbit.yaml` as its
+  configuration proves policy loading for that head. Schema validity can still coexist with a
+  revoked installation, provider outage, or behavior change in a later service release.
+
+### OpenSSF Scorecard publication
+
+- **Capability and owner:** OpenSSF owns Scorecard result publication; GitHub owns workflow execution
+  and code-scanning ingestion; maintainers own scheduling and permissions.
+- **Authority and transport:** GitHub OIDC and scoped workflow permissions authenticate HTTPS result
+  publication and SARIF upload without a stored credential.
+- **Time and capacity:** The workflow runs on `main` and weekly within GitHub-hosted job limits;
+  OpenSSF or GitHub availability can delay publication.
+- **Commit point and delivery semantics:** An authenticated published result and accepted SARIF upload
+  are the durable commits. Repeated scheduled runs replace or supplement results for later commits.
+- **Degraded behavior, recovery, and observation:** Publication or upload failure fails the workflow
+  but does not affect application deployment. Maintainers inspect the workflow and Security tab,
+  correct permissions or wait for recovery, and rerun.
+- **Evidence and production-disconfirming case:** The pinned workflow and PR static checks prove
+  configuration only. Default-branch publication can still fail after merge because PR events do
+  not exercise the same OIDC, branch, or publication path.
+
+### Action release artifacts
+
+- **Capability and owner:** Each third-party action maintainer owns its release artifact; Personal OS
+  maintainers own selection, review, and immutable pin updates.
+- **Authority and transport:** GitHub downloads action source over its managed transport by full
+  commit SHA. Dependabot may propose later pin updates through ordinary public PRs.
+- **Time and capacity:** Checkout is bounded by the containing job; release deletion, repository
+  outage, or runner cache behavior can prevent retrieval.
+- **Commit point and delivery semantics:** The committed full SHA is the repository's durable
+  selection. Runner retrieval is repeatable for that immutable object but not guaranteed available.
+- **Degraded behavior, recovery, and observation:** Retrieval or execution failure fails the job.
+  Maintainers inspect the action log, verify the upstream release provenance, and deliberately update
+  or replace the pin through review.
+- **Evidence and production-disconfirming case:** Full-SHA references, Dependabot validation, and a
+  successful hosted run prove the selected artifacts resolved for this head. A compromised upstream
+  release predating the pin, later repository unavailability, or incompatible runner change can
+  still invalidate that evidence.
 
 ## Verification
 
-- Parse every YAML file and validate `.coderabbit.yaml` against CodeRabbit's published JSON Schema.
-- Run `actionlint` across all workflow files.
+- Parse every committed YAML file locally. Separately fetch CodeRabbit's published JSON Schema with
+  fail-on-HTTP, a 20-second timeout, and retries; record its SHA-256 digest and validation result as
+  external evidence rather than a deterministic repository gate.
+- Run `actionlint` across both `.yml` and `.yaml` workflow files.
 - Run zizmor locally to establish the current findings and verify the new workflow uses immutable
   action references.
 - Run the repository's deterministic `pnpm verify` gate.

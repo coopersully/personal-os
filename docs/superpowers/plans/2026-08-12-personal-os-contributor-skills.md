@@ -10,7 +10,7 @@
 
 ---
 
-### Task 1: Add the public workflow bundle
+## Task 1: Add the public workflow bundle
 
 **Files:**
 - Create: `.agents/skills/{catchup,create-pr,github-issue-janitor,github-work-context,github-work-sync,ilo-current-state,ilo-deploy-status,ilo-knowledge-base,ilo-product-planning,personal-os-qa,pr-briefing,pr-shepherd,resolve-pr-comments,review-pr}/**`
@@ -18,11 +18,11 @@
 
 **Steps:**
 1. Import only reusable skills from the private working branch.
-2. Exclude the maintainer-only project orchestrator, individual work queue, and branch-claim workflow.
+2. Exclude maintainer-only coordination, individual work-queue, and branch-ownership workflows.
 3. Replace user-specific branch conventions and human-facing ilo branding with repository-neutral, Personal OS wording.
 4. Preserve deterministic boundaries: GitHub is delivery truth, docs are product/engineering truth, and each skill states its write authority.
 
-### Task 2: Add discoverability and compatibility guidance
+## Task 2: Add discoverability and compatibility guidance
 
 **Files:**
 - Create: `.github/copilot-instructions.md`
@@ -33,7 +33,7 @@
 2. Document a small routing table that avoids duplicate workflow selection and keeps code, tests, docs, and GitHub artifacts in sync.
 3. Keep the guidance compatible with public contributors and omit private identities, routines, and machine state.
 
-### Task 3: Make validation deterministic
+## Task 3: Make validation deterministic
 
 **Files:**
 - Create: `scripts/check-public-agent-skills.mjs`
@@ -45,7 +45,7 @@
 2. Implement the checker using Node built-ins and add a package script.
 3. Run the checker’s test plus imported helper-script tests, frontmatter validation, formatting, and repository verification.
 
-### Task 4: Exercise prompt-quality rubrics and publish
+## Task 4: Exercise prompt-quality rubrics and publish
 
 **Files:**
 - Create: `docs/engineering/contributor-agent-workflows.md` (rubric section)
@@ -56,7 +56,7 @@
 2. Correct ambiguous default actions or mismatched labels before publishing.
 3. Commit, push, inspect the draft PR, and update its body with concrete contents and validation evidence.
 
-### Verification
+## Verification
 
 Run from the repository root:
 

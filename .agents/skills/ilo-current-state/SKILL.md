@@ -12,10 +12,12 @@ do not write to GitHub, message people or agents, modify branches or code, or ex
 
 1. Read `$ilo-knowledge-base` and only the current product/architecture/delivery documents
    needed to name the active goal and constraints.
-2. Resolve the repository and authenticated GitHub identity. Via `github:github`, query every open
-   repository PR (including drafts) and every relevant open repository issue; these are the
-   completeness sources. Use `$pr-briefing` only as a supplemental view, then inspect live
-   review-thread, mergeability, and required-check evidence needed to substantiate each finding.
+2. Resolve the repository, confirm that it is public, and resolve the authenticated GitHub identity.
+   Via `github:github`, query every open PR (including drafts) and every relevant open issue in that
+   public repository; these are the completeness sources. Discard results from private or restricted
+   repositories before classification, retention, or output. Use `$pr-briefing` only as a
+   supplemental view, then inspect live review-thread, mergeability, and required-check evidence
+   needed to substantiate each finding.
 3. When the host exposes active repository work sessions, read only sessions that match this
    repository or a live issue, PR, or branch in the collected evidence. Treat a matching session as
    **staffed** only when its public delivery artifact is linked; otherwise report `Missing public
@@ -27,8 +29,9 @@ do not write to GitHub, message people or agents, modify branches or code, or ex
 
 ## Classify
 
-- **Staffed lanes:** a matching active repository session with any linked live PR/issue and its
-  status. When no public artifact is linked, state `Missing public delivery artifact`.
+- **Staffed lanes:** a matching active repository session with a linked live PR or issue in the
+  confirmed public repository and its status. When no public artifact is linked, state `Missing
+  public delivery artifact`.
 - **Unstaffed lanes:** a live, relevant GitHub issue or PR with no matching active repository
   session when host session data is available. Do not infer ownership from author, assignee,
   branch, local checkout, or a stale/completed session.

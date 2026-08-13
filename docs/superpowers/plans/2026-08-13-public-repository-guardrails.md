@@ -1,6 +1,7 @@
 # Public Repository Guardrails Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For contributors:** Follow `AGENTS.md`, complete the tasks in order, and mark each checkbox only
+> after its stated verification passes.
 
 **Goal:** Add the approved priority-one public repository guardrails to Personal OS.
 
@@ -31,8 +32,9 @@ zizmor, Dependabot, GitHub issue forms.
 - Produces: CodeRabbit review, analyzer, knowledge-base, and warning-mode pre-merge policy.
 
 - [ ] Create the configuration with path-specific guidance and public-safety checks.
-- [ ] Validate it against `https://coderabbit.ai/integrations/schema.v2.json` using PyYAML and
-  JSON Schema.
+- [ ] Parse the committed YAML locally, then validate it against the published CodeRabbit schema
+  as bounded external evidence: use fail-on-HTTP, a 20-second timeout, and record the schema SHA-256
+  digest with the result. The live schema is not a deterministic repository gate.
 - [ ] Confirm no local paths, personal information, or maintainer-only workflows are present.
 
 ### Task 2: Deterministic security workflows
@@ -50,7 +52,8 @@ zizmor, Dependabot, GitHub issue forms.
 - [ ] Add the upstream-recommended Scorecard workflow with authenticated result publication.
 - [ ] Add zizmor in stateful Advanced Security mode for incremental triage.
 - [ ] Pin every action to its verified release commit.
-- [ ] Run `actionlint .github/workflows/*.yml` and local zizmor analysis.
+- [ ] Run `find .github/workflows -type f \\( -name '*.yml' -o -name '*.yaml' \\) -exec actionlint {} +`
+  and local zizmor analysis.
 
 ### Task 3: Public contribution intake and dependency grouping
 

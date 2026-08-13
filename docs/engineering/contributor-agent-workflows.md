@@ -12,6 +12,7 @@ This repository keeps public contributor workflows in `.agents/skills`. They mak
 | Implement domain changes | `$personal-os-architecture`, then the matching database, frontend, MCP, or testing skill | Domain-owned code and verification |
 | Validate a user-facing flow | `$personal-os-qa` | Local browser acceptance evidence paired with committed tests |
 | Create or update GitHub delivery work | `$github-work-context`, then `$github-work-sync` | Conservatively linked, non-duplicated Issues and PRs |
+| Maintain stale or duplicate GitHub Issues | `$github-issue-janitor` | Evidence-backed issue cleanup |
 | Prepare or update a pull request | `$create-pr` | Scoped, documented, verified draft or ready PR |
 | Review feedback, stale bases, or a PR queue | `$resolve-pr-comments`, `$catchup`, `$pr-shepherd`, or `$pr-briefing` | One bounded, evidence-backed maintenance action |
 | Review a pull request | `$review-pr` | Read-only findings unless posting is explicitly authorized |

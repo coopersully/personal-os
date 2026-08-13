@@ -2,6 +2,7 @@ import { access, readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 export const PUBLIC_SKILLS = [
   "catchup",
@@ -25,11 +26,11 @@ export const PUBLIC_SKILLS = [
   "review-pr",
 ];
 
-const PRIVATE_SKILLS = ["ilo-project-orchestration", "my-issues"];
+const ALLOWED_SKILL_DIRECTORIES = new Set([...PUBLIC_SKILLS, "shadcn"]);
 const FORBIDDEN_REFERENCES = [
   { pattern: /cooper\//, label: "a personal branch prefix" },
-  { pattern: /\$my-issues\b/, label: "the private work-queue skill" },
-  { pattern: /\$ilo-project-orchestration\b/, label: "the private orchestration skill" },
+  { pattern: /\/Users\//, label: "an absolute user path" },
+  { pattern: /\.codex\/worktrees\//, label: "a local worktree path" },
 ];
 
 const REQUIRED_CONTRACTS = {
@@ -50,9 +51,33 @@ async function exists(target) {
   }
 }
 
-function frontmatter(text) {
+function frontmatterSource(text) {
   const match = text.match(/^---\n([\s\S]*?)\n---\n/);
   return match?.[1] ?? null;
+}
+
+function parseYamlMap(source, label, errors) {
+  try {
+    const parsed = parseYaml(source);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      errors.push(`${label} must contain a YAML mapping`);
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    errors.push(`Invalid YAML in ${label}: ${error.message.split("\n")[0]}`);
+    return null;
+  }
+}
+
+async function filesUnder(root) {
+  const files = [];
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const target = path.join(root, entry.name);
+    if (entry.isDirectory()) files.push(...(await filesUnder(target)));
+    else if (entry.isFile()) files.push(target);
+  }
+  return files;
 }
 
 export async function validatePublicAgentSkills(root) {
@@ -76,26 +101,40 @@ export async function validatePublicAgentSkills(root) {
 
     const skillText = await readFile(skillFile, "utf8");
     const metadata = await readFile(metadataFile, "utf8");
-    const header = frontmatter(skillText);
-    if (!header) {
+    const headerSource = frontmatterSource(skillText);
+    if (!headerSource) {
       errors.push(`Missing YAML frontmatter: ${skill}/SKILL.md`);
-    } else if (!header.match(new RegExp(`^name: ${skill}$`, "m"))) {
-      errors.push(`Skill name does not match its directory: ${skill}`);
+    } else {
+      const header = parseYamlMap(headerSource, `${skill}/SKILL.md frontmatter`, errors);
+      if (header && header.name !== skill) {
+        errors.push(`Skill name does not match its directory: ${skill}`);
+      }
     }
+
+    const metadataDocument = parseYamlMap(metadata, `${skill}/agents/openai.yaml`, errors);
+    const metadataInterface = metadataDocument?.interface;
     if (
-      !/^interface:\n {2}display_name: .+\n {2}short_description: .+\n {2}default_prompt: .+$/m.test(
-        metadata,
+      !metadataInterface ||
+      typeof metadataInterface !== "object" ||
+      !["display_name", "short_description", "default_prompt"].every(
+        (field) => typeof metadataInterface[field] === "string" && metadataInterface[field].trim(),
       )
-    ) {
+    )
       errors.push(`Incomplete agent metadata: ${skill}`);
-    }
+
     if (/(?<!\$)\bilo\b/i.test(metadata)) {
       errors.push(`Human-facing metadata must use Personal OS, not ilo: ${skill}`);
     }
 
+    const publicFiles = await filesUnder(skillDir);
     for (const { pattern, label } of FORBIDDEN_REFERENCES) {
-      if (pattern.test(`${skillText}\n${metadata}`)) {
-        errors.push(`Public skill ${skill} references ${label}`);
+      for (const publicFile of publicFiles) {
+        const fileText = await readFile(publicFile, "utf8");
+        if (pattern.test(fileText)) {
+          errors.push(
+            `Public skill ${skill} references ${label} in ${path.relative(skillDir, publicFile)}`,
+          );
+        }
       }
     }
     for (const phrase of REQUIRED_CONTRACTS[skill] ?? []) {
@@ -105,10 +144,9 @@ export async function validatePublicAgentSkills(root) {
     }
   }
 
-  for (const privateSkill of PRIVATE_SKILLS) {
-    if (available.includes(privateSkill)) {
-      errors.push(`Private-only skill must not be published: ${privateSkill}`);
-    }
+  for (const skill of available) {
+    if (!ALLOWED_SKILL_DIRECTORIES.has(skill))
+      errors.push(`Unapproved skill directory must not be published: ${skill}`);
   }
 
   return errors;

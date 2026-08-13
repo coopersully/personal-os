@@ -28,7 +28,7 @@ Treat QA as a contract check, not a screenshot tour.
 - Use only a disposable local account created for the pass or an existing
   committed test fixture. Do not place credentials, personal content, provider
   payloads, or local paths in a report.
-- If the scenario requires populated, recovery, or provider state that the
+- If the scenario requires a populated application, recovery, or provider-specific state that the
   repository does not create deterministically, add that coverage to automated
   tests before claiming the state was accepted. Do not invent a manual fixture.
 

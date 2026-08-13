@@ -27,9 +27,9 @@ metadata calls the product **Personal OS** consistently.
 
 ## Exclusions
 
-- `ilo-project-orchestration`: private workflow for the maintainer's scheduled task.
-- `claim-branch`: personal cross-repository worktree workflow; it is not copied into this repository.
-- `my-issues`: individual GitHub queue view rather than a shared contributor standard.
+- Maintainer-only project coordination and scheduled-task workflows.
+- Personal cross-repository branch-ownership and worktree workflows.
+- Individual work-queue views that are not shared contributor standards.
 - Personal task IDs, automation prompts, local paths, credentials, and private delivery context.
 
 The pre-existing implementation and design skills already on `main` remain unchanged.

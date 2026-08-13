@@ -162,4 +162,85 @@ describe("Finance settings", () => {
       }),
     );
   });
+
+  it("shows active guidance and saves the signed-in person's financial profile", async () => {
+    const draft = await mocks.getDomainProfile();
+    const active = {
+      ...draft,
+      categories: [],
+      instructions: [],
+      preferences: {},
+      sourceContexts: [],
+      status: "active" as const,
+      version: 2,
+    };
+    const setup = await mocks.getFinanceGuidedSetup();
+    mocks.getDomainProfile.mockResolvedValue(active);
+    mocks.getFinanceGuidedSetup.mockResolvedValue({
+      ...setup,
+      accountSources: [],
+      guidance: {
+        approvedProfile: active,
+        draftNotice: null,
+        draftProposal: null,
+      },
+      humanOnlyActions: [],
+    });
+    mocks.getFinanceOverview.mockResolvedValue({
+      accounts: [{ id, institution: "Credit Union", name: "Checking" }],
+      budgets: [],
+      reviewCount: 0,
+      spendingThisMonth: 0,
+      transactions: [],
+    });
+    mocks.getFinanceProfile.mockResolvedValue({
+      effectiveDate: "2026-08-01",
+      employer: null,
+      employmentType: null,
+      expectedNetPay: null,
+      grossAnnualIncome: null,
+      nextPayday: null,
+      payAccountId: null,
+      payFrequency: null,
+      role: null,
+    });
+
+    renderSettings();
+    const browser = userEvent.setup();
+    expect(await screen.findByText("Active approved guidance")).toBeVisible();
+    expect(screen.getByText("Consequential finance actions stay in Finance.")).toBeVisible();
+    expect(screen.queryByText("Monthly review guidance")).not.toBeInTheDocument();
+
+    await browser.type(screen.getByRole("textbox", { name: "Employer" }), "Ilo Labs");
+    await browser.type(screen.getByRole("textbox", { name: "Role" }), "Product lead");
+    await browser.selectOptions(
+      screen.getByRole("combobox", { name: "Employment type" }),
+      "full_time",
+    );
+    await browser.clear(screen.getByLabelText("Effective date"));
+    await browser.type(screen.getByLabelText("Effective date"), "2026-08-15");
+    await browser.type(screen.getByRole("textbox", { name: "Gross annual income" }), "145000");
+    await browser.type(screen.getByRole("textbox", { name: "Expected net paycheck" }), "4125");
+    await browser.selectOptions(
+      screen.getByRole("combobox", { name: "Pay frequency" }),
+      "biweekly",
+    );
+    await browser.type(screen.getByLabelText("Next payday"), "2026-08-28");
+    await browser.selectOptions(screen.getByRole("combobox", { name: "Pay account" }), id);
+    await browser.click(screen.getByRole("button", { name: "Save profile" }));
+
+    await waitFor(() =>
+      expect(mocks.updateFinanceProfile).toHaveBeenCalledWith({
+        effectiveDate: "2026-08-15",
+        employer: "Ilo Labs",
+        employmentType: "full_time",
+        expectedNetPay: 4125,
+        grossAnnualIncome: 145000,
+        nextPayday: "2026-08-28",
+        payAccountId: id,
+        payFrequency: "biweekly",
+        role: "Product lead",
+      }),
+    );
+  });
 });

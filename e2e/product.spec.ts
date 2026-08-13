@@ -11,7 +11,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await expect(page.getByText("Product strategy review", { exact: true })).toBeVisible();
   await page.goto("/tasks");
   if (test.info().project.name === "mobile-chromium") {
-    await page.getByRole("button", { name: "Open Navigation" }).click();
+    await page.getByRole("button", { name: "Workspace actions" }).click();
   }
   await page
     .getByRole("navigation", { name: "Task Lists" })

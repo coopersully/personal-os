@@ -1156,6 +1156,13 @@ function AuthenticatedApp({ user }: { user: User }) {
             accountSections={settingsSectionPages(user.canManageInvitations === true)}
             onLogout={mobileDockLogout}
             pathname={location.pathname}
+            {...(sidebarMode === "tasks"
+              ? {
+                  renderWorkspaceNavigation: (onNavigate: () => void) => (
+                    <TasksSidebar onNavigate={onNavigate} />
+                  ),
+                }
+              : {})}
             workspaceDefinitions={workspaceDefinitions}
           />
         ) : null}

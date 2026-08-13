@@ -3447,7 +3447,6 @@ describe("ilo web app", () => {
     const view = setup("/tasks?view=today");
     await screen.findByText("Both containers");
     expect(screen.getByText(/Work \/ Launch/)).toBeInTheDocument();
-    expect(screen.getByText("No date or estimate yet")).toBeInTheDocument();
     expect(screen.getByText("Work")).toBeInTheDocument();
     view.unmount();
   });

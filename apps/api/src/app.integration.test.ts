@@ -771,6 +771,105 @@ describe.sequential("ilo API", () => {
           .from(reminders)
           .where(eq(reminders.id, togetherTask.id)),
       ).toEqual([{ listId: together.id, revision: 1 }]);
+
+      const projectOnlySource = await createList("Move Project-Only Source");
+      const projectOnlyDestination = await createList("Move Project-Only Destination");
+      const [projectOnly] = await database.db
+        .insert(taskProjects)
+        .values({
+          listId: projectOnlySource.id,
+          name: "Move Project Without Tasks",
+          normalizedName: "move project without tasks",
+          userId: listUserId,
+        })
+        .returning();
+      if (!projectOnly) throw new Error("Project-only move fixture was not created.");
+      const projectOnlyMove = await listRequest(`/v1/task-lists/${projectOnlySource.id}/archive`, {
+        body: {
+          destinationListId: projectOnlyDestination.id,
+          expectedRevision: projectOnlySource.revision,
+          resolution: "move_active_contents",
+        },
+      });
+      expect(projectOnlyMove.status).toBe(200);
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, projectOnly.id)),
+      ).toEqual([{ listId: projectOnlyDestination.id, revision: 2 }]);
+      expect(
+        await database.db
+          .select({ action: auditEvents.action })
+          .from(auditEvents)
+          .where(eq(auditEvents.entityId, projectOnly.id)),
+      ).toEqual([{ action: "task_project.moved_with_list" }]);
+
+      const taskOnlySource = await createList("Move Task-Only Source");
+      const taskOnlyDestination = await createList("Move Task-Only Destination");
+      const [taskOnly] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: taskOnlySource.id,
+          taskRevision: 1,
+          title: "Move Task Without Project",
+          userId: listUserId,
+        })
+        .returning();
+      if (!taskOnly) throw new Error("Task-only move fixture was not created.");
+      const taskOnlyMove = await agentListRequest(
+        listAgentToken,
+        `/v1/task-lists/${taskOnlySource.id}/archive`,
+        {
+          body: {
+            destinationListId: taskOnlyDestination.id,
+            expectedRevision: taskOnlySource.revision,
+            resolution: "move_active_contents",
+          },
+        },
+      );
+      expect(taskOnlyMove.status).toBe(200);
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId, revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, taskOnly.id)),
+      ).toEqual([{ listId: taskOnlyDestination.id, revision: 2 }]);
+      const [taskOnlyAudit] = await database.db
+        .select({
+          actorId: auditEvents.actorId,
+          actorType: auditEvents.actorType,
+          after: auditEvents.after,
+          before: auditEvents.before,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, taskOnly.id));
+      expect(taskOnlyAudit).toMatchObject({
+        actorType: "agent",
+        after: {
+          authorization: {
+            actorId: taskOnlyAudit?.actorId,
+            kind: "scoped_agent_permission",
+          },
+          listId: taskOnlyDestination.id,
+          policy: "approved_rule",
+          projectId: null,
+          revision: 2,
+        },
+        before: {
+          authorization: {
+            actorId: taskOnlyAudit?.actorId,
+            kind: "scoped_agent_permission",
+          },
+          listId: taskOnlySource.id,
+          policy: "approved_rule",
+          projectId: null,
+          revision: 1,
+        },
+      });
     });
 
     it("task lists reject missing, archived, and same-list archive destinations", async () => {
@@ -3248,6 +3347,38 @@ describe.sequential("ilo API", () => {
         });
       }
 
+      const unavailableProjectList = await createTaskList("Unavailable Restore Project List");
+      const unavailableProject = await createTaskProject(
+        unavailableProjectList.id,
+        "Unavailable Restore Project",
+      );
+      const unavailableProjectTask = await createTask("Restore from unavailable Project", {
+        listId: unavailableProjectList.id,
+        projectId: unavailableProject.id,
+      });
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${unavailableProjectTask.id}/trash`, {
+            body: { expectedRevision: unavailableProjectTask.revision },
+          })
+        ).status,
+      ).toBe(200);
+      await database.db
+        .update(taskProjects)
+        .set({ deletedAt: new Date("2026-07-13T12:00:00.000Z") })
+        .where(eq(taskProjects.id, unavailableProject.id));
+      const restoredFromUnavailable = await taskAgentRequest(
+        `/v1/tasks/${unavailableProjectTask.id}/restore`,
+        { body: { expectedRevision: 2 } },
+      );
+      expect(restoredFromUnavailable.status).toBe(200);
+      expect((await payload(restoredFromUnavailable)).task).toMatchObject({
+        deletedAt: null,
+        listId: unavailableProjectList.id,
+        projectId: null,
+        revision: 3,
+      });
+
       const agentAliasTask = await createTask("Revision-safe DELETE alias Task");
       const agentAliasResponse = await taskAgentRequest(`/v1/tasks/${agentAliasTask.id}`, {
         body: { expectedRevision: agentAliasTask.revision },
@@ -3337,6 +3468,52 @@ describe.sequential("ilo API", () => {
           [archiveRequest, restoreRequest].filter(
             (value): value is Promise<Response> => value !== undefined,
           ),
+        );
+      }
+
+      const driftList = await createTaskList("Concurrent Restore Revision List");
+      const driftTask = await createTask("Concurrent restore revision Task", {
+        listId: driftList.id,
+      });
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${driftTask.id}/trash`, {
+            body: { expectedRevision: driftTask.revision },
+          })
+        ).status,
+      ).toBe(200);
+      const driftBlocker = await database.pool.connect();
+      let driftRestore: Promise<Response> | undefined;
+      try {
+        await driftBlocker.query("BEGIN");
+        await driftBlocker.query("SELECT id FROM task_lists WHERE id = $1 FOR UPDATE", [
+          driftList.id,
+        ]);
+        driftRestore = taskAgentRequest(`/v1/tasks/${driftTask.id}/restore`, {
+          body: { expectedRevision: 2 },
+        });
+        void driftRestore.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(1);
+        await database.db
+          .update(reminders)
+          .set({ taskRevision: 3 })
+          .where(eq(reminders.id, driftTask.id));
+        await driftBlocker.query("COMMIT");
+
+        const driftResponse = await driftRestore;
+        expect(driftResponse.status).toBe(409);
+        expect((await payload(driftResponse)).error.details).toEqual({ currentRevision: 3 });
+        expect(
+          await database.db
+            .select({ deletedAt: reminders.deletedAt, revision: reminders.taskRevision })
+            .from(reminders)
+            .where(eq(reminders.id, driftTask.id)),
+        ).toEqual([{ deletedAt: new Date("2026-07-13T12:00:00.000Z"), revision: 3 }]);
+      } finally {
+        await driftBlocker.query("ROLLBACK");
+        driftBlocker.release();
+        await Promise.allSettled(
+          [driftRestore].filter((value): value is Promise<Response> => value !== undefined),
         );
       }
     });
@@ -3604,6 +3781,31 @@ describe.sequential("ilo API", () => {
         projectId: null,
         revision: 2,
       });
+      const attachPreview = (
+        await payload(
+          await taskAgentRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              destinationProjectId: destinationProject.id,
+              expectedRevision: 2,
+            },
+          }),
+        )
+      ).preview;
+      const attached = await taskAgentRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          destinationProjectId: destinationProject.id,
+          expectedRevision: 2,
+          previewToken: attachPreview.previewToken,
+        },
+      });
+      expect(attached.status).toBe(200);
+      expect((await payload(attached)).task).toMatchObject({
+        listId: destinationList.id,
+        projectId: destinationProject.id,
+        revision: 3,
+      });
       expect(
         await database.db
           .select({
@@ -3618,8 +3820,8 @@ describe.sequential("ilo API", () => {
         {
           legacyStatus: "inbox",
           listId: destinationList.id,
-          projectId: null,
-          revision: 2,
+          projectId: destinationProject.id,
+          revision: 3,
         },
       ]);
       const moveAudit = (

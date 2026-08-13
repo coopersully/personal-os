@@ -1,0 +1,78 @@
+name: Bug report
+description: Report a reproducible Personal OS defect
+title: "Bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Personal OS. This repository is public: do not include secrets,
+        personal information, private mail or calendar content, financial records, access tokens,
+        provider payloads, or absolute paths from your machine.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - Web application
+        - Desktop application
+        - API
+        - MCP server
+        - Connector or synchronization
+        - Deployment or release
+        - Contributor tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What happened?
+      description: Describe the observable behavior and its impact.
+      placeholder: The application showed…
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen?
+      description: Describe the expected observable behavior.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reliable sequence that reproduces the defect.
+      placeholder: |
+        1. Start from…
+        2. Select…
+        3. Observe…
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Provide the release version or full commit SHA when known.
+      placeholder: v0.1.0 or 0123456789abcdef0123456789abcdef01234567
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Public-safe evidence
+      description: Add sanitized logs, screenshots, or test output that contain no private data.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public repository safety
+      options:
+        - label: I removed secrets, personal information, provider payloads, and private content.
+          required: true

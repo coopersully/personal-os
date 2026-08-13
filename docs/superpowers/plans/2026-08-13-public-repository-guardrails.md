@@ -60,6 +60,8 @@ zizmor, Dependabot, GitHub issue forms.
 - Create: `.github/ISSUE_TEMPLATE/config.yml`
 - Create: `.github/pull_request_template.md`
 - Modify: `.github/dependabot.yml`
+- Modify: `CONTRIBUTING.md`
+- Modify: `SECURITY.md`
 
 **Interfaces:**
 - Consumes: the repository PR rubric, public security policy, and current package ecosystems.
@@ -70,6 +72,8 @@ zizmor, Dependabot, GitHub issue forms.
 - [ ] Add a PR template matching every required rubric section.
 - [ ] Group compatible npm production/development updates and GitHub Actions updates while keeping
   major updates independent.
+- [ ] Explain the automated review contract to public contributors and use Personal OS consistently
+  in the contribution and security policies.
 - [ ] Parse all changed YAML and inspect the generated diff.
 
 ### Task 4: Verify and publish

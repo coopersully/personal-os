@@ -22,20 +22,7 @@ import {
   type TrashTaskInput,
   type UpdateTaskInput,
 } from "@personal-os/domain";
-import {
-  and,
-  desc,
-  eq,
-  gte,
-  ilike,
-  inArray,
-  isNotNull,
-  isNull,
-  lt,
-  lte,
-  or,
-  sql,
-} from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
@@ -621,7 +608,39 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
       }
       if (query.lifecycle) conditions.push(eq(reminders.taskLifecycle, query.lifecycle));
       if (query.listId) conditions.push(eq(reminders.taskListId, query.listId));
-      if (query.projectId) conditions.push(eq(reminders.taskProjectId, query.projectId));
+      if (query.projectId) {
+        conditions.push(
+          eq(reminders.taskProjectId, query.projectId),
+          inArray(
+            reminders.taskProjectId,
+            db
+              .select({ id: taskProjects.id })
+              .from(taskProjects)
+              .where(
+                and(
+                  eq(taskProjects.id, query.projectId),
+                  eq(taskProjects.userId, userId),
+                  eq(taskProjects.availability, "active"),
+                  eq(taskProjects.lifecycle, "open"),
+                  isNull(taskProjects.deletedAt),
+                  inArray(
+                    taskProjects.listId,
+                    db
+                      .select({ id: taskLists.id })
+                      .from(taskLists)
+                      .where(
+                        and(
+                          eq(taskLists.userId, userId),
+                          eq(taskLists.availability, "active"),
+                          isNull(taskLists.deletedAt),
+                        ),
+                      ),
+                  ),
+                ),
+              ),
+          ),
+        );
+      }
       if (query.dueAfter) conditions.push(gte(reminders.dueAt, new Date(query.dueAfter)));
       if (query.dueBefore) conditions.push(lte(reminders.dueAt, new Date(query.dueBefore)));
       if (query.scheduledAfter) {
@@ -631,10 +650,15 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
         conditions.push(lte(reminders.scheduledAt, new Date(query.scheduledBefore)));
       }
       if (query.query) {
+        const escapedQuery = query.query
+          .replaceAll("\\", "\\\\")
+          .replaceAll("%", "\\%")
+          .replaceAll("_", "\\_");
+        const pattern = `%${escapedQuery}%`;
         const search = or(
-          ilike(reminders.title, `%${query.query}%`),
-          ilike(reminders.notes, `%${query.query}%`),
-          ilike(reminders.taskWhy, `%${query.query}%`),
+          sql`${reminders.title} ILIKE ${pattern} ESCAPE '\\'`,
+          sql`${reminders.notes} ILIKE ${pattern} ESCAPE '\\'`,
+          sql`${reminders.taskWhy} ILIKE ${pattern} ESCAPE '\\'`,
         );
         if (search) conditions.push(search);
       }
@@ -827,12 +851,57 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
       const observed = await findTask(context.principal.userId, id, true);
       assertExpectedRevision(observed, input.expectedRevision);
       const row = await db.transaction(async (transaction) => {
-        const locked = await lockHierarchy(transaction, observed, { deleted: true });
-        assertExpectedRevision(locked.task, input.expectedRevision);
-        assertActiveDestinationList(locked.sourceList, true);
-        if (locked.task.taskProjectId) {
-          assertActiveDestinationProject(locked.sourceProject, locked.sourceList.id, true);
+        assertCanonicalTask(observed);
+        const inbox = (
+          await transaction
+            .select({ id: taskLists.id })
+            .from(taskLists)
+            .where(
+              and(
+                eq(taskLists.userId, observed.userId),
+                eq(taskLists.kind, "inbox"),
+                isNull(taskLists.deletedAt),
+              ),
+            )
+            .limit(1)
+        )[0];
+        if (!inbox) throw new AppError("internal_error", "The Task owner's Inbox was not found.");
+        const lists = await lockLists(transaction, observed.userId, [
+          observed.taskListId,
+          inbox.id,
+        ]);
+        const projects = await lockProjects(
+          transaction,
+          observed.userId,
+          observed.taskProjectId ? [observed.taskProjectId] : [],
+        );
+        const task = await lockTask(transaction, observed.userId, observed.id, true);
+        if (
+          task.taskRevision !== observed.taskRevision ||
+          task.taskListId !== observed.taskListId ||
+          task.taskProjectId !== observed.taskProjectId ||
+          task.taskLifecycle !== observed.taskLifecycle ||
+          task.deletedAt?.toISOString() !== observed.deletedAt?.toISOString()
+        ) {
+          throw revisionConflict(task.taskRevision);
         }
+        assertExpectedRevision(task, input.expectedRevision);
+        const sourceList = lists.find((list) => list.id === task.taskListId) ?? null;
+        const activeInbox = lists.find((list) => list.id === inbox.id) ?? null;
+        const restoreList =
+          sourceList?.availability === "active"
+            ? sourceList
+            : assertActiveDestinationList(activeInbox, true);
+        const sourceProject = task.taskProjectId
+          ? (projects.find((project) => project.id === task.taskProjectId) ?? null)
+          : null;
+        const restoreProject =
+          sourceList?.availability === "active" &&
+          sourceProject?.listId === sourceList.id &&
+          sourceProject.availability === "active" &&
+          sourceProject.lifecycle === "open"
+            ? sourceProject
+            : null;
         const changedAt = now();
         const after = requireDatabaseRecord(
           (
@@ -840,15 +909,17 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
               .update(reminders)
               .set({
                 deletedAt: null,
-                taskRevision: (locked.task.taskRevision as number) + 1,
+                taskListId: restoreList.id,
+                taskProjectId: restoreProject?.id ?? null,
+                taskRevision: (task.taskRevision as number) + 1,
                 updatedAt: changedAt,
               })
               .where(
                 and(
-                  eq(reminders.id, locked.task.id),
-                  eq(reminders.userId, locked.task.userId),
+                  eq(reminders.id, task.id),
+                  eq(reminders.userId, task.userId),
                   eq(reminders.kind, "task"),
-                  eq(reminders.taskRevision, locked.task.taskRevision as number),
+                  eq(reminders.taskRevision, task.taskRevision as number),
                   isNotNull(reminders.deletedAt),
                 ),
               )
@@ -860,7 +931,7 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
           auditValues({
             action: "task.restored",
             after: taskAuditState(after),
-            before: taskAuditState(locked.task),
+            before: taskAuditState(task),
             entityId: after.id,
             entityType: "task",
             ...context,

@@ -19,7 +19,12 @@ import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError, isUniqueViolation } from "./errors.js";
 import { decodeCursor, encodeCursor } from "./pagination.js";
-import { auditSnapshot, serializeTaskList } from "./serialization.js";
+import {
+  auditSnapshot,
+  serializeTask,
+  serializeTaskList,
+  serializeTaskProject,
+} from "./serialization.js";
 import type { Principal } from "./types.js";
 
 type MutationContext = {
@@ -55,6 +60,18 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
 
   function auditState(row: typeof taskLists.$inferSelect): Record<string, unknown> {
     return auditSnapshot(serializeTaskList(row)) ?? {};
+  }
+
+  function childAuditState(value: object, context: MutationContext): Record<string, unknown> {
+    return {
+      ...(auditSnapshot(value) ?? {}),
+      authorization: {
+        actorId: context.principal.actorId,
+        kind:
+          context.principal.actorType === "user" ? "interactive_user" : "scoped_agent_permission",
+      },
+      policy: context.principal.actorType === "user" ? "approve_each" : "approved_rule",
+    };
   }
 
   function revisionConflict(currentRevision: number | null): AppError {
@@ -272,6 +289,26 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
 
           const changedAt = now();
           if (hasContents && input.resolution === "move_active_contents" && destination) {
+            const projectsBefore = await transaction
+              .select()
+              .from(taskProjects)
+              .where(
+                and(eq(taskProjects.userId, source.userId), eq(taskProjects.listId, source.id)),
+              )
+              .orderBy(taskProjects.id)
+              .for("update");
+            const tasksBefore = await transaction
+              .select()
+              .from(reminders)
+              .where(
+                and(
+                  eq(reminders.userId, source.userId),
+                  eq(reminders.kind, "task"),
+                  eq(reminders.taskListId, source.id),
+                ),
+              )
+              .orderBy(reminders.id)
+              .for("update");
             await transaction.execute(sql`
               WITH moved_projects AS (
                 UPDATE "task_projects"
@@ -295,6 +332,80 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
                 (SELECT count(*) FROM moved_projects) AS "project_count",
                 (SELECT count(*) FROM moved_tasks) AS "task_count"
             `);
+            const projectsAfter =
+              projectsBefore.length === 0
+                ? []
+                : await transaction
+                    .select()
+                    .from(taskProjects)
+                    .where(
+                      inArray(
+                        taskProjects.id,
+                        projectsBefore.map(({ id }) => id),
+                      ),
+                    )
+                    .orderBy(taskProjects.id);
+            const tasksAfter =
+              tasksBefore.length === 0
+                ? []
+                : await transaction
+                    .select()
+                    .from(reminders)
+                    .where(
+                      inArray(
+                        reminders.id,
+                        tasksBefore.map(({ id }) => id),
+                      ),
+                    )
+                    .orderBy(reminders.id);
+            const projectBeforeById = new Map(
+              projectsBefore.map((project) => [project.id, project]),
+            );
+            const taskBeforeById = new Map(tasksBefore.map((task) => [task.id, task]));
+            if (projectsAfter.length > 0) {
+              await transaction.insert(auditEvents).values(
+                projectsAfter.map((project) => ({
+                  ...auditValues({
+                    action: "task_project.moved_with_list",
+                    after: childAuditState(serializeTaskProject(project), context),
+                    before: childAuditState(
+                      serializeTaskProject(
+                        requireDatabaseRecord(
+                          projectBeforeById.get(project.id),
+                          "The moved task Project audit source was not found.",
+                        ),
+                      ),
+                      context,
+                    ),
+                    entityId: project.id,
+                    entityType: "task_project",
+                    ...context,
+                  }),
+                })),
+              );
+            }
+            if (tasksAfter.length > 0) {
+              await transaction.insert(auditEvents).values(
+                tasksAfter.map((task) => ({
+                  ...auditValues({
+                    action: "task.moved_with_list",
+                    after: childAuditState(serializeTask(task), context),
+                    before: childAuditState(
+                      serializeTask(
+                        requireDatabaseRecord(
+                          taskBeforeById.get(task.id),
+                          "The moved Task audit source was not found.",
+                        ),
+                      ),
+                      context,
+                    ),
+                    entityId: task.id,
+                    entityType: "task",
+                    ...context,
+                  }),
+                })),
+              );
+            }
           }
 
           const expectedRevision = input.expectedRevision ?? source.revision;

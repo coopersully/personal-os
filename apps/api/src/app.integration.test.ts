@@ -676,6 +676,52 @@ describe.sequential("ilo API", () => {
       expect(await database.db.select().from(reminders).where(eq(reminders.id, task.id))).toEqual([
         expect.objectContaining({ taskListId: destination.id, taskRevision: 2 }),
       ]);
+      const moveAudits = await database.db
+        .select({
+          action: auditEvents.action,
+          actorId: auditEvents.actorId,
+          actorType: auditEvents.actorType,
+          after: auditEvents.after,
+          before: auditEvents.before,
+          entityId: auditEvents.entityId,
+          requestId: auditEvents.requestId,
+        })
+        .from(auditEvents)
+        .where(inArray(auditEvents.entityId, [source.id, project.id, task.id]));
+      expect(moveAudits.map(({ action }) => action).sort()).toEqual([
+        "task.moved_with_list",
+        "task_list.archived",
+        "task_list.created",
+        "task_project.moved_with_list",
+      ]);
+      expect(new Set(moveAudits.map(({ requestId }) => requestId)).size).toBe(2);
+      for (const childAudit of moveAudits.filter(({ entityId }) => entityId !== source.id)) {
+        expect(childAudit).toMatchObject({
+          actorId: listUserId,
+          actorType: "user",
+          after: {
+            authorization: { actorId: listUserId, kind: "interactive_user" },
+            listId: destination.id,
+            policy: "approve_each",
+            revision: 2,
+            source: { provider: "local", revision: "2" },
+          },
+          before: {
+            authorization: { actorId: listUserId, kind: "interactive_user" },
+            listId: source.id,
+            policy: "approve_each",
+            revision: 1,
+            source: { provider: "local", revision: "1" },
+          },
+        });
+      }
+      expect(
+        new Set(
+          moveAudits
+            .filter(({ action }) => action !== "task_list.created")
+            .map(({ requestId }) => requestId),
+        ).size,
+      ).toBe(1);
 
       const together = await createList("Archive Together");
       const [togetherProject] = await database.db
@@ -2662,6 +2708,25 @@ describe.sequential("ilo API", () => {
       ).toEqual(new Set([first.id, second.id]));
     });
 
+    it("tasks treat percent, underscore, and backslash as literal search characters", async () => {
+      const literalPercent = await createTask("Progress is 100% complete");
+      await createTask("Progress is 100 percent complete");
+      const literalUnderscore = await createTask("Release slot_a is ready");
+      await createTask("Release slotXa is ready");
+      const literalBackslash = await createTask("Archive path C:\\temp is ready");
+      await createTask("Archive path C:Xtemp is ready");
+
+      for (const [search, expectedId] of [
+        ["100%", literalPercent.id],
+        ["slot_a", literalUnderscore.id],
+        ["C:\\temp", literalBackslash.id],
+      ] as const) {
+        const query = new URLSearchParams({ query: search });
+        const result = await payload(await taskRequest(`/v1/tasks?${query.toString()}`));
+        expect(result.items.map(({ id }: { id: string }) => id)).toEqual([expectedId]);
+      }
+    });
+
     it("tasks preserve safe placement and explicit optional-field updates", async () => {
       const missingId = "99999999-9999-4999-8999-999999999999";
       const list = await createTaskList("Task Placement Safety");
@@ -2845,6 +2910,60 @@ describe.sequential("ilo API", () => {
       expect((await payload(crossUserInspection)).items).toEqual([]);
     });
 
+    it("tasks require an explicit Project and its parent List to remain active and open", async () => {
+      const archivedParent = await createTaskList("Explicit Project Archived Parent");
+      const archivedParentProject = await createTaskProject(
+        archivedParent.id,
+        "Explicit Project Under Archived Parent",
+      );
+      const archivedParentTask = await createTask("Task under archived Project parent", {
+        listId: archivedParent.id,
+        projectId: archivedParentProject.id,
+      });
+      expect(
+        (
+          await taskRequest(`/v1/task-lists/${archivedParent.id}/archive`, {
+            body: {
+              expectedRevision: archivedParent.revision,
+              resolution: "archive_contents_together",
+            },
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (await payload(await taskRequest(`/v1/tasks?projectId=${archivedParentProject.id}`))).items,
+      ).toEqual([]);
+      expect(
+        (await payload(await taskRequest(`/v1/tasks?listId=${archivedParent.id}`))).items.map(
+          ({ id }: { id: string }) => id,
+        ),
+      ).toContain(archivedParentTask.id);
+
+      for (const terminalAction of ["cancel", "archive"] as const) {
+        const list = await createTaskList(`Explicit ${terminalAction} Project List`);
+        const project = await createTaskProject(list.id, `Explicit ${terminalAction} Project`);
+        const task = await createTask(`Task under ${terminalAction} Project`, {
+          listId: list.id,
+          projectId: project.id,
+        });
+        expect(
+          (
+            await taskRequest(`/v1/task-projects/${project.id}/${terminalAction}`, {
+              body: { expectedRevision: project.revision },
+            })
+          ).status,
+        ).toBe(200);
+        expect(
+          (await payload(await taskRequest(`/v1/tasks?projectId=${project.id}`))).items,
+        ).toEqual([]);
+        expect(
+          (await payload(await taskRequest(`/v1/tasks?listId=${list.id}`))).items.map(
+            ({ id }: { id: string }) => id,
+          ),
+        ).toContain(task.id);
+      }
+    });
+
     it("tasks use focused revision-safe complete, reopen, and cancel transitions with canonical audits", async () => {
       const task = await createTask("Lifecycle Task");
       expect(
@@ -2996,6 +3115,48 @@ describe.sequential("ilo API", () => {
       });
     });
 
+    it("task audit snapshots do not disclose Task intent or container names to audit-only tokens", async () => {
+      const secretListName = "Private Client Planning";
+      const secretProjectName = "Sensitive Acquisition Outcome";
+      const secretTaskWhy = "Because this reveals a confidential motivation";
+      const list = await createTaskList(secretListName);
+      const project = await createTaskProject(list.id, secretProjectName);
+      const task = await createTask("Confidential executable action", {
+        listId: list.id,
+        projectId: project.id,
+        why: secretTaskWhy,
+      });
+      const auditTokenResponse = await taskRequest("/v1/access-tokens", {
+        body: { name: "Task audit metadata only", scopes: ["audit:read"] },
+      });
+      expect(auditTokenResponse.status).toBe(201);
+      const auditToken = (await payload(auditTokenResponse)).token.token as string;
+
+      const auditResponse = await scopedTaskAgentRequest(auditToken, "/v1/audit?limit=100");
+      expect(auditResponse.status).toBe(200);
+      const events = (await payload(auditResponse)).events.filter(
+        ({ entityId }: { entityId: string }) => [list.id, project.id, task.id].includes(entityId),
+      );
+      expect(events).toHaveLength(3);
+      expect(
+        events.find(({ entityId }: { entityId: string }) => entityId === list.id)?.after,
+      ).toMatchObject({
+        name: "[redacted]",
+      });
+      expect(
+        events.find(({ entityId }: { entityId: string }) => entityId === project.id)?.after,
+      ).toMatchObject({ name: "[redacted]" });
+      expect(
+        events.find(({ entityId }: { entityId: string }) => entityId === task.id)?.after,
+      ).toMatchObject({
+        title: "[redacted]",
+        why: "[redacted]",
+      });
+      expect(JSON.stringify(events)).not.toContain(secretListName);
+      expect(JSON.stringify(events)).not.toContain(secretProjectName);
+      expect(JSON.stringify(events)).not.toContain(secretTaskWhy);
+    });
+
     it("tasks trash and restore without changing lifecycle and DELETE advertises its successor", async () => {
       const list = await createTaskList("Task Restore Validation List");
       const task = await createTask("Task in soon-archived List", { listId: list.id });
@@ -3018,19 +3179,74 @@ describe.sequential("ilo API", () => {
         body: { expectedRevision: list.revision },
       });
       expect(archived.status).toBe(200);
-      const restoreRejected = await taskAgentRequest(`/v1/tasks/${task.id}/restore`, {
+      const restoredToInbox = await taskAgentRequest(`/v1/tasks/${task.id}/restore`, {
         body: { expectedRevision: 2 },
       });
-      expect(restoreRejected.status).toBe(409);
-      expect((await payload(restoreRejected)).error.details).toMatchObject({
-        code: "task_destination_unavailable",
+      expect(restoredToInbox.status).toBe(200);
+      expect((await payload(restoredToInbox)).task).toMatchObject({
+        deletedAt: null,
+        lifecycle: "open",
+        listId: taskInboxId,
+        projectId: null,
+        revision: 3,
       });
       expect(
         await database.db
-          .select({ deletedAt: reminders.deletedAt, lifecycle: reminders.taskLifecycle })
+          .select({
+            deletedAt: reminders.deletedAt,
+            lifecycle: reminders.taskLifecycle,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
           .from(reminders)
           .where(eq(reminders.id, task.id)),
-      ).toEqual([{ deletedAt: new Date("2026-07-13T12:00:00.000Z"), lifecycle: "open" }]);
+      ).toEqual([
+        {
+          deletedAt: null,
+          lifecycle: "open",
+          listId: taskInboxId,
+          projectId: null,
+          revision: 3,
+        },
+      ]);
+
+      for (const terminalAction of ["complete", "archive"] as const) {
+        const projectList = await createTaskList(`Restore ${terminalAction} Project List`);
+        const project = await createTaskProject(
+          projectList.id,
+          `Restore ${terminalAction} Project`,
+        );
+        const projectTask = await createTask(`Restore from ${terminalAction} Project`, {
+          listId: projectList.id,
+          projectId: project.id,
+        });
+        const trashedProjectTask = await taskAgentRequest(`/v1/tasks/${projectTask.id}/trash`, {
+          body: { expectedRevision: projectTask.revision },
+        });
+        expect(trashedProjectTask.status).toBe(200);
+        const terminalProject = await taskRequest(
+          `/v1/task-projects/${project.id}/${terminalAction}`,
+          { body: { expectedRevision: project.revision } },
+        );
+        expect(terminalProject.status).toBe(200);
+        const staleRestore = await taskAgentRequest(`/v1/tasks/${projectTask.id}/restore`, {
+          body: { expectedRevision: projectTask.revision },
+        });
+        expect(staleRestore.status).toBe(409);
+        expect((await payload(staleRestore)).error.details).toMatchObject({ currentRevision: 2 });
+
+        const restoredDetached = await taskAgentRequest(`/v1/tasks/${projectTask.id}/restore`, {
+          body: { expectedRevision: 2 },
+        });
+        expect(restoredDetached.status).toBe(200);
+        expect((await payload(restoredDetached)).task).toMatchObject({
+          deletedAt: null,
+          listId: projectList.id,
+          projectId: null,
+          revision: 3,
+        });
+      }
 
       const agentAliasTask = await createTask("Revision-safe DELETE alias Task");
       const agentAliasResponse = await taskAgentRequest(`/v1/tasks/${agentAliasTask.id}`, {
@@ -3078,6 +3294,51 @@ describe.sequential("ilo API", () => {
         "task.trashed",
         "task.restored",
       ]);
+    });
+
+    it("tasks restore from the locked current List state when archive wins concurrently", async () => {
+      const list = await createTaskList("Concurrent Restore Archive List");
+      const task = await createTask("Concurrent restore fallback Task", { listId: list.id });
+      const trashed = await taskAgentRequest(`/v1/tasks/${task.id}/trash`, {
+        body: { expectedRevision: task.revision },
+      });
+      expect(trashed.status).toBe(200);
+      const blocker = await database.pool.connect();
+      let archiveRequest: Promise<Response> | undefined;
+      let restoreRequest: Promise<Response> | undefined;
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query("SELECT id FROM task_lists WHERE id = $1 FOR UPDATE", [list.id]);
+        archiveRequest = taskRequest(`/v1/task-lists/${list.id}/archive`, {
+          body: { expectedRevision: list.revision },
+        });
+        void archiveRequest.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(1);
+        restoreRequest = taskAgentRequest(`/v1/tasks/${task.id}/restore`, {
+          body: { expectedRevision: 2 },
+        });
+        void restoreRequest.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(2);
+        await blocker.query("COMMIT");
+
+        const [archived, restored] = await Promise.all([archiveRequest, restoreRequest]);
+        expect(archived.status).toBe(200);
+        expect(restored.status).toBe(200);
+        expect((await payload(restored)).task).toMatchObject({
+          deletedAt: null,
+          listId: taskInboxId,
+          projectId: null,
+          revision: 3,
+        });
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+        await Promise.allSettled(
+          [archiveRequest, restoreRequest].filter(
+            (value): value is Promise<Response> => value !== undefined,
+          ),
+        );
+      }
     });
 
     it("task and project move previews use tasks read scope without mutation while commits require write", async () => {

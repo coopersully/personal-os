@@ -425,6 +425,7 @@ const sensitiveAuditFields = new Set([
   "from",
   "location",
   "merchant",
+  "name",
   "notes",
   "passwordHash",
   "raw",
@@ -435,6 +436,7 @@ const sensitiveAuditFields = new Set([
   "title",
   "to",
   "tokenHash",
+  "why",
 ]);
 
 function redactAuditValue(value: unknown): unknown {

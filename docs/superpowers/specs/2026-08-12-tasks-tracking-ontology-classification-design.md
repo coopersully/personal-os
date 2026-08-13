@@ -1,6 +1,6 @@
 # Tasks and Tracking Ontology and Classification Design
 
-**Status:** Proposed
+**Status:** Approved ontology; List/Project/Task subset implemented, classifier and Tracking pending
 
 **Date:** 2026-08-12
 
@@ -20,6 +20,25 @@ ambiguous.
 The ontology is normative. An LLM may extract candidate facts and phrase a clarification, but its
 confidence score, world knowledge, or intuition cannot change the entity definitions or bypass the
 validation rules.
+
+## Implementation status — 2026-08-12
+
+The List, Project, Task, and system View definitions in this document are implemented. PostgreSQL
+enforces one Inbox per person, owner-scoped List membership, optional same-List Project membership,
+positive revisions, normalized container-name uniqueness, lifecycle/timestamp coherence, and the
+separation of Task-only fields from Reminder rows. API transactions enforce exact child-resolution,
+stable lock order, revision conflicts, idempotent creates, audit writes, and revision-bound move
+previews. The web implements the canonical `view | list + optional project` URL model and keeps
+Inbox at parameter-free `/tasks`. API responses derive local-only List/Project/Task provenance from
+entity ID and revision; callers cannot supply provenance in v1.
+
+The old mixed Task `status` remains only as `legacyStatus` compatibility metadata in the shared
+`reminders` table. No first-party Task query, view, lifecycle, automation, or fixture decision uses
+it. The shared table is transitional storage, not evidence that Tasks and Reminders share one
+domain. Physical extraction is pending the compatibility observation gate in the parent design.
+
+Task Occurrences/recurrence, Tracker/Habit/Check-in/Entry/Goal/Prompt persistence, the capture
+workflow, classifier implementation, and execution of the golden corpus are not implemented.
 
 ## Hard-ball review of the earlier model
 
@@ -383,10 +402,10 @@ the same result. MCP may expose focused prepare tools such as `preview_task_capt
 `preview_tracking_capture`; it does not own classification logic and does not receive a generic
 cross-domain commit tool.
 
-Entity mutations remain focused (`create_list`, `create_project`, `create_task`, `record_entry`,
-etc.). A host can follow the returned plan, but the API rechecks context versions and returns a
-structured conflict if names, revisions, time, permissions, or open occurrences changed after
-preview.
+Entity mutations remain focused (`create_task_list`, `create_task_project`, `create_task`,
+`record_entry`, etc.). A host can follow the returned plan, but the API rechecks context versions
+and returns a structured conflict if names, revisions, time, permissions, or open occurrences
+changed after preview.
 
 ## Golden corpus requirements
 
@@ -450,3 +469,16 @@ the cited research.
 - Every clarification has 2–3 concrete choices and resolves only one uncertainty.
 - The full corpus runs in domain unit tests, API integration tests, and MCP contract tests; UI E2E
   tests cover representative commit, preview, and clarification paths.
+
+Current evidence status:
+
+- [x] The relational Task subset prevents incompatible List/Project references and protects Inbox.
+- [x] Task and Project moves use server previews and atomic revision-checked commits; Project
+  completion and List archive expose exact resolution choices.
+- [x] Lifecycle, timing, organization, availability, and deletion are independent in canonical
+  Task contracts and first-party decisions.
+- [ ] No classifier implementation has been delivered, so deterministic cross-implementation
+  classification is not yet proven.
+- [ ] The golden corpus is design data only; it does not yet run in domain, API, MCP, or UI tests.
+- [ ] Clarification, Entry validation, Prompt timing, recurrence, and Tracking acceptance criteria
+  remain unproven until those domains are implemented.

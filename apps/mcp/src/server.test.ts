@@ -805,6 +805,17 @@ describe("ilo MCP server", () => {
       expect(schema.required).toContain("expectedRevision");
     }
 
+    const invalidListMove = await client.callTool({
+      name: "archive_task_list",
+      arguments: { expectedRevision: 1, id: accountId, resolution: "move_active_contents" },
+    });
+    const invalidProjectCompletion = await client.callTool({
+      name: "complete_task_project",
+      arguments: { expectedRevision: 1, id: projectId, resolution: "move_open_tasks" },
+    });
+    expect(invalidListMove).toMatchObject({ isError: true });
+    expect(invalidProjectCompletion).toMatchObject({ isError: true });
+
     await client.close();
     await server.close();
   });

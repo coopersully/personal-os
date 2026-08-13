@@ -1,13 +1,13 @@
 # Tasks and Tracking Ledger Design
 
-**Status:** Proposed
+**Status:** Approved direction; Task organization foundation implemented, Tracking remains proposed
 
 **Date:** 2026-08-12
 
-**Document relationship:** Once approved, this design supersedes the proposed reminder/task and
-goal/motive/habit framing in `docs/product/master-design.md` sections 6.5–6.6 and the corresponding
-MCP vocabulary. Those authoritative documents should be updated in the first implementation plan,
-not piecemeal during design review.
+**Document relationship:** This design supersedes the earlier reminder/task and goal/motive/habit
+framing in `docs/product/master-design.md` sections 6.5–6.6. The authoritative product, page,
+ownership, MCP, and QA documentation was reconciled with the implemented Task foundation on
+2026-08-12.
 
 **Normative companion:** Core entity definitions, relational invariants, the deterministic capture
 rubric, and golden fixtures are defined in
@@ -29,6 +29,43 @@ The product is a personal ledger with four primary verbs: **remind, check off, l
 is not a wellness program, a coach, or a diagnostic product. Behavioral research informs details
 such as short check-ins, stable cues, flexible targets, recovery after lapses, and honest treatment
 of missing data; it does not determine the product's voice or impose a self-improvement philosophy.
+
+## Implementation status — 2026-08-12
+
+The Task organization foundation is implemented across shared domain contracts, PostgreSQL, public
+API, typed client, web, MCP, Today/automation consumers, and QA fixtures:
+
+- one protected system Inbox plus local-only Lists and Projects;
+- one List per Task and at most one same-List Project;
+- Task/Project lifecycle `open | completed | cancelled`, independent deadline and reserved time,
+  separate availability/Trash, positive revisions, and local source references derived from ID and
+  revision;
+- canonical system Views `today | upcoming | scheduled | completed | cancelled | trash`;
+- exact conflict resolution for non-empty List archive and Project completion, plus revision-bound
+  Task/Project move previews and commits;
+- canonical `/tasks` URL selection with `view`, `list`, and `project` parameters;
+- focused HTTP, typed-client, and 25-tool MCP Task/List/Project surfaces;
+- bounded legacy-status projection with no first-party Task decision based on it.
+
+Lists, Projects, and Tasks are local in v1. Callers cannot supply their source; the API returns
+`provider: local`, `accountId: null`, the entity ID as `remoteId`, and the entity revision as source
+revision.
+
+Task rows still occupy the `reminders` table beside Reminder rows. Task-only constraints, owner and
+same-List foreign keys, kind-scoped services, and separate public contracts make this transitional
+shared storage, not a shared domain. Physical Task extraction remains pending.
+
+The deterministic capture classifier and corpus execution, Task recurrence/occurrences, Prompt
+persistence/delivery, Reminder conversion, Tracking storage/workspace/tools, Tracking Goals, and
+physical Task extraction are not implemented by this foundation.
+
+The public HTTP surface is `/v1/task-lists` collection/get/update/archive,
+`/v1/task-projects` collection/get/update/complete/cancel/archive plus move preview/commit, and
+`/v1/tasks` collection/get/update/complete/reopen/cancel/trash/restore plus move preview/commit.
+Creates use the three collection `POST`s. Read-only move previews are exact `POST` exceptions that
+require `tasks:read`; reads require `tasks:read`, and all other mutations require `tasks:write`.
+`DELETE /v1/tasks/:id` is a deprecated compatibility alias for Trash; canonical clients and MCP use
+`POST /v1/tasks/:id/trash`, and permanent deletion is not public.
 
 ## Problem
 
@@ -404,10 +441,12 @@ tracker outside the corresponding source selection.
 The coherent task surface is:
 
 - `list_task_lists`, `get_task_list`, `create_task_list`, `update_task_list`, `archive_task_list`;
-- `list_projects`, `get_project`, `create_project`, `update_project`, `complete_project`,
-  `cancel_project`, `archive_project`, `move_project`;
+- `list_task_projects`, `get_task_project`, `create_task_project`, `update_task_project`,
+  `complete_task_project`, `cancel_task_project`, `archive_task_project`,
+  `preview_task_project_move`, `move_task_project`;
 - `list_tasks`, `get_task`, `create_task`, `update_task`;
-- `complete_task`, `cancel_task`, `trash_task`, `restore_task`;
+- `complete_task`, `reopen_task`, `cancel_task`, `trash_task`, `restore_task`,
+  `preview_task_move`, `move_task`;
 - recurrence occurrence operations where a single instance must differ from the series.
 
 The initial tracking surface is:
@@ -544,12 +583,12 @@ mixed sources and duplicate exclusions.
 
 1. Bring Tasks to the existing Reminder safety baseline: get, revision guards, source references,
    structured errors, trash/restore, accurate idempotency declarations, and audit consistency.
-2. Preserve task IDs and task behavior while separating task persistence from the legacy shared
-   `reminders` representation through a reviewed migration. Create each person's system Inbox,
-   assign every existing Task to it, map incomplete states to `open`, preserve valid scheduling, and
-   retain the old mixed `inbox`/`next`/`scheduled` value as bounded compatibility metadata until
-   first-party clients and the person have had a review path. Do not invent a new permanent “next”
-   field merely to preserve the old collision.
+2. Preserve Task IDs and behavior while first expanding the legacy shared `reminders`
+   representation with canonical Task-only columns. The implemented migration creates each
+   person's system Inbox, assigns every existing Task to it, maps lifecycle to `open`, `completed`,
+   or `cancelled`, preserves timing, and retains the old mixed value as bounded `legacyStatus`
+   compatibility metadata. The later physical extraction must use a second reviewed
+   expand–migrate–contract procedure. It must not invent a permanent “next” field.
 3. Represent new reminders as prompts. Keep legacy reminder endpoints/tools temporarily, returning
    compatibility projections and deprecation metadata. Convert a standalone legacy reminder to a
    Task plus Prompt only when its semantics are unambiguous; otherwise preserve it until the person
@@ -608,6 +647,41 @@ At minimum, implementation must prove:
 - the versioned golden classification corpus passes at the shared domain, API, MCP-contract, and
   representative UI E2E layers;
 - repository verification through focused unit/integration/E2E coverage followed by `pnpm verify`.
+
+Foundation status:
+
+- [x] List/Project uniqueness, protected Inbox, same-List membership, atomic Project moves, Task
+  detachment previews, and exact Project/List conflicts are enforced and tested.
+- [x] Task lifecycle, timing, availability, deletion, revision, local provenance, idempotent create,
+  audit, and owner isolation are independent and tested through API/MCP/UI layers.
+- [x] Canonical Tasks Views, Lists, Projects, URL selection, lifecycle actions, and QA fixtures are
+  implemented without first-party legacy-status decisions.
+- [ ] Task recurrence and Task Occurrence persistence, DST behavior, series exceptions, and
+  occurrence UI are not implemented.
+- [ ] Prompt Rule, Prompt, Delivery Attempt persistence, and standalone Reminder conversion are not
+  implemented.
+- [ ] Tracker definitions, Entries, Check-in Occurrences, Tracking Goals, source selection,
+  workspace, MCP tools, imports, insights, and Today composition are not implemented.
+- [ ] Deterministic classifier/corpus execution across domain, API, MCP, and representative UI is
+  not implemented.
+- [ ] Physical Task extraction from `reminders` is not implemented and is gated below.
+
+## Compatibility observation gate
+
+Physical Task extraction and removal of the mixed `status` column from Task compatibility require
+all of the following before implementation begins:
+
+1. two successful production releases using canonical Task organization storage;
+2. zero first-party Task decisions based on the old `status` column during the observation window;
+3. a reviewed disposition for every remaining Task with `legacyStatus = 'next'`;
+4. a tested expand–migrate–contract procedure that preserves Task IDs and supports rollback without
+   losing canonical or compatibility state; and
+5. approval of the Prompt/Reminder compatibility plan before any old Task row is deleted.
+
+Post-deploy evidence must verify one Inbox per user, no Task missing canonical List/lifecycle/
+revision, no cross-List Project reference, healthy API and MCP discovery, and one human-session
+create/edit/complete/restore flow. This is an observation gate, not evidence already obtained by
+repository tests. As of 2026-08-12 no production release or observation claim is recorded here.
 
 ## Refinement findings incorporated
 

@@ -9,6 +9,7 @@ import {
   agentMutationPolicies,
   apiErrorSchema,
   applyFinanceCategorizationsInputSchema,
+  archiveTaskListInputSchema,
   assistantSetupPlanQuerySchema,
   assistantSetupPlanSchema,
   bulkUpdateMailInputSchema,
@@ -19,6 +20,7 @@ import {
   calendarSchema,
   cancelTaskInputSchema,
   completeTaskInputSchema,
+  completeTaskProjectInputSchema,
   connectedAccountHealthSchema,
   connectICloudInputSchema,
   connectorAuthorizationOutcomeSchema,
@@ -1023,6 +1025,12 @@ describe("domain schemas", () => {
       "move_open_tasks",
       "keep_project_open",
     ]);
+    expect(
+      archiveTaskListInputSchema.safeParse({ resolution: "move_active_contents" }).success,
+    ).toBe(false);
+    expect(
+      completeTaskProjectInputSchema.safeParse({ resolution: "move_open_tasks" }).success,
+    ).toBe(false);
     expect(
       taskMovePreviewSchema.parse({
         destinationListId: listId,

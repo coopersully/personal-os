@@ -362,7 +362,17 @@ describe.sequential("ilo API", () => {
       const replayed = await listRequest("/v1/task-lists", { body: createInput });
       expect(created.status).toBe(201);
       expect(replayed.status).toBe(201);
-      expect((await payload(replayed)).taskList).toEqual((await payload(created)).taskList);
+      const createdList = (await payload(created)).taskList;
+      expect((await payload(replayed)).taskList).toEqual(createdList);
+      const renameCollision = await listRequest(`/v1/task-lists/${createdList.id}`, {
+        body: { expectedRevision: createdList.revision, name: " focus plan " },
+        method: "PATCH",
+      });
+      expect(renameCollision.status).toBe(409);
+      expect((await payload(renameCollision)).error).toMatchObject({
+        code: "conflict",
+        details: { code: "task_list_name_conflict" },
+      });
       const mismatch = await listRequest("/v1/task-lists", {
         body: { ...createInput, description: "Different material" },
       });
@@ -627,6 +637,14 @@ describe.sequential("ilo API", () => {
           resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
         },
       });
+      const destinationPreview = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+        body: { destinationListId: destination.id, expectedRevision: source.revision },
+      });
+      expect(destinationPreview.status).toBe(409);
+      expect((await payload(destinationPreview)).error.details.currentRevisions).toMatchObject({
+        destinationList: destination.revision,
+        sourceList: source.revision,
+      });
 
       const cancelled = await listRequest(`/v1/task-lists/${source.id}/archive`, {
         body: { expectedRevision: source.revision, resolution: "cancel" },
@@ -707,6 +725,48 @@ describe.sequential("ilo API", () => {
           .from(reminders)
           .where(eq(reminders.id, togetherTask.id)),
       ).toEqual([{ listId: together.id, revision: 1 }]);
+    });
+
+    it("task lists reject missing, archived, and same-list archive destinations", async () => {
+      const missingId = "99999999-9999-4999-8999-999999999999";
+      expect(
+        (
+          await listRequest(`/v1/task-lists/${missingId}/archive`, {
+            body: { resolution: "archive_contents_together" },
+          })
+        ).status,
+      ).toBe(404);
+
+      const empty = await createList("Human Revision Default");
+      const humanUpdate = await listRequest(`/v1/task-lists/${empty.id}`, {
+        body: { description: "Updated without an explicit human revision" },
+        method: "PATCH",
+      });
+      expect(humanUpdate.status).toBe(200);
+      expect((await payload(humanUpdate)).taskList.revision).toBe(2);
+      const humanArchive = await listRequest(`/v1/task-lists/${empty.id}/archive`, { body: {} });
+      expect(humanArchive.status).toBe(200);
+      const archived = (await payload(humanArchive)).taskList;
+      expect(archived.revision).toBe(3);
+      expect(
+        (
+          await listRequest(`/v1/task-lists/${empty.id}/archive`, {
+            body: { expectedRevision: archived.revision },
+          })
+        ).status,
+      ).toBe(409);
+
+      const source = await createList("Unavailable Destination Source");
+      for (const destinationListId of [source.id, missingId, empty.id]) {
+        const response = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+          body: {
+            destinationListId,
+            expectedRevision: source.revision,
+            resolution: "move_active_contents",
+          },
+        });
+        expect(response.status).toBe(destinationListId === missingId ? 404 : 409);
+      }
     });
   });
 
@@ -1036,6 +1096,211 @@ describe.sequential("ilo API", () => {
       ).toBe(409);
     });
 
+    it("task projects fail closed for terminal Projects and unavailable move destinations", async () => {
+      const missingId = "99999999-9999-4999-8999-999999999999";
+      const sourceList = await createProjectList("Project Safety Source");
+      const project = await createProject(sourceList.id, "Project Safety Subject");
+      expect((await projectRequest(`/v1/task-projects/${missingId}`)).status).toBe(404);
+      const notesOnly = await projectRequest(`/v1/task-projects/${project.id}`, {
+        body: { notes: "Human review without a supplied revision" },
+        method: "PATCH",
+      });
+      expect(notesOnly.status).toBe(200);
+      const revised = (await payload(notesOnly)).taskProject as ProjectResponse;
+      expect(revised).toMatchObject({
+        notes: "Human review without a supplied revision",
+        revision: 2,
+      });
+
+      const sameDestination = await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+        body: { destinationListId: sourceList.id, expectedRevision: revised.revision },
+      });
+      expect(sameDestination.status).toBe(409);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move`, {
+            body: {
+              destinationListId: sourceList.id,
+              expectedRevision: revised.revision,
+              previewToken: "same-destination-does-not-commit",
+            },
+          })
+        ).status,
+      ).toBe(409);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: { destinationListId: missingId, expectedRevision: revised.revision },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move`, {
+            body: {
+              destinationListId: missingId,
+              expectedRevision: revised.revision,
+              previewToken: "missing-destination-does-not-commit",
+            },
+          })
+        ).status,
+      ).toBe(404);
+
+      const archivedDestination = await createProjectList("Project Safety Archived Destination");
+      expect(
+        (
+          await projectRequest(`/v1/task-lists/${archivedDestination.id}/archive`, {
+            body: { expectedRevision: archivedDestination.revision },
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: {
+              destinationListId: archivedDestination.id,
+              expectedRevision: revised.revision,
+            },
+          })
+        ).status,
+      ).toBe(404);
+
+      const completed = await createProject(sourceList.id, "Project Safety Completed");
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${completed.id}/complete`, {
+            body: { expectedRevision: completed.revision },
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${completed.id}/cancel`, {
+            body: { expectedRevision: 2 },
+          })
+        ).status,
+      ).toBe(409);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${completed.id}/complete`, {
+            body: { expectedRevision: 2 },
+          })
+        ).status,
+      ).toBe(409);
+
+      const archivedProject = await createProject(sourceList.id, "Project Safety Archived");
+      const archiveResponse = await projectRequest(
+        `/v1/task-projects/${archivedProject.id}/archive`,
+        { body: { expectedRevision: archivedProject.revision } },
+      );
+      expect(archiveResponse.status).toBe(200);
+      for (const [path, body, method] of [
+        [
+          `/v1/task-projects/${archivedProject.id}`,
+          { expectedRevision: 2, notes: "Cannot edit an archived Project" },
+          "PATCH",
+        ],
+        [
+          `/v1/task-projects/${archivedProject.id}/move/preview`,
+          { destinationListId: sourceList.id, expectedRevision: 2 },
+          "POST",
+        ],
+      ] as const) {
+        expect((await projectRequest(path, { body, method })).status).toBe(409);
+      }
+
+      const destinationList = await createProjectList("Project Completion Safety Destination");
+      const movable = await createProject(sourceList.id, "Project Completion Safety Subject");
+      await insertProjectTask(movable, "Project Completion Safety Task");
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${movable.id}/complete`, {
+            body: {
+              destinationListId: missingId,
+              expectedRevision: movable.revision,
+              resolution: "move_open_tasks",
+            },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${movable.id}/complete`, {
+            body: {
+              destinationListId: destinationList.id,
+              destinationProjectId: missingId,
+              expectedRevision: movable.revision,
+              resolution: "move_open_tasks",
+            },
+          })
+        ).status,
+      ).toBe(404);
+      const movedWithoutProject = await projectRequest(`/v1/task-projects/${movable.id}/complete`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: movable.revision,
+          resolution: "move_open_tasks",
+        },
+      });
+      expect(movedWithoutProject.status).toBe(200);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${missingId}/archive`, {
+            body: { expectedRevision: 1 },
+          })
+        ).status,
+      ).toBe(404);
+    });
+
+    it("task organization moves and renames preserve destination name uniqueness", async () => {
+      const sourceList = await createProjectList("Project Collision Source");
+      const destinationList = await createProjectList("Project Collision Destination");
+      const sourceProject = await createProject(sourceList.id, "Collision Project");
+      await createProject(destinationList.id, "collision project");
+
+      const preview = await payload(
+        await projectRequest(`/v1/task-projects/${sourceProject.id}/move/preview`, {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: sourceProject.revision,
+          },
+        }),
+      );
+      const collidingMove = await projectRequest(`/v1/task-projects/${sourceProject.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: sourceProject.revision,
+          previewToken: preview.preview.previewToken,
+        },
+      });
+      expect(collidingMove.status).toBe(409);
+      expect((await payload(collidingMove)).error.details).toMatchObject({
+        code: "task_project_move_name_conflict",
+      });
+
+      const renameSource = await createProject(sourceList.id, "Rename Source Project");
+      const collidingRename = await projectRequest(`/v1/task-projects/${renameSource.id}`, {
+        body: { expectedRevision: renameSource.revision, name: "Collision Project" },
+        method: "PATCH",
+      });
+      expect(collidingRename.status).toBe(409);
+      expect((await payload(collidingRename)).error.details).toMatchObject({
+        code: "task_project_name_conflict",
+      });
+
+      const listMove = await projectRequest(`/v1/task-lists/${sourceList.id}/archive`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: sourceList.revision,
+          resolution: "move_active_contents",
+        },
+      });
+      expect(listMove.status).toBe(409);
+      expect((await payload(listMove)).error.details).toMatchObject({
+        code: "task_list_move_name_conflict",
+      });
+    });
+
     it("task projects require an explicit open-Task completion resolution and apply every choice atomically", async () => {
       const sourceList = await createProjectList("Project Completion Source");
       const destinationList = await createProjectList("Project Completion Destination");
@@ -1062,6 +1327,14 @@ describe.sequential("ilo API", () => {
           "move_open_tasks",
           "keep_project_open",
         ],
+      });
+      const destinationConflict = await projectRequest(`/v1/task-projects/${kept.id}/complete`, {
+        body: { destinationListId: destinationList.id, expectedRevision: kept.revision },
+      });
+      expect(destinationConflict.status).toBe(409);
+      expect((await payload(destinationConflict)).error.details.currentRevisions).toMatchObject({
+        destinationList: destinationList.revision,
+        project: kept.revision,
       });
       const keepResponse = await projectRequest(`/v1/task-projects/${kept.id}/complete`, {
         body: { expectedRevision: kept.revision, resolution: "keep_project_open" },
@@ -2340,6 +2613,173 @@ describe.sequential("ilo API", () => {
           .from(auditEvents)
           .where(eq(auditEvents.entityId, todayTask.id)),
       ).toHaveLength(auditBefore.length + 1);
+    });
+
+    it("tasks combine canonical placement, timing, text, and cursor filters", async () => {
+      const list = await createTaskList("Filtered Task List");
+      const project = await createTaskProject(list.id, "Filtered Task Project");
+      const first = await createTask("Quarterly review alpha", {
+        dueAt: "2026-07-15T14:00:00.000Z",
+        listId: list.id,
+        notes: "Include the metrics packet",
+        projectId: project.id,
+        scheduledAt: "2026-07-14T14:00:00.000Z",
+      });
+      const second = await createTask("Quarterly review beta", {
+        dueAt: "2026-07-16T14:00:00.000Z",
+        listId: list.id,
+        projectId: project.id,
+        scheduledAt: "2026-07-15T14:00:00.000Z",
+        why: "Keep the quarterly review moving",
+      });
+      await createTask("Quarterly review outside range", {
+        dueAt: "2026-07-20T14:00:00.000Z",
+        listId: list.id,
+        projectId: project.id,
+        scheduledAt: "2026-07-19T14:00:00.000Z",
+      });
+
+      const query = new URLSearchParams({
+        dueAfter: "2026-07-14T00:00:00.000Z",
+        dueBefore: "2026-07-17T00:00:00.000Z",
+        limit: "1",
+        listId: list.id,
+        projectId: project.id,
+        query: "quarterly review",
+        scheduledAfter: "2026-07-13T00:00:00.000Z",
+        scheduledBefore: "2026-07-16T00:00:00.000Z",
+      });
+      const firstPage = await payload(await taskRequest(`/v1/tasks?${query.toString()}`));
+      expect(firstPage.items).toHaveLength(1);
+      expect(firstPage.nextCursor).toEqual(expect.any(String));
+
+      query.set("cursor", firstPage.nextCursor);
+      const secondPage = await payload(await taskRequest(`/v1/tasks?${query.toString()}`));
+      expect(secondPage.items).toHaveLength(1);
+      expect(secondPage.nextCursor).toBeNull();
+      expect(
+        new Set([...firstPage.items, ...secondPage.items].map(({ id }: { id: string }) => id)),
+      ).toEqual(new Set([first.id, second.id]));
+    });
+
+    it("tasks preserve safe placement and explicit optional-field updates", async () => {
+      const missingId = "99999999-9999-4999-8999-999999999999";
+      const list = await createTaskList("Task Placement Safety");
+      const task = await createTask("Task optional fields", {
+        dueAt: "2026-07-16T14:00:00.000Z",
+        listId: list.id,
+        scheduledAt: "2026-07-15T14:00:00.000Z",
+      });
+      const updatedResponse = await taskRequest(`/v1/tasks/${task.id}`, {
+        body: {
+          dueAt: null,
+          estimateMinutes: 30,
+          notes: "All optional material is deliberate",
+          priority: "high",
+          scheduledAt: null,
+          tags: ["review"],
+          timezone: "America/New_York",
+          why: "Protect the public update contract",
+        },
+        method: "PATCH",
+      });
+      expect(updatedResponse.status).toBe(200);
+      const updated = (await payload(updatedResponse)).task as Task;
+      expect(updated).toMatchObject({
+        dueAt: null,
+        estimateMinutes: 30,
+        notes: "All optional material is deliberate",
+        priority: "high",
+        revision: 2,
+        scheduledAt: null,
+        tags: ["review"],
+        timezone: "America/New_York",
+        why: "Protect the public update contract",
+      });
+
+      const samePreview = await payload(
+        await taskRequest(`/v1/tasks/${task.id}/move/preview`, {
+          body: { destinationListId: list.id, expectedRevision: updated.revision },
+        }),
+      );
+      const sameMove = await taskRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: list.id,
+          expectedRevision: updated.revision,
+          previewToken: samePreview.preview.previewToken,
+        },
+      });
+      expect(sameMove.status).toBe(409);
+      expect((await payload(sameMove)).error.details).toMatchObject({
+        code: "task_destination_unavailable",
+      });
+      expect(
+        (
+          await taskRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: { destinationListId: missingId, expectedRevision: updated.revision },
+          })
+        ).status,
+      ).toBe(404);
+
+      expect(
+        (
+          await taskRequest(`/v1/tasks/${missingId}/restore`, {
+            body: { expectedRevision: 1 },
+          })
+        ).status,
+      ).toBe(404);
+      const project = await createTaskProject(list.id, "Task Restore Placement Project");
+      const projectTask = await createTask("Task restored to its Project", {
+        listId: list.id,
+        projectId: project.id,
+      });
+      const trashedProjectTask = await payload(
+        await taskRequest(`/v1/tasks/${projectTask.id}/trash`, {
+          body: { expectedRevision: projectTask.revision },
+        }),
+      );
+      const restoredProjectTask = await taskRequest(`/v1/tasks/${projectTask.id}/restore`, {
+        body: { expectedRevision: trashedProjectTask.task.revision },
+      });
+      expect(restoredProjectTask.status).toBe(200);
+      expect((await payload(restoredProjectTask)).task.projectId).toBe(project.id);
+      expect(
+        (
+          await taskRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: {
+              destinationListId: list.id,
+              destinationProjectId: missingId,
+              expectedRevision: updated.revision,
+            },
+          })
+        ).status,
+      ).toBe(404);
+
+      expect(
+        (
+          await taskRequest("/v1/tasks", {
+            body: { listId: missingId, title: "Task cannot use a missing List" },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await taskRequest("/v1/tasks", {
+            body: {
+              listId: list.id,
+              projectId: missingId,
+              title: "Task cannot use a missing Project",
+            },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await taskRequest(`/v1/tasks/${task.id}/reopen`, {
+            body: { expectedRevision: updated.revision },
+          })
+        ).status,
+      ).toBe(409);
     });
 
     it("tasks hide archived-List contents from ordinary views but allow owned explicit List inspection", async () => {

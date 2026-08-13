@@ -782,13 +782,13 @@ if (process.argv[2] === "--fake-aws") {
   );
   const delayedDeploymentAlarmClear = runScenario(
     "delayed-deployment-alarm-clear",
-    baseState({ requiredDeploymentZeroPublishes: 3 }),
+    baseState({ requiredDeploymentZeroPublishes: 20 }),
   );
   assert(
     delayedDeploymentAlarmClear.result.status === 0 &&
       delayedDeploymentAlarmClear.state.deploymentAlarmState === "OK" &&
-      delayedDeploymentAlarmClear.heartbeatValues.filter((value) => value === 0).length >= 3,
-    "Cleanup must keep publishing zero while waiting for CloudWatch to clear suppression.",
+      delayedDeploymentAlarmClear.heartbeatValues.filter((value) => value === 0).length >= 20,
+    "Cleanup must cover delayed CloudWatch evaluation while continuing to publish zero.",
   );
   const delayedPrimary = runScenario(
     "delayed-primary-completion",

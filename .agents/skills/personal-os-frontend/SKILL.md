@@ -97,6 +97,13 @@ performance work.
   feature, apply them to a whole page, or use them as status. Today stays
   neutral, Reminders stays inside Tasks, and ordinary actions, records, views,
   and providers use unframed functional icons.
+- Treat Today, Calendar, Tasks, Mail, and Finances as the complete workspace
+  set. The navigation-owner manifest, rather than a leaf route, determines the
+  active workspace sidebar: Today owns Goals, Motives, and Activity; Tasks owns
+  Reminders. Account configuration belongs to the account utility, a tenant of
+  the shell: it uses the shared frame, sidebar column, and app bar, but must not
+  become a workspace, take a workspace identity, or enter the switcher. Only a
+  standalone flow such as setup may replace the shell.
 - Combine only attributes that answer the same user question into one compact
   trigger and detail surface. Keep a neighbouring control when it represents a
   distinct action—for example, weather icon + temperature combine, while the

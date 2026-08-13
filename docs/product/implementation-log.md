@@ -72,7 +72,7 @@ This log records delivered vertical slices against the master plan. It does not 
 - Exposed the plan through `get_ilo_setup` so a connected agent can inspect Ilo,
   ask only unresolved questions, save a draft, preserve signed-in approval
   boundaries, and re-read the plan after every state change.
-- Reduced Agent access to the unavoidable connection handoff plus supervised
+- Split agent controls into Connected agents and Workspace access, with the unavoidable connection handoff plus supervised
   agent-owned setup. Skill installation and copied procedural prompts are now
   optional protocol details rather than required user work.
 - Published the optional compatibility reference as v0.2.0 on Ilo's immutable
@@ -113,7 +113,7 @@ This log records delivered vertical slices against the master plan. It does not 
 - Stale claims, timeouts, credential-persistence failures, and provider-success/local-commit
   failures enter exact thread reconciliation before any replay. Rate limits back off; rejected or
   exhausted work fails closed and creates visible account attention.
-- Mail setup and Agent access now expose pending, in-progress, reconciliation, failed, oldest-due,
+- Mail setup and Workspace access now expose pending, in-progress, reconciliation, failed, oldest-due,
   and last-completed automation state without credentials or message bodies.
 
 ## 2026-07-28 — Finance agent-guided setup and safe review workflows
@@ -218,7 +218,7 @@ This log records delivered vertical slices against the master plan. It does not 
 - Added matching API-client and MCP verbs plus the installable `ilo-setup` skill. Its short adaptive
   interview saves drafts first, previews exact candidates, and requires explicit acceptance before
   automatic behavior becomes active.
-- Added a deployment-aware Agent access handoff to account setup and Settings:
+- Added a deployment-aware agent connection handoff to account setup and Settings:
   users can copy the remote MCP URL, install the guided-setup skill, choose a
   domain starter prompt, inspect Mail readiness, and manage connected hosts.
 

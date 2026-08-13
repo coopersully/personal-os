@@ -10,8 +10,8 @@ Treat QA as a contract check, not a screenshot tour.
 
 ## Start safely
 
-1. Read `AGENTS.md`, the relevant design or product specification, and the
-   nearest implementation/testing skill.
+1. Read `AGENTS.md`, `docs/engineering/qa-fixtures.md`, the relevant design or
+   product specification, and the nearest implementation/testing skill.
 2. Run:
 
    ```bash
@@ -28,9 +28,27 @@ Treat QA as a contract check, not a screenshot tour.
 - Use only a disposable local account created for the pass or an existing
   committed test fixture. Do not place credentials, personal content, provider
   payloads, or local paths in a report.
+- When a selected runbook relies on committed personas, run `pnpm fixtures:load`
+  before the pass and reload after any mutation the runbook identifies. Never
+  mutate an ordinary local account to manufacture coverage.
 - If the scenario requires a populated application, recovery, or provider-specific state that the
   repository does not create deterministically, add that coverage to automated
   tests before claiming the state was accepted. Do not invent a manual fixture.
+
+## Select the relevant runbook
+
+Load only the runbooks relevant to the affected behavior:
+
+- Shell, navigation, workspace previews, responsive app frame, and motion:
+  [references/shell-and-switching.md](references/shell-and-switching.md)
+- Authentication, setup, resume, exit, and recovery:
+  [references/setup-and-accounts.md](references/setup-and-accounts.md)
+- Today, Calendar, Tasks, Reminders, Goals, and Motives:
+  [references/planning.md](references/planning.md)
+- Unified inbox, account rails, thread reader, and mailbox states:
+  [references/mail.md](references/mail.md)
+- Overview, ledger, budgets, cash flow, accounts, and review:
+  [references/finances.md](references/finances.md)
 
 ## Use the in-app browser
 

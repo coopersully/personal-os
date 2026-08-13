@@ -16,6 +16,12 @@ This repository is the Personal OS monorepo and stores reusable contributor work
 - `pnpm env:start` runs the current source and remains attached so failures are visible.
 - Use `pnpm env:status`, `pnpm env:logs`, `pnpm env:restart`, and `pnpm env:stop` to operate it.
 - The registered local runtime uses web `8081`, API `8788`, MCP `8789`, and PostgreSQL `55433`.
+- Runtime tiers are persistent assignments, not positions in `git worktree list`. Tier 2 uses web
+  `8086`, API `8793`, MCP `8794`, and PostgreSQL `55438`; adding or removing another worktree must
+  not change an assigned checkout's ports.
+- `environment.sh activate <tier>` registers the current checkout as the active runtime in the
+  repository's shared Git directory. Personal launchers may use `active-root` to route a saved
+  primary-checkout action to that worktree without hard-coding its temporary path.
 - The primary checkout's ignored `.env` is authoritative. Setup and start synchronize it into Codex worktrees before loading configuration.
 - A linked worktree receives an ignored `.env.codex.local` containing a deterministic whole-set port shift and an isolated Compose project name.
 - Runtime PID and log files live under ignored `.codex/run/`.

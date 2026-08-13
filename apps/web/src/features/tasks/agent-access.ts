@@ -70,6 +70,14 @@ export function taskAgentAccessCapability(
 ): DomainCapability {
   if (support === "unsupported") return unsupportedCapability("Tasks");
   return {
+    allowed: [
+      "Read Tasks",
+      "Capture and update individual Tasks",
+      "Prioritize and schedule bounded work",
+    ],
+    approvalRequired: ["Approve profile guidance", "Approve any published Task-owned rule"],
+    sourceScope:
+      "Task permission applies to the Ilo Task workspace; per-list agent credentials are not available.",
     description:
       support === "executable_rules"
         ? "This deployment publishes Task preferences, bounded actions, and Task-owned executable rules."
@@ -79,5 +87,6 @@ export function taskAgentAccessCapability(
       support === "executable_rules"
         ? "Task preferences, actions, and rules"
         : "Task preferences and bounded actions",
+    unavailable: ["Bulk destructive changes", "Treating a scheduled time as a deadline"],
   };
 }

@@ -50,6 +50,7 @@ const allScopes = new Set<AccessScope>([
   "tasks:read",
   "tasks:write",
 ]);
+const inactiveNewTokenScopes = new Set<AccessScope>(["automations:write"]);
 
 type AccountActionPurpose = "email_verification" | "password_reset";
 
@@ -248,6 +249,12 @@ export function createAuthService(options: AuthServiceOptions) {
       userId: string,
       input: CreateAccessTokenInput,
     ): Promise<CreatedAccessToken> {
+      if (input.scopes.some((scope) => inactiveNewTokenScopes.has(scope))) {
+        throw new AppError(
+          "invalid_request",
+          "Legacy automation write access is inactive and cannot be added to new tokens.",
+        );
+      }
       const token = generateToken("pos");
       const record = requireDatabaseRecord(
         (

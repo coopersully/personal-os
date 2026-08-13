@@ -43,10 +43,10 @@ Discovery follows these rules:
    annotations improve agent behavior but never grant authority.
 
 The workflow stages are `context`, `inspect`, `prepare`, `commit`, `verify`, and `recover`.
-Preview tools are read-only `prepare` operations. Direct changes use `approve_each`; installed
-routines use `approved_rule`; normal reads use `read_only`. `get_ilo_context` returns the tools
+Preview tools are read-only `prepare` operations. Direct changes use `approve_each`; domain-owned
+rules use `approved_rule`; normal reads use `read_only`. `get_ilo_context` returns the tools
 actually available on that connection together with the safe workflow and links back to Today,
-activity, Agent access, approvals, and recovery.
+activity, Reviews, Workspace access, approvals, and recovery.
 
 Every tool result keeps its feature payload under `result` (or its structured `error`/empty `ok`)
 and adds `_ilo` with the domain, stage, policy, read-only state, and first-party links. Text content
@@ -148,7 +148,7 @@ Mail is the first executable implementation:
   Trash rules, including one-day preferences, create durable work for matching observed and future
   synchronized conversations. Permanent deletion remains unavailable.
 - saved rules are re-reviewed with `review_mail_rule`, then activated only by the signed-in person
-  in **Settings → Agent access → Review Mail rules**. The API rechecks the reviewed version,
+  in **Settings → Workspace access → Mail**. The API rechecks the reviewed version,
   candidate facts, action due states, and fingerprint inside one locked transaction, rejects
   preview drift, and atomically records
   `approved_rule` plus enabled state. Acceptance must state that the candidates are a bounded recent
@@ -301,7 +301,7 @@ do not replay the request, not that Ilo can reconcile a missing audit record.
 
 ## Authorization
 
-Open **Settings → Agent access** for the current deployment's MCP URL. A new
+Open **Settings → Connected agents** for the current deployment's MCP URL. A new
 account can go directly there from the Ready step. The person completes that
 one unavoidable connection handoff; after authentication, the host calls
 `get_ilo_setup` and Ilo supplies the current domain context and next work. A
@@ -336,7 +336,7 @@ Grant only the scopes the host needs:
 - `mail:read`, `mail:write`
 - `tasks:read`, `tasks:write`
 - `goals:read`, `goals:write`
-- `automations:read`, `automations:write`
+- `automations:read` (compatibility scope for the daily brief; no routine lifecycle)
 - `bookmarks:read`
 - `audit:read`
 - `finances:read`, `finances:write`

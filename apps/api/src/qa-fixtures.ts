@@ -1,7 +1,6 @@
 import {
+  attentionItems,
   auditEvents,
-  automationRoutines,
-  automationRuns,
   calendarAccounts,
   calendarEvents,
   calendars,
@@ -159,9 +158,8 @@ export const qaFixtureAccounts = [
 ] as const satisfies readonly QaFixtureAccount[];
 
 type FixtureData = {
+  attentionItems: Array<typeof attentionItems.$inferInsert>;
   auditEvents: Array<typeof auditEvents.$inferInsert>;
-  automationRoutines: Array<typeof automationRoutines.$inferInsert>;
-  automationRuns: Array<typeof automationRuns.$inferInsert>;
   calendarAccounts: Array<typeof calendarAccounts.$inferInsert>;
   calendarEvents: Array<typeof calendarEvents.$inferInsert>;
   calendars: Array<typeof calendars.$inferInsert>;
@@ -194,9 +192,8 @@ type FixtureData = {
 
 function emptyFixtureData(): FixtureData {
   return {
+    attentionItems: [],
     auditEvents: [],
-    automationRoutines: [],
-    automationRuns: [],
     calendarAccounts: [],
     calendarEvents: [],
     calendars: [],
@@ -688,29 +685,6 @@ function addLoadedWorkspace(
       userId: account.id,
     },
   );
-  const routineId = fixtureId(account, 220);
-  data.automationRoutines.push({
-    createdAt: ago(24 * 14),
-    enabled: true,
-    id: routineId,
-    lastRunAt: at(today, 8 * 60),
-    schedule: "Weekdays at 8:00 AM",
-    template: "morning_brief",
-    timezone,
-    title: "Morning brief",
-    updatedAt: now,
-    userId: account.id,
-  });
-  data.automationRuns.push({
-    completedAt: at(today, 8 * 60 + 1),
-    id: fixtureId(account, 221),
-    routineId,
-    startedAt: at(today, 8 * 60),
-    status: "completed",
-    summary: "3 calendar commitments, 2 priority tasks, and 1 overdue reminder.",
-    userId: account.id,
-  });
-
   data.mailboxes.push(
     {
       accountId: connectedAccountId,
@@ -939,6 +913,53 @@ function addLoadedWorkspace(
     updatedAt: now,
     userId: account.id,
   });
+  data.mailRules.push({
+    actions: [{ afterDays: 0, mailboxId: null, type: "mark_read" }],
+    condition: {
+      field: "sender",
+      operator: "contains",
+      value: "news",
+    },
+    createdAt: ago(12),
+    description: "A safe review fixture for the Agent Access action queue.",
+    enabled: false,
+    id: fixtureId(account, 334),
+    name: "Fixture newsletters",
+    policy: "preview",
+    profileId: mailProfileId,
+    sourceAccountIds: [connectedAccountId],
+    updatedAt: ago(1),
+    userId: account.id,
+  });
+
+  const attentionDomains = ["mail", "calendar", "tasks", "finances"] as const;
+  const attentionLabels = {
+    calendar: "Calendar",
+    finances: "Finances",
+    mail: "Mail",
+    tasks: "Tasks",
+  } as const;
+  const attentionImportance = ["critical", "high", "normal", "low"] as const;
+  for (let index = 0; index < 8; index += 1) {
+    const domain = attentionDomains[
+      index % attentionDomains.length
+    ] as (typeof attentionDomains)[number];
+    data.attentionItems.push({
+      createdAt: ago(20 - index),
+      domain,
+      id: fixtureId(account, 520 + index),
+      importance: attentionImportance[
+        index % attentionImportance.length
+      ] as (typeof attentionImportance)[number],
+      kind: index % 2 === 0 ? "important" : "follow_up",
+      occursAt: ago(8 - index),
+      status: "open",
+      summary: `Resolve deterministic ${domain} fixture work before the agent continues.`,
+      title: `${attentionLabels[domain]} fixture attention ${index + 1}`,
+      updatedAt: ago(8 - index),
+      userId: account.id,
+    });
+  }
 
   data.financeAccounts.push(
     {
@@ -1421,19 +1442,6 @@ function addLoadedWorkspace(
       requestId: `fixture-${account.key}-finance`,
       userId: account.id,
     },
-    {
-      action: "automation.completed",
-      actorId: routineId,
-      actorType: "system",
-      after: { summary: "Morning brief generated" },
-      before: null,
-      createdAt: at(today, 8 * 60 + 1),
-      entityId: routineId,
-      entityType: "automation_routine",
-      id: fixtureId(account, 502),
-      requestId: `fixture-${account.key}-automation`,
-      userId: account.id,
-    },
   );
 }
 
@@ -1471,6 +1479,8 @@ export async function loadQaFixtures(
     const fixtureScope = or(inArray(users.email, emails), inArray(users.id, ids));
     if (fixtureScope) await transaction.delete(users).where(fixtureScope);
     await transaction.insert(users).values(data.users);
+    if (data.attentionItems.length)
+      await transaction.insert(attentionItems).values(data.attentionItems);
     await transaction.insert(calendarAccounts).values(data.calendarAccounts);
     await transaction.insert(calendars).values(data.calendars);
     if (data.calendarEvents.length)
@@ -1478,10 +1488,6 @@ export async function loadQaFixtures(
     if (data.reminders.length) await transaction.insert(reminders).values(data.reminders);
     if (data.goals.length) await transaction.insert(goals).values(data.goals);
     if (data.motives.length) await transaction.insert(motives).values(data.motives);
-    if (data.automationRoutines.length)
-      await transaction.insert(automationRoutines).values(data.automationRoutines);
-    if (data.automationRuns.length)
-      await transaction.insert(automationRuns).values(data.automationRuns);
     if (data.mailboxes.length) await transaction.insert(mailboxes).values(data.mailboxes);
     if (data.mailThreads.length) await transaction.insert(mailThreads).values(data.mailThreads);
     if (data.mailMessages.length) await transaction.insert(mailMessages).values(data.mailMessages);

@@ -3,14 +3,14 @@ import {
   actorTypeSchema,
   addLocalDays,
   addMonths,
+  agentAccessWorkItemPageSchema,
+  agentAccessWorkItemQuerySchema,
   agentConnectionGuideSchema,
   agentMutationPolicies,
   apiErrorSchema,
   applyFinanceCategorizationsInputSchema,
   assistantSetupPlanQuerySchema,
   assistantSetupPlanSchema,
-  automationRoutineSchema,
-  automationRunSchema,
   bulkUpdateMailInputSchema,
   calendarCommitmentCandidateSchema,
   calendarEventSchema,
@@ -23,7 +23,6 @@ import {
   connectorCapabilities,
   createAccessTokenInputSchema,
   createAttentionItemInputSchema,
-  createAutomationRoutineInputSchema,
   createEventBlockInputSchema,
   createEventInputSchema,
   createGoalInputSchema,
@@ -79,7 +78,6 @@ import {
   taskStatusSchema,
   timeZoneSchema,
   updateAccountSetupInputSchema,
-  updateAutomationRoutineInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
   updateFinanceTransactionInputSchema,
@@ -108,6 +106,109 @@ const start = "2026-07-13T13:00:00.000Z";
 const end = "2026-07-13T14:00:00.000Z";
 
 describe("domain schemas", () => {
+  it("validates paginated Agent Access work items and local actions", () => {
+    const page = agentAccessWorkItemPageSchema.parse({
+      filteredTotal: 1,
+      items: [
+        {
+          action: {
+            label: "Review Mail rule",
+            to: `/settings?section=workspace-access&reviewRule=${id}`,
+          },
+          actionAt: start,
+          domain: "mail",
+          id: `mail-rule:${id}`,
+          kind: "review",
+          priority: "person_review",
+          source: {
+            accountId,
+            provider: "google",
+            remoteId: id,
+            revision: start,
+            sourceType: "mail_thread",
+          },
+          summary: "Review the current bounded sample before activation.",
+          title: "Review Statements",
+          updatedAt: start,
+        },
+      ],
+      nextCursor: "opaque-next",
+      snapshotAt: start,
+      summary: {
+        byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
+        byKind: { attention: 0, review: 1 },
+        total: 1,
+      },
+      unavailableDomains: [],
+    });
+
+    expect(page.summary).toMatchObject({ total: 1 });
+    expect(agentAccessWorkItemQuerySchema.parse({})).toEqual({ limit: 10 });
+    expect(
+      agentAccessWorkItemQuerySchema.parse({ cursor: "opaque-next", kind: "review", limit: "10" }),
+    ).toEqual({ cursor: "opaque-next", kind: "review", limit: 10 });
+  });
+
+  it("rejects invalid Agent Access pages and queries", () => {
+    expect(agentAccessWorkItemQuerySchema.safeParse({ limit: 11 }).success).toBe(false);
+    expect(agentAccessWorkItemQuerySchema.safeParse({ kind: "diagnostic" }).success).toBe(false);
+    expect(agentAccessWorkItemQuerySchema.safeParse({ cursor: "" }).success).toBe(false);
+    expect(
+      agentAccessWorkItemPageSchema.safeParse({
+        filteredTotal: 1,
+        items: [
+          {
+            action: { label: "Unsafe route", to: "/\\\\untrusted.example" },
+            actionAt: null,
+            domain: "mail",
+            id: "unsafe-route",
+            kind: "review",
+            priority: "person_review",
+            source: null,
+            summary: "This must not be accepted as an in-app route.",
+            title: "Unsafe route",
+            updatedAt: start,
+          },
+        ],
+        nextCursor: null,
+        snapshotAt: start,
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
+          byKind: { attention: 0, review: 1 },
+          total: 1,
+        },
+        unavailableDomains: [],
+      }).success,
+    ).toBe(false);
+    expect(
+      agentAccessWorkItemPageSchema.safeParse({
+        filteredTotal: 1,
+        items: [
+          {
+            action: { label: "Leave Ilo", to: "https://example.com" },
+            actionAt: null,
+            domain: "mail",
+            id: "bad-action",
+            kind: "attention",
+            priority: "normal",
+            source: null,
+            summary: "This action is not local.",
+            title: "External action",
+            updatedAt: start,
+          },
+        ],
+        nextCursor: null,
+        snapshotAt: start,
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 1, tasks: 0 },
+          byKind: { attention: 1, review: 0 },
+          total: 1,
+        },
+        unavailableDomains: [],
+      }).success,
+    ).toBe(false);
+  });
+
   it("exposes stable cross-feature connector and agent-action contracts", () => {
     expect(featureIds).toEqual([
       "automations",
@@ -705,9 +806,6 @@ describe("domain schemas", () => {
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
         .scopes,
     ).toEqual(["audit:read"]);
-    expect(
-      createAutomationRoutineInputSchema.parse({ template: "morning_brief", timezone: "UTC" }),
-    ).toMatchObject({ schedule: "Weekdays at 8:00 AM" });
     const brief = dailyBriefSchema.parse({
       allDay: [],
       anytime: [],
@@ -731,30 +829,7 @@ describe("domain schemas", () => {
       today: [],
       tomorrow: [],
     });
-    expect(
-      automationRoutineSchema.parse({
-        createdAt: start,
-        enabled: true,
-        id,
-        lastRunAt: null,
-        schedule: "Daily",
-        template: "morning_brief",
-        timezone: "UTC",
-        title: "Morning brief",
-        updatedAt: start,
-      }).title,
-    ).toBe("Morning brief");
-    expect(
-      automationRunSchema.parse({
-        brief,
-        completedAt: start,
-        id: accountId,
-        routineId: id,
-        startedAt: start,
-        status: "completed",
-        summary: "Done",
-      }).brief,
-    ).toEqual(brief);
+    expect(brief.timeZone).toBe("UTC");
 
     expect(reminderPrioritySchema.parse("high")).toBe("high");
     expect(createReminderInputSchema.parse({ title: " Test " })).toEqual({
@@ -973,10 +1048,6 @@ describe("domain schemas", () => {
         defaultTimezone: "Eastern",
       }).success,
     ).toBe(false);
-    expect(updateAutomationRoutineInputSchema.safeParse({}).success).toBe(false);
-    expect(
-      updateAutomationRoutineInputSchema.parse({ enabled: false, schedule: "Daily at 8:00 PM" }),
-    ).toEqual({ enabled: false, schedule: "Daily at 8:00 PM" });
     expect(createGoalInputSchema.parse({ title: "Protect focus" })).toMatchObject({
       progress: 0,
       description: null,
@@ -1086,6 +1157,10 @@ describe("domain schemas", () => {
       }),
     ).toMatchObject({ accountIds: [accountId], limit: 25, unread: true });
     expect(mailListQuerySchema.parse({ unread: "false" }).unread).toBe(false);
+    expect(mailListQuerySchema.parse({ snoozed: "true", starred: "true" })).toMatchObject({
+      snoozed: true,
+      starred: true,
+    });
     expect(
       connectICloudInputSchema.parse({
         appSpecificPassword: "xxxx-xxxx",

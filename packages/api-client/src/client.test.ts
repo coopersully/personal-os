@@ -1,6 +1,4 @@
 import type {
-  AutomationRoutine,
-  AutomationRun,
   Calendar,
   CalendarCommitmentProposal,
   CalendarEvent,
@@ -224,17 +222,6 @@ const attentionItem = {
   updatedAt: now,
   version: 1,
 };
-const automation: AutomationRoutine = {
-  id,
-  template: "morning_brief",
-  title: "Morning brief",
-  schedule: "Weekdays at 8:00 AM",
-  timezone: "UTC",
-  enabled: true,
-  lastRunAt: null,
-  createdAt: now,
-  updatedAt: now,
-};
 const brief: DailyBrief = {
   allDay: [],
   anytime: [reminder],
@@ -258,15 +245,6 @@ const brief: DailyBrief = {
   completedTasks: [],
   today: [],
   tomorrow: [],
-};
-const automationRun: AutomationRun = {
-  id: accountId,
-  routineId: id,
-  status: "completed",
-  summary: "Morning brief completed.",
-  brief,
-  startedAt: now,
-  completedAt: now,
 };
 const financeAccount: FinanceAccount = {
   balance: 1200,
@@ -489,13 +467,6 @@ function apiFetch() {
     if (url.pathname === "/v1/motives") return json({ motives: [motive] });
     if (url.pathname === `/v1/goals/${id}`) return json({ goal });
     if (url.pathname === `/v1/motives/${id}`) return json({ motive });
-    if (url.pathname === "/v1/automations" && method === "POST")
-      return json({ routine: automation }, 201);
-    if (url.pathname === `/v1/automations/${id}` && method === "PATCH")
-      return json({ routine: automation });
-    if (url.pathname === "/v1/automations") return json({ routines: [automation] });
-    if (url.pathname === "/v1/automations/runs") return json({ runs: [automationRun] });
-    if (url.pathname.endsWith("/runs")) return json({ run: automationRun }, 201);
     if (url.pathname === "/v1/connectors/google/start")
       return json({ url: "https://accounts.google.com/o/oauth2/v2/auth" });
     if (url.pathname === `/v1/connectors/authorization-attempts/${id}`)
@@ -832,6 +803,22 @@ function apiFetch() {
           steps: [],
         },
       });
+    if (url.pathname === "/v1/assistant/work-items") {
+      expect(url.searchParams.get("cursor")).toBe("opaque-next");
+      expect(url.searchParams.get("kind")).toBe("review");
+      return json({
+        filteredTotal: 0,
+        items: [],
+        nextCursor: null,
+        snapshotAt: now,
+        summary: {
+          byDomain: { calendar: 0, finances: 0, mail: 0, tasks: 0 },
+          byKind: { attention: 0, review: 0 },
+          total: 0,
+        },
+        unavailableDomains: [],
+      });
+    }
     if (url.pathname === "/v1/assistant/context")
       return json({
         context: {
@@ -1073,6 +1060,8 @@ describe("ilo API client", () => {
       headers: { "x-ilo-client": "web" },
       token: "pos_token",
     });
+    expect(api).not.toHaveProperty("listAutomations");
+    expect(api).not.toHaveProperty("runAutomation");
     await expect(api.getMe()).resolves.toEqual(user);
     await expect(api.listGoals()).resolves.toEqual([goal]);
     await expect(
@@ -1373,13 +1362,6 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual({ imported: 2, skipped: 1 });
     await api.deleteFinanceAccount(id);
-    await expect(api.listAutomations()).resolves.toEqual([automation]);
-    await expect(
-      api.createAutomation({ ...automation, schedule: automation.schedule }),
-    ).resolves.toEqual(automation);
-    await expect(api.updateAutomation(id, { enabled: false })).resolves.toEqual(automation);
-    await expect(api.listAutomationRuns(id)).resolves.toEqual([automationRun]);
-    await expect(api.runAutomation(id, true)).resolves.toEqual(automationRun);
     await expect(api.listConnectors()).resolves.toEqual([
       expect.objectContaining({
         health: {
@@ -1441,6 +1423,9 @@ describe("ilo API client", () => {
       mcpUrl: "https://mcp.example.com/mcp",
       skill: { name: "ilo-setup" },
     });
+    await expect(
+      api.listAgentAccessWorkItems({ cursor: "opaque-next", kind: "review", limit: 10 }),
+    ).resolves.toMatchObject({ items: [], nextCursor: null, summary: { total: 0 } });
     await expect(api.getDomainProfile("mail")).resolves.toEqual(domainProfile);
     await expect(
       api.upsertDomainProfile({

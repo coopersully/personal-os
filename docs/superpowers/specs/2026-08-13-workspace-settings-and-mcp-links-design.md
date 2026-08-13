@@ -2,8 +2,7 @@
 
 ## Status
 
-Design approved in conversation. This written specification awaits end-user
-review before implementation planning.
+Design approved in conversation and implemented for pull-request review.
 
 - Owners: account utility, assistant integration, Mail, Finances, Calendar,
   Tasks, MCP transport, and production deployment.

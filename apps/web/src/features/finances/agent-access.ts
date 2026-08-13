@@ -1,6 +1,5 @@
-import type { AttentionItem, FinanceGuidedSetupContext } from "@personal-os/domain";
+import type { FinanceGuidedSetupContext } from "@personal-os/domain";
 import {
-  attentionReadiness,
   type ConnectedHostAuthority,
   type DomainCapability,
   type DomainReadinessItem,
@@ -15,12 +14,10 @@ import {
 } from "../agent-access/readiness.js";
 
 export function financeAgentAccessReadiness({
-  attention,
   hosts,
   profile,
   setup,
 }: {
-  attention: Loadable<AttentionItem[]>;
   hosts: Loadable<ConnectedHostAuthority[]>;
   profile: Loadable<DomainSetupStatus | undefined>;
   setup: Loadable<FinanceGuidedSetupContext>;
@@ -36,13 +33,12 @@ export function financeAgentAccessReadiness({
     const unavailable = setup.state === "unavailable";
     return [
       unavailable
-        ? unavailableReadiness("Finance material", "Finance sources are unavailable.")
-        : loadingReadiness("Finance material", "Finance sources are loading."),
+        ? unavailableReadiness("Accounts", "Finance sources are unavailable.")
+        : loadingReadiness("Accounts", "Finance sources are loading."),
       profileReadiness("Finances", profile),
       unavailable
-        ? unavailableReadiness("Finance workflow", "Finance workflow readiness is unavailable.")
-        : loadingReadiness("Finance workflow", "Finance workflows are loading."),
-      attentionReadiness("Finances", attention),
+        ? unavailableReadiness("Workflow", "Finance workflow status is unavailable.")
+        : loadingReadiness("Workflow", "Finance workflows are loading."),
       access,
     ];
   }
@@ -61,18 +57,20 @@ export function financeAgentAccessReadiness({
         : {}),
       complete: accountCount > 0,
       description: `${accountCount} Finance account${accountCount === 1 ? "" : "s"}${staleAccounts > 0 ? ` · ${staleAccounts} stale` : ""}`,
-      title: "Finance material",
+      title: "Accounts",
     },
     profileReadiness("Finances", profile),
     {
       complete: availableWorkflows > 0,
-      description: `${availableWorkflows} guidance or review workflow${availableWorkflows === 1 ? "" : "s"} available · ${setup.data.reviewSummary.count} item${setup.data.reviewSummary.count === 1 ? "" : "s"} ${setup.data.reviewSummary.count === 1 ? "needs" : "need"} signed-in review.`,
+      description:
+        availableWorkflows > 0
+          ? `${availableWorkflows} guidance or review ${availableWorkflows === 1 ? "workflow" : "workflows"} ready`
+          : "No guidance or review workflow is set up",
       ...(availableWorkflows === 0
         ? { nextStep: "Set up a Finance guidance or review workflow" }
         : {}),
-      title: "Finance workflow",
+      title: "Workflow",
     },
-    attentionReadiness("Finances", attention),
     access,
   ];
 }

@@ -62,13 +62,10 @@ export function profileReadiness(
   profile: Loadable<DomainSetupStatus | undefined>,
 ): DomainReadinessItem {
   if (profile.state === "loading") {
-    return loadingReadiness(`${label} preferences`, `${label} preferences are loading.`);
+    return loadingReadiness("Preferences", `${label} preferences are loading.`);
   }
   if (profile.state === "unavailable") {
-    return unavailableReadiness(
-      `${label} preferences`,
-      `${label} preferences are unavailable until setup status can be loaded.`,
-    );
+    return unavailableReadiness("Preferences", `${label} preferences are unavailable.`);
   }
   if (profile.data?.approvedProfileStatus === "active") {
     return {
@@ -76,14 +73,14 @@ export function profileReadiness(
       description: profile.data.pendingDraftVersion
         ? `Approved guidance v${profile.data.approvedProfileVersion} is active; draft v${profile.data.pendingDraftVersion} awaits signed-in review.`
         : `Approved guidance v${profile.data.approvedProfileVersion} is active.`,
-      title: `${label} preferences`,
+      title: "Preferences",
     };
   }
   if (profile.data?.profileStatus === "active") {
     return {
       complete: true,
       description: `Profile v${profile.data.profileVersion} is active.`,
-      title: `${label} preferences`,
+      title: "Preferences",
     };
   }
   if (profile.data?.profileStatus === "draft") {
@@ -91,14 +88,14 @@ export function profileReadiness(
       complete: false,
       description: `Draft profile v${profile.data.profileVersion} is waiting for review.`,
       nextStep: `Review the draft ${label} profile`,
-      title: `${label} preferences`,
+      title: "Preferences",
     };
   }
   return {
     complete: false,
     description: `Run the guided interview to teach Ilo your ${label} preferences.`,
     nextStep: `Teach Ilo your ${label} preferences`,
-    title: `${label} preferences`,
+    title: "Preferences",
   };
 }
 
@@ -139,32 +136,29 @@ export function hostPermissionReadiness({
   writeScope: AccessScope;
 }): DomainReadinessItem {
   if (hosts.state === "loading") {
-    return loadingReadiness(`${label} agent access`, "Connected-host permissions are loading.");
+    return loadingReadiness("Agent access", "Connected agent permissions are loading.");
   }
   if (hosts.state === "unavailable") {
-    return unavailableReadiness(
-      `${label} agent access`,
-      "Connected-host permissions are unavailable, so Ilo cannot claim agent access.",
-    );
+    return unavailableReadiness("Agent access", "Connected agent permissions are unavailable.");
   }
   const readers = hosts.data.filter((host) => host.scopes.includes(readScope));
   const writers = hosts.data.filter((host) => host.scopes.includes(writeScope));
   if (readers.length === 0) {
     return {
       complete: false,
-      description: `No connected host has ${label} read permission.`,
+      description: `No connected agent can read ${label}.`,
       nextStep: `Connect an agent with ${label} read access`,
-      title: `${label} agent access`,
+      title: "Agent access",
     };
   }
   return {
     complete: writers.length > 0,
     description:
       writers.length > 0
-        ? `${readers.length} connected host${readers.length === 1 ? "" : "s"} can read ${label}; ${writers.length} can ${writeCapability}.`
-        : `${readers.length} connected host${readers.length === 1 ? "" : "s"} can read ${label}; none has ${label} write permission.`,
+        ? `${readers.length} ${readers.length === 1 ? "agent" : "agents"} can read ${label} · ${writers.length} can ${writeCapability}`
+        : `${readers.length} ${readers.length === 1 ? "agent can" : "agents can"} read ${label} but cannot make changes`,
     ...(writers.length === 0 ? { nextStep: `Give a connected agent ${label} write access` } : {}),
-    title: `${label} agent access`,
+    title: "Agent access",
   };
 }
 

@@ -208,9 +208,11 @@ material-item judgment is completed where the material is understood.
 
 ### 5. Checks and diagnostics
 
-Detailed readiness evidence is available behind **View checks** or an
-equivalent disclosure. It supports diagnosis and may link to the exact
-configuration or source action. It is not the primary task list.
+Detailed readiness evidence is available behind **Review checks**. Unresolved
+checks appear first with full evidence and actions; completed checks stay
+collapsed as compact one-line history. The disclosure supports diagnosis and
+may link to the exact configuration or source action. It is not the primary
+task list.
 
 Checks distinguish healthy, action required, agent in progress, unavailable,
 and not applicable. A status without an action must not imply that the person

@@ -44,9 +44,9 @@ describe("ReadinessPanel", () => {
     const user = userEvent.setup();
     const { container } = renderPanel();
 
-    expect(screen.getByText("Needs attention")).toBeInTheDocument();
-    expect(screen.getByText("1 of 2 checks ready")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "1 of 2 checks ready" })).toHaveAttribute(
+    expect(screen.getByText("1 to finish")).toBeInTheDocument();
+    expect(screen.getByText("1 of 2 complete")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "1 of 2 checks complete" })).toHaveAttribute(
       "aria-valuenow",
       "50",
     );
@@ -56,16 +56,39 @@ describe("ReadinessPanel", () => {
     expect(container.querySelectorAll('[data-slot="item"]')).toHaveLength(1);
     expect(screen.queryByRole("list", { name: "Mail readiness checks" })).not.toBeInTheDocument();
 
-    const viewChecks = screen.getByRole("button", { name: "View checks" });
+    const viewChecks = screen.getByRole("button", { name: "Review checks" });
     viewChecks.focus();
     await user.keyboard("{Enter}");
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
-    expect(screen.getByRole("list", { name: "Mail readiness checks" })).toBeInTheDocument();
+    expect(screen.getByText("1 check needs attention. 1 completed.")).toBeInTheDocument();
+    const unresolved = screen.getByRole("list", {
+      name: "Mail readiness checks: not ready",
+    });
+    expect(unresolved).toBeInTheDocument();
+    expect(unresolved.querySelector('[data-slot="item"]')).toHaveAttribute(
+      "data-variant",
+      "outline",
+    );
     expect(screen.getByRole("button", { name: "Resolve preference" })).toBeInTheDocument();
+    expect(screen.queryByText("Material")).not.toBeInTheDocument();
+    expect(screen.queryByText("A source is connected.")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show 1 completed check" }));
+    const completed = screen.getByRole("list", {
+      name: "Mail readiness checks: completed",
+    });
+    expect(completed).toBeInTheDocument();
+    expect(completed.querySelector('[data-slot="item"]')).toHaveAttribute("data-variant", "muted");
+    expect(screen.getByText("Material")).toBeInTheDocument();
+    expect(screen.getByText("A source is connected.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide 1 completed check" })).toBeInTheDocument();
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(viewChecks).toHaveFocus();
+    await user.click(viewChecks);
+    expect(screen.getByRole("button", { name: "Show 1 completed check" })).toBeInTheDocument();
+    expect(screen.queryByText("Material")).not.toBeInTheDocument();
   });
 
   it("does not imply progress while checking or unavailable", () => {
@@ -91,7 +114,8 @@ describe("ReadinessPanel", () => {
     const completeChecks = checks.map((check) => ({ ...check, action: undefined, complete: true }));
     const { rerender } = renderPanel({ checks: completeChecks });
     expect(screen.getByText("Ready")).toBeInTheDocument();
-    expect(screen.getByRole("progressbar", { name: "2 of 2 checks ready" })).toHaveAttribute(
+    expect(screen.getByText("2 of 2 complete")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: "2 of 2 checks complete" })).toHaveAttribute(
       "aria-valuenow",
       "100",
     );

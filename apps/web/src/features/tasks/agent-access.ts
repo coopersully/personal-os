@@ -1,6 +1,5 @@
-import type { AttentionItem, Task } from "@personal-os/domain";
+import type { Task } from "@personal-os/domain";
 import {
-  attentionReadiness,
   type ConnectedHostAuthority,
   type DomainCapability,
   type DomainReadinessItem,
@@ -17,12 +16,10 @@ import {
 type TaskPage = { items: Task[]; nextCursor: string | null };
 
 export function taskAgentAccessReadiness({
-  attention,
   hosts,
   profile,
   tasks,
 }: {
-  attention: Loadable<AttentionItem[]>;
   hosts: Loadable<ConnectedHostAuthority[]>;
   profile: Loadable<DomainSetupStatus | undefined>;
   tasks: Loadable<TaskPage>;
@@ -36,9 +33,9 @@ export function taskAgentAccessReadiness({
   });
   const material =
     tasks.state === "loading"
-      ? loadingReadiness("Task material", "Task material is loading.")
+      ? loadingReadiness("Tasks", "Tasks are loading.")
       : tasks.state === "unavailable"
-        ? unavailableReadiness("Task material", "Task material is unavailable.")
+        ? unavailableReadiness("Tasks", "Tasks are unavailable.")
         : {
             ...(tasks.data.items.length === 0
               ? { action: { label: "Open Tasks", to: "/tasks" } }
@@ -48,7 +45,7 @@ export function taskAgentAccessReadiness({
               tasks.data.items.length > 0
                 ? `${tasks.data.items.length}${tasks.data.nextCursor ? "+" : ""} open Task${tasks.data.items.length === 1 ? "" : "s"} in Ilo.`
                 : "No open Tasks. Local capture is available whenever you need it.",
-            title: "Task material",
+            title: "Tasks",
           };
   return [
     material,
@@ -57,9 +54,8 @@ export function taskAgentAccessReadiness({
       complete: true,
       description:
         "Ilo supports capture, prioritization, scheduling, and bounded single-item Task actions.",
-      title: "Task workflow",
+      title: "Task actions",
     },
-    attentionReadiness("Tasks", attention),
     access,
   ];
 }

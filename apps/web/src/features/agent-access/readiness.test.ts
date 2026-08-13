@@ -107,18 +107,18 @@ describe("agent access readiness adapters", () => {
     expect(hostPermissionReadiness({ ...hostInput, hosts: loading }).description).toContain(
       "loading",
     );
-    expect(hostPermissionReadiness({ ...hostInput, hosts: unavailable }).description).toContain(
-      "cannot claim",
+    expect(hostPermissionReadiness({ ...hostInput, hosts: unavailable }).description).toBe(
+      "Connected agent permissions are unavailable.",
     );
-    expect(hostPermissionReadiness({ ...hostInput, hosts: ready([]) }).description).toContain(
-      "No connected host",
+    expect(hostPermissionReadiness({ ...hostInput, hosts: ready([]) }).description).toBe(
+      "No connected agent can read Mail.",
     );
     expect(
       hostPermissionReadiness({
         ...hostInput,
         hosts: ready([{ name: "Reader", scopes: ["mail:read"] }]),
       }).description,
-    ).toContain("none has Mail write");
+    ).toBe("1 agent can read Mail but cannot make changes");
     expect(
       hostPermissionReadiness({
         ...hostInput,
@@ -127,13 +127,13 @@ describe("agent access readiness adapters", () => {
           { name: "Reader two", scopes: ["mail:read"] },
         ]),
       }).description,
-    ).toBe("2 connected hosts can read Mail; none has Mail write permission.");
+    ).toBe("2 agents can read Mail but cannot make changes");
     expect(
       hostPermissionReadiness({
         ...hostInput,
         hosts: ready([{ name: "Writer", scopes: ["mail:read", "mail:write"] }]),
       }).description,
-    ).toBe("1 connected host can read Mail; 1 can manage Mail.");
+    ).toBe("1 agent can read Mail · 1 can manage Mail");
   });
 
   it("covers Mail source, rule, automation, and support variants", () => {
@@ -156,7 +156,7 @@ describe("agent access readiness adapters", () => {
         ...base,
         setup: ready({ accounts: [], automation: {} } as unknown as MailSetupContext),
       })[3]?.description,
-    ).toContain("cannot claim verified commitment evidence");
+    ).toBe("Calendar attachment status is unavailable.");
 
     const emptySetup = {
       accounts: [],
@@ -211,15 +211,23 @@ describe("agent access readiness adapters", () => {
       rules: ready([{ enabled: true, policy: "approved_rule" } as never]),
       setup: ready(connectedSetup),
     });
-    expect(rows[0]?.description).toContain("one@example.com, Two +1 · 1 needs reconnect");
-    expect(rows[1]?.description).toContain("1 active approved Mail rule");
-    expect(rows[2]?.description).toContain("Oldest due:");
+    expect(rows.map((row) => row.title)).not.toContain("Mail attention");
+    expect(rows[0]).toMatchObject({
+      description: "3 connected · one@example.com, Two +1 · 1 needs reconnect",
+      title: "Accounts",
+    });
+    expect(rows[1]).toMatchObject({
+      description: "Profile v1 · 1 approved rule active",
+      title: "Rules",
+    });
+    expect(rows[2]?.description).toContain(
+      "1 pending · 0 running · 0 need reconciliation · 1 stopped",
+    );
     expect(rows[3]).toMatchObject({
       complete: false,
-      title: "Mail commitment intake",
+      title: "Calendar attachments",
     });
-    expect(rows[3]?.description).toContain("2 preview-only calendar attachment candidates");
-    expect(rows[3]?.description).toContain("Automatic Calendar creation is not enabled");
+    expect(rows[3]?.description).toBe("Automatic calendar creation is off · 2 candidates waiting");
 
     expect(mailAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
     expect(mailAgentAccessCapability("profile_and_attention", "$ilo-setup").title).toContain(
@@ -253,6 +261,7 @@ describe("agent access readiness adapters", () => {
         } as Calendar,
       ]),
     });
+    expect(calendarRows.map((row) => row.title)).not.toContain("Calendar attention");
     expect(calendarRows[0]?.description).toContain("1 needs reconnect");
     expect(calendarRows[2]?.description).toContain("required");
     expect(calendarAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
@@ -276,8 +285,9 @@ describe("agent access readiness adapters", () => {
       ...shared,
       setup: ready(financeSetup),
     });
+    expect(financeRows.map((row) => row.title)).not.toContain("Finances attention");
     expect(financeRows[0]).toMatchObject({ complete: false });
-    expect(financeRows[2]?.description).toContain("1 item needs");
+    expect(financeRows[2]?.description).toBe("1 guidance or review workflow ready");
     expect(financeAgentAccessCapability("unsupported", "$ilo-setup").setupPrompt).toBeNull();
     expect(financeAgentAccessCapability("executable_rules", "$ilo-setup").title).toContain("rules");
 
@@ -310,6 +320,12 @@ describe("agent access readiness adapters", () => {
     expect(taskAgentAccessReadiness({ ...shared, tasks: unavailable })[0]?.description).toContain(
       "unavailable",
     );
+    expect(
+      taskAgentAccessReadiness({
+        ...shared,
+        tasks: ready({ items: [], nextCursor: null }),
+      }),
+    ).not.toContainEqual(expect.objectContaining({ title: "Tasks attention" }));
     expect(
       taskAgentAccessReadiness({
         ...shared,

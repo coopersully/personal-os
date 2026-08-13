@@ -1,6 +1,5 @@
-import type { AttentionItem, MailRule, MailSetupContext } from "@personal-os/domain";
+import type { MailRule, MailSetupContext } from "@personal-os/domain";
 import {
-  attentionReadiness,
   type ConnectedHostAuthority,
   type DomainCapability,
   type DomainReadinessItem,
@@ -15,13 +14,11 @@ import {
 } from "../agent-access/readiness.js";
 
 export function mailAgentAccessReadiness({
-  attention,
   hosts,
   profile,
   rules,
   setup,
 }: {
-  attention: Loadable<AttentionItem[]>;
   hosts: Loadable<ConnectedHostAuthority[]>;
   profile: Loadable<DomainSetupStatus | undefined>;
   rules: Loadable<MailRule[]>;
@@ -29,12 +26,9 @@ export function mailAgentAccessReadiness({
 }): DomainReadinessItem[] {
   const material =
     setup.state === "loading"
-      ? loadingReadiness("Mail material", "Mail sources are loading.")
+      ? loadingReadiness("Accounts", "Mail accounts are loading.")
       : setup.state === "unavailable"
-        ? unavailableReadiness(
-            "Mail material",
-            "Mail sources are unavailable until Ilo can load setup context.",
-          )
+        ? unavailableReadiness("Accounts", "Mail accounts are unavailable.")
         : {
             ...(setup.data.accounts.length === 0
               ? {
@@ -47,22 +41,22 @@ export function mailAgentAccessReadiness({
               setup.data.accounts.length > 0
                 ? mailSourceSummary(setup.data.accounts)
                 : "No Mail account is connected yet.",
-            title: "Mail material",
+            title: "Accounts",
           };
   const preferences =
     rules.state === "loading"
-      ? loadingReadiness("Mail preferences", "Mail rules are loading.")
+      ? loadingReadiness("Rules", "Mail rules are loading.")
       : rules.state === "unavailable"
         ? unavailableReadiness(
-            "Mail preferences",
+            "Rules",
             "Mail rules are unavailable, so Ilo cannot report an approved-rule count.",
           )
         : mailPreferences(profile, rules.data);
   const automation =
     setup.state === "loading"
-      ? loadingReadiness("Mail automation", "Delayed Mail automation status is loading.")
+      ? loadingReadiness("Scheduled actions", "Scheduled Mail actions are loading.")
       : setup.state === "unavailable"
-        ? unavailableReadiness("Mail automation", "Delayed Mail automation status is unavailable.")
+        ? unavailableReadiness("Scheduled actions", "Scheduled Mail actions are unavailable.")
         : {
             complete:
               setup.data.automation.reconciliationCount === 0 &&
@@ -72,27 +66,23 @@ export function mailAgentAccessReadiness({
             setup.data.automation.failedCount > 0
               ? { nextStep: "Review stopped or unreconciled Mail automation" }
               : {}),
-            title: "Mail automation",
+            title: "Scheduled actions",
           };
   const commitmentIntake =
     setup.state === "loading"
-      ? loadingReadiness("Mail commitment intake", "Mail commitment intake status is loading.")
+      ? loadingReadiness("Calendar attachments", "Calendar attachment status is loading.")
       : setup.state === "unavailable" || setup.data.commitmentIntake === undefined
-        ? unavailableReadiness(
-            "Mail commitment intake",
-            "Mail commitment intake is unavailable, so Ilo cannot claim verified commitment evidence.",
-          )
+        ? unavailableReadiness("Calendar attachments", "Calendar attachment status is unavailable.")
         : {
             complete: setup.data.commitmentIntake.automaticCreationEnabled,
             description: formatMailCommitmentIntake(setup.data.commitmentIntake),
-            title: "Mail commitment intake",
+            title: "Calendar attachments",
           };
   return [
     material,
     preferences,
     automation,
     commitmentIntake,
-    attentionReadiness("Mail", attention),
     hostPermissionReadiness({
       hosts,
       label: "Mail",
@@ -152,23 +142,28 @@ function mailPreferences(
   return profile.data?.profileStatus === "active"
     ? {
         ...base,
-        description: `${activeRules.length} active approved Mail rule${activeRules.length === 1 ? "" : "s"} · profile v${profile.data.profileVersion}`,
+        description: `Profile v${profile.data.profileVersion} · ${activeRules.length} approved ${activeRules.length === 1 ? "rule" : "rules"} active`,
+        title: "Rules",
       }
-    : base;
+    : { ...base, title: "Rules" };
 }
 
 function formatMailAutomationStatus(automation: MailSetupContext["automation"]): string {
-  const oldestDue = automation.oldestDueAt
-    ? ` Oldest due: ${new Date(automation.oldestDueAt).toLocaleString()}.`
-    : "";
-  const lastCompleted = automation.lastCompletedAt
-    ? ` Last completed: ${new Date(automation.lastCompletedAt).toLocaleString()}.`
-    : "";
-  return `${automation.pendingCount} delayed action${automation.pendingCount === 1 ? "" : "s"} pending; ${automation.inProgressCount} in progress; ${automation.reconciliationCount} need provider reconciliation; ${automation.failedCount} stopped safely. Ilo processes at most ${automation.executionLimitPerRun} conversations per scheduled run.${oldestDue}${lastCompleted}`;
+  if (
+    automation.pendingCount === 0 &&
+    automation.inProgressCount === 0 &&
+    automation.reconciliationCount === 0 &&
+    automation.failedCount === 0
+  ) {
+    return "No pending or stopped actions";
+  }
+  return `${automation.pendingCount} pending · ${automation.inProgressCount} running · ${automation.reconciliationCount} need reconciliation · ${automation.failedCount} stopped`;
 }
 
 function formatMailCommitmentIntake(intake: MailSetupContext["commitmentIntake"]): string {
-  return `${intake.previewOnlyCount} preview-only calendar attachment candidate${intake.previewOnlyCount === 1 ? "" : "s"}; ${intake.serverVerifiedCount} server-verified. Automatic Calendar creation is not enabled; cached prose and attachment metadata cannot authorize an event.`;
+  return intake.automaticCreationEnabled
+    ? `Automatic calendar creation is on · ${intake.serverVerifiedCount} verified`
+    : `Automatic calendar creation is off · ${intake.previewOnlyCount} ${intake.previewOnlyCount === 1 ? "candidate" : "candidates"} waiting`;
 }
 
 function mailSourceSummary(accounts: MailSetupContext["accounts"]): string {
@@ -178,5 +173,5 @@ function mailSourceSummary(accounts: MailSetupContext["accounts"]): string {
     identities.length <= 2
       ? identities.join(" and ")
       : `${identities.slice(0, 2).join(", ")} +${identities.length - 2}`;
-  return `${accounts.length} Mail account${accounts.length === 1 ? "" : "s"} · ${sourceSummary}${failing > 0 ? ` · ${failing} ${failing === 1 ? "needs" : "need"} reconnect` : ""}`;
+  return `${accounts.length} connected · ${sourceSummary}${failing > 0 ? ` · ${failing} ${failing === 1 ? "needs" : "need"} reconnect` : ""}`;
 }

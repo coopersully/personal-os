@@ -208,9 +208,9 @@ the checks a dashboard grid. Use the shared `ReadinessPanel`, composed from
 `Item`, `Badge`, `Progress`, and `Dialog`, as the default bounded overview:
 
 - identify the affected product or object with its established icon and label;
-- show one honest aggregate state: **Checking**, **Unavailable**, **Needs
-  attention**, or **Ready**;
-- after every required read settles, pair a visible **N of N checks ready** label
+- show one honest aggregate state: **Checking**, **Unavailable**, **N to
+  finish**, or **Ready**;
+- after every required read settles, pair a visible **N of N complete** label
   with a determinate progress bar. Never show a percentage or progress bar for
   loading, unavailable, or partial evidence;
 - promote the highest-priority actionable unresolved check as **Next step** and
@@ -221,12 +221,21 @@ the checks a dashboard grid. Use the shared `ReadinessPanel`, composed from
   person action. The overview remains diagnostic evidence, not a second copy of
   the task;
 - keep the closed overview to exactly two compact rows: identity, status, and
-  focus on row one; completed-check count, progress, and **View checks** on row
+  focus on row one; completed-check count, progress, and **Review checks** on row
   two. Never add a focus callout, nested `Item`, recovery action, or any other
   third row. Working per-check actions belong inside the evidence dialog;
-- keep **View checks** beside the progress bar so evidence access does not add a
-  separate row. Open the complete vertical `ItemGroup` in a labelled dialog;
-  reviewing evidence must never expand or change the height of the overview;
+- keep **Review checks** beside the progress bar so evidence access does not add
+  a separate row. In the labelled dialog, show every unresolved check first as
+  a full outlined `Item` with its evidence and action. Put completed checks in a
+  collapsed **Show N completed checks** disclosure and render them as quiet,
+  compact rows with one evidence line when opened. A completed check must not compete with
+  work that remains; reviewing evidence must never expand or change the height
+  of the overview;
+- keep checklist titles local to the dialog context: use **Accounts**, **Rules**,
+  **Workflow**, or **Agent access**, not repeated workspace-qualified labels.
+  Use direct state copy and counts instead of explaining the meaning of
+  readiness. Operational queues and open-review counts are work, not setup
+  evidence, and never become readiness checks;
 - keep loading, unavailable, incomplete, empty, and complete distinct. A
   partial read never becomes a successful zero or a confident readiness score.
 

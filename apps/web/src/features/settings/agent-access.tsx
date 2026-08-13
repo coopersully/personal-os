@@ -275,11 +275,6 @@ function AgentAccessSettings({
     queryFn: api.getFinanceGuidedSetup,
     queryKey: ["finances", "guided-setup"],
   });
-  const attention = useQuery({
-    enabled: view === "workspaces" && selectedDomainEnabled,
-    queryFn: () => api.listAttentionItems({ domain: selectedDomain, limit: 100, status: "open" }),
-    queryKey: ["assistant-attention", selectedDomain, "open"],
-  });
   const tokens = useQuery({ queryFn: api.listAccessTokens, queryKey: ["tokens"] });
   const oauthClients = useQuery({ queryFn: api.listOAuthClients, queryKey: ["oauth-clients"] });
   const revokeOAuthClient = useMutation({
@@ -311,7 +306,6 @@ function AgentAccessSettings({
     value.domains.find((item) => item.domain === "mail"),
   );
   const hostAuthorities = connectedHostAuthorities(tokens, oauthClients, currentTime);
-  const attentionResource = queryLoadable(attention);
   const selectedLabel = setupDomainLabels[selectedDomain];
   const selectedSupport: DomainSupport = selectedGuide?.support ?? "unsupported";
   const guidedSetupComplete = setupPlan.data?.status === "complete";
@@ -325,7 +319,6 @@ function AgentAccessSettings({
   );
   const readiness = selectedDomainEnabled
     ? domainReadiness({
-        attention: attentionResource,
         calendars: queryLoadable(calendars),
         domain: selectedDomain,
         financeSetup: queryLoadable(financeSetup),
@@ -342,18 +335,16 @@ function AgentAccessSettings({
     tokens.isPending ||
     oauthClients.isPending ||
     (selectedDomainEnabled &&
-      (attention.isPending ||
-        (selectedDomain === "mail"
-          ? mailSetup.isPending || rules.isPending
-          : selectedDomain === "calendar"
-            ? calendars.isPending
-            : selectedDomain === "tasks"
-              ? tasks.isPending
-              : financeSetup.isPending)));
+      (selectedDomain === "mail"
+        ? mailSetup.isPending || rules.isPending
+        : selectedDomain === "calendar"
+          ? calendars.isPending
+          : selectedDomain === "tasks"
+            ? tasks.isPending
+            : financeSetup.isPending));
   const blockingError = guide.error;
   const readinessError =
     setup.error ??
-    attention.error ??
     tokens.error ??
     oauthClients.error ??
     (selectedDomain === "mail"
@@ -934,15 +925,18 @@ function DomainReadinessPanel({
     (item) => !item.complete && (item.nextStep !== undefined || item.action !== undefined),
   );
   const focus = recommended ?? priority;
+  const remainingCount = readiness.filter((item) => !item.complete).length;
   const summary = error
-    ? errorMessage(error)
+    ? `${label} readiness could not be loaded.`
     : loading
-      ? `Checking ${label} material, preferences, workflows, and agent access.`
+      ? "Checking setup and access."
       : !enabled
-        ? `${label} guided setup is not published by this deployment.`
+        ? `${label} is not available in this deployment.`
         : priority
-          ? `${label} is partially ready for agent use.`
-          : `Everything Ilo checks for ${label} is ready.`;
+          ? suppressFocus
+            ? `${remainingCount} ${remainingCount === 1 ? "check is" : "checks are"} open, including the action above.`
+            : `${remainingCount} ${remainingCount === 1 ? "check needs" : "checks need"} attention.`
+          : "Setup and access are ready.";
 
   return (
     <ReadinessPanel
@@ -1437,7 +1431,6 @@ function domainCapability(
 }
 
 function domainReadiness({
-  attention,
   calendars,
   domain,
   financeSetup,
@@ -1447,7 +1440,6 @@ function domainReadiness({
   profile,
   tasks,
 }: {
-  attention: Parameters<typeof mailAgentAccessReadiness>[0]["attention"];
   calendars: Parameters<typeof calendarAgentAccessReadiness>[0]["calendars"];
   domain: SetupDomain;
   financeSetup: Parameters<typeof financeAgentAccessReadiness>[0]["setup"];
@@ -1459,7 +1451,6 @@ function domainReadiness({
 }): DomainReadinessItem[] {
   if (domain === "mail") {
     return mailAgentAccessReadiness({
-      attention,
       hosts,
       profile,
       rules: mailRules,
@@ -1467,12 +1458,12 @@ function domainReadiness({
     });
   }
   if (domain === "calendar") {
-    return calendarAgentAccessReadiness({ attention, calendars, hosts, profile });
+    return calendarAgentAccessReadiness({ calendars, hosts, profile });
   }
   if (domain === "tasks") {
-    return taskAgentAccessReadiness({ attention, hosts, profile, tasks });
+    return taskAgentAccessReadiness({ hosts, profile, tasks });
   }
-  return financeAgentAccessReadiness({ attention, hosts, profile, setup: financeSetup });
+  return financeAgentAccessReadiness({ hosts, profile, setup: financeSetup });
 }
 
 function queryLoadable<T>({

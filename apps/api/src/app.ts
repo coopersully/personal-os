@@ -358,8 +358,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     listEvents: calendar.listEvents,
     listReminders: async (userId) =>
       (await reminders.list(userId, { completed: false, limit: 100 })).items,
-    listTasks: async (userId, completed) =>
-      (await tasks.list(userId, { completed, limit: 100 })).items,
+    listTasks: async (userId, query) => (await tasks.list(userId, query)).items,
     now,
   });
   const audit = createAuditService(dependencies.db);

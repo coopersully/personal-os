@@ -23,6 +23,7 @@ import {
   taskProjects,
   users,
 } from "@personal-os/database";
+import type { Task, TaskListQuery } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
 import { createApp, type PersonalOsApp } from "./app.js";
@@ -3477,7 +3478,7 @@ describe.sequential("ilo API", () => {
     expect(limitedRecovery.headers.get("retry-after")).toBe("300");
   });
 
-  it("loads repeatable QA personas without touching ordinary accounts", async () => {
+  it("loads repeatable QA fixture personas without Task organization collisions", async () => {
     const fixtureNow = new Date("2026-07-28T14:00:00.000Z");
     await database.db.insert(users).values({
       displayName: "Unrelated account",
@@ -3517,33 +3518,54 @@ describe.sequential("ilo API", () => {
     expect(degraded).toBeDefined();
     expect(await verifyPassword(DEMO_QA_PASSWORD, demo?.passwordHash ?? "")).toBe(true);
 
-    const [events, messages, transactions, profiles, emptyTasks, degradedAccounts] =
-      await Promise.all([
-        database.db
-          .select()
-          .from(calendarEvents)
-          .where(eq(calendarEvents.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(mailThreads)
-          .where(eq(mailThreads.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(financeTransactions)
-          .where(eq(financeTransactions.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(domainProfiles)
-          .where(eq(domainProfiles.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(reminders)
-          .where(eq(reminders.userId, empty?.id ?? "")),
-        database.db
-          .select()
-          .from(calendarAccounts)
-          .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
-      ]);
+    const [
+      events,
+      messages,
+      transactions,
+      profiles,
+      emptyTasks,
+      degradedAccounts,
+      demoTaskLists,
+      demoTaskProjects,
+      demoTasks,
+    ] = await Promise.all([
+      database.db
+        .select()
+        .from(calendarEvents)
+        .where(eq(calendarEvents.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(mailThreads)
+        .where(eq(mailThreads.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(domainProfiles)
+        .where(eq(domainProfiles.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(reminders)
+        .where(eq(reminders.userId, empty?.id ?? "")),
+      database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
+      database.db
+        .select()
+        .from(taskLists)
+        .where(eq(taskLists.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(taskProjects)
+        .where(eq(taskProjects.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(reminders)
+        .where(and(eq(reminders.userId, demo?.id ?? ""), eq(reminders.kind, "task"))),
+    ]);
     expect(events).toHaveLength(7);
     expect(messages).toHaveLength(5);
     expect(transactions).toHaveLength(9);
@@ -3552,6 +3574,57 @@ describe.sequential("ilo API", () => {
     expect(degradedAccounts).toContainEqual(
       expect.objectContaining({ provider: "google", syncStatus: "error" }),
     );
+    expect(demoTaskLists.map(({ kind, name }) => ({ kind, name }))).toEqual(
+      expect.arrayContaining([
+        { kind: "inbox", name: "Inbox" },
+        { kind: "standard", name: "Personal" },
+        { kind: "standard", name: "Work" },
+        { kind: "standard", name: "Shopping" },
+      ]),
+    );
+    expect(demoTaskLists.filter((list) => list.kind === "inbox")).toHaveLength(1);
+    expect(demoTaskLists.filter((list) => list.kind === "standard")).toHaveLength(3);
+    const repeatedProjects = demoTaskProjects.filter(
+      (project) => project.name === "Quarterly reset",
+    );
+    expect(repeatedProjects).toHaveLength(2);
+    expect(new Set(repeatedProjects.map((project) => project.listId)).size).toBe(2);
+    expect(demoTasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          deletedAt: null,
+          taskLifecycle: "open",
+          title: "Draft weekly product update",
+        }),
+        expect.objectContaining({
+          deletedAt: null,
+          scheduledAt: null,
+          taskLifecycle: "open",
+          title: "Compare renters insurance renewals",
+        }),
+        expect.objectContaining({
+          deletedAt: null,
+          scheduledAt: expect.any(Date),
+          taskLifecycle: "open",
+          title: "Review monthly subscriptions",
+        }),
+        expect.objectContaining({
+          completedAt: expect.any(Date),
+          taskLifecycle: "completed",
+          title: "Book dentist appointment",
+        }),
+        expect.objectContaining({ taskCancelledAt: expect.any(Date), taskLifecycle: "cancelled" }),
+        expect.objectContaining({ deletedAt: expect.any(Date), taskLifecycle: "open" }),
+      ]),
+    );
+    const sameListMoveTask = demoTasks.find(
+      (task) => task.title === "Prepare launch follow-through",
+    );
+    const sameListProjects = demoTaskProjects.filter(
+      (project) => project.listId === sameListMoveTask?.taskListId,
+    );
+    expect(sameListMoveTask?.taskProjectId).toEqual(expect.any(String));
+    expect(sameListProjects).toHaveLength(2);
 
     await loadQaFixtures(database.db, { now: new Date("2026-07-29T14:00:00.000Z") });
     expect(
@@ -3560,6 +3633,132 @@ describe.sequential("ilo API", () => {
     expect(
       await database.db.select().from(users).where(eq(users.email, "qa-unrelated@example.com")),
     ).toHaveLength(1);
+    expect(
+      await database.db
+        .select()
+        .from(taskLists)
+        .where(eq(taskLists.userId, demo?.id ?? "")),
+    ).toHaveLength(4);
+    expect(
+      await database.db
+        .select()
+        .from(taskProjects)
+        .where(eq(taskProjects.userId, demo?.id ?? "")),
+    ).toHaveLength(3);
+  });
+
+  it("daily brief uses canonical lifecycle, deletion, and timing", async () => {
+    const baseTask: Task = {
+      cancelledAt: null,
+      completedAt: null,
+      createdAt: "2026-07-13T08:00:00.000Z",
+      deletedAt: null,
+      dueAt: null,
+      estimateMinutes: 30,
+      id: "a1000000-0000-4000-8000-000000000001",
+      legacyStatus: "completed",
+      lifecycle: "open",
+      listId: "a1000000-0000-4000-8000-000000000010",
+      notes: null,
+      priority: "medium",
+      projectId: null,
+      revision: 1,
+      scheduledAt: null,
+      source: {
+        accountId: null,
+        provider: "local",
+        remoteId: "a1000000-0000-4000-8000-000000000001",
+        revision: "1",
+        sourceType: "task",
+      },
+      tags: [],
+      timezone: "UTC",
+      title: "Open without timing",
+      updatedAt: "2026-07-13T08:00:00.000Z",
+      why: null,
+    };
+    const canonicalTasks: Task[] = [
+      baseTask,
+      {
+        ...baseTask,
+        dueAt: "2026-07-13T16:00:00.000Z",
+        id: "a1000000-0000-4000-8000-000000000002",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000002" },
+        title: "Open due today",
+      },
+      {
+        ...baseTask,
+        estimateMinutes: 45,
+        id: "a1000000-0000-4000-8000-000000000003",
+        legacyStatus: "cancelled",
+        scheduledAt: "2026-07-13T14:00:00.000Z",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000003" },
+        title: "Open reserved time",
+      },
+      {
+        ...baseTask,
+        completedAt: "2026-07-13T11:00:00.000Z",
+        id: "a1000000-0000-4000-8000-000000000004",
+        legacyStatus: "inbox",
+        lifecycle: "completed",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000004" },
+        title: "Completed summary",
+      },
+      {
+        ...baseTask,
+        cancelledAt: "2026-07-13T10:00:00.000Z",
+        id: "a1000000-0000-4000-8000-000000000005",
+        legacyStatus: "next",
+        lifecycle: "cancelled",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000005" },
+        title: "Cancelled Task",
+      },
+      {
+        ...baseTask,
+        deletedAt: "2026-07-13T09:00:00.000Z",
+        id: "a1000000-0000-4000-8000-000000000006",
+        legacyStatus: "next",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000006" },
+        title: "Trashed Task",
+      },
+    ];
+    const listQueries: TaskListQuery[] = [];
+    const dailyBrief = createDailyBriefService({
+      db: database.db,
+      listEvents: async () => [],
+      listReminders: async () => [],
+      listTasks: async (_userId, query) => {
+        listQueries.push(query);
+        return canonicalTasks.filter(
+          (task) => task.deletedAt === null && task.lifecycle === query.lifecycle,
+        );
+      },
+      now: () => new Date("2026-07-13T12:00:00.000Z"),
+    });
+
+    const brief = await dailyBrief.dailyBrief(crypto.randomUUID(), "UTC");
+
+    expect(brief.tasks.map((task) => task.title)).toEqual([
+      "Open without timing",
+      "Open due today",
+      "Open reserved time",
+    ]);
+    expect(brief.completedTasks.map((task) => task.title)).toEqual(["Completed summary"]);
+    expect(brief.tasks).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "Cancelled Task" }),
+        expect.objectContaining({ title: "Trashed Task" }),
+      ]),
+    );
+    expect(brief.capacity).toMatchObject({ flexibleTaskMinutes: 60, scheduledTaskMinutes: 45 });
+    expect(brief.recommendedTasks.map(({ task, urgency }) => [task.title, urgency])).toEqual([
+      ["Open due today", "due_today"],
+      ["Open without timing", "inbox"],
+    ]);
+    expect(listQueries).toEqual([
+      { lifecycle: "open", limit: 100 },
+      { lifecycle: "completed", limit: 100 },
+    ]);
   });
 
   it("serves health, registration, sessions, tokens, reminders, calendars, events, and audit", async () => {
@@ -5673,26 +5872,27 @@ describe.sequential("ilo API", () => {
         {
           ...task,
           estimateMinutes: 90,
+          legacyStatus: "inbox" as const,
           scheduledAt: "2026-07-13T13:00:00.000Z",
-          status: "scheduled" as const,
         },
         {
           ...inboxTask,
+          dueAt: "2026-07-14T16:00:00.000Z",
           estimateMinutes: 25,
-          status: "next" as const,
+          legacyStatus: "completed" as const,
         },
         {
           ...inboxTask,
           estimateMinutes: null,
           id: crypto.randomUUID(),
+          legacyStatus: "cancelled" as const,
           scheduledAt: "2026-07-13T14:00:00.000Z",
-          status: "scheduled" as const,
         },
         {
           ...inboxTask,
           estimateMinutes: null,
           id: crypto.randomUUID(),
-          status: "inbox" as const,
+          legacyStatus: "next" as const,
         },
       ],
       now: () => new Date("2026-07-13T12:00:00.000Z"),
@@ -5726,15 +5926,15 @@ describe.sequential("ilo API", () => {
         {
           ...task,
           estimateMinutes: 60,
+          legacyStatus: "inbox" as const,
           scheduledAt: "2026-07-13T14:00:00.000Z",
-          status: "scheduled" as const,
         },
         {
           ...task,
           estimateMinutes: 90,
           id: crypto.randomUUID(),
+          legacyStatus: "cancelled" as const,
           scheduledAt: "2026-07-13T10:00:00.000Z",
-          status: "scheduled" as const,
         },
       ],
       now: () => new Date("2026-07-13T12:00:00.000Z"),
@@ -5760,40 +5960,45 @@ describe.sequential("ilo API", () => {
           dueAt: "2026-07-13T11:00:00.000Z",
           estimateMinutes: 15,
           id: crypto.randomUUID(),
+          legacyStatus: "inbox" as const,
           priority: "high" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
         {
           ...task,
           dueAt: "2026-07-13T16:00:00.000Z",
           estimateMinutes: 20,
           id: crypto.randomUUID(),
+          legacyStatus: "cancelled" as const,
           priority: "medium" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
         {
           ...task,
-          dueAt: null,
+          dueAt: "2026-07-14T15:00:00.000Z",
           estimateMinutes: 25,
           id: crypto.randomUUID(),
+          legacyStatus: "completed" as const,
           priority: "low" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
         {
           ...task,
-          dueAt: null,
+          dueAt: "2026-07-14T14:00:00.000Z",
           estimateMinutes: 30,
           id: crypto.randomUUID(),
+          legacyStatus: "inbox" as const,
           priority: "high" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
         {
           ...task,
-          dueAt: null,
+          dueAt: "2026-07-14T17:00:00.000Z",
           estimateMinutes: 35,
           id: crypto.randomUUID(),
+          legacyStatus: "cancelled" as const,
           priority: "low" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
       ],
       now: () => new Date("2026-07-13T12:00:00.000Z"),

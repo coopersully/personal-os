@@ -1795,6 +1795,55 @@ describe("ilo web app", () => {
     ).toBeInTheDocument();
   });
 
+  it("agent access previews canonical open Tasks", async () => {
+    const guide = await mocks.getAgentConnectionGuide();
+    mocks.getAgentConnectionGuide.mockResolvedValue({
+      ...guide,
+      domains: [
+        ...guide.domains,
+        {
+          domain: "tasks",
+          readScope: "tasks:read",
+          support: "profile_and_attention",
+          writeScope: "tasks:write",
+        },
+      ],
+    });
+    const setupStatus = await mocks.getAssistantSetupStatus();
+    mocks.getAssistantSetupStatus.mockResolvedValue({
+      ...setupStatus,
+      domains: [
+        ...setupStatus.domains,
+        {
+          approvedProfileStatus: null,
+          approvedProfileVersion: null,
+          canRead: true,
+          canWrite: true,
+          domain: "tasks",
+          pendingDraftVersion: null,
+          profileStatus: null,
+          profileVersion: null,
+        },
+      ],
+    });
+    mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
+    setup("/settings?section=agents");
+    const browser = userEvent.setup();
+
+    const tasksLabel = await screen.findByText("Tasks", {
+      selector: ".agent-access__domain-copy > span:first-child",
+    });
+    const tasksButton = tasksLabel.closest("button") as HTMLButtonElement;
+    await waitFor(() => expect(tasksButton).toBeEnabled());
+    await browser.click(tasksButton);
+
+    expect(tasksButton).toHaveAttribute("data-state", "on");
+    expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    expect(await screen.findByText("1 open Task in Ilo.")).toBeInTheDocument();
+    expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open", limit: 100 });
+  });
+
   it("uses the real provider flows while progressing through full setup", async () => {
     const setupUser: User = {
       ...user,

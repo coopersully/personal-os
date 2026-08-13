@@ -57,12 +57,16 @@ export function TaskDialog({
     queryKey: ["task-projects"],
   });
   const requestedProjectId = searchParams.get("project") ?? "";
+  const [currentTask, setCurrentTask] = useState(task);
   const [listId, setListId] = useState(task?.listId ?? "");
   const [projectId, setProjectId] = useState(task?.projectId ?? "");
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const inbox = lists.data?.items.find((list) => list.kind === "inbox");
   const requestedProject = projects.data?.items.find(
-    (project) => project.id === requestedProjectId && project.availability === "active",
+    (project) =>
+      project.id === requestedProjectId &&
+      project.availability === "active" &&
+      project.lifecycle === "open",
   );
   const requestedList = lists.data?.items.find(
     (list) => list.id === searchParams.get("list") && list.availability === "active",
@@ -79,7 +83,10 @@ export function TaskDialog({
   const activeLists = lists.data?.items.filter((list) => list.availability === "active") ?? [];
   const availableProjects =
     projects.data?.items.filter(
-      (project) => project.availability === "active" && project.listId === listId,
+      (project) =>
+        project.availability === "active" &&
+        project.lifecycle === "open" &&
+        project.listId === listId,
     ) ?? [];
 
   const finish = async (message: string) => {
@@ -98,14 +105,19 @@ export function TaskDialog({
           ...(projectId ? { projectId } : {}),
         });
       }
-      const moved = task.listId !== listId || (task.projectId ?? "") !== projectId;
+      const persistedTask = currentTask ?? task;
+      const moved =
+        persistedTask.listId !== listId || (persistedTask.projectId ?? "") !== projectId;
       if (!moved) {
-        return api.updateTask(task.id, { ...fields, expectedRevision: task.revision });
+        return api.updateTask(task.id, {
+          ...fields,
+          expectedRevision: persistedTask.revision,
+        });
       }
       const preview = await api.previewTaskMove(task.id, {
         destinationListId: listId,
         destinationProjectId: projectId || null,
-        expectedRevision: task.revision,
+        expectedRevision: persistedTask.revision,
       });
       if (preview.detachedProjectId) {
         setPendingMove({ fields, preview });
@@ -114,9 +126,10 @@ export function TaskDialog({
       const movedTask = await api.moveTask(task.id, {
         destinationListId: listId,
         destinationProjectId: projectId || null,
-        expectedRevision: task.revision,
+        expectedRevision: persistedTask.revision,
         previewToken: preview.previewToken,
       });
+      setCurrentTask(movedTask);
       return api.updateTask(task.id, { ...fields, expectedRevision: movedTask.revision });
     },
     onError: (error) => toast.error(errorMessage(error)),
@@ -134,6 +147,10 @@ export function TaskDialog({
         expectedRevision: pendingMove.preview.taskRevision,
         previewToken: pendingMove.preview.previewToken,
       });
+      setCurrentTask(movedTask);
+      setListId(movedTask.listId);
+      setProjectId(movedTask.projectId ?? "");
+      setPendingMove(null);
       return api.updateTask(task.id, {
         ...pendingMove.fields,
         expectedRevision: movedTask.revision,
@@ -145,13 +162,14 @@ export function TaskDialog({
 
   const transition = useMutation({
     mutationFn: async (action: "cancel" | "complete" | "reopen" | "restore" | "trash") => {
-      if (!task) throw new Error("Save the Task before changing its lifecycle.");
-      const input = { expectedRevision: task.revision };
-      if (action === "complete") return api.completeTask(task.id, input);
-      if (action === "cancel") return api.cancelTask(task.id, input);
-      if (action === "restore") return api.restoreTask(task.id, input);
-      if (action === "trash") return api.trashTask(task.id, input);
-      return api.reopenTask(task.id, input);
+      const persistedTask = currentTask ?? task;
+      if (!persistedTask) throw new Error("Save the Task before changing its lifecycle.");
+      const input = { expectedRevision: persistedTask.revision };
+      if (action === "complete") return api.completeTask(persistedTask.id, input);
+      if (action === "cancel") return api.cancelTask(persistedTask.id, input);
+      if (action === "restore") return api.restoreTask(persistedTask.id, input);
+      if (action === "trash") return api.trashTask(persistedTask.id, input);
+      return api.reopenTask(persistedTask.id, input);
     },
     onError: (error) => toast.error(errorMessage(error)),
     onSuccess: (_result, action) => finish(taskActionResult(action)),
@@ -319,7 +337,9 @@ export function TaskDialog({
                 <FieldDescription>Separate tags with commas.</FieldDescription>
               </Field>
             </FieldGroup>
-            {save.isError ? <InlineError error={save.error} /> : null}
+            {save.isError || confirmMove.isError ? (
+              <InlineError error={save.error ?? confirmMove.error} />
+            ) : null}
             <DialogFooter className="mt-5">
               <Button onClick={close} type="button" variant="outline">
                 Cancel

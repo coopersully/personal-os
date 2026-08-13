@@ -1,6 +1,5 @@
 import type {
   AccessScope,
-  AssistantSetupStatus,
   AssistantSetupStep,
   MailRulePreview,
   MailSetupAccount,
@@ -314,9 +313,7 @@ function AgentAccessSettings({
       })
     : [];
   const operationalReviewCount =
-    selectedDomain === "finances"
-      ? financeSetup.data?.reviewSummary.count
-      : attention.data?.length;
+    selectedDomain === "finances" ? financeSetup.data?.reviewSummary.count : attention.data?.length;
   const operationalReviewLabel = selectedDomain === "finances" ? "Finance" : selectedLabel;
   const readinessPending =
     guide.isPending ||
@@ -505,9 +502,7 @@ function AgentAccessSettings({
                         }
                       >
                         Review {operationalReviewCount}
-                        {selectedDomain !== "finances" && operationalReviewCount >= 100
-                          ? "+"
-                          : ""}{" "}
+                        {selectedDomain !== "finances" && operationalReviewCount >= 100 ? "+" : ""}{" "}
                         {operationalReviewLabel} item{operationalReviewCount === 1 ? "" : "s"}
                       </Link>
                     </Button>
@@ -515,96 +510,106 @@ function AgentAccessSettings({
                 </Item>
               ) : null}
 
-              {!guidedSetupComplete ? <div className="agent-access__steps">
-                <ConnectionStep
-                  complete={guidedSetupComplete}
-                  defaultOpen={!guidedSetupComplete}
-                  description="After connection, the agent calls get_ilo_context to orient itself, then get_ilo_setup for the current semantic step, domain context, required tools, and approval boundary. A separately installed skill is not required."
-                  number="1"
-                  status={
-                    setupPlan.isPending
-                      ? `Checking ${selectedLabel} setup…`
-                      : setupPlan.isError
-                        ? `${selectedLabel} setup status is unavailable.`
-                        : (setupPlan.data?.nextAction ?? "Waiting for the setup protocol.")
-                  }
-                  title={
-                    currentSetupStep?.owner === "person"
-                      ? `Finish ${selectedLabel} setup`
-                      : "Let the agent set up Ilo"
-                  }
-                >
-                  <Alert role="status" variant="info">
-                    <ShieldCheckIcon />
-                    <AlertTitle>
-                      {setupPlan.data
-                        ? (setupPlan.data.steps.find(
-                            (step) => step.id === setupPlan.data?.currentStepId,
-                          )?.title ?? capability.title)
-                        : `Loading ${selectedLabel} setup`}
-                    </AlertTitle>
-                    <AlertDescription>
-                      {setupPlan.data?.nextAction ??
-                        "Ilo is checking the authenticated setup plan and domain state."}{" "}
-                      {!guide.isPending ? capability.description : ""}
-                    </AlertDescription>
-                  </Alert>
+              {!guidedSetupComplete ? (
+                <div className="agent-access__steps">
+                  <ConnectionStep
+                    complete={guidedSetupComplete}
+                    defaultOpen={!guidedSetupComplete}
+                    description="After connection, the agent calls get_ilo_context to orient itself, then get_ilo_setup for the current semantic step, domain context, required tools, and approval boundary. A separately installed skill is not required."
+                    number="1"
+                    status={
+                      setupPlan.isPending
+                        ? `Checking ${selectedLabel} setup…`
+                        : setupPlan.isError
+                          ? `${selectedLabel} setup status is unavailable.`
+                          : (setupPlan.data?.nextAction ?? "Waiting for the setup protocol.")
+                    }
+                    title={
+                      currentSetupStep?.owner === "person"
+                        ? `Finish ${selectedLabel} setup`
+                        : "Let the agent set up Ilo"
+                    }
+                  >
+                    <Alert role="status" variant="info">
+                      <ShieldCheckIcon />
+                      <AlertTitle>
+                        {setupPlan.data
+                          ? (setupPlan.data.steps.find(
+                              (step) => step.id === setupPlan.data?.currentStepId,
+                            )?.title ?? capability.title)
+                          : `Loading ${selectedLabel} setup`}
+                      </AlertTitle>
+                      <AlertDescription>
+                        {setupPlan.data?.nextAction ??
+                          "Ilo is checking the authenticated setup plan and domain state."}{" "}
+                        {!guide.isPending ? capability.description : ""}
+                      </AlertDescription>
+                    </Alert>
 
-                  {setupPlan.data ? (
-                    <ItemGroup className="agent-access__protocol-steps">
-                      {setupPlan.data.steps.map((step) => (
-                        <SetupProtocolStep key={step.id} step={step} />
-                      ))}
-                    </ItemGroup>
-                  ) : null}
+                    {setupPlan.data ? (
+                      <ItemGroup className="agent-access__protocol-steps">
+                        {setupPlan.data.steps.map((step) => (
+                          <SetupProtocolStep key={step.id} step={step} />
+                        ))}
+                      </ItemGroup>
+                    ) : null}
 
-                  <Collapsible>
-                    <CollapsibleTrigger asChild>
-                      <Button className="agent-access__protocol-trigger" size="sm" variant="ghost">
-                        Setup protocol details
-                        <ChevronDownIcon data-icon="inline-end" />
-                      </Button>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="agent-access__protocol-details">
-                      <p>
-                        Most hosts can begin from the tool description. If yours waits for a
-                        request, send this one sentence. The hosted skill remains an optional
-                        reference for hosts that support skills.
-                      </p>
-                      <CopyPrompt
-                        copyLabel="Copy agent setup request"
-                        label="Agent setup request"
-                        loading={guide.isPending}
-                        value={guide.data?.skill.setupPrompt ?? ""}
-                      />
-                      {guide.data ? (
-                        <Item size="xs" variant="muted">
-                          <ItemMedia variant="icon">
-                            <ShieldCheckIcon />
-                          </ItemMedia>
-                          <ItemContent>
-                            <ItemTitle>
-                              Optional setup reference v{guide.data.skill.version}
-                            </ItemTitle>
-                            <ItemDescription>
-                              Protocol {setupPlan.data?.protocolVersion ?? "1.0"} · source revision{" "}
-                              {guide.data.skill.revision}
-                            </ItemDescription>
-                          </ItemContent>
-                          <ItemActions>
-                            <Button asChild size="sm" variant="ghost">
-                              <a href={guide.data.skill.sourceUrl} rel="noreferrer" target="_blank">
-                                View skill source
-                                <ExternalLinkIcon data-icon="inline-end" />
-                              </a>
-                            </Button>
-                          </ItemActions>
-                        </Item>
-                      ) : null}
-                    </CollapsibleContent>
-                  </Collapsible>
-                </ConnectionStep>
-              </div> : null}
+                    <Collapsible>
+                      <CollapsibleTrigger asChild>
+                        <Button
+                          className="agent-access__protocol-trigger"
+                          size="sm"
+                          variant="ghost"
+                        >
+                          Setup protocol details
+                          <ChevronDownIcon data-icon="inline-end" />
+                        </Button>
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="agent-access__protocol-details">
+                        <p>
+                          Most hosts can begin from the tool description. If yours waits for a
+                          request, send this one sentence. The hosted skill remains an optional
+                          reference for hosts that support skills.
+                        </p>
+                        <CopyPrompt
+                          copyLabel="Copy agent setup request"
+                          label="Agent setup request"
+                          loading={guide.isPending}
+                          value={guide.data?.skill.setupPrompt ?? ""}
+                        />
+                        {guide.data ? (
+                          <Item size="xs" variant="muted">
+                            <ItemMedia variant="icon">
+                              <ShieldCheckIcon />
+                            </ItemMedia>
+                            <ItemContent>
+                              <ItemTitle>
+                                Optional setup reference v{guide.data.skill.version}
+                              </ItemTitle>
+                              <ItemDescription>
+                                Protocol {setupPlan.data?.protocolVersion ?? "1.0"} · source
+                                revision {guide.data.skill.revision}
+                              </ItemDescription>
+                            </ItemContent>
+                            <ItemActions>
+                              <Button asChild size="sm" variant="ghost">
+                                <a
+                                  href={guide.data.skill.sourceUrl}
+                                  rel="noreferrer"
+                                  target="_blank"
+                                >
+                                  View skill source
+                                  <ExternalLinkIcon data-icon="inline-end" />
+                                </a>
+                              </Button>
+                            </ItemActions>
+                          </Item>
+                        ) : null}
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </ConnectionStep>
+                </div>
+              ) : null}
             </CardContent>
           </Card>
 
@@ -1067,9 +1072,7 @@ function DomainReadinessPanel({
 }
 
 function domainAuthorityLabel(
-  guide:
-    | Awaited<ReturnType<typeof api.getAgentConnectionGuide>>["domains"][number]
-    | undefined,
+  guide: Awaited<ReturnType<typeof api.getAgentConnectionGuide>>["domains"][number] | undefined,
   hosts: Loadable<ConnectedHostAuthority[]>,
 ): string {
   if (!guide || guide.support === "unsupported" || hosts.state === "unavailable") {
@@ -1085,27 +1088,6 @@ function domainAuthorityLabel(
   if (writers > 0) return "Read & prepare";
   if (readers > 0) return "Read only";
   return "No access";
-}
-
-function domainSetupPhase({
-  domain,
-  guideLoading,
-  published,
-  setup,
-}: {
-  domain: SetupDomain;
-  guideLoading: boolean;
-  published: boolean;
-  setup: Loadable<AssistantSetupStatus>;
-}): string {
-  if (guideLoading || setup.state === "loading") return "Checking";
-  if (!published || setup.state === "unavailable") return "Unavailable";
-  const profile = setup.data.domains.find((item) => item.domain === domain);
-  if (profile?.pendingDraftVersion || profile?.profileStatus === "draft") return "Needs review";
-  if (profile?.approvedProfileStatus === "active" || profile?.profileStatus === "active") {
-    return "Set up";
-  }
-  return "Not set up";
 }
 
 function SetupProtocolStep({ step }: { step: AssistantSetupStep }) {

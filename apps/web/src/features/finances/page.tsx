@@ -14,7 +14,7 @@ import { addMonths, formatDateOnly, formatMonth } from "@personal-os/domain";
 import { EmptyState, Spinner } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { type ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { Fragment, type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, type ReactNode, useCallback, useMemo, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import {
@@ -132,11 +132,6 @@ export function FinancesPage() {
     enabled: section === "health" || section === "overview",
     queryFn: api.getFinanceLedgerHealth,
     queryKey: ["finance-ledger-health"],
-  });
-  const profile = useQuery({
-    enabled: section === "cashflow" || section === "overview",
-    queryFn: api.getFinanceProfile,
-    queryKey: ["finance-profile"],
   });
   const incomeStreams = useQuery({
     enabled: section === "cashflow" || section === "overview",
@@ -497,11 +492,7 @@ export function FinancesPage() {
         className={
           section === "budgets" ? "grid gap-6" : "grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]"
         }
-        hidden={
-          section === "overview" ||
-          section === "cashflow" ||
-          section === "subscriptions"
-        }
+        hidden={section === "overview" || section === "cashflow" || section === "subscriptions"}
       >
         <div className="flex min-w-0 flex-col gap-6">
           <ShadcnCard hidden={section !== "health"}>

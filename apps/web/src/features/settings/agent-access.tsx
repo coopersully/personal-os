@@ -193,7 +193,8 @@ export function useWorkspaceSettingsActions(enabled: boolean): WorkspaceSettings
       enabled,
       queryFn: () => api.getIloSetup({ domain }),
       queryKey: ["ilo-setup-plan", domain],
-      refetchInterval: 10_000,
+      refetchInterval: 60_000,
+      staleTime: 30_000,
     })),
   });
 
@@ -499,7 +500,7 @@ function AgentAccessSettings({
                 label={selectedLabel}
                 loading={readinessPending}
                 readiness={readiness}
-                suppressFocus={currentSetupStep?.owner === "person"}
+                suppressFocus={workspaceSetupNeedsPersonAction(setupPlan.data)}
               />
 
               {setupPlan.data && !guidedSetupComplete ? (
@@ -904,15 +905,28 @@ function WorkspaceSettingsStatus({
   plan: AssistantSetupPlan | undefined;
   step: AssistantSetupPlan["steps"][number] | undefined;
 }) {
-  if (!error && !loading && (!plan || plan.status === "complete" || step?.owner !== "person")) {
+  const agentOwned = Boolean(plan && plan.status !== "complete" && step?.owner === "agent");
+  if (
+    !error &&
+    !loading &&
+    (!plan || plan.status === "complete" || (step?.owner !== "person" && !agentOwned))
+  ) {
     return null;
   }
-  const title = error ? "Setup unavailable" : loading ? "Checking settings" : "Action required";
+  const title = error
+    ? "Setup unavailable"
+    : loading
+      ? "Checking settings"
+      : agentOwned
+        ? "Setup in progress"
+        : "Action required";
   const description = error
     ? errorMessage(error)
     : loading
       ? `Ilo is checking ${label} configuration.`
-      : (step?.userAction ?? plan?.nextAction ?? `${label} setup has not started.`);
+      : agentOwned
+        ? (plan?.nextAction ?? step?.description ?? `The agent is setting up ${label}.`)
+        : (step?.userAction ?? plan?.nextAction ?? `${label} setup has not started.`);
   const action =
     !error && !loading && step?.id === "connect_agent"
       ? { label: "Connect agent", to: "/settings?section=agent-connections" }

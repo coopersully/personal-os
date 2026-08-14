@@ -210,6 +210,40 @@ const secondMailThread = {
   subject: "No body",
   unread: false,
 };
+function iloSetupFixture() {
+  return {
+    access: { canRead: false, canWrite: false },
+    connection: { lastObservedAt: null, observed: false },
+    currentStepId: "connect_agent",
+    domain: "mail" as const,
+    nextAction: "Connect an MCP-compatible host to Ilo.",
+    profile: {
+      approvedStatus: null,
+      approvedVersion: null,
+      pendingDraftVersion: null,
+      status: null,
+      version: null,
+    },
+    progress: { completed: 0, total: 4 },
+    protocolVersion: "1.0",
+    selectedStepId: "connect_agent",
+    status: "needs_connection" as const,
+    steps: [
+      {
+        completionEvidence: [],
+        description: "Authorize one MCP host.",
+        id: "connect_agent",
+        instructions: [],
+        order: 1,
+        owner: "person" as const,
+        requiredTools: [],
+        state: "current" as const,
+        title: "Connect an agent",
+        userAction: "Connect an MCP-compatible agent host to Ilo.",
+      },
+    ],
+  };
+}
 
 const mocks = vi.hoisted(() => ({
   completeReminder: vi.fn(),
@@ -731,38 +765,7 @@ function defaults() {
       },
     ],
   });
-  mocks.getIloSetup.mockResolvedValue({
-    access: { canRead: false, canWrite: false },
-    connection: { lastObservedAt: null, observed: false },
-    currentStepId: "connect_agent",
-    domain: "mail",
-    nextAction: "Connect an MCP-compatible host to Ilo.",
-    profile: {
-      approvedStatus: null,
-      approvedVersion: null,
-      pendingDraftVersion: null,
-      status: null,
-      version: null,
-    },
-    progress: { completed: 0, total: 4 },
-    protocolVersion: "1.0",
-    selectedStepId: "connect_agent",
-    status: "needs_connection",
-    steps: [
-      {
-        completionEvidence: [],
-        description: "Authorize one MCP host.",
-        id: "connect_agent",
-        instructions: [],
-        order: 1,
-        owner: "person",
-        requiredTools: [],
-        state: "current",
-        title: "Connect an agent",
-        userAction: "Connect an MCP-compatible agent host to Ilo.",
-      },
-    ],
-  });
+  mocks.getIloSetup.mockImplementation(async () => iloSetupFixture());
   mocks.listXBookmarkFolders.mockResolvedValue([]);
   mocks.listMailboxes.mockResolvedValue([mailbox]);
   mocks.getMailSetupContext.mockResolvedValue({
@@ -2232,7 +2235,7 @@ describe("ilo web app", () => {
   });
 
   it("marks only workspace settings with a current person-owned action", async () => {
-    const basePlan = await mocks.getIloSetup();
+    const basePlan = iloSetupFixture();
     mocks.getIloSetup.mockImplementation(
       async ({ domain = "mail" }: { domain?: "calendar" | "finances" | "mail" | "tasks" } = {}) =>
         domain === "mail"

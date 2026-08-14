@@ -270,7 +270,7 @@ Open Settings and verify all four workspace pages, access-only Workspace access,
 
 - [ ] **Step 3: Exercise 320 px behavior and keyboard flow**
 
-Verify the mobile Settings navigation exposes every text label, action summaries stack without overflow, View checks opens and closes by keyboard, and redirects restore useful focus.
+Verify the mobile Settings navigation exposes every text label, action summaries stack without overflow, Review checks opens and closes by keyboard, and redirects restore useful focus.
 
 - [ ] **Step 4: Run the web suite after any QA corrections**
 

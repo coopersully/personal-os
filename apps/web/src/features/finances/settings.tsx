@@ -1,4 +1,8 @@
-import type { FinanceAccount, FinanceGuidedSetupContext } from "@personal-os/domain";
+import type {
+  FinanceAccount,
+  FinanceGuidedSetupContext,
+  FinanceProfile,
+} from "@personal-os/domain";
 import { Spinner } from "@personal-os/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -68,9 +72,25 @@ function emptyProfileForm(): FinanceProfileForm {
   };
 }
 
+function financeProfileForm(profile: FinanceProfile): FinanceProfileForm {
+  return {
+    effectiveDate: profile.effectiveDate,
+    employer: profile.employer ?? "",
+    employmentType: profile.employmentType ?? "",
+    expectedNetPay: profile.expectedNetPay?.toString() ?? "",
+    grossAnnualIncome: profile.grossAnnualIncome?.toString() ?? "",
+    nextPayday: profile.nextPayday ?? "",
+    payAccountId: profile.payAccountId ?? "",
+    payFrequency: profile.payFrequency ?? "",
+    role: profile.role ?? "",
+  };
+}
+
 export function FinanceSettings() {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<FinanceProfileForm>(emptyProfileForm);
+  const [formDirty, setFormDirty] = useState(false);
+  const currentMonth = new Date().toISOString().slice(0, 7);
   const setup = useQuery({
     queryFn: api.getFinanceGuidedSetup,
     queryKey: ["finance-guided-setup"],
@@ -81,7 +101,7 @@ export function FinanceSettings() {
   });
   const overview = useQuery({
     queryFn: api.getFinanceOverview,
-    queryKey: ["finance-overview", "settings"],
+    queryKey: ["finance-overview", currentMonth],
   });
   const financialProfile = useQuery({
     queryFn: api.getFinanceProfile,
@@ -125,28 +145,22 @@ export function FinanceSettings() {
         payFrequency: form.payFrequency || null,
         role: form.role.trim() || null,
       }),
-    onSuccess: () =>
-      Promise.all([
+    onSuccess: (profile) => {
+      queryClient.setQueryData(["finance-profile"], profile);
+      setForm(financeProfileForm(profile));
+      setFormDirty(false);
+      return Promise.all([
         queryClient.invalidateQueries({ queryKey: ["finance-profile"] }),
         queryClient.invalidateQueries({ queryKey: ["finance-guided-setup"] }),
         queryClient.invalidateQueries({ queryKey: ["finances", "guided-setup"] }),
-      ]),
+      ]);
+    },
   });
 
   useEffect(() => {
-    if (!financialProfile.data) return;
-    setForm({
-      effectiveDate: financialProfile.data.effectiveDate,
-      employer: financialProfile.data.employer ?? "",
-      employmentType: financialProfile.data.employmentType ?? "",
-      expectedNetPay: financialProfile.data.expectedNetPay?.toString() ?? "",
-      grossAnnualIncome: financialProfile.data.grossAnnualIncome?.toString() ?? "",
-      nextPayday: financialProfile.data.nextPayday ?? "",
-      payAccountId: financialProfile.data.payAccountId ?? "",
-      payFrequency: financialProfile.data.payFrequency ?? "",
-      role: financialProfile.data.role ?? "",
-    });
-  }, [financialProfile.data]);
+    if (!financialProfile.data || formDirty) return;
+    setForm(financeProfileForm(financialProfile.data));
+  }, [financialProfile.data, formDirty]);
 
   return (
     <div className="agent-access" id="guidance">
@@ -166,7 +180,10 @@ export function FinanceSettings() {
         error={financialProfile.error ?? saveProfile.error}
         form={form}
         loading={financialProfile.isPending || overview.isPending}
-        onChange={setForm}
+        onChange={(update) => {
+          setFormDirty(true);
+          setForm(update);
+        }}
         onSave={() => saveProfile.mutate()}
         saving={saveProfile.isPending}
       />

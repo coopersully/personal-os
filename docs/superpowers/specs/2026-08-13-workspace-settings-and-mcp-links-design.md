@@ -123,7 +123,7 @@ and **Not allowed**. Every capability item starts with a stable semantic
 icon—check circle, hand, or x circle—while the existing wording remains in
 place as the readable source of truth.
 
-Loading, unavailable, no connected host, no granted access, read only, and
+Loading, unavailable, no connected host, no granted access, read-only, and
 read/write or proposal authority are distinct states. The interface never
 converts an unavailable authority query into **Not allowed**. Exact scope IDs
 remain available in disclosed technical detail on **Connected agents**; this
@@ -294,8 +294,8 @@ healthy process alone is not sufficient production evidence.
 
 - A failed configuration query produces **Unavailable**, not **No settings
   action needed**.
-- A healthy workspace with zero operational reviews remains **No settings
-  action needed** and does not render an empty review card.
+- A healthy workspace with zero operational reviews renders no settings action
+  region or reassurance banner and does not render an empty review card.
 - A completed setup with an unrelated source warning identifies the source
   warning without regressing the setup phase.
 - A draft configuration names the person-owned approval action and opens the

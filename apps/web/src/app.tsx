@@ -4445,19 +4445,20 @@ function SettingsSidebarNavigation({
           <ShadcnSidebarGroupContent>
             <nav aria-label={group.label}>
               <ShadcnSidebarMenu>
-                {group.items.map(({ icon, id, label }) => (
-                  <SidebarNavigationItem
-                    {...(workspaceActionBadge(id, workspaceActions)
-                      ? { badge: "Action required" }
-                      : {})}
-                    icon={icon}
-                    isActive={section === id}
-                    key={id}
-                    label={label}
-                    onNavigate={onNavigate}
-                    path={settingsSectionPath(id)}
-                  />
-                ))}
+                {group.items.map(({ icon, id, label }) => {
+                  const badge = workspaceActionBadge(id, workspaceActions);
+                  return (
+                    <SidebarNavigationItem
+                      {...(badge ? { badge } : {})}
+                      icon={icon}
+                      isActive={section === id}
+                      key={id}
+                      label={label}
+                      onNavigate={onNavigate}
+                      path={settingsSectionPath(id)}
+                    />
+                  );
+                })}
               </ShadcnSidebarMenu>
             </nav>
           </ShadcnSidebarGroupContent>

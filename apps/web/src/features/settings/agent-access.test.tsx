@@ -560,15 +560,16 @@ describe("agent access settings", () => {
     expect(allowed.querySelector("svg")).not.toBeInTheDocument();
     expect(approvalRequired.querySelector("svg")).not.toBeInTheDocument();
     expect(notAllowed.querySelector("svg")).not.toBeInTheDocument();
-    expect(allowed.parentElement?.querySelectorAll('li svg[data-tier="allowed"]')).not.toHaveLength(
-      0,
-    );
     expect(
-      approvalRequired.parentElement?.querySelectorAll('li svg[data-tier="approval-required"]'),
-    ).not.toHaveLength(0);
+      allowed.parentElement?.querySelectorAll('li svg[data-tier="allowed"]').length ?? 0,
+    ).toBeGreaterThan(0);
     expect(
-      notAllowed.parentElement?.querySelectorAll('li svg[data-tier="not-allowed"]'),
-    ).not.toHaveLength(0);
+      approvalRequired.parentElement?.querySelectorAll('li svg[data-tier="approval-required"]')
+        .length ?? 0,
+    ).toBeGreaterThan(0);
+    expect(
+      notAllowed.parentElement?.querySelectorAll('li svg[data-tier="not-allowed"]').length ?? 0,
+    ).toBeGreaterThan(0);
 
     await browser.click(screen.getByRole("radio", { name: "Tasks" }));
     expect(screen.getByLabelText("Current location")).toHaveTextContent(
@@ -809,6 +810,14 @@ describe("agent access settings", () => {
         expectedVersion: 1,
       }),
     );
+  });
+
+  it("reports agent-owned setup work without presenting a person action", async () => {
+    renderSettings("/settings?section=calendar");
+
+    expect(await screen.findByText("Setup in progress")).toBeVisible();
+    expect(screen.getByText(/agent should inspect calendar material/i)).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Connect agent" })).not.toBeInTheDocument();
   });
 
   it("keeps missing sources and connection-guide failures actionable", async () => {

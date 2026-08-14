@@ -271,6 +271,10 @@ describe.sequential("Agent Access work-item projection", () => {
           }),
           title: "Review Statements",
         }),
+        expect.objectContaining({
+          action: { label: "Review guidance", to: "/settings?section=finances#guidance" },
+          title: "Review Finances guidance",
+        }),
       ]),
     );
     expect(reviews.filteredTotal).toBe(3);

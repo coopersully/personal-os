@@ -207,8 +207,8 @@ requireMatch(
 );
 requireMatch(
   workflowSource,
-  /select\(\.name == "APP_BASE_URL" and \.value == \$app_url\)[\s\S]*?Rendered MCP task definition is missing the canonical APP_BASE_URL/,
-  "post-render validation of the MCP application origin",
+  /select\(\.name == "APP_BASE_URL"\)[\s\S]*?as \$app_base_urls[\s\S]*?\(\$app_base_urls \| length\) == 1[\s\S]*?\$app_base_urls\[0\]\.value == \$app_url[\s\S]*?exactly one canonical APP_BASE_URL/,
+  "post-render validation of exactly one canonical MCP application origin",
 );
 if (workflow.includes("--desired-status PENDING")) {
   throw new Error(

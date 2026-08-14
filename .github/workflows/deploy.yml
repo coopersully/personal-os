@@ -420,10 +420,12 @@ jobs:
                   .containerDefinitions[]
                   | select(.name == "mcp")
                   | .environment[]?
-                  | select(.name == "APP_BASE_URL" and .value == $app_url)
-                ] | length) == 1' \
+                  | select(.name == "APP_BASE_URL")
+                ] as $app_base_urls
+                | ($app_base_urls | length) == 1
+                  and $app_base_urls[0].value == $app_url' \
                 "$task_file" >/dev/null || {
-                  echo "::error::Rendered MCP task definition is missing the canonical APP_BASE_URL."
+                  echo "::error::Rendered MCP task definition must contain exactly one canonical APP_BASE_URL."
                   exit 1
                 }
             fi

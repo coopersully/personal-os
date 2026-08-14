@@ -386,7 +386,7 @@ function projectItems({
     for (const profile of results.profiles ?? []) {
       if (profile.domain !== "finances") continue;
       items.push({
-        action: { label: "Review guidance", to: "/finances/profile" },
+        action: { label: "Review guidance", to: "/settings?section=finances#guidance" },
         actionAt: null,
         domain: "finances",
         id: `profile:${profile.id}:${profile.version}`,

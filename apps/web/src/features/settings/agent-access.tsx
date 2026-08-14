@@ -9,9 +9,11 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
+  ApprovalHandIcon,
   ChevronDownIcon,
   CircleCheckIcon,
   ClipboardIcon,
+  ErrorIcon,
   ExternalLinkIcon,
   KeyIcon,
   PlugIcon,
@@ -438,9 +440,17 @@ function AgentAccessSettings({
               </div>
               <p className="agent-access__source-scope">{capability.sourceScope}</p>
               <div className="agent-access__capability-lists">
-                <CapabilityList items={capability.allowed} label="Allowed" />
-                <CapabilityList items={capability.approvalRequired} label="Needs your approval" />
-                <CapabilityList items={capability.unavailable} label="Not allowed" />
+                <CapabilityList items={capability.allowed} label="Allowed" tier="allowed" />
+                <CapabilityList
+                  items={capability.approvalRequired}
+                  label="Needs your approval"
+                  tier="approval-required"
+                />
+                <CapabilityList
+                  items={capability.unavailable}
+                  label="Not allowed"
+                  tier="not-allowed"
+                />
               </div>
             </section>
           </CardContent>
@@ -846,13 +856,35 @@ function formatCandidateActions(actions: MailRulePreview["candidates"][number]["
     .join("; ");
 }
 
-function CapabilityList({ items, label }: { items: string[]; label: string }) {
+function CapabilityList({
+  items,
+  label,
+  tier,
+}: {
+  items: string[];
+  label: string;
+  tier: "allowed" | "approval-required" | "not-allowed";
+}) {
+  const TierIcon =
+    tier === "allowed"
+      ? CircleCheckIcon
+      : tier === "approval-required"
+        ? ApprovalHandIcon
+        : ErrorIcon;
+
   return (
     <div>
       <h4>{label}</h4>
       <ul>
         {items.map((item) => (
-          <li key={item}>{item}</li>
+          <li data-tier={tier} key={item}>
+            <TierIcon
+              aria-hidden="true"
+              className="agent-access__capability-tier-icon"
+              data-tier={tier}
+            />
+            {item}
+          </li>
         ))}
       </ul>
     </div>

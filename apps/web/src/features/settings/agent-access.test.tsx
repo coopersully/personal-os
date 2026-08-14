@@ -541,17 +541,34 @@ describe("agent access settings", () => {
 
   it("keeps workspace access limited to agent authority and separates connected agents", async () => {
     const browser = userEvent.setup();
-    renderSettings("/settings?section=workspace-access&workspace=calendar");
+    renderSettings("/settings?section=workspace-access&workspace=mail");
 
     expect(await screen.findByRole("heading", { name: "Workspace access" })).toBeInTheDocument();
     expect(screen.queryByText("Your action queue")).not.toBeInTheDocument();
     expect(screen.queryByText("Access management")).not.toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Calendar" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "Mail" })).toBeChecked();
     expect(screen.queryByText("Calendar readiness")).not.toBeInTheDocument();
+    await screen.findByRole("heading", { name: "Mail profiles, previews, and approved rules" });
     expect(
       screen.queryByRole("button", { name: /Let the agent set up Ilo/ }),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: "Calendar" })).not.toHaveTextContent("Not set up");
+    expect(screen.getByRole("radio", { name: "Mail" })).not.toHaveTextContent("Not set up");
+
+    const allowed = screen.getByRole("heading", { name: "Allowed" });
+    const approvalRequired = screen.getByRole("heading", { name: "Needs your approval" });
+    const notAllowed = screen.getByRole("heading", { name: "Not allowed" });
+    expect(allowed.querySelector("svg")).not.toBeInTheDocument();
+    expect(approvalRequired.querySelector("svg")).not.toBeInTheDocument();
+    expect(notAllowed.querySelector("svg")).not.toBeInTheDocument();
+    expect(allowed.parentElement?.querySelectorAll('li svg[data-tier="allowed"]')).not.toHaveLength(
+      0,
+    );
+    expect(
+      approvalRequired.parentElement?.querySelectorAll('li svg[data-tier="approval-required"]'),
+    ).not.toHaveLength(0);
+    expect(
+      notAllowed.parentElement?.querySelectorAll('li svg[data-tier="not-allowed"]'),
+    ).not.toHaveLength(0);
 
     await browser.click(screen.getByRole("radio", { name: "Tasks" }));
     expect(screen.getByLabelText("Current location")).toHaveTextContent(

@@ -118,6 +118,11 @@ The selected-workspace detail, if retained, may explain exact capabilities and
 limits by host. It may not include readiness checks, setup phases, source
 health, guidance drafts, pending review counts, or setup instructions.
 
+Its three access tiers remain labelled **Allowed**, **Needs your approval**,
+and **Not allowed**. Every capability item starts with a stable semantic
+icon—check circle, hand, or x circle—while the existing wording remains in
+place as the readable source of truth.
+
 Loading, unavailable, no connected host, no granted access, read only, and
 read/write or proposal authority are distinct states. The interface never
 converts an unavailable authority query into **Not allowed**. Exact scope IDs

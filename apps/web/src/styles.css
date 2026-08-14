@@ -3643,12 +3643,23 @@ p {
   font-size: 12px;
   margin: 0 0 6px;
 }
+.agent-access__capability-tier-icon {
+  flex: 0 0 auto;
+  height: 14px;
+  width: 14px;
+}
 .agent-access__capability-lists ul {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
   margin: 0;
-  padding-left: 16px;
+  padding: 0;
+}
+.agent-access__capability-lists li {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  list-style: none;
 }
 .reviews-page {
   display: flex;

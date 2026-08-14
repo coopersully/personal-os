@@ -26,6 +26,16 @@ icon = "check"
 command = "bash ./.codex/scripts/environment.sh status"
 
 [[actions]]
+name = "Production Status"
+icon = "check"
+command = "bash ./.codex/scripts/environment.sh production-status"
+
+[[actions]]
+name = "Stop Production"
+icon = "run"
+command = "bash ./.codex/scripts/environment.sh production-stop"
+
+[[actions]]
 name = "Logs"
 icon = "check"
 command = "bash ./.codex/scripts/environment.sh logs"

@@ -16,8 +16,16 @@ const outputs = readFileSync(resolve(root, "infra/outputs.tf"), "utf8");
 
 const required = [
   [runtime, /resource "aws_security_group" "local_production_tunnel"/, "tunnel security group"],
-  [runtime, /resource "aws_security_group_rule" "database_from_local_production_tunnel"/, "database SG-to-SG ingress"],
-  [runtime, /source_security_group_id\s*=\s*aws_security_group\.local_production_tunnel\.id/, "database source security group"],
+  [
+    runtime,
+    /resource "aws_security_group_rule" "database_from_local_production_tunnel"/,
+    "database SG-to-SG ingress",
+  ],
+  [
+    runtime,
+    /source_security_group_id\s*=\s*aws_security_group\.local_production_tunnel\.id/,
+    "database source security group",
+  ],
   [runtime, /resource "aws_instance" "local_production_tunnel"/, "tunnel instance"],
   [runtime, /http_tokens\s*=\s*"required"/, "required IMDSv2"],
   [runtime, /key_name\s*=\s*null/, "explicitly absent SSH key"],
@@ -35,7 +43,8 @@ const required = [
 ];
 
 for (const [source, pattern, label] of required) {
-  if (!pattern.test(source)) throw new Error(`Missing local production runtime contract: ${label}.`);
+  if (!pattern.test(source))
+    throw new Error(`Missing local production runtime contract: ${label}.`);
 }
 
 const tunnelSecurityGroup = runtime.match(

@@ -45,6 +45,35 @@
 
 Generate the encryption key outside the repository and store it in the deployment platform's secret manager. Rotating it requires reauthorizing currently connected accounts.
 
+## Local source against live production
+
+The repository can run one worktree's local API, MCP server, and web app against the live production
+database through the no-ingress Session Manager tunnel declared in
+`infra/local-production-runtime.tf`. This mode is intentionally a full production writer. It starts
+the current API source with migrations and background schedulers enabled, projects the deployed ECS
+API task's exact SSM-backed configuration into process memory, and preserves normal connector and
+provider behavior.
+
+RDS stays private. The local PostgreSQL URL connects to loopback, crosses the authenticated SSM
+remote-host port forward, and verifies the RDS CA chain with `sslmode=verify-ca`. Hostname validation
+cannot use `verify-full` after the URL host becomes loopback; the SSM target, exact RDS identifier,
+private-state check, security groups, and CA verification jointly authenticate the path.
+
+Apply the infrastructure only with a reviewed plan and set
+`local_production_runtime_principal_arn` to an exact named non-root operator principal. The start
+command requires this acknowledgement on every invocation:
+
+```bash
+ILO_PRODUCTION_SOURCE_PROFILE=<named-ilo-operator-profile> \
+ILO_PRODUCTION_RUNTIME=I_UNDERSTAND_THIS_IS_PRODUCTION \
+pnpm env:prod:start
+```
+
+The runtime refuses an unexpected, public, or unavailable RDS instance; an untagged or ambiguous
+tunnel; missing deployed parameters; unowned local ports; and tunnel or service readiness failures.
+It never persists production parameters, assumed-role credentials, or database URLs. Stop and inspect
+the current worktree with `pnpm env:prod:stop` and `pnpm env:prod:status`.
+
 Hosted deployments should set both `EMAIL_FROM` and `RESEND_API_KEY`. Without them, development safely suppresses transactional email, but users cannot complete email verification or recover a password.
 
 Production also refuses to start without both Google OAuth values. Store them under the configured

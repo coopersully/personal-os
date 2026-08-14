@@ -20,6 +20,15 @@ HTTPS provider traffic on TCP 443, iCloud Mail IMAP over TLS on TCP 993, and
 iCloud Mail SMTP submission on TCP 587. PostgreSQL remains in dedicated private
 subnets and accepts traffic only from application tasks.
 
+The optional local production runtime reaches the same private PostgreSQL instance through a
+dedicated, no-ingress EC2 host managed by Systems Manager. The host has no SSH key, accepts no network
+connections, and may send only PostgreSQL to the database plus DNS and HTTPS for the SSM control
+channel. RDS also accepts TCP 5432 from that host's security group. A separate scoped role can start
+or stop only this host, open only the AWS port-forwarding session document, inspect the deployed ilo
+runtime, and read only ilo's exact runtime parameters. Set
+`local_production_runtime_principal_arn` to a named non-root operator principal in private production
+tfvars; do not leave the account-wide default in a production apply.
+
 ## One-time bootstrap
 
 Terraform state is intentionally separate from the application stack.

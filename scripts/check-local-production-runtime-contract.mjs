@@ -14,6 +14,20 @@ try {
 const network = readFileSync(resolve(root, "infra/network.tf"), "utf8");
 const outputs = readFileSync(resolve(root, "infra/outputs.tf"), "utf8");
 
+function resourceBlock(source, declaration) {
+  const start = source.indexOf(declaration);
+  if (start === -1) return null;
+  const openingBrace = source.indexOf("{", start + declaration.length);
+  if (openingBrace === -1) return null;
+  let depth = 0;
+  for (let index = openingBrace; index < source.length; index += 1) {
+    if (source[index] === "{") depth += 1;
+    if (source[index] === "}") depth -= 1;
+    if (depth === 0) return source.slice(start, index + 1);
+  }
+  return null;
+}
+
 const required = [
   [runtime, /resource "aws_security_group" "local_production_tunnel"/, "tunnel security group"],
   [
@@ -47,9 +61,10 @@ for (const [source, pattern, label] of required) {
     throw new Error(`Missing local production runtime contract: ${label}.`);
 }
 
-const tunnelSecurityGroup = runtime.match(
-  /resource "aws_security_group" "local_production_tunnel" \{([\s\S]*?)\n\}/,
-)?.[1];
+const tunnelSecurityGroup = resourceBlock(
+  runtime,
+  'resource "aws_security_group" "local_production_tunnel"',
+);
 if (!tunnelSecurityGroup) throw new Error("Could not inspect the tunnel security group.");
 if (/\bingress\s*\{/.test(tunnelSecurityGroup)) {
   throw new Error("The local production tunnel security group must not have ingress rules.");

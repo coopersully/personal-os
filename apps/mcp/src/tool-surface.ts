@@ -1,6 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { AccessScope } from "@personal-os/domain";
 import { z } from "zod";
+import { createIloAppLinks } from "./app-links.js";
 import {
   canDiscoverTool,
   type IloToolDefinition,
@@ -147,13 +148,7 @@ function attachIloMetadata(raw: unknown, definition: IloToolDefinition, appBaseU
       ...value.structuredContent,
       _ilo: {
         domain: definition.domain,
-        links: {
-          activity: `${appBaseUrl}/activity`,
-          agentAccess: `${appBaseUrl}/settings?section=agents`,
-          approvals: `${appBaseUrl}/settings?section=agents`,
-          recovery: `${appBaseUrl}/settings?section=agents`,
-          today: `${appBaseUrl}/today`,
-        },
+        links: createIloAppLinks(appBaseUrl, definition.domain),
         policy: definition.policy,
         readOnly: definition.readOnly,
         stage: definition.stage,

@@ -4,6 +4,7 @@ import { type AuthInfo, createMcpHandler } from "@modelcontextprotocol/server";
 import { ApiClientError, createApiClient } from "@personal-os/api-client";
 import type { IloAgentContext } from "@personal-os/domain";
 import express, { type Request, type Response } from "express";
+import { createIloAppLinks, resolveAppBaseUrl } from "./app-links.js";
 import {
   createFixedWindowRateLimiter,
   isAllowedOrigin,
@@ -14,7 +15,10 @@ import {
 import { createPersonalOsMcpServer } from "./server.js";
 
 const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8788";
-const appBaseUrl = (process.env.APP_BASE_URL ?? "http://localhost:8081").replace(/\/$/, "");
+const appBaseUrl = resolveAppBaseUrl(process.env, {
+  production: process.env.NODE_ENV === "production",
+});
+const appLinks = createIloAppLinks(appBaseUrl, "assistant");
 const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 8789);
 const publicUrl = (process.env.MCP_PUBLIC_URL ?? `http://${host}:${port}`).replace(/\/$/, "");
@@ -73,7 +77,7 @@ app.use(hostHeaderValidation([new URL(publicUrl).hostname]));
 const protectedResourceMetadata = {
   authorization_servers: [authorizationServer],
   resource: resourceUrl.href,
-  resource_documentation: `${appBaseUrl}/settings?section=agents`,
+  resource_documentation: appLinks.agentAccess,
   resource_name: "ilo",
   scopes_supported: [
     "tasks:read",

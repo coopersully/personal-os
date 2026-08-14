@@ -3643,12 +3643,23 @@ p {
   font-size: 12px;
   margin: 0 0 6px;
 }
+.agent-access__capability-tier-icon {
+  flex: 0 0 auto;
+  height: 14px;
+  width: 14px;
+}
 .agent-access__capability-lists ul {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.5;
   margin: 0;
-  padding-left: 16px;
+  padding: 0;
+}
+.agent-access__capability-lists li {
+  align-items: center;
+  display: flex;
+  gap: 6px;
+  list-style: none;
 }
 .reviews-page {
   display: flex;
@@ -3737,106 +3748,6 @@ p {
   justify-content: flex-end;
   margin: 0;
   width: auto;
-}
-.agent-access__steps {
-  display: flex;
-  flex-direction: column;
-}
-.agent-access__step {
-  padding: 20px 0;
-}
-.agent-access__step-layout {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: 28px minmax(0, 1fr);
-}
-.agent-access__step + .agent-access__step {
-  border-top: 1px solid var(--line);
-}
-.agent-access__step:first-child {
-  padding-top: 0;
-}
-.agent-access__step:last-child {
-  padding-bottom: 0;
-}
-.agent-access__step-number {
-  align-items: center;
-  background: var(--surface-muted);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  display: flex;
-  font-family: var(--app-font-mono);
-  font-size: 12px;
-  font-weight: 700;
-  height: 28px;
-  justify-content: center;
-  width: 28px;
-}
-.agent-access__step[data-complete] .agent-access__step-number {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-foreground);
-}
-.agent-access__step-number svg {
-  height: 16px;
-  width: 16px;
-}
-.agent-access__step-content {
-  display: flex;
-  flex-direction: column;
-  gap: 13px;
-  min-width: 0;
-}
-.agent-access__step-content h3 {
-  font-size: 15px;
-  margin: 0;
-}
-.agent-access__step-trigger {
-  height: auto;
-  justify-content: space-between;
-  padding: 0;
-  text-align: left;
-  width: 100%;
-}
-.agent-access__step-trigger > span:first-child {
-  align-items: flex-start;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 0;
-}
-.agent-access__step-title {
-  color: var(--foreground);
-  font-size: 15px;
-  font-weight: 700;
-}
-.agent-access__step-status {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 500;
-}
-.agent-access__step-trigger svg {
-  transition: transform 160ms ease;
-}
-.agent-access__step-trigger[data-state="open"] svg {
-  transform: rotate(180deg);
-}
-.agent-access__step-details {
-  display: flex;
-  flex-direction: column;
-  gap: 13px;
-  padding-top: 13px;
-}
-.agent-access__step-details > p {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-  margin: 0;
-  max-width: 66ch;
-}
-.agent-access__protocol-steps {
-  display: flex;
-  flex-direction: column;
 }
 .agent-access__protocol-trigger[data-state="open"] svg {
   transform: rotate(180deg);
@@ -4658,13 +4569,6 @@ p {
   }
   .reviews-page__workspace-filter select {
     width: 100%;
-  }
-  .agent-access__step-layout {
-    grid-template-columns: 24px minmax(0, 1fr);
-  }
-  .agent-access__step-number {
-    height: 24px;
-    width: 24px;
   }
   .agent-access__presets {
     align-items: stretch;

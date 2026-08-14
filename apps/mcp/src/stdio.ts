@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createApiClient } from "@personal-os/api-client";
+import { resolveAppBaseUrl } from "./app-links.js";
 import { createPersonalOsMcpServer } from "./server.js";
 
 const apiUrl = process.env.PERSONAL_OS_API_URL ?? "http://127.0.0.1:8788";
+const appBaseUrl = resolveAppBaseUrl(process.env, {
+  production: process.env.NODE_ENV === "production",
+});
 const token = process.env.PERSONAL_OS_TOKEN;
 
 if (!token) {
@@ -17,7 +21,7 @@ const context = await api.getIloContext();
 serveStdio(() =>
   createPersonalOsMcpServer({
     api,
-    appBaseUrl: process.env.APP_BASE_URL ?? "http://localhost:8081",
+    appBaseUrl,
     includeCompatibilityTools: process.env.MCP_INCLUDE_COMPATIBILITY_TOOLS === "true",
     scopes: new Set(context.access.grantedScopes),
     timeZone:

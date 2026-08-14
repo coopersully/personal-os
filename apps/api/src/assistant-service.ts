@@ -283,9 +283,9 @@ export function createAssistantService({
         },
         links: {
           activity: link("/activity"),
-          agentAccess: link("/settings?section=agents"),
-          approvals: link("/settings?section=agents"),
-          recovery: link("/settings?section=agents"),
+          agentAccess: link("/settings?section=workspace-access"),
+          approvals: link("/reviews"),
+          recovery: link("/settings?section=connections"),
           today: link("/today"),
         },
         readiness,

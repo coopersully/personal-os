@@ -49,6 +49,63 @@ function checkRuntimeTaskDefinition(taskDefinition) {
   });
 }
 
+const mcpAppBaseUrlFilter = workflowSource.match(
+  /--arg app_url "\$APP_URL" \\\n\s+'([\s\S]*?)' \\\n\s+"\$task_file"/,
+)?.[1];
+if (!mcpAppBaseUrlFilter) {
+  throw new Error("Production workflow must expose the MCP APP_BASE_URL validation filter.");
+}
+
+function checkMcpAppBaseUrl(taskDefinition, appUrl = "https://app.ilo.test") {
+  return spawnSync("jq", ["-e", "--arg", "app_url", appUrl, mcpAppBaseUrlFilter], {
+    encoding: "utf8",
+    input: JSON.stringify(taskDefinition),
+  });
+}
+
+const validMcpTaskDefinition = {
+  containerDefinitions: [
+    {
+      name: "mcp",
+      environment: [{ name: "APP_BASE_URL", value: "https://app.ilo.test" }],
+    },
+  ],
+};
+const validMcpAppBaseUrlCheck = checkMcpAppBaseUrl(validMcpTaskDefinition);
+if (validMcpAppBaseUrlCheck.status !== 0) {
+  throw new Error(
+    `A canonical MCP APP_BASE_URL must pass deployment validation: ${validMcpAppBaseUrlCheck.stderr.trim()}`,
+  );
+}
+for (const invalidDefinition of [
+  {
+    containerDefinitions: [{ name: "mcp", environment: [] }],
+  },
+  {
+    containerDefinitions: [
+      {
+        name: "mcp",
+        environment: [
+          { name: "APP_BASE_URL", value: "https://app.ilo.test" },
+          { name: "APP_BASE_URL", value: "https://app.ilo.test" },
+        ],
+      },
+    ],
+  },
+  {
+    containerDefinitions: [
+      {
+        name: "mcp",
+        environment: [{ name: "APP_BASE_URL", value: "https://wrong.ilo.test" }],
+      },
+    ],
+  },
+]) {
+  if (checkMcpAppBaseUrl(invalidDefinition).status === 0) {
+    throw new Error("Missing, duplicate, or non-canonical MCP APP_BASE_URL wiring must fail.");
+  }
+}
+
 const validRuntimeTaskDefinition = {
   containerDefinitions: [
     {

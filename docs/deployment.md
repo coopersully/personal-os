@@ -54,10 +54,10 @@ the current API source with migrations and background schedulers enabled, projec
 API task's exact SSM-backed configuration into process memory, and preserves normal connector and
 provider behavior.
 
-RDS stays private. The local PostgreSQL URL connects to loopback, crosses the authenticated SSM
-remote-host port forward, and verifies the RDS CA chain with `sslmode=verify-ca`. Hostname validation
-cannot use `verify-full` after the URL host becomes loopback; the SSM target, exact RDS identifier,
-private-state check, security groups, and CA verification jointly authenticate the path.
+RDS stays private. The local PostgreSQL transport connects to loopback and crosses the authenticated
+SSM remote-host port forward, while the logical URL retains the exact RDS hostname. The database
+client overrides only the TCP destination, so `sslmode=verify-full` validates both the pinned RDS CA
+chain and the server certificate hostname.
 
 Apply the infrastructure only with a reviewed plan and set
 `local_production_runtime_principal_arn` to an exact named non-root operator principal. The start

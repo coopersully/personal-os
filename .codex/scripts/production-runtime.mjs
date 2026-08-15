@@ -64,9 +64,8 @@ export function rewriteDatabaseUrl(databaseUrl, localPort, certificatePath) {
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") {
     throw new Error("Production DATABASE_URL must use PostgreSQL.");
   }
-  url.hostname = "127.0.0.1";
   url.port = String(localPort);
-  url.searchParams.set("sslmode", "verify-ca");
+  url.searchParams.set("sslmode", "verify-full");
   url.searchParams.set("sslrootcert", certificatePath);
   return url.toString();
 }
@@ -100,6 +99,7 @@ export function projectProductionEnvironment({ certificatePath, local, parameter
     ALLOWED_ORIGINS: `${local.webUrl},tauri://localhost,http://tauri.localhost`,
     API_BASE_URL: local.apiUrl,
     APP_BASE_URL: local.webUrl,
+    DATABASE_CONNECT_HOST: "127.0.0.1",
     DATABASE_URL: rewriteDatabaseUrl(projected.DATABASE_URL, local.databasePort, certificatePath),
     GOOGLE_CALENDAR_PUSH_ENABLED: "false",
     GOOGLE_GMAIL_PUSH_ENABLED: "false",
@@ -142,6 +142,51 @@ export function buildPortForwardingSessionArgs({
       portNumber: [String(databasePort)],
       localPortNumber: [String(localPort)],
     }),
+  ];
+}
+
+export function buildStopTunnelInstanceArgs(instanceId, region) {
+  return [
+    "ec2",
+    "stop-instances",
+    "--region",
+    region,
+    "--instance-ids",
+    instanceId,
+    "--output",
+    "json",
+  ];
+}
+
+export function parseTunnelSessionId(output) {
+  return output.match(/Starting session with SessionId:\s*([A-Za-z0-9_-]+)/u)?.[1];
+}
+
+export function buildTerminateTunnelSessionArgs(sessionId, region) {
+  return [
+    "ssm",
+    "terminate-session",
+    "--region",
+    region,
+    "--session-id",
+    sessionId,
+    "--output",
+    "json",
+  ];
+}
+
+function buildDescribeActiveTunnelSessionsArgs(instanceId, region) {
+  return [
+    "ssm",
+    "describe-sessions",
+    "--region",
+    region,
+    "--state",
+    "Active",
+    "--filters",
+    `key=Target,value=${instanceId}`,
+    "--output",
+    "json",
   ];
 }
 
@@ -392,6 +437,39 @@ function signalProcessGroup(child, signal = "SIGTERM") {
   }
 }
 
+async function stopTunnelInstanceWhenIdle({ awsEnvironment, instanceId, region }) {
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    let sessions;
+    try {
+      sessions = awsJson(
+        buildDescribeActiveTunnelSessionsArgs(instanceId, region),
+        awsEnvironment,
+      ).Sessions;
+    } catch {
+      process.stderr.write(
+        "[personal-os] warning: could not verify whether the production tunnel instance is idle; leaving it running.\n",
+      );
+      return;
+    }
+    if (!Array.isArray(sessions) || sessions.length === 0) {
+      const stopped = spawnSync("aws", buildStopTunnelInstanceArgs(instanceId, region), {
+        env: awsEnvironment,
+        stdio: "ignore",
+      });
+      if (stopped.status !== 0) {
+        process.stderr.write(
+          "[personal-os] warning: could not stop the idle production tunnel instance.\n",
+        );
+      }
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  process.stdout.write(
+    "[personal-os] another production tunnel session remains active; leaving the shared instance running.\n",
+  );
+}
+
 async function commandStart(options) {
   assertProductionAcknowledgement(process.env);
   const root = requiredOption(options, "root");
@@ -423,13 +501,28 @@ async function commandStart(options) {
 
   const children = [];
   const secretValues = [];
+  let awsEnvironment;
   let stopping = false;
+  let tunnelInstanceId;
+  let tunnelSessionId;
   const cleanup = async () => {
     if (stopping) return;
     stopping = true;
     for (const child of [...children].reverse()) signalProcessGroup(child);
     await new Promise((resolve) => setTimeout(resolve, 500));
     for (const child of [...children].reverse()) signalProcessGroup(child, "SIGKILL");
+    if (awsEnvironment && tunnelSessionId) {
+      try {
+        awsJson(buildTerminateTunnelSessionArgs(tunnelSessionId, region), awsEnvironment);
+      } catch {
+        process.stderr.write(
+          "[personal-os] warning: could not terminate the owned production tunnel session.\n",
+        );
+      }
+    }
+    if (awsEnvironment && tunnelInstanceId) {
+      await stopTunnelInstanceWhenIdle({ awsEnvironment, instanceId: tunnelInstanceId, region });
+    }
     rmSync(metadataPath, { force: true });
   };
   const shutdown = () => void cleanup().then(() => process.exit(0));
@@ -440,7 +533,7 @@ async function commandStart(options) {
     const sessionName = `ilo-local-${basename(root)
       .replace(/[^a-zA-Z0-9+=,.@_-]/g, "-")
       .slice(0, 32)}-${process.pid}`;
-    const awsEnvironment = assumedAwsEnvironment(sourceProfile, region, sessionName);
+    awsEnvironment = assumedAwsEnvironment(sourceProfile, region, sessionName);
     const rds = awsJson(
       [
         "rds",
@@ -474,6 +567,7 @@ async function commandStart(options) {
     const tunnelInstance = selectTunnelInstance(
       (ec2.Reservations ?? []).flatMap((reservation) => reservation.Instances ?? []),
     );
+    tunnelInstanceId = tunnelInstance.InstanceId;
     if (tunnelInstance.State?.Name === "stopping") {
       spawnSync(
         "aws",
@@ -601,7 +695,8 @@ async function commandStart(options) {
 
     const certificatePath = join(productionDir, "aws-rds-global-bundle.pem");
     await ensureCertificate(certificatePath);
-    const tunnelLog = openSync(join(logsDir, "tunnel.log"), "w", 0o600);
+    const tunnelLogPath = join(logsDir, "tunnel.log");
+    const tunnelLog = openSync(tunnelLogPath, "w", 0o600);
     const tunnel = spawn(
       "aws",
       buildPortForwardingSessionArgs({
@@ -624,6 +719,20 @@ async function commandStart(options) {
       "the production database tunnel",
       45_000,
       500,
+    );
+    await waitFor(
+      () => {
+        tunnelSessionId = parseTunnelSessionId(readFileSync(tunnelLogPath, "utf8"));
+        return tunnelSessionId !== undefined;
+      },
+      "the production tunnel session identity",
+      5_000,
+      100,
+    );
+    writeFileSync(
+      metadataPath,
+      `${JSON.stringify({ ...metadata, tunnelInstanceId, tunnelSessionId })}\n`,
+      { mode: 0o600 },
     );
 
     const environment = projectProductionEnvironment({

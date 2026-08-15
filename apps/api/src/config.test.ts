@@ -59,6 +59,19 @@ describe("API configuration", () => {
     expect(loadConfig({ ...required, EMAIL_FROM: "" }).emailFrom).toBe("");
   });
 
+  it("projects an explicit database transport override without changing the logical URL", () => {
+    expect(
+      loadConfig({
+        ...required,
+        DATABASE_CONNECT_HOST: "127.0.0.1",
+        DATABASE_URL: "postgresql://app@prod.internal:55438/personal_os?sslmode=verify-full",
+      }),
+    ).toMatchObject({
+      databaseConnectHost: "127.0.0.1",
+      databaseUrl: "postgresql://app@prod.internal:55438/personal_os?sslmode=verify-full",
+    });
+  });
+
   it("fails closed unless enabled Gmail push configuration is complete", () => {
     expect(() => loadConfig({ ...required, GOOGLE_GMAIL_PUSH_ENABLED: "true" })).toThrow(
       "GOOGLE_GMAIL_PUBSUB_SUBSCRIPTION is required",

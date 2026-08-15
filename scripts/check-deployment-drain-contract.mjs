@@ -110,7 +110,10 @@ const validRuntimeTaskDefinition = {
   containerDefinitions: [
     {
       name: "api",
-      environment: [{ name: "NODE_ENV", value: "production" }],
+      environment: [
+        { name: "NODE_ENV", value: "production" },
+        { name: "PLAID_ENV", value: "production" },
+      ],
       secrets: [
         {
           name: "GOOGLE_CLIENT_ID",
@@ -121,6 +124,15 @@ const validRuntimeTaskDefinition = {
           name: "GOOGLE_CLIENT_SECRET",
           valueFrom:
             "arn:aws:ssm:us-east-1:123456789012:parameter/personal-os/prod/GOOGLE_CLIENT_SECRET",
+        },
+        {
+          name: "PLAID_CLIENT_ID",
+          valueFrom:
+            "arn:aws:ssm:us-east-1:123456789012:parameter/personal-os/prod/PLAID_CLIENT_ID",
+        },
+        {
+          name: "PLAID_SECRET",
+          valueFrom: "arn:aws:ssm:us-east-1:123456789012:parameter/personal-os/prod/PLAID_SECRET",
         },
       ],
     },
@@ -207,6 +219,42 @@ for (const invalidDefinition of [
   }
   if (invalidRuntimeCheck.stderr.includes("plain-text-is-not-a-runtime-reference")) {
     throw new Error("Runtime preflight failures must not echo rejected configuration values.");
+  }
+}
+
+for (const invalidDefinition of [
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        environment: [
+          { name: "NODE_ENV", value: "production" },
+          { name: "PLAID_ENV", value: "sandbox" },
+        ],
+      },
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        secrets: validRuntimeTaskDefinition.containerDefinitions[0].secrets.filter(
+          ({ name }) => name !== "PLAID_SECRET",
+        ),
+      },
+    ],
+  },
+]) {
+  const invalidRuntimeCheck = checkRuntimeTaskDefinition(invalidDefinition);
+  if (invalidRuntimeCheck.status === 0) {
+    throw new Error("Sandbox or incomplete Plaid runtime wiring must fail before API drain.");
+  }
+  if (!invalidRuntimeCheck.stderr.includes("Plaid production runtime configuration is not ready")) {
+    throw new Error(
+      "Plaid runtime preflight failures must use the safe operator-facing diagnostic.",
+    );
   }
 }
 

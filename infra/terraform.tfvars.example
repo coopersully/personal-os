@@ -14,7 +14,7 @@ email_from        = "ilo <noreply@example.com>"
 
 # Enable only when the matching client ID and secret parameters are configured.
 plaid_enabled     = false
-plaid_environment = "sandbox"
+plaid_environment = "production"
 x_enabled         = false
 
 # Keep low-latency modes disabled until the production evidence checklist is complete.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createPlaidConnector } from "./index.js";
+import { ConnectorError, createPlaidConnector } from "./index.js";
 
 const linkInput = {
   clientName: "ilo",
@@ -10,6 +10,21 @@ const linkInput = {
   transactions: { daysRequested: 730 },
   userId: "user-1",
 } as const;
+
+async function connectorErrorFrom(operation: () => Promise<unknown>): Promise<ConnectorError> {
+  try {
+    await operation();
+  } catch (error) {
+    if (error instanceof ConnectorError) return error;
+  }
+  throw new Error("Expected a ConnectorError.");
+}
+
+function assertRedactedMessage(message: string, sensitiveValues: readonly string[]): void {
+  if (sensitiveValues.some((value) => message.includes(value))) {
+    throw new Error("Redaction regression: connector error contains sensitive material.");
+  }
+}
 
 describe("Plaid connector", () => {
   it("sends a Link token request to the configured Plaid environment and parses its token", async () => {
@@ -181,11 +196,13 @@ describe("Plaid connector", () => {
     });
 
     for (const plaid of [temporary, transport]) {
-      await expect(plaid.validateCredentials()).rejects.toMatchObject({
-        disposition: "retry",
-      });
-      await expect(plaid.validateCredentials()).rejects.not.toThrow(rawProviderMessage);
-      await expect(plaid.validateCredentials()).rejects.not.toThrow("connector-secret");
+      const error = await connectorErrorFrom(() => plaid.validateCredentials());
+      expect(error.disposition).toBe("retry");
+      assertRedactedMessage(error.message, [
+        rawProviderMessage,
+        "connector-secret",
+        "access-token",
+      ]);
     }
   });
 });

@@ -6,12 +6,54 @@ import {
   connectorSubscriptions,
   connectorSyncTriggers,
   domainProfileApprovals,
+  financeAccounts,
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
   oauthStates,
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps Finance synchronization health and expiring claims aligned", async () => {
+    const table = getTableConfig(financeAccounts);
+    expect(table.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "sync_state",
+        "sync_claim_id",
+        "sync_claim_expires_at",
+        "last_sync_attempt_at",
+        "next_sync_at",
+        "sync_error",
+        "sync_error_code",
+        "sync_error_category",
+        "sync_recovery",
+        "sync_failure_count",
+      ]),
+    );
+    expect(table.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining(["finance_accounts_sync_due_idx", "finance_accounts_sync_claim_idx"]),
+    );
+    expect(table.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "finance_accounts_sync_claim_check",
+        "finance_accounts_sync_failure_count_check",
+        "finance_accounts_sync_failure_check",
+      ]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0055_finance_sync_health.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain("ADD COLUMN \"sync_state\" text DEFAULT 'stale' NOT NULL");
+    expect(migrationSql).toContain('ADD COLUMN "sync_claim_expires_at" timestamptz');
+    expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_due_idx"');
+    expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_claim_idx"');
+    expect(migrationSql).toContain("\"provider\" = 'manual'");
+    expect(migrationSql).toContain("INTERVAL '24 hours'");
+    expect(migrationSql).toContain('"next_sync_at" = NOW()');
+    expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
   it("keeps connector notification storage bounded and coalesced", async () => {
     const subscriptions = getTableConfig(connectorSubscriptions);
     const triggers = getTableConfig(connectorSyncTriggers);

@@ -1295,15 +1295,53 @@ export const financeAccounts = pgTable(
     providerAccountId: text("provider_account_id"),
     providerItemId: text("provider_item_id"),
     syncCursor: text("sync_cursor"),
+    syncState: text("sync_state")
+      .$type<"current" | "stale" | "retrying" | "blocked">()
+      .notNull()
+      .default("stale"),
+    syncClaimId: uuid("sync_claim_id"),
+    syncClaimExpiresAt: timestamp("sync_claim_expires_at", { withTimezone: true }),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
+    syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("finance_accounts_user_idx").on(table.userId),
+    index("finance_accounts_sync_claim_idx")
+      .on(table.syncClaimExpiresAt)
+      .where(sql`${table.syncClaimId} IS NOT NULL`),
+    index("finance_accounts_sync_due_idx")
+      .on(table.nextSyncAt, table.updatedAt)
+      .where(sql`${table.provider} = 'plaid' AND ${table.nextSyncAt} IS NOT NULL`),
     uniqueIndex("finance_accounts_provider_idx").on(
       table.userId,
       table.provider,
       table.providerAccountId,
+    ),
+    check(
+      "finance_accounts_sync_state_check",
+      sql`${table.syncState} IN ('current', 'stale', 'retrying', 'blocked')`,
+    ),
+    check(
+      "finance_accounts_sync_claim_check",
+      sql`(${table.syncClaimId} IS NULL) = (${table.syncClaimExpiresAt} IS NULL)`,
+    ),
+    check("finance_accounts_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
+    check(
+      "finance_accounts_sync_failure_check",
+      sql`(
+        (${table.syncState} IN ('current', 'stale') AND ${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncState} = 'retrying' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} = 'automatic')
+        OR
+        (${table.syncState} = 'blocked' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('operator', 'reconnect'))
+      )`,
     ),
   ],
 );

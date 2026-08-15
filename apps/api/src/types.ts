@@ -76,7 +76,7 @@ export type RequestLog = {
   nextSyncAt?: string | null;
   notificationDisposition?: "accepted" | "duplicate" | "rejected" | undefined;
   path: string;
-  provider?: Extract<CalendarProvider, "google" | "icloud"> | "x";
+  provider?: Extract<CalendarProvider, "google" | "icloud"> | "plaid" | "x";
   renewalLagMs?: number | undefined;
   requestId: string;
   status: number;

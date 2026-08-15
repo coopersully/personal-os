@@ -621,7 +621,13 @@ describe.sequential("ilo API", () => {
       profilesComplete: true,
       profilesDemoted: 0,
     });
-    await expect(app.syncDueFinances()).resolves.toEqual({ failed: 0, reasons: [], synced: 0 });
+    await expect(app.syncDueFinances()).resolves.toEqual({
+      attempted: 0,
+      failed: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 0,
+    });
   });
 
   it("enforces owner-issued, one-time invitations for private beta sign-up", async () => {
@@ -2960,7 +2966,11 @@ describe.sequential("ilo API", () => {
     expect(
       logs.mock.calls
         .map(([entry]) => entry)
-        .filter(({ event }) => event === "connector_sync_freshness_observed"),
+        .filter(
+          ({ event, path }) =>
+            event === "connector_sync_freshness_observed" &&
+            path === "/internal/connectors/freshness",
+        ),
     ).toEqual([
       expect.objectContaining({
         eligibleAccountCount: expect.any(Number),

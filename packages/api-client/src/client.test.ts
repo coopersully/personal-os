@@ -256,6 +256,16 @@ const financeAccount: FinanceAccount = {
   name: "Checking",
   provider: "manual",
   status: "manual",
+  synchronization: {
+    failureCode: null,
+    failureCount: 0,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    message: null,
+    nextRetryAt: null,
+    recovery: null,
+    state: "current",
+  },
   updatedAt: now,
 };
 const financeTransaction: FinanceTransaction = {

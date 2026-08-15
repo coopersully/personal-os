@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { PlaidConnector, PlaidTransactionSnapshot } from "@personal-os/connectors";
+import {
+  ConnectorError,
+  type PlaidConnector,
+  type PlaidTransactionSnapshot,
+} from "@personal-os/connectors";
 import {
   attentionItems,
   auditEvents,
@@ -67,6 +71,11 @@ import type {
 import { financeDomainProfileSchema, idSchema, localDateAt } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
+import {
+  classifyConnectorSyncFailure,
+  connectorRetryAt,
+  connectorSyncAppError,
+} from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import {
@@ -78,12 +87,13 @@ import {
 import { parseFinanceCsv } from "./finance-csv.js";
 import { decryptJson, encryptJson } from "./security.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
-import type { Principal } from "./types.js";
+import type { Principal, RequestLog } from "./types.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 type Options = {
   db: Database;
   encryptionKey?: string;
+  log?: (entry: RequestLog) => void;
   now: () => Date;
   onProposalSnapshotRead?: () => Promise<void>;
   plaid?: PlaidConnector;
@@ -95,6 +105,19 @@ type PlaidCredentials = { accessToken: string };
 type PlaidCategoryConfidence = NonNullable<
   PlaidTransactionSnapshot["personalFinanceCategory"]
 >["confidenceLevel"];
+
+export type FinanceSyncBatchResult = {
+  attempted: number;
+  failed: number;
+  recovered: number;
+  skipped: number;
+  succeeded: number;
+};
+
+const financeSyncClaimMs = 5 * 60_000;
+const financeSyncIntervalMs = 6 * 60 * 60_000;
+const financeSyncBatchLimit = 25;
+const financeSyncConcurrency = 3;
 
 const categoryRules: Array<[RegExp, string]> = [
   [/uber|lyft|mta|transit|amtrak|airlines/i, "Transportation"],
@@ -362,6 +385,16 @@ function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
     name: row.name,
     provider: row.provider,
     status: row.status,
+    synchronization: {
+      failureCode: row.syncErrorCode,
+      failureCount: row.syncFailureCount,
+      lastAttemptAt: row.lastSyncAttemptAt?.toISOString() ?? null,
+      lastSuccessAt: row.lastSyncedAt?.toISOString() ?? null,
+      message: row.syncError,
+      nextRetryAt: row.syncFailureCount > 0 ? (row.nextSyncAt?.toISOString() ?? null) : null,
+      recovery: row.syncRecovery,
+      state: row.syncState,
+    },
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -472,6 +505,7 @@ function merchantAuditSnapshot(value: FinanceMerchant) {
 export function createFinanceService({
   db,
   encryptionKey,
+  log,
   now,
   onProposalSnapshotRead,
   plaid,
@@ -2529,6 +2563,7 @@ export function createFinanceService({
       const accountsResponse = await plaid.getAccounts(accessToken);
       const itemKey = createHash("sha256").update(accessToken).digest("hex");
       const key = getEncryptionKey();
+      const connectedAt = now();
       const rows = await db.transaction(async (tx) => {
         await ensureCategories(context.principal.userId, tx);
         await tx
@@ -2559,10 +2594,12 @@ export function createFinanceService({
                   institution: input.institution ?? "Plaid",
                   lastSyncedAt: null,
                   name: remote.officialName ?? remote.name,
+                  nextSyncAt: connectedAt,
                   provider: "plaid",
                   providerAccountId: remote.accountId,
                   providerItemId: itemKey,
                   status: "connected",
+                  syncState: "stale",
                   userId: context.principal.userId,
                 })
                 .onConflictDoUpdate({
@@ -2575,8 +2612,17 @@ export function createFinanceService({
                     name: remote.officialName ?? remote.name,
                     providerItemId: itemKey,
                     status: "connected",
+                    syncClaimExpiresAt: null,
+                    syncClaimId: null,
                     syncCursor: null,
-                    updatedAt: now(),
+                    syncError: null,
+                    syncErrorCategory: null,
+                    syncErrorCode: null,
+                    syncFailureCount: 0,
+                    syncRecovery: null,
+                    syncState: "stale",
+                    nextSyncAt: connectedAt,
+                    updatedAt: connectedAt,
                   },
                   target: [
                     financeAccounts.userId,
@@ -2613,357 +2659,617 @@ export function createFinanceService({
       ) {
         throw new AppError("invalid_request", "This is not a connected Plaid account.");
       }
-      const itemAccounts = await db
-        .select()
-        .from(financeAccounts)
-        .where(
-          before.providerItemId
-            ? and(
-                eq(financeAccounts.userId, context.principal.userId),
-                eq(financeAccounts.provider, "plaid"),
-                eq(financeAccounts.providerItemId, before.providerItemId),
-              )
-            : eq(financeAccounts.id, before.id),
-        );
-      const syncAccount = itemAccounts.find((row) => row.encryptedCredentials) ?? before;
-      const plaid = getPlaid();
-      const credentials = decryptJson<PlaidCredentials>(
-        syncAccount.encryptedCredentials as EncryptedCredentials,
-        getEncryptionKey(),
-      );
-      const accountsByProviderId = new Map(
-        itemAccounts.flatMap((row) =>
-          row.providerAccountId ? [[row.providerAccountId, row]] : [],
-        ),
-      );
-      const itemAccountIds = itemAccounts.map((row) => row.id).sort();
-      const persistedCursor = syncAccount.syncCursor;
-      let cursor = persistedCursor;
-      let hasMore = true;
-      let changed = 0;
-      const removedTransactionIds = new Set<string>();
-      const replacedPendingTransactionIds = new Set<string>();
-      while (hasMore) {
-        const page = await plaid.syncTransactions({
-          accessToken: credentials.accessToken,
-          cursor,
-        });
-        for (const removed of page.removed) {
-          removedTransactionIds.add(removed.transactionId);
-        }
-        for (const remote of [...page.added, ...page.modified]) {
-          if (remote.pendingTransactionId) {
-            replacedPendingTransactionIds.add(remote.pendingTransactionId);
-          }
-        }
-        const prepared = await Promise.all(
-          [...page.added, ...page.modified]
-            .filter((remote) => accountsByProviderId.has(remote.accountId))
-            .map(async (remote) => {
-              const merchant = remote.merchantName ?? remote.name;
-              const learned = await learnedCategory(context.principal.userId, merchant);
-              const automatic = learned ? categorization(merchant, learned) : null;
-              const providerCategory = remote.personalFinanceCategory;
-              const inferred = isRentMerchant(merchant)
-                ? categorization(merchant)
-                : (automatic ??
-                  (providerCategory?.primary
-                    ? {
-                        category: providerCategory.primary,
-                        confidence: (() => {
-                          const confidence = providerConfidence(providerCategory.confidenceLevel);
-                          return confidence === null ? null : Math.round(confidence * 10_000);
-                        })(),
-                        needsReview: providerNeedsReview(providerCategory.confidenceLevel),
-                      }
-                    : categorization(merchant)));
-              const isTransfer =
-                !isRentMerchant(merchant) &&
-                (isSoFiVaultTransfer(merchant) || isProviderTransfer(inferred.category));
-              // These idempotent upserts intentionally happen before the page
-              // transaction. They can remain after a later page rollback or
-              // connection conflict and are reused by the replayed sync.
-              const [merchantRecord, categoryRecord] = await Promise.all([
-                merchantFor(context.principal.userId, merchant, "provider"),
-                isTransfer
-                  ? categoryForName(context.principal.userId, transferCategory)
-                  : inferred.category
-                    ? categoryForName(context.principal.userId, inferred.category)
-                    : null,
-              ]);
-              return {
-                automatic,
-                categoryRecord,
-                inferred,
-                isTransfer,
-                merchant,
-                merchantRecord,
-                providerCategory,
-                remote,
-              };
-            }),
-        );
-        await db.transaction(async (tx) => {
-          // Reconciliation takes account locks before transaction locks. Keep
-          // provider sync in the same deterministic order so the two paths
-          // cannot deadlock while touching the same item.
-          const lockedItemAccounts = await tx
+      const claimItemAccounts = before.providerItemId
+        ? await db
             .select()
             .from(financeAccounts)
-            .where(inArray(financeAccounts.id, itemAccountIds))
-            .orderBy(financeAccounts.id)
-            .for("update");
-          const currentSyncAccount = lockedItemAccounts.find(
-            (accountRow) => accountRow.id === syncAccount.id,
+            .where(
+              and(
+                eq(financeAccounts.userId, before.userId),
+                eq(financeAccounts.provider, "plaid"),
+                eq(financeAccounts.providerItemId, before.providerItemId),
+              ),
+            )
+            .orderBy(asc(financeAccounts.id))
+        : [before];
+      const claimTarget = claimItemAccounts[0] ?? before;
+      const claimItemAccountIds = claimItemAccounts.map((financeAccount) => financeAccount.id);
+      const startedAt = Date.now();
+      const attemptedAt = now();
+      const syncClaimId = randomUUID();
+      const [claimedAccount] = await db
+        .update(financeAccounts)
+        .set({
+          lastSyncAttemptAt: attemptedAt,
+          syncClaimExpiresAt: new Date(attemptedAt.getTime() + financeSyncClaimMs),
+          syncClaimId,
+        })
+        .where(
+          and(
+            eq(financeAccounts.id, claimTarget.id),
+            or(
+              isNull(financeAccounts.syncClaimId),
+              lte(financeAccounts.syncClaimExpiresAt, attemptedAt),
+            ),
+          ),
+        )
+        .returning();
+      if (!claimedAccount) {
+        throw new AppError("conflict", "This Finance account is already synchronizing.", {
+          accountId: before.id,
+        });
+      }
+      if (
+        claimedAccount.providerItemId !== claimTarget.providerItemId ||
+        claimedAccount.syncCursor !== claimTarget.syncCursor ||
+        JSON.stringify(claimedAccount.encryptedCredentials) !==
+          JSON.stringify(claimTarget.encryptedCredentials)
+      ) {
+        await db
+          .update(financeAccounts)
+          .set({ syncClaimExpiresAt: null, syncClaimId: null })
+          .where(
+            and(
+              eq(financeAccounts.id, claimedAccount.id),
+              eq(financeAccounts.syncClaimId, syncClaimId),
+            ),
           );
-          if (
-            !currentSyncAccount ||
-            currentSyncAccount.providerItemId !== syncAccount.providerItemId ||
-            currentSyncAccount.syncCursor !== persistedCursor ||
-            JSON.stringify(currentSyncAccount.encryptedCredentials) !==
-              JSON.stringify(syncAccount.encryptedCredentials)
-          ) {
-            throw new AppError(
-              "conflict",
-              "The Plaid connection changed while this sync was in progress. Retry against the current connection.",
-            );
+        throw new AppError(
+          "conflict",
+          "The Plaid connection changed while this sync was in progress. Retry against the current connection.",
+        );
+      }
+      try {
+        if (!plaid) {
+          throw new ConnectorError({
+            category: "configuration",
+            code: "plaid_configuration_missing",
+            disposition: "operator",
+            message: "Plaid is not configured for this ilo instance.",
+            status: 503,
+          });
+        }
+        if (!encryptionKey) {
+          throw new ConnectorError({
+            category: "configuration",
+            code: "finance_encryption_configuration_missing",
+            disposition: "operator",
+            message: "Finance credential encryption is not configured.",
+            status: 503,
+          });
+        }
+        const itemAccounts = await db
+          .select()
+          .from(financeAccounts)
+          .where(
+            before.providerItemId
+              ? and(
+                  eq(financeAccounts.userId, context.principal.userId),
+                  eq(financeAccounts.provider, "plaid"),
+                  eq(financeAccounts.providerItemId, before.providerItemId),
+                )
+              : eq(financeAccounts.id, before.id),
+          );
+        const syncAccount = itemAccounts.find((row) => row.encryptedCredentials) ?? before;
+        const credentials = decryptJson<PlaidCredentials>(
+          syncAccount.encryptedCredentials as EncryptedCredentials,
+          encryptionKey,
+        );
+        const accountsByProviderId = new Map(
+          itemAccounts.flatMap((row) =>
+            row.providerAccountId ? [[row.providerAccountId, row]] : [],
+          ),
+        );
+        const itemAccountIds = itemAccounts.map((row) => row.id).sort();
+        const persistedCursor = syncAccount.syncCursor;
+        let cursor = persistedCursor;
+        let hasMore = true;
+        let changed = 0;
+        const removedTransactionIds = new Set<string>();
+        const replacedPendingTransactionIds = new Set<string>();
+        while (hasMore) {
+          const page = await plaid.syncTransactions({
+            accessToken: credentials.accessToken,
+            cursor,
+          });
+          for (const removed of page.removed) {
+            removedTransactionIds.add(removed.transactionId);
           }
-          for (const {
-            automatic,
-            categoryRecord,
-            inferred,
-            isTransfer,
-            merchant,
-            merchantRecord,
-            providerCategory,
-            remote,
-          } of prepared) {
-            const localAccount = accountsByProviderId.get(remote.accountId);
-            if (!localAccount) continue;
-            const providerDirection = remote.amount < 0 ? "income" : "expense";
-            let [existingTransaction] = await tx
+          for (const remote of [...page.added, ...page.modified]) {
+            if (remote.pendingTransactionId) {
+              replacedPendingTransactionIds.add(remote.pendingTransactionId);
+            }
+          }
+          const prepared = await Promise.all(
+            [...page.added, ...page.modified]
+              .filter((remote) => accountsByProviderId.has(remote.accountId))
+              .map(async (remote) => {
+                const merchant = remote.merchantName ?? remote.name;
+                const learned = await learnedCategory(context.principal.userId, merchant);
+                const automatic = learned ? categorization(merchant, learned) : null;
+                const providerCategory = remote.personalFinanceCategory;
+                const inferred = isRentMerchant(merchant)
+                  ? categorization(merchant)
+                  : (automatic ??
+                    (providerCategory?.primary
+                      ? {
+                          category: providerCategory.primary,
+                          confidence: (() => {
+                            const confidence = providerConfidence(providerCategory.confidenceLevel);
+                            return confidence === null ? null : Math.round(confidence * 10_000);
+                          })(),
+                          needsReview: providerNeedsReview(providerCategory.confidenceLevel),
+                        }
+                      : categorization(merchant)));
+                const isTransfer =
+                  !isRentMerchant(merchant) &&
+                  (isSoFiVaultTransfer(merchant) || isProviderTransfer(inferred.category));
+                // These idempotent upserts intentionally happen before the page
+                // transaction. They can remain after a later page rollback or
+                // connection conflict and are reused by the replayed sync.
+                const [merchantRecord, categoryRecord] = await Promise.all([
+                  merchantFor(context.principal.userId, merchant, "provider"),
+                  isTransfer
+                    ? categoryForName(context.principal.userId, transferCategory)
+                    : inferred.category
+                      ? categoryForName(context.principal.userId, inferred.category)
+                      : null,
+                ]);
+                return {
+                  automatic,
+                  categoryRecord,
+                  inferred,
+                  isTransfer,
+                  merchant,
+                  merchantRecord,
+                  providerCategory,
+                  remote,
+                };
+              }),
+          );
+          await db.transaction(async (tx) => {
+            // Reconciliation takes account locks before transaction locks. Keep
+            // provider sync in the same deterministic order so the two paths
+            // cannot deadlock while touching the same item.
+            const lockedItemAccounts = await tx
               .select()
-              .from(financeTransactions)
-              .where(
-                and(
-                  eq(financeTransactions.accountId, localAccount.id),
-                  eq(financeTransactions.providerTransactionId, remote.transactionId),
-                ),
-              )
-              .for("update")
-              .limit(1);
-            if (!existingTransaction && remote.pendingTransactionId) {
-              [existingTransaction] = await tx
+              .from(financeAccounts)
+              .where(inArray(financeAccounts.id, itemAccountIds))
+              .orderBy(financeAccounts.id)
+              .for("update");
+            const currentSyncAccount = lockedItemAccounts.find(
+              (accountRow) => accountRow.id === syncAccount.id,
+            );
+            const currentClaimedAccount = lockedItemAccounts.find(
+              (accountRow) => accountRow.id === claimedAccount.id,
+            );
+            if (
+              !currentClaimedAccount ||
+              currentClaimedAccount.syncClaimId !== syncClaimId ||
+              currentClaimedAccount.syncClaimExpiresAt === null ||
+              !currentSyncAccount ||
+              currentSyncAccount.providerItemId !== syncAccount.providerItemId ||
+              currentSyncAccount.syncCursor !== persistedCursor ||
+              JSON.stringify(currentSyncAccount.encryptedCredentials) !==
+                JSON.stringify(syncAccount.encryptedCredentials)
+            ) {
+              throw new AppError(
+                "conflict",
+                "The Plaid connection changed while this sync was in progress. Retry against the current connection.",
+              );
+            }
+            for (const {
+              automatic,
+              categoryRecord,
+              inferred,
+              isTransfer,
+              merchant,
+              merchantRecord,
+              providerCategory,
+              remote,
+            } of prepared) {
+              const localAccount = accountsByProviderId.get(remote.accountId);
+              if (!localAccount) continue;
+              const providerDirection = remote.amount < 0 ? "income" : "expense";
+              let [existingTransaction] = await tx
                 .select()
                 .from(financeTransactions)
                 .where(
                   and(
                     eq(financeTransactions.accountId, localAccount.id),
-                    eq(financeTransactions.providerTransactionId, remote.pendingTransactionId),
+                    eq(financeTransactions.providerTransactionId, remote.transactionId),
                   ),
                 )
                 .for("update")
                 .limit(1);
-              if (existingTransaction) {
-                await tx
-                  .update(financeTransactions)
-                  .set({ providerTransactionId: remote.transactionId })
-                  .where(eq(financeTransactions.id, existingTransaction.id));
+              if (!existingTransaction && remote.pendingTransactionId) {
+                [existingTransaction] = await tx
+                  .select()
+                  .from(financeTransactions)
+                  .where(
+                    and(
+                      eq(financeTransactions.accountId, localAccount.id),
+                      eq(financeTransactions.providerTransactionId, remote.pendingTransactionId),
+                    ),
+                  )
+                  .for("update")
+                  .limit(1);
+                if (existingTransaction) {
+                  await tx
+                    .update(financeTransactions)
+                    .set({ providerTransactionId: remote.transactionId })
+                    .where(eq(financeTransactions.id, existingTransaction.id));
+                }
               }
-            }
-            const protectedTransaction =
-              existingTransaction &&
-              existingTransaction.categoryDecidedAt !== null &&
-              (existingTransaction.categorySource === "user" ||
-                existingTransaction.categorySource === "agent")
-                ? existingTransaction
-                : null;
-            const previousProviderDirection =
-              protectedTransaction?.providerDirection ??
-              (protectedTransaction?.direction === "expense" ||
-              protectedTransaction?.direction === "income"
-                ? protectedTransaction.direction
-                : null);
-            const providerSignChanged =
-              protectedTransaction !== null &&
-              previousProviderDirection !== null &&
-              previousProviderDirection !== providerDirection;
-            await tx
-              .insert(financeTransactions)
-              .values({
-                accountId: localAccount.id,
-                amount: Math.round(Math.abs(remote.amount) * 100),
-                category: isTransfer ? transferCategory : inferred.category,
-                categoryId: categoryRecord?.id ?? null,
-                categoryConfidence: inferred.confidence,
-                categorySource: automatic ? "rule" : providerCategory?.primary ? "provider" : null,
-                direction: isTransfer ? "transfer" : providerDirection,
-                merchant,
-                merchantId: merchantRecord.id,
-                needsReview: isTransfer ? !isSoFiVaultTransfer(merchant) : inferred.needsReview,
-                pending: remote.pending ?? false,
-                pendingTransactionId: remote.pendingTransactionId,
-                providerCategory: providerCategory?.primary ?? null,
-                providerCategoryDetailed: providerCategory?.detailed ?? null,
-                providerCategoryConfidence: providerCategory?.confidenceLevel ?? null,
-                providerDirection,
-                providerTransactionId: remote.transactionId,
-                reconciliationStatus: isSoFiVaultTransfer(merchant)
-                  ? "confirmed"
-                  : isTransfer
-                    ? "candidate"
-                    : "not_applicable",
-                transactionDate: remote.date,
-                userId: context.principal.userId,
-              })
-              .onConflictDoUpdate({
-                set: {
+              const protectedTransaction =
+                existingTransaction &&
+                existingTransaction.categoryDecidedAt !== null &&
+                (existingTransaction.categorySource === "user" ||
+                  existingTransaction.categorySource === "agent")
+                  ? existingTransaction
+                  : null;
+              const previousProviderDirection =
+                protectedTransaction?.providerDirection ??
+                (protectedTransaction?.direction === "expense" ||
+                protectedTransaction?.direction === "income"
+                  ? protectedTransaction.direction
+                  : null);
+              const providerSignChanged =
+                protectedTransaction !== null &&
+                previousProviderDirection !== null &&
+                previousProviderDirection !== providerDirection;
+              await tx
+                .insert(financeTransactions)
+                .values({
+                  accountId: localAccount.id,
                   amount: Math.round(Math.abs(remote.amount) * 100),
-                  category: protectedTransaction
-                    ? protectedTransaction.category
-                    : isTransfer
-                      ? transferCategory
-                      : inferred.category,
-                  categoryConfidence: protectedTransaction
-                    ? protectedTransaction.categoryConfidence
-                    : inferred.confidence,
-                  categoryDecidedAt: protectedTransaction
-                    ? protectedTransaction.categoryDecidedAt
-                    : null,
-                  categoryId: protectedTransaction
-                    ? protectedTransaction.categoryId
-                    : (categoryRecord?.id ?? null),
-                  categoryRationale: protectedTransaction
-                    ? protectedTransaction.categoryRationale
-                    : null,
-                  categorySource: protectedTransaction
-                    ? protectedTransaction.categorySource
-                    : automatic
-                      ? "rule"
-                      : providerCategory?.primary
-                        ? "provider"
-                        : null,
-                  direction: protectedTransaction
-                    ? providerSignChanged && protectedTransaction.direction !== "transfer"
-                      ? providerDirection
-                      : protectedTransaction.direction
-                    : isTransfer
-                      ? "transfer"
-                      : providerDirection,
+                  category: isTransfer ? transferCategory : inferred.category,
+                  categoryId: categoryRecord?.id ?? null,
+                  categoryConfidence: inferred.confidence,
+                  categorySource: automatic
+                    ? "rule"
+                    : providerCategory?.primary
+                      ? "provider"
+                      : null,
+                  direction: isTransfer ? "transfer" : providerDirection,
                   merchant,
                   merchantId: merchantRecord.id,
-                  needsReview: protectedTransaction
-                    ? providerSignChanged || protectedTransaction.needsReview
-                    : isTransfer
-                      ? !isSoFiVaultTransfer(merchant)
-                      : inferred.needsReview,
+                  needsReview: isTransfer ? !isSoFiVaultTransfer(merchant) : inferred.needsReview,
                   pending: remote.pending ?? false,
                   pendingTransactionId: remote.pendingTransactionId,
                   providerCategory: providerCategory?.primary ?? null,
                   providerCategoryDetailed: providerCategory?.detailed ?? null,
                   providerCategoryConfidence: providerCategory?.confidenceLevel ?? null,
                   providerDirection,
-                  reconciliationStatus: protectedTransaction
-                    ? protectedTransaction.reconciliationStatus
-                    : isSoFiVaultTransfer(merchant)
-                      ? "confirmed"
-                      : isTransfer
-                        ? "candidate"
-                        : "not_applicable",
+                  providerTransactionId: remote.transactionId,
+                  reconciliationStatus: isSoFiVaultTransfer(merchant)
+                    ? "confirmed"
+                    : isTransfer
+                      ? "candidate"
+                      : "not_applicable",
                   transactionDate: remote.date,
-                  transferGroupId: protectedTransaction
-                    ? protectedTransaction.transferGroupId
-                    : null,
-                  updatedAt: now(),
-                },
-                target: [financeTransactions.accountId, financeTransactions.providerTransactionId],
-              });
-            if (providerSignChanged && existingTransaction) {
-              const [existingReview] = await tx
-                .select()
-                .from(financeReviewCases)
-                .where(
-                  and(
-                    eq(financeReviewCases.transactionId, existingTransaction.id),
-                    inArray(financeReviewCases.status, ["deferred", "open"]),
-                  ),
-                )
-                .orderBy(desc(financeReviewCases.updatedAt))
-                .for("update")
-                .limit(1);
-              if (existingReview) {
-                await tx
-                  .update(financeReviewCases)
-                  .set({
+                  userId: context.principal.userId,
+                })
+                .onConflictDoUpdate({
+                  set: {
+                    amount: Math.round(Math.abs(remote.amount) * 100),
+                    category: protectedTransaction
+                      ? protectedTransaction.category
+                      : isTransfer
+                        ? transferCategory
+                        : inferred.category,
+                    categoryConfidence: protectedTransaction
+                      ? protectedTransaction.categoryConfidence
+                      : inferred.confidence,
+                    categoryDecidedAt: protectedTransaction
+                      ? protectedTransaction.categoryDecidedAt
+                      : null,
+                    categoryId: protectedTransaction
+                      ? protectedTransaction.categoryId
+                      : (categoryRecord?.id ?? null),
+                    categoryRationale: protectedTransaction
+                      ? protectedTransaction.categoryRationale
+                      : null,
+                    categorySource: protectedTransaction
+                      ? protectedTransaction.categorySource
+                      : automatic
+                        ? "rule"
+                        : providerCategory?.primary
+                          ? "provider"
+                          : null,
+                    direction: protectedTransaction
+                      ? providerSignChanged && protectedTransaction.direction !== "transfer"
+                        ? providerDirection
+                        : protectedTransaction.direction
+                      : isTransfer
+                        ? "transfer"
+                        : providerDirection,
+                    merchant,
+                    merchantId: merchantRecord.id,
+                    needsReview: protectedTransaction
+                      ? providerSignChanged || protectedTransaction.needsReview
+                      : isTransfer
+                        ? !isSoFiVaultTransfer(merchant)
+                        : inferred.needsReview,
+                    pending: remote.pending ?? false,
+                    pendingTransactionId: remote.pendingTransactionId,
+                    providerCategory: providerCategory?.primary ?? null,
+                    providerCategoryDetailed: providerCategory?.detailed ?? null,
+                    providerCategoryConfidence: providerCategory?.confidenceLevel ?? null,
+                    providerDirection,
+                    reconciliationStatus: protectedTransaction
+                      ? protectedTransaction.reconciliationStatus
+                      : isSoFiVaultTransfer(merchant)
+                        ? "confirmed"
+                        : isTransfer
+                          ? "candidate"
+                          : "not_applicable",
+                    transactionDate: remote.date,
+                    transferGroupId: protectedTransaction
+                      ? protectedTransaction.transferGroupId
+                      : null,
+                    updatedAt: now(),
+                  },
+                  target: [
+                    financeTransactions.accountId,
+                    financeTransactions.providerTransactionId,
+                  ],
+                });
+              if (providerSignChanged && existingTransaction) {
+                const [existingReview] = await tx
+                  .select()
+                  .from(financeReviewCases)
+                  .where(
+                    and(
+                      eq(financeReviewCases.transactionId, existingTransaction.id),
+                      inArray(financeReviewCases.status, ["deferred", "open"]),
+                    ),
+                  )
+                  .orderBy(desc(financeReviewCases.updatedAt))
+                  .for("update")
+                  .limit(1);
+                if (existingReview) {
+                  await tx
+                    .update(financeReviewCases)
+                    .set({
+                      rationale:
+                        "The provider changed the transaction direction after categorization.",
+                      reason: "refund_or_reversal",
+                      suggestedCategoryId: existingTransaction.categoryId,
+                      updatedAt: now(),
+                    })
+                    .where(eq(financeReviewCases.id, existingReview.id));
+                } else {
+                  await tx.insert(financeReviewCases).values({
                     rationale:
                       "The provider changed the transaction direction after categorization.",
                     reason: "refund_or_reversal",
+                    status: "open",
                     suggestedCategoryId: existingTransaction.categoryId,
-                    updatedAt: now(),
-                  })
-                  .where(eq(financeReviewCases.id, existingReview.id));
-              } else {
-                await tx.insert(financeReviewCases).values({
-                  rationale: "The provider changed the transaction direction after categorization.",
-                  reason: "refund_or_reversal",
-                  status: "open",
-                  suggestedCategoryId: existingTransaction.categoryId,
-                  transactionId: existingTransaction.id,
-                  userId: context.principal.userId,
-                });
+                    transactionId: existingTransaction.id,
+                    userId: context.principal.userId,
+                  });
+                }
               }
+              changed += 1;
             }
-            changed += 1;
-          }
-          if (!page.hasMore) {
-            const deletableTransactionIds = [...removedTransactionIds].filter(
-              (transactionId) => !replacedPendingTransactionIds.has(transactionId),
+            if (!page.hasMore) {
+              const deletableTransactionIds = [...removedTransactionIds].filter(
+                (transactionId) => !replacedPendingTransactionIds.has(transactionId),
+              );
+              for (let offset = 0; offset < deletableTransactionIds.length; offset += 1_000) {
+                const transactionIds = deletableTransactionIds.slice(offset, offset + 1_000);
+                const deleted = await tx
+                  .delete(financeTransactions)
+                  .where(
+                    and(
+                      inArray(financeTransactions.accountId, itemAccountIds),
+                      inArray(financeTransactions.providerTransactionId, transactionIds),
+                    ),
+                  )
+                  .returning({ id: financeTransactions.id });
+                changed += deleted.length;
+              }
+              await tx
+                .update(financeAccounts)
+                .set({
+                  syncCursor: page.nextCursor,
+                  updatedAt: now(),
+                })
+                .where(inArray(financeAccounts.id, itemAccountIds));
+            }
+          });
+          cursor = page.nextCursor;
+          hasMore = page.hasMore;
+        }
+        const reconciliation = await reconcileBudgetTransfers(context.principal.userId);
+        await refreshCashflowIntelligence(context.principal.userId);
+        const completedAt = now();
+        await db.transaction(async (tx) => {
+          const [settledAccount] = await tx
+            .update(financeAccounts)
+            .set({
+              lastSyncedAt: completedAt,
+              nextSyncAt: new Date(completedAt.getTime() + financeSyncIntervalMs),
+              syncClaimExpiresAt: null,
+              syncClaimId: null,
+              syncError: null,
+              syncErrorCategory: null,
+              syncErrorCode: null,
+              syncFailureCount: 0,
+              syncRecovery: null,
+              syncState: "current",
+              status: "connected",
+              updatedAt: completedAt,
+            })
+            .where(
+              and(
+                eq(financeAccounts.id, claimedAccount.id),
+                eq(financeAccounts.syncClaimId, syncClaimId),
+              ),
+            )
+            .returning({ id: financeAccounts.id });
+          if (!settledAccount) {
+            throw new AppError(
+              "conflict",
+              "The Finance synchronization claim was superseded before completion.",
             );
-            for (let offset = 0; offset < deletableTransactionIds.length; offset += 1_000) {
-              const transactionIds = deletableTransactionIds.slice(offset, offset + 1_000);
-              const deleted = await tx
-                .delete(financeTransactions)
-                .where(
-                  and(
-                    inArray(financeTransactions.accountId, itemAccountIds),
-                    inArray(financeTransactions.providerTransactionId, transactionIds),
-                  ),
-                )
-                .returning({ id: financeTransactions.id });
-              changed += deleted.length;
-            }
+          }
+          const siblingAccountIds = itemAccountIds.filter(
+            (accountId) => accountId !== claimedAccount.id,
+          );
+          if (siblingAccountIds.length > 0) {
             await tx
               .update(financeAccounts)
               .set({
-                lastSyncedAt:
-                  page.transactionsUpdateStatus === "NOT_READY" ? before.lastSyncedAt : now(),
-                syncCursor: page.nextCursor,
-                updatedAt: now(),
+                lastSyncedAt: completedAt,
+                nextSyncAt: new Date(completedAt.getTime() + financeSyncIntervalMs),
+                syncClaimExpiresAt: null,
+                syncClaimId: null,
+                syncError: null,
+                syncErrorCategory: null,
+                syncErrorCode: null,
+                syncFailureCount: 0,
+                syncRecovery: null,
+                syncState: "current",
+                status: "connected",
+                updatedAt: completedAt,
               })
-              .where(inArray(financeAccounts.id, itemAccountIds));
+              .where(
+                and(
+                  inArray(financeAccounts.id, siblingAccountIds),
+                  or(
+                    isNull(financeAccounts.syncClaimId),
+                    lte(financeAccounts.syncClaimExpiresAt, completedAt),
+                  ),
+                ),
+              );
+          }
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.plaid_synced",
+              after: { ...reconciliation, changed },
+              before: null,
+              entityId: before.id,
+              entityType: "finance_account",
+              ...context,
+            }),
+          );
+        });
+        const requestId = `sync:finance:${syncClaimId}`;
+        log?.({
+          accountId: claimedAccount.id,
+          durationMs: Date.now() - startedAt,
+          event: "connector_sync_completed",
+          freshnessAgeMs: Math.max(
+            0,
+            completedAt.getTime() -
+              (claimedAccount.lastSyncedAt?.getTime() ?? attemptedAt.getTime()),
+          ),
+          method: "CONNECTOR",
+          path: `/internal/finances/${claimedAccount.id}/sync`,
+          provider: "plaid",
+          requestId,
+          status: 200,
+        });
+        if (claimedAccount.syncFailureCount > 0) {
+          log?.({
+            accountId: claimedAccount.id,
+            durationMs: Date.now() - startedAt,
+            event: "connector_sync_recovered",
+            failureCount: claimedAccount.syncFailureCount,
+            method: "CONNECTOR",
+            path: `/internal/finances/${claimedAccount.id}/sync`,
+            provider: "plaid",
+            requestId,
+            status: 200,
+          });
+        }
+        return { changed };
+      } catch (error) {
+        const failedAt = now();
+        const failureCount = claimedAccount.syncFailureCount + 1;
+        const failure = classifyConnectorSyncFailure(error, "plaid");
+        const nextSyncAt =
+          failure.recovery === "reconnect"
+            ? null
+            : connectorRetryAt({
+                accountId: claimedAccount.id,
+                failureCount,
+                now: failedAt,
+                retryAfterMs: failure.retryAfterMs,
+              });
+        await db.transaction(async (tx) => {
+          const [settledAccount] = await tx
+            .update(financeAccounts)
+            .set({
+              ...(failure.recovery === "reconnect" ? { status: "needs_reauth" as const } : {}),
+              nextSyncAt,
+              syncClaimExpiresAt: null,
+              syncClaimId: null,
+              syncError: failure.message,
+              syncErrorCategory: failure.category,
+              syncErrorCode: failure.code,
+              syncFailureCount: failureCount,
+              syncRecovery: failure.recovery,
+              syncState: failure.recovery === "automatic" ? "retrying" : "blocked",
+              updatedAt: failedAt,
+            })
+            .where(
+              and(
+                eq(financeAccounts.id, claimedAccount.id),
+                eq(financeAccounts.syncClaimId, syncClaimId),
+              ),
+            )
+            .returning({ id: financeAccounts.id });
+          if (!settledAccount) {
+            throw new AppError(
+              "conflict",
+              "The Finance synchronization claim was superseded before failure settlement.",
+            );
+          }
+          const siblingAccountIds = claimItemAccountIds.filter(
+            (accountId) => accountId !== claimedAccount.id,
+          );
+          if (siblingAccountIds.length > 0) {
+            await tx
+              .update(financeAccounts)
+              .set({
+                ...(failure.recovery === "reconnect" ? { status: "needs_reauth" as const } : {}),
+                nextSyncAt,
+                syncError: failure.message,
+                syncErrorCategory: failure.category,
+                syncErrorCode: failure.code,
+                syncFailureCount: failureCount,
+                syncRecovery: failure.recovery,
+                syncState: failure.recovery === "automatic" ? "retrying" : "blocked",
+                updatedAt: failedAt,
+              })
+              .where(inArray(financeAccounts.id, siblingAccountIds));
           }
         });
-        cursor = page.nextCursor;
-        hasMore = page.hasMore;
+        log?.({
+          accountId: claimedAccount.id,
+          category: failure.category,
+          code: failure.code,
+          disposition: failure.recovery,
+          durationMs: Date.now() - startedAt,
+          event: "connector_sync_failed",
+          failureCount,
+          method: "CONNECTOR",
+          nextSyncAt: nextSyncAt?.toISOString() ?? null,
+          path: `/internal/finances/${claimedAccount.id}/sync`,
+          provider: "plaid",
+          requestId: `sync:finance:${syncClaimId}`,
+          status: failure.status ?? 503,
+        });
+        if (error instanceof AppError && error.code === "conflict") throw error;
+        throw connectorSyncAppError(failure, claimedAccount.id, "plaid", nextSyncAt);
       }
-      const reconciliation = await reconcileBudgetTransfers(context.principal.userId);
-      await refreshCashflowIntelligence(context.principal.userId);
-      await db.insert(auditEvents).values(
-        auditValues({
-          action: "finance.plaid_synced",
-          after: { ...reconciliation, changed },
-          before: null,
-          entityId: before.id,
-          entityType: "finance_account",
-          ...context,
-        }),
-      );
-      return { changed };
     },
-    async syncDuePlaidAccounts(maxAgeMinutes = 360) {
-      if (!plaid) return { failed: 0, reasons: [], synced: 0 };
-      const cutoff = new Date(now().getTime() - maxAgeMinutes * 60 * 1000);
-      const dueAccounts = await db
+    async syncDuePlaidAccounts(): Promise<FinanceSyncBatchResult> {
+      const selectedAt = now();
+      const selectedRows = await db
         .select({
           id: financeAccounts.id,
           providerItemId: financeAccounts.providerItemId,
@@ -2973,34 +3279,94 @@ export function createFinanceService({
         .where(
           and(
             eq(financeAccounts.provider, "plaid"),
-            or(isNull(financeAccounts.lastSyncedAt), lt(financeAccounts.lastSyncedAt, cutoff)),
+            eq(financeAccounts.status, "connected"),
+            lte(financeAccounts.nextSyncAt, selectedAt),
           ),
-        );
-      let failed = 0;
-      const reasons = new Set<string>();
-      const syncedItems = new Set<string>();
-      let synced = 0;
-      for (const due of dueAccounts) {
+        )
+        .orderBy(asc(financeAccounts.nextSyncAt), asc(financeAccounts.updatedAt))
+        .limit(financeSyncBatchLimit * 4);
+      const dueAccounts: typeof selectedRows = [];
+      const selectedItems = new Set<string>();
+      for (const due of selectedRows) {
         const itemKey = due.providerItemId ?? due.id;
-        if (syncedItems.has(itemKey)) continue;
-        syncedItems.add(itemKey);
-        try {
-          await this.syncPlaidAccount(due.id, {
-            principal: {
-              actorId: due.userId,
-              actorType: "user",
-              scopes: new Set(["finances:read", "finances:write"]),
-              userId: due.userId,
-            },
-            requestId: `scheduler:finance:${due.id}:${now().toISOString()}`,
-          });
-          synced += 1;
-        } catch (error) {
-          failed += 1;
-          reasons.add(error instanceof Error ? error.message : "Unknown sync error.");
-        }
+        if (selectedItems.has(itemKey)) continue;
+        selectedItems.add(itemKey);
+        dueAccounts.push(due);
+        if (dueAccounts.length >= financeSyncBatchLimit) break;
       }
-      return { failed, reasons: [...reasons], synced };
+      const result: FinanceSyncBatchResult = {
+        attempted: dueAccounts.length,
+        failed: 0,
+        recovered: 0,
+        skipped: 0,
+        succeeded: 0,
+      };
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < dueAccounts.length) {
+          const due = dueAccounts[cursor];
+          cursor += 1;
+          if (!due) continue;
+          try {
+            const [before] = await db
+              .select({ syncFailureCount: financeAccounts.syncFailureCount })
+              .from(financeAccounts)
+              .where(eq(financeAccounts.id, due.id))
+              .limit(1);
+            await this.syncPlaidAccount(due.id, {
+              principal: {
+                actorId: due.userId,
+                actorType: "user",
+                scopes: new Set(["finances:read", "finances:write"]),
+                userId: due.userId,
+              },
+              requestId: `scheduler:finance:${due.id}:${selectedAt.toISOString()}`,
+            });
+            result.succeeded += 1;
+            if ((before?.syncFailureCount ?? 0) > 0) result.recovered += 1;
+          } catch (error) {
+            if (error instanceof AppError && error.code === "conflict") result.skipped += 1;
+            else result.failed += 1;
+          }
+        }
+      };
+      await Promise.all(
+        Array.from({ length: Math.min(financeSyncConcurrency, dueAccounts.length) }, async () =>
+          worker(),
+        ),
+      );
+
+      const freshnessStartedAt = Date.now();
+      const freshnessAccounts = await db
+        .select({
+          createdAt: financeAccounts.createdAt,
+          lastSyncedAt: financeAccounts.lastSyncedAt,
+        })
+        .from(financeAccounts)
+        .where(and(eq(financeAccounts.provider, "plaid"), eq(financeAccounts.status, "connected")));
+      log?.({
+        durationMs: Date.now() - freshnessStartedAt,
+        eligibleAccountCount: freshnessAccounts.length,
+        event: "connector_sync_freshness_observed",
+        freshnessAgeMs: freshnessAccounts.reduce(
+          (maximumAge, financeAccount) =>
+            Math.max(
+              maximumAge,
+              Math.max(
+                0,
+                selectedAt.getTime() -
+                  (financeAccount.lastSyncedAt ?? financeAccount.createdAt).getTime(),
+              ),
+            ),
+          0,
+        ),
+        method: "SCHEDULER",
+        path: "/internal/finances/freshness",
+        provider: "plaid",
+        requestId: randomUUID(),
+        status: 200,
+      });
+      return result;
     },
     async reconcileTransfers(userId: string) {
       return reconcileBudgetTransfers(userId);
@@ -3642,6 +4008,7 @@ export function createFinanceService({
                 name: input.name,
                 provider: input.provider,
                 status: input.provider === "manual" ? "manual" : "needs_reauth",
+                syncState: input.provider === "manual" ? "current" : "stale",
                 userId: context.principal.userId,
               })
               .returning()

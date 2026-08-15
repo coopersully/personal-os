@@ -97,7 +97,13 @@ export type PersonalOsApp = Hono<AppEnv> & {
     skipped: number;
     succeeded: number;
   }>;
-  syncDueFinances: () => Promise<{ failed: number; reasons: string[]; synced: number }>;
+  syncDueFinances: () => Promise<{
+    attempted: number;
+    failed: number;
+    recovered: number;
+    skipped: number;
+    succeeded: number;
+  }>;
 };
 
 const auditQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50) });
@@ -377,6 +383,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   const finances = createFinanceService({
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
+    ...(dependencies.log ? { log: dependencies.log } : {}),
     now,
     ...(plaid ? { plaid } : {}),
   });
@@ -1214,7 +1221,22 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       }
     },
     async syncDueFinances() {
-      return finances.syncDuePlaidAccounts();
+      const startedAt = Date.now();
+      try {
+        return await finances.syncDuePlaidAccounts();
+      } catch {
+        dependencies.log?.({
+          code: "finance_sync_scheduler_failed",
+          durationMs: Date.now() - startedAt,
+          event: "connector_sync_failed",
+          method: "SCHEDULER",
+          path: "/internal/finances/sync",
+          provider: "plaid",
+          requestId: randomUUID(),
+          status: 500,
+        });
+        throw new Error("Scheduled Finance synchronization failed.");
+      }
     },
   });
 }

@@ -77,16 +77,7 @@ runtimeLifecycle.startBackgroundTask(
 );
 
 async function dispatchFinanceSync(): Promise<void> {
-  try {
-    const result = await app.syncDueFinances();
-    if (result.failed)
-      process.stderr.write(
-        `[personal-os] scheduled finance sync failed for ${result.failed} accounts: ${result.reasons.join("; ")}\n`,
-      );
-  } catch (error) {
-    process.stderr.write(`[personal-os] scheduled finance sync failed: ${String(error)}\n`);
-    throw error;
-  }
+  await app.syncDueFinances();
 }
 
 async function dispatchFinanceBackfill(): Promise<void> {

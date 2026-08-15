@@ -35,6 +35,7 @@ import {
   eventListQuerySchema,
   featureAccessPolicies,
   featureIds,
+  financeAccountSchema,
   financeGuidedPreferencesSchema,
   financeReviewDecisionInputSchema,
   financeTransactionQuerySchema,
@@ -106,6 +107,42 @@ const start = "2026-07-13T13:00:00.000Z";
 const end = "2026-07-13T14:00:00.000Z";
 
 describe("domain schemas", () => {
+  it("parses finance account synchronization health", () => {
+    const parsed = financeAccountSchema.parse({
+      balance: 125,
+      createdAt: start,
+      id,
+      institution: "Example Bank",
+      kind: "cash",
+      lastSyncedAt: null,
+      name: "Checking",
+      provider: "plaid",
+      status: "connected",
+      synchronization: {
+        failureCode: null,
+        failureCount: 0,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        message: null,
+        nextRetryAt: null,
+        recovery: null,
+        state: "stale",
+      },
+      updatedAt: start,
+    });
+
+    expect(parsed.synchronization).toEqual({
+      failureCode: null,
+      failureCount: 0,
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      message: null,
+      nextRetryAt: null,
+      recovery: null,
+      state: "stale",
+    });
+  });
+
   it("validates paginated Agent Access work items and local actions", () => {
     const page = agentAccessWorkItemPageSchema.parse({
       filteredTotal: 1,

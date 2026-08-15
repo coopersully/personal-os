@@ -386,6 +386,13 @@
       "when": 1786953600000,
       "tag": "0054_agent_access_work_item_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1786957200000,
+      "tag": "0055_finance_sync_health",
+      "breakpoints": true
     }
   ]
 }

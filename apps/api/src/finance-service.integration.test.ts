@@ -336,6 +336,7 @@ describe.sequential("finance service", () => {
       "0052_connector_notifications",
       "0053_oauth_states_expiry_index",
       "0054_agent_access_work_item_snapshots",
+      "0055_finance_sync_health",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -365,16 +366,14 @@ describe.sequential("finance service", () => {
         "Existing attention must receive version one.",
       ],
     );
-    const [upgradeAccount] = await database.db
-      .insert(financeAccounts)
-      .values({
-        institution: "Legacy Bank",
-        name: "Legacy checking",
-        provider: "manual",
-        status: "manual",
-        userId: upgradeUser.id,
-      })
-      .returning();
+    const [upgradeAccount] = (
+      await database.pool.query<{ id: string; name: string }>(
+        `INSERT INTO finance_accounts (user_id, institution, name, provider, status)
+         VALUES ($1, 'Legacy Bank', 'Legacy checking', 'manual', 'manual')
+         RETURNING id, name`,
+        [upgradeUser.id],
+      )
+    ).rows;
     if (!upgradeAccount) throw new Error("Finance upgrade fixture account was not created.");
     await database.db.insert(domainProfiles).values({
       categories: [],
@@ -404,17 +403,23 @@ describe.sequential("finance service", () => {
       })
       .returning();
     if (!secondUpgradeUser) throw new Error("Second Finance upgrade fixture was not created.");
-    const [secondUpgradeAccount] = await database.db
-      .insert(financeAccounts)
-      .values({
-        institution: "Second Legacy Bank",
-        name: "Second legacy checking",
-        provider: "manual",
-        status: "manual",
-        userId: secondUpgradeUser.id,
-      })
-      .returning();
+    const [secondUpgradeAccount] = (
+      await database.pool.query<{ id: string; name: string }>(
+        `INSERT INTO finance_accounts (user_id, institution, name, provider, status)
+         VALUES ($1, 'Second Legacy Bank', 'Second legacy checking', 'manual', 'manual')
+         RETURNING id, name`,
+        [secondUpgradeUser.id],
+      )
+    ).rows;
     if (!secondUpgradeAccount) throw new Error("Second Finance upgrade account was not created.");
+    await database.pool.query(
+      `INSERT INTO finance_accounts (
+         user_id, institution, name, provider, status, provider_account_id, last_synced_at
+       ) VALUES
+         ($1, 'Fresh Legacy Plaid', 'Fresh connected account', 'plaid', 'connected', 'fresh-legacy', CURRENT_TIMESTAMP - INTERVAL '1 hour'),
+         ($1, 'Stale Legacy Plaid', 'Stale connected account', 'plaid', 'connected', 'stale-legacy', CURRENT_TIMESTAMP - INTERVAL '25 hours')`,
+      [upgradeUser.id],
+    );
     const [secondUpgradeProfile] = await database.db
       .insert(domainProfiles)
       .values({
@@ -493,6 +498,33 @@ describe.sequential("finance service", () => {
       throw new Error("Legacy manual transaction fixture was not created.");
     }
     await migrateDatabase(database.db, migrationsFolder);
+    await expect(
+      database.pool.query<{
+        name: string;
+        next_sync_at: Date | null;
+        sync_state: string;
+      }>(
+        `SELECT name, next_sync_at, sync_state
+         FROM finance_accounts
+         WHERE user_id = $1
+         ORDER BY name`,
+        [upgradeUser.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          name: "Fresh connected account",
+          next_sync_at: expect.any(Date),
+          sync_state: "current",
+        },
+        { name: "Legacy checking", next_sync_at: null, sync_state: "current" },
+        {
+          name: "Stale connected account",
+          next_sync_at: expect.any(Date),
+          sync_state: "stale",
+        },
+      ],
+    });
     await expect(
       database.pool.query<{ relation: string | null }>(
         "SELECT to_regclass('public.finance_setup_backfill_state')::text AS relation",
@@ -2091,7 +2123,7 @@ describe.sequential("finance service", () => {
     await expect(service.deleteAccount(account.id, context)).rejects.toThrow(
       "financial account was not found",
     );
-  }, 20_000);
+  });
 
   it("uses the planning-timezone month for Finance guided setup", async () => {
     const timezoneUserId = crypto.randomUUID();
@@ -2883,9 +2915,11 @@ describe.sequential("finance service", () => {
       changed: 4,
     });
     await expect(service.syncDuePlaidAccounts()).resolves.toEqual({
+      attempted: 0,
       failed: 0,
-      reasons: [],
-      synced: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 0,
     });
     const [transaction] = await database.db
       .select()
@@ -3162,6 +3196,403 @@ describe.sequential("finance service", () => {
       await Promise.allSettled(pendingOperations);
     }
   });
+
+  it("fences Plaid claims and durably settles classified failures and recovery", async () => {
+    const [healthUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Plaid Health",
+        email: "plaid-health@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!healthUser) throw new Error("Plaid health fixture user was not created.");
+
+    type SyncMode = "authorization" | "configuration" | "deferred" | "rate" | "success";
+    let mode: SyncMode = "deferred";
+    let releaseDeferredSync: (() => void) | undefined;
+    let observeDeferredSync: (() => void) | undefined;
+    let deferredSyncCalls = 0;
+    const deferredSyncStarted = new Promise<void>((resolvePromise) => {
+      observeDeferredSync = resolvePromise;
+    });
+    const deferredSyncRelease = new Promise<void>((resolvePromise) => {
+      releaseDeferredSync = resolvePromise;
+    });
+    let successfulCursor = 0;
+    const fetch = vi.fn(async (input: RequestInfo | URL, _init?: RequestInit) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const path = new URL(requestUrl).pathname;
+      if (path === "/item/public_token/exchange") {
+        return Response.json({ access_token: "health-token", item_id: "health-item" });
+      }
+      if (path === "/accounts/get") {
+        return Response.json({
+          accounts: [
+            {
+              account_id: "health-account",
+              balances: { current: 250 },
+              name: "Health checking",
+              official_name: null,
+            },
+            {
+              account_id: "health-sibling-account",
+              balances: { current: 500 },
+              name: "Health savings",
+              official_name: null,
+            },
+          ],
+        });
+      }
+      if (path === "/transactions/sync") {
+        if (mode === "deferred") {
+          deferredSyncCalls += 1;
+          if (deferredSyncCalls === 1) {
+            observeDeferredSync?.();
+            await deferredSyncRelease;
+          }
+        }
+        if (mode === "configuration") {
+          return Response.json(
+            {
+              error_code: "INVALID_API_KEYS",
+              error_message: "raw-configuration-canary",
+            },
+            { status: 400 },
+          );
+        }
+        if (mode === "rate") {
+          return Response.json(
+            { error_code: "RATE_LIMIT_EXCEEDED", error_message: "raw-rate-canary" },
+            { headers: { "retry-after": "120" }, status: 429 },
+          );
+        }
+        if (mode === "authorization") {
+          return Response.json(
+            { error_code: "ITEM_LOGIN_REQUIRED", error_message: "raw-auth-canary" },
+            { status: 400 },
+          );
+        }
+        successfulCursor += 1;
+        return Response.json({
+          added: [],
+          has_more: false,
+          modified: [],
+          next_cursor: `health-cursor-${successfulCursor}`,
+          removed: [],
+          transactions_update_status: "HISTORICAL_UPDATE_COMPLETE",
+        });
+      }
+      return Response.json(
+        { error_code: "UNEXPECTED", error_message: "unexpected" },
+        { status: 400 },
+      );
+    });
+    const logs = vi.fn();
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch,
+      secret: "secret",
+    });
+    const workerOne = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      log: logs,
+      now: () => now,
+      plaid,
+    });
+    const workerTwo = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      log: logs,
+      now: () => now,
+      plaid,
+    });
+    const context = {
+      principal: financePrincipal(healthUser.id),
+      requestId: "plaid-health",
+    };
+    const connectedHealthAccounts = await workerOne.exchangePlaidToken(
+      { institution: "Health Bank", publicToken: "health-public-token" },
+      context,
+    );
+    const [healthSiblingAccount, healthAccount] = [...connectedHealthAccounts].sort((left, right) =>
+      left.id.localeCompare(right.id),
+    );
+    if (!healthAccount) throw new Error("Plaid health account was not created.");
+    if (!healthSiblingAccount) throw new Error("Plaid health sibling account was not created.");
+    expect(healthAccount.synchronization).toEqual({
+      failureCode: null,
+      failureCount: 0,
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      message: null,
+      nextRetryAt: null,
+      recovery: null,
+      state: "stale",
+    });
+
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET next_sync_at = $2
+       WHERE provider = 'plaid' AND id <> $1 AND next_sync_at <= $3`,
+      [healthAccount.id, new Date(now.getTime() + 24 * 60 * 60_000), now],
+    );
+    const firstPass = workerOne.syncDuePlaidAccounts();
+    await Promise.race([
+      deferredSyncStarted,
+      firstPass.then((result) => {
+        throw new Error(
+          `First Plaid health pass settled before provider call: ${JSON.stringify(result)}`,
+        );
+      }),
+    ]);
+    const overlappingPass = workerTwo.syncDuePlaidAccounts();
+    const siblingSync = workerTwo.syncPlaidAccount(healthSiblingAccount.id, context);
+    const siblingOutcome = await siblingSync.then(
+      () => ({ code: "resolved" }),
+      (error: unknown) => error,
+    );
+    await expect(overlappingPass).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      recovered: 0,
+      skipped: 1,
+      succeeded: 0,
+    });
+    releaseDeferredSync?.();
+    expect(siblingOutcome).toMatchObject({ code: "conflict" });
+    await expect(firstPass).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 1,
+    });
+    mode = "success";
+    const expiredClaimId = crypto.randomUUID();
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET sync_state = 'stale', sync_claim_id = $2,
+           sync_claim_expires_at = $3, next_sync_at = $4
+       WHERE id = $1`,
+      [healthAccount.id, expiredClaimId, new Date(now.getTime() - 1), now],
+    );
+    await expect(workerTwo.syncDuePlaidAccounts()).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 1,
+    });
+
+    const makeDue = async () =>
+      database.pool.query(`UPDATE finance_accounts SET next_sync_at = $2 WHERE id = $1`, [
+        healthAccount.id,
+        now,
+      ]);
+    const unconfiguredWorker = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      log: logs,
+      now: () => now,
+    });
+    await makeDue();
+    await expect(unconfiguredWorker.syncDuePlaidAccounts()).resolves.toMatchObject({ failed: 1 });
+    await expect(
+      database.pool.query(
+        `SELECT sync_error_code, sync_error_category, sync_recovery
+         FROM finance_accounts WHERE id = $1`,
+        [healthAccount.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          sync_error_category: "configuration",
+          sync_error_code: "plaid_configuration_missing",
+          sync_recovery: "operator",
+        },
+      ],
+    });
+
+    const unencryptedWorker = createFinanceService({
+      db: database.db,
+      log: logs,
+      now: () => now,
+      plaid,
+    });
+    await makeDue();
+    await expect(unencryptedWorker.syncDuePlaidAccounts()).resolves.toMatchObject({ failed: 1 });
+    await expect(
+      database.pool.query(
+        `SELECT sync_error_code, sync_error_category, sync_recovery
+         FROM finance_accounts WHERE id = $1`,
+        [healthAccount.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          sync_error_category: "configuration",
+          sync_error_code: "finance_encryption_configuration_missing",
+          sync_recovery: "operator",
+        },
+      ],
+    });
+
+    mode = "configuration";
+    await makeDue();
+    await expect(workerOne.syncDuePlaidAccounts()).resolves.toMatchObject({ failed: 1 });
+    await expect(
+      database.pool.query(
+        `SELECT status, sync_state, sync_error, sync_error_code, sync_error_category, sync_recovery
+         FROM finance_accounts WHERE id = $1`,
+        [healthAccount.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          status: "connected",
+          sync_error: "Plaid is not configured correctly. ilo is resolving this.",
+          sync_error_category: "configuration",
+          sync_error_code: "plaid_configuration_invalid",
+          sync_recovery: "operator",
+          sync_state: "blocked",
+        },
+      ],
+    });
+
+    mode = "rate";
+    await makeDue();
+    await expect(workerOne.syncDuePlaidAccounts()).resolves.toMatchObject({ failed: 1 });
+    await expect(
+      database.pool.query(
+        `SELECT sync_state, sync_error_category, sync_recovery, next_sync_at
+         FROM finance_accounts WHERE id = $1`,
+        [healthAccount.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          next_sync_at: expect.any(Date),
+          sync_error_category: "rate_limited",
+          sync_recovery: "automatic",
+          sync_state: "retrying",
+        },
+      ],
+    });
+    expect(
+      (await workerOne.listOverview(healthUser.id)).accounts.find(
+        (financeAccount) => financeAccount.id === healthAccount.id,
+      )?.synchronization,
+    ).toMatchObject({
+      nextRetryAt: expect.any(String),
+      recovery: "automatic",
+      state: "retrying",
+    });
+
+    mode = "authorization";
+    await makeDue();
+    await expect(workerOne.syncDuePlaidAccounts()).resolves.toMatchObject({ failed: 1 });
+    await expect(
+      database.pool.query(
+        `SELECT status, sync_state, sync_error_category, sync_recovery, next_sync_at
+         FROM finance_accounts WHERE id = $1`,
+        [healthAccount.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          next_sync_at: null,
+          status: "needs_reauth",
+          sync_error_category: "authorization",
+          sync_recovery: "reconnect",
+          sync_state: "blocked",
+        },
+      ],
+    });
+    expect(
+      (await workerOne.listOverview(healthUser.id)).accounts.find(
+        (financeAccount) => financeAccount.id === healthAccount.id,
+      )?.synchronization,
+    ).toMatchObject({
+      nextRetryAt: null,
+      recovery: "reconnect",
+      state: "blocked",
+    });
+
+    mode = "success";
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET status = 'connected', next_sync_at = $2
+       WHERE provider_item_id = (
+         SELECT provider_item_id FROM finance_accounts WHERE id = $1
+       )`,
+      [healthAccount.id, now],
+    );
+    await expect(workerOne.syncDuePlaidAccounts()).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      recovered: 1,
+      skipped: 0,
+      succeeded: 1,
+    });
+    await expect(
+      database.pool.query(
+        `SELECT sync_state, sync_claim_id, sync_claim_expires_at,
+                sync_error, sync_error_code, sync_error_category, sync_recovery,
+                sync_failure_count, last_synced_at
+         FROM finance_accounts WHERE id = $1`,
+        [healthAccount.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          last_synced_at: expect.any(Date),
+          sync_claim_expires_at: null,
+          sync_claim_id: null,
+          sync_error: null,
+          sync_error_category: null,
+          sync_error_code: null,
+          sync_failure_count: 0,
+          sync_recovery: null,
+          sync_state: "current",
+        },
+      ],
+    });
+    await expect(
+      database.pool.query(
+        `SELECT status FROM finance_accounts WHERE provider_item_id = (
+           SELECT provider_item_id FROM finance_accounts WHERE id = $1
+         )`,
+        [healthAccount.id],
+      ),
+    ).resolves.toMatchObject({ rows: [{ status: "connected" }, { status: "connected" }] });
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET provider_item_id = NULL, next_sync_at = $2
+       WHERE id = $1`,
+      [healthAccount.id, now],
+    );
+    await expect(workerOne.syncDuePlaidAccounts()).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 1,
+    });
+    expect(logs.mock.calls.map(([entry]) => entry)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: "connector_sync_completed", provider: "plaid" }),
+        expect.objectContaining({ event: "connector_sync_failed", provider: "plaid" }),
+        expect.objectContaining({ event: "connector_sync_recovered", provider: "plaid" }),
+        expect.objectContaining({ event: "connector_sync_freshness_observed", provider: "plaid" }),
+      ]),
+    );
+    expect(JSON.stringify(logs.mock.calls)).not.toContain("raw-");
+  }, 20_000);
 
   it("replays a removal window when a later Plaid page fails before the cursor checkpoint", async () => {
     const [restartUser] = await database.db

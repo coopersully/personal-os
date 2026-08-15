@@ -5,6 +5,7 @@ import {
   domainProfileSchema,
 } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
+import { connectorSyncRecoverySchema } from "./connection.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
 export const financeProviderSchema = z.enum(["plaid", "paypal", "venmo", "zelle", "manual"]);
@@ -13,6 +14,18 @@ export const transactionDirectionSchema = z.enum(["income", "expense", "transfer
 export type TransactionDirection = z.infer<typeof transactionDirectionSchema>;
 export const financeAccountKindSchema = z.enum(["cash", "investment", "debt", "other"]);
 export type FinanceAccountKind = z.infer<typeof financeAccountKindSchema>;
+
+export const financeSynchronizationSchema = z.object({
+  failureCode: z.string().max(120).nullable(),
+  failureCount: z.number().int().nonnegative(),
+  lastAttemptAt: isoDateTimeSchema.nullable(),
+  lastSuccessAt: isoDateTimeSchema.nullable(),
+  message: z.string().max(300).nullable(),
+  nextRetryAt: isoDateTimeSchema.nullable(),
+  recovery: connectorSyncRecoverySchema.nullable(),
+  state: z.enum(["current", "stale", "retrying", "blocked"]),
+});
+export type FinanceSynchronization = z.infer<typeof financeSynchronizationSchema>;
 
 const moneySchema = z.number().finite().nonnegative().max(100_000_000);
 const categorySchema = z.string().trim().min(1).max(80);
@@ -72,6 +85,7 @@ export const financeAccountSchema = z.object({
   name: z.string().min(1).max(160),
   provider: financeProviderSchema,
   status: z.enum(["connected", "needs_reauth", "manual"]),
+  synchronization: financeSynchronizationSchema,
   updatedAt: isoDateTimeSchema,
 });
 export type FinanceAccount = z.infer<typeof financeAccountSchema>;

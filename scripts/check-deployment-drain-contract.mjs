@@ -246,10 +246,40 @@ for (const invalidDefinition of [
       },
     ],
   },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        environment: [
+          { name: "NODE_ENV", value: "production" },
+          { name: "PLAID_ENV", value: "production" },
+          { name: "PLAID_CLIENT_ID", value: "plain-text-client-id" },
+        ],
+        secrets: validRuntimeTaskDefinition.containerDefinitions[0].secrets.filter(
+          ({ name }) => name !== "PLAID_CLIENT_ID" && name !== "PLAID_SECRET",
+        ),
+      },
+    ],
+  },
+  {
+    ...validRuntimeTaskDefinition,
+    containerDefinitions: [
+      {
+        ...validRuntimeTaskDefinition.containerDefinitions[0],
+        environment: [
+          ...validRuntimeTaskDefinition.containerDefinitions[0].environment,
+          { name: "PLAID_SECRET", value: "plain-text-secret" },
+        ],
+      },
+    ],
+  },
 ]) {
   const invalidRuntimeCheck = checkRuntimeTaskDefinition(invalidDefinition);
   if (invalidRuntimeCheck.status === 0) {
-    throw new Error("Sandbox or incomplete Plaid runtime wiring must fail before API drain.");
+    throw new Error(
+      "Sandbox, incomplete, or plaintext Plaid runtime wiring must fail before API drain.",
+    );
   }
   if (!invalidRuntimeCheck.stderr.includes("Plaid production runtime configuration is not ready")) {
     throw new Error(

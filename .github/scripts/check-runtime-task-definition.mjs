@@ -46,6 +46,10 @@ for (const name of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"]) {
 }
 
 const plaidSecretNames = ["PLAID_CLIENT_ID", "PLAID_SECRET"];
+if (environment.some((entry) => plaidSecretNames.includes(entry?.name))) {
+  failClosed(plaidSafeFailure);
+}
+
 if (secrets.some((entry) => plaidSecretNames.includes(entry?.name))) {
   const plaidEnvironment = environment.filter((entry) => entry?.name === "PLAID_ENV");
   if (plaidEnvironment.length !== 1 || plaidEnvironment[0]?.value !== "production") {

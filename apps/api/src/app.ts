@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   createGoogleConnector,
   createICloudConnector,
+  createPlaidConnector,
   createXConnector,
 } from "@personal-os/connectors";
 import {
@@ -363,15 +364,21 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
     reviewSigningKey: dependencies.config.encryptionKey,
   });
+  const plaid =
+    dependencies.plaid ??
+    (dependencies.config.plaidClientId && dependencies.config.plaidSecret
+      ? createPlaidConnector({
+          clientId: dependencies.config.plaidClientId,
+          environment: dependencies.config.plaidEnvironment,
+          ...(dependencies.fetch ? { fetch: dependencies.fetch } : {}),
+          secret: dependencies.config.plaidSecret,
+        })
+      : undefined);
   const finances = createFinanceService({
     db: dependencies.db,
+    encryptionKey: dependencies.config.encryptionKey,
     now,
-    plaid: {
-      clientId: dependencies.config.plaidClientId,
-      encryptionKey: dependencies.config.encryptionKey,
-      environment: dependencies.config.plaidEnvironment,
-      secret: dependencies.config.plaidSecret,
-    },
+    ...(plaid ? { plaid } : {}),
   });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,

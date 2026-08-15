@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { providerFetch } from "@personal-os/connectors";
+import type { PlaidConnector, PlaidTransactionSnapshot } from "@personal-os/connectors";
 import {
   attentionItems,
   auditEvents,
@@ -81,47 +81,20 @@ import { auditAttentionItemMetadata, serializeAttentionItem } from "./serializat
 import type { Principal } from "./types.js";
 
 type MutationContext = { principal: Principal; requestId: string };
-type PlaidOptions = {
-  clientId: string;
-  encryptionKey: string;
-  environment: "sandbox" | "development" | "production";
-  fetch?: typeof globalThis.fetch;
-  secret: string;
-};
 type Options = {
   db: Database;
+  encryptionKey?: string;
   now: () => Date;
   onProposalSnapshotRead?: () => Promise<void>;
-  plaid?: PlaidOptions;
+  plaid?: PlaidConnector;
 };
 type FinanceProfileSourceExecutor = Pick<Database, "select">;
 type FinanceReadExecutor = Pick<Database, "select">;
 type FinanceReviewExecutor = Pick<Database, "insert" | "select" | "update">;
 type PlaidCredentials = { accessToken: string };
-type PlaidAccount = {
-  account_id: string;
-  balances: { current: number | null };
-  name: string;
-  official_name: string | null;
-};
-type PlaidTransaction = {
-  account_id: string;
-  amount: number;
-  date: string;
-  merchant_name: string | null;
-  name: string;
-  pending: boolean;
-  pending_transaction_id: string | null;
-  personal_finance_category: {
-    confidence_level?: "HIGH" | "LOW" | "MEDIUM" | "UNKNOWN" | "VERY_HIGH" | null;
-    detailed?: string | null;
-    primary: string;
-  } | null;
-  transaction_id: string;
-};
 type PlaidCategoryConfidence = NonNullable<
-  PlaidTransaction["personal_finance_category"]
->["confidence_level"];
+  PlaidTransactionSnapshot["personalFinanceCategory"]
+>["confidenceLevel"];
 
 const categoryRules: Array<[RegExp, string]> = [
   [/uber|lyft|mta|transit|amtrak|airlines/i, "Transportation"],
@@ -496,7 +469,13 @@ function merchantAuditSnapshot(value: FinanceMerchant) {
   };
 }
 
-export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }: Options) {
+export function createFinanceService({
+  db,
+  encryptionKey,
+  now,
+  onProposalSnapshotRead,
+  plaid,
+}: Options) {
   async function seedCategories(
     userId: string,
     executor: Pick<Database, "insert" | "select"> = db,
@@ -950,35 +929,16 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
     });
   }
   function getPlaid() {
-    if (!plaid?.clientId || !plaid.secret) {
+    if (!plaid) {
       throw new AppError("invalid_request", "Plaid is not configured for this ilo instance.");
     }
     return plaid;
   }
-  async function plaidRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
-    const config = getPlaid();
-    const response = await providerFetch(
-      config.fetch ?? globalThis.fetch,
-      `https://${config.environment}.plaid.com${path}`,
-      {
-        body: JSON.stringify({ client_id: config.clientId, secret: config.secret, ...body }),
-        headers: { "content-type": "application/json" },
-        method: "POST",
-      },
-    );
-    const value = (await response.json().catch(() => null)) as
-      | T
-      | { error_message?: string }
-      | null;
-    if (!response.ok) {
-      throw new AppError(
-        "invalid_request",
-        value && typeof value === "object" && "error_message" in value && value.error_message
-          ? `Plaid: ${value.error_message}`
-          : "Plaid could not complete that request.",
-      );
+  function getEncryptionKey() {
+    if (!encryptionKey) {
+      throw new AppError("invalid_request", "Finance credential encryption is not configured.");
     }
-    return value as T;
+    return encryptionKey;
   }
   async function ownedAccount(userId: string, id: string) {
     const [row] = await db
@@ -2029,7 +1989,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
     },
 
     plaidAvailable() {
-      return Boolean(plaid?.clientId && plaid.secret);
+      return Boolean(plaid);
     },
     async validateProfileSources(
       transaction: FinanceProfileSourceExecutor,
@@ -2550,29 +2510,25 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
       return { processed: userIds.length };
     },
     async createPlaidLinkToken(userId: string) {
-      const response = await plaidRequest<{ link_token: string }>("/link/token/create", {
-        client_name: "ilo",
-        country_codes: ["US"],
+      return getPlaid().createLinkToken({
+        clientName: "ilo",
+        countryCodes: ["US"],
         language: "en",
-        link_customization_name: "default",
+        linkCustomizationName: "default",
         products: ["transactions"],
-        transactions: { days_requested: 730 },
-        user: { client_user_id: userId },
+        transactions: { daysRequested: 730 },
+        userId,
       });
-      return response.link_token;
     },
     async exchangePlaidToken(
       input: ExchangePlaidTokenInput,
       context: MutationContext,
     ): Promise<FinanceAccount[]> {
-      const exchange = await plaidRequest<{ access_token: string; item_id: string }>(
-        "/item/public_token/exchange",
-        { public_token: input.publicToken },
-      );
-      const accountsResponse = await plaidRequest<{ accounts: PlaidAccount[] }>("/accounts/get", {
-        access_token: exchange.access_token,
-      });
-      const config = getPlaid();
+      const plaid = getPlaid();
+      const accessToken = await plaid.exchangePublicToken(input.publicToken);
+      const accountsResponse = await plaid.getAccounts(accessToken);
+      const itemKey = createHash("sha256").update(accessToken).digest("hex");
+      const key = getEncryptionKey();
       const rows = await db.transaction(async (tx) => {
         await ensureCategories(context.principal.userId, tx);
         await tx
@@ -2584,48 +2540,40 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
               eq(financeAccounts.provider, "plaid"),
               inArray(
                 financeAccounts.providerAccountId,
-                accountsResponse.accounts.map((remote) => remote.account_id),
+                accountsResponse.map((remote) => remote.accountId),
               ),
             ),
           )
           .orderBy(financeAccounts.id)
           .for("update");
         const created: Array<typeof financeAccounts.$inferSelect> = [];
-        for (const remote of accountsResponse.accounts) {
+        for (const remote of accountsResponse) {
           const record = requireDatabaseRecord(
             (
               await tx
                 .insert(financeAccounts)
                 .values({
                   balance:
-                    remote.balances.current === null
-                      ? null
-                      : Math.round(remote.balances.current * 100),
-                  encryptedCredentials: encryptJson(
-                    { accessToken: exchange.access_token },
-                    config.encryptionKey,
-                  ),
+                    remote.balanceCurrent === null ? null : Math.round(remote.balanceCurrent * 100),
+                  encryptedCredentials: encryptJson({ accessToken }, key),
                   institution: input.institution ?? "Plaid",
                   lastSyncedAt: null,
-                  name: remote.official_name ?? remote.name,
+                  name: remote.officialName ?? remote.name,
                   provider: "plaid",
-                  providerAccountId: remote.account_id,
-                  providerItemId: exchange.item_id,
+                  providerAccountId: remote.accountId,
+                  providerItemId: itemKey,
                   status: "connected",
                   userId: context.principal.userId,
                 })
                 .onConflictDoUpdate({
                   set: {
                     balance:
-                      remote.balances.current === null
+                      remote.balanceCurrent === null
                         ? null
-                        : Math.round(remote.balances.current * 100),
-                    encryptedCredentials: encryptJson(
-                      { accessToken: exchange.access_token },
-                      config.encryptionKey,
-                    ),
-                    name: remote.official_name ?? remote.name,
-                    providerItemId: exchange.item_id,
+                        : Math.round(remote.balanceCurrent * 100),
+                    encryptedCredentials: encryptJson({ accessToken }, key),
+                    name: remote.officialName ?? remote.name,
+                    providerItemId: itemKey,
                     status: "connected",
                     syncCursor: null,
                     updatedAt: now(),
@@ -2678,10 +2626,10 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
             : eq(financeAccounts.id, before.id),
         );
       const syncAccount = itemAccounts.find((row) => row.encryptedCredentials) ?? before;
-      const config = getPlaid();
+      const plaid = getPlaid();
       const credentials = decryptJson<PlaidCredentials>(
         syncAccount.encryptedCredentials as EncryptedCredentials,
-        config.encryptionKey,
+        getEncryptionKey(),
       );
       const accountsByProviderId = new Map(
         itemAccounts.flatMap((row) =>
@@ -2696,37 +2644,26 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
       const removedTransactionIds = new Set<string>();
       const replacedPendingTransactionIds = new Set<string>();
       while (hasMore) {
-        const page = await plaidRequest<{
-          added: PlaidTransaction[];
-          has_more: boolean;
-          modified: PlaidTransaction[];
-          next_cursor: string;
-          removed: Array<{ transaction_id: string }>;
-          transactions_update_status?:
-            | "NOT_READY"
-            | "INITIAL_UPDATE_COMPLETE"
-            | "HISTORICAL_UPDATE_COMPLETE";
-        }>("/transactions/sync", {
-          access_token: credentials.accessToken,
+        const page = await plaid.syncTransactions({
+          accessToken: credentials.accessToken,
           cursor,
-          count: 500,
         });
         for (const removed of page.removed) {
-          removedTransactionIds.add(removed.transaction_id);
+          removedTransactionIds.add(removed.transactionId);
         }
         for (const remote of [...page.added, ...page.modified]) {
-          if (remote.pending_transaction_id) {
-            replacedPendingTransactionIds.add(remote.pending_transaction_id);
+          if (remote.pendingTransactionId) {
+            replacedPendingTransactionIds.add(remote.pendingTransactionId);
           }
         }
         const prepared = await Promise.all(
           [...page.added, ...page.modified]
-            .filter((remote) => accountsByProviderId.has(remote.account_id))
+            .filter((remote) => accountsByProviderId.has(remote.accountId))
             .map(async (remote) => {
-              const merchant = remote.merchant_name ?? remote.name;
+              const merchant = remote.merchantName ?? remote.name;
               const learned = await learnedCategory(context.principal.userId, merchant);
               const automatic = learned ? categorization(merchant, learned) : null;
-              const providerCategory = remote.personal_finance_category;
+              const providerCategory = remote.personalFinanceCategory;
               const inferred = isRentMerchant(merchant)
                 ? categorization(merchant)
                 : (automatic ??
@@ -2734,10 +2671,10 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
                     ? {
                         category: providerCategory.primary,
                         confidence: (() => {
-                          const confidence = providerConfidence(providerCategory.confidence_level);
+                          const confidence = providerConfidence(providerCategory.confidenceLevel);
                           return confidence === null ? null : Math.round(confidence * 10_000);
                         })(),
-                        needsReview: providerNeedsReview(providerCategory.confidence_level),
+                        needsReview: providerNeedsReview(providerCategory.confidenceLevel),
                       }
                     : categorization(merchant)));
               const isTransfer =
@@ -2801,7 +2738,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
             providerCategory,
             remote,
           } of prepared) {
-            const localAccount = accountsByProviderId.get(remote.account_id);
+            const localAccount = accountsByProviderId.get(remote.accountId);
             if (!localAccount) continue;
             const providerDirection = remote.amount < 0 ? "income" : "expense";
             let [existingTransaction] = await tx
@@ -2810,19 +2747,19 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
               .where(
                 and(
                   eq(financeTransactions.accountId, localAccount.id),
-                  eq(financeTransactions.providerTransactionId, remote.transaction_id),
+                  eq(financeTransactions.providerTransactionId, remote.transactionId),
                 ),
               )
               .for("update")
               .limit(1);
-            if (!existingTransaction && remote.pending_transaction_id) {
+            if (!existingTransaction && remote.pendingTransactionId) {
               [existingTransaction] = await tx
                 .select()
                 .from(financeTransactions)
                 .where(
                   and(
                     eq(financeTransactions.accountId, localAccount.id),
-                    eq(financeTransactions.providerTransactionId, remote.pending_transaction_id),
+                    eq(financeTransactions.providerTransactionId, remote.pendingTransactionId),
                   ),
                 )
                 .for("update")
@@ -2830,7 +2767,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
               if (existingTransaction) {
                 await tx
                   .update(financeTransactions)
-                  .set({ providerTransactionId: remote.transaction_id })
+                  .set({ providerTransactionId: remote.transactionId })
                   .where(eq(financeTransactions.id, existingTransaction.id));
               }
             }
@@ -2865,12 +2802,12 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
                 merchantId: merchantRecord.id,
                 needsReview: isTransfer ? !isSoFiVaultTransfer(merchant) : inferred.needsReview,
                 pending: remote.pending ?? false,
-                pendingTransactionId: remote.pending_transaction_id ?? null,
+                pendingTransactionId: remote.pendingTransactionId,
                 providerCategory: providerCategory?.primary ?? null,
                 providerCategoryDetailed: providerCategory?.detailed ?? null,
-                providerCategoryConfidence: providerCategory?.confidence_level ?? null,
+                providerCategoryConfidence: providerCategory?.confidenceLevel ?? null,
                 providerDirection,
-                providerTransactionId: remote.transaction_id,
+                providerTransactionId: remote.transactionId,
                 reconciliationStatus: isSoFiVaultTransfer(merchant)
                   ? "confirmed"
                   : isTransfer
@@ -2921,10 +2858,10 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
                       ? !isSoFiVaultTransfer(merchant)
                       : inferred.needsReview,
                   pending: remote.pending ?? false,
-                  pendingTransactionId: remote.pending_transaction_id ?? null,
+                  pendingTransactionId: remote.pendingTransactionId,
                   providerCategory: providerCategory?.primary ?? null,
                   providerCategoryDetailed: providerCategory?.detailed ?? null,
-                  providerCategoryConfidence: providerCategory?.confidence_level ?? null,
+                  providerCategoryConfidence: providerCategory?.confidenceLevel ?? null,
                   providerDirection,
                   reconciliationStatus: protectedTransaction
                     ? protectedTransaction.reconciliationStatus
@@ -2978,7 +2915,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
             }
             changed += 1;
           }
-          if (!page.has_more) {
+          if (!page.hasMore) {
             const deletableTransactionIds = [...removedTransactionIds].filter(
               (transactionId) => !replacedPendingTransactionIds.has(transactionId),
             );
@@ -2999,15 +2936,15 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
               .update(financeAccounts)
               .set({
                 lastSyncedAt:
-                  page.transactions_update_status === "NOT_READY" ? before.lastSyncedAt : now(),
-                syncCursor: page.next_cursor,
+                  page.transactionsUpdateStatus === "NOT_READY" ? before.lastSyncedAt : now(),
+                syncCursor: page.nextCursor,
                 updatedAt: now(),
               })
               .where(inArray(financeAccounts.id, itemAccountIds));
           }
         });
-        cursor = page.next_cursor;
-        hasMore = page.has_more;
+        cursor = page.nextCursor;
+        hasMore = page.hasMore;
       }
       const reconciliation = await reconcileBudgetTransfers(context.principal.userId);
       await refreshCashflowIntelligence(context.principal.userId);
@@ -3024,7 +2961,7 @@ export function createFinanceService({ db, now, onProposalSnapshotRead, plaid }:
       return { changed };
     },
     async syncDuePlaidAccounts(maxAgeMinutes = 360) {
-      if (!plaid?.clientId || !plaid.secret) return { failed: 0, reasons: [], synced: 0 };
+      if (!plaid) return { failed: 0, reasons: [], synced: 0 };
       const cutoff = new Date(now().getTime() - maxAgeMinutes * 60 * 1000);
       const dueAccounts = await db
         .select({

@@ -1,4 +1,9 @@
-import type { GoogleConnector, ICloudConnector, XConnector } from "@personal-os/connectors";
+import type {
+  GoogleConnector,
+  ICloudConnector,
+  PlaidConnector,
+  XConnector,
+} from "@personal-os/connectors";
 import type { Database } from "@personal-os/database";
 import type {
   AccessScope,
@@ -29,6 +34,7 @@ export type AppDependencies = {
   icloud?: ICloudConnector;
   log?: (entry: RequestLog) => void;
   now?: () => Date;
+  plaid?: PlaidConnector;
   runtimeLifecycle?: RuntimeLifecycle;
   verifyGooglePubSubToken?: (token: string) => Promise<{ subject: string | null }>;
   x?: XConnector;

@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createPlaidConnector } from "@personal-os/connectors";
 import {
   attentionItems,
   auditEvents,
@@ -2849,14 +2850,14 @@ describe.sequential("finance service", () => {
     const fetch = plaidFetch();
     const service = createFinanceService({
       db: database.db,
+      encryptionKey: key,
       now: () => now,
-      plaid: {
+      plaid: createPlaidConnector({
         clientId: "client",
-        encryptionKey: key,
         environment: "sandbox",
         fetch,
         secret: "secret",
-      },
+      }),
     });
     const context = {
       principal: financePrincipal(plaidOnlyUser.id),
@@ -3089,7 +3090,7 @@ describe.sequential("finance service", () => {
       if (concurrentReconciliation) pendingOperations.push(concurrentReconciliation);
       await Promise.allSettled(pendingOperations);
     }
-    const amountPage = await service.listTransactions(userId, {
+    const amountPage = await service.listTransactions(plaidOnlyUser.id, {
       limit: 1,
       review: "all",
       sortBy: "amount",
@@ -3097,7 +3098,7 @@ describe.sequential("finance service", () => {
     });
     expect(amountPage.items).toHaveLength(1);
     expect(amountPage.nextCursor).toEqual(expect.any(String));
-    const nextAmountPage = await service.listTransactions(userId, {
+    const nextAmountPage = await service.listTransactions(plaidOnlyUser.id, {
       cursor: amountPage.nextCursor as string,
       limit: 1,
       review: "all",
@@ -3106,7 +3107,7 @@ describe.sequential("finance service", () => {
     });
     expect(nextAmountPage.items[0]?.id).not.toBe(amountPage.items[0]?.id);
     await expect(
-      service.listTransactions(userId, {
+      service.listTransactions(plaidOnlyUser.id, {
         cursor: amountPage.nextCursor as string,
         limit: 1,
         review: "all",
@@ -3142,18 +3143,16 @@ describe.sequential("finance service", () => {
       await expect(reconnectSync).rejects.toThrow(
         "connection changed while this sync was in progress",
       );
-      await expect(
-        database.db
-          .select({
-            providerItemId: financeAccounts.providerItemId,
-            syncCursor: financeAccounts.syncCursor,
-          })
-          .from(financeAccounts)
-          .where(inArray(financeAccounts.id, [plaidAccount.id, debtAccount.id])),
-      ).resolves.toEqual([
-        { providerItemId: "item-2", syncCursor: null },
-        { providerItemId: "item-2", syncCursor: null },
-      ]);
+      const reconnectedAccounts = await database.db
+        .select({
+          providerItemId: financeAccounts.providerItemId,
+          syncCursor: financeAccounts.syncCursor,
+        })
+        .from(financeAccounts)
+        .where(inArray(financeAccounts.id, [plaidAccount.id, debtAccount.id]));
+      expect(reconnectedAccounts).toHaveLength(2);
+      expect(reconnectedAccounts.every((account) => account.syncCursor === null)).toBe(true);
+      expect(new Set(reconnectedAccounts.map((account) => account.providerItemId)).size).toBe(1);
     } finally {
       await exchangeBlocker.query("ROLLBACK");
       exchangeBlocker.release();
@@ -3223,14 +3222,14 @@ describe.sequential("finance service", () => {
     });
     const service = createFinanceService({
       db: database.db,
+      encryptionKey: key,
       now: () => now,
-      plaid: {
+      plaid: createPlaidConnector({
         clientId: "client",
-        encryptionKey: key,
         environment: "sandbox",
         fetch,
         secret: "secret",
-      },
+      }),
     });
     const context = {
       principal: financePrincipal(restartUser.id),
@@ -3259,7 +3258,7 @@ describe.sequential("finance service", () => {
     if (!staleTransaction) throw new Error("Stale Plaid transaction was not created.");
 
     await expect(service.syncPlaidAccount(restartAccount.id, context)).rejects.toThrow(
-      "Temporary page failure",
+      "Plaid is temporarily unavailable.",
     );
     await expect(
       database.db
@@ -3294,34 +3293,36 @@ describe.sequential("finance service", () => {
   it("surfaces Plaid API failures without persisting credentials", async () => {
     const service = createFinanceService({
       db: database.db,
+      encryptionKey: key,
       now: () => now,
-      plaid: {
+      plaid: createPlaidConnector({
         clientId: "client",
-        encryptionKey: key,
         environment: "sandbox",
         fetch: vi.fn(async () =>
           Response.json({ error_message: "Bad public token" }, { status: 400 }),
         ),
         secret: "secret",
-      },
+      }),
     });
-    await expect(service.createPlaidLinkToken(userId)).rejects.toThrow("Plaid: Bad public token");
+    await expect(service.createPlaidLinkToken(userId)).rejects.toThrow(
+      "Plaid rejected the request.",
+    );
     const fallbackService = createFinanceService({
       db: database.db,
+      encryptionKey: key,
       now: () => now,
-      plaid: {
+      plaid: createPlaidConnector({
         clientId: "client",
-        encryptionKey: key,
         environment: "sandbox",
         secret: "secret",
-      },
+      }),
     });
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => Response.json({}, { status: 500 })),
     );
     await expect(fallbackService.createPlaidLinkToken(userId)).rejects.toThrow(
-      "Plaid could not complete that request",
+      "Plaid is temporarily unavailable.",
     );
     vi.unstubAllGlobals();
   });

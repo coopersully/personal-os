@@ -28,21 +28,26 @@ describe("database client", () => {
       `postgresql://app@prod.internal:${address.port}/personal_os?sslmode=verify-full`,
       { connectHost: "127.0.0.1" },
     );
+    let acceptedStream: Socket | undefined;
+    let stream: Socket | undefined;
     try {
       expect(new URL(client.pool.options.connectionString ?? "").hostname).toBe("prod.internal");
       expect(client.pool.options.stream).toBeTypeOf("function");
-      const stream = client.pool.options.stream?.() as Socket | undefined;
+      stream = client.pool.options.stream?.() as Socket | undefined;
       if (!stream) throw new Error("Expected a database transport stream.");
       const accepted = once(server, "connection");
+      const connected = once(stream, "connect");
       stream.connect(address.port, "prod.internal");
-      const [acceptedStream] = await accepted;
+      const [acceptedValues] = await Promise.all([accepted, connected]);
+      acceptedStream = acceptedValues[0] as Socket;
       expect(stream.remoteAddress).toBe("127.0.0.1");
-      stream.destroy();
-      acceptedStream.destroy();
     } finally {
+      stream?.destroy();
+      acceptedStream?.destroy();
       await client.close();
+      const closed = once(server, "close");
       server.close();
-      await once(server, "close");
+      await closed;
     }
   });
 });

@@ -60,6 +60,16 @@ output "rds_master_secret_arn" {
   sensitive = true
 }
 
+output "local_production_runtime_role_arn" {
+  description = "Scoped role assumed by the explicitly acknowledged local production runtime."
+  value       = aws_iam_role.local_production_runtime.arn
+}
+
+output "local_production_tunnel_instance_id" {
+  description = "No-ingress Session Manager tunnel host used by local production runtime sessions."
+  value       = aws_instance.local_production_tunnel.id
+}
+
 output "app_url" {
   value = "https://${local.app_domain}"
 }

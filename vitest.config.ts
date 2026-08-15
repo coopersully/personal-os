@@ -40,7 +40,11 @@ export default defineConfig({
     },
     environment: "node",
     globals: true,
-    include: ["apps/*/src/**/*.test.{ts,tsx}", "packages/*/src/**/*.test.{ts,tsx}"],
+    include: [
+      ".codex/scripts/**/*.test.ts",
+      "apps/*/src/**/*.test.{ts,tsx}",
+      "packages/*/src/**/*.test.{ts,tsx}",
+    ],
     // Keep the large DOM suite from contending with API integration-test containers.
     // Four local workers made otherwise-fast setup flows exceed their timeout under
     // full `pnpm verify` load; matching CI keeps the repository-wide gate deterministic.

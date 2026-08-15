@@ -156,4 +156,21 @@ printf '2\n' >"$WORKTREE_B/.codex/run/tier"
 recovered_config="$(cd "$WORKTREE_B" && bash ./.codex/scripts/environment.sh config)"
 assert_contains "$recovered_config" "Tier:      3"
 
+# Production lifecycle commands delegate the exact stable worktree ports without
+# synthesizing the required production acknowledgement.
+PRODUCTION_HELPER="$TEMP_ROOT/production-runtime-helper.mjs"
+PRODUCTION_OUTPUT="$TEMP_ROOT/production-runtime-output.jsonl"
+cp "$SOURCE_ROOT/.codex/scripts/production-runtime.test-helper.mjs" "$PRODUCTION_HELPER"
+export ILO_PRODUCTION_RUNTIME_HELPER="$PRODUCTION_HELPER"
+export ILO_PRODUCTION_TEST_OUTPUT="$PRODUCTION_OUTPUT"
+(cd "$WORKTREE_A" && bash ./.codex/scripts/environment.sh production-status)
+production_invocation="$(tail -n 1 "$PRODUCTION_OUTPUT")"
+assert_contains "$production_invocation" '"acknowledgement":null'
+assert_contains "$production_invocation" '"status"'
+assert_contains "$production_invocation" '"--api-port","8793"'
+assert_contains "$production_invocation" '"--mcp-port","8794"'
+assert_contains "$production_invocation" '"--web-port","8086"'
+assert_contains "$production_invocation" '"--database-port","55438"'
+unset ILO_PRODUCTION_RUNTIME_HELPER ILO_PRODUCTION_TEST_OUTPUT
+
 printf 'Codex environment lifecycle tests passed.\n'

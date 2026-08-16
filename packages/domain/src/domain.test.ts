@@ -106,6 +106,8 @@ import {
   updateMotiveInputSchema,
   updateReminderInputSchema,
   updateTaskInputSchema,
+  updateTaskListInputSchema,
+  updateTaskProjectInputSchema,
   updateUserInputSchema,
   upsertDomainProfileInputSchema,
   upsertMailProfileInputSchema,
@@ -1006,6 +1008,9 @@ describe("domain schemas", () => {
       }).success,
     ).toBe(false);
     expect(updateTaskInputSchema.safeParse({ expectedRevision: 1 }).success).toBe(false);
+    expect(updateTaskInputSchema.safeParse({ title: undefined }).success).toBe(false);
+    expect(updateTaskListInputSchema.safeParse({ description: undefined }).success).toBe(false);
+    expect(updateTaskProjectInputSchema.safeParse({ why: undefined }).success).toBe(false);
     expect(
       updateTaskInputSchema.safeParse({ expectedRevision: 0, title: "Invalid revision" }).success,
     ).toBe(false);

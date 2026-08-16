@@ -44,7 +44,7 @@ describe("auditSnapshot", () => {
     ).toThrow("Cannot serialize a Task without canonical lifecycle, List, and revision.");
     expect(
       serializeTaskList({
-        archivedAt: null,
+        archivedAt: timestamp,
         availability: "archived",
         color: null,
         createdAt: timestamp,

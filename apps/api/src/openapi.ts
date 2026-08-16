@@ -8,6 +8,16 @@ export function createOpenApiDocument(apiBaseUrl: string) {
     required: true,
     schema: { format: "uuid", type: "string" },
   };
+  const queryParameter = (name: string, schema: Record<string, unknown>) => ({
+    in: "query",
+    name,
+    required: false,
+    schema,
+  });
+  const paginationParameters = [
+    queryParameter("cursor", { minLength: 1, type: "string" }),
+    queryParameter("limit", { maximum: 100, minimum: 1, type: "integer" }),
+  ];
   const jsonRequest = (schema: string, required = true) => ({
     content: { "application/json": { schema: { $ref: `#/components/schemas/${schema}` } } },
     required,
@@ -319,7 +329,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         },
       },
       "/v1/task-lists": {
-        get: taskRead("Task Lists"),
+        get: { ...taskRead("Task Lists"), parameters: paginationParameters },
         post: taskWrite("Task List created", "TaskListCreateInput", 201),
       },
       "/v1/task-lists/{id}": {
@@ -336,7 +346,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         },
       },
       "/v1/task-projects": {
-        get: taskRead("Task Projects"),
+        get: { ...taskRead("Task Projects"), parameters: paginationParameters },
         post: taskWrite("Task Project created", "TaskProjectCreateInput", 201),
       },
       "/v1/task-projects/{id}": {
@@ -378,7 +388,27 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         },
       },
       "/v1/tasks": {
-        get: taskRead("Task page"),
+        get: {
+          ...taskRead("Task page"),
+          parameters: [
+            ...paginationParameters,
+            queryParameter("lifecycle", {
+              enum: ["open", "completed", "cancelled"],
+              type: "string",
+            }),
+            queryParameter("listId", { format: "uuid", type: "string" }),
+            queryParameter("projectId", { format: "uuid", type: "string" }),
+            queryParameter("view", {
+              enum: ["today", "upcoming", "scheduled", "completed", "cancelled", "trash"],
+              type: "string",
+            }),
+            queryParameter("search", { maxLength: 240, minLength: 1, type: "string" }),
+            queryParameter("dueAfter", { format: "date-time", type: "string" }),
+            queryParameter("dueBefore", { format: "date-time", type: "string" }),
+            queryParameter("scheduledAfter", { format: "date-time", type: "string" }),
+            queryParameter("scheduledBefore", { format: "date-time", type: "string" }),
+          ],
+        },
         post: taskWrite("Task created", "TaskCreateInput", 201),
       },
       "/v1/tasks/{id}": {

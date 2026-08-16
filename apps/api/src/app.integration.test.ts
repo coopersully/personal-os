@@ -382,6 +382,17 @@ describe.sequential("ilo API", () => {
         details: { code: "task_list_idempotency_mismatch" },
       });
 
+      await database.db
+        .update(taskLists)
+        .set({ deletedAt: new Date("2026-07-13T12:00:00.000Z") })
+        .where(eq(taskLists.id, createdList.id));
+      const deletedReplay = await listRequest("/v1/task-lists", { body: createInput });
+      expect(deletedReplay.status).toBe(201);
+      expect((await payload(deletedReplay)).taskList).toMatchObject({
+        deletedAt: "2026-07-13T12:00:00.000Z",
+        id: createdList.id,
+      });
+
       const otherRegistration = await request("/v1/auth/register", {
         auth: "none",
         body: {
@@ -618,6 +629,56 @@ describe.sequential("ilo API", () => {
         })
         .returning();
       if (!task) throw new Error("Task fixture was not created.");
+      const terminalAt = new Date("2026-07-13T11:00:00.000Z");
+      const [archivedProject, completedProject] = await database.db
+        .insert(taskProjects)
+        .values([
+          {
+            archivedAt: terminalAt,
+            availability: "archived",
+            listId: source.id,
+            name: "Archived Project Stays",
+            normalizedName: "archived project stays",
+            userId: listUserId,
+          },
+          {
+            completedAt: terminalAt,
+            lifecycle: "completed",
+            listId: source.id,
+            name: "Completed Project Stays",
+            normalizedName: "completed project stays",
+            userId: listUserId,
+          },
+        ])
+        .returning();
+      const [cancelledTask, deletedTask] = await database.db
+        .insert(reminders)
+        .values([
+          {
+            kind: "task",
+            status: "cancelled",
+            taskCancelledAt: terminalAt,
+            taskLifecycle: "cancelled",
+            taskListId: source.id,
+            taskRevision: 1,
+            title: "Cancelled Task Stays",
+            userId: listUserId,
+          },
+          {
+            deletedAt: terminalAt,
+            kind: "task",
+            status: "inbox",
+            taskLifecycle: "open",
+            taskListId: source.id,
+            taskRevision: 1,
+            title: "Trashed Task Stays",
+            userId: listUserId,
+          },
+        ])
+        .returning();
+      if (!archivedProject || !completedProject || !cancelledTask || !deletedTask) {
+        throw new Error("Inactive Task List contents were not created.");
+      }
 
       const preview = await listRequest(`/v1/task-lists/${source.id}/archive`, {
         body: { expectedRevision: source.revision },
@@ -675,6 +736,24 @@ describe.sequential("ilo API", () => {
       ).toEqual([expect.objectContaining({ listId: destination.id, revision: 2 })]);
       expect(await database.db.select().from(reminders).where(eq(reminders.id, task.id))).toEqual([
         expect.objectContaining({ taskListId: destination.id, taskRevision: 2 }),
+      ]);
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(inArray(taskProjects.id, [archivedProject.id, completedProject.id])),
+      ).toEqual([
+        { listId: source.id, revision: 1 },
+        { listId: source.id, revision: 1 },
+      ]);
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId, revision: reminders.taskRevision })
+          .from(reminders)
+          .where(inArray(reminders.id, [cancelledTask.id, deletedTask.id])),
+      ).toEqual([
+        { listId: source.id, revision: 1 },
+        { listId: source.id, revision: 1 },
       ]);
       const moveAudits = await database.db
         .select({
@@ -1088,13 +1167,24 @@ describe.sequential("ilo API", () => {
       const replayed = await projectRequest("/v1/task-projects", { body: input });
       expect(created.status).toBe(201);
       expect(replayed.status).toBe(201);
-      expect((await payload(replayed)).taskProject).toEqual((await payload(created)).taskProject);
+      const createdProject = (await payload(created)).taskProject;
+      expect((await payload(replayed)).taskProject).toEqual(createdProject);
       const mismatch = await projectRequest("/v1/task-projects", {
         body: { ...input, notes: "Different material" },
       });
       expect(mismatch.status).toBe(409);
       expect((await payload(mismatch)).error.details).toMatchObject({
         code: "task_project_idempotency_mismatch",
+      });
+      await database.db
+        .update(taskProjects)
+        .set({ deletedAt: new Date("2026-07-13T12:00:00.000Z") })
+        .where(eq(taskProjects.id, createdProject.id));
+      const deletedReplay = await projectRequest("/v1/task-projects", { body: input });
+      expect(deletedReplay.status).toBe(201);
+      expect((await payload(deletedReplay)).taskProject).toMatchObject({
+        deletedAt: "2026-07-13T12:00:00.000Z",
+        id: createdProject.id,
       });
 
       const otherRegistration = await request("/v1/auth/register", {
@@ -1631,6 +1721,41 @@ describe.sequential("ilo API", () => {
         sourceListRevision: sourceList.revision,
         taskProjectId: project.id,
         taskProjectRevision: project.revision,
+      });
+
+      const forgedToken = createHash("sha256")
+        .update(
+          JSON.stringify({
+            affectedTaskCount: 1,
+            affectedTasks: [
+              {
+                deletedAt: null,
+                id: firstTask.id,
+                lifecycle: "open",
+                listId: sourceList.id,
+                projectId: project.id,
+                revision: 1,
+              },
+            ],
+            destinationListId: destinationList.id,
+            destinationListRevision: destinationList.revision,
+            sourceListId: sourceList.id,
+            sourceListRevision: sourceList.revision,
+            taskProjectId: project.id,
+            taskProjectRevision: project.revision,
+          }),
+        )
+        .digest("hex");
+      const forgedMove = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: project.revision,
+          previewToken: forgedToken,
+        },
+      });
+      expect(forgedMove.status).toBe(409);
+      expect((await payload(forgedMove)).error.details).toMatchObject({
+        code: "task_project_move_preview_stale",
       });
 
       const secondTask = await insertProjectTask(project, "Atomic Move Drift");

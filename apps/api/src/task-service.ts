@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
   auditEvents,
   type Database,
@@ -37,6 +37,7 @@ type MutationContext = {
 
 type TaskServiceOptions = {
   db: Database;
+  movePreviewSecret: string;
   now: () => Date;
 };
 
@@ -53,7 +54,7 @@ type LockedTaskHierarchy = {
   task: TaskRow;
 };
 
-export function createTaskService({ db, now }: TaskServiceOptions) {
+export function createTaskService({ db, movePreviewSecret, now }: TaskServiceOptions) {
   function taskAuditState(row: TaskRow): Record<string, unknown> {
     return auditSnapshot(serializeTask(row)) ?? {};
   }
@@ -132,7 +133,13 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
     taskId: string;
     taskRevision: number;
   }): string {
-    return createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    return createHmac("sha256", movePreviewSecret).update(JSON.stringify(input)).digest("hex");
+  }
+
+  function moveTokenMatches(input: Parameters<typeof moveToken>[0], candidate: string): boolean {
+    const expected = Buffer.from(moveToken(input));
+    const received = Buffer.from(candidate);
+    return expected.length === received.length && timingSafeEqual(expected, received);
   }
 
   async function findTask(userId: string, id: string, deleted: boolean): Promise<TaskRow> {
@@ -748,7 +755,7 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
           taskId: locked.task.id,
           taskRevision: locked.task.taskRevision as number,
         };
-        if (moveToken(tokenValues) !== input.previewToken) {
+        if (!moveTokenMatches(tokenValues, input.previewToken)) {
           throw new AppError("conflict", "The Task move preview is stale.", {
             code: "task_move_preview_stale",
             currentRevision: locked.task.taskRevision,
@@ -809,7 +816,7 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
       requireAgentRevision(context, input.expectedRevision);
       const observed = await findTask(context.principal.userId, id, false);
       assertExpectedRevision(observed, input.expectedRevision);
-      return db.transaction(async (transaction) => {
+      return db.transaction(async (transaction): Promise<TaskMovePreview> => {
         const locked = await lockHierarchy(transaction, observed, {
           deleted: false,
           destinationListId: input.destinationListId,
@@ -838,7 +845,20 @@ export function createTaskService({ db, now }: TaskServiceOptions) {
           taskRevision: locked.task.taskRevision as number,
         };
         const { sourceProjectRevision: _, ...preview } = tokenValues;
-        return { ...preview, previewToken: moveToken(tokenValues) } as TaskMovePreview;
+        const previewToken = moveToken(tokenValues);
+        return destinationProject
+          ? {
+              ...preview,
+              destinationProjectId: destinationProject.id,
+              destinationProjectRevision: destinationProject.revision,
+              previewToken,
+            }
+          : {
+              ...preview,
+              destinationProjectId: null,
+              destinationProjectRevision: null,
+              previewToken,
+            };
       });
     },
 

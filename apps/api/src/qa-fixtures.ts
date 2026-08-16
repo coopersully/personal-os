@@ -235,6 +235,10 @@ function fixtureId(account: QaFixtureAccount, record: number): string {
   return `${account.id.slice(0, 8)}-0000-4000-8000-${record.toString(16).padStart(12, "0")}`;
 }
 
+function taskInboxPlaceholderId(account: QaFixtureAccount): string {
+  return fixtureId(account, 230);
+}
+
 function addBaseAccount(
   data: FixtureData,
   account: QaFixtureAccount,
@@ -352,7 +356,7 @@ function addLoadedWorkspace(
   const connectedAccountId = fixtureId(account, 11);
   const workCalendarId = fixtureId(account, 21);
   const familyCalendarId = fixtureId(account, 22);
-  const taskInboxId = fixtureId(account, 230);
+  const taskInboxId = taskInboxPlaceholderId(account);
   const personalTaskListId = fixtureId(account, 231);
   const workTaskListId = fixtureId(account, 232);
   const shoppingTaskListId = fixtureId(account, 233);
@@ -1647,7 +1651,7 @@ export async function loadQaFixtures(
       const generatedInboxId = generatedInboxByUser.get(account.id);
       if (!generatedInboxId)
         throw new Error(`The database did not create an Inbox for ${account.key}.`);
-      const inboxPlaceholder = fixtureId(account, 230);
+      const inboxPlaceholder = taskInboxPlaceholderId(account);
       for (const reminder of data.reminders) {
         if (reminder.userId === account.id && reminder.taskListId === inboxPlaceholder) {
           reminder.taskListId = generatedInboxId;

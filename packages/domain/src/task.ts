@@ -1,8 +1,11 @@
 import { z } from "zod";
 import { idSchema, isoDateTimeSchema, paginationSchema, timeZoneSchema } from "./common.js";
-import { materialSourceReferenceSchema } from "./feature-contracts.js";
 import { reminderPrioritySchema } from "./reminder.js";
-import { taskLifecycleSchema, taskSystemViewSchema } from "./task-organization.js";
+import {
+  localTaskMaterialSourceSchema,
+  taskLifecycleSchema,
+  taskSystemViewSchema,
+} from "./task-organization.js";
 
 /** Compatibility-only metadata retained while legacy Task rows are reviewed. */
 export const taskStatusSchema = z.enum(["inbox", "next", "scheduled", "completed", "cancelled"]);
@@ -21,13 +24,7 @@ const tagsSchema = z
   .transform((tags) => [...new Set(tags)]);
 const nullableTaskTextSchema = z.string().trim().max(10_000).nullable();
 const revisionSchema = z.number().int().positive();
-const taskSourceSchema = materialSourceReferenceSchema.extend({
-  accountId: z.null(),
-  provider: z.literal("local"),
-  remoteId: idSchema,
-  revision: z.string().trim().min(1),
-  sourceType: z.literal("task"),
-});
+const taskSourceSchema = localTaskMaterialSourceSchema("task");
 
 const taskContentFieldsSchema = z.object({
   dueAt: isoDateTimeSchema.nullable(),
@@ -64,7 +61,10 @@ export const updateTaskInputSchema = taskContentFieldsSchema
   .extend({ expectedRevision: revisionSchema.optional() })
   .strict()
   .refine(
-    (value) => Object.keys(value).some((key) => key !== "expectedRevision"),
+    (value) =>
+      Object.entries(value).some(
+        ([key, fieldValue]) => key !== "expectedRevision" && fieldValue !== undefined,
+      ),
     "At least one task field is required",
   );
 export type UpdateTaskInput = z.infer<typeof updateTaskInputSchema>;

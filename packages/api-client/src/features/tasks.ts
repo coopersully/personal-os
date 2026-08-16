@@ -10,6 +10,7 @@ import type {
   CreateTaskProjectInput,
   MoveTaskInput,
   MoveTaskProjectInput,
+  Pagination,
   ReopenTaskInput,
   RestoreTaskInput,
   Task,
@@ -28,7 +29,7 @@ import type {
 
 export type TaskApiRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
-type TaskContainerListQuery = Pick<TaskListQuery, "cursor" | "limit">;
+type TaskContainerListQuery = Pagination;
 
 /** Typed task operations sharing the authenticated client transport. */
 export function createTaskApiClient(request: TaskApiRequest, toQuery: (query: object) => string) {

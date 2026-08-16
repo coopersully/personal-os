@@ -34,20 +34,18 @@ export function normalizeTaskContainerName(value: string): string {
 const taskContainerNameSchema = z.string().trim().min(1).max(240);
 const nullableTaskContainerTextSchema = z.string().trim().max(10_000).nullable();
 const nullableTaskContainerColorSchema = z.string().trim().min(1).max(32).nullable();
-const taskListSourceSchema = materialSourceReferenceSchema.extend({
-  accountId: z.null(),
-  provider: z.literal("local"),
-  remoteId: idSchema,
-  revision: z.string().trim().min(1),
-  sourceType: z.literal("task_list"),
-});
-const taskProjectSourceSchema = materialSourceReferenceSchema.extend({
-  accountId: z.null(),
-  provider: z.literal("local"),
-  remoteId: idSchema,
-  revision: z.string().trim().min(1),
-  sourceType: z.literal("task_project"),
-});
+export function localTaskMaterialSourceSchema<const T extends string>(sourceType: T) {
+  return materialSourceReferenceSchema.extend({
+    accountId: z.null(),
+    provider: z.literal("local"),
+    remoteId: idSchema,
+    revision: z.string().trim().min(1),
+    sourceType: z.literal(sourceType),
+  });
+}
+
+const taskListSourceSchema = localTaskMaterialSourceSchema("task_list");
+const taskProjectSourceSchema = localTaskMaterialSourceSchema("task_project");
 const revisionSchema = z.number().int().positive();
 const optionalExpectedRevisionSchema = revisionSchema.optional();
 const optionalIdempotencyKeySchema = z.uuid().optional();
@@ -85,7 +83,10 @@ export const updateTaskListInputSchema = taskListFieldsSchema
   .extend({ expectedRevision: optionalExpectedRevisionSchema })
   .strict()
   .refine(
-    (value) => Object.keys(value).some((key) => key !== "expectedRevision"),
+    (value) =>
+      Object.entries(value).some(
+        ([key, fieldValue]) => key !== "expectedRevision" && fieldValue !== undefined,
+      ),
     "At least one task List field is required",
   );
 export type UpdateTaskListInput = z.infer<typeof updateTaskListInputSchema>;
@@ -154,7 +155,10 @@ export const updateTaskProjectInputSchema = taskProjectFieldsSchema
   .extend({ expectedRevision: optionalExpectedRevisionSchema })
   .strict()
   .refine(
-    (value) => Object.keys(value).some((key) => key !== "expectedRevision"),
+    (value) =>
+      Object.entries(value).some(
+        ([key, fieldValue]) => key !== "expectedRevision" && fieldValue !== undefined,
+      ),
     "At least one task Project field is required",
   );
 export type UpdateTaskProjectInput = z.infer<typeof updateTaskProjectInputSchema>;

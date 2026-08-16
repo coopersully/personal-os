@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import {
   auditEvents,
   type Database,
@@ -33,6 +33,7 @@ type MutationContext = {
 
 type TaskProjectServiceOptions = {
   db: Database;
+  movePreviewSecret: string;
   now: () => Date;
 };
 
@@ -62,7 +63,11 @@ const completionResolutions = [
   "keep_project_open",
 ] as const;
 
-export function createTaskProjectService({ db, now }: TaskProjectServiceOptions) {
+export function createTaskProjectService({
+  db,
+  movePreviewSecret,
+  now,
+}: TaskProjectServiceOptions) {
   function projectAuditState(row: ProjectRow): Record<string, unknown> {
     return auditSnapshot(serializeTaskProject(row)) ?? {};
   }
@@ -114,7 +119,13 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
     taskProjectId: string;
     taskProjectRevision: number;
   }): string {
-    return createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    return createHmac("sha256", movePreviewSecret).update(JSON.stringify(input)).digest("hex");
+  }
+
+  function moveTokenMatches(input: Parameters<typeof moveToken>[0], candidate: string): boolean {
+    const expected = Buffer.from(moveToken(input));
+    const received = Buffer.from(candidate);
+    return expected.length === received.length && timingSafeEqual(expected, received);
   }
 
   function moveTaskTokenState(rows: TaskRow[]): MoveTaskTokenState[] {
@@ -251,7 +262,6 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
             and(
               eq(taskProjects.userId, userId),
               eq(taskProjects.createIdempotencyKey, idempotencyKey),
-              isNull(taskProjects.deletedAt),
             ),
           )
           .limit(1)
@@ -502,10 +512,12 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
         if (input.resolution === "keep_project_open") return before;
 
         let destinationProject: ProjectRow | undefined;
+        let moveDestinationList: ListRow | undefined;
         if (input.resolution === "move_open_tasks") {
           if (destinationList?.availability !== "active") {
             throw new AppError("not_found", "The destination task List was not found.");
           }
+          moveDestinationList = destinationList;
           if (input.destinationProjectId === before.id) {
             throw new AppError(
               "conflict",
@@ -568,10 +580,14 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
             .returning();
           taskAction = "task.cancelled_with_project";
         } else if (openTasks.length > 0 && input.resolution === "move_open_tasks") {
+          const destinationForMove = requireDatabaseRecord(
+            moveDestinationList,
+            "The destination task List was not locked for the Project completion.",
+          );
           changedTasks = await transaction
             .update(reminders)
             .set({
-              taskListId: destinationList?.id,
+              taskListId: destinationForMove.id,
               taskProjectId: destinationProject?.id ?? null,
               taskRevision: sql<number>`${reminders.taskRevision} + 1`,
               updatedAt: changedAt,
@@ -780,7 +796,7 @@ export function createTaskProjectService({ db, now }: TaskProjectServiceOptions)
             taskProjectId: before.id,
             taskProjectRevision: before.revision,
           };
-          if (moveToken(previewValues) !== input.previewToken) {
+          if (!moveTokenMatches(previewValues, input.previewToken)) {
             throw new AppError("conflict", "The task Project move preview is stale.", {
               code: "task_project_move_preview_stale",
               currentRevision: before.revision,

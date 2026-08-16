@@ -229,8 +229,16 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     });
   const reminders = createReminderService({ db: dependencies.db, now });
   const taskLists = createTaskListService({ db: dependencies.db, now });
-  const taskProjects = createTaskProjectService({ db: dependencies.db, now });
-  const tasks = createTaskService({ db: dependencies.db, now });
+  const taskProjects = createTaskProjectService({
+    db: dependencies.db,
+    movePreviewSecret: dependencies.config.encryptionKey,
+    now,
+  });
+  const tasks = createTaskService({
+    db: dependencies.db,
+    movePreviewSecret: dependencies.config.encryptionKey,
+    now,
+  });
   const google =
     dependencies.google ??
     createGoogleConnector({

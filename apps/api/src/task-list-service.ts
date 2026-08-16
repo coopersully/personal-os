@@ -153,11 +153,7 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
           .select()
           .from(taskLists)
           .where(
-            and(
-              eq(taskLists.userId, userId),
-              eq(taskLists.createIdempotencyKey, idempotencyKey),
-              isNull(taskLists.deletedAt),
-            ),
+            and(eq(taskLists.userId, userId), eq(taskLists.createIdempotencyKey, idempotencyKey)),
           )
           .limit(1)
       )[0];
@@ -293,7 +289,13 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
               .select()
               .from(taskProjects)
               .where(
-                and(eq(taskProjects.userId, source.userId), eq(taskProjects.listId, source.id)),
+                and(
+                  eq(taskProjects.userId, source.userId),
+                  eq(taskProjects.listId, source.id),
+                  eq(taskProjects.lifecycle, "open"),
+                  eq(taskProjects.availability, "active"),
+                  isNull(taskProjects.deletedAt),
+                ),
               )
               .orderBy(taskProjects.id)
               .for("update");
@@ -305,6 +307,8 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
                   eq(reminders.userId, source.userId),
                   eq(reminders.kind, "task"),
                   eq(reminders.taskListId, source.id),
+                  eq(reminders.taskLifecycle, "open"),
+                  isNull(reminders.deletedAt),
                 ),
               )
               .orderBy(reminders.id)
@@ -317,6 +321,9 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
                     "updated_at" = ${changedAt}
                 WHERE "user_id" = ${source.userId}
                   AND "list_id" = ${source.id}
+                  AND "lifecycle" = 'open'
+                  AND "availability" = 'active'
+                  AND "deleted_at" IS NULL
                 RETURNING "id"
               ), moved_tasks AS (
                 UPDATE "reminders"
@@ -326,6 +333,8 @@ export function createTaskListService({ db, now }: TaskListServiceOptions) {
                 WHERE "user_id" = ${source.userId}
                   AND "kind" = 'task'
                   AND "task_list_id" = ${source.id}
+                  AND "task_lifecycle" = 'open'
+                  AND "deleted_at" IS NULL
                 RETURNING "id"
               )
               SELECT

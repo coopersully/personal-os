@@ -7,6 +7,12 @@ type OpenApiOperation = {
     content?: { "application/json"?: { schema?: { $ref?: string } } };
     required?: boolean;
   };
+  parameters?: Array<{
+    in: string;
+    name: string;
+    required?: boolean;
+    schema?: Record<string, unknown>;
+  }>;
   responses?: Record<number, { description?: string }>;
   "x-required-scopes"?: string[];
   "x-successor-operation"?: string;
@@ -133,5 +139,29 @@ describe("canonical Tasks OpenAPI surface", () => {
     for (const [path, method] of writeOperations) {
       expect(taskOperation(path, method)["x-required-scopes"]).toEqual(["tasks:write"]);
     }
+  });
+
+  it("documents the canonical query parameters for Task collection reads", () => {
+    expect(taskOperation("/v1/task-lists", "get").parameters?.map(({ name }) => name)).toEqual([
+      "cursor",
+      "limit",
+    ]);
+    expect(taskOperation("/v1/task-projects", "get").parameters?.map(({ name }) => name)).toEqual([
+      "cursor",
+      "limit",
+    ]);
+    expect(taskOperation("/v1/tasks", "get").parameters?.map(({ name }) => name)).toEqual([
+      "cursor",
+      "limit",
+      "lifecycle",
+      "listId",
+      "projectId",
+      "view",
+      "search",
+      "dueAfter",
+      "dueBefore",
+      "scheduledAfter",
+      "scheduledBefore",
+    ]);
   });
 });

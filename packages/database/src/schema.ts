@@ -33,6 +33,8 @@ import type {
   MailRuleCondition,
   MailRuleProviderEffect,
   MailRuleWorkStatus,
+  MaintenanceRunStatus,
+  MaintenanceScope,
   MaterialSourceReference,
   Theme,
   TransactionDirection,
@@ -88,6 +90,105 @@ export const users = pgTable("users", {
     .default(17 * 60),
   ...timestamps,
 });
+
+type MaintenanceSafeError = { code: string; message: string };
+
+export const workspaceMaintenanceRuns = pgTable(
+  "workspace_maintenance_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    scope: jsonb("scope").$type<MaintenanceScope>().notNull(),
+    status: text("status").$type<MaintenanceRunStatus>().notNull().default("queued"),
+    rulebookVersion: text("rulebook_version").notNull(),
+    sourceSnapshot: jsonb("source_snapshot").$type<unknown>(),
+    checkpoint: jsonb("checkpoint").$type<unknown>(),
+    leaseClaimId: uuid("lease_claim_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    retryAt: timestamp("retry_at", { withTimezone: true }),
+    lastSafeError: jsonb("last_safe_error").$type<MaintenanceSafeError>(),
+    settledResult: jsonb("settled_result").$type<unknown>(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "workspace_maintenance_runs_status_check",
+      sql`${table.status} IN ('queued', 'running', 'completed', 'completed_with_questions', 'awaiting_approval', 'blocked', 'failed_recoverable', 'failed_terminal')`,
+    ),
+    check(
+      "workspace_maintenance_runs_lease_check",
+      sql`(
+        (${table.status} = 'running' AND ${table.leaseClaimId} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)
+        OR
+        (${table.status} <> 'running' AND ${table.leaseClaimId} IS NULL AND ${table.leaseExpiresAt} IS NULL)
+      )`,
+    ),
+    check(
+      "workspace_maintenance_runs_retry_check",
+      sql`(
+        (${table.status} = 'failed_recoverable' AND ${table.retryAt} IS NOT NULL)
+        OR
+        (${table.status} <> 'failed_recoverable' AND ${table.retryAt} IS NULL)
+      )`,
+    ),
+    uniqueIndex("workspace_maintenance_runs_open_user_domain_idx")
+      .on(table.userId, table.domain)
+      .where(
+        sql`${table.status} IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable')`,
+      ),
+    index("workspace_maintenance_runs_claimable_idx")
+      .on(table.status, table.retryAt, table.leaseExpiresAt, table.updatedAt)
+      .where(sql`${table.status} IN ('queued', 'running', 'failed_recoverable')`),
+    index("workspace_maintenance_runs_user_history_idx").on(
+      table.userId,
+      table.domain,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const workspaceMaintenanceSteps = pgTable(
+  "workspace_maintenance_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    stepName: text("step_name").notNull(),
+    status: text("status")
+      .$type<"completed" | "failed_recoverable" | "failed_terminal">()
+      .notNull(),
+    attemptCount: integer("attempt_count").notNull().default(1),
+    idempotencyKey: text("idempotency_key").notNull(),
+    attemptClaimId: uuid("attempt_claim_id").notNull(),
+    safeResult: jsonb("safe_result").$type<unknown>(),
+    safeError: jsonb("safe_error").$type<MaintenanceSafeError>(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "workspace_maintenance_steps_status_check",
+      sql`${table.status} IN ('completed', 'failed_recoverable', 'failed_terminal')`,
+    ),
+    check("workspace_maintenance_steps_attempt_check", sql`${table.attemptCount} > 0`),
+    check(
+      "workspace_maintenance_steps_result_check",
+      sql`(
+        (${table.status} = 'completed' AND ${table.safeError} IS NULL)
+        OR
+        (${table.status} IN ('failed_recoverable', 'failed_terminal') AND ${table.safeResult} IS NULL AND ${table.safeError} IS NOT NULL)
+      )`,
+    ),
+    uniqueIndex("workspace_maintenance_steps_run_step_idx").on(table.runId, table.stepName),
+    uniqueIndex("workspace_maintenance_steps_run_idempotency_idx").on(
+      table.runId,
+      table.idempotencyKey,
+    ),
+  ],
+);
 
 export const accountActionTokens = pgTable(
   "account_action_tokens",
@@ -1275,6 +1376,82 @@ export const reminders = pgTable(
   ],
 );
 
+export const financeProviderItems = pgTable(
+  "finance_provider_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"plaid">().notNull(),
+    providerItemId: text("provider_item_id"),
+    legacyGroupingKey: text("legacy_grouping_key"),
+    encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>().notNull(),
+    syncCursor: text("sync_cursor"),
+    syncState: text("sync_state")
+      .$type<"current" | "stale" | "retrying" | "blocked">()
+      .notNull()
+      .default("stale"),
+    syncClaimId: uuid("sync_claim_id"),
+    syncClaimOwner: text("sync_claim_owner"),
+    syncClaimGeneration: integer("sync_claim_generation"),
+    syncClaimStartedAt: timestamp("sync_claim_started_at", { withTimezone: true }),
+    syncClaimExpiresAt: timestamp("sync_claim_expires_at", { withTimezone: true }),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
+    syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_provider_items_user_idx").on(table.userId),
+    uniqueIndex("finance_provider_items_remote_identity_idx")
+      .on(table.userId, table.provider, table.providerItemId)
+      .where(sql`${table.providerItemId} IS NOT NULL`),
+    uniqueIndex("finance_provider_items_legacy_identity_idx")
+      .on(table.userId, table.provider, table.legacyGroupingKey)
+      .where(sql`${table.legacyGroupingKey} IS NOT NULL`),
+    index("finance_provider_items_sync_due_idx")
+      .on(table.nextSyncAt, table.updatedAt)
+      .where(sql`${table.nextSyncAt} IS NOT NULL`),
+    index("finance_provider_items_sync_claim_recovery_idx")
+      .on(table.syncClaimExpiresAt)
+      .where(sql`${table.syncClaimId} IS NOT NULL`),
+    check("finance_provider_items_provider_check", sql`${table.provider} = 'plaid'`),
+    check(
+      "finance_provider_items_identity_check",
+      sql`${table.providerItemId} IS NOT NULL OR ${table.legacyGroupingKey} IS NOT NULL`,
+    ),
+    check(
+      "finance_provider_items_sync_state_check",
+      sql`${table.syncState} IN ('current', 'stale', 'retrying', 'blocked')`,
+    ),
+    check(
+      "finance_provider_items_sync_claim_check",
+      sql`num_nonnulls(${table.syncClaimId}, ${table.syncClaimOwner}, ${table.syncClaimGeneration}, ${table.syncClaimStartedAt}, ${table.syncClaimExpiresAt}) IN (0, 5)`,
+    ),
+    check(
+      "finance_provider_items_sync_claim_generation_check",
+      sql`${table.syncClaimGeneration} IS NULL OR ${table.syncClaimGeneration} >= 0`,
+    ),
+    check("finance_provider_items_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
+    check(
+      "finance_provider_items_sync_failure_check",
+      sql`(
+        (${table.syncState} IN ('current', 'stale') AND ${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncState} = 'retrying' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IS NOT NULL AND ${table.syncRecovery} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} = 'automatic')
+        OR
+        (${table.syncState} = 'blocked' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IS NOT NULL AND ${table.syncRecovery} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('operator', 'reconnect'))
+      )`,
+    ),
+  ],
+);
+
 export const financeAccounts = pgTable(
   "finance_accounts",
   {
@@ -1287,6 +1464,7 @@ export const financeAccounts = pgTable(
     name: text("name").notNull(),
     kind: text("kind").$type<"cash" | "investment" | "debt" | "other">().notNull().default("cash"),
     balance: integer("balance_cents"),
+    currencyCode: text("currency_code"),
     status: text("status")
       .$type<"connected" | "needs_reauth" | "manual">()
       .notNull()
@@ -1294,16 +1472,72 @@ export const financeAccounts = pgTable(
     encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>(),
     providerAccountId: text("provider_account_id"),
     providerItemId: text("provider_item_id"),
+    providerItemRecordId: uuid("provider_item_record_id").references(
+      () => financeProviderItems.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     syncCursor: text("sync_cursor"),
+    syncState: text("sync_state")
+      .$type<"current" | "stale" | "retrying" | "blocked">()
+      .notNull()
+      .default("stale"),
+    syncClaimId: uuid("sync_claim_id"),
+    syncClaimExpiresAt: timestamp("sync_claim_expires_at", { withTimezone: true }),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
+    syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
     lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
     index("finance_accounts_user_idx").on(table.userId),
+    index("finance_accounts_provider_item_record_id_idx").on(table.providerItemRecordId),
+    index("finance_accounts_sync_claim_idx")
+      .on(table.syncClaimExpiresAt)
+      .where(sql`${table.syncClaimId} IS NOT NULL`),
+    index("finance_accounts_sync_due_idx")
+      .on(table.nextSyncAt, table.updatedAt)
+      .where(sql`${table.provider} = 'plaid' AND ${table.nextSyncAt} IS NOT NULL`),
+    index("finance_accounts_sync_initialization_idx")
+      .on(table.id)
+      .where(sql`(
+        (${table.provider} = 'manual' AND ${table.syncState} = 'stale' AND ${table.nextSyncAt} IS NULL)
+        OR
+        (${table.provider} = 'plaid' AND ${table.status} = 'connected' AND ${table.syncState} = 'stale' AND ${table.nextSyncAt} IS NULL)
+      )`),
     uniqueIndex("finance_accounts_provider_idx").on(
       table.userId,
       table.provider,
       table.providerAccountId,
+    ),
+    check(
+      "finance_accounts_sync_state_check",
+      sql`${table.syncState} IN ('current', 'stale', 'retrying', 'blocked')`,
+    ),
+    check(
+      "finance_accounts_currency_code_check",
+      sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
+    ),
+    check(
+      "finance_accounts_sync_claim_check",
+      sql`(${table.syncClaimId} IS NULL) = (${table.syncClaimExpiresAt} IS NULL)`,
+    ),
+    check("finance_accounts_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
+    check(
+      "finance_accounts_sync_failure_check",
+      sql`(
+        (${table.syncState} IN ('current', 'stale') AND ${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncState} = 'retrying' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} = 'automatic')
+        OR
+        (${table.syncState} = 'blocked' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('operator', 'reconnect'))
+      )`,
     ),
   ],
 );
@@ -1393,6 +1627,7 @@ export const financeTransactions = pgTable(
     providerDirection: text("provider_direction").$type<"expense" | "income">(),
     merchant: text("merchant").notNull(),
     amount: integer("amount_cents").notNull(),
+    currencyCode: text("currency_code"),
     direction: text("direction").$type<TransactionDirection>().notNull(),
     transactionDate: text("transaction_date").notNull(),
     category: text("category"),
@@ -1422,6 +1657,10 @@ export const financeTransactions = pgTable(
     check(
       "finance_transactions_provider_direction_check",
       sql`${table.providerDirection} IS NULL OR ${table.providerDirection} IN ('expense', 'income')`,
+    ),
+    check(
+      "finance_transactions_currency_code_check",
+      sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
     ),
   ],
 );

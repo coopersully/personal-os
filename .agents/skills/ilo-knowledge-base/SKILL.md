@@ -14,6 +14,9 @@ code names, an old PR, or a historical plan when a current document exists.
 | --- | --- |
 | System boundary and technology | `docs/architecture/0001-system-shape.md`, `0002-technology.md` |
 | Finance invariants | `docs/architecture/0003-finance-intelligence.md` |
+| Workspace Ilo product doctrine | `docs/product/ilo-workspace-stewardship.md` |
+| New workspace Ilo charter | `docs/product/workspace-ilo-charter-template.md` |
+| Workspace stewardship architecture | `docs/architecture/0004-workspace-ilo-stewardship.md` |
 | Product scope and acceptance | `docs/product/mvp.md`, then the relevant master-plan section |
 | Product model and interaction contract | `docs/product/master-design.md`, `experience-standards.md` |
 | Challenged assumptions and safety gates | `docs/product/assumptions-audit.md` |
@@ -44,6 +47,10 @@ implementation detail in code and tests.
 Do not promote `docs/product/master-plan.md` intent to shipped truth without checking the
 implementation log and code. When docs disagree, identify the conflict, resolve it from current code
 and authoritative contracts, then update the misleading current doc rather than silently choosing.
+
+The workspace-stewardship doctrine is a target product contract. When applying it, name the target
+capability separately from the current implementation slice. A client prompt, coding-agent skill,
+or proposed plan is not evidence that the runtime Ilo capability has shipped.
 
 ## Completion gate
 

@@ -10,6 +10,7 @@ describe("MCP OAuth resource metadata", () => {
 
     expect(metadata).toContain('"automations:read"');
     expect(metadata).not.toContain('"automations:write"');
+    expect(metadata).toContain('"finances:maintain"');
   });
 
   it("validates one explicit application origin at every entry point", async () => {

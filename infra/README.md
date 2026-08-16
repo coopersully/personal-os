@@ -20,6 +20,15 @@ HTTPS provider traffic on TCP 443, iCloud Mail IMAP over TLS on TCP 993, and
 iCloud Mail SMTP submission on TCP 587. PostgreSQL remains in dedicated private
 subnets and accepts traffic only from application tasks.
 
+The optional local production runtime reaches the same private PostgreSQL instance through a
+dedicated, no-ingress EC2 host managed by Systems Manager. The host has no SSH key, accepts no network
+connections, and may send only PostgreSQL to the database plus DNS and HTTPS for the SSM control
+channel. RDS also accepts TCP 5432 from that host's security group. A separate scoped role can start
+or stop only this host, open only the AWS port-forwarding session document, inspect the deployed ilo
+runtime, and read only ilo's exact runtime parameters. Set
+`local_production_runtime_principal_arn` to a named non-root operator principal in private production
+tfvars; do not leave the account-wide default in a production apply.
+
 ## One-time bootstrap
 
 Terraform state is intentionally separate from the application stack.
@@ -75,8 +84,21 @@ RESEND_API_KEY
 Before the first task starts, create every required parameter under the configured
 `ssm_parameter_prefix`. Add `PLAID_SECRET` only when a Plaid production account
 is ready and `plaid_enabled = true`; `PLAID_CLIENT_ID` is also read from
-Parameter Store in that mode. When `x_enabled = true`, add `X_CLIENT_ID` and
-`X_CLIENT_SECRET`. Disabled connectors inject no connector credentials.
+Parameter Store in that mode. Plaid-enabled production stacks must use
+`plaid_environment = "production"` with production credentials and endpoints;
+they must never use sandbox credentials or endpoints. When `x_enabled = true`,
+add `X_CLIENT_ID` and `X_CLIENT_SECRET`. Disabled connectors inject no connector
+credentials.
+
+### Live Plaid verification before enabling the rollout
+
+Configuration validation proves only that the task can start; it does not prove production Plaid
+authentication, reachability, status retrieval, or durable maintenance. Before enabling
+`plaid_enabled`, an authorized operator must use a production Finance token to perform one
+authenticated `GET /v1/finances/status` and one bounded `POST /v1/finances/maintenance` request.
+Record the maintenance request ID, its final durable run state, resulting freshness, any reconnect
+state, and confirmation that replay created no duplicate projections. Keep the request scoped to a
+known test connection or read-only-safe account; do not record credentials or provider payloads.
 Credential and encryption values must be `SecureString`; public client identifiers may remain
 `String`. The ECS `secrets` projection keeps both kinds out of the plain task environment and makes
 the execution role—not the deployment workflow—responsible for runtime retrieval.

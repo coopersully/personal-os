@@ -29,6 +29,32 @@ documentation. Compose and Terraform set the same first-party origin used by the
 and visual-entrypoint status of every tool; `tool-surface.ts` enforces that catalog uniformly.
 Adding a tool without a catalog record fails while the server is being constructed.
 
+### Workspace Ilo intent surface
+
+For a mature workspace Ilo, prefer a small high-level intent pair:
+
+- `get_<workspace>_status` reports setup readiness, source freshness, maintained-state checks,
+  backlog, active or recoverable work, open questions, and the latest review.
+- `maintain_<workspace>` starts, resumes, or verifies the domain-owned maintenance turn for `all`,
+  a bounded time window, or an exact target.
+
+These names are a product convention, not a claim that every workspace already advertises both
+tools. `get_ilo_context` remains the authority for what the current connection can use. Granular
+tools remain available for useful surgical inspection, previews, and exact authorized actions.
+
+Maintenance is not batch CRUD and the MCP host does not provide the sequence. The workspace API
+owns its expert playbook, rulebook, orchestration, durable run state, question/learning loop,
+advisory model, review artifact, idempotency, and completion decision. MCP only validates the
+intent, calls the authenticated typed API, and returns the durable state. A host instruction such
+as `maintain finances` should therefore work consistently without embedding Finance procedure in a
+Claude, Codex, or other client automation.
+
+The maintenance intent never widens scopes or policy. Consequential actions retain the policy,
+revision, source evidence, audit, and recovery behavior of their surgical operations. A terminal
+result distinguishes maintained, maintained-with-questions, blocked, and failed outcomes and links
+to the workspace's review and recovery surfaces. See
+[`ADR 0004`](architecture/0004-workspace-ilo-stewardship.md).
+
 Discovery follows these rules:
 
 1. `get_ilo_context` and `get_ilo_setup` remain available after authentication so an agent can
@@ -170,7 +196,17 @@ matching behavior changes, and connector sync executes only enabled `approved_ru
 MCP annotations remain untrusted UX hints. The API and durable scheduler remain authoritative;
 Mail-to-Calendar intake does not use experimental MCP task execution.
 
-Finance tools are a read/proposal adapter over the same Finance API used by the web app.
+Finance tools are an adapter over the same Finance API used by the web app. The preferred
+complete-workspace operations are `get_finance_status` and `maintain_finances`. Status reports the
+authoritative readiness, freshness, outstanding work, open questions, and recoverable run state;
+maintenance durably starts, resumes, or verifies one Ilo-owned turn for all outstanding work, a
+bounded window, or an exact target. No-argument maintenance means all outstanding work. MCP does
+not poll, schedule, or sequence this work: the API owns its durable lifecycle, questions,
+approvals, recovery, and terminal result.
+`get_finance_status` requires `finances:read`; `maintain_finances` requires the separately
+consented `finances:maintain` scope. Existing `finances:write` grants remain limited to Finance
+guidance drafts and do not gain maintenance authority. Grant `finances:maintain` through an
+explicit new local-token or OAuth consent flow; ilo does not migrate or revoke existing grants.
 `get_finance_guided_setup` is the entry point for a short Finance interview: it
 returns the shared durable profile together with owned account sources, review
 and ledger readiness, human-only boundaries, and suggested workflows. The
@@ -339,6 +375,6 @@ Grant only the scopes the host needs:
 - `automations:read` (compatibility scope for the daily brief; no routine lifecycle)
 - `bookmarks:read`
 - `audit:read`
-- `finances:read`, `finances:write`
+- `finances:read`, `finances:write`, `finances:maintain`
 
 Only a token hash is stored. Revoke a host without ending human sessions or affecting another host. Connector and account administration remain human-only.

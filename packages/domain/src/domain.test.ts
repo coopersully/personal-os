@@ -1,3 +1,4 @@
+import { z } from "zod";
 import {
   accountSetupStateSchema,
   actorTypeSchema,
@@ -35,8 +36,12 @@ import {
   eventListQuerySchema,
   featureAccessPolicies,
   featureIds,
+  financeAccountSchema,
   financeGuidedPreferencesSchema,
+  financeMaintenanceResultSchema,
+  financeProviderItemHealthSchema,
   financeReviewDecisionInputSchema,
+  financeStatusDetailsSchema,
   financeTransactionQuerySchema,
   formatDateOnly,
   formatDateWithOrdinal,
@@ -57,6 +62,12 @@ import {
   mailRuleActionIsDue,
   mailRuleActionSchema,
   mailThreadSchema,
+  maintenanceRequestSchema,
+  maintenanceRunSchema,
+  maintenanceRunStatusSchema,
+  maintenanceScopeQuerySchema,
+  maintenanceScopeSchema,
+  maintenanceSettlementStatusSchema,
   matchesMailRule,
   paginationSchema,
   passwordRequirementState,
@@ -98,6 +109,7 @@ import {
   weatherLocationSearchQuerySchema,
   weatherQuerySchema,
   weatherSnapshotSchema,
+  workspaceStatusSchema,
 } from "./index.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
@@ -105,7 +117,274 @@ const accountId = "22222222-2222-4222-8222-222222222222";
 const start = "2026-07-13T13:00:00.000Z";
 const end = "2026-07-13T14:00:00.000Z";
 
+describe("workspace maintenance", () => {
+  it("defaults to all outstanding work and validates inclusive scopes", () => {
+    expect(maintenanceRequestSchema.parse({})).toEqual({
+      scope: { type: "all_outstanding" },
+    });
+    expect(
+      maintenanceScopeSchema.parse({ type: "window", start: "2026-08-01", end: "2026-08-01" }),
+    ).toEqual({ type: "window", start: "2026-08-01", end: "2026-08-01" });
+    expect(() =>
+      maintenanceScopeSchema.parse({ type: "window", start: "2026-08-10", end: "2026-08-01" }),
+    ).toThrow();
+    expect(() =>
+      maintenanceScopeSchema.parse({
+        type: "target",
+        entityType: "finance_transaction",
+        id: "not-a-uuid",
+      }),
+    ).toThrow();
+  });
+
+  it("normalizes exactly one supported maintenance query form", () => {
+    expect(maintenanceScopeQuerySchema.parse({})).toEqual({ type: "all_outstanding" });
+    expect(maintenanceScopeQuerySchema.parse({ scope: "all_outstanding" })).toEqual({
+      type: "all_outstanding",
+    });
+    expect(maintenanceScopeQuerySchema.parse({ start: "2026-08-01", end: "2026-08-31" })).toEqual({
+      type: "window",
+      start: "2026-08-01",
+      end: "2026-08-31",
+    });
+    expect(
+      maintenanceScopeQuerySchema.parse({ entityType: "finance_transaction", targetId: id }),
+    ).toEqual({ type: "target", entityType: "finance_transaction", id });
+
+    for (const query of [
+      { start: "2026-08-01" },
+      { entityType: "finance_transaction" },
+      { scope: "all_outstanding", start: "2026-08-01", end: "2026-08-31" },
+      { start: "2026-08-01", end: "2026-08-31", entityType: "transaction", targetId: id },
+    ]) {
+      expect(maintenanceScopeQuerySchema.safeParse(query).success).toBe(false);
+    }
+  });
+
+  it("supports every durable maintenance settlement state", () => {
+    expect(
+      [
+        "queued",
+        "running",
+        "completed",
+        "completed_with_questions",
+        "awaiting_approval",
+        "blocked",
+        "failed_recoverable",
+        "failed_terminal",
+      ].map((status) => maintenanceRunStatusSchema.parse(status)),
+    ).toEqual([
+      "queued",
+      "running",
+      "completed",
+      "completed_with_questions",
+      "awaiting_approval",
+      "blocked",
+      "failed_recoverable",
+      "failed_terminal",
+    ]);
+    expect(maintenanceSettlementStatusSchema.safeParse("queued").success).toBe(false);
+    expect(maintenanceSettlementStatusSchema.safeParse("running").success).toBe(false);
+  });
+
+  it("projects Provider Item synchronization without remote identity or credentials", () => {
+    expect(
+      financeProviderItemHealthSchema.parse({
+        accountIds: [accountId],
+        id,
+        provider: "plaid",
+        synchronization: {
+          failureCode: null,
+          failureCount: 0,
+          lastAttemptAt: null,
+          lastSuccessAt: null,
+          message: null,
+          nextRetryAt: null,
+          recovery: null,
+          state: "stale",
+        },
+      }),
+    ).toEqual({
+      accountIds: [accountId],
+      id,
+      provider: "plaid",
+      synchronization: {
+        failureCode: null,
+        failureCount: 0,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        message: null,
+        nextRetryAt: null,
+        recovery: null,
+        state: "stale",
+      },
+    });
+  });
+
+  it("includes Provider Item health in Finance account status details", () => {
+    expect(
+      financeStatusDetailsSchema.shape.accounts.parse({
+        blocked: 0,
+        current: 0,
+        items: [],
+        retrying: 0,
+        stale: 1,
+        tracked: 1,
+      }),
+    ).toMatchObject({ providerItems: [] });
+  });
+
+  it("reports a Finance health step that did not run", () => {
+    expect(
+      financeMaintenanceResultSchema.parse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: { applicability: "not_run", confidence: "insufficient", refreshed: false },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "stale", state: "blocked" },
+      }),
+    ).toMatchObject({
+      health: { applicability: "not_run", refreshed: false },
+    });
+  });
+
+  it("makes scoped Finance health applicability explicit in maintenance results", () => {
+    expect(
+      financeMaintenanceResultSchema.parse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: {
+          applicability: "skipped_scoped",
+          confidence: "provisional",
+          refreshed: false,
+        },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "current", state: "clean" },
+      }),
+    ).toMatchObject({
+      health: { applicability: "skipped_scoped", refreshed: false },
+    });
+    expect(
+      financeMaintenanceResultSchema.safeParse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: { confidence: "provisional", refreshed: false },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "current", state: "clean" },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("parses a generic workspace status with a compact active run summary", () => {
+    const statusSchema = workspaceStatusSchema(z.object({ reviewCount: z.int().nonnegative() }));
+    expect(
+      statusSchema.parse({
+        activeRun: {
+          domain: "finances",
+          id,
+          rulebookVersion: "rules:v1",
+          scope: { type: "all_outstanding" },
+          status: "running",
+          updatedAt: start,
+        },
+        asOf: start,
+        details: { reviewCount: 2 },
+        domain: "finances",
+        freshness: { blockers: [], observedAt: start, state: "current" },
+        state: "needs_work",
+        validNextOperations: [{ href: "/finances", label: "Review finances", operation: "review" }],
+        work: {
+          actionable: 2,
+          awaitingApproval: 0,
+          awaitingInput: 0,
+          blocked: 0,
+          oldestOutstandingAt: start,
+        },
+      }),
+    ).toMatchObject({ activeRun: { id, status: "running" }, details: { reviewCount: 2 } });
+
+    const runBase = {
+      checkpoint: null,
+      createdAt: start,
+      domain: "finances",
+      id,
+      lastSafeError: null,
+      retryAt: null,
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      settledResult: null,
+      sourceSnapshot: null,
+      updatedAt: start,
+      userId: accountId,
+    };
+    expect(
+      maintenanceRunSchema.safeParse({ ...runBase, status: "running", leaseExpiresAt: null })
+        .success,
+    ).toBe(false);
+    expect(
+      maintenanceRunSchema.safeParse({
+        ...runBase,
+        status: "queued",
+        leaseExpiresAt: end,
+      }).success,
+    ).toBe(false);
+    expect(
+      maintenanceRunSchema.safeParse({
+        ...runBase,
+        status: "failed_recoverable",
+        leaseExpiresAt: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      maintenanceRunSchema.safeParse({
+        ...runBase,
+        status: "failed_recoverable",
+        leaseExpiresAt: null,
+        retryAt: end,
+      }).success,
+    ).toBe(true);
+  });
+});
+
 describe("domain schemas", () => {
+  it("parses finance account synchronization health", () => {
+    const parsed = financeAccountSchema.parse({
+      balance: 125,
+      createdAt: start,
+      currencyCode: "USD",
+      id,
+      institution: "Example Bank",
+      kind: "cash",
+      lastSyncedAt: null,
+      name: "Checking",
+      provider: "plaid",
+      status: "connected",
+      synchronization: {
+        failureCode: null,
+        failureCount: 0,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        message: null,
+        nextRetryAt: null,
+        recovery: null,
+        state: "stale",
+      },
+      updatedAt: start,
+    });
+
+    expect(parsed.synchronization).toEqual({
+      failureCode: null,
+      failureCount: 0,
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      message: null,
+      nextRetryAt: null,
+      recovery: null,
+      state: "stale",
+    });
+    expect(parsed.currencyCode).toBe("USD");
+  });
+
   it("validates paginated Agent Access work items and local actions", () => {
     const page = agentAccessWorkItemPageSchema.parse({
       filteredTotal: 1,
@@ -806,6 +1085,12 @@ describe("domain schemas", () => {
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
         .scopes,
     ).toEqual(["audit:read"]);
+    expect(
+      createAccessTokenInputSchema.parse({
+        name: "Finance maintainer",
+        scopes: ["finances:maintain"],
+      }).scopes,
+    ).toEqual(["finances:maintain"]);
     const brief = dailyBriefSchema.parse({
       allDay: [],
       anytime: [],
@@ -1184,6 +1469,26 @@ describe("domain schemas", () => {
 });
 
 describe("finance agent contracts", () => {
+  it("validates Finance health policy preferences", () => {
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        budgetOffTrackForecastRatio: 1.2,
+        budgetWatchForecastRatio: 1.08,
+        emergencyReserveTargetMonths: 6,
+      }),
+    ).toMatchObject({
+      budgetOffTrackForecastRatio: 1.2,
+      budgetWatchForecastRatio: 1.08,
+      emergencyReserveTargetMonths: 6,
+    });
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        budgetOffTrackForecastRatio: 1.05,
+        budgetWatchForecastRatio: 1.1,
+      }).success,
+    ).toBe(false);
+  });
+
   it("uses percentage points for recurring-change preferences", () => {
     expect(
       financeGuidedPreferencesSchema.parse({

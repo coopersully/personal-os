@@ -16,11 +16,100 @@ import type {
   Task,
   User,
 } from "@personal-os/domain";
+import {
+  type FinanceStatus,
+  financeStatusSchema,
+  type MaintenanceRun,
+  maintenanceRunSchema,
+} from "@personal-os/domain";
 import { ApiClientError, createApiClient } from "./client.js";
 
 const now = "2026-07-13T12:00:00.000Z";
 const id = "11111111-1111-4111-8111-111111111111";
 const accountId = "22222222-2222-4222-8222-222222222222";
+const financeStatus: FinanceStatus = financeStatusSchema.parse({
+  activeRun: null,
+  asOf: now,
+  details: {
+    accountRoles: { missingInputs: ["account_roles"], state: "unavailable" },
+    accounts: {
+      blocked: 0,
+      current: 0,
+      items: [],
+      providerItems: [],
+      retrying: 0,
+      stale: 0,
+      tracked: 0,
+    },
+    activeGoals: [],
+    activeMotives: [],
+    budget: { approved: false, month: "2026-07", total: null },
+    cashFlow: { net: null },
+    health: {
+      confidence: "insufficient",
+      confidenceEvidence: [],
+      dimensions: Object.fromEntries(
+        ["borrow", "goals", "invest", "plan", "save", "spend"].map((key) => [
+          key,
+          {
+            evidence: [],
+            missingInputs: [],
+            nextAction: null,
+            rating: "unknown",
+            trend: "unknown",
+          },
+        ]),
+      ),
+      missingInputs: [],
+      month: {
+        approvedBudget: null,
+        forecastSpending: null,
+        postedSpending: null,
+        rating: "unknown",
+      },
+    },
+    income: { monthly: null },
+    ledger: {
+      candidateTransfers: 0,
+      missingProvenance: 0,
+      pendingTransactions: 0,
+      possibleDuplicates: 0,
+    },
+    month: { forecast: null, spending: null },
+    proposals: [],
+    questions: [],
+    review: { byReason: {}, total: 0 },
+    rulebookVersion: `sha256:${"a".repeat(64)}`,
+    wealth: { cash: null, debt: null, investments: null, netWorth: null },
+  },
+  domain: "finances",
+  freshness: { blockers: [], observedAt: now, state: "current" },
+  state: "clean",
+  validNextOperations: [],
+  work: {
+    actionable: 0,
+    awaitingApproval: 0,
+    awaitingInput: 0,
+    blocked: 0,
+    oldestOutstandingAt: null,
+  },
+});
+const financeMaintenanceRun: MaintenanceRun = maintenanceRunSchema.parse({
+  checkpoint: null,
+  createdAt: now,
+  domain: "finances",
+  id,
+  lastSafeError: null,
+  leaseExpiresAt: null,
+  retryAt: null,
+  rulebookVersion: `sha256:${"a".repeat(64)}`,
+  scope: { type: "all_outstanding" },
+  settledResult: null,
+  sourceSnapshot: null,
+  status: "queued",
+  updatedAt: now,
+  userId: id,
+});
 const user: User = {
   accentColor: "#c7d23c",
   emailVerified: true,
@@ -249,6 +338,7 @@ const brief: DailyBrief = {
 const financeAccount: FinanceAccount = {
   balance: 1200,
   createdAt: now,
+  currencyCode: null,
   id,
   institution: "Test bank",
   kind: "cash",
@@ -256,6 +346,16 @@ const financeAccount: FinanceAccount = {
   name: "Checking",
   provider: "manual",
   status: "manual",
+  synchronization: {
+    failureCode: null,
+    failureCount: 0,
+    lastAttemptAt: null,
+    lastSuccessAt: null,
+    message: null,
+    nextRetryAt: null,
+    recovery: null,
+    state: "current",
+  },
   updatedAt: now,
 };
 const financeTransaction: FinanceTransaction = {
@@ -264,6 +364,7 @@ const financeTransaction: FinanceTransaction = {
   category: null,
   categoryConfidence: null,
   createdAt: now,
+  currencyCode: null,
   date: "2026-07-13",
   direction: "expense",
   id: accountId,
@@ -1052,6 +1153,70 @@ function apiFetch() {
 }
 
 describe("ilo API client", () => {
+  it("uses typed Finance status and durable-maintenance routes", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        if (url.pathname === "/v1/finances/status") return json({ status: financeStatus });
+        if (url.pathname === "/v1/finances/maintenance" && init?.method === "POST")
+          return json({ run: financeMaintenanceRun }, 202);
+        if (url.pathname === `/v1/finances/maintenance/${id}`)
+          return json({ run: financeMaintenanceRun });
+        return json({ error: { code: "not_found", message: "Not found" } }, 404);
+      },
+    });
+
+    await expect(api.getFinanceStatus()).resolves.toEqual(financeStatus);
+    await expect(
+      api.maintainFinances({ type: "window", start: "2026-08-01", end: "2026-08-16" }),
+    ).resolves.toEqual(financeMaintenanceRun);
+    await expect(api.getFinanceMaintenanceRun(id)).resolves.toEqual(financeMaintenanceRun);
+
+    expect(requests).toEqual([
+      { body: null, method: "GET", path: "/v1/finances/status" },
+      {
+        body: JSON.stringify({
+          scope: { type: "window", start: "2026-08-01", end: "2026-08-16" },
+        }),
+        method: "POST",
+        path: "/v1/finances/maintenance",
+      },
+      { body: null, method: "GET", path: `/v1/finances/maintenance/${id}` },
+    ]);
+  });
+
+  it("preserves Finance maintenance API errors with their request IDs", async () => {
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () =>
+        json(
+          {
+            error: {
+              code: "conflict",
+              details: { activeRunId: id },
+              message: "A Finance maintenance run is already active.",
+              requestId: "finance-maintenance-request-123",
+            },
+          },
+          409,
+        ),
+    });
+
+    await expect(api.maintainFinances()).rejects.toMatchObject({
+      code: "conflict",
+      details: { activeRunId: id },
+      requestId: "finance-maintenance-request-123",
+      status: 409,
+    });
+  });
+
   it("calls every API operation and serializes query parameters", async () => {
     const fetch = apiFetch();
     const api = createApiClient({

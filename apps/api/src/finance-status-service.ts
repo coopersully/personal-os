@@ -1,0 +1,701 @@
+import { createHash } from "node:crypto";
+import {
+  type Database,
+  domainProfileApprovals,
+  financeAccounts,
+  financeBudgets,
+  financeCategoryRules,
+  financeProfiles,
+  financeProviderItems,
+  financeReviewCases,
+  financeTransactions,
+  goals as goalRows,
+  motives as motiveRows,
+  workspaceMaintenanceRuns,
+} from "@personal-os/database";
+import {
+  type FinanceAccount,
+  type FinanceStatus,
+  financeDomainProfileSchema,
+  financeGuidedPreferencesSchema,
+  financeStatusSchema,
+  type MaintenanceScope,
+} from "@personal-os/domain";
+import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
+import type { createAssistantService } from "./assistant-service.js";
+import { AppError } from "./errors.js";
+import { assessFinanceHealth } from "./finance-health.js";
+import type { createFinanceService } from "./finance-service.js";
+import type { createGoalsService } from "./goals-service.js";
+import type { WorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
+
+type Options = {
+  assistant: ReturnType<typeof createAssistantService>;
+  db: Database;
+  finances: ReturnType<typeof createFinanceService>;
+  goals: ReturnType<typeof createGoalsService>;
+  maintenance: WorkspaceMaintenanceService;
+  now: () => Date;
+};
+
+const openRunStatuses = [
+  "queued",
+  "running",
+  "awaiting_approval",
+  "blocked",
+  "failed_recoverable",
+] as const;
+const outstandingReviewStatuses = ["deferred", "open"] as const;
+const financeTargetTypes = [
+  "finance_account",
+  "finance_review_case",
+  "finance_transaction",
+] as const;
+type FinanceTargetType = (typeof financeTargetTypes)[number];
+
+function isFinanceTargetType(value: string): value is FinanceTargetType {
+  return financeTargetTypes.includes(value as FinanceTargetType);
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, nested: unknown) => {
+    if (nested !== null && typeof nested === "object" && !Array.isArray(nested)) {
+      const record = nested as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .map((key) => [key, record[key]]),
+      );
+    }
+    return nested;
+  });
+}
+
+function iso(value: Date | null): string | null {
+  return value?.toISOString() ?? null;
+}
+
+type SynchronizationSource = Pick<
+  typeof financeAccounts.$inferSelect,
+  | "lastSyncedAt"
+  | "lastSyncAttemptAt"
+  | "nextSyncAt"
+  | "syncError"
+  | "syncErrorCode"
+  | "syncFailureCount"
+  | "syncRecovery"
+  | "syncState"
+>;
+
+const migrationBlockedSynchronization = {
+  failureCode: "finance_provider_item_migration_required",
+  failureCount: 1,
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  message: "This Plaid account must be linked to an authoritative Provider Item.",
+  nextRetryAt: null,
+  recovery: "operator" as const,
+  state: "blocked" as const,
+};
+
+function synchronization(source: SynchronizationSource) {
+  return {
+    failureCode: source.syncErrorCode,
+    failureCount: source.syncFailureCount,
+    lastAttemptAt: iso(source.lastSyncAttemptAt),
+    lastSuccessAt: iso(source.lastSyncedAt),
+    message: source.syncError,
+    nextRetryAt: source.syncFailureCount > 0 ? iso(source.nextSyncAt) : null,
+    recovery: source.syncRecovery,
+    state: source.syncState,
+  };
+}
+
+function effectiveSynchronization(source: SynchronizationSource, asOf: Date, manual = false) {
+  const value = synchronization(source);
+  if (
+    !manual &&
+    value.state === "current" &&
+    (source.lastSyncedAt === null ||
+      asOf.getTime() - source.lastSyncedAt.getTime() > 24 * 60 * 60 * 1_000)
+  ) {
+    return { ...value, state: "stale" as const };
+  }
+  return value;
+}
+
+function serializeAccount(
+  row: typeof financeAccounts.$inferSelect,
+  source?: SynchronizationSource,
+  sourceSynchronization?: ReturnType<typeof synchronization>,
+): FinanceAccount {
+  const synchronizationSource = source ?? row;
+  const legacyPlaid = row.provider === "plaid" && row.providerItemRecordId === null;
+  return {
+    balance: row.balance === null ? null : row.balance / 100,
+    createdAt: row.createdAt.toISOString(),
+    currencyCode: row.currencyCode,
+    id: row.id,
+    institution: row.institution,
+    kind: row.kind,
+    lastSyncedAt: legacyPlaid ? null : iso(synchronizationSource.lastSyncedAt),
+    name: row.name,
+    provider: row.provider,
+    status: row.status,
+    synchronization: legacyPlaid
+      ? migrationBlockedSynchronization
+      : (sourceSynchronization ?? synchronization(synchronizationSource)),
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function nextMonth(month: string): string {
+  const [year = 0, monthNumber = 0] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 7);
+}
+
+function transactionIsInScope(
+  row: typeof financeTransactions.$inferSelect,
+  scope: MaintenanceScope,
+  defaultMonth: string,
+  targetReviewTransactionId: string | null,
+): boolean {
+  if (scope.type === "window") {
+    return row.transactionDate >= scope.start && row.transactionDate <= scope.end;
+  }
+  if (scope.type === "target") {
+    if (scope.entityType === "finance_transaction") return row.id === scope.id;
+    if (scope.entityType === "finance_account") return row.accountId === scope.id;
+    if (scope.entityType === "finance_review_case") return row.id === targetReviewTransactionId;
+    return false;
+  }
+  return (
+    row.transactionDate >= `${defaultMonth}-01` &&
+    row.transactionDate < `${nextMonth(defaultMonth)}-01`
+  );
+}
+
+function latestProfile(rows: Array<typeof financeProfiles.$inferSelect>, date: string) {
+  return rows
+    .filter((row) => row.effectiveDate <= date)
+    .toSorted((left, right) => right.effectiveDate.localeCompare(left.effectiveDate))[0];
+}
+
+function serializeGoal(row: typeof goalRows.$inferSelect) {
+  return {
+    createdAt: row.createdAt.toISOString(),
+    description: row.description,
+    id: row.id,
+    progress: row.progress,
+    status: row.status,
+    targetDate: row.targetDate,
+    title: row.title,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+function serializeMotive(row: typeof motiveRows.$inferSelect) {
+  return {
+    createdAt: row.createdAt.toISOString(),
+    detail: row.detail,
+    id: row.id,
+    isActive: row.isActive,
+    title: row.title,
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function createFinanceStatusService({ db, now }: Options) {
+  return {
+    async getFinanceStatus(userId: string, scope: MaintenanceScope): Promise<FinanceStatus> {
+      const asOfDate = now();
+      const asOf = asOfDate.toISOString();
+      const currentMonth = asOf.slice(0, 7);
+      if (scope.type === "target" && !isFinanceTargetType(scope.entityType)) {
+        throw new AppError("invalid_request", "The Finance target type is not supported.");
+      }
+      return db.transaction(
+        async (tx) => {
+          const accounts = await tx
+            .select()
+            .from(financeAccounts)
+            .where(eq(financeAccounts.userId, userId))
+            .orderBy(financeAccounts.id);
+          const providerItems = await tx
+            .select()
+            .from(financeProviderItems)
+            .where(eq(financeProviderItems.userId, userId))
+            .orderBy(financeProviderItems.id);
+          const budgets = await tx
+            .select()
+            .from(financeBudgets)
+            .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, currentMonth)))
+            .orderBy(financeBudgets.id);
+          const reviews = await tx
+            .select()
+            .from(financeReviewCases)
+            .where(
+              and(
+                eq(financeReviewCases.userId, userId),
+                or(
+                  inArray(financeReviewCases.status, outstandingReviewStatuses),
+                  scope.type === "target" && scope.entityType === "finance_review_case"
+                    ? eq(financeReviewCases.id, scope.id)
+                    : undefined,
+                ),
+              ),
+            )
+            .orderBy(financeReviewCases.createdAt);
+          const targetReview =
+            scope.type === "target" && scope.entityType === "finance_review_case"
+              ? reviews.find((review) => review.id === scope.id)
+              : null;
+          const currentMonthStart = `${currentMonth}-01`;
+          const lowerBound =
+            scope.type === "window" && scope.start < currentMonthStart
+              ? scope.start
+              : currentMonthStart;
+          const explicitlyRequiredTransactionIds = [
+            ...reviews.map((review) => review.transactionId),
+            ...(scope.type === "target" && scope.entityType === "finance_transaction"
+              ? [scope.id]
+              : []),
+            ...(targetReview ? [targetReview.transactionId] : []),
+          ];
+          const transactions = await tx
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                or(
+                  gte(financeTransactions.transactionDate, lowerBound),
+                  inArray(financeTransactions.id, explicitlyRequiredTransactionIds),
+                ),
+              ),
+            )
+            .orderBy(financeTransactions.transactionDate, financeTransactions.id);
+          const profiles = await tx
+            .select()
+            .from(financeProfiles)
+            .where(eq(financeProfiles.userId, userId));
+          const approvals = await tx
+            .select()
+            .from(domainProfileApprovals)
+            .where(
+              and(
+                eq(domainProfileApprovals.userId, userId),
+                eq(domainProfileApprovals.domain, "finances"),
+              ),
+            );
+          const goals = await tx
+            .select()
+            .from(goalRows)
+            .where(and(eq(goalRows.userId, userId), eq(goalRows.status, "active")))
+            .orderBy(goalRows.id);
+          const motives = await tx
+            .select()
+            .from(motiveRows)
+            .where(and(eq(motiveRows.userId, userId), eq(motiveRows.isActive, true)))
+            .orderBy(motiveRows.id);
+          const categoryRules = await tx
+            .select()
+            .from(financeCategoryRules)
+            .where(eq(financeCategoryRules.userId, userId))
+            .orderBy(financeCategoryRules.id);
+          const maintenanceRuns = await tx
+            .select()
+            .from(workspaceMaintenanceRuns)
+            .where(
+              and(
+                eq(workspaceMaintenanceRuns.userId, userId),
+                eq(workspaceMaintenanceRuns.domain, "finances"),
+              ),
+            )
+            .orderBy(desc(workspaceMaintenanceRuns.createdAt))
+            .limit(1);
+
+          const approvedProfile = approvals
+            .toSorted((left, right) => right.approvedAt.getTime() - left.approvedAt.getTime())
+            .map((approval) => {
+              const profile = financeDomainProfileSchema.safeParse(approval.profile);
+              if (
+                !profile.success ||
+                profile.data.id !== approval.profileId ||
+                profile.data.version !== approval.profileVersion ||
+                profile.data.status !== "active"
+              )
+                return null;
+              const preferences = financeGuidedPreferencesSchema.safeParse(
+                profile.data.preferences,
+              );
+              return preferences.success
+                ? { preferences: preferences.data, profile: profile.data }
+                : null;
+            })
+            .find((profile) => profile !== null);
+          const profilePolicy = approvedProfile?.preferences ?? null;
+          const outstandingReviews = reviews.filter((review) =>
+            outstandingReviewStatuses.includes(
+              review.status as (typeof outstandingReviewStatuses)[number],
+            ),
+          );
+          if (
+            scope.type === "target" &&
+            ((scope.entityType === "finance_account" &&
+              !accounts.some((account) => account.id === scope.id)) ||
+              (scope.entityType === "finance_transaction" &&
+                !transactions.some((transaction) => transaction.id === scope.id)) ||
+              (scope.entityType === "finance_review_case" && targetReview === null))
+          ) {
+            throw new AppError("not_found", "The Finance target was not found.");
+          }
+          const currentTransactions = transactions.filter((row) =>
+            transactionIsInScope(row, { type: "all_outstanding" }, currentMonth, null),
+          );
+          const scopedTransactions = transactions.filter((row) =>
+            transactionIsInScope(row, scope, currentMonth, targetReview?.transactionId ?? null),
+          );
+          const transactionById = new Map(transactions.map((row) => [row.id, row]));
+          const scopedReviews = outstandingReviews.filter((review) => {
+            if (scope.type === "target" && scope.entityType === "finance_review_case")
+              return review.id === scope.id;
+            const transaction = transactionById.get(review.transactionId);
+            return transaction
+              ? transactionIsInScope(
+                  transaction,
+                  scope,
+                  currentMonth,
+                  targetReview?.transactionId ?? null,
+                )
+              : false;
+          });
+          const postedExpenses = currentTransactions.filter(
+            (row) => !row.pending && row.direction === "expense",
+          );
+          const postedIncome = currentTransactions.filter(
+            (row) => !row.pending && row.direction === "income",
+          );
+          const spending = postedExpenses.reduce((sum, row) => sum + row.amount, 0) / 100;
+          const incomeObserved = postedIncome.reduce((sum, row) => sum + row.amount, 0) / 100;
+          const activeProfile = latestProfile(profiles, asOf.slice(0, 10));
+          const monthlyIncome =
+            activeProfile?.grossAnnualIncome != null
+              ? activeProfile.grossAnnualIncome / 1200
+              : incomeObserved > 0
+                ? incomeObserved
+                : null;
+          const budgetTotal =
+            budgets.length > 0 ? budgets.reduce((sum, row) => sum + row.limit, 0) / 100 : null;
+          const selectedDay = asOfDate.getUTCDate();
+          const daysInMonth = new Date(
+            Date.UTC(Number(currentMonth.slice(0, 4)), Number(currentMonth.slice(5, 7)), 0),
+          ).getUTCDate();
+          const forecast =
+            postedExpenses.length > 0 && selectedDay > 0
+              ? (spending / selectedDay) * daysInMonth
+              : null;
+          const providerItemById = new Map(providerItems.map((item) => [item.id, item]));
+          if (
+            accounts.some((account) => {
+              if (!account.providerItemRecordId) return false;
+              const item = providerItemById.get(account.providerItemRecordId);
+              return !item || account.provider !== "plaid" || item.provider !== "plaid";
+            })
+          ) {
+            throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+          }
+          const accountIdsByItem = new Map<string, string[]>();
+          for (const account of accounts) {
+            if (!account.providerItemRecordId) continue;
+            const linked = accountIdsByItem.get(account.providerItemRecordId) ?? [];
+            linked.push(account.id);
+            accountIdsByItem.set(account.providerItemRecordId, linked);
+          }
+          const providerItemSynchronizationById = new Map(
+            providerItems.map((item) => [item.id, effectiveSynchronization(item, asOfDate)]),
+          );
+          const providerItemSynchronization = (itemId: string) => {
+            const value = providerItemSynchronizationById.get(itemId);
+            if (!value)
+              throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+            return value;
+          };
+          const serializedAccounts = accounts.map((account) =>
+            serializeAccount(
+              account,
+              account.providerItemRecordId
+                ? providerItemById.get(account.providerItemRecordId)
+                : undefined,
+              account.providerItemRecordId
+                ? providerItemSynchronizationById.get(account.providerItemRecordId)
+                : effectiveSynchronization(account, asOfDate, account.provider === "manual"),
+            ),
+          );
+          const sourceSynchronizations = [
+            ...providerItems.map((item) => ({
+              accountIds: accountIdsByItem.get(item.id) ?? [],
+              synchronization: providerItemSynchronization(item.id),
+            })),
+            ...accounts
+              .filter((account) => account.provider !== "plaid")
+              .map((account) => ({
+                accountIds: [account.id],
+                synchronization: effectiveSynchronization(
+                  account,
+                  asOfDate,
+                  account.provider === "manual",
+                ),
+              })),
+            ...accounts
+              .filter(
+                (account) => account.provider === "plaid" && account.providerItemRecordId === null,
+              )
+              .map((account) => ({
+                accountIds: [account.id],
+                synchronization: migrationBlockedSynchronization,
+              })),
+          ];
+          const health = assessFinanceHealth(
+            {
+              accounts: serializedAccounts.map((account) => ({
+                balance: account.balance,
+                kind: account.kind,
+                lastSuccessAt: account.synchronization.lastSuccessAt,
+                provider: account.provider,
+                synchronizationState: account.synchronization.state,
+              })),
+              activeGoalCount: goals.length,
+              approvedBudget: budgetTotal,
+              forecastSpending: forecast,
+              investmentAllocationKnown: false,
+              monthlyIncome,
+              postedTransactions: currentTransactions.map((row) => ({
+                amount: row.amount / 100,
+                direction: row.direction,
+                pending: row.pending,
+              })),
+              profile: profilePolicy,
+              totalDebt: accounts.some((row) => row.kind === "debt" && row.balance !== null)
+                ? accounts
+                    .filter((row) => row.kind === "debt")
+                    .reduce((sum, row) => sum + Math.abs(row.balance ?? 0), 0) / 100
+                : accounts.some((row) => row.kind === "debt")
+                  ? null
+                  : 0,
+              unknownDebtAprCount: accounts.filter((row) => row.kind === "debt").length,
+            },
+            asOfDate,
+          );
+          const currentCount = sourceSynchronizations.filter(
+            (source) => source.synchronization.state === "current",
+          ).length;
+          const blockedSources = sourceSynchronizations.filter(
+            (source) => source.synchronization.state === "blocked",
+          );
+          const blockedCount = blockedSources.length;
+          const retryingCount = sourceSynchronizations.filter(
+            (source) => source.synchronization.state === "retrying",
+          ).length;
+          const staleCount =
+            sourceSynchronizations.length - currentCount - blockedCount - retryingCount;
+          const usableCount = sourceSynchronizations.filter(
+            (source) =>
+              source.synchronization.state !== "blocked" &&
+              source.accountIds.some(
+                (accountId) =>
+                  accounts.find((account) => account.id === accountId)?.balance !== null,
+              ),
+          ).length;
+          const freshnessState =
+            usableCount === 0
+              ? "unavailable"
+              : currentCount === sourceSynchronizations.length
+                ? "current"
+                : currentCount > 0
+                  ? "partial"
+                  : "stale";
+          const blockers = blockedSources.map((source) => ({
+            code: source.synchronization.failureCode ?? "finance_account_blocked",
+            message: source.synchronization.message ?? "A Finance account is blocked.",
+            recovery: source.synchronization.recovery,
+          }));
+          const byReason: Record<string, number> = {};
+          for (const review of scopedReviews)
+            byReason[review.reason] = (byReason[review.reason] ?? 0) + 1;
+          const questions = health.missingInputs
+            .filter((missing) => missing !== "account_roles")
+            .map((missing) => ({
+              code: missing,
+              prompt: `Provide ${missing.replaceAll("_", " ")} evidence.`,
+            }));
+          const latestRun = maintenanceRuns[0];
+          const activeRun =
+            latestRun &&
+            openRunStatuses.includes(latestRun.status as (typeof openRunStatuses)[number])
+              ? {
+                  id: latestRun.id,
+                  domain: latestRun.domain,
+                  scope: latestRun.scope,
+                  status: latestRun.status,
+                  rulebookVersion: latestRun.rulebookVersion,
+                  updatedAt: latestRun.updatedAt.toISOString(),
+                }
+              : null;
+          const rulebookInput = {
+            accountRoles: { available: false, revisions: [] },
+            activeBudgets: budgets.map((row) => ({
+              id: row.id,
+              month: row.month,
+              updatedAt: row.updatedAt.toISOString(),
+            })),
+            activeGoals: goals.map((row) => ({
+              id: row.id,
+              revision: row.updatedAt.toISOString(),
+            })),
+            activeMotives: motives.map((row) => ({
+              id: row.id,
+              revision: row.updatedAt.toISOString(),
+            })),
+            approvedFinanceProfile: approvedProfile
+              ? { id: approvedProfile.profile.id, version: approvedProfile.profile.version }
+              : null,
+            categoryRules: categoryRules.map((row) => ({
+              id: row.id,
+              revision: row.updatedAt.toISOString(),
+            })),
+          };
+          const rulebookVersion = `sha256:${createHash("sha256").update(stableJson(rulebookInput)).digest("hex")}`;
+          const possibleDuplicateKeys = new Map<string, number>();
+          for (const row of scopedTransactions.filter((item) => item.direction !== "transfer")) {
+            const key = [
+              row.accountId,
+              row.transactionDate,
+              row.merchant.toLowerCase(),
+              row.amount,
+              row.direction,
+            ].join(":");
+            possibleDuplicateKeys.set(key, (possibleDuplicateKeys.get(key) ?? 0) + 1);
+          }
+          const oldestOutstandingAt = outstandingReviews[0]?.createdAt.toISOString() ?? null;
+          const work = {
+            actionable: scopedReviews.length,
+            awaitingApproval: latestRun?.status === "awaiting_approval" ? 1 : 0,
+            awaitingInput: questions.length,
+            blocked: blockedCount + (latestRun?.status === "blocked" ? 1 : 0),
+            oldestOutstandingAt,
+          };
+          const evidenceCurrent = freshnessState === "current";
+          const state =
+            blockers.length > 0
+              ? "blocked"
+              : accounts.length === 0
+                ? "needs_input"
+                : work.actionable + work.awaitingApproval + work.awaitingInput > 0 ||
+                    freshnessState !== "current" ||
+                    health.month.rating === "watch" ||
+                    health.month.rating === "off_track"
+                  ? "needs_work"
+                  : "clean";
+          const cash = evidenceCurrent
+            ? accounts
+                .filter((row) => row.kind === "cash")
+                .reduce((sum, row) => sum + (row.balance ?? 0), 0) / 100
+            : null;
+          const debt = evidenceCurrent
+            ? accounts
+                .filter((row) => row.kind === "debt")
+                .reduce((sum, row) => sum + Math.abs(row.balance ?? 0), 0) / 100
+            : null;
+          const investments = evidenceCurrent
+            ? accounts
+                .filter((row) => row.kind === "investment")
+                .reduce((sum, row) => sum + (row.balance ?? 0), 0) / 100
+            : null;
+          return financeStatusSchema.parse({
+            activeRun,
+            asOf,
+            details: {
+              accountRoles: { missingInputs: ["account_roles"], state: "unavailable" },
+              accounts: {
+                blocked: blockedCount,
+                current: currentCount,
+                items: serializedAccounts,
+                providerItems: providerItems.map((item) => ({
+                  accountIds: (accountIdsByItem.get(item.id) ?? []).toSorted(),
+                  id: item.id,
+                  provider: item.provider,
+                  synchronization: providerItemSynchronization(item.id),
+                })),
+                retrying: retryingCount,
+                stale: staleCount,
+                tracked: accounts.length,
+              },
+              activeGoals: goals.map(serializeGoal),
+              activeMotives: motives.map(serializeMotive),
+              budget: {
+                approved: budgets.length > 0,
+                month: currentMonth,
+                total: evidenceCurrent ? budgetTotal : null,
+              },
+              cashFlow: { net: evidenceCurrent ? incomeObserved - spending : null },
+              health,
+              income: { monthly: evidenceCurrent ? monthlyIncome : null },
+              ledger: {
+                candidateTransfers: scopedTransactions.filter(
+                  (row) => row.reconciliationStatus === "candidate",
+                ).length,
+                missingProvenance: scopedTransactions.filter(
+                  (row) => row.category !== null && row.categorySource === null,
+                ).length,
+                pendingTransactions: scopedTransactions.filter((row) => row.pending).length,
+                possibleDuplicates: [...possibleDuplicateKeys.values()].filter((count) => count > 1)
+                  .length,
+              },
+              month: {
+                forecast: evidenceCurrent ? forecast : null,
+                spending: evidenceCurrent ? spending : null,
+              },
+              proposals: [],
+              questions,
+              review: { byReason, total: scopedReviews.length },
+              rulebookVersion,
+              wealth: {
+                cash,
+                debt,
+                investments,
+                netWorth:
+                  cash === null || debt === null || investments === null
+                    ? null
+                    : cash + investments - debt,
+              },
+            },
+            domain: "finances",
+            freshness: { blockers, observedAt: asOf, state: freshnessState },
+            state,
+            validNextOperations:
+              blockers.length > 0
+                ? [
+                    {
+                      operation: "reconnect_finance",
+                      label: "Reconnect Finance account",
+                      href: "/finances/accounts",
+                    },
+                  ]
+                : [
+                    {
+                      operation: "maintain_finances",
+                      label: "Maintain finances",
+                      href: "/finances",
+                    },
+                  ],
+            work,
+          });
+        },
+        { accessMode: "read only", isolationLevel: "repeatable read" },
+      );
+    },
+  };
+}
+
+export type FinanceStatusService = ReturnType<typeof createFinanceStatusService>;

@@ -16,6 +16,7 @@ AGENT_SKILL_RELEASE_MANIFEST="$ROOT/packages/domain/src/ilo-setup-release.json"
 RUNTIME_REGISTRY_DIR="$GIT_COMMON_DIR/ilo-runtime"
 RUNTIME_TIER_DIR="$RUNTIME_REGISTRY_DIR/tiers"
 ACTIVE_ROOT_FILE="$RUNTIME_REGISTRY_DIR/active-root"
+PRODUCTION_RUNTIME_HELPER="${ILO_PRODUCTION_RUNTIME_HELPER:-$ROOT/.codex/scripts/production-runtime.mjs}"
 TIER_FILE="$RUN_DIR/tier"
 REQUESTED_RUNTIME_TIER=""
 if [[ "${1:-}" == "activate" && -n "${2:-}" ]]; then
@@ -797,6 +798,52 @@ command_status() {
   return "$healthy"
 }
 
+run_production_runtime_helper() {
+  node "$PRODUCTION_RUNTIME_HELPER" "$1" \
+    --root "$ROOT" \
+    --run-dir "$RUN_DIR" \
+    --web-port "$WEB_PORT" \
+    --api-port "$API_PORT" \
+    --mcp-port "$MCP_PORT" \
+    --database-port "$DB_PORT" \
+    --web-url "$WEB_URL" \
+    --api-url "$API_URL" \
+    --mcp-url "$MCP_URL"
+}
+
+command_production_start() {
+  require_command git
+  require_command node
+  require_command pnpm
+  require_command curl
+  require_command lsof
+  require_command aws
+  require_command session-manager-plugin
+
+  stop_supervisor
+  stop_source_services
+  stop_compose_apps
+  if docker_is_ready; then
+    assert_current_compose_owned
+    docker compose stop postgres >/dev/null 2>&1 || true
+  fi
+  clear_repo_port "$WEB_PORT"
+  clear_repo_port "$MCP_PORT"
+  clear_repo_port "$API_PORT"
+  clear_repo_port "$DB_PORT"
+
+  exec node "$PRODUCTION_RUNTIME_HELPER" start \
+    --root "$ROOT" \
+    --run-dir "$RUN_DIR" \
+    --web-port "$WEB_PORT" \
+    --api-port "$API_PORT" \
+    --mcp-port "$MCP_PORT" \
+    --database-port "$DB_PORT" \
+    --web-url "$WEB_URL" \
+    --api-url "$API_URL" \
+    --mcp-url "$MCP_URL"
+}
+
 command_logs() {
   local requested="${1:-}" name file
   local names=(api mcp web)
@@ -870,6 +917,9 @@ Commands:
   stop      Stop the local runtime while preserving PostgreSQL data.
   restart   Stop and start the local runtime.
   status    Report process and health-check state.
+  production-start  Start this worktree against the live production database.
+  production-stop   Stop this worktree's local production runtime.
+  production-status Report this worktree's local production runtime state.
   logs      Print recent API, MCP, and web logs; optionally name one service.
   test      Run the test suite with the repository's 100% coverage gate.
   fixtures  Replace the named local QA accounts with deterministic fixture data.
@@ -893,6 +943,9 @@ case "${1:-}" in
     command_start
     ;;
   status) command_status ;;
+  production-start) command_production_start ;;
+  production-stop) run_production_runtime_helper stop ;;
+  production-status) run_production_runtime_helper status ;;
   logs) command_logs "${2:-}" ;;
   test) command_test ;;
   fixtures) command_fixtures ;;

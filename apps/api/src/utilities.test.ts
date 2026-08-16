@@ -133,6 +133,52 @@ describe("pagination, errors, and OpenAPI", () => {
     );
     expect(document.servers).toEqual([{ url: "https://api.example.com" }]);
     expect(Object.keys(document.paths)).toContain("/v1/connectors/{id}/sync");
+    expect(document.paths["/v1/finances/maintenance"].post).toMatchObject({
+      requestBody: {
+        content: {
+          "application/json": {
+            examples: {
+              allOutstanding: { value: { scope: { type: "all_outstanding" } } },
+            },
+          },
+        },
+      },
+      responses: {
+        202: { description: "Finance maintenance run durably accepted for background work" },
+        403: { description: "The caller lacks finances:maintain" },
+        409: { description: "A conflicting Finance maintenance run or rulebook is active" },
+      },
+    });
+    expect(document.paths["/v1/finances/status"].get.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ in: "query", name: "start", required: false }),
+        expect.objectContaining({ in: "query", name: "end", required: false }),
+        expect.objectContaining({ in: "query", name: "entityType", required: false }),
+        expect.objectContaining({ in: "query", name: "targetId", required: false }),
+      ]),
+    );
+    expect(document.paths["/v1/finances/maintenance/{id}"].get.responses).toMatchObject({
+      200: {
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/FinanceMaintenanceRunResponse" },
+          },
+        },
+        description: "Owned Finance maintenance run",
+      },
+      404: { description: "Finance maintenance run not found for this user" },
+    });
+    expect(document.components.schemas.FinanceMaintenanceResult).toMatchObject({
+      properties: {
+        health: {
+          properties: {
+            applicability: { enum: ["not_run", "applied", "skipped_scoped"], type: "string" },
+            refreshed: { type: "boolean" },
+          },
+          required: ["applicability", "confidence", "refreshed"],
+        },
+      },
+    });
     expect(document.paths["/v1/calendars/commitments/preview"]).toEqual({
       post: {
         security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],

@@ -68,6 +68,9 @@ export const materialSourceReferenceSchema = z.object({
   revision: z.string().nullable(),
   sourceType: z.enum([
     "calendar_event",
+    "finance_account",
+    "finance_income_stream",
+    "finance_recurring_obligation",
     "finance_transaction",
     "mail_thread",
     "reminder",

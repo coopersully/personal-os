@@ -13,6 +13,11 @@ ownership, MCP, and QA documentation was reconciled with the implemented Task fo
 rubric, and golden fixtures are defined in
 [Tasks and Tracking Ontology and Classification Design](./2026-08-12-tasks-tracking-ontology-classification-design.md).
 
+**Workspace stewardship companion:** The
+[Tasks Ilo charter](../../product/tasks-ilo-charter.md) maps the implemented Task ledger and
+surgical operations, plus their explicit follow-ups, to the workspace-Ilo doctrine adopted on
+2026-08-15.
+
 ## Decision summary
 
 ilo will have two sibling workspaces:

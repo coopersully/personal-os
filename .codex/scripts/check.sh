@@ -17,6 +17,7 @@ done
 
 bash -n ./.codex/scripts/environment.sh
 bash -n ./.codex/scripts/environment.test-docker.sh
+node --check ./.codex/scripts/production-runtime.mjs
 bash ./.codex/scripts/environment.test.sh
 
 echo "Codex local environment check passed."

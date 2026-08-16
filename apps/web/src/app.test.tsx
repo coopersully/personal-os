@@ -275,6 +275,40 @@ const secondMailThread = {
   subject: "No body",
   unread: false,
 };
+function iloSetupFixture() {
+  return {
+    access: { canRead: false, canWrite: false },
+    connection: { lastObservedAt: null, observed: false },
+    currentStepId: "connect_agent",
+    domain: "mail" as const,
+    nextAction: "Connect an MCP-compatible host to Ilo.",
+    profile: {
+      approvedStatus: null,
+      approvedVersion: null,
+      pendingDraftVersion: null,
+      status: null,
+      version: null,
+    },
+    progress: { completed: 0, total: 4 },
+    protocolVersion: "1.0",
+    selectedStepId: "connect_agent",
+    status: "needs_connection" as const,
+    steps: [
+      {
+        completionEvidence: [],
+        description: "Authorize one MCP host.",
+        id: "connect_agent",
+        instructions: [],
+        order: 1,
+        owner: "person" as const,
+        requiredTools: [],
+        state: "current" as const,
+        title: "Connect an agent",
+        userAction: "Connect an MCP-compatible agent host to Ilo.",
+      },
+    ],
+  };
+}
 
 const mocks = vi.hoisted(() => ({
   completeReminder: vi.fn(),
@@ -818,38 +852,7 @@ function defaults() {
       },
     ],
   });
-  mocks.getIloSetup.mockResolvedValue({
-    access: { canRead: false, canWrite: false },
-    connection: { lastObservedAt: null, observed: false },
-    currentStepId: "connect_agent",
-    domain: "mail",
-    nextAction: "Connect an MCP-compatible host to Ilo.",
-    profile: {
-      approvedStatus: null,
-      approvedVersion: null,
-      pendingDraftVersion: null,
-      status: null,
-      version: null,
-    },
-    progress: { completed: 0, total: 4 },
-    protocolVersion: "1.0",
-    selectedStepId: "connect_agent",
-    status: "needs_connection",
-    steps: [
-      {
-        completionEvidence: [],
-        description: "Authorize one MCP host.",
-        id: "connect_agent",
-        instructions: [],
-        order: 1,
-        owner: "person",
-        requiredTools: [],
-        state: "current",
-        title: "Connect an agent",
-        userAction: "Connect an MCP-compatible agent host to Ilo.",
-      },
-    ],
-  });
+  mocks.getIloSetup.mockImplementation(async () => iloSetupFixture());
   mocks.listXBookmarkFolders.mockResolvedValue([]);
   mocks.listMailboxes.mockResolvedValue([mailbox]);
   mocks.getMailSetupContext.mockResolvedValue({
@@ -1827,19 +1830,12 @@ describe("ilo web app", () => {
       ],
     });
     mocks.listTasks.mockResolvedValue({ items: [task], nextCursor: null });
-    setup("/settings?section=agents");
+    setup("/settings?section=tasks");
     const browser = userEvent.setup();
 
-    const tasksLabel = await screen.findByText("Tasks", {
-      selector: ".agent-access__domain-copy > span:first-child",
-    });
-    const tasksButton = tasksLabel.closest("button") as HTMLButtonElement;
-    await waitFor(() => expect(tasksButton).toBeEnabled());
-    await browser.click(tasksButton);
-
-    expect(tasksButton).toHaveAttribute("data-state", "on");
     expect(await screen.findByText("Tasks readiness")).toBeInTheDocument();
-    await browser.click(screen.getByRole("button", { name: "View checks" }));
+    await browser.click(screen.getByRole("button", { name: "Review checks" }));
+    await browser.click(screen.getByRole("button", { name: /Show \d+ completed checks?/ }));
     expect(await screen.findByText("1 open Task in Ilo.")).toBeInTheDocument();
     expect(mocks.listTasks).toHaveBeenCalledWith({ lifecycle: "open", limit: 100 });
   });
@@ -2403,6 +2399,10 @@ describe("ilo web app", () => {
       "href",
       "/settings?section=appearance",
     );
+    expect(await screen.findByRole("link", { name: "Mail: Action required" })).toHaveAttribute(
+      "href",
+      "/settings?section=mail",
+    );
     await browser.keyboard("{Escape}");
 
     // The switcher still offers exactly the five workspaces, none of them current.
@@ -2414,6 +2414,50 @@ describe("ilo web app", () => {
         .getAllByRole("menuitem")
         .filter((item) => item.getAttribute("aria-current") === "page"),
     ).toHaveLength(0);
+  });
+
+  it("marks only workspace settings with a current person-owned action", async () => {
+    const basePlan = iloSetupFixture();
+    mocks.getIloSetup.mockImplementation(
+      async ({ domain = "mail" }: { domain?: "calendar" | "finances" | "mail" | "tasks" } = {}) =>
+        domain === "mail"
+          ? { ...basePlan, domain }
+          : {
+              ...basePlan,
+              connection: { lastObservedAt: now, observed: true },
+              currentStepId: "complete",
+              domain,
+              nextAction: `${domain} setup is active.`,
+              progress: { completed: 4, total: 4 },
+              selectedStepId: "complete",
+              status: "complete",
+              steps: [
+                {
+                  ...basePlan.steps[0],
+                  id: "complete",
+                  owner: "ilo",
+                  state: "complete",
+                  title: "Confirm setup",
+                  userAction: null,
+                },
+              ],
+            },
+    );
+
+    setup("/settings?section=profile");
+    const sidebar = await screen.findByRole("complementary", {
+      name: "Account utility navigation",
+    });
+    const mailItem = within(sidebar).getByRole("link", { name: "Mail" }).closest("li");
+    if (!(mailItem instanceof HTMLElement)) throw new Error("Mail settings item was not rendered.");
+    expect(
+      await within(mailItem).findByRole("status", { name: "Mail: Action required" }),
+    ).toBeVisible();
+    const financesItem = within(sidebar).getByRole("link", { name: "Finances" }).closest("li");
+    if (!(financesItem instanceof HTMLElement)) {
+      throw new Error("Finances settings item was not rendered.");
+    }
+    expect(within(financesItem).queryByText("Action required")).not.toBeInTheDocument();
   });
 
   it("applies the account section permission rule to the sidebar and the dock alike", async () => {
@@ -4408,24 +4452,22 @@ describe("ilo web app", () => {
       ["/finances/health", "Ledger health"],
       ["/finances/review", "Review queue"],
       ["/finances/subscriptions", "Subscriptions"],
-      ["/finances/profile", "Financial profile"],
     ] as const) {
       const view = setup(path);
       expect(await screen.findByRole("heading", { name: title })).toBeInTheDocument();
-      if (path === "/finances/profile") {
-        expect(await screen.findByText("Agent guidance")).toBeInTheDocument();
-        expect(await screen.findByText("1 available now.", { exact: false })).toBeInTheDocument();
-        expect(screen.getByText("Human-only boundaries")).toBeInTheDocument();
-        expect(
-          screen.getByText("connect or disconnect sources", { exact: false }),
-        ).toBeInTheDocument();
-        expect(screen.getByRole("link", { name: "Connect an agent" })).toHaveAttribute(
-          "href",
-          "/settings?section=agent-connections",
-        );
-      }
       view.unmount();
     }
+  });
+
+  it("moves the legacy financial profile route into Finance settings", async () => {
+    configureFinanceWorkspace();
+    const view = setup("/finances/profile");
+    await waitFor(() => expect(view.location.value).toBe("/settings?section=finances#guidance"));
+    expect(await screen.findByRole("heading", { name: "Finances settings" })).toBeVisible();
+    expect(screen.getByText("Agent guidance")).toBeVisible();
+    expect(await screen.findByText("Human-only boundaries")).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Financial profile" })).not.toBeInTheDocument();
+    view.unmount();
   });
 
   it("activates a Finance guidance draft only through the signed-in Finance surface", async () => {
@@ -4463,7 +4505,7 @@ describe("ilo web app", () => {
       },
     });
 
-    const view = setup("/finances/profile");
+    const view = setup("/settings?section=finances");
     const invalidateQueries = vi.spyOn(view.queryClient, "invalidateQueries");
     expect(await screen.findByText(draft.objective)).toBeVisible();
     expect(screen.getByText(draft.summary)).toBeVisible();
@@ -4531,7 +4573,7 @@ describe("ilo web app", () => {
       },
     });
 
-    const view = setup("/finances/profile");
+    const view = setup("/settings?section=finances");
     expect(await screen.findByText("Active + draft")).toBeVisible();
     expect(screen.getByText("Active approved guidance")).toBeVisible();
     expect(screen.getByText(approved.objective)).toBeVisible();
@@ -4839,13 +4881,25 @@ describe("ilo web app", () => {
 
   it("keeps Mail and Finances workspace controls on child routes", async () => {
     const mail = setup("/mail/thread/example");
-    const mailAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
+    await waitFor(() =>
+      expect(screen.getByRole("navigation", { name: "Top navigation" })).toHaveAttribute(
+        "data-workspace",
+        "mail",
+      ),
+    );
+    const mailAppBar = screen.getByRole("navigation", { name: "Top navigation" });
     expect(within(mailAppBar).getByRole("searchbox", { name: "Search mail" })).toBeInTheDocument();
     expect(within(mailAppBar).getByRole("button", { name: "Compose mail" })).toBeInTheDocument();
     mail.unmount();
 
     const finances = setup("/finances/transactions");
-    const financeAppBar = await screen.findByRole("navigation", { name: "Top navigation" });
+    await waitFor(() =>
+      expect(screen.getByRole("navigation", { name: "Top navigation" })).toHaveAttribute(
+        "data-workspace",
+        "finances",
+      ),
+    );
+    const financeAppBar = screen.getByRole("navigation", { name: "Top navigation" });
     expect(
       within(financeAppBar).getByRole("button", { name: "Add transaction" }),
     ).toBeInTheDocument();
@@ -5930,7 +5984,7 @@ describe("ilo web app", () => {
     });
     const settingsNavigation = within(settingsSidebar);
     expect(settingsNavigation.queryByRole("link", { name: "Invitations" })).not.toBeInTheDocument();
-    await browser.click(settingsNavigation.getByRole("link", { name: "Calendars" }));
+    await browser.click(settingsNavigation.getByRole("link", { name: "Calendar" }));
     await browser.click(screen.getByRole("checkbox", { name: "Hide Personal" }));
     await waitFor(() => expect(mocks.setCalendarSelected).toHaveBeenCalledWith(id, false));
     await browser.click(screen.getByRole("button", { name: "Delete Personal" }));
@@ -6809,7 +6863,7 @@ describe("ilo web app", () => {
       }),
     );
     const settingsView = setup("/settings");
-    await browser.click(await findSettingsLink("Calendars"));
+    await browser.click(await findSettingsLink("Calendar"));
     expect(await screen.findByText(/iCloud Calendar/)).toBeInTheDocument();
     await browser.click(await findSettingsLink("Connections"));
     await browser.click(screen.getByRole("button", { name: "Connect" }));

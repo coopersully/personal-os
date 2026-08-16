@@ -83,6 +83,30 @@ from stable entity ID and revision (`provider: local`, no account), not accepted
 stored as a second provenance record. A future provider-backed container requires a new reviewed
 storage and source contract.
 
+The completed [Tasks Ilo charter](../product/tasks-ilo-charter.md) maps this shipped foundation and
+its explicit follow-ups to the workspace-stewardship doctrine. It does not turn the unimplemented
+maintenance, question, learning, status, or review layers into Integration-owned behavior.
+
+## Workspace Ilo ownership
+
+A workspace owner owns the semantics of its Ilo: living ledger, researched expert playbook,
+definition of maintained, rulebook, surgical operations, maintenance-step graph, questions and
+proposals, learning behavior, health/advisory model, review artifact, and domain status. These
+contracts stay in the domain's normal paths and are described in a completed
+[`workspace Ilo charter`](../product/workspace-ilo-charter-template.md).
+
+Integration may own generic durable maintenance infrastructure such as run/step identifiers,
+leases, fencing, idempotency, retry history, terminal settlement, and shared result envelopes. It
+does not own domain judgment. A shared service must not decide what counts as a Finance transfer, a
+Mail response obligation, a Calendar conflict, a healthy budget, or a useful recommendation.
+
+Parallel workspace branches should deliver independently testable vertical slices and list shared
+schema, migration-journal, registry, and composition-root changes as explicit Integration handoffs.
+Do not move orchestration into an MCP host or coding-agent skill to avoid those seams. The governing
+product and architecture contracts are
+[`Ilo workspace stewardship`](../product/ilo-workspace-stewardship.md) and
+[`ADR 0004`](../architecture/0004-workspace-ilo-stewardship.md).
+
 ## Required seams
 
 ### Domain and API

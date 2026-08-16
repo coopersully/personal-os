@@ -10,6 +10,7 @@ import {
   SettingsIcon,
   SparklesIcon,
 } from "@/components/icons";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -20,7 +21,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Item, ItemContent, ItemGroup, ItemMedia, ItemTitle } from "@/components/ui/item";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemGroup,
+  ItemMedia,
+  ItemTitle,
+} from "@/components/ui/item";
 import {
   Sheet,
   SheetContent,
@@ -169,13 +177,24 @@ export function MobileWorkspaceDock({
               <ItemGroup className="workspace-dock-sheet__items">
                 {pages.map((page) => (
                   <Item asChild key={page.path} size="xs">
-                    <Link onClick={() => setOpen(false)} to={page.path}>
+                    <Link
+                      aria-label={page.badge ? `${page.label}: ${page.badge}` : undefined}
+                      onClick={() => setOpen(false)}
+                      to={page.path}
+                    >
                       <ItemMedia variant="icon">
                         <page.icon aria-hidden="true" />
                       </ItemMedia>
                       <ItemContent>
                         <ItemTitle>{page.label}</ItemTitle>
                       </ItemContent>
+                      {page.badge ? (
+                        <ItemActions>
+                          <Badge aria-hidden="true" variant="destructive">
+                            {page.badge}
+                          </Badge>
+                        </ItemActions>
+                      ) : null}
                     </Link>
                   </Item>
                 ))}

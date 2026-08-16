@@ -369,13 +369,19 @@ jobs:
               jq \
                 --arg container "$container" \
                 --arg image "$image" \
+                --arg app_url "$APP_URL" \
                 --arg api_restore_state "$api_restore_state" \
                 --arg api_recovery_marker "$api_candidate_recovery_marker" \
                 '.taskDefinition
                 | .containerDefinitions |= map(
                     if .name == $container then
                       .image = $image
-                      | if $container == "api" then
+                      | if $container == "mcp" then
+                          .environment = (
+                            [.environment[]? | select(.name != "APP_BASE_URL")] +
+                            [{name: "APP_BASE_URL", value: $app_url}]
+                          )
+                        elif $container == "api" then
                           .environment = (
                               [
                                 .environment[]?
@@ -406,6 +412,23 @@ jobs:
                     .status,
                     .taskDefinitionArn
                   )' > "$task_file"
+
+            if test "$container" = "mcp"; then
+              jq -e \
+                --arg app_url "$APP_URL" \
+                '([
+                  .containerDefinitions[]
+                  | select(.name == "mcp")
+                  | .environment[]?
+                  | select(.name == "APP_BASE_URL")
+                ] as $app_base_urls
+                | ($app_base_urls | length) == 1
+                  and $app_base_urls[0].value == $app_url)' \
+                "$task_file" >/dev/null || {
+                  echo "::error::Rendered MCP task definition must contain exactly one canonical APP_BASE_URL."
+                  exit 1
+                }
+            fi
 
             registered_arn="$(
               aws ecs register-task-definition \

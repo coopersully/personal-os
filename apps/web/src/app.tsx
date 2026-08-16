@@ -242,6 +242,7 @@ import {
   SidebarGroupLabel as ShadcnSidebarGroupLabel,
   SidebarHeader as ShadcnSidebarHeader,
   SidebarMenu as ShadcnSidebarMenu,
+  SidebarMenuBadge as ShadcnSidebarMenuBadge,
   SidebarMenuButton as ShadcnSidebarMenuButton,
   SidebarMenuItem as ShadcnSidebarMenuItem,
   SidebarMenuSub as ShadcnSidebarMenuSub,
@@ -296,6 +297,7 @@ import {
   financeSectionFromPath,
 } from "./features/finances/navigation.js";
 import { FinancesPage } from "./features/finances/page.js";
+import { FinanceSettings } from "./features/finances/settings.js";
 import {
   MailPage as MailFeaturePage,
   MailSidebar as MailFeatureSidebar,
@@ -310,7 +312,10 @@ import {
 import { ReviewsPage } from "./features/reviews/page.js";
 import {
   ConnectedAgentsSettings,
+  useWorkspaceSettingsActions,
   WorkspaceAccessSettings,
+  WorkspaceSettings,
+  type WorkspaceSettingsActions,
 } from "./features/settings/agent-access.js";
 import { settingsNavigationItem } from "./features/settings/manifest.js";
 import { SetupPage } from "./features/setup/page.js";
@@ -364,7 +369,7 @@ const calendarHours = Array.from({ length: 24 }, (_, hour) => hour);
 const calendarDragType = "application/x-personal-os-calendar-event";
 
 type NavigationItemDefinition = {
-  badge?: number;
+  badge?: number | string;
   icon: Icon;
   items?: NavigationItemDefinition[];
   label: string;
@@ -1008,6 +1013,7 @@ function AuthenticatedApp({ user }: { user: User }) {
       : navigationOwner.workspace === "today"
         ? null
         : navigationOwner.workspace;
+  const workspaceSettingsActions = useWorkspaceSettingsActions(sidebarMode === "settings");
   const activeSettingsSection = settingsSectionFromSearch(location.search);
   const pageTitle = workspaceTitleForLocation(location.pathname, location.search);
   const activeFinanceSection = financeSectionFromPath(location.pathname);
@@ -1109,6 +1115,7 @@ function AuthenticatedApp({ user }: { user: User }) {
                   canManageInvitations={user.canManageInvitations === true}
                   onNavigate={closeMobileMenu}
                   section={activeSettingsSection}
+                  workspaceActions={workspaceSettingsActions}
                 />
               ) : sidebarMode === "finances" ? (
                 <FinanceSidebarNavigation
@@ -1153,7 +1160,10 @@ function AuthenticatedApp({ user }: { user: User }) {
         {isMobileWorkspaceDock ? (
           <MobileWorkspaceDock
             accountName={workspaceOwnerName(user)}
-            accountSections={settingsSectionPages(user.canManageInvitations === true)}
+            accountSections={settingsSectionPages(
+              user.canManageInvitations === true,
+              workspaceSettingsActions,
+            )}
             onLogout={mobileDockLogout}
             pathname={location.pathname}
             {...(sidebarMode === "tasks"
@@ -1370,6 +1380,10 @@ function WorkspaceRoutes({
       <Route path="/reviews" element={<ReviewsPage />} />
       <Route path="/goals" element={<GoalsPage />} />
       <Route path="/motives" element={<MotivesPage />} />
+      <Route
+        path="/finances/profile"
+        element={<Navigate replace to="/settings?section=finances#guidance" />}
+      />
       <Route path="/finances/*" element={<FinancesPage />} />
       <Route path="/settings" element={<SettingsPage setEditor={setEditor} user={user} />} />
       <Route path="*" element={<Navigate replace to="/today" />} />
@@ -1378,6 +1392,7 @@ function WorkspaceRoutes({
 }
 
 function SidebarNavigationItem({
+  badge,
   icon: Icon,
   isActive: explicitIsActive,
   label,
@@ -1389,7 +1404,7 @@ function SidebarNavigationItem({
   const workspaceId = workspaceIdForPath(path);
   return (
     <ShadcnSidebarMenuItem>
-      <ShadcnSidebarMenuButton asChild isActive={isActive}>
+      <ShadcnSidebarMenuButton className={badge ? "pr-24" : undefined} asChild isActive={isActive}>
         <NavLink onClick={onNavigate} to={path}>
           {workspaceId ? (
             <WorkspaceIcon size="sm" workspace={workspaceId} />
@@ -1399,6 +1414,11 @@ function SidebarNavigationItem({
           <span>{label}</span>
         </NavLink>
       </ShadcnSidebarMenuButton>
+      {badge ? (
+        <ShadcnSidebarMenuBadge aria-label={`${label}: ${badge}`} role="status">
+          <ShadcnBadge variant="destructive">{badge}</ShadcnBadge>
+        </ShadcnSidebarMenuBadge>
+      ) : null}
     </ShadcnSidebarMenuItem>
   );
 }
@@ -2402,7 +2422,6 @@ function workspaceTitleForLocation(pathname: string, search: string): string | n
   if (pathname === "/finances/cashflow") return "Cash flow";
   if (pathname === "/finances/health") return "Ledger health";
   if (pathname === "/finances/imports") return "Import history";
-  if (pathname === "/finances/profile") return "Financial profile";
   if (pathname === "/finances/review") return "Review queue";
   if (pathname === "/finances/subscriptions") return "Subscriptions";
   if (pathname === "/finances/transactions") return "Transactions";
@@ -4324,11 +4343,14 @@ function MailComposeButton({ onSelect }: { onSelect?: () => void }) {
 type SettingsSectionId =
   | "agent-connections"
   | "appearance"
-  | "calendars"
+  | "calendar"
   | "connections"
+  | "finances"
   | "invitations"
+  | "mail"
   | "profile"
   | "sessions"
+  | "tasks"
   | "wallpaper"
   | "workspace-access";
 
@@ -4352,10 +4374,16 @@ const settingsNavigation: Array<{
     ],
   },
   {
-    label: "Workspace",
+    label: "Sources",
+    items: [{ icon: CloudIcon, id: "connections", label: "Connections" }],
+  },
+  {
+    label: "Workspaces",
     items: [
-      { icon: CloudIcon, id: "connections", label: "Connections" },
-      { icon: CalendarIcon, id: "calendars", label: "Calendars" },
+      { icon: MailIcon, id: "mail", label: "Mail" },
+      { icon: BankIcon, id: "finances", label: "Finances" },
+      { icon: CalendarIcon, id: "calendar", label: "Calendar" },
+      { icon: ListChecksIcon, id: "tasks", label: "Tasks" },
     ],
   },
   {
@@ -4375,11 +4403,13 @@ function settingsSectionFromSearch(search: string): SettingsSectionId {
   const requestedSection = new URLSearchParams(search).get("section");
   return requestedSection === "account"
     ? "profile"
-    : requestedSection === "agents" || requestedSection === "automations"
-      ? "workspace-access"
-      : settingsSectionIds.has(requestedSection as SettingsSectionId)
-        ? (requestedSection as SettingsSectionId)
-        : "profile";
+    : requestedSection === "calendars"
+      ? "calendar"
+      : requestedSection === "agents" || requestedSection === "automations"
+        ? "workspace-access"
+        : settingsSectionIds.has(requestedSection as SettingsSectionId)
+          ? (requestedSection as SettingsSectionId)
+          : "profile";
 }
 
 export function settingsSectionPath(section: SettingsSectionId): string {
@@ -4397,20 +4427,43 @@ function visibleSettingsNavigation(canManageInvitations: boolean) {
 }
 
 /** The narrow-layout dock lists the same sections as the sidebar, flattened. */
-function settingsSectionPages(canManageInvitations: boolean): MobileWorkspacePage[] {
+function settingsSectionPages(
+  canManageInvitations: boolean,
+  workspaceActions: WorkspaceSettingsActions,
+): MobileWorkspacePage[] {
   return visibleSettingsNavigation(canManageInvitations).flatMap((group) =>
-    group.items.map(({ icon, id, label }) => ({ icon, label, path: settingsSectionPath(id) })),
+    group.items.map(({ icon, id, label }) => {
+      const badge = workspaceActionBadge(id, workspaceActions);
+      return {
+        ...(badge ? { badge } : {}),
+        icon,
+        label,
+        path: settingsSectionPath(id),
+      };
+    }),
   );
+}
+
+function workspaceActionBadge(
+  id: SettingsSectionId,
+  workspaceActions: WorkspaceSettingsActions,
+): string | undefined {
+  if (id !== "mail" && id !== "finances" && id !== "calendar" && id !== "tasks") {
+    return undefined;
+  }
+  return workspaceActions[id] ? "Action required" : undefined;
 }
 
 function SettingsSidebarNavigation({
   canManageInvitations,
   onNavigate,
   section,
+  workspaceActions,
 }: {
   canManageInvitations: boolean;
   onNavigate: () => void;
   section: SettingsSectionId;
+  workspaceActions: WorkspaceSettingsActions;
 }) {
   return (
     <>
@@ -4420,16 +4473,20 @@ function SettingsSidebarNavigation({
           <ShadcnSidebarGroupContent>
             <nav aria-label={group.label}>
               <ShadcnSidebarMenu>
-                {group.items.map(({ icon, id, label }) => (
-                  <SidebarNavigationItem
-                    icon={icon}
-                    isActive={section === id}
-                    key={id}
-                    label={label}
-                    onNavigate={onNavigate}
-                    path={settingsSectionPath(id)}
-                  />
-                ))}
+                {group.items.map(({ icon, id, label }) => {
+                  const badge = workspaceActionBadge(id, workspaceActions);
+                  return (
+                    <SidebarNavigationItem
+                      {...(badge ? { badge } : {})}
+                      icon={icon}
+                      isActive={section === id}
+                      key={id}
+                      label={label}
+                      onNavigate={onNavigate}
+                      path={settingsSectionPath(id)}
+                    />
+                  );
+                })}
               </ShadcnSidebarMenu>
             </nav>
           </ShadcnSidebarGroupContent>
@@ -4447,6 +4504,11 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
     next.set("section", "workspace-access");
     return <Navigate replace to={`/settings?${next.toString()}`} />;
   }
+  if (requestedSection === "calendars") {
+    const next = new URLSearchParams(location.search);
+    next.set("section", "calendar");
+    return <Navigate replace to={`/settings?${next.toString()}`} />;
+  }
   const section = settingsSectionFromSearch(location.search);
   if (section === "invitations" && user.canManageInvitations !== true) {
     return <Navigate replace to="/settings?section=profile" />;
@@ -4454,7 +4516,20 @@ function SettingsPage({ setEditor, user }: { setEditor: (editor: Editor) => void
   return (
     <div className="narrow-page settings-page">
       <section aria-live="polite" className="settings-panel" key={section}>
-        {section === "calendars" ? <CalendarsSettings setEditor={setEditor} /> : null}
+        {section === "mail" ? <WorkspaceSettings domain="mail" /> : null}
+        {section === "finances" ? (
+          <div className="flex flex-col gap-6">
+            <WorkspaceSettings domain="finances" />
+            <FinanceSettings />
+          </div>
+        ) : null}
+        {section === "calendar" ? (
+          <div className="flex flex-col gap-6">
+            <WorkspaceSettings domain="calendar" />
+            <CalendarsSettings setEditor={setEditor} />
+          </div>
+        ) : null}
+        {section === "tasks" ? <WorkspaceSettings domain="tasks" /> : null}
         {section === "connections" ? <ConnectorsSettings /> : null}
         {section === "agent-connections" ? <ConnectedAgentsSettings /> : null}
         {section === "workspace-access" ? <WorkspaceAccessSettings /> : null}
@@ -4490,7 +4565,7 @@ function CalendarsSettings({ setEditor }: { setEditor: (editor: Editor) => void 
         </ShadcnButton>
       }
       description="Choose what appears in your unified view."
-      title="Calendars"
+      title="Calendar sources"
     >
       {calendarGroups.length ? (
         <ShadcnItemGroup className="calendar-settings__groups">

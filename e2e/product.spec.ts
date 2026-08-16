@@ -24,10 +24,7 @@ test("the repository QA fixture login exposes representative workspace data", as
   await expect(page.getByRole("row", { name: /Sq Unknown Popup Uncategorized/ })).toBeVisible();
 });
 
-test("Reviews and agent controls separate decisions from configuration", async ({
-  baseURL,
-  page,
-}) => {
+test("Reviews and agent controls separate decisions from configuration", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Email").fill("demo+full@ilo.test");
   await page.getByLabel("Password", { exact: true }).fill("#%YxqD2Kz%8S#3");
@@ -44,35 +41,27 @@ test("Reviews and agent controls separate decisions from configuration", async (
   const mailReview = page.getByRole("listitem").filter({ hasText: "Review Fixture newsletters" });
   await mailReview.getByRole("link", { name: "Review rule" }).click();
   await expect(page.getByRole("dialog", { name: "Review Fixture newsletters" })).toBeVisible();
-  await expect(page).toHaveURL(/workspace=mail&reviewRule=/);
+  await expect(page).toHaveURL(/settings\?section=mail&reviewRule=/);
   await expect(page.getByRole("dialog").getByText(/Rule scope:/)).toBeVisible();
   await expect(
     page.getByRole("dialog").getByRole("button", { name: "Activate reviewed rule" }),
   ).toBeEnabled();
   await page.getByRole("dialog").getByRole("button", { name: "Close" }).last().click();
-  await expect(page).toHaveURL(/settings\?section=workspace-access&workspace=mail$/);
+  await expect(page).toHaveURL(/settings\?section=mail$/);
+  await expect(page.getByRole("heading", { name: "Mail settings" })).toBeVisible();
+
+  await page.goto("/settings?section=workspace-access&workspace=mail");
   await expect(page.getByRole("heading", { name: "Workspace access" })).toBeVisible();
   await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
   await expect(page.getByText("Needs your approval", { exact: true })).toBeVisible();
   await expect(page.getByText("Not allowed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Mail readiness")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Setup protocol details" })).toHaveCount(0);
 
   await page.getByRole("radio", { name: "Calendar" }).click();
   await expect(page).toHaveURL(/workspace=calendar/);
-  await expect(page.getByText("Calendar readiness")).toBeVisible();
+  await expect(page.getByText("Calendar readiness")).toHaveCount(0);
   await page.getByRole("radio", { name: "Mail" }).click();
-
-  const setupTrigger = page.getByRole("button", {
-    name: /Let the agent set up Ilo/,
-  });
-  if ((await setupTrigger.getAttribute("aria-expanded")) !== "true") await setupTrigger.click();
-  await page.getByRole("button", { name: "Setup protocol details" }).click();
-  const source = page.getByRole("link", { name: "View skill source" });
-  await expect(source).toHaveAttribute("href", `${baseURL}/skills/ilo-setup/v0.2.0/SKILL.md`);
-  const sourceHref = await source.getAttribute("href");
-  if (!sourceHref) throw new Error("The Ilo setup skill did not expose a source URL.");
-  const sourceResponse = await page.request.get(sourceHref);
-  expect(sourceResponse.ok()).toBe(true);
-  expect(await sourceResponse.text()).toContain("name: ilo-setup");
   expect(
     await page.locator("html").evaluate((element) => element.scrollWidth <= innerWidth + 1),
   ).toBe(true);
@@ -283,9 +272,21 @@ test("a person and an agent share one reminder and calendar surface", async ({
   await expect(page.getByRole("heading", { name: "Connected agents", exact: true })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Ilo MCP URL" })).toHaveValue(/\/mcp$/);
   await openSettingsSection("Workspace access");
+  await expect(page.getByText("Allowed", { exact: true })).toBeVisible();
+  await expect(page.getByText("Mail readiness")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Setup protocol details" })).toHaveCount(0);
+  await openSettingsSection("Mail");
+  await expect(page.getByRole("heading", { name: "Mail settings" })).toBeVisible();
+  const mailAction = page
+    .locator("main")
+    .getByRole("status")
+    .filter({ hasText: "Action required" });
+  await expect(mailAction).toContainText("Connect an MCP-compatible agent host to Ilo.");
+  await expect(mailAction.getByRole("link", { name: "Connect agent" })).toBeVisible();
+  await expect(page.getByText("Operational review")).toHaveCount(0);
+  await expect(page.getByText("Connect an agent", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "Setup protocol details" }).click();
   await expect(page.getByRole("link", { name: "View skill source" })).toBeVisible();
-  await expect(page.getByRole("radio", { name: "Mail", checked: true })).toBeVisible();
   await openSettingsSection("Connected agents");
   await page.getByRole("button", { name: "Set up a local token" }).click();
   await expect(

@@ -353,7 +353,7 @@ function projectItems({
       items.push({
         action: {
           label: "Review rule",
-          to: `/settings?section=workspace-access&workspace=mail&reviewRule=${rule.id}`,
+          to: `/settings?section=mail&reviewRule=${rule.id}`,
         },
         actionAt: null,
         domain: "mail",
@@ -386,7 +386,7 @@ function projectItems({
     for (const profile of results.profiles ?? []) {
       if (profile.domain !== "finances") continue;
       items.push({
-        action: { label: "Review guidance", to: "/finances/profile" },
+        action: { label: "Review guidance", to: "/settings?section=finances#guidance" },
         actionAt: null,
         domain: "finances",
         id: `profile:${profile.id}:${profile.version}`,

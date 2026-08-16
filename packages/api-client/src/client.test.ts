@@ -912,9 +912,9 @@ function apiFetch() {
           identity: { actorType: "agent", displayName: "Test", userId: id },
           links: {
             activity: "https://app.example.com/activity",
-            agentAccess: "https://app.example.com/settings?section=agents",
-            approvals: "https://app.example.com/settings?section=agents",
-            recovery: "https://app.example.com/settings?section=agents",
+            agentAccess: "https://app.example.com/settings?section=workspace-access",
+            approvals: "https://app.example.com/reviews",
+            recovery: "https://app.example.com/settings?section=connections",
             today: "https://app.example.com/today",
           },
           readiness: { domains: [] },

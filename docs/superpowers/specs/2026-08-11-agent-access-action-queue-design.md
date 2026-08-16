@@ -143,7 +143,7 @@ for review**. The selection control does not repeat full readiness progress.
 Selecting a workspace reveals one detail region below the choices:
 
 - the existing two-row `ReadinessPanel` overview;
-- **View checks** for complete evidence in a dialog;
+- **Review checks** for unresolved evidence first and collapsed completed history in a dialog;
 - the current server-owned setup step;
 - the workspace's observed agent authority.
 

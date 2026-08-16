@@ -131,7 +131,7 @@ describe("domain schemas", () => {
         {
           action: {
             label: "Review Mail rule",
-            to: `/settings?section=workspace-access&reviewRule=${id}`,
+            to: `/settings?section=mail&reviewRule=${id}`,
           },
           actionAt: start,
           domain: "mail",

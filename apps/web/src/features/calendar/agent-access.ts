@@ -1,6 +1,5 @@
-import type { AttentionItem, Calendar } from "@personal-os/domain";
+import type { Calendar } from "@personal-os/domain";
 import {
-  attentionReadiness,
   type ConnectedHostAuthority,
   type DomainCapability,
   type DomainReadinessItem,
@@ -15,12 +14,10 @@ import {
 } from "../agent-access/readiness.js";
 
 export function calendarAgentAccessReadiness({
-  attention,
   calendars,
   hosts,
   profile,
 }: {
-  attention: Loadable<AttentionItem[]>;
   calendars: Loadable<Calendar[]>;
   hosts: Loadable<ConnectedHostAuthority[]>;
   profile: Loadable<DomainSetupStatus | undefined>;
@@ -29,13 +26,12 @@ export function calendarAgentAccessReadiness({
     const unavailable = calendars.state === "unavailable";
     return [
       unavailable
-        ? unavailableReadiness("Calendar material", "Calendar sources are unavailable.")
-        : loadingReadiness("Calendar material", "Calendar sources are loading."),
+        ? unavailableReadiness("Calendars", "Calendar sources are unavailable.")
+        : loadingReadiness("Calendars", "Calendar sources are loading."),
       profileReadiness("Calendar", profile),
       unavailable
-        ? unavailableReadiness("Calendar workflow", "Calendar workflow readiness is unavailable.")
-        : loadingReadiness("Calendar workflow", "Calendar workflow readiness is loading."),
-      attentionReadiness("Calendar", attention),
+        ? unavailableReadiness("Writable calendar", "Writable calendar status is unavailable.")
+        : loadingReadiness("Writable calendar", "Writable calendar status is loading."),
       calendarHostAccess(hosts),
     ];
   }
@@ -54,7 +50,7 @@ export function calendarAgentAccessReadiness({
         : {}),
       complete: selected.length > 0,
       description: `${calendars.data.length} calendar${calendars.data.length === 1 ? "" : "s"} · ${selected.length} selected · ${writable.length} writable${sourceErrors > 0 ? ` · ${sourceErrors} ${sourceErrors === 1 ? "needs" : "need"} reconnect` : ""}`,
-      title: "Calendar material",
+      title: "Calendars",
     },
     profileReadiness("Calendar", profile),
     {
@@ -64,9 +60,8 @@ export function calendarAgentAccessReadiness({
           ? `${writable.length} writable destination${writable.length === 1 ? "" : "s"}. Ilo can preview strong-evidence commitments; automatic creation is not enabled.`
           : "A selected writable calendar is required for commitment previews.",
       ...(writable.length === 0 ? { nextStep: "Select a writable calendar" } : {}),
-      title: "Calendar workflow",
+      title: "Writable calendar",
     },
-    attentionReadiness("Calendar", attention),
     calendarHostAccess(hosts),
   ];
 }

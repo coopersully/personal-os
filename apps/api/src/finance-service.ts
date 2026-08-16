@@ -26,6 +26,7 @@ import {
   financeSetupBackfillState,
   financeTransactions,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import type {
   ApplyFinanceCategorizationsInput,
@@ -98,6 +99,7 @@ type MaintenanceMutationAttribution = {
 };
 type MutationContext = {
   maintenance?: MaintenanceMutationAttribution;
+  maintenanceClaim?: { claimId: string; runId: string };
   principal: Principal;
   requestId: string;
 };
@@ -112,6 +114,7 @@ type Options = {
 type FinanceProfileSourceExecutor = Pick<Database, "select">;
 type FinanceReadExecutor = Pick<Database, "select">;
 type FinanceReviewExecutor = Pick<Database, "insert" | "select" | "update">;
+type FinanceWriteExecutor = Pick<Database, "insert" | "select" | "update">;
 type PlaidCredentials = { accessToken: string };
 type PlaidCategoryConfidence = NonNullable<
   PlaidTransactionSnapshot["personalFinanceCategory"]
@@ -556,6 +559,31 @@ export function createFinanceService({
   onProposalSnapshotRead,
   plaid,
 }: Options) {
+  async function assertMaintenanceClaim(
+    executor: FinanceReadExecutor,
+    context?: MutationContext,
+  ): Promise<void> {
+    if (!context?.maintenanceClaim) return;
+    const [current] = await executor
+      .select({ id: workspaceMaintenanceRuns.id })
+      .from(workspaceMaintenanceRuns)
+      .where(
+        and(
+          eq(workspaceMaintenanceRuns.id, context.maintenanceClaim.runId),
+          eq(workspaceMaintenanceRuns.userId, context.principal.userId),
+          eq(workspaceMaintenanceRuns.domain, "finances"),
+          eq(workspaceMaintenanceRuns.status, "running"),
+          eq(workspaceMaintenanceRuns.leaseClaimId, context.maintenanceClaim.claimId),
+          sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+        ),
+      )
+      .for("update")
+      .limit(1);
+    if (!current) {
+      throw new AppError("conflict", "The Finance maintenance claim is no longer current.");
+    }
+  }
+
   async function seedCategories(
     userId: string,
     executor: Pick<Database, "insert" | "select"> = db,
@@ -606,7 +634,7 @@ export function createFinanceService({
     };
   }
 
-  async function categoryForId(userId: string, categoryId: string) {
+  async function categoryForId(userId: string, categoryId: string, context?: MutationContext) {
     let [row] = await db
       .select()
       .from(financeCategories)
@@ -614,6 +642,7 @@ export function createFinanceService({
       .limit(1);
     if (
       !row &&
+      !context?.maintenanceClaim &&
       defaultCategories.some(([, slug]) => defaultCategoryId(userId, slug) === categoryId)
     ) {
       await ensureCategories(userId);
@@ -627,12 +656,16 @@ export function createFinanceService({
     return row;
   }
 
-  async function categoryForName(userId: string, name: string) {
-    const categories = await ensureCategories(userId);
+  async function categoryForName(
+    userId: string,
+    name: string,
+    executor: FinanceWriteExecutor = db,
+  ) {
+    const categories = await ensureCategories(userId, executor);
     const existing = categories.find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (existing) return existing;
     const slug = categorySlug(name);
-    const [created] = await db
+    const [created] = await executor
       .insert(financeCategories)
       .values({ group: "Custom", isSystem: false, name, slug, userId })
       .onConflictDoUpdate({
@@ -670,9 +703,10 @@ export function createFinanceService({
     userId: string,
     rawMerchant: string,
     source: "agent" | "provider" | "user",
+    executor: FinanceWriteExecutor = db,
   ) {
     const normalizedName = normalizedMerchant(rawMerchant);
-    const [alias] = await db
+    const [alias] = await executor
       .select({ merchant: financeMerchants })
       .from(financeMerchantAliases)
       .innerJoin(financeMerchants, eq(financeMerchantAliases.merchantId, financeMerchants.id))
@@ -684,7 +718,7 @@ export function createFinanceService({
       )
       .limit(1);
     if (alias) return alias.merchant;
-    const [merchant] = await db
+    const [merchant] = await executor
       .insert(financeMerchants)
       .values({
         displayName: titleCaseMerchant(normalizedName || rawMerchant),
@@ -697,7 +731,7 @@ export function createFinanceService({
       })
       .returning();
     const resolved = requireDatabaseRecord(merchant, "The merchant could not be saved.");
-    await db
+    await executor
       .insert(financeMerchantAliases)
       .values({
         confidence: 10_000,
@@ -836,13 +870,14 @@ export function createFinanceService({
     userId: string,
     scope: MaintenanceScope = { type: "all_outstanding" },
     context?: MutationContext,
+    onProgress?: FinanceSyncProgress,
   ) {
+    await onProgress?.();
     await assertMaintenanceScopeOwned(userId, scope);
-    const [transfers, rent] = await Promise.all([
-      categoryForName(userId, transferCategory),
-      categoryForName(userId, rentCategory),
-    ]);
     return db.transaction(async (tx) => {
+      await assertMaintenanceClaim(tx, context);
+      const transfers = await categoryForName(userId, transferCategory, tx);
+      const rent = await categoryForName(userId, rentCategory, tx);
       // Account locks serialize reconciliation runs for one user. Transaction
       // locks then ensure decisions are evaluated from current rows and cannot
       // be overwritten between matching and persistence.
@@ -1456,7 +1491,7 @@ export function createFinanceService({
     const maintenanceSource = context.maintenance
       ? await financeTransactionSource(context.principal.userId, before)
       : null;
-    const category = await categoryForId(context.principal.userId, decision.categoryId);
+    const category = await categoryForId(context.principal.userId, decision.categoryId, context);
     const beforeValue = transaction(before);
     if (beforeValue.updatedAt !== decision.expectedTransactionUpdatedAt) {
       throw new AppError("conflict", "The transaction changed after the proposal was prepared.", {
@@ -1488,6 +1523,7 @@ export function createFinanceService({
     const canApply = source !== "agent" || confidence >= threshold;
     if (!canApply) {
       const replayed = await db.transaction(async (tx) => {
+        await assertMaintenanceClaim(tx, context);
         const [current] = await tx
           .select()
           .from(financeTransactions)
@@ -1675,6 +1711,7 @@ export function createFinanceService({
       return { applied: false, replayed, threshold, transaction: beforeValue };
     }
     const value = await db.transaction(async (tx) => {
+      await assertMaintenanceClaim(tx, context);
       const [current] = await tx
         .select()
         .from(financeTransactions)
@@ -1905,23 +1942,26 @@ export function createFinanceService({
       )
     );
   }
-  async function openAlert(input: {
-    body: string;
-    evidence: Record<string, unknown>;
-    incomeStreamId?: string | null;
-    recurringObligationId?: string | null;
-    severity: "info" | "warning";
-    title: string;
-    transactionId?: string | null;
-    type:
-      | "income_changed"
-      | "income_missing"
-      | "recurring_amount_changed"
-      | "recurring_missing"
-      | "subscription_price_changed";
-    userId: string;
-  }) {
-    const existing = await db
+  async function openAlert(
+    input: {
+      body: string;
+      evidence: Record<string, unknown>;
+      incomeStreamId?: string | null;
+      recurringObligationId?: string | null;
+      severity: "info" | "warning";
+      title: string;
+      transactionId?: string | null;
+      type:
+        | "income_changed"
+        | "income_missing"
+        | "recurring_amount_changed"
+        | "recurring_missing"
+        | "subscription_price_changed";
+      userId: string;
+    },
+    executor: FinanceWriteExecutor = db,
+  ) {
+    const existing = await executor
       .select({ id: financeAlerts.id })
       .from(financeAlerts)
       .where(
@@ -1939,15 +1979,15 @@ export function createFinanceService({
       )
       .limit(1);
     if (existing.length) return;
-    await db.insert(financeAlerts).values({
+    await executor.insert(financeAlerts).values({
       ...input,
       incomeStreamId: input.incomeStreamId ?? null,
       recurringObligationId: input.recurringObligationId ?? null,
       transactionId: input.transactionId ?? null,
     });
   }
-  async function refreshCashflowIntelligence(userId: string) {
-    const transactions = await db
+  async function refreshCashflowIntelligence(userId: string, executor: FinanceWriteExecutor = db) {
+    const transactions = await executor
       .select()
       .from(financeTransactions)
       .where(and(eq(financeTransactions.userId, userId), eq(financeTransactions.pending, false)))
@@ -1976,7 +2016,7 @@ export function createFinanceService({
       const last = rows.at(-1);
       if (!last) continue;
       const confidence = cadence.regular && rows.length >= 4 ? 9700 : 8200;
-      const existing = await db
+      const existing = await executor
         .select()
         .from(financeIncomeStreams)
         .where(and(eq(financeIncomeStreams.userId, userId), eq(financeIncomeStreams.payer, payer)))
@@ -1997,30 +2037,33 @@ export function createFinanceService({
           updatedAt: now(),
         };
         if (existing[0])
-          await db
+          await executor
             .update(financeIncomeStreams)
             .set(values)
             .where(eq(financeIncomeStreams.id, existing[0].id));
-        else await db.insert(financeIncomeStreams).values({ ...values, userId });
+        else await executor.insert(financeIncomeStreams).values({ ...values, userId });
       }
       if (
         existing[0]?.status === "active" &&
         Math.abs(last.amount - existing[0].expectedAmount) > existing[0].amountTolerance
       )
-        await openAlert({
-          body: `${titleCaseMerchant(last.merchant)} was ${formatCurrency(Math.abs(last.amount - existing[0].expectedAmount))} ${last.amount < existing[0].expectedAmount ? "lower" : "higher"} than its expected deposit. Confirm whether your pay changed or this was one-time.`,
-          evidence: {
-            expectedAmount: existing[0].expectedAmount / 100,
-            observedAmount: last.amount / 100,
-            observedDate: last.transactionDate,
+        await openAlert(
+          {
+            body: `${titleCaseMerchant(last.merchant)} was ${formatCurrency(Math.abs(last.amount - existing[0].expectedAmount))} ${last.amount < existing[0].expectedAmount ? "lower" : "higher"} than its expected deposit. Confirm whether your pay changed or this was one-time.`,
+            evidence: {
+              expectedAmount: existing[0].expectedAmount / 100,
+              observedAmount: last.amount / 100,
+              observedDate: last.transactionDate,
+            },
+            incomeStreamId: existing[0].id,
+            severity: "warning",
+            title: "Expected income changed",
+            transactionId: last.id,
+            type: "income_changed",
+            userId,
           },
-          incomeStreamId: existing[0].id,
-          severity: "warning",
-          title: "Expected income changed",
-          transactionId: last.id,
-          type: "income_changed",
-          userId,
-        });
+          executor,
+        );
     }
     for (const [merchant, rows] of expensesByMerchant) {
       const cadence = cadenceFromDates(rows.map((row) => row.transactionDate));
@@ -2037,7 +2080,7 @@ export function createFinanceService({
         rows.length >= 4 &&
         Math.max(...amounts) - Math.min(...amounts) <= tolerance * 2;
       const confidence = highConfidence ? 9700 : 8200;
-      const existing = await db
+      const existing = await executor
         .select()
         .from(financeRecurringObligations)
         .where(
@@ -2073,39 +2116,43 @@ export function createFinanceService({
           updatedAt: now(),
         };
         if (existing[0])
-          await db
+          await executor
             .update(financeRecurringObligations)
             .set(values)
             .where(eq(financeRecurringObligations.id, existing[0].id));
-        else await db.insert(financeRecurringObligations).values({ ...values, userId });
+        else await executor.insert(financeRecurringObligations).values({ ...values, userId });
       }
       if (
         existing[0]?.status === "active" &&
         Math.abs(last.amount - existing[0].expectedAmount) > existing[0].amountTolerance
       )
-        await openAlert({
-          body: `${titleCaseMerchant(last.merchant)} was ${formatCurrency(Math.abs(last.amount - existing[0].expectedAmount))} ${last.amount < existing[0].expectedAmount ? "lower" : "higher"} than its expected recurring charge.`,
-          evidence: {
-            expectedAmount: existing[0].expectedAmount / 100,
-            observedAmount: last.amount / 100,
-            observedDate: last.transactionDate,
+        await openAlert(
+          {
+            body: `${titleCaseMerchant(last.merchant)} was ${formatCurrency(Math.abs(last.amount - existing[0].expectedAmount))} ${last.amount < existing[0].expectedAmount ? "lower" : "higher"} than its expected recurring charge.`,
+            evidence: {
+              expectedAmount: existing[0].expectedAmount / 100,
+              observedAmount: last.amount / 100,
+              observedDate: last.transactionDate,
+            },
+            recurringObligationId: existing[0].id,
+            severity: "info",
+            title:
+              kind === "subscription" ? "Subscription price changed" : "Recurring payment changed",
+            transactionId: last.id,
+            type:
+              kind === "subscription" ? "subscription_price_changed" : "recurring_amount_changed",
+            userId,
           },
-          recurringObligationId: existing[0].id,
-          severity: "info",
-          title:
-            kind === "subscription" ? "Subscription price changed" : "Recurring payment changed",
-          transactionId: last.id,
-          type: kind === "subscription" ? "subscription_price_changed" : "recurring_amount_changed",
-          userId,
-        });
+          executor,
+        );
     }
     const [streams, obligations, openAlerts] = await Promise.all([
-      db.select().from(financeIncomeStreams).where(eq(financeIncomeStreams.userId, userId)),
-      db
+      executor.select().from(financeIncomeStreams).where(eq(financeIncomeStreams.userId, userId)),
+      executor
         .select()
         .from(financeRecurringObligations)
         .where(eq(financeRecurringObligations.userId, userId)),
-      db
+      executor
         .select({
           id: financeAlerts.id,
           incomeStreamId: financeAlerts.incomeStreamId,
@@ -2131,41 +2178,47 @@ export function createFinanceService({
       today,
     });
     if (obsoleteAlerts.length)
-      await db
+      await executor
         .update(financeAlerts)
         .set({ resolvedAt: now(), status: "resolved", updatedAt: now() })
         .where(inArray(financeAlerts.id, obsoleteAlerts));
     for (const stream of streams.filter((row) => row.status === "active" && row.nextExpectedDate)) {
       if ((stream.nextExpectedDate ?? today) < today)
-        await openAlert({
-          body: `${stream.displayName} has not arrived by its expected window. Confirm whether it is delayed, one-time, or a schedule change.`,
-          evidence: {
-            expectedAmount: stream.expectedAmount / 100,
-            expectedDate: stream.nextExpectedDate,
+        await openAlert(
+          {
+            body: `${stream.displayName} has not arrived by its expected window. Confirm whether it is delayed, one-time, or a schedule change.`,
+            evidence: {
+              expectedAmount: stream.expectedAmount / 100,
+              expectedDate: stream.nextExpectedDate,
+            },
+            incomeStreamId: stream.id,
+            severity: "warning",
+            title: "Expected income has not arrived",
+            type: "income_missing",
+            userId,
           },
-          incomeStreamId: stream.id,
-          severity: "warning",
-          title: "Expected income has not arrived",
-          type: "income_missing",
-          userId,
-        });
+          executor,
+        );
     }
     for (const obligation of obligations.filter(
       (row) => row.status === "active" && row.nextExpectedDate,
     )) {
       if ((obligation.nextExpectedDate ?? today) < today)
-        await openAlert({
-          body: `${obligation.displayName} has not appeared by its expected window. Check whether it was paid elsewhere, paused, or changed.`,
-          evidence: {
-            expectedAmount: obligation.expectedAmount / 100,
-            expectedDate: obligation.nextExpectedDate,
+        await openAlert(
+          {
+            body: `${obligation.displayName} has not appeared by its expected window. Check whether it was paid elsewhere, paused, or changed.`,
+            evidence: {
+              expectedAmount: obligation.expectedAmount / 100,
+              expectedDate: obligation.nextExpectedDate,
+            },
+            recurringObligationId: obligation.id,
+            severity: "info",
+            title: "Expected recurring payment is missing",
+            type: "recurring_missing",
+            userId,
           },
-          recurringObligationId: obligation.id,
-          severity: "info",
-          title: "Expected recurring payment is missing",
-          type: "recurring_missing",
-          userId,
-        });
+          executor,
+        );
     }
   }
   return {
@@ -3054,24 +3107,11 @@ export function createFinanceService({
                 const isTransfer =
                   !isRentMerchant(merchant) &&
                   (isSoFiVaultTransfer(merchant) || isProviderTransfer(inferred.category));
-                // These idempotent upserts intentionally happen before the page
-                // transaction. They can remain after a later page rollback or
-                // connection conflict and are reused by the replayed sync.
-                const [merchantRecord, categoryRecord] = await Promise.all([
-                  merchantFor(context.principal.userId, merchant, "provider"),
-                  isTransfer
-                    ? categoryForName(context.principal.userId, transferCategory)
-                    : inferred.category
-                      ? categoryForName(context.principal.userId, inferred.category)
-                      : null,
-                ]);
                 return {
                   automatic,
-                  categoryRecord,
                   inferred,
                   isTransfer,
                   merchant,
-                  merchantRecord,
                   providerCategory,
                   remote,
                 };
@@ -3123,16 +3163,25 @@ export function createFinanceService({
             }
             for (const {
               automatic,
-              categoryRecord,
               inferred,
               isTransfer,
               merchant,
-              merchantRecord,
               providerCategory,
               remote,
             } of prepared) {
               const localAccount = accountsByProviderId.get(remote.accountId);
               if (!localAccount) continue;
+              const merchantRecord = await merchantFor(
+                context.principal.userId,
+                merchant,
+                "provider",
+                tx,
+              );
+              const categoryRecord = isTransfer
+                ? await categoryForName(context.principal.userId, transferCategory, tx)
+                : inferred.category
+                  ? await categoryForName(context.principal.userId, inferred.category, tx)
+                  : null;
               const providerDirection = remote.amount < 0 ? "income" : "expense";
               let [existingTransaction] = await tx
                 .select()
@@ -3194,11 +3243,11 @@ export function createFinanceService({
                     : providerCategory?.primary
                       ? "provider"
                       : null,
-                  direction: isTransfer ? "transfer" : providerDirection,
+                  direction: providerDirection,
                   currencyCode: remote.currencyCode,
                   merchant,
                   merchantId: merchantRecord.id,
-                  needsReview: isTransfer ? !isSoFiVaultTransfer(merchant) : inferred.needsReview,
+                  needsReview: isTransfer ? true : inferred.needsReview,
                   pending: remote.pending ?? false,
                   pendingTransactionId: remote.pendingTransactionId,
                   providerCategory: providerCategory?.primary ?? null,
@@ -3206,11 +3255,7 @@ export function createFinanceService({
                   providerCategoryConfidence: providerCategory?.confidenceLevel ?? null,
                   providerDirection,
                   providerTransactionId: remote.transactionId,
-                  reconciliationStatus: isSoFiVaultTransfer(merchant)
-                    ? "confirmed"
-                    : isTransfer
-                      ? "candidate"
-                      : "not_applicable",
+                  reconciliationStatus: isTransfer ? "candidate" : "not_applicable",
                   transactionDate: remote.date,
                   userId: context.principal.userId,
                 })
@@ -3245,16 +3290,14 @@ export function createFinanceService({
                       ? providerSignChanged && protectedTransaction.direction !== "transfer"
                         ? providerDirection
                         : protectedTransaction.direction
-                      : isTransfer
-                        ? "transfer"
-                        : providerDirection,
+                      : providerDirection,
                     currencyCode: remote.currencyCode,
                     merchant,
                     merchantId: merchantRecord.id,
                     needsReview: protectedTransaction
                       ? providerSignChanged || protectedTransaction.needsReview
                       : isTransfer
-                        ? !isSoFiVaultTransfer(merchant)
+                        ? true
                         : inferred.needsReview,
                     pending: remote.pending ?? false,
                     pendingTransactionId: remote.pendingTransactionId,
@@ -3264,11 +3307,9 @@ export function createFinanceService({
                     providerDirection,
                     reconciliationStatus: protectedTransaction
                       ? protectedTransaction.reconciliationStatus
-                      : isSoFiVaultTransfer(merchant)
-                        ? "confirmed"
-                        : isTransfer
-                          ? "candidate"
-                          : "not_applicable",
+                      : isTransfer
+                        ? "candidate"
+                        : "not_applicable",
                     transactionDate: remote.date,
                     transferGroupId: protectedTransaction
                       ? protectedTransaction.transferGroupId
@@ -3830,11 +3871,24 @@ export function createFinanceService({
       userId: string,
       scope: MaintenanceScope,
       context?: MutationContext,
+      onProgress?: FinanceSyncProgress,
     ) {
-      return reconcileBudgetTransfers(userId, scope, context);
+      return reconcileBudgetTransfers(userId, scope, context, onProgress);
     },
-    async refreshCashflowForUser(userId: string) {
-      await refreshCashflowIntelligence(userId);
+    async refreshCashflowForUser(
+      userId: string,
+      context?: MutationContext,
+      onProgress?: FinanceSyncProgress,
+    ) {
+      await onProgress?.();
+      if (context?.maintenanceClaim) {
+        await db.transaction(async (tx) => {
+          await assertMaintenanceClaim(tx, context);
+          await refreshCashflowIntelligence(userId, tx);
+        });
+      } else {
+        await refreshCashflowIntelligence(userId);
+      }
       return { refreshed: true };
     },
     async summarizeMaintenanceEffectsForRun(userId: string, runId: string) {
@@ -3845,18 +3899,22 @@ export function createFinanceService({
           and(
             eq(auditEvents.userId, userId),
             like(auditEvents.requestId, `maintenance:${runId}:%`),
-            inArray(auditEvents.action, [
-              "finance.transaction_categorized",
-              "finance.transfer_reconciled",
-            ]),
           ),
         );
       const distinct = new Set(rows.map((row) => `${row.action}:${row.entityId}`));
+      const distinctRows = rows.filter(
+        (row, index) =>
+          rows.findIndex(
+            (candidate) => candidate.action === row.action && candidate.entityId === row.entityId,
+          ) === index,
+      );
       return {
-        categorizations: rows.filter((row) => row.action === "finance.transaction_categorized")
-          .length,
+        categorizations: distinctRows.filter((row) =>
+          ["finance.rent_rule_applied", "finance.transaction_categorized"].includes(row.action),
+        ).length,
         duplicateActions: rows.length - distinct.size,
-        transfers: rows.filter((row) => row.action === "finance.transfer_reconciled").length,
+        transfers: distinctRows.filter((row) => row.action === "finance.transfer_reconciled")
+          .length,
       };
     },
     async backfillLedgerIntegrity() {
@@ -4260,7 +4318,9 @@ export function createFinanceService({
       userId: string,
       scope: MaintenanceScope,
       cursor?: string,
+      onProgress?: FinanceSyncProgress,
     ): Promise<FinanceCategorizationProposalPage> {
+      await onProgress?.();
       if (scope.type === "target" && scope.entityType === "finance_transaction") {
         const row = await ownedTransaction(userId, scope.id);
         if (!row.needsReview) return { items: [], nextCursor: null };
@@ -4452,7 +4512,9 @@ export function createFinanceService({
       userId: string,
       scope: MaintenanceScope,
       context?: MutationContext,
+      onProgress?: FinanceSyncProgress,
     ) {
+      await onProgress?.();
       await assertMaintenanceScopeOwned(userId, scope);
       const reviewsBefore = await db
         .select()
@@ -4511,9 +4573,11 @@ export function createFinanceService({
         const candidate = group.find((row) => !openByTransaction.has(row.id)) ?? group[0];
         if (!candidate) continue;
         const source = await financeTransactionSource(userId, candidate);
+        await onProgress?.();
         const review = context?.maintenance
-          ? await db.transaction((tx) =>
-              putInReview(
+          ? await db.transaction(async (tx) => {
+              await assertMaintenanceClaim(tx, context);
+              return putInReview(
                 candidate.id,
                 userId,
                 "possible_duplicate",
@@ -4522,8 +4586,8 @@ export function createFinanceService({
                 tx,
                 context,
                 source,
-              ),
-            )
+              );
+            })
           : await putInReview(
               candidate.id,
               userId,
@@ -4543,9 +4607,11 @@ export function createFinanceService({
         const proposal = await categorizationProposal(userId, await enrichTransaction(row));
         const reason = proposal.suggestedCategory ? "low_confidence" : "unknown_merchant";
         const source = await financeTransactionSource(userId, row);
+        await onProgress?.();
         const review = context?.maintenance
-          ? await db.transaction((tx) =>
-              putInReview(
+          ? await db.transaction(async (tx) => {
+              await assertMaintenanceClaim(tx, context);
+              return putInReview(
                 row.id,
                 userId,
                 reason,
@@ -4554,8 +4620,8 @@ export function createFinanceService({
                 tx,
                 context,
                 source,
-              ),
-            )
+              );
+            })
           : await putInReview(
               row.id,
               userId,

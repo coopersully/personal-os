@@ -209,6 +209,62 @@ describe.sequential("workspace maintenance service", () => {
     ).rejects.toMatchObject({ code: "conflict" });
   });
 
+  it("releases a current claim for durable retry without replacing completed steps", async () => {
+    const service = createWorkspaceMaintenanceService({ db: database.db, now: () => new Date() });
+    const owner = await database.db
+      .insert(users)
+      .values({
+        displayName: "Retry release owner",
+        email: `retry-release-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning({ id: users.id });
+    const ownerId = owner[0]?.id;
+    if (!ownerId) throw new Error("Retry release fixture user was not created.");
+    const run = await service.createOrResume(
+      ownerId,
+      "finances",
+      { type: "all_outstanding" },
+      "rules:v1",
+    );
+    const claim = await service.claim(run.id);
+    if (!claim) throw new Error("Retry release fixture was not claimed.");
+    await service.completeStep({
+      claimId: claim.claimId,
+      idempotencyKey: "finances:rules:v1:verify",
+      result: { state: "needs_work" },
+      runId: run.id,
+      step: "verify",
+    });
+
+    await expect(
+      service.releaseForRetry({
+        claimId: claim.claimId,
+        code: "source_stale",
+        runId: run.id,
+        safeMessage: "The source is stale.",
+      }),
+    ).resolves.toMatchObject({
+      checkpoint: { completedStep: "verify" },
+      lastSafeError: { code: "source_stale", message: "The source is stale." },
+      leaseExpiresAt: null,
+      retryAt: expect.any(String),
+      status: "failed_recoverable",
+    });
+    await expect(service.listStepRecords(run.id)).resolves.toEqual([
+      expect.objectContaining({ status: "completed", step: "verify" }),
+    ]);
+    await expect(
+      service.releaseForRetry({
+        claimId: claim.claimId,
+        code: "source_stale",
+        runId: run.id,
+        safeMessage: "The source is stale.",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("lists due work and durably releases a partial checkpoint for another runtime", async () => {
     const firstRuntime = createWorkspaceMaintenanceService({
       db: database.db,

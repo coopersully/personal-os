@@ -134,7 +134,7 @@ describe.sequential("Finance maintenance service", () => {
 
   function status(
     rulebookVersion = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    options: { blocked?: boolean; questions?: number } = {},
+    options: { blocked?: boolean; nonCurrent?: boolean; questions?: number } = {},
   ) {
     return {
       asOf: now.toISOString(),
@@ -148,7 +148,7 @@ describe.sequential("Finance maintenance service", () => {
         blockers: options.blocked
           ? [{ code: "sync_blocked", message: "Finance source is blocked.", recovery: "operator" }]
           : [],
-        state: options.blocked ? "unavailable" : "current",
+        state: options.blocked ? "unavailable" : options.nonCurrent ? "stale" : "current",
       },
       state: options.blocked ? "blocked" : "needs_work",
     } as unknown as FinanceStatus;
@@ -753,6 +753,83 @@ describe.sequential("Finance maintenance service", () => {
     ).resolves.toMatchObject({ status: "blocked" });
   });
 
+  it("revalidates rulebook and source freshness before settling a recovered verify", async () => {
+    async function crashAfterVerify(ownerId: string) {
+      const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+      let crash = true;
+      const firstRuntime = createFinanceMaintenanceService({
+        finances: operations(),
+        maintenance: {
+          ...workspace,
+          async settle(input: Parameters<typeof workspace.settle>[0]) {
+            if (crash) {
+              crash = false;
+              throw new Error("process exited after verify committed");
+            }
+            return workspace.settle(input);
+          },
+        },
+        now: () => now,
+        status: { getFinanceStatus: async () => status() },
+      });
+      const run = await firstRuntime.startOrResume(ownerId, { type: "all_outstanding" });
+      await expect(firstRuntime.dispatchRun(run.id)).rejects.toThrow();
+      await database.db
+        .update(workspaceMaintenanceRuns)
+        .set({ leaseExpiresAt: sql`NOW() - INTERVAL '1 second'` })
+        .where(eq(workspaceMaintenanceRuns.id, run.id));
+      return { run, workspace };
+    }
+
+    const rulebookOwner = await createUser("Finance recovered verify rulebook");
+    const changedRulebook =
+      "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+    const rulebookCrash = await crashAfterVerify(rulebookOwner);
+    const changedRuntime = createFinanceMaintenanceService({
+      finances: operations(),
+      maintenance: rulebookCrash.workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status(changedRulebook) },
+    });
+    await changedRuntime.dispatchRun(rulebookCrash.run.id);
+    await expect(changedRuntime.getRun(rulebookOwner, rulebookCrash.run.id)).resolves.toMatchObject(
+      {
+        settledResult: { code: "finance_rulebook_changed" },
+        status: "failed_terminal",
+      },
+    );
+    await expect(
+      changedRuntime.startOrResume(rulebookOwner, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({ rulebookVersion: changedRulebook, status: "queued" });
+
+    const staleOwner = await createUser("Finance recovered verify stale source");
+    const staleCrash = await crashAfterVerify(staleOwner);
+    const staleRuntime = createFinanceMaintenanceService({
+      finances: operations(),
+      maintenance: staleCrash.workspace,
+      now: () => now,
+      status: {
+        getFinanceStatus: async () => {
+          const current = status();
+          return {
+            ...current,
+            freshness: { ...current.freshness, blockers: [], state: "stale" as const },
+          };
+        },
+      },
+    });
+    await staleRuntime.dispatchRun(staleCrash.run.id);
+    await expect(staleRuntime.getRun(staleOwner, staleCrash.run.id)).resolves.toMatchObject({
+      lastSafeError: { code: "finance_source_not_current" },
+      status: "failed_recoverable",
+    });
+    await expect(staleCrash.workspace.listStepRecords(staleCrash.run.id)).resolves.not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: "failed_recoverable", step: "verify" }),
+      ]),
+    );
+  });
+
   it("recovers a committed categorization after process loss before its checkpoint", async () => {
     const ownerId = await createUser("Finance process loss");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
@@ -834,7 +911,7 @@ describe.sequential("Finance maintenance service", () => {
     });
   });
 
-  it("keeps failed source synchronization recoverable without preserving a false checkpoint", async () => {
+  it("settles explicit source blockers durably blocked without preserving a false checkpoint", async () => {
     const ownerId = await createUser("Finance blocked sync");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
     let sourceBlocked = false;
@@ -861,18 +938,19 @@ describe.sequential("Finance maintenance service", () => {
     await service.dispatchRun(run.id);
 
     await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
-      status: "failed_recoverable",
+      retryAt: null,
+      status: "blocked",
     });
     await expect(workspace.listStepRecords(run.id)).resolves.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ status: "completed", step: "preflight" }),
-        expect.objectContaining({ status: "failed_recoverable", step: "synchronize" }),
-      ]),
+      expect.arrayContaining([expect.objectContaining({ status: "completed", step: "preflight" })]),
+    );
+    await expect(workspace.listStepRecords(run.id)).resolves.not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ step: "synchronize" })]),
     );
 
     sourceBlocked = false;
     const recovered = await service.startOrResume(ownerId, { type: "all_outstanding" });
-    expect(recovered).toMatchObject({ id: run.id, status: "failed_recoverable" });
+    expect(recovered).toMatchObject({ id: run.id, status: "queued" });
   });
 
   it("blocks on a changed operative rulebook before the next mutation", async () => {
@@ -1042,7 +1120,7 @@ describe.sequential("Finance maintenance service", () => {
         now: () => now,
         status: {
           getFinanceStatus: async () =>
-            status(undefined, { blocked: synchronized && !sourceCurrent }),
+            status(undefined, { nonCurrent: synchronized && !sourceCurrent }),
         },
       });
       const run = await service.startOrResume(ownerId, { type: "all_outstanding" });

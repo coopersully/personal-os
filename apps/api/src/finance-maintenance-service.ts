@@ -30,6 +30,7 @@ type MutationContext = {
     rulebookVersion: string;
     runId: string;
   };
+  maintenanceClaim: { claimId: string; runId: string };
   principal: Principal;
   requestId: string;
 };
@@ -47,17 +48,24 @@ export type FinanceMaintenanceOperations = {
     userId: string,
     scope: MaintenanceScope,
     cursor?: string,
+    onProgress?: () => Promise<void>,
   ) => Promise<FinanceCategorizationProposalPage>;
   reconcileTransfersForUser: (
     userId: string,
     scope: MaintenanceScope,
     context?: MutationContext,
+    onProgress?: () => Promise<void>,
   ) => Promise<{ paired: number; transfers: number }>;
-  refreshCashflowForUser: (userId: string) => Promise<{ refreshed: boolean }>;
+  refreshCashflowForUser: (
+    userId: string,
+    context?: MutationContext,
+    onProgress?: () => Promise<void>,
+  ) => Promise<{ refreshed: boolean }>;
   refreshMaintenanceQuestionsForUser: (
     userId: string,
     scope: MaintenanceScope,
     context?: MutationContext,
+    onProgress?: () => Promise<void>,
   ) => Promise<{ created: number; total: number }>;
   syncDueAccountsForUser: (
     userId: string,
@@ -121,6 +129,7 @@ function completedStep(value: unknown): FinanceMaintenanceStep | null {
 function mutationContext(
   run: Pick<FinanceMaintenanceRun, "id" | "rulebookVersion" | "userId">,
   step: FinanceMaintenanceStep,
+  claimId: string,
 ): MutationContext {
   return {
     maintenance: {
@@ -129,6 +138,7 @@ function mutationContext(
       rulebookVersion: run.rulebookVersion,
       runId: run.id,
     },
+    maintenanceClaim: { claimId, runId: run.id },
     principal: {
       actorId: run.userId,
       actorType: "agent",
@@ -225,7 +235,15 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
 
     try {
       if (lastCompleted === "verify") {
-        const observed = await currentStatus(run.userId, run.scope);
+        const observed = await assertCurrentRulebook(run);
+        if (observed.freshness.blockers.length === 0 && observed.freshness.state !== "current") {
+          return maintenance.releaseForRetry({
+            claimId,
+            code: "finance_source_not_current",
+            runId,
+            safeMessage: "Finance source freshness must recover before verification can settle.",
+          });
+        }
         const result = await resultFor(runId, run.userId, observed);
         return maintenance.settle({
           claimId,
@@ -262,6 +280,14 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           });
           await maintenance.renewClaim({ claimId, runId });
           const observed = await currentStatus(run.userId, run.scope);
+          if (observed.freshness.blockers.length > 0 || observed.state === "blocked") {
+            return maintenance.settle({
+              claimId,
+              result: await resultFor(runId, run.userId, observed),
+              runId,
+              status: "blocked",
+            });
+          }
           if (
             synchronized.failed > 0 ||
             synchronized.skipped > 0 ||
@@ -286,7 +312,10 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           const reconciled = await finances.reconcileTransfersForUser(
             run.userId,
             run.scope,
-            mutationContext(run, step),
+            mutationContext(run, step, claimId),
+            async () => {
+              await maintenance.renewClaim({ claimId, runId });
+            },
           );
           await maintenance.completeStep({
             claimId,
@@ -298,10 +327,14 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           continue;
         }
         if (step === "categorize") {
+          await maintenance.renewClaim({ claimId, runId });
           const page = await finances.proposeOutstandingCategorizations(
             run.userId,
             run.scope,
             continuation?.cursor,
+            async () => {
+              await maintenance.renewClaim({ claimId, runId });
+            },
           );
           const eligible = page.items.filter(isEligibleOneOff).slice(0, 50);
           if (eligible.length > 0) {
@@ -322,20 +355,23 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
             const oneOffProposals = eligible.filter(
               (proposal) => proposal.suggestionBasis === "transaction_evidence",
             );
-            const results = [
-              ...(ruleProposals.length > 0
+            await maintenance.renewClaim({ claimId, runId });
+            const ruleResults =
+              ruleProposals.length > 0
                 ? await finances.applyApprovedRules(
                     decisions(ruleProposals),
-                    mutationContext(run, step),
+                    mutationContext(run, step, claimId),
                   )
-                : []),
-              ...(oneOffProposals.length > 0
+                : [];
+            await maintenance.renewClaim({ claimId, runId });
+            const oneOffResults =
+              oneOffProposals.length > 0
                 ? await finances.applyApprovedOneOffs(
                     decisions(oneOffProposals),
-                    mutationContext(run, step),
+                    mutationContext(run, step, claimId),
                   )
-                : []),
-            ];
+                : [];
+            const results = [...ruleResults, ...oneOffResults];
             const failed = results.find((result) => result.status === "failed");
             if (failed?.error) {
               throw new AppError(
@@ -369,7 +405,10 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           const refreshed = await finances.refreshMaintenanceQuestionsForUser(
             run.userId,
             run.scope,
-            mutationContext(run, step),
+            mutationContext(run, step, claimId),
+            async () => {
+              await maintenance.renewClaim({ claimId, runId });
+            },
           );
           await maintenance.completeStep({
             claimId,
@@ -381,6 +420,8 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           continue;
         }
         if (step === "budget") {
+          await assertCurrentRulebook(run);
+          await maintenance.renewClaim({ claimId, runId });
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
@@ -392,7 +433,14 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
         }
         if (step === "health") {
           await assertCurrentRulebook(run);
-          const refreshed = await finances.refreshCashflowForUser(run.userId);
+          const refreshed = await finances.refreshCashflowForUser(
+            run.userId,
+            mutationContext(run, step, claimId),
+            async () => {
+              await maintenance.renewClaim({ claimId, runId });
+            },
+          );
+          await maintenance.renewClaim({ claimId, runId });
           const observed = await currentStatus(run.userId, run.scope);
           await maintenance.completeStep({
             claimId,
@@ -403,7 +451,20 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           });
           continue;
         }
+        await assertCurrentRulebook(run);
+        await maintenance.renewClaim({ claimId, runId });
         const observed = await currentStatus(run.userId, run.scope);
+        if (observed.freshness.blockers.length > 0 || observed.state === "blocked") {
+          return maintenance.settle({
+            claimId,
+            result: await resultFor(runId, run.userId, observed),
+            runId,
+            status: "blocked",
+          });
+        }
+        if (observed.freshness.state !== "current") {
+          throw new AppError("conflict", "Finance source freshness must recover before verify.");
+        }
         await maintenance.completeStep({
           claimId,
           idempotencyKey,
@@ -417,12 +478,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           claimId,
           result,
           runId,
-          status:
-            observed.freshness.blockers.length > 0 || observed.state === "blocked"
-              ? "blocked"
-              : questionCount > 0
-                ? "completed_with_questions"
-                : "completed",
+          status: questionCount > 0 ? "completed_with_questions" : "completed",
         });
       }
       return maintenance.getOwnedRun(run.userId, runId);

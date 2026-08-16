@@ -17,6 +17,7 @@ import {
   financeTransactions,
   migrateDatabase,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
@@ -197,13 +198,10 @@ function plaidFetch(): typeof globalThis.fetch {
                       account_id: "plaid-account-1",
                       amount: 60,
                       date: "2026-07-20",
-                      merchant_name: "Credit card payment",
-                      name: "CREDIT CARD PAYMENT",
-                      personal_finance_category: {
-                        confidence_level: "VERY_HIGH",
-                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
-                        primary: "TRANSFER_OUT",
-                      },
+                      iso_currency_code: "USD",
+                      merchant_name: "Transfer to SoFi Vault",
+                      name: "TRANSFER TO SOFI VAULT",
+                      personal_finance_category: null,
                       transaction_id: "txn-late-transfer",
                     },
                   ],
@@ -3137,6 +3135,33 @@ describe.sequential("finance service", () => {
       (review) => review.reason === "possible_transfer",
     );
     expect(transferReviews).toHaveLength(3);
+    expect(transferReviews.map((review) => review.transaction)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          direction: "income",
+          providerDirection: "income",
+          reconciliationStatus: "candidate",
+        }),
+        expect.objectContaining({
+          direction: "expense",
+          providerDirection: "expense",
+          reconciliationStatus: "candidate",
+        }),
+      ]),
+    );
+    expect(transferReviews.every((review) => review.transaction.direction !== "transfer")).toBe(
+      true,
+    );
+    expect(
+      transferReviews.find((review) =>
+        review.transaction.rawMerchant?.toLowerCase().includes("sofi vault"),
+      )?.transaction,
+    ).toMatchObject({
+      currencyCode: "USD",
+      direction: "expense",
+      providerDirection: "expense",
+      reconciliationStatus: "candidate",
+    });
     for (const review of transferReviews) {
       await service.resolveReview(
         review.id,
@@ -4067,11 +4092,25 @@ describe.sequential("finance service", () => {
       context,
     );
     if (!account) throw new Error("Maintenance heartbeat account was not created.");
+    let progressAfterProvider = 0;
+    const effectsBefore = await database.pool.query(
+      `
+      SELECT
+        (SELECT count(*)::int FROM finance_merchants WHERE user_id = $1) AS merchants,
+        (SELECT count(*)::int FROM finance_merchant_aliases WHERE user_id = $1) AS aliases,
+        (SELECT count(*)::int FROM finance_categories WHERE user_id = $1) AS categories,
+        (SELECT count(*)::int FROM audit_events WHERE user_id = $1) AS audits
+    `,
+      [maintenanceUser.id],
+    );
 
     await expect(
       service.syncDueAccountsForUser(maintenanceUser.id, async () => {
         if (providerReturned) {
-          throw new AppError("conflict", "The maintenance claim expired.");
+          progressAfterProvider += 1;
+          if (progressAfterProvider >= 2) {
+            throw new AppError("conflict", "The maintenance claim expired.");
+          }
         }
       }),
     ).resolves.toMatchObject({ failed: 0, skipped: 1, succeeded: 0 });
@@ -4094,6 +4133,222 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual([
       { syncClaimId: null, syncCursor: null, syncFailureCount: 0, syncState: "stale" },
     ]);
+    await expect(
+      database.pool.query(
+        `
+        SELECT
+          (SELECT count(*)::int FROM finance_merchants WHERE user_id = $1) AS merchants,
+          (SELECT count(*)::int FROM finance_merchant_aliases WHERE user_id = $1) AS aliases,
+          (SELECT count(*)::int FROM finance_categories WHERE user_id = $1) AS categories,
+          (SELECT count(*)::int FROM audit_events WHERE user_id = $1) AS audits
+      `,
+        [maintenanceUser.id],
+      ),
+    ).resolves.toMatchObject({ rows: effectsBefore.rows });
+  });
+
+  it("fences reconciliation mutations when another runtime takes the maintenance run", async () => {
+    const [maintenanceUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Maintenance reconciliation fence",
+        email: `finance-reconcile-fence-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!maintenanceUser) throw new Error("Maintenance reconciliation user was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const userContext = {
+      principal: financePrincipal(maintenanceUser.id),
+      requestId: "maintenance-reconciliation-fixture",
+    };
+    const cash = await service.createAccount(
+      { balance: 0, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      userContext,
+    );
+    const card = await service.createAccount(
+      { balance: 0, institution: "Card", kind: "debt", name: "Card", provider: "manual" },
+      userContext,
+    );
+    const outgoing = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 200,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-18",
+        direction: "expense",
+        merchant: "Card payment",
+        notes: null,
+      },
+      userContext,
+    );
+    const incoming = await service.createTransaction(
+      {
+        accountId: card.id,
+        amount: 200,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "income",
+        merchant: "Payment thank you",
+        notes: null,
+      },
+      userContext,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ categoryDecidedAt: null, categorySource: "provider", currencyCode: "USD" })
+      .where(inArray(financeTransactions.id, [outgoing.id, incoming.id]));
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: maintenanceUser.id,
+    });
+    const agentContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:reconcile",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(maintenanceUser.id),
+      requestId: `maintenance:${runId}:reconcile`,
+    };
+    const auditsBefore = await database.db
+      .select({ id: auditEvents.id })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, agentContext.requestId));
+
+    await expect(
+      service.reconcileTransfersForUser(
+        maintenanceUser.id,
+        { type: "all_outstanding" },
+        agentContext,
+        async () => {
+          await database.db
+            .update(workspaceMaintenanceRuns)
+            .set({ leaseExpiresAt: new Date(0) })
+            .where(eq(workspaceMaintenanceRuns.id, runId));
+        },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ reconciliationStatus: financeTransactions.reconciliationStatus })
+        .from(financeTransactions)
+        .where(inArray(financeTransactions.id, [outgoing.id, incoming.id]))
+        .orderBy(financeTransactions.id),
+    ).resolves.toEqual([
+      { reconciliationStatus: "not_applicable" },
+      { reconciliationStatus: "not_applicable" },
+    ]);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, agentContext.requestId)),
+    ).resolves.toEqual(auditsBefore);
+  });
+
+  it("fences question mutations when a second runtime takes the maintenance run mid-step", async () => {
+    const [maintenanceUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Maintenance question fence",
+        email: `finance-question-fence-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!maintenanceUser) throw new Error("Maintenance question user was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const userContext = {
+      principal: financePrincipal(maintenanceUser.id),
+      requestId: "maintenance-question-fixture",
+    };
+    const account = await service.createAccount(
+      { balance: 0, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      userContext,
+    );
+    for (let index = 0; index < 2; index += 1) {
+      await service.createTransaction(
+        {
+          accountId: account.id,
+          amount: 42,
+          category: null,
+          categoryConfidence: null,
+          date: "2026-07-18",
+          direction: "expense",
+          merchant: "Same purchase",
+          notes: null,
+        },
+        { ...userContext, requestId: `${userContext.requestId}:${index}` },
+      );
+    }
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: maintenanceUser.id,
+    });
+    const requestId = `maintenance:${runId}:questions`;
+    const agentContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:questions",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(maintenanceUser.id),
+      requestId,
+    };
+    let progressCalls = 0;
+
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(
+        maintenanceUser.id,
+        { type: "all_outstanding" },
+        agentContext,
+        async () => {
+          progressCalls += 1;
+          if (progressCalls === 2) {
+            await database.db
+              .update(workspaceMaintenanceRuns)
+              .set({ leaseExpiresAt: new Date(0) })
+              .where(eq(workspaceMaintenanceRuns.id, runId));
+          }
+        },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ id: financeReviewCases.id })
+        .from(financeReviewCases)
+        .where(eq(financeReviewCases.userId, maintenanceUser.id)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, requestId)),
+    ).resolves.toEqual([]);
   });
 
   it("bounds maintenance proposals and keeps ambiguous transfer matches as questions", async () => {
@@ -4121,7 +4376,7 @@ describe.sequential("finance service", () => {
         runId: "11111111-1111-4111-8111-111111111111",
       },
       principal: financeAgentPrincipal(maintenanceUser.id),
-      requestId: "maintenance-agent",
+      requestId: "maintenance:11111111-1111-4111-8111-111111111111:maintenance-test",
     };
     const cash = await service.createAccount(
       { balance: 1_000, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
@@ -4642,5 +4897,38 @@ describe.sequential("finance service", () => {
         source: { revision: expect.any(String), sourceType: "finance_transaction" },
       });
     }
+    await expect(
+      service.summarizeMaintenanceEffectsForRun(maintenanceUser.id, agentContext.maintenance.runId),
+    ).resolves.toEqual({ categorizations: 1, duplicateActions: 0, transfers: 2 });
+    for (const action of [
+      "finance.rent_rule_applied",
+      "finance.review_queued",
+      "finance.transfer_candidate_queued",
+    ]) {
+      const original = attributedAudits.find((audit) => audit.action === action);
+      if (!original) throw new Error(`Missing ${action} audit fixture.`);
+      const [fullAudit] = await database.db
+        .select()
+        .from(auditEvents)
+        .where(
+          and(eq(auditEvents.requestId, agentContext.requestId), eq(auditEvents.action, action)),
+        )
+        .limit(1);
+      if (!fullAudit) throw new Error(`Missing ${action} audit row.`);
+      await database.db.insert(auditEvents).values({
+        action: fullAudit.action,
+        actorId: fullAudit.actorId,
+        actorType: fullAudit.actorType,
+        after: fullAudit.after,
+        before: fullAudit.before,
+        entityId: fullAudit.entityId,
+        entityType: fullAudit.entityType,
+        requestId: fullAudit.requestId,
+        userId: fullAudit.userId,
+      });
+    }
+    await expect(
+      service.summarizeMaintenanceEffectsForRun(maintenanceUser.id, agentContext.maintenance.runId),
+    ).resolves.toEqual({ categorizations: 1, duplicateActions: 3, transfers: 2 });
   });
 });

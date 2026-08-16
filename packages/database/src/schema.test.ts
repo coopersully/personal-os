@@ -30,7 +30,11 @@ describe("database schema contracts", () => {
       ]),
     );
     expect(table.indexes.map((candidate) => candidate.config.name)).toEqual(
-      expect.arrayContaining(["finance_accounts_sync_due_idx", "finance_accounts_sync_claim_idx"]),
+      expect.arrayContaining([
+        "finance_accounts_sync_due_idx",
+        "finance_accounts_sync_claim_idx",
+        "finance_accounts_sync_initialization_idx",
+      ]),
     );
     expect(table.checks.map((candidate) => candidate.name)).toEqual(
       expect.arrayContaining([
@@ -48,9 +52,8 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('ADD COLUMN "sync_claim_expires_at" timestamptz');
     expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_due_idx"');
     expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_claim_idx"');
-    expect(migrationSql).toContain("\"provider\" = 'manual'");
-    expect(migrationSql).toContain("INTERVAL '24 hours'");
-    expect(migrationSql).toContain('"next_sync_at" = NOW()');
+    expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_initialization_idx"');
+    expect(migrationSql).not.toMatch(/\bUPDATE "finance_accounts"/u);
     expect(migrationSql).not.toMatch(/https?:\/\//u);
   });
 

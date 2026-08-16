@@ -514,17 +514,96 @@ describe.sequential("finance service", () => {
       rows: [
         {
           name: "Fresh connected account",
-          next_sync_at: expect.any(Date),
-          sync_state: "current",
+          next_sync_at: null,
+          sync_state: "stale",
         },
-        { name: "Legacy checking", next_sync_at: null, sync_state: "current" },
+        { name: "Legacy checking", next_sync_at: null, sync_state: "stale" },
         {
           name: "Stale connected account",
-          next_sync_at: expect.any(Date),
+          next_sync_at: null,
           sync_state: "stale",
         },
       ],
     });
+    const initializationLogs = vi.fn();
+    const upgradeService = createFinanceService({
+      db: database.db,
+      log: initializationLogs,
+      now: () => now,
+    });
+    const interruptedInitialization = await database.pool.connect();
+    let firstInitializationPass!: Awaited<ReturnType<typeof upgradeService.initializeSyncHealth>>;
+    try {
+      await interruptedInitialization.query("BEGIN");
+      await interruptedInitialization.query(
+        "SELECT id FROM finance_accounts WHERE id = $1 FOR UPDATE",
+        [upgradeAccount.id],
+      );
+      firstInitializationPass = await upgradeService.initializeSyncHealth(2);
+    } finally {
+      await interruptedInitialization.query("ROLLBACK");
+      interruptedInitialization.release();
+    }
+    expect(firstInitializationPass).toMatchObject({
+      complete: false,
+      initialized: 2,
+    });
+    await expect(
+      database.pool.query<{ initialized: string }>(
+        `SELECT count(*)::text AS initialized
+         FROM finance_accounts
+         WHERE (provider = 'manual' AND sync_state = 'current')
+            OR (provider = 'plaid' AND next_sync_at IS NOT NULL)`,
+      ),
+    ).resolves.toMatchObject({ rows: [{ initialized: "2" }] });
+    const restartedSyncHealthService = createFinanceService({
+      db: database.db,
+      log: initializationLogs,
+      now: () => now,
+    });
+    const initializationPasses = [firstInitializationPass];
+    for (let pass = 0; pass < 5; pass += 1) {
+      const result = await restartedSyncHealthService.initializeSyncHealth(1);
+      initializationPasses.push(result);
+      if (result.complete) break;
+    }
+    expect(initializationPasses.at(-1)).toMatchObject({ complete: true });
+    expect(
+      initializationPasses.reduce(
+        (total, pass) => ({
+          initialized: total.initialized + pass.initialized,
+          manual: total.manual + pass.manual,
+          plaidCurrent: total.plaidCurrent + pass.plaidCurrent,
+          plaidDue: total.plaidDue + pass.plaidDue,
+        }),
+        { initialized: 0, manual: 0, plaidCurrent: 0, plaidDue: 0 },
+      ),
+    ).toEqual({ initialized: 4, manual: 2, plaidCurrent: 1, plaidDue: 1 });
+    await expect(restartedSyncHealthService.initializeSyncHealth(1)).resolves.toEqual({
+      complete: true,
+      initialized: 0,
+      manual: 0,
+      plaidCurrent: 0,
+      plaidDue: 0,
+    });
+    await expect(restartedSyncHealthService.syncDuePlaidAccounts()).resolves.toMatchObject({
+      attempted: 1,
+      failed: 1,
+    });
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET next_sync_at = NOW() + INTERVAL '30 days'
+       WHERE user_id = $1 AND provider = 'plaid'`,
+      [upgradeUser.id],
+    );
+    expect(initializationLogs.mock.calls.map(([entry]) => entry)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: "finance_sync_health_initialized",
+          initializedAccountCount: expect.any(Number),
+        }),
+      ]),
+    );
     await expect(
       database.pool.query<{ relation: string | null }>(
         "SELECT to_regclass('public.finance_setup_backfill_state')::text AS relation",
@@ -596,7 +675,6 @@ describe.sequential("finance service", () => {
         .from(financeTransactions)
         .where(eq(financeTransactions.id, legacyManualTransaction.id)),
     ).resolves.toEqual([{ providerDirection: null }]);
-    const upgradeService = createFinanceService({ db: database.db, now: () => now });
     const syntheticCategories = await upgradeService.listCategories(upgradeUser.id);
     expect(syntheticCategories).toHaveLength(20);
     expect(
@@ -3304,11 +3382,25 @@ describe.sequential("finance service", () => {
       now: () => now,
       plaid,
     });
-    const workerTwo = createFinanceService({
+    const slowClockWorker = createFinanceService({
       db: database.db,
       encryptionKey: key,
       log: logs,
-      now: () => now,
+      now: () => new Date(now.getTime() - 60 * 60_000),
+      plaid,
+    });
+    const fastClockWorker = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      log: logs,
+      now: () => new Date(now.getTime() + 60 * 60_000),
+      plaid,
+    });
+    const settlementFastClockWorker = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      log: logs,
+      now: () => new Date(Date.now() + 60 * 60_000),
       plaid,
     });
     const context = {
@@ -3341,7 +3433,7 @@ describe.sequential("finance service", () => {
        WHERE provider = 'plaid' AND id <> $1 AND next_sync_at <= $3`,
       [healthAccount.id, new Date(now.getTime() + 24 * 60 * 60_000), now],
     );
-    const firstPass = workerOne.syncDuePlaidAccounts();
+    const firstPass = slowClockWorker.syncPlaidAccount(healthAccount.id, context);
     await Promise.race([
       deferredSyncStarted,
       firstPass.then((result) => {
@@ -3350,8 +3442,17 @@ describe.sequential("finance service", () => {
         );
       }),
     ]);
-    const overlappingPass = workerTwo.syncDuePlaidAccounts();
-    const siblingSync = workerTwo.syncPlaidAccount(healthSiblingAccount.id, context);
+    const activeLease = await database.pool.query<{ remaining_ms: number }>(
+      `SELECT EXTRACT(EPOCH FROM (sync_claim_expires_at - NOW())) * 1000 AS remaining_ms
+       FROM finance_accounts
+       WHERE id = $1`,
+      [healthSiblingAccount.id],
+    );
+    const remainingLeaseMs = Number(activeLease.rows[0]?.remaining_ms);
+    expect(remainingLeaseMs).toBeGreaterThan(4 * 60_000);
+    expect(remainingLeaseMs).toBeLessThanOrEqual(5 * 60_000);
+    const overlappingPass = fastClockWorker.syncDuePlaidAccounts();
+    const siblingSync = fastClockWorker.syncPlaidAccount(healthSiblingAccount.id, context);
     const siblingOutcome = await siblingSync.then(
       () => ({ code: "resolved" }),
       (error: unknown) => error,
@@ -3365,28 +3466,46 @@ describe.sequential("finance service", () => {
     });
     releaseDeferredSync?.();
     expect(siblingOutcome).toMatchObject({ code: "conflict" });
-    await expect(firstPass).resolves.toEqual({
-      attempted: 1,
-      failed: 0,
-      recovered: 0,
-      skipped: 0,
-      succeeded: 1,
-    });
+    await expect(firstPass).resolves.toEqual({ changed: 0 });
     mode = "success";
+    const siblingLeaseId = crypto.randomUUID();
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET sync_state = 'stale', sync_claim_id = $2,
+           sync_claim_expires_at = NOW() + INTERVAL '30 minutes', next_sync_at = NOW()
+       WHERE id = $1`,
+      [healthAccount.id, siblingLeaseId],
+    );
+    await expect(
+      settlementFastClockWorker.syncPlaidAccount(healthAccount.id, context),
+    ).resolves.toEqual({ changed: 0 });
+    await expect(
+      database.pool.query(`SELECT sync_claim_id, sync_state FROM finance_accounts WHERE id = $1`, [
+        healthAccount.id,
+      ]),
+    ).resolves.toMatchObject({
+      rows: [{ sync_claim_id: siblingLeaseId, sync_state: "stale" }],
+    });
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET sync_claim_id = NULL, sync_claim_expires_at = NULL,
+           sync_state = 'current', next_sync_at = NOW() + INTERVAL '1 day'
+       WHERE id = $1`,
+      [healthAccount.id],
+    );
     const expiredClaimId = crypto.randomUUID();
     await database.pool.query(
       `UPDATE finance_accounts
        SET sync_state = 'stale', sync_claim_id = $2,
-           sync_claim_expires_at = $3, next_sync_at = $4
+           sync_claim_expires_at = NOW() - INTERVAL '1 second'
        WHERE id = $1`,
-      [healthAccount.id, expiredClaimId, new Date(now.getTime() - 1), now],
+      [healthSiblingAccount.id, expiredClaimId],
     );
-    await expect(workerTwo.syncDuePlaidAccounts()).resolves.toEqual({
-      attempted: 1,
-      failed: 0,
-      recovered: 0,
-      skipped: 0,
-      succeeded: 1,
+    await database.pool.query(`UPDATE finance_accounts SET next_sync_at = NOW() WHERE id = $1`, [
+      healthAccount.id,
+    ]);
+    await expect(slowClockWorker.syncPlaidAccount(healthAccount.id, context)).resolves.toEqual({
+      changed: 0,
     });
 
     const makeDue = async () =>
@@ -3572,6 +3691,14 @@ describe.sequential("finance service", () => {
     ).resolves.toMatchObject({ rows: [{ status: "connected" }, { status: "connected" }] });
     await database.pool.query(
       `UPDATE finance_accounts
+       SET next_sync_at = $2
+       WHERE provider_item_id = (
+         SELECT provider_item_id FROM finance_accounts WHERE id = $1
+       )`,
+      [healthAccount.id, new Date(now.getTime() + 24 * 60 * 60_000)],
+    );
+    await database.pool.query(
+      `UPDATE finance_accounts
        SET provider_item_id = NULL, next_sync_at = $2
        WHERE id = $1`,
       [healthAccount.id, now],
@@ -3593,6 +3720,48 @@ describe.sequential("finance service", () => {
     );
     expect(JSON.stringify(logs.mock.calls)).not.toContain("raw-");
   }, 20_000);
+
+  it("omits Plaid freshness age when no connected account supplies evidence", async () => {
+    const connectedAccounts = await database.db
+      .select({ id: financeAccounts.id })
+      .from(financeAccounts)
+      .where(and(eq(financeAccounts.provider, "plaid"), eq(financeAccounts.status, "connected")));
+    await database.db
+      .update(financeAccounts)
+      .set({ status: "needs_reauth" })
+      .where(
+        inArray(
+          financeAccounts.id,
+          connectedAccounts.map((account) => account.id),
+        ),
+      );
+    const logs = vi.fn();
+    try {
+      const service = createFinanceService({ db: database.db, log: logs, now: () => now });
+      await expect(service.syncDuePlaidAccounts()).resolves.toEqual({
+        attempted: 0,
+        failed: 0,
+        recovered: 0,
+        skipped: 0,
+        succeeded: 0,
+      });
+      const freshness = logs.mock.calls
+        .map(([entry]) => entry)
+        .findLast((entry) => entry.event === "connector_sync_freshness_observed");
+      expect(freshness).toMatchObject({ eligibleAccountCount: 0, provider: "plaid" });
+      expect(freshness).not.toHaveProperty("freshnessAgeMs");
+    } finally {
+      await database.db
+        .update(financeAccounts)
+        .set({ status: "connected" })
+        .where(
+          inArray(
+            financeAccounts.id,
+            connectedAccounts.map((account) => account.id),
+          ),
+        );
+    }
+  });
 
   it("replays a removal window when a later Plaid page fails before the cursor checkpoint", async () => {
     const [restartUser] = await database.db

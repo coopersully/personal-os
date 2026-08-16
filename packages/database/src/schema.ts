@@ -1319,6 +1319,13 @@ export const financeAccounts = pgTable(
     index("finance_accounts_sync_due_idx")
       .on(table.nextSyncAt, table.updatedAt)
       .where(sql`${table.provider} = 'plaid' AND ${table.nextSyncAt} IS NOT NULL`),
+    index("finance_accounts_sync_initialization_idx")
+      .on(table.id)
+      .where(sql`(
+        (${table.provider} = 'manual' AND ${table.syncState} = 'stale' AND ${table.nextSyncAt} IS NULL)
+        OR
+        (${table.provider} = 'plaid' AND ${table.status} = 'connected' AND ${table.syncState} = 'stale' AND ${table.nextSyncAt} IS NULL)
+      )`),
     uniqueIndex("finance_accounts_provider_idx").on(
       table.userId,
       table.provider,

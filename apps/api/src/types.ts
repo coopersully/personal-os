@@ -68,10 +68,16 @@ export type RequestLog = {
     | "connector_sync_recovered"
     | "connector_trigger_dispatched"
     | "connector_recovery_failed"
+    | "finance_sync_health_initialized"
     | "mail_rule_work_dispatch_failed"
     | "request";
   failureCount?: number;
   freshnessAgeMs?: number;
+  initializationComplete?: boolean;
+  initializedAccountCount?: number;
+  initializedManualAccountCount?: number;
+  initializedPlaidCurrentAccountCount?: number;
+  initializedPlaidDueAccountCount?: number;
   method: string;
   nextSyncAt?: string | null;
   notificationDisposition?: "accepted" | "duplicate" | "rejected" | undefined;

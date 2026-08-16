@@ -114,6 +114,14 @@ export type FinanceSyncBatchResult = {
   succeeded: number;
 };
 
+export type FinanceSyncHealthInitializationResult = {
+  complete: boolean;
+  initialized: number;
+  manual: number;
+  plaidCurrent: number;
+  plaidDue: number;
+};
+
 const financeSyncClaimMs = 5 * 60_000;
 const financeSyncIntervalMs = 6 * 60 * 60_000;
 const financeSyncBatchLimit = 25;
@@ -2675,13 +2683,12 @@ export function createFinanceService({
       const claimTarget = claimItemAccounts[0] ?? before;
       const claimItemAccountIds = claimItemAccounts.map((financeAccount) => financeAccount.id);
       const startedAt = Date.now();
-      const attemptedAt = now();
       const syncClaimId = randomUUID();
       const [claimedAccount] = await db
         .update(financeAccounts)
         .set({
-          lastSyncAttemptAt: attemptedAt,
-          syncClaimExpiresAt: new Date(attemptedAt.getTime() + financeSyncClaimMs),
+          lastSyncAttemptAt: sql`NOW()`,
+          syncClaimExpiresAt: sql`NOW() + ${financeSyncClaimMs} * INTERVAL '1 millisecond'`,
           syncClaimId,
         })
         .where(
@@ -2689,7 +2696,7 @@ export function createFinanceService({
             eq(financeAccounts.id, claimTarget.id),
             or(
               isNull(financeAccounts.syncClaimId),
-              lte(financeAccounts.syncClaimExpiresAt, attemptedAt),
+              sql`${financeAccounts.syncClaimExpiresAt} <= NOW()`,
             ),
           ),
         )
@@ -2843,8 +2850,20 @@ export function createFinanceService({
             const currentClaimedAccount = lockedItemAccounts.find(
               (accountRow) => accountRow.id === claimedAccount.id,
             );
+            const [activeClaim] = await tx
+              .select({ id: financeAccounts.id })
+              .from(financeAccounts)
+              .where(
+                and(
+                  eq(financeAccounts.id, claimedAccount.id),
+                  eq(financeAccounts.syncClaimId, syncClaimId),
+                  sql`${financeAccounts.syncClaimExpiresAt} > NOW()`,
+                ),
+              )
+              .limit(1);
             if (
               !currentClaimedAccount ||
+              !activeClaim ||
               currentClaimedAccount.syncClaimId !== syncClaimId ||
               currentClaimedAccount.syncClaimExpiresAt === null ||
               !currentSyncAccount ||
@@ -3106,6 +3125,7 @@ export function createFinanceService({
               and(
                 eq(financeAccounts.id, claimedAccount.id),
                 eq(financeAccounts.syncClaimId, syncClaimId),
+                sql`${financeAccounts.syncClaimExpiresAt} > NOW()`,
               ),
             )
             .returning({ id: financeAccounts.id });
@@ -3140,7 +3160,7 @@ export function createFinanceService({
                   inArray(financeAccounts.id, siblingAccountIds),
                   or(
                     isNull(financeAccounts.syncClaimId),
-                    lte(financeAccounts.syncClaimExpiresAt, completedAt),
+                    sql`${financeAccounts.syncClaimExpiresAt} <= NOW()`,
                   ),
                 ),
               );
@@ -3164,7 +3184,11 @@ export function createFinanceService({
           freshnessAgeMs: Math.max(
             0,
             completedAt.getTime() -
-              (claimedAccount.lastSyncedAt?.getTime() ?? attemptedAt.getTime()),
+              (
+                claimedAccount.lastSyncedAt ??
+                claimedAccount.lastSyncAttemptAt ??
+                claimedAccount.createdAt
+              ).getTime(),
           ),
           method: "CONNECTOR",
           path: `/internal/finances/${claimedAccount.id}/sync`,
@@ -3219,6 +3243,7 @@ export function createFinanceService({
               and(
                 eq(financeAccounts.id, claimedAccount.id),
                 eq(financeAccounts.syncClaimId, syncClaimId),
+                sql`${financeAccounts.syncClaimExpiresAt} > NOW()`,
               ),
             )
             .returning({ id: financeAccounts.id });
@@ -3245,7 +3270,15 @@ export function createFinanceService({
                 syncState: failure.recovery === "automatic" ? "retrying" : "blocked",
                 updatedAt: failedAt,
               })
-              .where(inArray(financeAccounts.id, siblingAccountIds));
+              .where(
+                and(
+                  inArray(financeAccounts.id, siblingAccountIds),
+                  or(
+                    isNull(financeAccounts.syncClaimId),
+                    sql`${financeAccounts.syncClaimExpiresAt} <= NOW()`,
+                  ),
+                ),
+              );
           }
         });
         log?.({
@@ -3267,7 +3300,96 @@ export function createFinanceService({
         throw connectorSyncAppError(failure, claimedAccount.id, "plaid", nextSyncAt);
       }
     },
+    async initializeSyncHealth(
+      limit = financeSyncBatchLimit,
+    ): Promise<FinanceSyncHealthInitializationResult> {
+      const startedAt = Date.now();
+      const initializationAt = now();
+      const requestedLimit = Number.isFinite(limit) ? Math.trunc(limit) : financeSyncBatchLimit;
+      const scanLimit = Math.max(1, Math.min(financeSyncBatchLimit, requestedLimit));
+      const uninitializedSyncHealth = or(
+        and(
+          eq(financeAccounts.provider, "manual"),
+          eq(financeAccounts.syncState, "stale"),
+          isNull(financeAccounts.nextSyncAt),
+        ),
+        and(
+          eq(financeAccounts.provider, "plaid"),
+          eq(financeAccounts.status, "connected"),
+          eq(financeAccounts.syncState, "stale"),
+          isNull(financeAccounts.nextSyncAt),
+        ),
+      );
+      const initialized = await db.transaction(async (tx) => {
+        const rows = await tx
+          .select({
+            id: financeAccounts.id,
+            provider: financeAccounts.provider,
+          })
+          .from(financeAccounts)
+          .where(uninitializedSyncHealth)
+          .orderBy(financeAccounts.id)
+          .limit(scanLimit)
+          .for("update", { skipLocked: true });
+        const result = { manual: 0, plaidCurrent: 0, plaidDue: 0 };
+        for (const row of rows) {
+          if (row.provider === "manual") {
+            await tx
+              .update(financeAccounts)
+              .set({ syncState: "current", updatedAt: sql`NOW()` })
+              .where(eq(financeAccounts.id, row.id));
+            result.manual += 1;
+            continue;
+          }
+          const [updated] = await tx
+            .update(financeAccounts)
+            .set({
+              nextSyncAt: sql`CASE
+                WHEN ${financeAccounts.lastSyncedAt} >= NOW() - INTERVAL '24 hours'
+                  THEN ${financeAccounts.lastSyncedAt} + INTERVAL '24 hours'
+                ELSE ${initializationAt}
+              END`,
+              syncState: sql`CASE
+                WHEN ${financeAccounts.lastSyncedAt} >= NOW() - INTERVAL '24 hours'
+                  THEN 'current'
+                ELSE 'stale'
+              END`,
+              updatedAt: sql`NOW()`,
+            })
+            .where(eq(financeAccounts.id, row.id))
+            .returning({ syncState: financeAccounts.syncState });
+          const isCurrent = updated?.syncState === "current";
+          if (isCurrent) result.plaidCurrent += 1;
+          else result.plaidDue += 1;
+        }
+        return { ...result, initialized: rows.length };
+      });
+      const [remaining] = await db
+        .select({ id: financeAccounts.id })
+        .from(financeAccounts)
+        .where(uninitializedSyncHealth)
+        .limit(1);
+      const result = {
+        complete: remaining === undefined,
+        ...initialized,
+      };
+      log?.({
+        durationMs: Date.now() - startedAt,
+        event: "finance_sync_health_initialized",
+        initializationComplete: result.complete,
+        initializedAccountCount: result.initialized,
+        initializedManualAccountCount: result.manual,
+        initializedPlaidCurrentAccountCount: result.plaidCurrent,
+        initializedPlaidDueAccountCount: result.plaidDue,
+        method: "SCHEDULER",
+        path: "/internal/finances/sync-health/initialize",
+        requestId: randomUUID(),
+        status: 200,
+      });
+      return result;
+    },
     async syncDuePlaidAccounts(): Promise<FinanceSyncBatchResult> {
+      await this.initializeSyncHealth();
       const selectedAt = now();
       const selectedRows = await db
         .select({
@@ -3344,22 +3466,26 @@ export function createFinanceService({
         })
         .from(financeAccounts)
         .where(and(eq(financeAccounts.provider, "plaid"), eq(financeAccounts.status, "connected")));
+      const freshnessAgeMs =
+        freshnessAccounts.length === 0
+          ? undefined
+          : freshnessAccounts.reduce(
+              (maximumAge, financeAccount) =>
+                Math.max(
+                  maximumAge,
+                  Math.max(
+                    0,
+                    selectedAt.getTime() -
+                      (financeAccount.lastSyncedAt ?? financeAccount.createdAt).getTime(),
+                  ),
+                ),
+              0,
+            );
       log?.({
         durationMs: Date.now() - freshnessStartedAt,
         eligibleAccountCount: freshnessAccounts.length,
         event: "connector_sync_freshness_observed",
-        freshnessAgeMs: freshnessAccounts.reduce(
-          (maximumAge, financeAccount) =>
-            Math.max(
-              maximumAge,
-              Math.max(
-                0,
-                selectedAt.getTime() -
-                  (financeAccount.lastSyncedAt ?? financeAccount.createdAt).getTime(),
-              ),
-            ),
-          0,
-        ),
+        ...(freshnessAgeMs === undefined ? {} : { freshnessAgeMs }),
         method: "SCHEDULER",
         path: "/internal/finances/freshness",
         provider: "plaid",

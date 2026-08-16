@@ -1208,6 +1208,69 @@ describe.sequential("finance service", () => {
     ]);
   });
 
+  it("deletes a credential-bearing Provider Item when its last linked account is deleted", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Provider Item deletion",
+        email: `provider-item-delete-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Provider Item deletion user was not created.");
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid: createPlaidConnector({
+        clientId: "client",
+        environment: "sandbox",
+        fetch: plaidFetch(),
+        secret: "secret",
+      }),
+    });
+    const context = {
+      principal: financePrincipal(owner.id),
+      requestId: "delete-provider-item-accounts",
+    };
+    const connected = await service.exchangePlaidToken(
+      { institution: "Deletion Bank", publicToken: "public-token" },
+      context,
+    );
+    expect(connected).toHaveLength(2);
+    const [itemBefore] = await database.db
+      .select({
+        encryptedCredentials: financeProviderItems.encryptedCredentials,
+        id: financeProviderItems.id,
+      })
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.userId, owner.id));
+    expect(itemBefore).toMatchObject({ encryptedCredentials: expect.any(Object) });
+    if (!itemBefore || !connected[0] || !connected[1]) {
+      throw new Error("Provider Item deletion fixture was incomplete.");
+    }
+
+    await service.deleteAccount(connected[0].id, context);
+    await expect(
+      database.db
+        .select({ id: financeProviderItems.id })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, itemBefore.id)),
+    ).resolves.toEqual([{ id: itemBefore.id }]);
+
+    await service.deleteAccount(connected[1].id, context);
+    await expect(
+      database.db
+        .select({
+          encryptedCredentials: financeProviderItems.encryptedCredentials,
+          id: financeProviderItems.id,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, itemBefore.id)),
+    ).resolves.toEqual([]);
+  });
+
   it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "manual-finance" };

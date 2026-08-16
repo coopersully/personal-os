@@ -6,6 +6,8 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financeCategories,
+  financeMerchants,
   financeProviderItems,
   financeTransactions,
   migrateDatabase,
@@ -15,7 +17,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { and, eq, inArray } from "drizzle-orm";
 import { createFinanceProviderItemSyncService } from "./finance-provider-item-sync-service.js";
 import { encryptJson } from "./security.js";
-import type { Principal } from "./types.js";
+import type { Principal, RequestLog } from "./types.js";
 
 const now = new Date("2026-08-16T12:00:00.000Z");
 const key = Buffer.alloc(32, 13).toString("base64");
@@ -38,6 +40,23 @@ function emptyPage(cursor: string, hasMore = false) {
     removed: [],
     transactionsUpdateStatus: "HISTORICAL_UPDATE_COMPLETE" as const,
   };
+}
+
+async function waitForAdvisoryWaiter(pool: DatabaseClient["pool"]) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(`
+      SELECT count(*)::text AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND wait_event_type = 'Lock'
+        AND query LIKE '%pg_advisory_xact_lock%'
+        AND query NOT LIKE '%pg_stat_activity%'
+    `);
+    if (Number(result.rows[0]?.count ?? 0) > 0) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error("Expected a Provider Item lookup advisory-lock waiter.");
 }
 
 function plaid(overrides: Partial<PlaidConnector> = {}): PlaidConnector {
@@ -127,10 +146,11 @@ describe.sequential("Finance Provider Item synchronization", () => {
     return { accounts, item, userId };
   }
 
-  function service(provider: PlaidConnector) {
+  function service(provider: PlaidConnector, log?: (entry: RequestLog) => void) {
     return createFinanceProviderItemSyncService({
       db: database.db,
       encryptionKey: key,
+      ...(log ? { log } : {}),
       now: () => now,
       plaid: provider,
       prepareTransaction: async (remote) => ({
@@ -287,6 +307,87 @@ describe.sequential("Finance Provider Item synchronization", () => {
     expect(cursors).toEqual([null, "page-one", "page-one"]);
   });
 
+  it("durably carries a pending removal across process loss before successful settlement", async () => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    if (!target) throw new Error("Pending-removal target account was not created.");
+    const pendingProviderId = `pending-removed-${userId}`;
+    await database.db.insert(financeTransactions).values({
+      accountId: target.id,
+      amount: 1_500,
+      direction: "expense",
+      merchant: "Pending removal",
+      pending: true,
+      providerTransactionId: pendingProviderId,
+      transactionDate: "2026-08-15",
+      userId,
+    });
+    let calls = 0;
+    await expect(
+      service(
+        plaid({
+          syncTransactions: async ({ cursor }) => {
+            calls += 1;
+            if (calls === 1) {
+              expect(cursor).toBeNull();
+              return {
+                ...emptyPage("pending-removal-page", true),
+                removed: [{ transactionId: pendingProviderId }],
+              };
+            }
+            expect(cursor).toBe("pending-removal-page");
+            await database.db
+              .update(financeProviderItems)
+              .set({
+                syncClaimExpiresAt: null,
+                syncClaimGeneration: null,
+                syncClaimId: null,
+                syncClaimOwner: null,
+                syncClaimStartedAt: null,
+              })
+              .where(eq(financeProviderItems.id, item.id));
+            throw new Error("simulated process loss after deferred removal");
+          },
+        }),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "pending-removal-loss",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ cursor: financeProviderItems.syncCursor })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ cursor: "pending-removal-page" }]);
+
+    await expect(
+      service(
+        plaid({
+          syncTransactions: async ({ cursor }) => {
+            expect(cursor).toBe("pending-removal-page");
+            return emptyPage("pending-removal-finished");
+          },
+        }),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "pending-removal-resume",
+      }),
+    ).resolves.toEqual({ changed: 1 });
+    await expect(
+      database.db
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, pendingProviderId)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({ state: financeProviderItems.syncState })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ state: "current" }]);
+  });
+
   it("clears an invalid Item cursor for one controlled replay", async () => {
     const { accounts, item, userId } = await fixture({ cursor: "opaque-cursor" });
     const target = accounts[0];
@@ -311,14 +412,25 @@ describe.sequential("Finance Provider Item synchronization", () => {
     await expect(
       database.db
         .select({
+          code: financeProviderItems.syncErrorCode,
           cursor: financeProviderItems.syncCursor,
           error: financeProviderItems.syncError,
           nextSyncAt: financeProviderItems.nextSyncAt,
+          recovery: financeProviderItems.syncRecovery,
           state: financeProviderItems.syncState,
         })
         .from(financeProviderItems)
         .where(eq(financeProviderItems.id, item.id)),
-    ).resolves.toEqual([{ cursor: null, error: null, nextSyncAt: now, state: "stale" }]);
+    ).resolves.toEqual([
+      {
+        code: "plaid_invalid_cursor_replay_in_progress",
+        cursor: null,
+        error: "Plaid transaction history is being replayed from a safe checkpoint.",
+        nextSyncAt: now,
+        recovery: "automatic",
+        state: "retrying",
+      },
+    ]);
 
     await expect(
       service(
@@ -348,6 +460,69 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .where(eq(financeProviderItems.id, item.id)),
     ).resolves.toEqual([
       { code: "plaid_invalid_cursor_replay_failed", recovery: "operator", state: "blocked" },
+    ]);
+  });
+
+  it("keeps invalid-cursor replay state across page checkpoints and terminates a repeated failure", async () => {
+    const { accounts, item, userId } = await fixture({ cursor: "invalid-before-replay" });
+    const target = accounts[0];
+    if (!target) throw new Error("Invalid-cursor target account was not created.");
+    const invalidCursor = () =>
+      new ConnectorError({
+        category: "rejected",
+        code: "plaid_invalid_cursor",
+        disposition: "retry",
+        message: "safe invalid cursor",
+      });
+    await expect(
+      service(
+        plaid({
+          syncTransactions: async () => {
+            throw invalidCursor();
+          },
+        }),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "invalid-cursor-start-replay",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+
+    let calls = 0;
+    await expect(
+      service(
+        plaid({
+          syncTransactions: async ({ cursor }) => {
+            calls += 1;
+            if (calls === 1) {
+              expect(cursor).toBeNull();
+              return emptyPage("replay-page-one", true);
+            }
+            expect(cursor).toBe("replay-page-one");
+            throw invalidCursor();
+          },
+        }),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "invalid-cursor-repeat-after-page",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      database.db
+        .select({
+          code: financeProviderItems.syncErrorCode,
+          cursor: financeProviderItems.syncCursor,
+          recovery: financeProviderItems.syncRecovery,
+          state: financeProviderItems.syncState,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([
+      {
+        code: "plaid_invalid_cursor_replay_failed",
+        cursor: "replay-page-one",
+        recovery: "operator",
+        state: "blocked",
+      },
     ]);
   });
 
@@ -487,6 +662,170 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ).resolves.toHaveLength(finalAuditsBefore.length);
   });
 
+  it("serializes reversed first-time merchant and category lookup creation across two Items", async () => {
+    const first = await fixture({ accountCount: 1 });
+    const firstAccount = first.accounts[0];
+    if (!firstAccount) throw new Error("First crossed-lookup account was not created.");
+    const [secondItem] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        encryptedCredentials: encryptJson({ accessToken: `second-token-${first.userId}` }, key),
+        nextSyncAt: now,
+        provider: "plaid",
+        providerItemId: `second-item-${first.userId}`,
+        syncState: "stale",
+        userId: first.userId,
+      })
+      .returning();
+    if (!secondItem) throw new Error("Second crossed-lookup Item was not created.");
+    const [secondAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Item Bank",
+        name: "Second crossed lookup",
+        provider: "plaid",
+        providerAccountId: `second-account-${first.userId}`,
+        providerItemId: secondItem.providerItemId,
+        providerItemRecordId: secondItem.id,
+        status: "connected",
+        syncState: "stale",
+        userId: first.userId,
+      })
+      .returning();
+    if (!secondAccount) throw new Error("Second crossed-lookup account was not created.");
+    await database.db.insert(financeCategories).values([
+      {
+        group: "Other",
+        name: "CROSSED_A",
+        slug: `crossed-a-${first.userId}`,
+        userId: first.userId,
+      },
+      {
+        group: "Other",
+        name: "CROSSED_B",
+        slug: `crossed-b-${first.userId}`,
+        userId: first.userId,
+      },
+    ]);
+    const remote = (accountId: string, merchant: string, category: "CROSSED_A" | "CROSSED_B") => ({
+      accountId,
+      amount: 10,
+      currencyCode: "USD",
+      date: "2026-08-16",
+      merchantName: merchant,
+      name: merchant.toUpperCase(),
+      pending: false,
+      pendingTransactionId: null,
+      personalFinanceCategory: {
+        confidenceLevel: "HIGH" as const,
+        detailed: `${category}_DETAIL`,
+        primary: category,
+      },
+      transactionId: `${merchant.toLowerCase()}-${first.userId}`,
+    });
+    const provider = plaid({
+      syncTransactions: async ({ accessToken }) =>
+        accessToken === `token-${first.userId}`
+          ? {
+              ...emptyPage("crossed-first-finished"),
+              added: [
+                remote(firstAccount.providerAccountId ?? "missing", "Alpha merchant", "CROSSED_B"),
+                remote(firstAccount.providerAccountId ?? "missing", "Zulu merchant", "CROSSED_A"),
+              ],
+            }
+          : {
+              ...emptyPage("crossed-second-finished"),
+              added: [
+                remote(secondAccount.providerAccountId ?? "missing", "Beta merchant", "CROSSED_A"),
+                remote(
+                  secondAccount.providerAccountId ?? "missing",
+                  "Yankee merchant",
+                  "CROSSED_B",
+                ),
+              ],
+            },
+    });
+    let firstLookupCount = 0;
+    let releaseFirstLookups!: () => void;
+    const firstLookups = new Promise<void>((resolvePromise) => {
+      releaseFirstLookups = resolvePromise;
+    });
+    const crossedService = () =>
+      createFinanceProviderItemSyncService({
+        db: database.db,
+        encryptionKey: key,
+        now: () => now,
+        plaid: provider,
+        prepareTransaction: async (providerTransaction) => ({
+          category: providerTransaction.personalFinanceCategory?.primary ?? null,
+          categoryConfidence: 9_000,
+          categorySource: "provider",
+          isTransfer: false,
+          merchant: providerTransaction.merchantName ?? providerTransaction.name,
+          needsReview: false,
+          remote: providerTransaction,
+        }),
+        resolveProjectionLookups: async (executor, userId, prepared) => {
+          const [merchant] = await executor
+            .insert(financeMerchants)
+            .values({
+              displayName: prepared.merchant,
+              normalizedName: prepared.merchant.toLowerCase(),
+              userId,
+            })
+            .returning();
+          const [category] = await executor
+            .update(financeCategories)
+            .set({ updatedAt: now })
+            .where(
+              and(
+                eq(financeCategories.userId, userId),
+                eq(financeCategories.name, prepared.category ?? "missing"),
+              ),
+            )
+            .returning();
+          if (prepared.merchant === "Alpha merchant" || prepared.merchant === "Beta merchant") {
+            firstLookupCount += 1;
+            if (firstLookupCount === 2) releaseFirstLookups();
+            await Promise.race([firstLookups, waitForAdvisoryWaiter(database.pool)]);
+          }
+          return { categoryId: category?.id ?? null, merchantId: merchant?.id ?? null };
+        },
+        resolveScopeAccountId: async () => undefined,
+      });
+
+    await expect(
+      Promise.all([
+        crossedService().syncAccount(firstAccount.id, {
+          principal: principal(first.userId),
+          requestId: "crossed-lookups-first",
+        }),
+        crossedService().syncAccount(secondAccount.id, {
+          principal: principal(first.userId),
+          requestId: "crossed-lookups-second",
+        }),
+      ]),
+    ).resolves.toEqual([{ changed: 2 }, { changed: 2 }]);
+    await expect(
+      database.db
+        .select({ name: financeMerchants.displayName })
+        .from(financeMerchants)
+        .where(eq(financeMerchants.userId, first.userId)),
+    ).resolves.toHaveLength(4);
+    await expect(
+      database.db
+        .select({ category: financeTransactions.category, merchant: financeTransactions.merchant })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.userId, first.userId))
+        .orderBy(financeTransactions.merchant),
+    ).resolves.toEqual([
+      { category: "CROSSED_B", merchant: "Alpha merchant" },
+      { category: "CROSSED_A", merchant: "Beta merchant" },
+      { category: "CROSSED_B", merchant: "Yankee merchant" },
+      { category: "CROSSED_A", merchant: "Zulu merchant" },
+    ]);
+  });
+
   it("projects the complete Item for a target and stores shared retry and reconnect state on the Item", async () => {
     const { accounts, item, userId } = await fixture();
     const target = accounts[0];
@@ -579,6 +918,110 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ]);
   });
 
+  it("ignores provider transactions for an account that is no longer linked to the Item", async () => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    const deletedSibling = accounts[1];
+    if (!target || !deletedSibling) throw new Error("Unlinked account fixture was not created.");
+    const deletedProviderAccountId = deletedSibling.providerAccountId ?? "missing";
+    await database.db.delete(financeAccounts).where(eq(financeAccounts.id, deletedSibling.id));
+    const unlinkedTransactionId = `unlinked-${userId}`;
+    const unlinked = createFinanceProviderItemSyncService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid: plaid({
+        syncTransactions: async () => ({
+          ...emptyPage("unlinked-finished"),
+          added: [
+            {
+              accountId: deletedProviderAccountId,
+              amount: 10,
+              currencyCode: "USD",
+              date: "2026-08-16",
+              merchantName: "Deleted sibling merchant",
+              name: "DELETED SIBLING MERCHANT",
+              pending: false,
+              pendingTransactionId: null,
+              personalFinanceCategory: {
+                confidenceLevel: "HIGH",
+                detailed: "UNLINKED_CATEGORY_DETAIL",
+                primary: "UNLINKED_CATEGORY",
+              },
+              transactionId: unlinkedTransactionId,
+            },
+          ],
+          removed: [{ transactionId: `unlinked-removed-${userId}` }],
+        }),
+      }),
+      prepareTransaction: async (remote) => ({
+        category: remote.personalFinanceCategory?.primary ?? null,
+        categoryConfidence: 9_000,
+        categorySource: "provider",
+        isTransfer: false,
+        merchant: remote.merchantName ?? remote.name,
+        needsReview: false,
+        remote,
+      }),
+      resolveProjectionLookups: async (executor, lookupUserId, prepared) => {
+        const [merchant] = await executor
+          .insert(financeMerchants)
+          .values({
+            displayName: prepared.merchant,
+            normalizedName: prepared.merchant.toLowerCase(),
+            userId: lookupUserId,
+          })
+          .returning();
+        const [category] = await executor
+          .insert(financeCategories)
+          .values({
+            group: "Other",
+            name: prepared.category ?? "Unlinked Category",
+            slug: "unlinked-category",
+            userId: lookupUserId,
+          })
+          .returning();
+        return { categoryId: category?.id ?? null, merchantId: merchant?.id ?? null };
+      },
+      resolveScopeAccountId: async () => undefined,
+    });
+
+    await expect(
+      unlinked.syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "unlinked-provider-account",
+      }),
+    ).resolves.toEqual({ changed: 0 });
+    await expect(
+      database.db
+        .select({ name: financeMerchants.displayName })
+        .from(financeMerchants)
+        .where(eq(financeMerchants.userId, userId)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({ name: financeCategories.name })
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, userId)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, unlinkedTransactionId)),
+    ).resolves.toEqual([]);
+    const [pageAudit] = await database.db
+      .select({ after: auditEvents.after })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.entityId, item.id),
+          eq(auditEvents.action, "finance.plaid_page_projected"),
+        ),
+      );
+    expect(pageAudit?.after).toMatchObject({ added: 0, changed: 0, modified: 0, removed: 0 });
+  });
+
   it("selects at most 25 due Items with at most three provider workers", async () => {
     await database.db.update(financeProviderItems).set({ nextSyncAt: null });
     const itemIds: string[] = [];
@@ -620,5 +1063,49 @@ describe.sequential("Finance Provider Item synchronization", () => {
         and(inArray(financeProviderItems.id, itemIds), eq(financeProviderItems.syncState, "stale")),
       );
     expect(remaining).toHaveLength(1);
+  });
+
+  it("selects a linked due Item ahead of 25 earlier orphan Items and excludes orphans from freshness", async () => {
+    await database.db.delete(financeAccounts);
+    await database.db.delete(financeProviderItems);
+    for (let index = 0; index < 25; index += 1) {
+      const userId = crypto.randomUUID();
+      await database.db.insert(users).values({
+        displayName: `Orphan ${index}`,
+        email: `orphan-${userId}@example.com`,
+        id: userId,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      });
+      await database.db.insert(financeProviderItems).values({
+        encryptedCredentials: encryptJson({ accessToken: `orphan-token-${index}` }, key),
+        nextSyncAt: new Date(now.getTime() - 60_000),
+        provider: "plaid",
+        providerItemId: `orphan-item-${userId}`,
+        syncState: "stale",
+        userId,
+      });
+    }
+    const valid = await fixture({ accountCount: 1, nextSyncAt: now });
+    const logs = vi.fn();
+    await expect(service(plaid(), logs).syncDueItems()).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 1,
+    });
+    expect(logs.mock.calls.map(([entry]) => entry)).toContainEqual(
+      expect.objectContaining({
+        eligibleAccountCount: 1,
+        event: "connector_sync_freshness_observed",
+      }),
+    );
+    await expect(
+      database.db
+        .select({ state: financeProviderItems.syncState })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, valid.item.id)),
+    ).resolves.toEqual([{ state: "current" }]);
   });
 });

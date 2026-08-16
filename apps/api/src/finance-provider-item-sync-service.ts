@@ -15,7 +15,7 @@ import {
   financeTransactions,
 } from "@personal-os/database";
 import type { MaintenanceScope } from "@personal-os/domain";
-import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import {
   classifyConnectorSyncFailure,
@@ -89,6 +89,7 @@ const syncIntervalMs = 6 * 60 * 60_000;
 const batchLimit = 25;
 const concurrency = 3;
 const invalidCursorCodes = new Set(["plaid_invalid_cursor", "plaid_transactions_cursor_invalid"]);
+const invalidCursorReplayCode = "plaid_invalid_cursor_replay_in_progress";
 
 type ActiveClaim = {
   generation: number;
@@ -332,13 +333,14 @@ export function createFinanceProviderItemSyncService(options: Options) {
     itemId: string;
     page: Awaited<ReturnType<PlaidConnector["syncTransactions"]>>;
     prepared: PreparedFinanceProviderTransaction[];
-    removedTransactionIds: Set<string>;
-    replacementTransactionIds: Set<string>;
   }): Promise<number> {
     return db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
       await lockActiveClaim(tx, input.itemId, input.claim);
       const accounts = await lockLinkedAccounts(tx, input.itemId);
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-lookups:${input.context.principal.userId}`}, 0))`,
+      );
       const accountByProviderId = new Map(
         accounts.flatMap((account) =>
           account.providerAccountId ? [[account.providerAccountId, account]] : [],
@@ -358,16 +360,17 @@ export function createFinanceProviderItemSyncService(options: Options) {
       }
 
       let changed = 0;
-      const removed = [...input.removedTransactionIds]
-        .filter((transactionId) => !input.replacementTransactionIds.has(transactionId))
-        .sort();
-      const deletable = input.page.hasMore
-        ? (
-            await tx
-              .select({
-                pending: financeTransactions.pending,
-                providerTransactionId: financeTransactions.providerTransactionId,
-              })
+      const removed = input.page.removed.map((entry) => entry.transactionId).sort();
+      const replacements = new Set(
+        input.prepared.flatMap((prepared) =>
+          prepared.remote.pendingTransactionId ? [prepared.remote.pendingTransactionId] : [],
+        ),
+      );
+      const removedRows =
+        removed.length === 0
+          ? []
+          : await tx
+              .select()
               .from(financeTransactions)
               .where(
                 and(
@@ -378,12 +381,25 @@ export function createFinanceProviderItemSyncService(options: Options) {
                   inArray(financeTransactions.providerTransactionId, removed),
                 ),
               )
-          )
-            .filter((transaction) => !transaction.pending)
-            .flatMap((transaction) =>
-              transaction.providerTransactionId ? [transaction.providerTransactionId] : [],
-            )
-        : removed;
+              .orderBy(financeTransactions.id)
+              .for("update");
+      const deletable = removedRows.flatMap((transaction) =>
+        !transaction.pending &&
+        transaction.providerTransactionId &&
+        !replacements.has(transaction.providerTransactionId)
+          ? [transaction.providerTransactionId]
+          : [],
+      );
+      for (const transaction of removedRows) {
+        if (!transaction.pending || !transaction.providerTransactionId) continue;
+        await tx
+          .update(financeTransactions)
+          .set({
+            pendingTransactionId: transaction.providerTransactionId,
+            updatedAt: now(),
+          })
+          .where(eq(financeTransactions.id, transaction.id));
+      }
       for (let offset = 0; offset < deletable.length; offset += 1_000) {
         const deleted = await tx
           .delete(financeTransactions)
@@ -569,6 +585,23 @@ export function createFinanceProviderItemSyncService(options: Options) {
         changed += 1;
       }
 
+      if (!input.page.hasMore) {
+        const deletedDeferred = await tx
+          .delete(financeTransactions)
+          .where(
+            and(
+              inArray(
+                financeTransactions.accountId,
+                accounts.map((account) => account.id),
+              ),
+              eq(financeTransactions.pending, true),
+              sql`${financeTransactions.pendingTransactionId} = ${financeTransactions.providerTransactionId}`,
+            ),
+          )
+          .returning({ id: financeTransactions.id });
+        changed += deletedDeferred.length;
+      }
+
       const updatedAt = now();
       await tx
         .update(financeProviderItems)
@@ -586,7 +619,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
             changed,
             hasMore: input.page.hasMore,
             modified: input.page.modified.length,
-            removed: input.page.removed.length,
+            removed: removedRows.length,
           },
           before: null,
           entityId: input.itemId,
@@ -723,8 +756,11 @@ export function createFinanceProviderItemSyncService(options: Options) {
       await assertMaintenanceClaim(tx, input.context);
       const item = await lockActiveClaim(tx, input.itemId, input.claim);
       await lockLinkedAccounts(tx, input.itemId);
-      const invalidCursor = invalidCursorReported && item.syncCursor !== null;
-      if (invalidCursorReported && !invalidCursor) {
+      const replayInProgress = item.syncErrorCode === invalidCursorReplayCode;
+      const replayScheduled =
+        invalidCursorReported && !replayInProgress && item.syncCursor !== null;
+      const replayFailed = invalidCursorReported && (replayInProgress || item.syncCursor === null);
+      if (replayFailed) {
         failure = {
           ...failure,
           code: "plaid_invalid_cursor_replay_failed",
@@ -733,7 +769,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
         };
       }
       const failureCount = item.syncFailureCount + 1;
-      nextSyncAt = invalidCursor
+      nextSyncAt = replayScheduled
         ? failedAt
         : failure.recovery === "reconnect"
           ? null
@@ -743,27 +779,39 @@ export function createFinanceProviderItemSyncService(options: Options) {
               now: failedAt,
               retryAfterMs: failure.retryAfterMs,
             });
-      const itemValues = invalidCursor
+      const preserveReplayMarker =
+        replayInProgress && !invalidCursorReported && failure.recovery === "automatic";
+      const itemValues = replayScheduled
         ? {
             nextSyncAt: failedAt,
             syncCursor: null,
-            syncError: null,
-            syncErrorCategory: null,
-            syncErrorCode: null,
-            syncFailureCount: 0,
-            syncRecovery: null,
-            syncState: "stale" as const,
-          }
-        : {
-            nextSyncAt,
-            syncError: failure.message,
-            syncErrorCategory: failure.category,
-            syncErrorCode: failure.code,
+            syncError: "Plaid transaction history is being replayed from a safe checkpoint.",
+            syncErrorCategory: "rejected" as const,
+            syncErrorCode: invalidCursorReplayCode,
             syncFailureCount: failureCount,
-            syncRecovery: failure.recovery,
-            syncState:
-              failure.recovery === "automatic" ? ("retrying" as const) : ("blocked" as const),
-          };
+            syncRecovery: "automatic" as const,
+            syncState: "retrying" as const,
+          }
+        : preserveReplayMarker
+          ? {
+              nextSyncAt,
+              syncError: item.syncError,
+              syncErrorCategory: item.syncErrorCategory,
+              syncErrorCode: invalidCursorReplayCode,
+              syncFailureCount: failureCount,
+              syncRecovery: "automatic" as const,
+              syncState: "retrying" as const,
+            }
+          : {
+              nextSyncAt,
+              syncError: failure.message,
+              syncErrorCategory: failure.category,
+              syncErrorCode: failure.code,
+              syncFailureCount: failureCount,
+              syncRecovery: failure.recovery,
+              syncState:
+                failure.recovery === "automatic" ? ("retrying" as const) : ("blocked" as const),
+            };
       await tx
         .update(financeProviderItems)
         .set({
@@ -779,8 +827,8 @@ export function createFinanceProviderItemSyncService(options: Options) {
       await tx
         .update(financeAccounts)
         .set({
-          ...(invalidCursor ? { syncCursor: null } : {}),
-          ...(failure.recovery === "reconnect" && !invalidCursor
+          ...(replayScheduled ? { syncCursor: null } : {}),
+          ...(failure.recovery === "reconnect" && !replayScheduled
             ? { status: "needs_reauth" as const }
             : {}),
           nextSyncAt: itemValues.nextSyncAt,
@@ -797,10 +845,10 @@ export function createFinanceProviderItemSyncService(options: Options) {
         .where(eq(financeAccounts.providerItemRecordId, input.itemId));
       await tx.insert(auditEvents).values(
         auditValues({
-          action: invalidCursor
+          action: replayScheduled
             ? "finance.plaid_cursor_replay_scheduled"
             : "finance.plaid_sync_failed",
-          after: invalidCursor
+          after: replayScheduled
             ? { replayScheduled: true }
             : { failureCode: failure.code, recovery: failure.recovery },
           before: null,
@@ -822,6 +870,11 @@ export function createFinanceProviderItemSyncService(options: Options) {
     const startedAt = Date.now();
     const claimed = await claimItem(itemId, context);
     const previousFailureCount = claimed.item.syncFailureCount;
+    const linkedProviderAccountIds = new Set(
+      claimed.accounts.flatMap((account) =>
+        account.providerAccountId ? [account.providerAccountId] : [],
+      ),
+    );
     try {
       await preserveProgress(onProgress);
       const accessToken = credentials(claimed.item.encryptedCredentials).accessToken;
@@ -840,33 +893,30 @@ export function createFinanceProviderItemSyncService(options: Options) {
       let cursor = claimed.item.syncCursor;
       let hasMore = true;
       let changed = 0;
-      const removedTransactionIds = new Set<string>();
-      const replacementTransactionIds = new Set<string>();
       while (hasMore) {
         await preserveProgress(onProgress);
-        const page = await getPlaid().syncTransactions({ accessToken, cursor });
+        const providerPage = await getPlaid().syncTransactions({ accessToken, cursor });
         await preserveProgress(onProgress);
+        const page = {
+          ...providerPage,
+          added: providerPage.added.filter((remote) =>
+            linkedProviderAccountIds.has(remote.accountId),
+          ),
+          modified: providerPage.modified.filter((remote) =>
+            linkedProviderAccountIds.has(remote.accountId),
+          ),
+        };
         const prepared = await Promise.all(
           [...page.added, ...page.modified].map((remote) =>
             prepareTransaction(remote, context.principal.userId),
           ),
         );
-        for (const removed of page.removed) {
-          removedTransactionIds.add(removed.transactionId);
-        }
-        for (const transaction of [...page.added, ...page.modified]) {
-          if (transaction.pendingTransactionId) {
-            replacementTransactionIds.add(transaction.pendingTransactionId);
-          }
-        }
         changed += await projectPage({
           claim: claimed.claim,
           context,
           itemId,
           page,
           prepared,
-          removedTransactionIds,
-          replacementTransactionIds,
         });
         cursor = page.nextCursor;
         hasMore = page.hasMore;
@@ -966,6 +1016,12 @@ export function createFinanceProviderItemSyncService(options: Options) {
         and(
           userId ? eq(financeProviderItems.userId, userId) : undefined,
           lte(financeProviderItems.nextSyncAt, selectedAt),
+          exists(
+            db
+              .select({ id: financeAccounts.id })
+              .from(financeAccounts)
+              .where(eq(financeAccounts.providerItemRecordId, financeProviderItems.id)),
+          ),
         ),
       )
       .orderBy(asc(financeProviderItems.nextSyncAt), asc(financeProviderItems.updatedAt))
@@ -1064,7 +1120,17 @@ export function createFinanceProviderItemSyncService(options: Options) {
         },
         requestId: `scheduler:finance:${entry.item.id}:${selectedAt.toISOString()}`,
       }));
-      const allItems = await db.select().from(financeProviderItems);
+      const allItems = await db
+        .select()
+        .from(financeProviderItems)
+        .where(
+          exists(
+            db
+              .select({ id: financeAccounts.id })
+              .from(financeAccounts)
+              .where(eq(financeAccounts.providerItemRecordId, financeProviderItems.id)),
+          ),
+        );
       const freshnessAgeMs =
         allItems.length === 0
           ? undefined

@@ -4650,14 +4650,66 @@ export function createFinanceService({
     },
     async deleteAccount(id: string, context: MutationContext) {
       await db.transaction(async (tx) => {
-        const [before] = await tx
+        const [candidate] = await tx
           .select()
           .from(financeAccounts)
           .where(
             and(eq(financeAccounts.id, id), eq(financeAccounts.userId, context.principal.userId)),
           )
-          .for("update")
           .limit(1);
+        if (!candidate) throw new AppError("not_found", "The financial account was not found.");
+        let providerItem: typeof financeProviderItems.$inferSelect | undefined;
+        let linkedAccounts: Array<typeof financeAccounts.$inferSelect> = [];
+        let before: typeof financeAccounts.$inferSelect | undefined;
+        if (candidate.providerItemRecordId) {
+          [providerItem] = await tx
+            .select()
+            .from(financeProviderItems)
+            .where(
+              and(
+                eq(financeProviderItems.id, candidate.providerItemRecordId),
+                eq(financeProviderItems.userId, context.principal.userId),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (providerItem) {
+            const [activeClaim] = await tx
+              .select({ id: financeProviderItems.id })
+              .from(financeProviderItems)
+              .where(
+                and(
+                  eq(financeProviderItems.id, providerItem.id),
+                  sql`${financeProviderItems.syncClaimId} IS NOT NULL`,
+                  sql`${financeProviderItems.syncClaimExpiresAt} > NOW()`,
+                ),
+              )
+              .limit(1);
+            if (activeClaim) {
+              throw new AppError(
+                "conflict",
+                "The Plaid connection is synchronizing. Retry account deletion after it finishes.",
+              );
+            }
+            linkedAccounts = await tx
+              .select()
+              .from(financeAccounts)
+              .where(eq(financeAccounts.providerItemRecordId, providerItem.id))
+              .orderBy(financeAccounts.id)
+              .for("update");
+            before = linkedAccounts.find((account) => account.id === id);
+          }
+        }
+        if (!before) {
+          [before] = await tx
+            .select()
+            .from(financeAccounts)
+            .where(
+              and(eq(financeAccounts.id, id), eq(financeAccounts.userId, context.principal.userId)),
+            )
+            .for("update")
+            .limit(1);
+        }
         if (!before) throw new AppError("not_found", "The financial account was not found.");
         const [profile] = await tx
           .select()
@@ -4804,6 +4856,9 @@ export function createFinanceService({
           }
         }
         await tx.delete(financeAccounts).where(eq(financeAccounts.id, before.id));
+        if (providerItem && linkedAccounts.length === 1) {
+          await tx.delete(financeProviderItems).where(eq(financeProviderItems.id, providerItem.id));
+        }
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.account_deleted",

@@ -55,7 +55,12 @@ export function registerFinanceRoutes({
 }: FinanceRouteOptions) {
   const requireFinanceScope = requireFeatureAccess("finances");
   const requireFinanceRead = requireScope("finances:read");
+  const requireFinanceMaintenance = requireScope("finances:maintain");
   const requireFinanceAccess: MiddlewareHandler<AppEnv> = async (context, next) => {
+    if (context.req.method === "POST" && context.req.path === "/v1/finances/maintenance") {
+      await requireFinanceMaintenance(context, next);
+      return;
+    }
     if (
       context.req.method === "POST" &&
       context.req.path === "/v1/finances/categorizations/propose"

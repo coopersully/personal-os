@@ -17,7 +17,7 @@ describe("Finance maintenance MCP catalog", () => {
       openWorld: false,
       policy: "approved_rule",
       readOnly: false,
-      requiredScopes: ["finances:write"],
+      requiredScopes: ["finances:maintain"],
       stage: "commit",
     });
   });
@@ -27,8 +27,13 @@ describe("Finance maintenance MCP catalog", () => {
     expect(availableToolNames(new Set(["finances:read"]), false)).not.toContain(
       "maintain_finances",
     );
-    expect(availableToolNames(new Set(["finances:write"]), false)).toContain("maintain_finances");
-    expect(availableToolNames(new Set(["finances:write"]), true)).not.toContain(
+    expect(availableToolNames(new Set(["finances:write"]), false)).not.toContain(
+      "maintain_finances",
+    );
+    expect(availableToolNames(new Set(["finances:maintain"]), false)).toContain(
+      "maintain_finances",
+    );
+    expect(availableToolNames(new Set(["finances:maintain"]), true)).not.toContain(
       "maintain_finances",
     );
     expect(availableToolNames(new Set(), false)).not.toEqual(

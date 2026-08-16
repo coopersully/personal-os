@@ -164,7 +164,7 @@ export const iloToolCatalog = {
     idempotent: true,
     openWorld: false,
   },
-  maintain_finances: write("finances", ["finances:write"], {
+  maintain_finances: write("finances", ["finances:maintain"], {
     idempotent: false,
     openWorld: false,
     policy: "approved_rule",

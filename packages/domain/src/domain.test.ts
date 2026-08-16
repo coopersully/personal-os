@@ -1085,6 +1085,12 @@ describe("domain schemas", () => {
       createAccessTokenInputSchema.parse({ name: "Agent", scopes: ["audit:read", "audit:read"] })
         .scopes,
     ).toEqual(["audit:read"]);
+    expect(
+      createAccessTokenInputSchema.parse({
+        name: "Finance maintainer",
+        scopes: ["finances:maintain"],
+      }).scopes,
+    ).toEqual(["finances:maintain"]);
     const brief = dailyBriefSchema.parse({
       allDay: [],
       anytime: [],

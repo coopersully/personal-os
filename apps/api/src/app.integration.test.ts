@@ -3685,7 +3685,7 @@ describe.sequential("ilo API", () => {
       code_challenge_method: "S256",
       redirect_uri: "http://127.0.0.1:4312/callback",
       resource: "https://api.example.com/mcp",
-      scope: "tasks:read",
+      scope: "tasks:read finances:maintain",
       state: "test-state",
     }).toString();
     const consent = await app.request(authorize.pathname + authorize.search, {
@@ -3695,6 +3695,11 @@ describe.sequential("ilo API", () => {
     const consentPage = await consent.text();
     expect(consentPage).toContain("Connect Protocol test client");
     expect(consentPage).toContain("Read tasks");
+    expect(consentPage).toContain("Maintain Finances");
+    expect(consentPage).toContain("provider synchronization");
+    expect(consentPage).toContain("rule-approved categorization and reconciliation");
+    expect(consentPage).toContain("pending rather than guessed");
+    expect(consentPage).toContain("durable Finance maintenance run");
     expect(consentPage).toContain("Connected provider credentials remain inside Ilo");
     expect(consentPage).toContain('class="oauth-card"');
     expect(consentPage).toContain("Requested access");
@@ -3744,7 +3749,7 @@ describe.sequential("ilo API", () => {
       expect.objectContaining({
         id: client.client_id,
         name: "Protocol test client",
-        scopes: ["tasks:read"],
+        scopes: ["tasks:read", "finances:maintain"],
       }),
     ]);
     expect(

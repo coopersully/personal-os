@@ -9,7 +9,7 @@ import type {
   Reminder,
   Task,
 } from "@personal-os/domain";
-import { accessScopeSchema } from "@personal-os/domain";
+import { type AccessScope, accessScopeSchema } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "./server.js";
 import { availableToolNames } from "./tool-catalog.js";
 
@@ -1631,6 +1631,39 @@ describe("ilo MCP server", () => {
 
     await client.close();
     await server.close();
+  });
+
+  it("renders the Finance review prompt without a maintenance handoff on read-only or status-only access", async () => {
+    const limitedAccessOptions: Array<{ readOnly: boolean; scopes: Set<AccessScope> }> = [
+      { readOnly: true, scopes: new Set(["finances:read", "finances:maintain"]) },
+      { readOnly: false, scopes: new Set(["finances:read"]) },
+    ];
+    for (const options of limitedAccessOptions) {
+      const api = mockApi();
+      const server = createPersonalOsMcpServer({
+        api: api as unknown as PersonalOsApiClient,
+        ...options,
+        timeZone: "America/New_York",
+      });
+      const client = new Client({ name: "test", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      const prompts = await client.listPrompts();
+      expect(prompts.prompts.map((prompt) => prompt.name)).toContain("review_finances");
+      const prompt = await client.getPrompt({ arguments: {}, name: "review_finances" });
+      const text =
+        prompt.messages[0]?.content.type === "text" ? prompt.messages[0].content.text : "";
+      expect(text).toContain("get_finance_status");
+      expect(text).toContain("Present pending work");
+      expect(text).not.toContain("maintain_finances");
+      expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain(
+        "maintain_finances",
+      );
+
+      await client.close();
+      await server.close();
+    }
   });
 
   it("uses the hardened Mail send schema for normalization and header injection rejection", async () => {

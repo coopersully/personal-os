@@ -203,6 +203,10 @@ maintenance durably starts, resumes, or verifies one Ilo-owned turn for all outs
 bounded window, or an exact target. No-argument maintenance means all outstanding work. MCP does
 not poll, schedule, or sequence this work: the API owns its durable lifecycle, questions,
 approvals, recovery, and terminal result.
+`get_finance_status` requires `finances:read`; `maintain_finances` requires the separately
+consented `finances:maintain` scope. Existing `finances:write` grants remain limited to Finance
+guidance drafts and do not gain maintenance authority. Grant `finances:maintain` through an
+explicit new local-token or OAuth consent flow; ilo does not migrate or revoke existing grants.
 `get_finance_guided_setup` is the entry point for a short Finance interview: it
 returns the shared durable profile together with owned account sources, review
 and ledger readiness, human-only boundaries, and suggested workflows. The
@@ -371,6 +375,6 @@ Grant only the scopes the host needs:
 - `automations:read` (compatibility scope for the daily brief; no routine lifecycle)
 - `bookmarks:read`
 - `audit:read`
-- `finances:read`, `finances:write`
+- `finances:read`, `finances:write`, `finances:maintain`
 
 Only a token hash is stored. Revoke a host without ending human sessions or affecting another host. Connector and account administration remain human-only.

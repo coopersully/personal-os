@@ -192,12 +192,14 @@ describe("OAuth authorized clients", () => {
 
     expect(service.parseScopes(undefined)).toContain("bookmarks:read");
     expect(service.parseScopes(undefined)).toContain("mail:write");
+    expect(service.parseScopes(undefined)).toContain("finances:maintain");
     expect(service.parseScopes(undefined)).toContain("tasks:read");
     expect(service.parseScopes(undefined)).not.toContain("automations:write");
     expect(service.parseScopes("tasks:read  tasks:read calendar:read")).toEqual([
       "tasks:read",
       "calendar:read",
     ]);
+    expect(service.parseScopes("finances:maintain")).toEqual(["finances:maintain"]);
     expect(() => service.parseScopes("")).toThrow("requested scopes are not supported");
     expect(() => service.parseScopes("tasks:read unknown:read")).toThrow(
       "requested scopes are not supported",

@@ -259,7 +259,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
               },
               description: "Finance maintenance run durably accepted for background work",
             },
-            403: { description: "The caller lacks finances:write" },
+            403: { description: "The caller lacks finances:maintain" },
             409: { description: "A conflicting Finance maintenance run or rulebook is active" },
           },
           security,

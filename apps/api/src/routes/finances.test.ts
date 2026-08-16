@@ -1,3 +1,4 @@
+import type { AccessScope } from "@personal-os/domain";
 import { Hono } from "hono";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { createFinanceService } from "../finance-service.js";
@@ -21,6 +22,9 @@ describe("finance routes", () => {
       context.set("requestId", "request-status");
       await next();
     });
+    app.onError((error, context) =>
+      context.json({ error: error instanceof Error ? error.message : "unknown" }, 403),
+    );
     registerFinanceRoutes({
       app,
       financeMaintenance: {} as FinanceMaintenanceService,
@@ -198,6 +202,7 @@ describe("finance routes", () => {
 
   it("allows a scoped agent to start and read its durable Finance maintenance run", async () => {
     const app = new Hono<AppEnv>();
+    let grantedScopes: Set<AccessScope> = new Set(["finances:read", "finances:write"]);
     const run = { id, scope: { type: "all_outstanding" }, status: "queued", userId: id };
     const financeMaintenance = {
       dispatchRun: vi.fn(async () => ({ ...run, status: "completed" })),
@@ -208,12 +213,15 @@ describe("finance routes", () => {
       context.set("principal", {
         actorId: id,
         actorType: "agent",
-        scopes: new Set(["finances:read", "finances:write"]),
+        scopes: grantedScopes,
         userId: id,
       });
       context.set("requestId", "request-maintenance");
       await next();
     });
+    app.onError((error, context) =>
+      context.json({ error: error instanceof Error ? error.message : "unknown" }, 403),
+    );
     registerFinanceRoutes({
       app,
       financeMaintenance: financeMaintenance as unknown as FinanceMaintenanceService,
@@ -225,6 +233,11 @@ describe("finance routes", () => {
       }),
     });
 
+    const legacyStart = await app.request("/v1/finances/maintenance", { method: "POST" });
+    expect(legacyStart.status).toBe(403);
+    expect(financeMaintenance.startOrResume).not.toHaveBeenCalled();
+
+    grantedScopes = new Set(["finances:read", "finances:maintain"]);
     const started = await app.request("/v1/finances/maintenance", { method: "POST" });
     expect(started.status).toBe(202);
     await expect(started.json()).resolves.toEqual({ run });

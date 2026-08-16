@@ -1317,6 +1317,8 @@ const oauthScopeLabels: Record<string, string> = {
   "calendar:write": "Create and manage events",
   "finances:read": "Read sensitive financial accounts, balances, and activity",
   "finances:write": "Save Finance setup guidance drafts",
+  "finances:maintain":
+    "Maintain Finances: create a durable Finance maintenance run that can use provider synchronization and rule-approved categorization and reconciliation; questions and approvals stay pending rather than guessed.",
   "goals:read": "Read goals and motives",
   "goals:write": "Manage goals and motives",
   "mail:read": "Read connected mail",

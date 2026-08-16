@@ -145,6 +145,7 @@ describe("pagination, errors, and OpenAPI", () => {
       },
       responses: {
         202: { description: "Finance maintenance run durably accepted for background work" },
+        403: { description: "The caller lacks finances:maintain" },
         409: { description: "A conflicting Finance maintenance run or rulebook is active" },
       },
     });

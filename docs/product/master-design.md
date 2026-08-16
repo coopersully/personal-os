@@ -18,6 +18,12 @@ There are no deferred product domains in this document. Delivery is phased for d
 
 It must make the useful action easy for a person who wants a calm, low-information interface while retaining fast paths, search, keyboard access, automation, and inspection for a power user.
 
+Each material workspace has an Ilo: a persistent expert steward that maintains the workspace's
+living ledger, applies its approved rulebook, asks only for irreducible human judgment, learns from
+explicit answers, and produces an evidence-backed review and recommendations. Clients express
+intent; the workspace domain owns the expertise and durable workflow. The shared product doctrine
+is [`Ilo workspace stewardship`](ilo-workspace-stewardship.md).
+
 ### 2.1 Target user and jobs
 
 The primary user is an individual with multiple Google/iCloud accounts, variable attention and energy, a calendar that mixes work and life, an inbox that needs recurring cleanup, and existing Claude/Codex subscriptions. They want help without surrendering control.
@@ -201,12 +207,19 @@ Mail policy tiers:
 
 ### 6.7 Finances
 
+- The Finance Ilo combines the useful methods of a bookkeeper, accountant/controller, financial
+  planner, investment analyst, auditor, and coach. Its maintenance turn reconciles and classifies a
+  selected period, balances it against budgets and goals, updates income/recurring/cash-flow/wealth
+  models, isolates questions, learns only explicitly approved rules, and publishes a period review.
 - Connect Plaid-supported institutions and selected accounts; show connection health, consent, refresh time, duplicate detection, data removal, and the connector's production-cost state. Manual accounts and CSV/OFX import remain first-class so budgeting and review do not require a paid connector.
 - Normalize balances, pending/posted transactions, transfers, merchant, location, category confidence, recurring inflow/outflow, account type, investments, liabilities, and manual transactions.
 - The daily finance queue is: new/uncategorized, low-confidence, split-needed, suspected transfer, recurring/subscription change, unusual spend, bills due, and review-complete. It is never mixed into Today unless it requires a decision.
 - Categorization uses provider categories, deterministic merchant rules, and agent suggestions. The user can correct one transaction, apply a rule to matching future items, split transactions, exclude/transfers, tag projects, and review all changed history.
 - Budgets support category, flexible, envelope/zero-based optional modes, rollovers, targets, recurring bills/income, cash-flow forecast, safe-to-spend/left-this-month, savings goals, watchlists, net worth, investments, subscriptions, and reports.
-- The agent may explain and propose categorization/review work under a finance-read scope. It cannot transfer money, trade, pay a bill, or make a financial recommendation/action beyond the product's permitted informational workflows.
+- The agent may explain and propose categorization/review work under a finance-read scope. The
+  Finance Ilo may provide evidence-backed informational planning, budget, savings, investment, and
+  market-context recommendations within the product's approved advisory model. It cannot transfer
+  money, trade, pay a bill, file a return, or claim a human professional credential.
 - Pending and posted transactions are separate states. Pending categorization is provisional, cannot create durable merchant rules or definitive budget/"safe to spend" claims, and must reconcile against provider removals/replacements before becoming settled data.
 - Finance data uses stronger consent, redaction, retention, export/delete, no-notification-content defaults, an explicit warning before sharing with an agent, and a visible last-refresh/provider-freshness indicator.
 

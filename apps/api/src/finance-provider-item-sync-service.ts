@@ -104,6 +104,8 @@ const concurrency = 3;
 const invalidCursorCodes = new Set(["plaid_invalid_cursor", "plaid_transactions_cursor_invalid"]);
 const invalidCursorReplayCode = "plaid_invalid_cursor_replay_in_progress";
 const invalidCursorReplayFailedCode = "plaid_invalid_cursor_replay_failed";
+const missingAccountCode = "plaid_account_missing_from_item";
+const missingAccountMessage = "Plaid no longer reports this account for the connection.";
 
 type ActiveClaim = {
   generation: number;
@@ -211,7 +213,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
     }
   }
 
-  async function lockActiveClaim(
+  async function lockClaimAggregate(
     executor: FinanceWriteExecutor,
     itemId: string,
     claim: ActiveClaim,
@@ -239,6 +241,29 @@ export function createFinanceProviderItemSyncService(options: Options) {
         "The Finance Provider Item synchronization claim is no longer current.",
       );
     }
+    const accounts = await lockLinkedAccounts(executor, itemId, userId);
+    const activeBridges =
+      accounts.length === 0
+        ? []
+        : await executor
+            .select({ id: financeAccounts.id })
+            .from(financeAccounts)
+            .where(
+              and(
+                inArray(
+                  financeAccounts.id,
+                  accounts.map((account) => account.id),
+                ),
+                eq(financeAccounts.syncClaimId, claim.id),
+                sql`${financeAccounts.syncClaimExpiresAt} > NOW()`,
+              ),
+            );
+    if (activeBridges.length !== accounts.length) {
+      throw new AppError(
+        "conflict",
+        "The Finance Provider Item synchronization claim is no longer current.",
+      );
+    }
     await executor
       .update(financeProviderItems)
       .set({
@@ -253,7 +278,19 @@ export function createFinanceProviderItemSyncService(options: Options) {
           eq(financeProviderItems.syncClaimGeneration, claim.generation),
         ),
       );
-    return item;
+    await executor
+      .update(financeAccounts)
+      .set({
+        syncClaimExpiresAt: sql`NOW() + ${claimLeaseMs} * INTERVAL '1 millisecond'`,
+        updatedAt: sql`NOW()`,
+      })
+      .where(
+        and(
+          eq(financeAccounts.providerItemRecordId, itemId),
+          eq(financeAccounts.syncClaimId, claim.id),
+        ),
+      );
+    return { accounts, item };
   }
 
   async function lockLinkedAccounts(
@@ -357,6 +394,32 @@ export function createFinanceProviderItemSyncService(options: Options) {
           "The Plaid connection changed while this sync was in progress. Retry against the current connection.",
         );
       }
+      const [activeLegacyClaim] = await tx
+        .select({ id: financeAccounts.id })
+        .from(financeAccounts)
+        .where(
+          and(
+            inArray(
+              financeAccounts.id,
+              accounts.map((account) => account.id),
+            ),
+            isNotNull(financeAccounts.syncClaimId),
+            ne(financeAccounts.syncClaimId, claimId),
+            sql`${financeAccounts.syncClaimExpiresAt} > NOW()`,
+          ),
+        )
+        .limit(1);
+      if (activeLegacyClaim) {
+        throw new AppError("conflict", "This Plaid connection is already synchronizing.");
+      }
+      await tx
+        .update(financeAccounts)
+        .set({
+          syncClaimExpiresAt: sql`NOW() + ${claimLeaseMs} * INTERVAL '1 millisecond'`,
+          syncClaimId: claimId,
+          updatedAt: sql`NOW()`,
+        })
+        .where(eq(financeAccounts.providerItemRecordId, itemId));
       return {
         accounts,
         claim: { generation: claimed.syncClaimGeneration, id: claimId, owner: claimOwner },
@@ -375,8 +438,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
     try {
       await db.transaction(async (tx) => {
         await assertMaintenanceClaim(tx, context);
-        const item = await lockActiveClaim(tx, itemId, claim, context.principal.userId);
-        await lockLinkedAccounts(tx, itemId, context.principal.userId);
+        const { item } = await lockClaimAggregate(tx, itemId, claim, context.principal.userId);
         if (item.providerItemId !== null && item.providerItemId !== snapshot.itemId) {
           throw new ConnectorError({
             category: "configuration",
@@ -417,8 +479,12 @@ export function createFinanceProviderItemSyncService(options: Options) {
   }): Promise<number> {
     return db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
-      await lockActiveClaim(tx, input.itemId, input.claim, input.context.principal.userId);
-      const accounts = await lockLinkedAccounts(tx, input.itemId, input.context.principal.userId);
+      const { accounts } = await lockClaimAggregate(
+        tx,
+        input.itemId,
+        input.claim,
+        input.context.principal.userId,
+      );
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-lookups:${input.context.principal.userId}`}, 0))`,
       );
@@ -723,23 +789,29 @@ export function createFinanceProviderItemSyncService(options: Options) {
     claim: ActiveClaim;
     context: FinanceProviderItemSyncContext;
     itemId: string;
-  }) {
-    await db.transaction(async (tx) => {
+  }): Promise<{ currentAccountIds: string[] }> {
+    return db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
-      await lockActiveClaim(tx, input.itemId, input.claim, input.context.principal.userId);
-      const linkedAccounts = await lockLinkedAccounts(
+      const { accounts: linkedAccounts } = await lockClaimAggregate(
         tx,
         input.itemId,
+        input.claim,
         input.context.principal.userId,
       );
       const snapshotByProviderId = new Map(
         input.accounts.map((account) => [account.accountId, account]),
       );
       let projected = 0;
+      const currentAccountIds: string[] = [];
+      const missingAccountIds: string[] = [];
       for (const linkedAccount of linkedAccounts) {
-        if (!linkedAccount.providerAccountId) continue;
-        const snapshot = snapshotByProviderId.get(linkedAccount.providerAccountId);
-        if (!snapshot) continue;
+        const snapshot = linkedAccount.providerAccountId
+          ? snapshotByProviderId.get(linkedAccount.providerAccountId)
+          : undefined;
+        if (!snapshot) {
+          missingAccountIds.push(linkedAccount.id);
+          continue;
+        }
         await tx
           .update(financeAccounts)
           .set({
@@ -751,12 +823,30 @@ export function createFinanceProviderItemSyncService(options: Options) {
           })
           .where(eq(financeAccounts.id, linkedAccount.id));
         projected += 1;
+        currentAccountIds.push(linkedAccount.id);
       }
-      if (projected > 0) {
+      if (missingAccountIds.length > 0) {
+        await tx
+          .update(financeAccounts)
+          .set({
+            balance: null,
+            nextSyncAt: null,
+            status: "needs_reauth",
+            syncError: missingAccountMessage,
+            syncErrorCategory: "not_found",
+            syncErrorCode: missingAccountCode,
+            syncFailureCount: 1,
+            syncRecovery: "operator",
+            syncState: "blocked",
+            updatedAt: now(),
+          })
+          .where(inArray(financeAccounts.id, missingAccountIds));
+      }
+      if (projected > 0 || missingAccountIds.length > 0) {
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.plaid_accounts_projected",
-            after: { projected },
+            after: { missing: missingAccountIds.length, projected },
             before: null,
             entityId: input.itemId,
             entityType: "finance_provider_item",
@@ -764,6 +854,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
           }),
         );
       }
+      return { currentAccountIds };
     });
   }
 
@@ -772,13 +863,13 @@ export function createFinanceProviderItemSyncService(options: Options) {
     changed: number;
     claim: ActiveClaim;
     context: FinanceProviderItemSyncContext;
+    currentAccountIds: string[];
     itemId: string;
   }) {
     const completedAt = now();
     await db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
-      await lockActiveClaim(tx, input.itemId, input.claim, input.context.principal.userId);
-      await lockLinkedAccounts(tx, input.itemId, input.context.principal.userId);
+      await lockClaimAggregate(tx, input.itemId, input.claim, input.context.principal.userId);
       const nextSyncAt = new Date(completedAt.getTime() + syncIntervalMs);
       await tx
         .update(financeProviderItems)
@@ -799,22 +890,28 @@ export function createFinanceProviderItemSyncService(options: Options) {
           updatedAt: completedAt,
         })
         .where(eq(financeProviderItems.id, input.itemId));
+      if (input.currentAccountIds.length > 0) {
+        await tx
+          .update(financeAccounts)
+          .set({
+            lastSyncedAt: completedAt,
+            nextSyncAt,
+            syncClaimExpiresAt: null,
+            syncClaimId: null,
+            syncError: null,
+            syncErrorCategory: null,
+            syncErrorCode: null,
+            syncFailureCount: 0,
+            syncRecovery: null,
+            syncState: "current",
+            status: "connected",
+            updatedAt: completedAt,
+          })
+          .where(inArray(financeAccounts.id, input.currentAccountIds));
+      }
       await tx
         .update(financeAccounts)
-        .set({
-          lastSyncedAt: completedAt,
-          nextSyncAt,
-          syncClaimExpiresAt: null,
-          syncClaimId: null,
-          syncError: null,
-          syncErrorCategory: null,
-          syncErrorCode: null,
-          syncFailureCount: 0,
-          syncRecovery: null,
-          syncState: "current",
-          status: "connected",
-          updatedAt: completedAt,
-        })
+        .set({ syncClaimExpiresAt: null, syncClaimId: null, updatedAt: completedAt })
         .where(eq(financeAccounts.providerItemRecordId, input.itemId));
       await tx.insert(auditEvents).values(
         auditValues({
@@ -833,6 +930,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
     accountId: string;
     claim: ActiveClaim;
     context: FinanceProviderItemSyncContext;
+    currentAccountIds?: string[];
     error: unknown;
     itemId: string;
   }): Promise<{
@@ -845,13 +943,12 @@ export function createFinanceProviderItemSyncService(options: Options) {
     let nextSyncAt: Date | null = null;
     await db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
-      const item = await lockActiveClaim(
+      const { item } = await lockClaimAggregate(
         tx,
         input.itemId,
         input.claim,
         input.context.principal.userId,
       );
-      await lockLinkedAccounts(tx, input.itemId, input.context.principal.userId);
       const replayInProgress = item.syncErrorCode === invalidCursorReplayCode;
       const replayScheduled =
         invalidCursorReported && !replayInProgress && item.syncCursor !== null;
@@ -922,24 +1019,34 @@ export function createFinanceProviderItemSyncService(options: Options) {
           updatedAt: failedAt,
         })
         .where(eq(financeProviderItems.id, input.itemId));
+      if (input.currentAccountIds === undefined || input.currentAccountIds.length > 0) {
+        await tx
+          .update(financeAccounts)
+          .set({
+            ...(replayScheduled ? { syncCursor: null } : {}),
+            ...(failure.recovery === "reconnect" && !replayScheduled
+              ? { status: "needs_reauth" as const }
+              : {}),
+            nextSyncAt: itemValues.nextSyncAt,
+            syncClaimExpiresAt: null,
+            syncClaimId: null,
+            syncError: itemValues.syncError,
+            syncErrorCategory: itemValues.syncErrorCategory,
+            syncErrorCode: itemValues.syncErrorCode,
+            syncFailureCount: itemValues.syncFailureCount,
+            syncRecovery: itemValues.syncRecovery,
+            syncState: itemValues.syncState,
+            updatedAt: failedAt,
+          })
+          .where(
+            input.currentAccountIds === undefined
+              ? eq(financeAccounts.providerItemRecordId, input.itemId)
+              : inArray(financeAccounts.id, input.currentAccountIds),
+          );
+      }
       await tx
         .update(financeAccounts)
-        .set({
-          ...(replayScheduled ? { syncCursor: null } : {}),
-          ...(failure.recovery === "reconnect" && !replayScheduled
-            ? { status: "needs_reauth" as const }
-            : {}),
-          nextSyncAt: itemValues.nextSyncAt,
-          syncClaimExpiresAt: null,
-          syncClaimId: null,
-          syncError: itemValues.syncError,
-          syncErrorCategory: itemValues.syncErrorCategory,
-          syncErrorCode: itemValues.syncErrorCode,
-          syncFailureCount: itemValues.syncFailureCount,
-          syncRecovery: itemValues.syncRecovery,
-          syncState: itemValues.syncState,
-          updatedAt: failedAt,
-        })
+        .set({ syncClaimExpiresAt: null, syncClaimId: null, updatedAt: failedAt })
         .where(eq(financeAccounts.providerItemRecordId, input.itemId));
       await tx.insert(auditEvents).values(
         auditValues({
@@ -973,6 +1080,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
         account.providerAccountId ? [account.providerAccountId] : [],
       ),
     );
+    let currentAccountIds: string[] | undefined;
     try {
       await preserveProgress(onProgress);
       const accessToken = credentials(claimed.item.encryptedCredentials).accessToken;
@@ -982,12 +1090,18 @@ export function createFinanceProviderItemSyncService(options: Options) {
       await preserveProgress(onProgress);
       const accountSnapshots = await getPlaid().getAccounts(accessToken);
       await preserveProgress(onProgress);
-      await projectAccounts({
+      const accountProjection = await projectAccounts({
         accounts: accountSnapshots,
         claim: claimed.claim,
         context,
         itemId,
       });
+      currentAccountIds = accountProjection.currentAccountIds;
+      const currentProviderAccountIds = new Set(
+        accountSnapshots.flatMap((account) =>
+          linkedProviderAccountIds.has(account.accountId) ? [account.accountId] : [],
+        ),
+      );
       let cursor = claimed.item.syncCursor;
       let hasMore = true;
       let changed = 0;
@@ -1010,10 +1124,10 @@ export function createFinanceProviderItemSyncService(options: Options) {
         const page = {
           ...providerPage,
           added: providerPage.added.filter((remote) =>
-            linkedProviderAccountIds.has(remote.accountId),
+            currentProviderAccountIds.has(remote.accountId),
           ),
           modified: providerPage.modified.filter((remote) =>
-            linkedProviderAccountIds.has(remote.accountId),
+            currentProviderAccountIds.has(remote.accountId),
           ),
         };
         const prepared = await Promise.all(
@@ -1032,7 +1146,14 @@ export function createFinanceProviderItemSyncService(options: Options) {
         hasMore = page.hasMore;
       }
       await preserveProgress(onProgress);
-      await settleSuccess({ accountId, changed, claim: claimed.claim, context, itemId });
+      await settleSuccess({
+        accountId,
+        changed,
+        claim: claimed.claim,
+        context,
+        currentAccountIds,
+        itemId,
+      });
       log?.({
         accountId,
         durationMs: Date.now() - startedAt,
@@ -1066,7 +1187,14 @@ export function createFinanceProviderItemSyncService(options: Options) {
       }
       let settled: Awaited<ReturnType<typeof settleFailure>>;
       try {
-        settled = await settleFailure({ accountId, claim: claimed.claim, context, error, itemId });
+        settled = await settleFailure({
+          accountId,
+          claim: claimed.claim,
+          context,
+          ...(currentAccountIds === undefined ? {} : { currentAccountIds }),
+          error,
+          itemId,
+        });
       } catch (settlementError) {
         if (isClaimConflict(settlementError)) {
           throw new AppError(

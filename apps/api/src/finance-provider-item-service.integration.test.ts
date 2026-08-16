@@ -673,6 +673,61 @@ describe.sequential("Finance Provider Item service", () => {
     ]);
   });
 
+  it("leaves an actively claimed legacy group unlinked until the old runtime lease clears", async () => {
+    const [legacyAccount] = await insertLegacyGroup("legacy-active-claim", ["legacy-cursor"]);
+    if (!legacyAccount) throw new Error("The actively claimed legacy account was not created.");
+    const legacyClaimId = "12121212-1212-4212-8212-121212121212";
+    const legacyClaimExpiry = new Date("2026-08-17T12:00:00.000Z");
+    await database.db
+      .update(financeAccounts)
+      .set({ syncClaimExpiresAt: legacyClaimExpiry, syncClaimId: legacyClaimId })
+      .where(eq(financeAccounts.id, legacyAccount.id));
+
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 0,
+      complete: false,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+    await expect(database.db.$count(financeProviderItems)).resolves.toBe(0);
+    await expect(database.db.$count(auditEvents)).resolves.toBe(0);
+    await expect(
+      database.db
+        .select({
+          claimExpiresAt: financeAccounts.syncClaimExpiresAt,
+          claimId: financeAccounts.syncClaimId,
+          itemId: financeAccounts.providerItemRecordId,
+        })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, legacyAccount.id)),
+    ).resolves.toEqual([
+      { claimExpiresAt: legacyClaimExpiry, claimId: legacyClaimId, itemId: null },
+    ]);
+
+    await database.db
+      .update(financeAccounts)
+      .set({ syncClaimExpiresAt: new Date("2000-01-01T00:00:00.000Z") })
+      .where(eq(financeAccounts.id, legacyAccount.id));
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 0,
+      complete: true,
+      created: 1,
+      linked: 1,
+      replayDue: 0,
+    });
+    await expect(
+      database.db
+        .select({
+          claimExpiresAt: financeAccounts.syncClaimExpiresAt,
+          claimId: financeAccounts.syncClaimId,
+          itemId: financeAccounts.providerItemRecordId,
+        })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, legacyAccount.id)),
+    ).resolves.toEqual([{ claimExpiresAt: null, claimId: null, itemId: expect.any(String) }]);
+  });
+
   it("reconciles a late sibling against the existing Item cursor before linking", async () => {
     await insertLegacyGroup("legacy-late-cursor", ["cursor-original"]);
     await service().backfillLegacyItems();

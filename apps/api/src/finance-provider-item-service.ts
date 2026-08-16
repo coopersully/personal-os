@@ -275,6 +275,39 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
         ) {
           throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
         }
+        const activeClaimedAccounts =
+          lockedAccounts.length === 0
+            ? []
+            : await tx
+                .select({
+                  id: financeAccounts.id,
+                  providerItemRecordId: financeAccounts.providerItemRecordId,
+                  syncClaimId: financeAccounts.syncClaimId,
+                })
+                .from(financeAccounts)
+                .where(
+                  and(
+                    inArray(
+                      financeAccounts.id,
+                      lockedAccounts.map((account) => account.id),
+                    ),
+                    isNotNull(financeAccounts.syncClaimId),
+                    sql`${financeAccounts.syncClaimExpiresAt} > CURRENT_TIMESTAMP`,
+                  ),
+                );
+        const lockedItemById = new Map(
+          lockedItems.map((lockedItem) => [lockedItem.id, lockedItem]),
+        );
+        if (
+          activeClaimedAccounts.some((account) => {
+            const linkedItem = account.providerItemRecordId
+              ? lockedItemById.get(account.providerItemRecordId)
+              : undefined;
+            return !linkedItem || linkedItem.syncClaimId !== account.syncClaimId;
+          })
+        ) {
+          throw new AppError("conflict", "The Plaid connection is synchronizing. Try again.");
+        }
 
         if (sourceItemIds.length > 0) {
           await tx
@@ -318,6 +351,10 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
             updatedAt: connectedAt,
           })
           .where(eq(financeProviderItems.id, item.id));
+        await tx
+          .update(financeAccounts)
+          .set({ syncClaimExpiresAt: null, syncClaimId: null, updatedAt: connectedAt })
+          .where(inArray(financeAccounts.providerItemRecordId, itemIds));
 
         await input.prepareTransaction?.(tx);
 
@@ -539,6 +576,24 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
                   .orderBy(asc(financeAccounts.id))
                   .for("update", { skipLocked: true });
           if (lockedCandidateAccounts.length !== candidateAccountSnapshot.length) continue;
+          const [activeLegacyClaim] =
+            lockedCandidateAccounts.length === 0
+              ? []
+              : await tx
+                  .select({ id: financeAccounts.id })
+                  .from(financeAccounts)
+                  .where(
+                    and(
+                      inArray(
+                        financeAccounts.id,
+                        lockedCandidateAccounts.map((account) => account.id),
+                      ),
+                      isNotNull(financeAccounts.syncClaimId),
+                      sql`${financeAccounts.syncClaimExpiresAt} > CURRENT_TIMESTAMP`,
+                    ),
+                  )
+                  .limit(1);
+          if (activeLegacyClaim) continue;
           const linkedTopologyRows = existingItem
             ? lockedCandidateAccounts.filter(
                 (account) => account.providerItemRecordId === existingItem.id,
@@ -570,6 +625,15 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
           } else if (relatedRows.some((row) => row.provider !== "plaid")) {
             blockedReason = blockedReasons.providerMismatch;
           }
+          await tx
+            .update(financeAccounts)
+            .set({ syncClaimExpiresAt: null, syncClaimId: null, updatedAt: now() })
+            .where(
+              inArray(
+                financeAccounts.id,
+                lockedCandidateAccounts.map((account) => account.id),
+              ),
+            );
 
           let accessToken: string | null = null;
           if (!blockedReason) {

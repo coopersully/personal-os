@@ -184,6 +184,25 @@ describe.sequential("Finance Provider Item synchronization", () => {
     });
   }
 
+  async function revokeClaimBridge(itemId: string) {
+    await database.db.transaction(async (tx) => {
+      await tx
+        .update(financeProviderItems)
+        .set({
+          syncClaimExpiresAt: null,
+          syncClaimGeneration: null,
+          syncClaimId: null,
+          syncClaimOwner: null,
+          syncClaimStartedAt: null,
+        })
+        .where(eq(financeProviderItems.id, itemId));
+      await tx
+        .update(financeAccounts)
+        .set({ syncClaimExpiresAt: null, syncClaimId: null })
+        .where(eq(financeAccounts.providerItemRecordId, itemId));
+    });
+  }
+
   it("commits legacy identity before paging and ignores divergent account cursor shadows", async () => {
     const { accounts, item, userId } = await fixture({ itemId: null });
     const observed: Array<{ cursor: string | null; identity: string | null }> = [];
@@ -214,6 +233,206 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .from(financeProviderItems)
         .where(eq(financeProviderItems.id, item.id)),
     ).resolves.toEqual([{ cursor: "cursor-resolved" }]);
+  });
+
+  it("bridges Item ownership into legacy account leases while provider work is in flight", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 1, cursor: "cursor-before" });
+    const target = accounts[0];
+    if (!target?.providerAccountId) throw new Error("The claim-bridge target was not created.");
+    const providerAccountId = target.providerAccountId;
+    const legacyClaimId = "23232323-2323-4232-8232-232323232323";
+    await database.db
+      .update(financeAccounts)
+      .set({
+        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimId: legacyClaimId,
+      })
+      .where(eq(financeAccounts.id, target.id));
+    const blockedProviderCall = vi.fn(async () => emptyPage("must-not-advance"));
+
+    await expect(
+      service(plaid({ syncTransactions: blockedProviderCall })).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "legacy-claim-wins",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(blockedProviderCall).not.toHaveBeenCalled();
+    await expect(
+      database.db
+        .select({
+          cursor: financeProviderItems.syncCursor,
+          itemClaim: financeProviderItems.syncClaimId,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ cursor: "cursor-before", itemClaim: null }]);
+
+    await database.db
+      .update(financeAccounts)
+      .set({ syncClaimExpiresAt: null, syncClaimId: null })
+      .where(eq(financeAccounts.id, target.id));
+    let releaseProvider!: () => void;
+    const providerReleased = new Promise<void>((resolvePromise) => {
+      releaseProvider = resolvePromise;
+    });
+    let providerStarted!: () => void;
+    const providerEntered = new Promise<void>((resolvePromise) => {
+      providerStarted = resolvePromise;
+    });
+    const providerTransactionId = `claim-bridge-${userId}`;
+    const synchronization = service(
+      plaid({
+        getAccounts: async () => [remoteAccount(providerAccountId, 44.5)],
+        syncTransactions: async () => {
+          providerStarted();
+          await providerReleased;
+          return {
+            ...emptyPage("cursor-after"),
+            added: [
+              {
+                accountId: providerAccountId,
+                amount: 8.25,
+                currencyCode: "USD",
+                date: "2026-08-16",
+                merchantName: "Claim bridge merchant",
+                name: "CLAIM BRIDGE MERCHANT",
+                pending: false,
+                pendingTransactionId: null,
+                personalFinanceCategory: null,
+                transactionId: providerTransactionId,
+              },
+            ],
+          };
+        },
+      }),
+    ).syncAccount(target.id, {
+      principal: principal(userId),
+      requestId: "item-claim-wins",
+    });
+    await providerEntered;
+
+    const [claimBridge] = await database.db
+      .select({
+        accountClaim: financeAccounts.syncClaimId,
+        accountExpiresAt: financeAccounts.syncClaimExpiresAt,
+        itemClaim: financeProviderItems.syncClaimId,
+        itemExpiresAt: financeProviderItems.syncClaimExpiresAt,
+      })
+      .from(financeAccounts)
+      .innerJoin(
+        financeProviderItems,
+        eq(financeProviderItems.id, financeAccounts.providerItemRecordId),
+      )
+      .where(eq(financeAccounts.id, target.id));
+    expect(claimBridge?.itemClaim).not.toBeNull();
+    expect(claimBridge).toMatchObject({
+      accountClaim: claimBridge?.itemClaim,
+      accountExpiresAt: claimBridge?.itemExpiresAt,
+    });
+    const oldRuntimeAttempt = await database.pool.query<{ id: string }>(
+      `UPDATE finance_accounts
+       SET sync_claim_id = $2,
+           sync_claim_expires_at = CURRENT_TIMESTAMP + INTERVAL '5 minutes'
+       WHERE id = $1
+         AND (sync_claim_id IS NULL OR sync_claim_expires_at <= CURRENT_TIMESTAMP)
+       RETURNING id`,
+      [target.id, legacyClaimId],
+    );
+    expect(oldRuntimeAttempt.rowCount).toBe(0);
+
+    releaseProvider();
+    await expect(synchronization).resolves.toEqual({ changed: 1 });
+    await expect(
+      database.db
+        .select({
+          cursor: financeProviderItems.syncCursor,
+          itemClaim: financeProviderItems.syncClaimId,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ cursor: "cursor-after", itemClaim: null }]);
+    await expect(
+      database.db
+        .select({ accountClaim: financeAccounts.syncClaimId })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, target.id)),
+    ).resolves.toEqual([{ accountClaim: null }]);
+    await expect(
+      database.db
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, providerTransactionId)),
+    ).resolves.toHaveLength(1);
+  });
+
+  it("blocks a linked account omitted from the complete Item snapshot without refreshing its balance", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 2 });
+    const present = accounts[0];
+    const missing = accounts[1];
+    if (!present?.providerAccountId || !missing) {
+      throw new Error("The membership snapshot fixtures were not created.");
+    }
+    const presentProviderAccountId = present.providerAccountId;
+    const staleAt = new Date("2026-08-10T12:00:00.000Z");
+    await database.db
+      .update(financeAccounts)
+      .set({ balance: 99_999, lastSyncedAt: staleAt, syncState: "current" })
+      .where(eq(financeAccounts.id, missing.id));
+
+    await expect(
+      service(
+        plaid({
+          getAccounts: async () => [remoteAccount(presentProviderAccountId, 81.25)],
+          syncTransactions: async () => emptyPage("membership-cursor"),
+        }),
+      ).syncAccount(present.id, {
+        principal: principal(userId),
+        requestId: "missing-item-membership",
+      }),
+    ).resolves.toEqual({ changed: 0 });
+
+    await expect(
+      database.db
+        .select({
+          balance: financeAccounts.balance,
+          errorCategory: financeAccounts.syncErrorCategory,
+          errorCode: financeAccounts.syncErrorCode,
+          lastSyncedAt: financeAccounts.lastSyncedAt,
+          nextSyncAt: financeAccounts.nextSyncAt,
+          recovery: financeAccounts.syncRecovery,
+          state: financeAccounts.syncState,
+          status: financeAccounts.status,
+        })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, missing.id)),
+    ).resolves.toEqual([
+      {
+        balance: null,
+        errorCategory: "not_found",
+        errorCode: "plaid_account_missing_from_item",
+        lastSyncedAt: staleAt,
+        nextSyncAt: null,
+        recovery: "operator",
+        state: "blocked",
+        status: "needs_reauth",
+      },
+    ]);
+    await expect(
+      database.db
+        .select({
+          cursor: financeProviderItems.syncCursor,
+          lastSyncedAt: financeProviderItems.lastSyncedAt,
+          state: financeProviderItems.syncState,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ cursor: "membership-cursor", lastSyncedAt: now, state: "current" }]);
+    await expect(
+      database.db
+        .select({ balance: financeAccounts.balance, state: financeAccounts.syncState })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, present.id)),
+    ).resolves.toEqual([{ balance: 8_125, state: "current" }]);
   });
 
   it("blocks a legacy Item when its resolved remote identity already belongs to another aggregate", async () => {
@@ -405,6 +624,8 @@ describe.sequential("Finance Provider Item synchronization", () => {
     const cursors: Array<string | null> = [];
     let calls = 0;
     const firstProvider = plaid({
+      getAccounts: async () =>
+        accounts.map((account) => remoteAccount(account.providerAccountId ?? "missing")),
       syncTransactions: async ({ cursor }) => {
         cursors.push(cursor);
         calls += 1;
@@ -459,6 +680,8 @@ describe.sequential("Finance Provider Item synchronization", () => {
     await expect(
       service(
         plaid({
+          getAccounts: async () =>
+            accounts.map((account) => remoteAccount(account.providerAccountId ?? "missing")),
           syncTransactions: async ({ cursor }) => {
             cursors.push(cursor);
             return emptyPage("page-two");
@@ -713,7 +936,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ).toBe(item.id);
   });
 
-  it("fences an active sync when backfill links a late equal-cursor sibling", async () => {
+  it("defers a late legacy sibling until the active Item claim bridge settles", async () => {
     const { accounts, item, userId } = await fixture({ accountCount: 1, cursor: "shared-cursor" });
     const target = accounts[0];
     if (!target) throw new Error("Backfill/sync target account was not created.");
@@ -747,11 +970,12 @@ describe.sequential("Finance Provider Item synchronization", () => {
     });
     const activeSync = service(
       plaid({
+        getAccounts: async () => [remoteAccount(target.providerAccountId ?? "missing")],
         syncTransactions: async ({ cursor }) => {
           expect(cursor).toBe("shared-cursor");
           signalProviderStarted();
           await providerRelease;
-          return emptyPage("must-not-commit");
+          return emptyPage("shared-cursor");
         },
       }),
     ).syncAccount(target.id, {
@@ -766,9 +990,16 @@ describe.sequential("Finance Provider Item synchronization", () => {
       encryptionKey: key,
       now: () => now,
     });
-    await expect(providerItems.backfillLegacyItems()).resolves.toMatchObject({ linked: 1 });
+    await expect(providerItems.backfillLegacyItems()).resolves.toMatchObject({
+      complete: false,
+      linked: 0,
+    });
     releaseProvider();
-    await expect(activeSync).rejects.toMatchObject({ code: "conflict" });
+    await expect(activeSync).resolves.toEqual({ changed: 0 });
+    await expect(providerItems.backfillLegacyItems()).resolves.toMatchObject({
+      complete: true,
+      linked: 1,
+    });
 
     expect(
       (
@@ -800,7 +1031,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
             eq(auditEvents.entityId, item.id),
           ),
         ),
-    ).toEqual([]);
+    ).toHaveLength(1);
   });
 
   it("durably carries a pending removal across process loss before successful settlement", async () => {
@@ -822,6 +1053,8 @@ describe.sequential("Finance Provider Item synchronization", () => {
     await expect(
       service(
         plaid({
+          getAccounts: async () =>
+            accounts.map((account) => remoteAccount(account.providerAccountId ?? "missing")),
           syncTransactions: async ({ cursor }) => {
             calls += 1;
             if (calls === 1) {
@@ -832,16 +1065,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
               };
             }
             expect(cursor).toBe("pending-removal-page");
-            await database.db
-              .update(financeProviderItems)
-              .set({
-                syncClaimExpiresAt: null,
-                syncClaimGeneration: null,
-                syncClaimId: null,
-                syncClaimOwner: null,
-                syncClaimStartedAt: null,
-              })
-              .where(eq(financeProviderItems.id, item.id));
+            await revokeClaimBridge(item.id);
             throw new Error("simulated process loss after deferred removal");
           },
         }),
@@ -860,6 +1084,8 @@ describe.sequential("Finance Provider Item synchronization", () => {
     await expect(
       service(
         plaid({
+          getAccounts: async () =>
+            accounts.map((account) => remoteAccount(account.providerAccountId ?? "missing")),
           syncTransactions: async ({ cursor }) => {
             expect(cursor).toBe("pending-removal-page");
             return emptyPage("pending-removal-finished");
@@ -893,6 +1119,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
     await expect(
       service(
         plaid({
+          getAccounts: async () => [remoteAccount(target.providerAccountId ?? "missing")],
           syncTransactions: async () => ({
             ...emptyPage("must-not-commit"),
             added: [
@@ -1008,6 +1235,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
     await expect(
       service(
         plaid({
+          getAccounts: async () => [remoteAccount(providerAccountId)],
           syncTransactions: async () => ({
             ...emptyPage("protected-finished"),
             modified: [
@@ -1450,7 +1678,9 @@ describe.sequential("Finance Provider Item synchronization", () => {
             eq(auditEvents.action, "finance.plaid_accounts_projected"),
           ),
         ),
-    ).resolves.toEqual([{ action: "finance.plaid_accounts_projected", after: { projected: 1 } }]);
+    ).resolves.toEqual([
+      { action: "finance.plaid_accounts_projected", after: { missing: 1, projected: 1 } },
+    ]);
   });
 
   it("classifies retryable operator contention as conflict while the winning runtime recovers", async () => {
@@ -1636,6 +1866,8 @@ describe.sequential("Finance Provider Item synchronization", () => {
     });
     let streams = 0;
     const deferred = plaid({
+      getAccounts: async () =>
+        accounts.map((account) => remoteAccount(account.providerAccountId ?? "missing")),
       syncTransactions: async () => {
         streams += 1;
         providerStarted();
@@ -1666,7 +1898,8 @@ describe.sequential("Finance Provider Item synchronization", () => {
         (SELECT count(*)::int FROM finance_merchants WHERE user_id = $1) AS merchants,
         (SELECT count(*)::int FROM finance_categories WHERE user_id = $1) AS categories,
         (SELECT count(*)::int FROM finance_transactions WHERE user_id = $1) AS transactions,
-        (SELECT count(*)::int FROM audit_events WHERE user_id = $1) AS audits`,
+        (SELECT count(*)::int FROM audit_events
+          WHERE user_id = $1 AND action = 'finance.plaid_page_projected') AS audits`,
       [userId],
     );
     await database.db
@@ -1674,17 +1907,10 @@ describe.sequential("Finance Provider Item synchronization", () => {
       .set({ nextSyncAt: now, syncState: "stale" })
       .where(eq(financeProviderItems.id, item.id));
     const claimLosing = plaid({
+      getAccounts: async () =>
+        accounts.map((account) => remoteAccount(account.providerAccountId ?? "missing")),
       syncTransactions: async () => {
-        await database.db
-          .update(financeProviderItems)
-          .set({
-            syncClaimExpiresAt: null,
-            syncClaimGeneration: null,
-            syncClaimId: null,
-            syncClaimOwner: null,
-            syncClaimStartedAt: null,
-          })
-          .where(eq(financeProviderItems.id, item.id));
+        await revokeClaimBridge(item.id);
         return {
           ...emptyPage("lost-page"),
           added: [
@@ -1716,7 +1942,8 @@ describe.sequential("Finance Provider Item synchronization", () => {
           (SELECT count(*)::int FROM finance_merchants WHERE user_id = $1) AS merchants,
           (SELECT count(*)::int FROM finance_categories WHERE user_id = $1) AS categories,
           (SELECT count(*)::int FROM finance_transactions WHERE user_id = $1) AS transactions,
-          (SELECT count(*)::int FROM audit_events WHERE user_id = $1) AS audits`,
+          (SELECT count(*)::int FROM audit_events
+            WHERE user_id = $1 AND action = 'finance.plaid_page_projected') AS audits`,
         [userId],
       ),
     ).resolves.toMatchObject({ rows: effectsBefore.rows });
@@ -1727,22 +1954,19 @@ describe.sequential("Finance Provider Item synchronization", () => {
       .where(and(eq(auditEvents.userId, userId), eq(auditEvents.action, "finance.plaid_synced")));
     let progressCalls = 0;
     await expect(
-      service(plaid({ syncTransactions: async () => emptyPage("settlement-page") })).syncAccount(
+      service(
+        plaid({
+          getAccounts: async () =>
+            accounts.map((account) => remoteAccount(account.providerAccountId ?? "missing")),
+          syncTransactions: async () => emptyPage("settlement-page"),
+        }),
+      ).syncAccount(
         firstAccount.id,
         { principal: principal(userId), requestId: "claim-loss-settlement" },
         async () => {
           progressCalls += 1;
           if (progressCalls === 6) {
-            await database.db
-              .update(financeProviderItems)
-              .set({
-                syncClaimExpiresAt: null,
-                syncClaimGeneration: null,
-                syncClaimId: null,
-                syncClaimOwner: null,
-                syncClaimStartedAt: null,
-              })
-              .where(eq(financeProviderItems.id, item.id));
+            await revokeClaimBridge(item.id);
           }
         },
       ),
@@ -1822,6 +2046,10 @@ describe.sequential("Finance Provider Item synchronization", () => {
       transactionId: `${merchant.toLowerCase()}-${first.userId}`,
     });
     const provider = plaid({
+      getAccounts: async (accessToken) =>
+        accessToken === `token-${first.userId}`
+          ? [remoteAccount(firstAccount.providerAccountId ?? "missing")]
+          : [remoteAccount(secondAccount.providerAccountId ?? "missing")],
       syncTransactions: async ({ accessToken }) =>
         accessToken === `token-${first.userId}`
           ? {

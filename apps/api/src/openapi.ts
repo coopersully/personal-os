@@ -219,6 +219,27 @@ export function createOpenApiDocument(apiBaseUrl: string) {
       },
       "/v1/finances/status": {
         get: {
+          parameters: [
+            {
+              in: "query",
+              name: "start",
+              required: false,
+              schema: { format: "date", type: "string" },
+            },
+            {
+              in: "query",
+              name: "end",
+              required: false,
+              schema: { format: "date", type: "string" },
+            },
+            { in: "query", name: "entityType", required: false, schema: { type: "string" } },
+            {
+              in: "query",
+              name: "targetId",
+              required: false,
+              schema: { format: "uuid", type: "string" },
+            },
+          ],
           security,
           responses: { 200: { description: "Authoritative Finance status" } },
         },

@@ -1,4 +1,3 @@
-import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { ConnectorError, type PlaidConnector } from "@personal-os/connectors";
 import {
@@ -100,7 +99,6 @@ describe.sequential("Finance Provider Item synchronization", () => {
   afterAll(async () => {
     await database?.pool.end();
     await container?.stop();
-    await rm(resolve(process.cwd(), ".drizzle"), { force: true, recursive: true });
   });
 
   async function fixture(
@@ -1881,29 +1879,100 @@ describe.sequential("Finance Provider Item synchronization", () => {
     }
   });
 
-  it("turns a failed maintenance heartbeat into claim loss before provider work", async () => {
-    const { item, userId } = await fixture({ accountCount: 1 });
+  it("persists a failed maintenance heartbeat as an automatic connector failure", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target) throw new Error("Maintenance heartbeat target was not created.");
     const getAccounts = vi.fn(async () => []);
     const syncTransactions = vi.fn(async () => emptyPage("must-not-run"));
 
     await expect(
-      service(plaid({ getAccounts, syncTransactions })).syncDueItemsForUser(
-        userId,
-        { type: "all_outstanding" },
-        undefined,
+      service(plaid({ getAccounts, syncTransactions })).syncAccount(
+        target.id,
+        { principal: principal(userId), requestId: "maintenance-heartbeat-failure" },
         async () => {
           throw new Error("maintenance lease expired");
         },
       ),
-    ).rejects.toMatchObject({ name: "MaintenanceClaimLostError" });
+    ).rejects.toMatchObject({ code: "service_unavailable" });
     expect(getAccounts).not.toHaveBeenCalled();
     expect(syncTransactions).not.toHaveBeenCalled();
     await expect(
       database.db
-        .select({ claimId: financeProviderItems.syncClaimId })
+        .select({
+          claimId: financeProviderItems.syncClaimId,
+          errorCode: financeProviderItems.syncErrorCode,
+        })
         .from(financeProviderItems)
         .where(eq(financeProviderItems.id, item.id)),
-    ).resolves.toEqual([{ claimId: null }]);
+    ).resolves.toEqual([{ claimId: null, errorCode: "connector_unknown_failure" }]);
+  });
+
+  it("normalizes invalid currency evidence instead of stalling an Item", async () => {
+    const { accounts, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target?.providerAccountId) throw new Error("Currency target was not created.");
+    const providerAccountId = target.providerAccountId;
+
+    await expect(
+      service(
+        plaid({
+          getAccounts: async () => [{ ...remoteAccount(providerAccountId), currencyCode: "usd" }],
+          syncTransactions: async () => ({
+            ...emptyPage("currency-normalized"),
+            added: [
+              {
+                accountId: providerAccountId,
+                amount: 12,
+                currencyCode: "US Dollars",
+                date: "2026-08-16",
+                merchantName: "Currency merchant",
+                name: "CURRENCY MERCHANT",
+                pending: false,
+                pendingTransactionId: null,
+                personalFinanceCategory: null,
+                transactionId: `currency-${userId}`,
+              },
+            ],
+          }),
+        }),
+      ).syncAccount(target.id, { principal: principal(userId), requestId: "currency-normalized" }),
+    ).resolves.toEqual({ changed: 1 });
+    await expect(
+      database.db
+        .select({
+          accountCurrency: financeAccounts.currencyCode,
+          transactionCurrency: financeTransactions.currencyCode,
+        })
+        .from(financeAccounts)
+        .innerJoin(financeTransactions, eq(financeTransactions.accountId, financeAccounts.id))
+        .where(eq(financeAccounts.id, target.id)),
+    ).resolves.toEqual([{ accountCurrency: null, transactionCurrency: null }]);
+  });
+
+  it("settles a non-advancing Plaid cursor as a visible provider failure", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 1, cursor: "stalled-cursor" });
+    const target = accounts[0];
+    if (!target?.providerAccountId) throw new Error("Cursor target was not created.");
+    const providerAccountId = target.providerAccountId;
+
+    await expect(
+      service(
+        plaid({
+          getAccounts: async () => [remoteAccount(providerAccountId)],
+          syncTransactions: async () => emptyPage("stalled-cursor", true),
+        }),
+      ).syncAccount(target.id, { principal: principal(userId), requestId: "cursor-stalled" }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      database.db
+        .select({
+          errorCode: financeProviderItems.syncErrorCode,
+          state: financeProviderItems.syncState,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ errorCode: "plaid_sync_cursor_not_advancing", state: "blocked" }]);
   });
 
   it("uses one Item claim across sibling runtimes and fences page and final writes after claim loss", async () => {

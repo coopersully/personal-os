@@ -111,6 +111,9 @@ describe.sequential("workspace maintenance service", () => {
       { type: "all_outstanding" },
       "rules:v1",
     );
+    expect(Date.parse(run.updatedAt)).toBeGreaterThan(
+      new Date("2026-01-01T00:00:00.000Z").getTime(),
+    );
 
     const firstClaim = await slowClockWorker.claim(run.id);
     expect(firstClaim).not.toBeNull();

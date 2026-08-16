@@ -149,6 +149,14 @@ describe("pagination, errors, and OpenAPI", () => {
         409: { description: "A conflicting Finance maintenance run or rulebook is active" },
       },
     });
+    expect(document.paths["/v1/finances/status"].get.parameters).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ in: "query", name: "start", required: false }),
+        expect.objectContaining({ in: "query", name: "end", required: false }),
+        expect.objectContaining({ in: "query", name: "entityType", required: false }),
+        expect.objectContaining({ in: "query", name: "targetId", required: false }),
+      ]),
+    );
     expect(document.paths["/v1/finances/maintenance/{id}"].get.responses).toMatchObject({
       200: {
         content: {

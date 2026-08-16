@@ -246,7 +246,7 @@ provider source.
 The preferred Finance MCP surface remains:
 
 - `get_finance_status`, requiring `finances:read`; and
-- `maintain_finances`, requiring `finances:write`, with an optional `all_outstanding`, bounded
+- `maintain_finances`, requiring separately consented `finances:maintain`, with an optional `all_outstanding`, bounded
   window, or exact target scope and no client-owned sequencing options.
 
 MCP forwards the scoped agent token through the typed API client and returns API-owned status,
@@ -260,7 +260,7 @@ playbook or recovery algorithm.
 | Concern | Provider Item answer |
 | --- | --- |
 | Capability and owner | `apps/api` reads Plaid account and transaction evidence through `packages/connectors`; the Finance service owns durable projection, health, and recovery. |
-| Configuration and authority | The API requires the existing Plaid production environment, client identity, secret, encrypted Item access token, `finances:write` maintenance authority, and owned user/Item/account relationships. MCP receives none of these provider credentials. |
+| Configuration and authority | The API requires the existing Plaid production environment, client identity, secret, encrypted Item access token, separately consented `finances:maintain` maintenance authority, and owned user/Item/account relationships. MCP receives none of these provider credentials. |
 | Transport | The deployed API calls Plaid over HTTPS/TCP 443 through the existing production egress contract. Web and MCP call only the public Ilo API. |
 | Time and capacity | Each Plaid request uses the repository 15-second provider timeout beneath the 60-second public edge timeout. Scheduler passes select at most 25 Items with three workers. Pagination continues only through durable background work; interactive maintenance returns after its durable run handoff. |
 | Commit point | Maintenance is accepted when its run commits. Provider progress is accepted only when a fenced page projection, redacted audits, and the new Item cursor commit together. |

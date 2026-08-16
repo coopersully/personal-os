@@ -123,15 +123,16 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
   const debtAprMissing = input.unknownDebtAprCount > 0;
   const dimensions: FinanceHealth["dimensions"] = {
     borrow: dimension(
-      confidence !== "reliable" || debtAprMissing
+      confidence !== "reliable" || debtAprMissing || input.totalDebt === null
         ? "unknown"
-        : (input.totalDebt ?? 0) > 0
+        : input.totalDebt > 0
           ? "watch"
           : "healthy",
       [{ label: "Total debt", source: "accounts", value: input.totalDebt }],
       uniqueMissing(
         confidence !== "reliable" && "current_account_evidence",
         debtAprMissing && "debt_apr",
+        input.totalDebt === null && "total_debt",
         "account_roles",
       ),
       debtAprMissing ? "Add APR evidence before assessing borrowing health." : null,

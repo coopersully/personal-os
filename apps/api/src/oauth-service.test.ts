@@ -192,7 +192,7 @@ describe("OAuth authorized clients", () => {
 
     expect(service.parseScopes(undefined)).toContain("bookmarks:read");
     expect(service.parseScopes(undefined)).toContain("mail:write");
-    expect(service.parseScopes(undefined)).toContain("finances:maintain");
+    expect(service.parseScopes(undefined)).not.toContain("finances:maintain");
     expect(service.parseScopes(undefined)).toContain("tasks:read");
     expect(service.parseScopes(undefined)).not.toContain("automations:write");
     expect(service.parseScopes("tasks:read  tasks:read calendar:read")).toEqual([

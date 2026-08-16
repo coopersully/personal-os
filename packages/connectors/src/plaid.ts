@@ -149,6 +149,7 @@ async function isInvalidCursorResponse(response: Response): Promise<boolean> {
     !response.headers.get("content-type")?.toLowerCase().includes("application/json") ||
     !response.body
   ) {
+    void response.body?.cancel().catch(() => undefined);
     return false;
   }
   const reader = response.body.getReader();

@@ -591,9 +591,9 @@ Assert:
 
 - `get_finance_status` requires `finances:read`, is read-only, closed-world, idempotent, and uses
   workflow stage `inspect`;
-- `maintain_finances` requires `finances:write`, is non-read-only, closed-world,
+- `maintain_finances` requires separately consented `finances:maintain`, is non-read-only, closed-world,
   non-idempotent as a host hint, uses policy `approved_rule`, and stage `commit`;
-- a read-only server advertises status but never maintenance;
+- a read-only or write-only server advertises status but never maintenance;
 - a token without Finance scopes advertises neither;
 - no-argument maintenance sends `{ scope: { type: "all_outstanding" } }` through the API client;
 - window and exact-target inputs use the shared maintenance scope schema and expose no batch,

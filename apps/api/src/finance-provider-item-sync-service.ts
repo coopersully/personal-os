@@ -106,6 +106,7 @@ const invalidCursorReplayCode = "plaid_invalid_cursor_replay_in_progress";
 const invalidCursorReplayFailedCode = "plaid_invalid_cursor_replay_failed";
 const missingAccountCode = "plaid_account_missing_from_item";
 const missingAccountMessage = "Plaid no longer reports this account for the connection.";
+const maxSyncPages = 500;
 
 type ActiveClaim = {
   generation: number;
@@ -129,6 +130,10 @@ function isClaimConflict(error: unknown): boolean {
 
 function providerDirection(remote: PlaidTransactionSnapshot): "expense" | "income" {
   return remote.amount < 0 ? "income" : "expense";
+}
+
+function normalizedCurrencyCode(value: string | null): string | null {
+  return value !== null && /^[A-Z]{3}$/u.test(value) ? value : null;
 }
 
 function failureIsInvalidCursor(error: unknown): boolean {
@@ -173,8 +178,9 @@ export function createFinanceProviderItemSyncService(options: Options) {
   ) {
     try {
       await options.assertMaintenanceClaim?.(executor, context);
-    } catch {
-      throw new MaintenanceClaimLostError();
+    } catch (error) {
+      if (isClaimConflict(error)) throw new MaintenanceClaimLostError();
+      throw error;
     }
   }
 
@@ -208,8 +214,9 @@ export function createFinanceProviderItemSyncService(options: Options) {
     if (!onProgress) return;
     try {
       await onProgress();
-    } catch {
-      throw new MaintenanceClaimLostError();
+    } catch (error) {
+      if (isClaimConflict(error)) throw new MaintenanceClaimLostError();
+      throw error;
     }
   }
 
@@ -635,7 +642,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
             categoryConfidence: prepared.categoryConfidence,
             categoryId: lookups.categoryId,
             categorySource: prepared.categorySource,
-            currencyCode: remote.currencyCode,
+            currencyCode: normalizedCurrencyCode(remote.currencyCode),
             direction,
             merchant: prepared.merchant,
             merchantId: lookups.merchantId,
@@ -670,7 +677,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
               categorySource: protectedTransaction
                 ? protectedTransaction.categorySource
                 : prepared.categorySource,
-              currencyCode: remote.currencyCode,
+              currencyCode: normalizedCurrencyCode(remote.currencyCode),
               direction: protectedTransaction
                 ? signChanged && protectedTransaction.direction !== "transfer"
                   ? direction
@@ -817,7 +824,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
           .set({
             balance:
               snapshot.balanceCurrent === null ? null : Math.round(snapshot.balanceCurrent * 100),
-            currencyCode: snapshot.currencyCode,
+            currencyCode: normalizedCurrencyCode(snapshot.currencyCode),
             name: snapshot.officialName ?? snapshot.name,
             updatedAt: now(),
           })
@@ -1105,10 +1112,28 @@ export function createFinanceProviderItemSyncService(options: Options) {
       let cursor = claimed.item.syncCursor;
       let hasMore = true;
       let changed = 0;
+      let pages = 0;
       while (hasMore) {
+        pages += 1;
+        if (pages > maxSyncPages) {
+          throw new ConnectorError({
+            category: "invalid_response",
+            code: "plaid_sync_page_limit_exceeded",
+            disposition: "operator",
+            message: "Plaid did not finish transaction synchronization.",
+          });
+        }
         await preserveProgress(onProgress);
         const providerPage = await getPlaid().syncTransactions({ accessToken, cursor });
         await preserveProgress(onProgress);
+        if (providerPage.hasMore && providerPage.nextCursor === cursor) {
+          throw new ConnectorError({
+            category: "invalid_response",
+            code: "plaid_sync_cursor_not_advancing",
+            disposition: "operator",
+            message: "Plaid returned an invalid response.",
+          });
+        }
         if (
           [...providerPage.added, ...providerPage.modified].some(
             (remote) => remote.pendingTransactionId === remote.transactionId,

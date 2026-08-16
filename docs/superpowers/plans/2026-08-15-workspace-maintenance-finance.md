@@ -646,7 +646,7 @@ Auto-match only equal-and-opposite posted transactions owned by the same user, o
 
 - [ ] **Step 6: Add authenticated maintenance routes**
 
-`POST /v1/finances/maintenance` parses `maintenanceRequestSchema`, requires `finances:write`, creates/resumes the run, advances one bounded slice, and returns `{ run }`. It must not use `requireHuman`. `GET /v1/finances/maintenance/:id` requires `finances:read`, enforces user ownership, and returns the stable run. Add both operations, schemas, scope examples, and conflict responses to `apps/api/src/openapi.ts`.
+`POST /v1/finances/maintenance` parses `maintenanceRequestSchema`, requires separately consented `finances:maintain`, creates/resumes the run, advances one bounded slice, and returns `{ run }`. It must not use `requireHuman`. `GET /v1/finances/maintenance/:id` requires `finances:read`, enforces user ownership, and returns the stable run. Add both operations, schemas, scope examples, and conflict responses to `apps/api/src/openapi.ts`.
 
 - [ ] **Step 7: Add server-owned continuation**
 
@@ -823,7 +823,9 @@ expect(toolCatalog.maintain_finances).toMatchObject({
 });
 ```
 
-Prove a read-only token sees status but not maintenance, a write token sees both, no-argument invocation sends `all_outstanding`, and results contain `_ilo` metadata plus useful text.
+Prove a read-only or write-only token sees status but not maintenance, a separately consented
+`finances:maintain` token sees both, no-argument invocation sends `all_outstanding`, and results
+contain `_ilo` metadata plus useful text.
 
 - [ ] **Step 5: Register the two tools**
 

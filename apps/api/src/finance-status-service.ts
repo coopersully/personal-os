@@ -21,7 +21,7 @@ import {
   financeStatusSchema,
   type MaintenanceScope,
 } from "@personal-os/domain";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import { assessFinanceHealth } from "./finance-health.js";
@@ -231,16 +231,50 @@ export function createFinanceStatusService({ db, now }: Options) {
             .from(financeBudgets)
             .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, currentMonth)))
             .orderBy(financeBudgets.id);
-          const transactions = await tx
-            .select()
-            .from(financeTransactions)
-            .where(eq(financeTransactions.userId, userId))
-            .orderBy(financeTransactions.transactionDate, financeTransactions.id);
           const reviews = await tx
             .select()
             .from(financeReviewCases)
-            .where(eq(financeReviewCases.userId, userId))
+            .where(
+              and(
+                eq(financeReviewCases.userId, userId),
+                or(
+                  inArray(financeReviewCases.status, outstandingReviewStatuses),
+                  scope.type === "target" && scope.entityType === "finance_review_case"
+                    ? eq(financeReviewCases.id, scope.id)
+                    : undefined,
+                ),
+              ),
+            )
             .orderBy(financeReviewCases.createdAt);
+          const targetReview =
+            scope.type === "target" && scope.entityType === "finance_review_case"
+              ? reviews.find((review) => review.id === scope.id)
+              : null;
+          const currentMonthStart = `${currentMonth}-01`;
+          const lowerBound =
+            scope.type === "window" && scope.start < currentMonthStart
+              ? scope.start
+              : currentMonthStart;
+          const explicitlyRequiredTransactionIds = [
+            ...reviews.map((review) => review.transactionId),
+            ...(scope.type === "target" && scope.entityType === "finance_transaction"
+              ? [scope.id]
+              : []),
+            ...(targetReview ? [targetReview.transactionId] : []),
+          ];
+          const transactions = await tx
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                or(
+                  gte(financeTransactions.transactionDate, lowerBound),
+                  inArray(financeTransactions.id, explicitlyRequiredTransactionIds),
+                ),
+              ),
+            )
+            .orderBy(financeTransactions.transactionDate, financeTransactions.id);
           const profiles = await tx
             .select()
             .from(financeProfiles)
@@ -306,10 +340,6 @@ export function createFinanceStatusService({ db, now }: Options) {
               review.status as (typeof outstandingReviewStatuses)[number],
             ),
           );
-          const targetReview =
-            scope.type === "target" && scope.entityType === "finance_review_case"
-              ? reviews.find((review) => review.id === scope.id)
-              : null;
           if (
             scope.type === "target" &&
             ((scope.entityType === "finance_account" &&

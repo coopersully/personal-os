@@ -158,7 +158,7 @@ function incompatibleRun(current: RunRow): AppError {
 
 export function createWorkspaceMaintenanceService({
   db,
-  now,
+  now: _now,
 }: Options): WorkspaceMaintenanceService {
   async function findOpenRun(userId: string, domain: AssistantDomain): Promise<RunRow | undefined> {
     const [run] = await db
@@ -224,7 +224,7 @@ export function createWorkspaceMaintenanceService({
             rulebookVersion,
             scope,
             status: "queued",
-            updatedAt: now(),
+            updatedAt: sql`NOW()`,
             userId,
           })
           .returning();

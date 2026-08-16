@@ -89,6 +89,16 @@ Parameter Store in that mode. Plaid-enabled production stacks must use
 they must never use sandbox credentials or endpoints. When `x_enabled = true`,
 add `X_CLIENT_ID` and `X_CLIENT_SECRET`. Disabled connectors inject no connector
 credentials.
+
+### Live Plaid verification before enabling the rollout
+
+Configuration validation proves only that the task can start; it does not prove production Plaid
+authentication, reachability, status retrieval, or durable maintenance. Before enabling
+`plaid_enabled`, an authorized operator must use a production Finance token to perform one
+authenticated `GET /v1/finances/status` and one bounded `POST /v1/finances/maintenance` request.
+Record the maintenance request ID, its final durable run state, resulting freshness, any reconnect
+state, and confirmation that replay created no duplicate projections. Keep the request scoped to a
+known test connection or read-only-safe account; do not record credentials or provider payloads.
 Credential and encryption values must be `SecureString`; public client identifiers may remain
 `String`. The ECS `secrets` projection keeps both kinds out of the plain task environment and makes
 the execution role—not the deployment workflow—responsible for runtime retrieval.

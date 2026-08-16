@@ -29,6 +29,9 @@ const allScopes = new Set<AccessScope>([
   "tasks:read",
   "tasks:write",
 ]);
+const defaultScopes = new Set<AccessScope>(
+  [...allScopes].filter((scope) => scope !== "finances:maintain"),
+);
 
 export function createOAuthService(options: { db: Database; now: () => Date; resource: string }) {
   const { db, now, resource } = options;
@@ -247,7 +250,7 @@ export function createOAuthService(options: { db: Database; now: () => Date; res
       return issue(record.userId, record.clientId, access.scopes);
     },
     parseScopes(value: string | undefined): AccessScope[] {
-      const scopes = value?.split(" ").filter(Boolean) ?? [...allScopes];
+      const scopes = value?.split(" ").filter(Boolean) ?? [...defaultScopes];
       if (!scopes.length || scopes.some((scope) => !allScopes.has(scope as AccessScope)))
         throw new AppError("invalid_request", "One or more requested scopes are not supported.");
       return [...new Set(scopes)] as AccessScope[];

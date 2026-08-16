@@ -157,6 +157,12 @@ describe("Finance health assessment", () => {
     });
   });
 
+  it("does not rate borrowing healthy when total debt is unknown", () => {
+    expect(assessFinanceHealth(input({ totalDebt: null }), now).dimensions.borrow.rating).toBe(
+      "unknown",
+    );
+  });
+
   it("discloses unavailable account-role evidence in every affected dimension", () => {
     const health = assessFinanceHealth(input(), now);
 

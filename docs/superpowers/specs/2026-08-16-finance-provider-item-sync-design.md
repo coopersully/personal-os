@@ -75,7 +75,11 @@ Add `finance_provider_items` with these invariants:
 
 - internal UUID primary key and owning `user_id`;
 - provider discriminator, initially `plaid`;
-- authoritative provider Item identity with a unique `(user_id, provider, provider_item_id)` key;
+- nullable authoritative provider Item identity with a unique partial
+  `(user_id, provider, provider_item_id)` key;
+- nullable `legacy_grouping_key` used only to group pre-migration sibling accounts until the first
+  safe provider read resolves Plaid's real Item identity, with a unique partial
+  `(user_id, provider, legacy_grouping_key)` key;
 - encrypted Item credential and encryption metadata using the existing credential boundary;
 - one nullable opaque sync cursor;
 - connection and synchronization state;
@@ -84,6 +88,11 @@ Add `finance_provider_items` with these invariants:
 - claim ID, claim owner, claim generation, claim start, and lease expiry for fencing;
 - created and updated timestamps; and
 - indexes for due selection, stale-claim recovery, and owned Item lookup.
+
+At least one of `provider_item_id` and `legacy_grouping_key` must be present during migration. New
+connections always store Plaid's real `item_id` and do not need a legacy key. The existing
+account-level `providerItemId` value is a hash of the access token, not Plaid Item provenance; it
+may seed `legacy_grouping_key` but must never be exposed or promoted as the remote Item identity.
 
 Add a nullable `provider_item_record_id` foreign key to `finance_accounts`. During the rollout,
 legacy account-level Provider Item identity, encrypted credentials, cursor, claim, retry, and
@@ -102,8 +111,10 @@ indexes, and the nullable Finance-account foreign key. It performs no production
 backfill. The planned budget proposal migration moves from `0058` to `0059`; later unpublished
 Finance migrations shift accordingly. Published migrations `0000` through `0057` remain immutable.
 
-Connection code writes one Item and its selected accounts atomically. Compatible reads accept the
-new Item authority when present and retain the legacy account path until backfill convergence.
+The Plaid connector returns both `accessToken` and Plaid's real `itemId` from public-token exchange,
+as Plaid's API specifies. Connection code writes one Item and its selected accounts atomically.
+Compatible reads accept the new Item authority when present and retain the legacy account path
+until backfill convergence.
 
 ### Migrate
 
@@ -115,7 +126,7 @@ provider request; a group requiring replay becomes immediately due for the norma
 For each group:
 
 1. validate that ownership, provider identity, and credential material agree;
-2. create or claim the authoritative Item row;
+2. create or claim an Item row keyed by the legacy grouping value, leaving `provider_item_id` null;
 3. link every sibling account in stable ID order;
 4. if every non-null legacy cursor is identical, preserve that cursor;
 5. if cursors are missing or divergent, store a null Item cursor and make the Item immediately due
@@ -126,6 +137,12 @@ For each group:
 Credential ciphertext is not compared for equality because independent encryption IVs make equal
 plaintext differ. Migration validates credentials by their owned source and normal decryption
 boundary without printing, logging, or auditing secret material.
+
+Before synchronizing a legacy Item whose real provider identity is still null, the connector calls
+Plaid `/item/get` using the owned access token. A short fenced transaction records the returned
+`item_id` before transaction pagination begins. A uniqueness conflict or mismatch with an existing
+owned Item is blocked for operator review; the service does not merge connection aggregates based
+only on credential or account overlap.
 
 ### Cutover
 
@@ -146,8 +163,9 @@ backfill release.
 
 1. The Finance maintenance run establishes scope and evidence cutoff and claims the Provider Item.
 2. The service loads and locks the Item, then its linked accounts in ascending stable ID order.
-3. It snapshots the credential and starting cursor, commits the short claim transaction, and calls
-   Plaid outside a database transaction with the repository's bounded provider timeout.
+3. It snapshots the credential and starting cursor, commits the short claim transaction, resolves
+   a missing legacy remote Item identity with Plaid `/item/get`, and calls Plaid outside a database
+   transaction with the repository's bounded provider timeout.
 4. For every bounded provider page, a short database transaction locks the maintenance run when
    present, the Item, and affected accounts in canonical order; validates claim ID, owner,
    generation, and lease; projects account and transaction evidence idempotently; writes redacted
@@ -246,7 +264,7 @@ playbook or recovery algorithm.
 | Transport | The deployed API calls Plaid over HTTPS/TCP 443 through the existing production egress contract. Web and MCP call only the public Ilo API. |
 | Time and capacity | Each Plaid request uses the repository 15-second provider timeout beneath the 60-second public edge timeout. Scheduler passes select at most 25 Items with three workers. Pagination continues only through durable background work; interactive maintenance returns after its durable run handoff. |
 | Commit point | Maintenance is accepted when its run commits. Provider progress is accepted only when a fenced page projection, redacted audits, and the new Item cursor commit together. |
-| Delivery semantics | Provider pages may repeat after timeout or process loss. Stable provider identities, idempotent projection constraints, run-attributed effects, and the single Item cursor make replay safe. Cursor divergence forces full replay rather than inference. |
+| Delivery semantics | Item identity and provider pages may be requested again after timeout or process loss. Stable provider identities, idempotent projection constraints, run-attributed effects, and the single Item cursor make replay safe. Cursor divergence forces full replay rather than inference. |
 | Degraded behavior | Status exposes stale, retrying, reconnect, unavailable, or migration-blocked Item health, safe failure codes, recovery ownership, and pending work. It never reports missing evidence as zero activity. |
 | Recovery and observation | The durable scheduler retries transient failures, reconnect waits for human authority repair, stale claims can be recovered, and maintenance/status surfaces expose run IDs, freshness, safe failures, and first-party recovery links. Logs use allowlisted aggregate fields without credentials or provider payloads. |
 | Evidence | Static schema/config contracts, migrated PostgreSQL lifecycle tests, claim/replay/concurrency tests, full repository verification, production runtime-policy validation, a least-privileged provider-read smoke from the deployed API, and post-deploy Item freshness evidence. |
@@ -256,6 +274,8 @@ playbook or recovery algorithm.
 Required behavior and PostgreSQL integration tests cover:
 
 - one Item for multiple Plaid accounts and one credential/cursor authority;
+- public-token exchange preserving Plaid's real `item_id`, plus `/item/get` resolution for legacy
+  Items without treating the old token hash as provider provenance;
 - matching, missing, and divergent legacy cursor backfill;
 - null-cursor full replay without duplicate projections or audits;
 - page commit followed by process loss and exact cursor resume;

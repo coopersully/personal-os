@@ -756,6 +756,15 @@ git commit -m "feat: add approved Finance budget proposals"
 
 ### Task 8: Publish the typed API and two preferred MCP tools
 
+> Delivery note (2026-08-16): the Provider Item correction delivered and verified the complete
+> status/maintenance slice: `getFinanceStatus`, `maintainFinances`,
+> `getFinanceMaintenanceRun`, MCP `get_finance_status`, and MCP `maintain_finances`. Maintenance
+> uses the explicit `finances:maintain` consent scope so existing draft-only `finances:write`
+> grants do not silently expand. Read-only transports expose status without suggesting an
+> unavailable write. Do not reimplement this slice after Task 7; only the two budget-proposal
+> client methods remain dependent on the proposal endpoints. The checkboxes below remain open
+> until that five-method combined task is fully reconciled.
+
 **Files:**
 - Modify: `packages/api-client/src/features/finances.ts`
 - Modify: `packages/api-client/src/client.test.ts`

@@ -11,6 +11,34 @@ pending, duplicated, or represent movement between accounts rather than a new
 purchase. The product also needs to surface pay, subscriptions, bills, and
 cash-flow guidance without an agent silently changing a user's financial record.
 
+## Finance Ilo intent
+
+Finances is a workspace with an Ilo, not merely a transaction store and collection of MCP tools.
+The target Finance Ilo combines the useful disciplines of a bookkeeper, accountant/controller,
+financial planner, investment analyst, auditor, and coach to keep a living financial ledger
+trustworthy and useful. It owns four continuous loops:
+
+- **close:** synchronize, reconcile, deduplicate, classify, annotate, and account for a selected
+  period;
+- **plan:** maintain budgets, income, recurring obligations, cash flow, savings, investments,
+  liabilities, net worth, and goals from the closed ledger;
+- **advise:** explain current health, trends, tradeoffs, risks, relevant market context, and
+  evidence-backed options aligned with the person's goals; and
+- **learn:** turn answers into one-off decisions or explicitly approved reusable rules, re-evaluate
+  affected evidence, and avoid asking the same resolved question again.
+
+Every maintenance turn produces a durable period review containing its scope and evidence cutoff,
+source freshness, work completed, budget and financial-health position, outstanding questions,
+learned or proposed rules, recommendations, and recovery or next-maintenance links. It must state
+partial or blocked outcomes honestly. It may provide informational guidance but cannot move money,
+trade, pay bills, file taxes, invent missing facts, or claim a licensed professional relationship.
+
+This is the target product contract described by
+[`Ilo workspace stewardship`](../product/ilo-workspace-stewardship.md). The remainder of this ADR
+also records currently established Finance invariants. Code, tests, migrations, deployed evidence,
+and the implementation log—not this target statement alone—determine which stewardship
+capabilities are shipped.
+
 ## Decision
 
 The Finance vertical slice owns its data model, API route module, typed client,

@@ -7,6 +7,9 @@ description: Build and review secure ilo MCP tools and transports. Use when chan
 
 Read `docs/mcp.md` and the agent-action section of
 `docs/engineering/feature-ownership.md` before altering MCP behavior.
+For a workspace status or maintenance surface, also read
+`docs/product/ilo-workspace-stewardship.md` and
+`docs/architecture/0004-workspace-ilo-stewardship.md`.
 
 ## Preserve the adapter boundary
 
@@ -16,6 +19,19 @@ Read `docs/mcp.md` and the agent-action section of
 - Keep HTTP requests isolated and forward only the caller's scoped agent token.
 - Keep stdio credentials in environment variables; never expose tokens in tool
   arguments, logs, or tool results.
+
+## Expose workspace intent without moving intelligence
+
+- For a mature workspace, prefer `get_<workspace>_status` and `maintain_<workspace>` as the small
+  high-level intent surface, plus granular tools for useful surgical operations.
+- Treat maintenance as one domain-owned, durable stewardship turn—not a batch endpoint or a
+  client-authored sequence of tool calls.
+- Return readiness, freshness, backlog, questions, run state, review, advice, and recovery links
+  from API-owned contracts. Do not calculate maintained state in MCP.
+- Never embed the expert playbook, rulebook, retry order, learning behavior, or completion criteria
+  in tool descriptions, prompts, or host-specific instructions.
+- Do not claim the conventional intent tools exist unless current discovery and tests prove they
+  are shipped for that workspace.
 
 ## Add a tool safely
 

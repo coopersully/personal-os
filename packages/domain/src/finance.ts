@@ -38,9 +38,12 @@ const categorySchema = z.string().trim().min(1).max(80);
 export const financeGuidedPreferencesSchema = z
   .object({
     billReviewLeadDays: z.number().int().min(0).max(90).optional(),
+    budgetOffTrackForecastRatio: z.number().finite().gt(1).max(10).default(1.15),
     budgetStyle: z
       .enum(["category", "envelope", "flexible", "unspecified", "zero_based"])
       .optional(),
+    budgetWatchForecastRatio: z.number().finite().gt(1).max(10).default(1.05),
+    emergencyReserveTargetMonths: z.number().finite().positive().max(60).default(3),
     largeExpenseAlertAmount: moneySchema.positive().optional(),
     lowBalanceAlertAmount: moneySchema.optional(),
     planningCurrency: z.literal("USD").optional(),
@@ -62,6 +65,13 @@ export const financeGuidedPreferencesSchema = z
     ]),
   )
   .superRefine((value, context) => {
+    if (value.budgetWatchForecastRatio >= value.budgetOffTrackForecastRatio) {
+      context.addIssue({
+        code: "custom",
+        message: "The Finance budget watch ratio must be lower than the off-track ratio.",
+        path: ["budgetWatchForecastRatio"],
+      });
+    }
     if (
       (value.largeExpenseAlertAmount !== undefined || value.lowBalanceAlertAmount !== undefined) &&
       value.planningCurrency !== "USD"

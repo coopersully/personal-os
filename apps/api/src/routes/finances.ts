@@ -10,6 +10,7 @@ import {
   financeMerchantQuerySchema,
   financeReviewDecisionInputSchema,
   financeTransactionQuerySchema,
+  maintenanceScopeQuerySchema,
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
   updateFinanceIncomeStreamInputSchema,
@@ -21,6 +22,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { createFinanceService } from "../finance-service.js";
+import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
 import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
 
@@ -28,12 +30,18 @@ type MutationContext = { principal: Principal; requestId: string };
 
 type FinanceRouteOptions = {
   app: Hono<AppEnv>;
+  financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
 };
 
 /** Register the Finance-owned HTTP surface without constructing shared services. */
-export function registerFinanceRoutes({ app, finances, mutationContext }: FinanceRouteOptions) {
+export function registerFinanceRoutes({
+  app,
+  financeStatus,
+  finances,
+  mutationContext,
+}: FinanceRouteOptions) {
   const requireFinanceScope = requireFeatureAccess("finances");
   const requireFinanceRead = requireScope("finances:read");
   const requireFinanceAccess: MiddlewareHandler<AppEnv> = async (context, next) => {
@@ -48,6 +56,14 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  app.get("/v1/finances/status", async (context) =>
+    context.json({
+      status: await financeStatus.getFinanceStatus(
+        context.get("principal").userId,
+        maintenanceScopeQuerySchema.parse(context.req.query()),
+      ),
+    }),
+  );
   app.get("/v1/finances", async (context) => {
     const query = financeBudgetStatusQuerySchema.parse(context.req.query());
     const accountIds = context.req.query("accountIds")?.split(",").filter(Boolean);

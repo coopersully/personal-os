@@ -43,6 +43,7 @@ import { createDailyBriefService } from "./daily-brief-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createFinanceService } from "./finance-service.js";
+import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
 import { createGooglePubSubAuth, GooglePubSubAuthError } from "./google-pubsub-auth.js";
 import { createMailService } from "./mail-service.js";
@@ -68,6 +69,7 @@ import { registerTaskRoutes } from "./routes/tasks.js";
 import { createTaskService } from "./task-service.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
+import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
 import { createXBookmarksService } from "./x-bookmarks-service.js";
 
 export type PersonalOsApp = Hono<AppEnv> & {
@@ -456,6 +458,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     now,
   });
   const goalService = createGoalsService({ db: dependencies.db, now });
+  const maintenance = createWorkspaceMaintenanceService({ db: dependencies.db, now });
+  const financeStatus = createFinanceStatusService({
+    assistant,
+    db: dependencies.db,
+    finances,
+    goals: goalService,
+    maintenance,
+    now,
+  });
   const pinterest = createPinterestService({ db: dependencies.db, now });
 
   app.use("*", async (context, next) => {
@@ -1087,7 +1098,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 
-  registerFinanceRoutes({ app, finances, mutationContext });
+  registerFinanceRoutes({ app, financeStatus, finances, mutationContext });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 

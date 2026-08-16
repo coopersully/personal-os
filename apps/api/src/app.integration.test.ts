@@ -630,6 +630,53 @@ describe.sequential("ilo API", () => {
     });
   });
 
+  it("returns finance status through the authenticated app composition", async () => {
+    const openApi = (await app.request("/openapi.json")).json();
+    await expect(openApi).resolves.toMatchObject({
+      paths: {
+        "/v1/finances/status": {
+          get: { responses: { 200: { description: "Authoritative Finance status" } } },
+        },
+      },
+    });
+    const [statusUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance Status",
+        email: `finance-status-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!statusUser) throw new Error("Finance status user was not created.");
+    const statusAuth = createAuthService({
+      db: database.db,
+      now: () => new Date("2026-08-15T12:00:00.000Z"),
+      sessionTtlDays: 30,
+    });
+    const statusToken = await statusAuth.createAccessToken(statusUser.id, {
+      name: "Finance status reader",
+      scopes: ["finances:read"],
+    });
+
+    const response = await app.request("/v1/finances/status", {
+      headers: { authorization: `Bearer ${statusToken.token}` },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: {
+        details: {
+          health: { confidence: "insufficient" },
+          month: { forecast: null, spending: null },
+        },
+        domain: "finances",
+        freshness: { state: "unavailable" },
+        state: "needs_input",
+      },
+    });
+  });
+
   it("enforces owner-issued, one-time invitations for private beta sign-up", async () => {
     const betaApp = createApp({
       config: {

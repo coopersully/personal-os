@@ -1,11 +1,46 @@
 import { Hono } from "hono";
 import type { createFinanceService } from "../finance-service.js";
+import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv } from "../types.js";
 import { registerFinanceRoutes } from "./finances.js";
 
 const id = "11111111-1111-4111-8111-111111111111";
 
 describe("finance routes", () => {
+  it("returns read-only Finance status for a parsed maintenance scope", async () => {
+    const app = new Hono<AppEnv>();
+    const getFinanceStatus = vi.fn(async () => ({ domain: "finances" }));
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read"]),
+        userId: id,
+      });
+      context.set("requestId", "request-status");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeStatus: { getFinanceStatus } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const response = await app.request("/v1/finances/status?start=2026-08-01&end=2026-08-15");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: { domain: "finances" } });
+    expect(getFinanceStatus).toHaveBeenCalledWith(id, {
+      type: "window",
+      start: "2026-08-01",
+      end: "2026-08-15",
+    });
+  });
+
   it("keeps setup and owned attention agent-accessible while consequential Finance mutations stay human-only", async () => {
     const app = new Hono<AppEnv>();
     const finances = {
@@ -38,6 +73,7 @@ describe("finance routes", () => {
     );
     registerFinanceRoutes({
       app,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
       finances: finances as unknown as ReturnType<typeof createFinanceService>,
       mutationContext: (context) => ({
         principal: context.get("principal"),
@@ -124,6 +160,7 @@ describe("finance routes", () => {
     });
     registerFinanceRoutes({
       app,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
       finances: finances as unknown as ReturnType<typeof createFinanceService>,
       mutationContext: (context) => ({
         principal: context.get("principal"),

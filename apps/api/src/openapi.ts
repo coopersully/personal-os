@@ -89,6 +89,12 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         delete: { security, responses: { 204: { description: "Motive deleted" } } },
         patch: { security, responses: { 200: { description: "Motive updated" } } },
       },
+      "/v1/finances/status": {
+        get: {
+          security,
+          responses: { 200: { description: "Authoritative Finance status" } },
+        },
+      },
       "/v1/reminders": {
         get: { security, responses: { 200: { description: "Reminder page" } } },
         post: { security, responses: { 201: { description: "Reminder created" } } },

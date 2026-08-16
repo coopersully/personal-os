@@ -6,6 +6,7 @@ export * from "./common.js";
 export * from "./connection.js";
 export * from "./feature-contracts.js";
 export * from "./finance.js";
+export * from "./finance-maintenance.js";
 export * from "./goals.js";
 export * from "./ilo-setup-release.js";
 export * from "./mail.js";

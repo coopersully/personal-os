@@ -1370,6 +1370,26 @@ describe("domain schemas", () => {
 });
 
 describe("finance agent contracts", () => {
+  it("validates Finance health policy preferences", () => {
+    expect(
+      financeGuidedPreferencesSchema.parse({
+        budgetOffTrackForecastRatio: 1.2,
+        budgetWatchForecastRatio: 1.08,
+        emergencyReserveTargetMonths: 6,
+      }),
+    ).toMatchObject({
+      budgetOffTrackForecastRatio: 1.2,
+      budgetWatchForecastRatio: 1.08,
+      emergencyReserveTargetMonths: 6,
+    });
+    expect(
+      financeGuidedPreferencesSchema.safeParse({
+        budgetOffTrackForecastRatio: 1.05,
+        budgetWatchForecastRatio: 1.1,
+      }).success,
+    ).toBe(false);
+  });
+
   it("uses percentage points for recurring-change preferences", () => {
     expect(
       financeGuidedPreferencesSchema.parse({

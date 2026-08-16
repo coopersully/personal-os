@@ -38,6 +38,7 @@ import {
   featureIds,
   financeAccountSchema,
   financeGuidedPreferencesSchema,
+  financeMaintenanceResultSchema,
   financeReviewDecisionInputSchema,
   financeTransactionQuerySchema,
   formatDateOnly,
@@ -182,6 +183,33 @@ describe("workspace maintenance", () => {
     ]);
     expect(maintenanceSettlementStatusSchema.safeParse("queued").success).toBe(false);
     expect(maintenanceSettlementStatusSchema.safeParse("running").success).toBe(false);
+  });
+
+  it("makes scoped Finance health applicability explicit in maintenance results", () => {
+    expect(
+      financeMaintenanceResultSchema.parse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: {
+          applicability: "skipped_scoped",
+          confidence: "provisional",
+          refreshed: false,
+        },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "current", state: "clean" },
+      }),
+    ).toMatchObject({
+      health: { applicability: "skipped_scoped", refreshed: false },
+    });
+    expect(
+      financeMaintenanceResultSchema.safeParse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: { confidence: "provisional", refreshed: false },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "current", state: "clean" },
+      }).success,
+    ).toBe(false);
   });
 
   it("parses a generic workspace status with a compact active run summary", () => {

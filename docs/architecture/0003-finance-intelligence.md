@@ -158,6 +158,15 @@ Pending transactions remain distinct from posted spending.
 They may be organized provisionally, but cannot create classification evidence
 or permanent merchant learning before posting.
 
+Plaid transaction synchronization is item-atomic even though the compatibility
+schema stores the opaque item cursor on each account row. A sync starts from the
+safest deterministic sibling cursor (a null cursor first, then the oldest last
+successful sync with account ID as the tie-break), projects deltas for every
+owned sibling account, and advances every sibling cursor only after every page
+payload has committed. A window or exact maintenance target may narrow later
+reconciliation, categorization, questions, and cash-flow health work; it never
+narrows the raw provider item projection or discards a sibling delta.
+
 ## Income, recurring activity, and cash flow
 
 Profiles are effective-dated. Reads select the latest profile whose effective

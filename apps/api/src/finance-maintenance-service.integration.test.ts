@@ -275,18 +275,53 @@ describe.sequential("Finance maintenance service", () => {
     expect(questionEffects).toBe(2);
   });
 
-  it("prefers the authoritative question-step creation count over refreshed review audits", async () => {
+  it("prefers the authoritative question-step creation count over reviews created during reconciliation", async () => {
     const ownerId = await createUser("Finance refreshed question count");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const reconciliationReviewIds = [crypto.randomUUID(), crypto.randomUUID()];
     const service = createFinanceMaintenanceService({
       finances: operations({
+        reconcileTransfersForUser: async (_userId, _scope, context) => {
+          if (!context) throw new Error("Maintenance attribution was not supplied.");
+          await database.db.insert(auditEvents).values(
+            reconciliationReviewIds.map((entityId) => ({
+              action: "finance.review_queued",
+              actorId: context.principal.actorId,
+              actorType: context.principal.actorType,
+              after: { maintenance: context.maintenance },
+              before: null,
+              entityId,
+              entityType: "finance_review_case",
+              requestId: context.requestId,
+              userId: ownerId,
+            })),
+          );
+          return { paired: 0, transfers: 0 };
+        },
         refreshMaintenanceQuestionsForUser: async () => ({ created: 0, total: 1 }),
-        summarizeMaintenanceEffectsForRun: async () => ({
-          categorizations: 0,
-          duplicateActions: 0,
-          questions: 0,
-          transfers: 0,
-        }),
+        summarizeMaintenanceEffectsForRun: async (_userId, runId) => {
+          const rows = await database.db
+            .select({ entityId: auditEvents.entityId, requestId: auditEvents.requestId })
+            .from(auditEvents)
+            .where(
+              and(
+                eq(auditEvents.userId, ownerId),
+                eq(auditEvents.action, "finance.review_queued"),
+                like(auditEvents.requestId, `maintenance:${runId}:%`),
+              ),
+            );
+          return {
+            categorizations: 0,
+            duplicateActions: 0,
+            questionStepCreations: new Set(
+              rows
+                .filter((row) => row.requestId === `maintenance:${runId}:questions`)
+                .map((row) => row.entityId),
+            ).size,
+            questions: new Set(rows.map((row) => row.entityId)).size,
+            transfers: 0,
+          };
+        },
       }),
       maintenance: workspace,
       now: () => now,
@@ -300,6 +335,17 @@ describe.sequential("Finance maintenance service", () => {
       settledResult: { questions: { created: 0, total: 1 } },
       status: "completed_with_questions",
     });
+    await expect(
+      database.db
+        .select({ entityId: auditEvents.entityId })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, `maintenance:${run.id}:reconcile`)),
+    ).resolves.toHaveLength(2);
+    await expect(workspace.listStepRecords(run.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ result: { created: 0, total: 1 }, step: "questions" }),
+      ]),
+    );
   });
 
   it("maintains a real Finance ledger and repeats with no duplicate mutations, questions, or audits", async () => {
@@ -495,6 +541,7 @@ describe.sequential("Finance maintenance service", () => {
       categorizations: 2,
       duplicateActions: 0,
       heuristicTransfersRepaired: 0,
+      questionStepCreations: 2,
       questions: 2,
       transfers: 2,
     });
@@ -1524,8 +1571,31 @@ describe.sequential("Finance maintenance service", () => {
     ]);
     await expect(windowService.getRun(windowOwner, windowRun.id)).resolves.toMatchObject({
       scope: windowScope,
+      settledResult: {
+        health: {
+          applicability: "skipped_scoped",
+          confidence: "reliable",
+          refreshed: false,
+        },
+      },
       status: "completed",
     });
+    await expect(
+      createWorkspaceMaintenanceService({ db: database.db, now: () => now }).listStepRecords(
+        windowRun.id,
+      ),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          result: {
+            applicability: "skipped_scoped",
+            confidence: "reliable",
+            refreshed: false,
+          },
+          step: "health",
+        }),
+      ]),
+    );
 
     const targetOwner = await createUser("Finance target scope");
     const targetScope = {

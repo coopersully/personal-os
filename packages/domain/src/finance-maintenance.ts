@@ -115,3 +115,26 @@ export const financeStatusSchema = workspaceStatusSchema(financeStatusDetailsSch
   domain: z.literal("finances"),
 });
 export type FinanceStatus = z.infer<typeof financeStatusSchema>;
+
+export const financeMaintenanceResultSchema = z.object({
+  applied: z.object({
+    categorizations: z.int().nonnegative(),
+    transfers: z.int().nonnegative(),
+  }),
+  asOf: z.iso.datetime(),
+  health: z.object({
+    applicability: z.enum(["applied", "skipped_scoped"]),
+    confidence: financeDataConfidenceSchema,
+    refreshed: z.boolean(),
+  }),
+  questions: z.object({
+    created: z.int().nonnegative(),
+    total: z.int().nonnegative(),
+  }),
+  verification: z.object({
+    duplicateActions: z.int().nonnegative(),
+    freshness: z.enum(["current", "partial", "stale", "unavailable"]),
+    state: z.enum(["blocked", "clean", "needs_input", "needs_work"]),
+  }),
+});
+export type FinanceMaintenanceResult = z.infer<typeof financeMaintenanceResultSchema>;

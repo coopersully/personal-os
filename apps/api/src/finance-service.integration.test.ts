@@ -4537,10 +4537,11 @@ describe.sequential("finance service", () => {
       planningTimezone: "UTC",
     });
     let syncCall = 0;
+    const observedSyncCursors: unknown[] = [];
     const plaid = createPlaidConnector({
       clientId: "client",
       environment: "sandbox",
-      fetch: async (input) => {
+      fetch: async (input, init) => {
         switch (new URL(String(input)).pathname) {
           case "/item/public_token/exchange":
             return Response.json({ access_token: "scope-access", item_id: "scope-item" });
@@ -4563,74 +4564,84 @@ describe.sequential("finance service", () => {
             });
           case "/transactions/sync": {
             syncCall += 1;
-            if (syncCall === 3) {
+            const body = JSON.parse(String(init?.body)) as { cursor?: unknown };
+            observedSyncCursors.push(body.cursor ?? null);
+            if (syncCall === 4) {
               return Response.json(
                 { error_message: "Temporary provider failure" },
                 { status: 500 },
               );
             }
-            const targetPass = syncCall > 1;
+            const targetPass = syncCall === 2;
             return Response.json({
-              added: targetPass
-                ? [
-                    {
-                      account_id: "scope-account-one",
-                      amount: 10,
-                      date: "2026-07-19",
-                      iso_currency_code: "USD",
-                      merchant_name: "Target account evidence",
-                      name: "TARGET ACCOUNT EVIDENCE",
-                      pending: false,
-                      personal_finance_category: null,
-                      transaction_id: "scope-target-one",
-                    },
-                    {
-                      account_id: "scope-account-two",
-                      amount: 20,
-                      date: "2026-07-19",
-                      iso_currency_code: "USD",
-                      merchant_name: "Unrelated account evidence",
-                      name: "UNRELATED ACCOUNT EVIDENCE",
-                      pending: false,
-                      personal_finance_category: null,
-                      transaction_id: "scope-target-two",
-                    },
-                  ]
-                : [
-                    {
-                      account_id: "scope-account-one",
-                      amount: 75,
-                      date: "2026-07-01",
-                      iso_currency_code: "USD",
-                      merchant_name: "Outside window outgoing",
-                      name: "OUTSIDE WINDOW OUTGOING",
-                      pending: false,
-                      personal_finance_category: {
-                        confidence_level: "VERY_HIGH",
-                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
-                        primary: "TRANSFER_OUT",
-                      },
-                      transaction_id: "scope-window-out",
-                    },
-                    {
-                      account_id: "scope-account-two",
-                      amount: -75,
-                      date: "2026-07-01",
-                      iso_currency_code: "USD",
-                      merchant_name: "Outside window incoming",
-                      name: "OUTSIDE WINDOW INCOMING",
-                      pending: false,
-                      personal_finance_category: {
-                        confidence_level: "VERY_HIGH",
-                        detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
-                        primary: "TRANSFER_IN",
-                      },
-                      transaction_id: "scope-window-in",
-                    },
-                  ],
+              added:
+                syncCall === 3
+                  ? []
+                  : targetPass
+                    ? [
+                        {
+                          account_id: "scope-account-one",
+                          amount: 10,
+                          date: "2026-07-19",
+                          iso_currency_code: "USD",
+                          merchant_name: "Target account evidence",
+                          name: "TARGET ACCOUNT EVIDENCE",
+                          pending: false,
+                          personal_finance_category: null,
+                          transaction_id: "scope-target-one",
+                        },
+                        {
+                          account_id: "scope-account-two",
+                          amount: 20,
+                          date: "2026-07-19",
+                          iso_currency_code: "USD",
+                          merchant_name: "Unrelated account evidence",
+                          name: "UNRELATED ACCOUNT EVIDENCE",
+                          pending: false,
+                          personal_finance_category: null,
+                          transaction_id: "scope-target-two",
+                        },
+                      ]
+                    : [
+                        {
+                          account_id: "scope-account-one",
+                          amount: 75,
+                          date: "2026-07-01",
+                          iso_currency_code: "USD",
+                          merchant_name: "Outside window outgoing",
+                          name: "OUTSIDE WINDOW OUTGOING",
+                          pending: false,
+                          personal_finance_category: {
+                            confidence_level: "VERY_HIGH",
+                            detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                            primary: "TRANSFER_OUT",
+                          },
+                          transaction_id: "scope-window-out",
+                        },
+                        {
+                          account_id: "scope-account-two",
+                          amount: -75,
+                          date: "2026-07-01",
+                          iso_currency_code: "USD",
+                          merchant_name: "Outside window incoming",
+                          name: "OUTSIDE WINDOW INCOMING",
+                          pending: false,
+                          personal_finance_category: {
+                            confidence_level: "VERY_HIGH",
+                            detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+                            primary: "TRANSFER_IN",
+                          },
+                          transaction_id: "scope-window-in",
+                        },
+                      ],
               has_more: false,
               modified: [],
-              next_cursor: targetPass ? "scope-target-cursor" : "scope-window-cursor",
+              next_cursor:
+                syncCall === 3
+                  ? "scope-all-cursor"
+                  : targetPass
+                    ? "scope-target-cursor"
+                    : "scope-window-cursor",
               removed: [],
             });
           }
@@ -4654,6 +4665,20 @@ describe.sequential("finance service", () => {
     const unrelatedAccount = accounts.find((account) => account.name === "Unrelated savings");
     if (!targetAccount || !unrelatedAccount)
       throw new Error("Scoped Plaid accounts were not saved.");
+    const scopedManualAccount = await service.createAccount(
+      { balance: 0, institution: "Cash", name: "Scoped manual wallet", provider: "manual" },
+      { principal: financePrincipal(userId), requestId: "scope-manual" },
+    );
+    await database.db
+      .update(financeAccounts)
+      .set({ nextSyncAt: null, syncState: "stale" })
+      .where(
+        inArray(financeAccounts.id, [
+          targetAccount.id,
+          unrelatedAccount.id,
+          scopedManualAccount.id,
+        ]),
+      );
     const windowScope = { type: "window", start: "2026-07-10", end: "2026-07-19" } as const;
     const windowRunId = crypto.randomUUID();
     const windowClaimId = crypto.randomUUID();
@@ -4698,6 +4723,37 @@ describe.sequential("finance service", () => {
     await expect(
       service.syncDueAccountsForUser(userId, windowScope, windowContext, async () => {}),
     ).resolves.toEqual({ attempted: 1, failed: 0, recovered: 0, skipped: 0, succeeded: 1 });
+    expect(observedSyncCursors).toEqual([null]);
+    await expect(
+      database.db
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          entityId: auditEvents.entityId,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "finance.sync_health_initialized"))
+        .orderBy(auditEvents.entityId),
+    ).resolves.toEqual(
+      [targetAccount.id, unrelatedAccount.id].sort().map((accountId) => ({
+        action: "finance.sync_health_initialized",
+        after: expect.objectContaining({
+          maintenance: windowContext.maintenance,
+          source: expect.objectContaining({
+            accountId,
+            remoteId: accountId,
+            sourceType: "finance_account",
+          }),
+        }),
+        entityId: accountId,
+      })),
+    );
+    await expect(
+      database.db
+        .select({ syncState: financeAccounts.syncState })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, scopedManualAccount.id)),
+    ).resolves.toEqual([{ syncState: "stale" }]);
     await expect(
       database.db
         .select({
@@ -4741,12 +4797,8 @@ describe.sequential("finance service", () => {
       .where(eq(workspaceMaintenanceRuns.id, windowRunId));
     await database.db
       .update(financeAccounts)
-      .set({ nextSyncAt: now, syncState: "stale" })
-      .where(inArray(financeAccounts.id, [targetAccount.id, unrelatedAccount.id]));
-    await database.db
-      .update(financeAccounts)
       .set({ nextSyncAt: null, syncState: "stale" })
-      .where(eq(financeAccounts.id, unrelatedAccount.id));
+      .where(inArray(financeAccounts.id, [targetAccount.id, unrelatedAccount.id]));
     const targetScope = {
       type: "target",
       entityType: "finance_account",
@@ -4785,8 +4837,33 @@ describe.sequential("finance service", () => {
             "scope-target-one",
             "scope-target-two",
           ]),
+        )
+        .orderBy(financeTransactions.providerTransactionId),
+    ).resolves.toEqual(
+      [
+        { accountId: targetAccount.id, providerId: "scope-target-one" },
+        { accountId: unrelatedAccount.id, providerId: "scope-target-two" },
+      ].toSorted((left, right) => left.providerId.localeCompare(right.providerId)),
+    );
+    expect(observedSyncCursors).toEqual([null, "scope-window-cursor"]);
+    await expect(
+      database.db
+        .select({ entityId: auditEvents.entityId })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "finance.sync_health_initialized"),
+            eq(auditEvents.requestId, targetContext.requestId),
+          ),
         ),
-    ).resolves.toEqual([{ accountId: targetAccount.id, providerId: "scope-target-one" }]);
+    ).resolves.toEqual([{ entityId: targetAccount.id }]);
+    await expect(
+      database.db
+        .select({ cursor: financeAccounts.syncCursor })
+        .from(financeAccounts)
+        .where(inArray(financeAccounts.id, [targetAccount.id, unrelatedAccount.id]))
+        .orderBy(financeAccounts.id),
+    ).resolves.toEqual([{ cursor: "scope-target-cursor" }, { cursor: "scope-target-cursor" }]);
     await expect(
       database.db
         .select({ nextSyncAt: financeAccounts.nextSyncAt, syncState: financeAccounts.syncState })
@@ -4798,6 +4875,113 @@ describe.sequential("finance service", () => {
       .update(workspaceMaintenanceRuns)
       .set({ leaseClaimId: null, leaseExpiresAt: null, status: "completed" })
       .where(eq(workspaceMaintenanceRuns.id, targetRunId));
+    const allRunId = crypto.randomUUID();
+    const allClaimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: allRunId,
+      leaseClaimId: allClaimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId,
+    });
+    const allContext = {
+      ...targetContext,
+      maintenance: { ...targetContext.maintenance, runId: allRunId },
+      maintenanceClaim: { claimId: allClaimId, runId: allRunId },
+      requestId: `maintenance:${allRunId}:synchronize`,
+    };
+    await expect(
+      service.syncDueAccountsForUser(
+        userId,
+        { type: "all_outstanding" },
+        allContext,
+        async () => {},
+      ),
+    ).resolves.toEqual({ attempted: 1, failed: 0, recovered: 0, skipped: 0, succeeded: 1 });
+    expect(observedSyncCursors).toEqual([null, "scope-window-cursor", "scope-target-cursor"]);
+    await expect(
+      database.db
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, "scope-target-two")),
+    ).resolves.toHaveLength(1);
+    await expect(
+      database.db
+        .select({ cursor: financeAccounts.syncCursor })
+        .from(financeAccounts)
+        .where(inArray(financeAccounts.id, [targetAccount.id, unrelatedAccount.id]))
+        .orderBy(financeAccounts.id),
+    ).resolves.toEqual([{ cursor: "scope-all-cursor" }, { cursor: "scope-all-cursor" }]);
+    await expect(
+      database.db
+        .select({ action: auditEvents.action, entityId: auditEvents.entityId })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "finance.sync_health_initialized")),
+    ).resolves.toHaveLength(5);
+    await expect(
+      database.db
+        .select({ after: auditEvents.after, entityId: auditEvents.entityId })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "finance.sync_health_initialized"),
+            eq(auditEvents.requestId, allContext.requestId),
+          ),
+        )
+        .orderBy(auditEvents.entityId),
+    ).resolves.toEqual(
+      [unrelatedAccount.id, scopedManualAccount.id].sort().map((accountId) => ({
+        after: expect.objectContaining({
+          maintenance: allContext.maintenance,
+          source: expect.objectContaining({ accountId, sourceType: "finance_account" }),
+        }),
+        entityId: accountId,
+      })),
+    );
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ leaseClaimId: null, leaseExpiresAt: null, status: "completed" })
+      .where(eq(workspaceMaintenanceRuns.id, allRunId));
+    const replayRunId = crypto.randomUUID();
+    const replayClaimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: replayRunId,
+      leaseClaimId: replayClaimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId,
+    });
+    const replayContext = {
+      ...allContext,
+      maintenance: { ...allContext.maintenance, runId: replayRunId },
+      maintenanceClaim: { claimId: replayClaimId, runId: replayRunId },
+      requestId: `maintenance:${replayRunId}:synchronize`,
+    };
+    await expect(
+      service.syncDueAccountsForUser(
+        userId,
+        { type: "all_outstanding" },
+        replayContext,
+        async () => {},
+      ),
+    ).resolves.toEqual({ attempted: 0, failed: 0, recovered: 0, skipped: 0, succeeded: 0 });
+    expect(observedSyncCursors).toHaveLength(3);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "finance.sync_health_initialized")),
+    ).resolves.toHaveLength(5);
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ leaseClaimId: null, leaseExpiresAt: null, status: "completed" })
+      .where(eq(workspaceMaintenanceRuns.id, replayRunId));
     await database.db
       .update(financeAccounts)
       .set({ nextSyncAt: now, syncState: "stale" })
@@ -4832,7 +5016,7 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual(
       [
         { id: targetAccount.id, syncState: "retrying" },
-        { id: unrelatedAccount.id, syncState: "stale" },
+        { id: unrelatedAccount.id, syncState: "current" },
       ].toSorted((left, right) => left.id.localeCompare(right.id)),
     );
 
@@ -4862,6 +5046,168 @@ describe.sequential("finance service", () => {
         .from(financeAlerts)
         .where(eq(financeAlerts.incomeStreamId, stream.id)),
     ).resolves.toEqual([]);
+  });
+
+  it("uses one oldest item cursor and one item claim across scoped Plaid runtimes", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Canonical Plaid item cursor",
+      email: `canonical-item-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const observedCursors: unknown[] = [];
+    let releaseProvider!: () => void;
+    const providerRelease = new Promise<void>((resolvePromise) => {
+      releaseProvider = resolvePromise;
+    });
+    let providerStarted!: () => void;
+    const providerStart = new Promise<void>((resolvePromise) => {
+      providerStarted = resolvePromise;
+    });
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async (input, init) => {
+        const path = new URL(String(input)).pathname;
+        if (path === "/item/public_token/exchange") {
+          return Response.json({ access_token: "canonical-access", item_id: "canonical-item" });
+        }
+        if (path === "/accounts/get") {
+          return Response.json({
+            accounts: [
+              {
+                account_id: "canonical-account-one",
+                balances: { current: 100, iso_currency_code: "USD" },
+                name: "Canonical one",
+                official_name: null,
+              },
+              {
+                account_id: "canonical-account-two",
+                balances: { current: 200, iso_currency_code: "USD" },
+                name: "Canonical two",
+                official_name: null,
+              },
+            ],
+          });
+        }
+        if (path === "/transactions/sync") {
+          const body = JSON.parse(String(init?.body)) as { cursor?: unknown };
+          observedCursors.push(body.cursor ?? null);
+          providerStarted();
+          await providerRelease;
+          return Response.json({
+            added: [
+              {
+                account_id: "canonical-account-two",
+                amount: 31,
+                date: "2026-07-19",
+                iso_currency_code: "USD",
+                merchant_name: "Sibling item transaction",
+                name: "SIBLING ITEM TRANSACTION",
+                pending: false,
+                personal_finance_category: null,
+                transaction_id: "canonical-sibling-transaction",
+              },
+            ],
+            has_more: false,
+            modified: [],
+            next_cursor: "canonical-final",
+            removed: [],
+          });
+        }
+        return Response.json({}, { status: 404 });
+      },
+      secret: "secret",
+    });
+    const firstRuntime = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+    });
+    const secondRuntime = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+    });
+    const connected = await firstRuntime.exchangePlaidToken(
+      { institution: "Canonical Bank", publicToken: "canonical-token" },
+      { principal: financePrincipal(userId), requestId: "canonical-connect" },
+    );
+    const ordered = [...connected].sort((left, right) => left.id.localeCompare(right.id));
+    const target = ordered[0];
+    const oldest = ordered[1];
+    const providerSibling = connected.find((account) => account.name === "Canonical two");
+    if (!target || !oldest || !providerSibling)
+      throw new Error("Canonical Plaid siblings were not saved.");
+    await database.db
+      .update(financeAccounts)
+      .set({
+        lastSyncedAt: new Date("2026-07-19T11:00:00.000Z"),
+        nextSyncAt: now,
+        syncCursor: "newer-cursor",
+        syncState: "stale",
+      })
+      .where(eq(financeAccounts.id, target.id));
+    await database.db
+      .update(financeAccounts)
+      .set({
+        lastSyncedAt: new Date("2026-07-18T11:00:00.000Z"),
+        nextSyncAt: now,
+        syncCursor: "oldest-cursor",
+        syncState: "stale",
+      })
+      .where(eq(financeAccounts.id, oldest.id));
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    const scope = { type: "target", entityType: "finance_account", id: target.id } as const;
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope,
+      status: "running",
+      userId,
+    });
+    const context = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:synchronize",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(userId),
+      requestId: `maintenance:${runId}:synchronize`,
+    };
+
+    const first = firstRuntime.syncPlaidAccount(target.id, context, async () => {}, scope);
+    await providerStart;
+    await expect(
+      secondRuntime.syncPlaidAccount(oldest.id, context, async () => {}, scope),
+    ).rejects.toThrow("already synchronizing");
+    releaseProvider();
+    await expect(first).resolves.toEqual({ changed: 1 });
+
+    expect(observedCursors).toEqual(["oldest-cursor"]);
+    await expect(
+      database.db
+        .select({ cursor: financeAccounts.syncCursor })
+        .from(financeAccounts)
+        .where(inArray(financeAccounts.id, [target.id, oldest.id]))
+        .orderBy(financeAccounts.id),
+    ).resolves.toEqual([{ cursor: "canonical-final" }, { cursor: "canonical-final" }]);
+    await expect(
+      database.db
+        .select({ accountId: financeTransactions.accountId })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, "canonical-sibling-transaction")),
+    ).resolves.toEqual([{ accountId: providerSibling.id }]);
   });
 
   it("fences reconciliation mutations when another runtime takes the maintenance run", async () => {
@@ -6018,6 +6364,7 @@ describe.sequential("finance service", () => {
       categorizations: 1,
       duplicateActions: 0,
       heuristicTransfersRepaired: 0,
+      questionStepCreations: 0,
       questions: attributedQuestionCount,
       transfers: 2,
     });
@@ -6054,6 +6401,7 @@ describe.sequential("finance service", () => {
       categorizations: 1,
       duplicateActions: 3,
       heuristicTransfersRepaired: 0,
+      questionStepCreations: 0,
       questions: attributedQuestionCount,
       transfers: 2,
     });

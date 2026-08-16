@@ -149,8 +149,26 @@ describe("pagination, errors, and OpenAPI", () => {
       },
     });
     expect(document.paths["/v1/finances/maintenance/{id}"].get.responses).toMatchObject({
-      200: { description: "Owned Finance maintenance run" },
+      200: {
+        content: {
+          "application/json": {
+            schema: { $ref: "#/components/schemas/FinanceMaintenanceRunResponse" },
+          },
+        },
+        description: "Owned Finance maintenance run",
+      },
       404: { description: "Finance maintenance run not found for this user" },
+    });
+    expect(document.components.schemas.FinanceMaintenanceResult).toMatchObject({
+      properties: {
+        health: {
+          properties: {
+            applicability: { enum: ["applied", "skipped_scoped"], type: "string" },
+            refreshed: { type: "boolean" },
+          },
+          required: ["applicability", "confidence", "refreshed"],
+        },
+      },
     });
     expect(document.paths["/v1/calendars/commitments/preview"]).toEqual({
       post: {

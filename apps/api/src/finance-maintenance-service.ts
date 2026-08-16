@@ -93,6 +93,7 @@ export type FinanceMaintenanceOperations = {
     categorizations: number;
     duplicateActions: number;
     heuristicTransfersRepaired?: number;
+    questionStepCreations?: number;
     questions?: number;
     transfers: number;
   }>;
@@ -231,8 +232,8 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
     return observed;
   }
 
-  async function resultFor(runId: string, userId: string, verificationStatus: FinanceStatus) {
-    const records = await maintenance.listStepRecords(runId);
+  async function resultFor(run: FinanceMaintenanceRun, verificationStatus: FinanceStatus) {
+    const records = await maintenance.listStepRecords(run.id);
     const reconciliation = records.find((record) => record.step === "reconcile")?.result as
       | { transfers?: number }
       | undefined;
@@ -242,8 +243,15 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
     const questions = records.find((record) => record.step === "questions")?.result as
       | { created?: number; total?: number }
       | undefined;
+    const health = records.find((record) => record.step === "health")?.result as
+      | {
+          applicability?: "applied" | "skipped_scoped";
+          confidence?: FinanceStatus["details"]["health"]["confidence"];
+          refreshed?: boolean;
+        }
+      | undefined;
     const durableEffects = finances.summarizeMaintenanceEffectsForRun
-      ? await finances.summarizeMaintenanceEffectsForRun(userId, runId)
+      ? await finances.summarizeMaintenanceEffectsForRun(run.userId, run.id)
       : null;
     return {
       applied: {
@@ -251,11 +259,18 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
         transfers: durableEffects?.transfers ?? reconciliation?.transfers ?? 0,
       },
       asOf: now().toISOString(),
+      health: {
+        applicability:
+          health?.applicability ??
+          (run.scope.type === "all_outstanding" ? "applied" : "skipped_scoped"),
+        confidence: health?.confidence ?? verificationStatus.details.health.confidence,
+        refreshed: health?.refreshed ?? false,
+      },
       questions: {
         created:
           questions === undefined
-            ? (durableEffects?.questions ?? 0)
-            : Math.max(questions.created ?? 0, durableEffects?.questions ?? 0),
+            ? (durableEffects?.questionStepCreations ?? durableEffects?.questions ?? 0)
+            : (questions.created ?? 0),
         total: questions?.total ?? verificationStatus.details.review.total,
       },
       verification: {
@@ -302,7 +317,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
             safeMessage: "Finance source freshness must recover before verification can settle.",
           });
         }
-        const result = await resultFor(runId, run.userId, observed);
+        const result = await resultFor(run, observed);
         return maintenance.settle({
           claimId,
           result,
@@ -346,7 +361,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           if (observed.freshness.blockers.length > 0 || observed.state === "blocked") {
             return maintenance.settle({
               claimId,
-              result: await resultFor(runId, run.userId, observed),
+              result: await resultFor(run, observed),
               runId,
               status: "blocked",
             });
@@ -497,10 +512,16 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
               await maintenance.renewClaim({ claimId, runId });
             },
           );
+          const questionEffects = finances.summarizeMaintenanceEffectsForRun
+            ? await finances.summarizeMaintenanceEffectsForRun(run.userId, run.id)
+            : null;
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
-            result: refreshed,
+            result: {
+              ...refreshed,
+              created: questionEffects?.questionStepCreations ?? refreshed.created,
+            },
             runId,
             step,
           });
@@ -533,7 +554,11 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
-            result: { confidence: observed.details.health.confidence, ...refreshed },
+            result: {
+              applicability: run.scope.type === "all_outstanding" ? "applied" : "skipped_scoped",
+              confidence: observed.details.health.confidence,
+              ...refreshed,
+            },
             runId,
             step,
           });
@@ -545,7 +570,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
         if (observed.freshness.blockers.length > 0 || observed.state === "blocked") {
           return maintenance.settle({
             claimId,
-            result: await resultFor(runId, run.userId, observed),
+            result: await resultFor(run, observed),
             runId,
             status: "blocked",
           });
@@ -560,7 +585,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           runId,
           step,
         });
-        const result = await resultFor(runId, run.userId, observed);
+        const result = await resultFor(run, observed);
         const questionCount = result.questions.total;
         return maintenance.settle({
           claimId,

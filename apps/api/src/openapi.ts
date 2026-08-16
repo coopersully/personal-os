@@ -9,11 +9,81 @@ export function createOpenApiDocument(apiBaseUrl: string) {
           },
           type: "object",
         },
+        FinanceMaintenanceResult: {
+          properties: {
+            applied: {
+              properties: {
+                categorizations: { minimum: 0, type: "integer" },
+                transfers: { minimum: 0, type: "integer" },
+              },
+              required: ["categorizations", "transfers"],
+              type: "object",
+            },
+            asOf: { format: "date-time", type: "string" },
+            health: {
+              properties: {
+                applicability: { enum: ["applied", "skipped_scoped"], type: "string" },
+                confidence: {
+                  enum: ["insufficient", "provisional", "reliable"],
+                  type: "string",
+                },
+                refreshed: { type: "boolean" },
+              },
+              required: ["applicability", "confidence", "refreshed"],
+              type: "object",
+            },
+            questions: {
+              properties: {
+                created: { minimum: 0, type: "integer" },
+                total: { minimum: 0, type: "integer" },
+              },
+              required: ["created", "total"],
+              type: "object",
+            },
+            verification: {
+              properties: {
+                duplicateActions: { minimum: 0, type: "integer" },
+                freshness: {
+                  enum: ["current", "stale", "partial", "unavailable"],
+                  type: "string",
+                },
+                state: {
+                  enum: ["clean", "needs_work", "needs_input", "blocked"],
+                  type: "string",
+                },
+              },
+              required: ["duplicateActions", "freshness", "state"],
+              type: "object",
+            },
+          },
+          required: ["applied", "asOf", "health", "questions", "verification"],
+          type: "object",
+        },
+        FinanceMaintenanceRunResponse: {
+          properties: { run: { $ref: "#/components/schemas/MaintenanceRun" } },
+          required: ["run"],
+          type: "object",
+        },
+        MaintenanceFailureResult: {
+          properties: {
+            code: { type: "string" },
+            message: { type: "string" },
+          },
+          required: ["code", "message"],
+          type: "object",
+        },
         MaintenanceRun: {
           properties: {
             id: { format: "uuid", type: "string" },
             rulebookVersion: { type: "string" },
             scope: { $ref: "#/components/schemas/MaintenanceScope" },
+            settledResult: {
+              anyOf: [
+                { $ref: "#/components/schemas/FinanceMaintenanceResult" },
+                { $ref: "#/components/schemas/MaintenanceFailureResult" },
+                { type: "null" },
+              ],
+            },
             status: {
               enum: [
                 "queued",
@@ -28,7 +98,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
               type: "string",
             },
           },
-          required: ["id", "rulebookVersion", "scope", "status"],
+          required: ["id", "rulebookVersion", "scope", "settledResult", "status"],
           type: "object",
         },
         MaintenanceScope: {
@@ -181,7 +251,14 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             required: false,
           },
           responses: {
-            202: { description: "Finance maintenance run durably accepted for background work" },
+            202: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceMaintenanceRunResponse" },
+                },
+              },
+              description: "Finance maintenance run durably accepted for background work",
+            },
             403: { description: "The caller lacks finances:write" },
             409: { description: "A conflicting Finance maintenance run or rulebook is active" },
           },
@@ -194,7 +271,14 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             { in: "path", name: "id", required: true, schema: { format: "uuid", type: "string" } },
           ],
           responses: {
-            200: { description: "Owned Finance maintenance run" },
+            200: {
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/FinanceMaintenanceRunResponse" },
+                },
+              },
+              description: "Owned Finance maintenance run",
+            },
             403: { description: "The caller lacks finances:read" },
             404: { description: "Finance maintenance run not found for this user" },
           },

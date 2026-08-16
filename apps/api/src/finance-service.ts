@@ -1436,6 +1436,17 @@ export function createFinanceService({
       sourceType: "finance_income_stream",
     };
   }
+  function financeAccountSourceValue(
+    financeAccount: typeof financeAccounts.$inferSelect,
+  ): MaterialSourceReference {
+    return {
+      accountId: financeAccount.id,
+      provider: financeAccount.provider === "manual" ? "local" : financeAccount.provider,
+      remoteId: financeAccount.id,
+      revision: financeAccount.updatedAt.toISOString(),
+      sourceType: "finance_account",
+    };
+  }
   function financeRecurringObligationSourceValue(
     obligation: typeof financeRecurringObligations.$inferSelect,
   ): MaterialSourceReference {
@@ -3447,23 +3458,43 @@ export function createFinanceService({
                   eq(financeAccounts.providerItemId, before.providerItemId),
                 )
               : eq(financeAccounts.id, before.id),
-          );
-        const scopedItemAccounts = targetAccountId
-          ? itemAccounts.filter((row) => row.id === targetAccountId)
-          : itemAccounts;
-        const syncAccount = scopedItemAccounts.find((row) => row.encryptedCredentials) ?? before;
+          )
+          .orderBy(asc(financeAccounts.id));
+        const canonicalItemAccounts = [...itemAccounts].sort((left, right) => {
+          if ((left.syncCursor === null) !== (right.syncCursor === null)) {
+            return left.syncCursor === null ? -1 : 1;
+          }
+          const lastSyncDifference =
+            (left.lastSyncedAt?.getTime() ?? Number.NEGATIVE_INFINITY) -
+            (right.lastSyncedAt?.getTime() ?? Number.NEGATIVE_INFINITY);
+          return lastSyncDifference === 0 ? left.id.localeCompare(right.id) : lastSyncDifference;
+        });
+        const canonicalCursorAccount = canonicalItemAccounts[0] ?? before;
+        const credentialAccount = canonicalCursorAccount.encryptedCredentials
+          ? canonicalCursorAccount
+          : (canonicalItemAccounts.find((row) => row.encryptedCredentials) ?? before);
         const credentials = decryptJson<PlaidCredentials>(
-          syncAccount.encryptedCredentials as EncryptedCredentials,
+          credentialAccount.encryptedCredentials as EncryptedCredentials,
           encryptionKey,
         );
         const accountsByProviderId = new Map(
-          scopedItemAccounts.flatMap((row) =>
+          itemAccounts.flatMap((row) =>
             row.providerAccountId ? [[row.providerAccountId, row]] : [],
           ),
         );
-        const itemAccountIds = scopedItemAccounts.map((row) => row.id).sort();
-        const lockedItemAccountIds = claimItemAccounts.map((row) => row.id).sort();
-        const persistedCursor = syncAccount.syncCursor;
+        const itemAccountIds = itemAccounts.map((row) => row.id).sort();
+        const lockedItemAccountIds = [...itemAccountIds];
+        const expectedItemState = new Map(
+          itemAccounts.map((row) => [
+            row.id,
+            {
+              encryptedCredentials: row.encryptedCredentials,
+              providerItemId: row.providerItemId,
+              syncCursor: row.syncCursor,
+            },
+          ]),
+        );
+        const persistedCursor = canonicalCursorAccount.syncCursor;
         let cursor = persistedCursor;
         let hasMore = true;
         let changed = 0;
@@ -3530,9 +3561,6 @@ export function createFinanceService({
               .where(inArray(financeAccounts.id, lockedItemAccountIds))
               .orderBy(financeAccounts.id)
               .for("update");
-            const currentSyncAccount = lockedItemAccounts.find(
-              (accountRow) => accountRow.id === syncAccount.id,
-            );
             const currentClaimedAccount = lockedItemAccounts.find(
               (accountRow) => accountRow.id === claimedAccount.id,
             );
@@ -3552,11 +3580,16 @@ export function createFinanceService({
               !activeClaim ||
               currentClaimedAccount.syncClaimId !== syncClaimId ||
               currentClaimedAccount.syncClaimExpiresAt === null ||
-              !currentSyncAccount ||
-              currentSyncAccount.providerItemId !== syncAccount.providerItemId ||
-              currentSyncAccount.syncCursor !== persistedCursor ||
-              JSON.stringify(currentSyncAccount.encryptedCredentials) !==
-                JSON.stringify(syncAccount.encryptedCredentials)
+              lockedItemAccounts.some((accountRow) => {
+                const expected = expectedItemState.get(accountRow.id);
+                return (
+                  !expected ||
+                  accountRow.providerItemId !== expected.providerItemId ||
+                  accountRow.syncCursor !== expected.syncCursor ||
+                  JSON.stringify(accountRow.encryptedCredentials) !==
+                    JSON.stringify(expected.encryptedCredentials)
+                );
+              })
             ) {
               throw new AppError(
                 "conflict",
@@ -3808,7 +3841,7 @@ export function createFinanceService({
             .where(inArray(financeAccounts.id, lockedItemAccountIds))
             .orderBy(financeAccounts.id)
             .for("update");
-          const claimedAccountIsScoped = itemAccountIds.includes(claimedAccount.id);
+          const claimedAccountIsScoped = syncHealthAccountIds.includes(claimedAccount.id);
           const [settledAccount] = await tx
             .update(financeAccounts)
             .set(
@@ -3843,7 +3876,7 @@ export function createFinanceService({
               "The Finance synchronization claim was superseded before completion.",
             );
           }
-          const siblingAccountIds = itemAccountIds.filter(
+          const siblingAccountIds = syncHealthAccountIds.filter(
             (accountId) => accountId !== claimedAccount.id,
           );
           if (siblingAccountIds.length > 0) {
@@ -4143,18 +4176,20 @@ export function createFinanceService({
       await db.transaction(async (tx) => {
         await assertMaintenanceClaim(tx, context);
         const rows = await tx
-          .select({ id: financeAccounts.id, provider: financeAccounts.provider })
+          .select()
           .from(financeAccounts)
           .where(
             and(
               eq(financeAccounts.userId, userId),
               targetAccountId ? eq(financeAccounts.id, targetAccountId) : undefined,
               or(
-                and(
-                  eq(financeAccounts.provider, "manual"),
-                  eq(financeAccounts.syncState, "stale"),
-                  isNull(financeAccounts.nextSyncAt),
-                ),
+                scope.type === "window"
+                  ? undefined
+                  : and(
+                      eq(financeAccounts.provider, "manual"),
+                      eq(financeAccounts.syncState, "stale"),
+                      isNull(financeAccounts.nextSyncAt),
+                    ),
                 and(
                   eq(financeAccounts.provider, "plaid"),
                   eq(financeAccounts.status, "connected"),
@@ -4168,14 +4203,41 @@ export function createFinanceService({
           .limit(financeSyncBatchLimit)
           .for("update", { skipLocked: true });
         for (const row of rows) {
-          await tx
+          if (!context?.maintenance) {
+            throw new AppError(
+              "invalid_request",
+              "Finance maintenance attribution is required to initialize synchronization health.",
+            );
+          }
+          const [updated] = await tx
             .update(financeAccounts)
             .set(
               row.provider === "manual"
                 ? { syncState: "current", updatedAt: initializationAt }
                 : { nextSyncAt: initializationAt, updatedAt: initializationAt },
             )
-            .where(eq(financeAccounts.id, row.id));
+            .where(eq(financeAccounts.id, row.id))
+            .returning();
+          if (!updated) continue;
+          const source = financeAccountSourceValue(row);
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.sync_health_initialized",
+              after: {
+                nextSyncAt: updated.nextSyncAt?.toISOString() ?? null,
+                syncState: updated.syncState,
+                ...maintenanceAuditAttribution(context, source),
+              },
+              before: {
+                nextSyncAt: row.nextSyncAt?.toISOString() ?? null,
+                syncState: row.syncState,
+                updatedAt: row.updatedAt.toISOString(),
+              },
+              entityId: row.id,
+              entityType: "finance_account",
+              ...context,
+            }),
+          );
         }
       });
       await onProgress?.();
@@ -4401,6 +4463,7 @@ export function createFinanceService({
           action: auditEvents.action,
           before: auditEvents.before,
           entityId: auditEvents.entityId,
+          requestId: auditEvents.requestId,
         })
         .from(auditEvents)
         .where(
@@ -4424,6 +4487,16 @@ export function createFinanceService({
         heuristicTransfersRepaired: distinctRows.filter(
           (row) => row.action === "finance.transfer_heuristic_repaired",
         ).length,
+        questionStepCreations: new Set(
+          rows
+            .filter(
+              (row) =>
+                row.action === "finance.review_queued" &&
+                row.before === null &&
+                row.requestId === `maintenance:${runId}:questions`,
+            )
+            .map((row) => row.entityId),
+        ).size,
         questions: distinctRows.filter(
           (row) => row.action === "finance.review_queued" && row.before === null,
         ).length,

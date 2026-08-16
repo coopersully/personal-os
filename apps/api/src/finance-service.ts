@@ -145,6 +145,7 @@ export type FinanceSyncHealthInitializationResult = {
 };
 
 const financeSyncClaimMs = 5 * 60_000;
+const financeMaintenanceClaimMs = 2 * 60_000;
 const financeSyncIntervalMs = 6 * 60 * 60_000;
 const financeSyncBatchLimit = 25;
 const financeSyncConcurrency = 3;
@@ -560,11 +561,35 @@ export function createFinanceService({
   plaid,
 }: Options) {
   async function assertMaintenanceClaim(
-    executor: FinanceReadExecutor,
+    executor: FinanceWriteExecutor,
     context?: MutationContext,
   ): Promise<void> {
     if (!context?.maintenanceClaim) return;
     const [current] = await executor
+      .update(workspaceMaintenanceRuns)
+      .set({
+        leaseExpiresAt: sql`NOW() + ${financeMaintenanceClaimMs} * INTERVAL '1 millisecond'`,
+        updatedAt: sql`NOW()`,
+      })
+      .where(
+        and(
+          eq(workspaceMaintenanceRuns.id, context.maintenanceClaim.runId),
+          eq(workspaceMaintenanceRuns.userId, context.principal.userId),
+          eq(workspaceMaintenanceRuns.domain, "finances"),
+          eq(workspaceMaintenanceRuns.status, "running"),
+          eq(workspaceMaintenanceRuns.leaseClaimId, context.maintenanceClaim.claimId),
+          sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+        ),
+      )
+      .returning({ id: workspaceMaintenanceRuns.id });
+    if (!current) {
+      throw new AppError("conflict", "The Finance maintenance claim is no longer current.");
+    }
+  }
+
+  async function maintenanceClaimIsCurrent(context?: MutationContext): Promise<boolean> {
+    if (!context?.maintenanceClaim) return true;
+    const [current] = await db
       .select({ id: workspaceMaintenanceRuns.id })
       .from(workspaceMaintenanceRuns)
       .where(
@@ -577,11 +602,8 @@ export function createFinanceService({
           sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
         ),
       )
-      .for("update")
       .limit(1);
-    if (!current) {
-      throw new AppError("conflict", "The Finance maintenance claim is no longer current.");
-    }
+    return current !== undefined;
   }
 
   async function seedCategories(
@@ -876,8 +898,6 @@ export function createFinanceService({
     await assertMaintenanceScopeOwned(userId, scope);
     return db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, context);
-      const transfers = await categoryForName(userId, transferCategory, tx);
-      const rent = await categoryForName(userId, rentCategory, tx);
       // Account locks serialize reconciliation runs for one user. Transaction
       // locks then ensure decisions are evaluated from current rows and cannot
       // be overwritten between matching and persistence.
@@ -887,6 +907,8 @@ export function createFinanceService({
         .where(eq(financeAccounts.userId, userId))
         .orderBy(financeAccounts.id)
         .for("update");
+      const transfers = await categoryForName(userId, transferCategory, tx);
+      const rent = await categoryForName(userId, rentCategory, tx);
       const accountById = new Map(lockedAccounts.map((account) => [account.id, account]));
       const sourceFor = (item: typeof financeTransactions.$inferSelect) => {
         const sourceAccount = accountById.get(item.accountId);
@@ -1157,6 +1179,147 @@ export function createFinanceService({
         }
       }
       return { paired: pairedIds.size / 2, transfers: pairedIds.size };
+    });
+  }
+  async function repairHeuristicTransfers(
+    userId: string,
+    scope: MaintenanceScope,
+    cursor: string | undefined,
+    context: MutationContext,
+    onProgress?: FinanceSyncProgress,
+  ) {
+    const sliceLimit = 100;
+    await onProgress?.();
+    await assertMaintenanceScopeOwned(userId, scope);
+    const targetReviewTransactionId =
+      scope.type === "target" && scope.entityType === "finance_review_case"
+        ? (
+            await db
+              .select({ transactionId: financeReviewCases.transactionId })
+              .from(financeReviewCases)
+              .where(
+                and(eq(financeReviewCases.id, scope.id), eq(financeReviewCases.userId, userId)),
+              )
+              .limit(1)
+          )[0]?.transactionId
+        : undefined;
+    return db.transaction(async (tx) => {
+      await assertMaintenanceClaim(tx, context);
+      const lockedAccounts = await tx
+        .select()
+        .from(financeAccounts)
+        .where(eq(financeAccounts.userId, userId))
+        .orderBy(financeAccounts.id)
+        .for("update");
+      const accountById = new Map(lockedAccounts.map((account) => [account.id, account]));
+      const plaidAccountIds = lockedAccounts
+        .filter((account) => account.provider === "plaid")
+        .map((account) => account.id);
+      if (plaidAccountIds.length === 0) {
+        return { complete: true, inspected: 0, nextCursor: null, repaired: 0 };
+      }
+      const scopeCondition =
+        scope.type === "window"
+          ? and(
+              gte(financeTransactions.transactionDate, scope.start),
+              lte(financeTransactions.transactionDate, scope.end),
+            )
+          : scope.type === "target" && scope.entityType === "finance_account"
+            ? eq(financeTransactions.accountId, scope.id)
+            : scope.type === "target" && scope.entityType === "finance_transaction"
+              ? eq(financeTransactions.id, scope.id)
+              : scope.type === "target" && scope.entityType === "finance_review_case"
+                ? eq(financeTransactions.id, targetReviewTransactionId as string)
+                : undefined;
+      const rows = await tx
+        .select()
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.userId, userId),
+            inArray(financeTransactions.accountId, plaidAccountIds),
+            cursor ? gt(financeTransactions.id, cursor) : undefined,
+            scopeCondition,
+            sql`${financeTransactions.providerDirection} IS NOT NULL`,
+            isNull(financeTransactions.transferGroupId),
+            or(
+              eq(financeTransactions.direction, "transfer"),
+              eq(financeTransactions.reconciliationStatus, "confirmed"),
+            ),
+            or(
+              eq(financeTransactions.providerCategory, "TRANSFER_IN"),
+              eq(financeTransactions.providerCategory, "TRANSFER_OUT"),
+              eq(financeTransactions.providerCategoryDetailed, "TRANSFER_IN"),
+              eq(financeTransactions.providerCategoryDetailed, "TRANSFER_OUT"),
+              sql`${financeTransactions.merchant} ~* ${String.raw`\y(?:to|from|2x)\y.*\yvault\y`}`,
+            ),
+            sql`(${financeTransactions.categoryDecidedAt} IS NULL OR ${financeTransactions.categorySource} IS NULL OR ${financeTransactions.categorySource} NOT IN ('user', 'agent'))`,
+          ),
+        )
+        .orderBy(financeTransactions.id)
+        .for("update")
+        .limit(sliceLimit);
+      let repaired = 0;
+      for (const [index, item] of rows.entries()) {
+        if (index > 0 && index % 25 === 0) await assertMaintenanceClaim(tx, context);
+        // The fenced query above selects only rows from the locked Plaid
+        // account set with a non-null provider direction and the exact legacy
+        // heuristic signature. Do not maintain a second eligibility predicate
+        // that can drift from the authoritative SQL selection.
+        const account = accountById.get(item.accountId) as typeof financeAccounts.$inferSelect;
+        const updated = requireDatabaseRecord(
+          (
+            await tx
+              .update(financeTransactions)
+              .set({
+                direction: item.providerDirection as "expense" | "income",
+                needsReview: true,
+                reconciliationStatus: "candidate",
+                transferGroupId: null,
+                updatedAt: now(),
+              })
+              .where(
+                and(eq(financeTransactions.id, item.id), eq(financeTransactions.userId, userId)),
+              )
+              .returning()
+          )[0],
+          "The legacy transfer changed before it could be repaired.",
+        );
+        const source = financeTransactionSourceValue(account, item);
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.transfer_heuristic_repaired",
+            after: {
+              ...transactionAuditSnapshot(transaction(updated)),
+              ...maintenanceAuditAttribution(context, source),
+            },
+            before: transactionAuditSnapshot(transaction(item)),
+            entityId: item.id,
+            entityType: "finance_transaction",
+            ...context,
+          }),
+        );
+        await putInReview(
+          item.id,
+          userId,
+          "possible_transfer",
+          null,
+          "A previous provider or merchant heuristic marked this as a transfer without authoritative matching evidence.",
+          tx,
+          context,
+          source,
+        );
+        repaired += 1;
+      }
+      const complete = rows.length < sliceLimit;
+      return {
+        complete,
+        inspected: rows.length,
+        nextCursor: complete
+          ? null
+          : (rows[sliceLimit - 1] as typeof financeTransactions.$inferSelect).id,
+        repaired,
+      };
     });
   }
   function getPlaid() {
@@ -1960,6 +2123,8 @@ export function createFinanceService({
       userId: string;
     },
     executor: FinanceWriteExecutor = db,
+    context?: MutationContext,
+    source?: MaterialSourceReference,
   ) {
     const existing = await executor
       .select({ id: financeAlerts.id })
@@ -1979,14 +2144,38 @@ export function createFinanceService({
       )
       .limit(1);
     if (existing.length) return;
-    await executor.insert(financeAlerts).values({
-      ...input,
-      incomeStreamId: input.incomeStreamId ?? null,
-      recurringObligationId: input.recurringObligationId ?? null,
-      transactionId: input.transactionId ?? null,
-    });
+    const [saved] = await executor
+      .insert(financeAlerts)
+      .values({
+        ...input,
+        incomeStreamId: input.incomeStreamId ?? null,
+        recurringObligationId: input.recurringObligationId ?? null,
+        transactionId: input.transactionId ?? null,
+      })
+      .returning();
+    if (saved && context?.maintenance && source) {
+      await executor.insert(auditEvents).values(
+        auditValues({
+          action: "finance.alert_queued",
+          after: {
+            severity: saved.severity,
+            status: saved.status,
+            type: saved.type,
+            ...maintenanceAuditAttribution(context, source),
+          },
+          before: null,
+          entityId: saved.id,
+          entityType: "finance_alert",
+          ...context,
+        }),
+      );
+    }
   }
-  async function refreshCashflowIntelligence(userId: string, executor: FinanceWriteExecutor = db) {
+  async function refreshCashflowIntelligence(
+    userId: string,
+    executor: FinanceWriteExecutor = db,
+    context?: MutationContext,
+  ) {
     const transactions = await executor
       .select()
       .from(financeTransactions)
@@ -2034,14 +2223,52 @@ export function createFinanceService({
           payer,
           source: "inferred" as const,
           status: confidence >= 9500 ? ("active" as const) : ("needs_review" as const),
-          updatedAt: now(),
         };
-        if (existing[0])
-          await executor
-            .update(financeIncomeStreams)
-            .set(values)
-            .where(eq(financeIncomeStreams.id, existing[0].id));
-        else await executor.insert(financeIncomeStreams).values({ ...values, userId });
+        const unchanged =
+          existing[0] &&
+          Object.entries(values).every(
+            ([key, value]) => existing[0]?.[key as keyof typeof values] === value,
+          );
+        const [saved] = existing[0]
+          ? unchanged
+            ? [existing[0]]
+            : await executor
+                .update(financeIncomeStreams)
+                .set({ ...values, updatedAt: now() })
+                .where(eq(financeIncomeStreams.id, existing[0].id))
+                .returning()
+          : await executor
+              .insert(financeIncomeStreams)
+              .values({ ...values, userId })
+              .returning();
+        if (saved && !unchanged && context?.maintenance) {
+          const source = await financeTransactionSource(userId, last, executor);
+          await executor.insert(auditEvents).values(
+            auditValues({
+              action: "finance.income_stream_refreshed",
+              after: {
+                accountId: saved.accountId,
+                cadence: saved.cadence,
+                expectedAmount: saved.expectedAmount,
+                source: saved.source,
+                status: saved.status,
+                ...maintenanceAuditAttribution(context, source),
+              },
+              before: existing[0]
+                ? {
+                    accountId: existing[0].accountId,
+                    cadence: existing[0].cadence,
+                    expectedAmount: existing[0].expectedAmount,
+                    source: existing[0].source,
+                    status: existing[0].status,
+                  }
+                : null,
+              entityId: saved.id,
+              entityType: "finance_income_stream",
+              ...context,
+            }),
+          );
+        }
       }
       if (
         existing[0]?.status === "active" &&
@@ -2063,6 +2290,8 @@ export function createFinanceService({
             userId,
           },
           executor,
+          context,
+          await financeTransactionSource(userId, last, executor),
         );
     }
     for (const [merchant, rows] of expensesByMerchant) {
@@ -2113,14 +2342,52 @@ export function createFinanceService({
             kind === "subscription" && highConfidence
               ? ("active" as const)
               : ("needs_review" as const),
-          updatedAt: now(),
         };
-        if (existing[0])
-          await executor
-            .update(financeRecurringObligations)
-            .set(values)
-            .where(eq(financeRecurringObligations.id, existing[0].id));
-        else await executor.insert(financeRecurringObligations).values({ ...values, userId });
+        const unchanged =
+          existing[0] &&
+          Object.entries(values).every(
+            ([key, value]) => existing[0]?.[key as keyof typeof values] === value,
+          );
+        const [saved] = existing[0]
+          ? unchanged
+            ? [existing[0]]
+            : await executor
+                .update(financeRecurringObligations)
+                .set({ ...values, updatedAt: now() })
+                .where(eq(financeRecurringObligations.id, existing[0].id))
+                .returning()
+          : await executor
+              .insert(financeRecurringObligations)
+              .values({ ...values, userId })
+              .returning();
+        if (saved && !unchanged && context?.maintenance) {
+          const source = await financeTransactionSource(userId, last, executor);
+          await executor.insert(auditEvents).values(
+            auditValues({
+              action: "finance.recurring_refreshed",
+              after: {
+                accountId: saved.accountId,
+                cadence: saved.cadence,
+                expectedAmount: saved.expectedAmount,
+                source: saved.source,
+                status: saved.status,
+                ...maintenanceAuditAttribution(context, source),
+              },
+              before: existing[0]
+                ? {
+                    accountId: existing[0].accountId,
+                    cadence: existing[0].cadence,
+                    expectedAmount: existing[0].expectedAmount,
+                    source: existing[0].source,
+                    status: existing[0].status,
+                  }
+                : null,
+              entityId: saved.id,
+              entityType: "finance_recurring_obligation",
+              ...context,
+            }),
+          );
+        }
       }
       if (
         existing[0]?.status === "active" &&
@@ -2144,44 +2411,92 @@ export function createFinanceService({
             userId,
           },
           executor,
+          context,
+          await financeTransactionSource(userId, last, executor),
         );
     }
-    const [streams, obligations, openAlerts] = await Promise.all([
-      executor.select().from(financeIncomeStreams).where(eq(financeIncomeStreams.userId, userId)),
-      executor
-        .select()
-        .from(financeRecurringObligations)
-        .where(eq(financeRecurringObligations.userId, userId)),
-      executor
-        .select({
-          id: financeAlerts.id,
-          incomeStreamId: financeAlerts.incomeStreamId,
-          recurringObligationId: financeAlerts.recurringObligationId,
-          type: financeAlerts.type,
-        })
-        .from(financeAlerts)
-        .where(
-          and(
-            eq(financeAlerts.userId, userId),
-            eq(financeAlerts.status, "open"),
-            or(
-              eq(financeAlerts.type, "income_missing"),
-              eq(financeAlerts.type, "recurring_missing"),
-            ),
-          ),
+    // Maintenance refreshes run inside one fenced transaction client. Keep
+    // these reads sequential: pg does not support concurrent queries on one
+    // client, and pg@9 removes the legacy implicit serialization behavior.
+    const streams = await executor
+      .select()
+      .from(financeIncomeStreams)
+      .where(eq(financeIncomeStreams.userId, userId));
+    const obligations = await executor
+      .select()
+      .from(financeRecurringObligations)
+      .where(eq(financeRecurringObligations.userId, userId));
+    const openAlerts = await executor
+      .select({
+        id: financeAlerts.id,
+        incomeStreamId: financeAlerts.incomeStreamId,
+        recurringObligationId: financeAlerts.recurringObligationId,
+        type: financeAlerts.type,
+      })
+      .from(financeAlerts)
+      .where(
+        and(
+          eq(financeAlerts.userId, userId),
+          eq(financeAlerts.status, "open"),
+          or(eq(financeAlerts.type, "income_missing"), eq(financeAlerts.type, "recurring_missing")),
         ),
-    ]);
+      );
     const obsoleteAlerts = obsoleteMissingAlertIds({
       alerts: openAlerts,
       incomeStreams: streams,
       obligations,
       today,
     });
-    if (obsoleteAlerts.length)
-      await executor
-        .update(financeAlerts)
-        .set({ resolvedAt: now(), status: "resolved", updatedAt: now() })
-        .where(inArray(financeAlerts.id, obsoleteAlerts));
+    if (obsoleteAlerts.length) {
+      if (context?.maintenance) {
+        for (const alertId of obsoleteAlerts) {
+          const [beforeAlert] = await executor
+            .select()
+            .from(financeAlerts)
+            .where(eq(financeAlerts.id, alertId))
+            .limit(1);
+          if (!beforeAlert) continue;
+          const stream = streams.find((item) => item.id === beforeAlert.incomeStreamId);
+          const obligation = obligations.find(
+            (item) => item.id === beforeAlert.recurringObligationId,
+          );
+          const sourceTransaction = stream
+            ? incomeByPayer.get(stream.payer)?.at(-1)
+            : obligation
+              ? expensesByMerchant.get(obligation.merchant)?.at(-1)
+              : undefined;
+          if (!sourceTransaction) {
+            throw new AppError("conflict", "The Finance alert source evidence is unavailable.");
+          }
+          const [saved] = await executor
+            .update(financeAlerts)
+            .set({ resolvedAt: now(), status: "resolved", updatedAt: now() })
+            .where(and(eq(financeAlerts.id, alertId), eq(financeAlerts.status, "open")))
+            .returning();
+          if (!saved) continue;
+          const source = await financeTransactionSource(userId, sourceTransaction, executor);
+          await executor.insert(auditEvents).values(
+            auditValues({
+              action: "finance.alert_resolved",
+              after: {
+                status: saved.status,
+                type: saved.type,
+                ...maintenanceAuditAttribution(context, source),
+              },
+              before: { status: beforeAlert.status, type: beforeAlert.type },
+              entityId: saved.id,
+              entityType: "finance_alert",
+              ...context,
+            }),
+          );
+        }
+      } else {
+        await executor
+          .update(financeAlerts)
+          .set({ resolvedAt: now(), status: "resolved", updatedAt: now() })
+          .where(inArray(financeAlerts.id, obsoleteAlerts));
+      }
+    }
     for (const stream of streams.filter((row) => row.status === "active" && row.nextExpectedDate)) {
       if ((stream.nextExpectedDate ?? today) < today)
         await openAlert(
@@ -2198,6 +2513,14 @@ export function createFinanceService({
             userId,
           },
           executor,
+          context,
+          incomeByPayer.get(stream.payer)?.at(-1)
+            ? await financeTransactionSource(
+                userId,
+                incomeByPayer.get(stream.payer)?.at(-1) as typeof financeTransactions.$inferSelect,
+                executor,
+              )
+            : undefined,
         );
     }
     for (const obligation of obligations.filter(
@@ -2218,6 +2541,16 @@ export function createFinanceService({
             userId,
           },
           executor,
+          context,
+          expensesByMerchant.get(obligation.merchant)?.at(-1)
+            ? await financeTransactionSource(
+                userId,
+                expensesByMerchant
+                  .get(obligation.merchant)
+                  ?.at(-1) as typeof financeTransactions.$inferSelect,
+                executor,
+              )
+            : undefined,
         );
     }
   }
@@ -3119,6 +3452,7 @@ export function createFinanceService({
           );
           await preserveMaintenanceClaim();
           await db.transaction(async (tx) => {
+            await assertMaintenanceClaim(tx, context);
             // Reconciliation takes account locks before transaction locks. Keep
             // provider sync in the same deterministic order so the two paths
             // cannot deadlock while touching the same item.
@@ -3389,12 +3723,24 @@ export function createFinanceService({
           hasMore = page.hasMore;
         }
         await preserveMaintenanceClaim();
-        const reconciliation = await reconcileBudgetTransfers(context.principal.userId);
+        const reconciliation = await reconcileBudgetTransfers(
+          context.principal.userId,
+          { type: "all_outstanding" },
+          context,
+        );
         await preserveMaintenanceClaim();
-        await refreshCashflowIntelligence(context.principal.userId);
+        if (context.maintenanceClaim) {
+          await db.transaction(async (tx) => {
+            await assertMaintenanceClaim(tx, context);
+            await refreshCashflowIntelligence(context.principal.userId, tx, context);
+          });
+        } else {
+          await refreshCashflowIntelligence(context.principal.userId);
+        }
         await preserveMaintenanceClaim();
         const completedAt = now();
         await db.transaction(async (tx) => {
+          await assertMaintenanceClaim(tx, context);
           const [settledAccount] = await tx
             .update(financeAccounts)
             .set({
@@ -3501,7 +3847,10 @@ export function createFinanceService({
         }
         return { changed };
       } catch (error) {
-        if (error instanceof FinanceSyncMaintenanceClaimLostError) {
+        if (
+          error instanceof FinanceSyncMaintenanceClaimLostError ||
+          (context.maintenanceClaim && !(await maintenanceClaimIsCurrent(context)))
+        ) {
           await db
             .update(financeAccounts)
             .set({ syncClaimExpiresAt: null, syncClaimId: null, updatedAt: sql`NOW()` })
@@ -3511,7 +3860,12 @@ export function createFinanceService({
                 eq(financeAccounts.syncClaimId, syncClaimId),
               ),
             );
-          throw new AppError("conflict", error.message);
+          throw new AppError(
+            "conflict",
+            error instanceof FinanceSyncMaintenanceClaimLostError
+              ? error.message
+              : "The Finance maintenance claim expired during synchronization.",
+          );
         }
         const failedAt = now();
         const failureCount = claimedAccount.syncFailureCount + 1;
@@ -3526,6 +3880,7 @@ export function createFinanceService({
                 retryAfterMs: failure.retryAfterMs,
               });
         await db.transaction(async (tx) => {
+          await assertMaintenanceClaim(tx, context);
           const [settledAccount] = await tx
             .update(financeAccounts)
             .set({
@@ -3693,6 +4048,7 @@ export function createFinanceService({
     async syncDueAccountsForUser(
       userId: string,
       onProgress?: FinanceSyncProgress,
+      context?: MutationContext,
     ): Promise<FinanceSyncBatchResult> {
       await onProgress?.();
       await this.initializeSyncHealth();
@@ -3732,7 +4088,7 @@ export function createFinanceService({
               .limit(1);
             await this.syncPlaidAccount(
               due.id,
-              {
+              context ?? {
                 principal: {
                   actorId: userId,
                   actorType: "agent",
@@ -3875,6 +4231,15 @@ export function createFinanceService({
     ) {
       return reconcileBudgetTransfers(userId, scope, context, onProgress);
     },
+    async repairHeuristicTransfersForUser(
+      userId: string,
+      scope: MaintenanceScope,
+      cursor: string | undefined,
+      context: MutationContext,
+      onProgress?: FinanceSyncProgress,
+    ) {
+      return repairHeuristicTransfers(userId, scope, cursor, context, onProgress);
+    },
     async refreshCashflowForUser(
       userId: string,
       context?: MutationContext,
@@ -3884,7 +4249,7 @@ export function createFinanceService({
       if (context?.maintenanceClaim) {
         await db.transaction(async (tx) => {
           await assertMaintenanceClaim(tx, context);
-          await refreshCashflowIntelligence(userId, tx);
+          await refreshCashflowIntelligence(userId, tx, context);
         });
       } else {
         await refreshCashflowIntelligence(userId);
@@ -3913,6 +4278,7 @@ export function createFinanceService({
           ["finance.rent_rule_applied", "finance.transaction_categorized"].includes(row.action),
         ).length,
         duplicateActions: rows.length - distinct.size,
+        questions: distinctRows.filter((row) => row.action === "finance.review_queued").length,
         transfers: distinctRows.filter((row) => row.action === "finance.transfer_reconciled")
           .length,
       };

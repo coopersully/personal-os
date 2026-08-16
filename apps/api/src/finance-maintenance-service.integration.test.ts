@@ -161,6 +161,12 @@ describe.sequential("Finance maintenance service", () => {
       applyApprovedRules: async () => [],
       applyApprovedOneOffs: async () => [],
       proposeOutstandingCategorizations: async () => ({ items: [], nextCursor: null }),
+      repairHeuristicTransfersForUser: async () => ({
+        complete: true,
+        inspected: 0,
+        nextCursor: null,
+        repaired: 0,
+      }),
       reconcileTransfersForUser: async () => ({ paired: 0, transfers: 0 }),
       refreshCashflowForUser: async () => ({ refreshed: true }),
       refreshMaintenanceQuestionsForUser: async () => ({ created: 0, total: 0 }),
@@ -217,6 +223,12 @@ describe.sequential("Finance maintenance service", () => {
         proposeOutstandingCategorizations: async () => ({
           items: allProposals.filter((item) => !applied.has(item.transaction.id)),
           nextCursor: null,
+        }),
+        repairHeuristicTransfersForUser: async () => ({
+          complete: true,
+          inspected: 0,
+          nextCursor: null,
+          repaired: 0,
         }),
         reconcileTransfersForUser: async () => ({
           paired: applied.size === 0 ? 1 : 0,
@@ -455,6 +467,7 @@ describe.sequential("Finance maintenance service", () => {
     await expect(finances.summarizeMaintenanceEffectsForRun(ownerId, run.id)).resolves.toEqual({
       categorizations: 2,
       duplicateActions: 0,
+      questions: 2,
       transfers: 2,
     });
     const appliedRows = await database.db
@@ -649,6 +662,109 @@ describe.sequential("Finance maintenance service", () => {
     expect(batchSizes).toEqual([50, 1]);
   });
 
+  it("recovers a committed bounded legacy-transfer repair before its durable checkpoint", async () => {
+    const ownerId = await createUser("Finance transfer repair continuation");
+    const workspaceOne = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const repairCursors: Array<string | undefined> = [];
+    const financeOperations = operations({
+      repairHeuristicTransfersForUser: async (_userId, _scope, cursor, context) => {
+        repairCursors.push(cursor);
+        const [firstPage] = await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(
+            and(
+              eq(auditEvents.userId, ownerId),
+              eq(auditEvents.action, "fixture.transfer_heuristic_repaired"),
+              eq(auditEvents.entityId, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+            ),
+          )
+          .limit(1);
+        const page = cursor ? 3 : firstPage ? 2 : 1;
+        const entityId =
+          page === 1
+            ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+            : page === 2
+              ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+              : "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+        await database.db.insert(auditEvents).values({
+          action: "fixture.transfer_heuristic_repaired",
+          actorId: context.principal.actorId,
+          actorType: context.principal.actorType,
+          after: { maintenance: context.maintenance },
+          before: null,
+          entityId,
+          entityType: "finance_transaction",
+          requestId: context.requestId,
+          userId: ownerId,
+        });
+        return page === 3
+          ? { complete: true, inspected: 1, nextCursor: null, repaired: 1 }
+          : {
+              complete: false,
+              inspected: 100,
+              nextCursor: `repair-page-${page}`,
+              repaired: 100,
+            };
+      },
+    });
+    let loseProcess = true;
+    const crashingMaintenance = {
+      ...workspaceOne,
+      checkpointAndRelease: async (
+        input: Parameters<typeof workspaceOne.checkpointAndRelease>[0],
+      ) => {
+        if (loseProcess && (input.checkpoint as { step?: string }).step === "reconcile") {
+          loseProcess = false;
+          throw new Error("process exited after transfer repair commit");
+        }
+        return workspaceOne.checkpointAndRelease(input);
+      },
+      failStep: async () => {
+        throw new Error("process exited before failure settlement");
+      },
+    };
+    const firstRuntime = createFinanceMaintenanceService({
+      finances: financeOperations,
+      maintenance: crashingMaintenance,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const run = await firstRuntime.startOrResume(ownerId, { type: "all_outstanding" });
+
+    await expect(firstRuntime.dispatchRun(run.id)).rejects.toThrow(
+      "process exited before failure settlement",
+    );
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ leaseExpiresAt: sql`NOW() - INTERVAL '1 second'` })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const recoveredRuntime = createFinanceMaintenanceService({
+      finances: financeOperations,
+      maintenance: createWorkspaceMaintenanceService({ db: database.db, now: () => now }),
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    await recoveredRuntime.dispatchRun(run.id);
+    const recovered = await recoveredRuntime.getRun(ownerId, run.id);
+    expect(recovered.lastSafeError).toBeNull();
+    expect(recovered).toMatchObject({
+      checkpoint: { cursor: "repair-page-2", repaired: 100, step: "reconcile" },
+      status: "queued",
+    });
+    await recoveredRuntime.dispatchRun(run.id);
+    await expect(recoveredRuntime.getRun(ownerId, run.id)).resolves.toMatchObject({
+      status: "completed",
+    });
+    expect(repairCursors).toEqual([undefined, undefined, "repair-page-2"]);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "fixture.transfer_heuristic_repaired")),
+    ).resolves.toHaveLength(3);
+  });
+
   it("settles a verify-complete run after process loss instead of stranding it running", async () => {
     const ownerId = await createUser("Finance verify recovery");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
@@ -828,6 +944,102 @@ describe.sequential("Finance maintenance service", () => {
         expect.objectContaining({ status: "failed_recoverable", step: "verify" }),
       ]),
     );
+  });
+
+  it("reconstructs the original created-question count after review commit and process loss", async () => {
+    const ownerId = await createUser("Finance question effect recovery");
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const context = {
+      principal: {
+        actorId: ownerId,
+        actorType: "user" as const,
+        scopes: new Set(["finances:read" as const, "finances:write" as const]),
+        userId: ownerId,
+      },
+      requestId: "question-effect-recovery-fixture",
+    };
+    const account = await finances.createAccount(
+      { balance: 0, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      context,
+    );
+    for (let index = 0; index < 2; index += 1) {
+      await finances.createTransaction(
+        {
+          accountId: account.id,
+          amount: 44,
+          category: null,
+          categoryConfidence: null,
+          date: "2026-08-12",
+          direction: "expense",
+          merchant: "Duplicate recovery purchase",
+          notes: null,
+        },
+        { ...context, requestId: `${context.requestId}:${index}` },
+      );
+    }
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    let crashOnQuestions = true;
+    const crashingWorkspace = {
+      ...workspace,
+      async completeStep(input: Parameters<typeof workspace.completeStep>[0]) {
+        if (input.step === "questions" && crashOnQuestions) {
+          crashOnQuestions = false;
+          throw new Error("process exited after question commit");
+        }
+        return workspace.completeStep(input);
+      },
+      async failStep(input: Parameters<typeof workspace.failStep>[0]) {
+        if (input.step === "questions" && !crashOnQuestions) {
+          throw new Error("process exited after question commit");
+        }
+        return workspace.failStep(input);
+      },
+    };
+    const financeStatus = createFinanceStatusService({
+      assistant: {} as never,
+      db: database.db,
+      finances,
+      goals: {} as never,
+      maintenance: workspace,
+      now: () => now,
+    });
+    const firstRuntime = createFinanceMaintenanceService({
+      finances,
+      maintenance: crashingWorkspace,
+      now: () => now,
+      status: financeStatus,
+    });
+    const run = await firstRuntime.startOrResume(ownerId, { type: "all_outstanding" });
+    await expect(firstRuntime.dispatchRun(run.id)).rejects.toThrow(
+      "process exited after question commit",
+    );
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ leaseExpiresAt: sql`NOW() - INTERVAL '1 second'` })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    const recoveredRuntime = createFinanceMaintenanceService({
+      finances,
+      maintenance: workspace,
+      now: () => now,
+      status: financeStatus,
+    });
+    await recoveredRuntime.dispatchRun(run.id);
+
+    await expect(recoveredRuntime.getRun(ownerId, run.id)).resolves.toMatchObject({
+      settledResult: { questions: { created: 1, total: 1 } },
+      status: "completed_with_questions",
+    });
+    await expect(
+      database.db
+        .select({ action: auditEvents.action })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.requestId, `maintenance:${run.id}:questions`),
+            eq(auditEvents.action, "finance.review_queued"),
+          ),
+        ),
+    ).resolves.toHaveLength(1);
   });
 
   it("recovers a committed categorization after process loss before its checkpoint", async () => {

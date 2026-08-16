@@ -50,6 +50,18 @@ export type FinanceMaintenanceOperations = {
     cursor?: string,
     onProgress?: () => Promise<void>,
   ) => Promise<FinanceCategorizationProposalPage>;
+  repairHeuristicTransfersForUser: (
+    userId: string,
+    scope: MaintenanceScope,
+    cursor: string | undefined,
+    context: MutationContext,
+    onProgress?: () => Promise<void>,
+  ) => Promise<{
+    complete: boolean;
+    inspected: number;
+    nextCursor: string | null;
+    repaired: number;
+  }>;
   reconcileTransfersForUser: (
     userId: string,
     scope: MaintenanceScope,
@@ -70,11 +82,17 @@ export type FinanceMaintenanceOperations = {
   syncDueAccountsForUser: (
     userId: string,
     onProgress?: () => Promise<void>,
+    context?: MutationContext,
   ) => Promise<FinanceSyncBatchResult>;
   summarizeMaintenanceEffectsForRun?: (
     userId: string,
     runId: string,
-  ) => Promise<{ categorizations: number; duplicateActions: number; transfers: number }>;
+  ) => Promise<{
+    categorizations: number;
+    duplicateActions: number;
+    questions?: number;
+    transfers: number;
+  }>;
 };
 
 type FinanceStatusReader = {
@@ -100,6 +118,13 @@ type CategorizeCheckpoint = {
   step: "categorize";
 };
 
+type ReconcileCheckpoint = {
+  cursor: string;
+  phase: "legacy_transfer_repair";
+  repaired: number;
+  step: "reconcile";
+};
+
 class FinanceRulebookChangedError extends Error {
   public constructor(public readonly currentRulebookVersion: string) {
     super("The Finance rulebook changed while maintenance was running.");
@@ -114,6 +139,22 @@ function categorizeCheckpoint(value: unknown): CategorizeCheckpoint | null {
     typeof record.cursor === "string" &&
     typeof record.applied === "number"
     ? { applied: record.applied, cursor: record.cursor, step: "categorize" }
+    : null;
+}
+
+function reconcileCheckpoint(value: unknown): ReconcileCheckpoint | null {
+  if (value === null || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  return record.step === "reconcile" &&
+    record.phase === "legacy_transfer_repair" &&
+    typeof record.cursor === "string" &&
+    typeof record.repaired === "number"
+    ? {
+        cursor: record.cursor,
+        phase: "legacy_transfer_repair",
+        repaired: record.repaired,
+        step: "reconcile",
+      }
     : null;
 }
 
@@ -208,7 +249,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
       },
       asOf: now().toISOString(),
       questions: {
-        created: questions?.created ?? 0,
+        created: durableEffects?.questions ?? questions?.created ?? 0,
         total: questions?.total ?? verificationStatus.details.review.total,
       },
       verification: {
@@ -224,14 +265,18 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
     if (!claim) return null;
     const { claimId } = claim;
     const run = claim.run;
-    const continuation = categorizeCheckpoint(run.checkpoint);
+    const categorizationContinuation = categorizeCheckpoint(run.checkpoint);
+    const reconciliationContinuation = reconcileCheckpoint(run.checkpoint);
     const lastCompleted = completedStep(run.checkpoint);
-    let startIndex = continuation
+    let startIndex = categorizationContinuation
       ? financeMaintenanceSteps.indexOf("categorize")
-      : lastCompleted
-        ? financeMaintenanceSteps.indexOf(lastCompleted) + 1
-        : 0;
-    let categorizationApplied = continuation?.applied ?? 0;
+      : reconciliationContinuation
+        ? financeMaintenanceSteps.indexOf("reconcile")
+        : lastCompleted
+          ? financeMaintenanceSteps.indexOf(lastCompleted) + 1
+          : 0;
+    let categorizationApplied = categorizationContinuation?.applied ?? 0;
+    let heuristicTransfersRepaired = reconciliationContinuation?.repaired ?? 0;
 
     try {
       if (lastCompleted === "verify") {
@@ -275,9 +320,13 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
         if (step === "synchronize") {
           await assertCurrentRulebook(run);
           await maintenance.renewClaim({ claimId, runId });
-          const synchronized = await finances.syncDueAccountsForUser(run.userId, async () => {
-            await maintenance.renewClaim({ claimId, runId });
-          });
+          const synchronized = await finances.syncDueAccountsForUser(
+            run.userId,
+            async () => {
+              await maintenance.renewClaim({ claimId, runId });
+            },
+            mutationContext(run, step, claimId),
+          );
           await maintenance.renewClaim({ claimId, runId });
           const observed = await currentStatus(run.userId, run.scope);
           if (observed.freshness.blockers.length > 0 || observed.state === "blocked") {
@@ -309,6 +358,30 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
         }
         if (step === "reconcile") {
           await assertCurrentRulebook(run);
+          await maintenance.renewClaim({ claimId, runId });
+          const repair = await finances.repairHeuristicTransfersForUser(
+            run.userId,
+            run.scope,
+            reconciliationContinuation?.cursor,
+            mutationContext(run, step, claimId),
+            async () => {
+              await maintenance.renewClaim({ claimId, runId });
+            },
+          );
+          heuristicTransfersRepaired += repair.repaired;
+          if (repair.nextCursor) {
+            await maintenance.checkpointAndRelease({
+              checkpoint: {
+                cursor: repair.nextCursor,
+                phase: "legacy_transfer_repair",
+                repaired: heuristicTransfersRepaired,
+                step,
+              },
+              claimId,
+              runId,
+            });
+            return maintenance.getOwnedRun(run.userId, runId);
+          }
           const reconciled = await finances.reconcileTransfersForUser(
             run.userId,
             run.scope,
@@ -320,7 +393,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
-            result: reconciled,
+            result: { heuristicTransfersRepaired, ...reconciled },
             runId,
             step,
           });
@@ -331,7 +404,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           const page = await finances.proposeOutstandingCategorizations(
             run.userId,
             run.scope,
-            continuation?.cursor,
+            categorizationContinuation?.cursor,
             async () => {
               await maintenance.renewClaim({ claimId, runId });
             },

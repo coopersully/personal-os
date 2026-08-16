@@ -12,6 +12,8 @@ import {
   financeAlerts,
   financeCategories,
   financeClassificationDecisions,
+  financeIncomeStreams,
+  financeRecurringObligations,
   financeReviewCases,
   financeSetupBackfillState,
   financeTransactions,
@@ -21,7 +23,6 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
-import { AppError } from "./errors.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
@@ -55,7 +56,7 @@ async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number
       FROM pg_stat_activity
       WHERE datname = current_database()
         AND wait_event_type = 'Lock'
-        AND query LIKE '%finance_%'
+        AND (query LIKE '%finance_%' OR query LIKE '%workspace_maintenance_runs%')
         AND query NOT LIKE '%pg_stat_activity%'
     `);
     if (Number(result.rows[0]?.count ?? 0) >= expected) return;
@@ -2891,6 +2892,144 @@ describe.sequential("finance service", () => {
         expect.objectContaining({ displayName: "Netflix" }),
       ]),
     });
+    await database.db.delete(financeIncomeStreams).where(eq(financeIncomeStreams.userId, userId));
+    await database.db
+      .delete(financeRecurringObligations)
+      .where(eq(financeRecurringObligations.userId, userId));
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId,
+    });
+    let healthNow = now;
+    const healthService = createFinanceService({ db: database.db, now: () => healthNow });
+    const maintenanceContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:health",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(userId),
+      requestId: `maintenance:${runId}:health`,
+    };
+    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    const firstHealthRows = await database.pool.query(
+      `SELECT id, updated_at FROM finance_income_streams WHERE user_id = $1
+       UNION ALL
+       SELECT id, updated_at FROM finance_recurring_obligations WHERE user_id = $1
+       ORDER BY id`,
+      [userId],
+    );
+    const firstHealthAudits = await database.db
+      .select({ action: auditEvents.action, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, maintenanceContext.requestId));
+    expect(firstHealthAudits.map((item) => item.action).sort()).toEqual([
+      "finance.income_stream_refreshed",
+      "finance.recurring_refreshed",
+    ]);
+    for (const audit of firstHealthAudits) {
+      expect(audit.after).toMatchObject({
+        maintenance: maintenanceContext.maintenance,
+        source: { revision: expect.any(String), sourceType: "finance_transaction" },
+      });
+    }
+    healthNow = new Date("2026-07-19T12:01:00.000Z");
+    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await expect(
+      database.pool.query(
+        `SELECT id, updated_at FROM finance_income_streams WHERE user_id = $1
+         UNION ALL
+         SELECT id, updated_at FROM finance_recurring_obligations WHERE user_id = $1
+         ORDER BY id`,
+        [userId],
+      ),
+    ).resolves.toMatchObject({ rows: firstHealthRows.rows });
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, maintenanceContext.requestId)),
+    ).resolves.toHaveLength(2);
+    healthNow = new Date("2026-09-01T12:00:00.000Z");
+    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    const healthActionsAfterAlerts = await database.db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, maintenanceContext.requestId));
+    expect(healthActionsAfterAlerts.map((item) => item.action).sort()).toEqual([
+      "finance.alert_queued",
+      "finance.alert_queued",
+      "finance.income_stream_refreshed",
+      "finance.recurring_refreshed",
+    ]);
+    healthNow = new Date("2026-09-01T12:01:00.000Z");
+    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, maintenanceContext.requestId)),
+    ).resolves.toHaveLength(4);
+    await database.db.insert(financeTransactions).values([
+      ...["2026-07-31", "2026-08-14", "2026-08-28"].map((transactionDate) => ({
+        accountId: account.id,
+        amount: 250_000,
+        category: "INCOME",
+        direction: "income" as const,
+        merchant: "Acme Payroll",
+        needsReview: false,
+        pending: false,
+        reconciliationStatus: "not_applicable" as const,
+        transactionDate,
+        userId,
+      })),
+      {
+        accountId: account.id,
+        amount: 1_549,
+        category: "Subscriptions",
+        direction: "expense",
+        merchant: "Netflix",
+        needsReview: false,
+        pending: false,
+        reconciliationStatus: "not_applicable",
+        transactionDate: "2026-08-15",
+        userId,
+      },
+    ]);
+    healthNow = new Date("2026-09-02T12:00:00.000Z");
+    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    const healthActionsAfterRecovery = await database.db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, maintenanceContext.requestId));
+    expect(healthActionsAfterRecovery.map((item) => item.action).sort()).toEqual([
+      "finance.alert_queued",
+      "finance.alert_queued",
+      "finance.alert_resolved",
+      "finance.alert_resolved",
+      "finance.income_stream_refreshed",
+      "finance.income_stream_refreshed",
+      "finance.recurring_refreshed",
+      "finance.recurring_refreshed",
+    ]);
+    healthNow = new Date("2026-09-02T12:01:00.000Z");
+    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, maintenanceContext.requestId)),
+    ).resolves.toHaveLength(8);
     const [incomeStream] = await service.listIncomeStreams(userId);
     const [recurring] = await service.listRecurringObligations(userId);
     if (!incomeStream || !recurring) throw new Error("Cash-flow patterns were not inferred.");
@@ -3273,21 +3412,66 @@ describe.sequential("finance service", () => {
     // A pending decision remains protected when the provider posts it, but it
     // does not become durable learning evidence without a posted user action.
     expect(postedDecision).toHaveLength(0);
+    const maintenanceRunId = crypto.randomUUID();
+    const maintenanceClaimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: maintenanceRunId,
+      leaseClaimId: maintenanceClaimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: plaidOnlyUser.id,
+    });
+    const maintenanceContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:concurrent-sync-reconcile",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId: maintenanceRunId,
+      },
+      maintenanceClaim: { claimId: maintenanceClaimId, runId: maintenanceRunId },
+      principal: financeAgentPrincipal(plaidOnlyUser.id),
+      requestId: `maintenance:${maintenanceRunId}:reconcile`,
+    };
     const blocker = await database.pool.connect();
     let concurrentSync: ReturnType<typeof service.syncPlaidAccount> | undefined;
-    let concurrentReconciliation: ReturnType<typeof service.reconcileTransfers> | undefined;
+    let concurrentReconciliation: ReturnType<typeof service.reconcileTransfersForUser> | undefined;
     try {
       await blocker.query("BEGIN");
       await blocker.query("SELECT id FROM finance_transactions WHERE id = $1 FOR UPDATE", [
         postedTransaction.id,
       ]);
-      concurrentSync = service.syncPlaidAccount(plaidAccount.id, context);
+      concurrentSync = service.syncPlaidAccount(
+        plaidAccount.id,
+        maintenanceContext,
+        async () => {},
+      );
       await waitForLockWaiters(database.pool, 1);
-      concurrentReconciliation = service.reconcileTransfers(plaidOnlyUser.id);
+      concurrentReconciliation = service.reconcileTransfersForUser(
+        plaidOnlyUser.id,
+        { type: "all_outstanding" },
+        maintenanceContext,
+        async () => {},
+      );
       await waitForLockWaiters(database.pool, 2);
       await blocker.query("COMMIT");
-      const [syncResult] = await Promise.all([concurrentSync, concurrentReconciliation]);
+      const [syncResult, reconciliationResult] = await Promise.all([
+        concurrentSync,
+        concurrentReconciliation,
+      ]);
       expect(syncResult).toEqual({ changed: 4 });
+      expect(reconciliationResult).toEqual({
+        paired: expect.any(Number),
+        transfers: expect.any(Number),
+      });
+      await expect(
+        database.db
+          .select({ claimId: workspaceMaintenanceRuns.leaseClaimId })
+          .from(workspaceMaintenanceRuns)
+          .where(eq(workspaceMaintenanceRuns.id, maintenanceRunId)),
+      ).resolves.toEqual([{ claimId: maintenanceClaimId }]);
     } finally {
       await blocker.query("ROLLBACK");
       blocker.release();
@@ -4032,7 +4216,8 @@ describe.sequential("finance service", () => {
       })
       .returning();
     if (!maintenanceUser) throw new Error("Maintenance heartbeat user was not created.");
-    let providerReturned = false;
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
     const plaid = createPlaidConnector({
       clientId: "client",
       environment: "sandbox",
@@ -4052,7 +4237,10 @@ describe.sequential("finance service", () => {
               ],
             });
           case "/transactions/sync":
-            providerReturned = true;
+            await database.db
+              .update(workspaceMaintenanceRuns)
+              .set({ leaseExpiresAt: new Date(0) })
+              .where(eq(workspaceMaintenanceRuns.id, runId));
             return Response.json({
               added: [
                 {
@@ -4092,7 +4280,27 @@ describe.sequential("finance service", () => {
       context,
     );
     if (!account) throw new Error("Maintenance heartbeat account was not created.");
-    let progressAfterProvider = 0;
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: maintenanceUser.id,
+    });
+    const maintenanceContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:synchronize",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(maintenanceUser.id),
+      requestId: `maintenance:${runId}:synchronize`,
+    };
     const effectsBefore = await database.pool.query(
       `
       SELECT
@@ -4105,14 +4313,7 @@ describe.sequential("finance service", () => {
     );
 
     await expect(
-      service.syncDueAccountsForUser(maintenanceUser.id, async () => {
-        if (providerReturned) {
-          progressAfterProvider += 1;
-          if (progressAfterProvider >= 2) {
-            throw new AppError("conflict", "The maintenance claim expired.");
-          }
-        }
-      }),
+      service.syncDueAccountsForUser(maintenanceUser.id, async () => {}, maintenanceContext),
     ).resolves.toMatchObject({ failed: 0, skipped: 1, succeeded: 0 });
     await expect(
       database.db
@@ -4349,6 +4550,259 @@ describe.sequential("finance service", () => {
         .from(auditEvents)
         .where(eq(auditEvents.requestId, requestId)),
     ).resolves.toEqual([]);
+  });
+
+  it("repairs legacy heuristic transfers in bounded resumable claim-fenced slices", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Legacy transfer repair",
+      email: `legacy-transfer-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const userContext = { principal: financePrincipal(userId), requestId: "legacy-transfer-setup" };
+    const account = await service.createAccount(
+      { balance: null, institution: "SoFi", name: "Checking", provider: "manual" },
+      userContext,
+    );
+    await database.db
+      .update(financeAccounts)
+      .set({ provider: "plaid", providerAccountId: "legacy-account" })
+      .where(eq(financeAccounts.id, account.id));
+    await database.db.insert(financeTransactions).values([
+      ...Array.from({ length: 205 }, (_, index) => ({
+        accountId: account.id,
+        amount: 10_000 + index,
+        category: "Transfers",
+        categorySource: "provider" as const,
+        direction: index === 2 ? ("expense" as const) : ("transfer" as const),
+        merchant: index === 1 ? "From Checking Vault" : `SoFi Vault Transfer ${index}`,
+        needsReview: false,
+        pending: false,
+        providerCategory:
+          index === 0 || index === 1 ? null : index % 2 === 0 ? "TRANSFER_OUT" : "TRANSFER_IN",
+        providerCategoryDetailed: index === 0 ? "TRANSFER_IN" : null,
+        providerDirection: index % 2 === 0 ? ("expense" as const) : ("income" as const),
+        providerTransactionId: `legacy-transfer-${index}`,
+        reconciliationStatus: "confirmed" as const,
+        transactionDate: "2026-07-01",
+        userId,
+      })),
+      {
+        accountId: account.id,
+        amount: 20_000,
+        category: "Transfers",
+        categoryDecidedAt: now,
+        categorySource: "user" as const,
+        direction: "transfer" as const,
+        merchant: "SoFi Vault Human Confirmed",
+        needsReview: false,
+        pending: false,
+        providerCategory: "TRANSFER_OUT",
+        providerDirection: "expense" as const,
+        providerTransactionId: "legacy-human-confirmed",
+        reconciliationStatus: "confirmed" as const,
+        transactionDate: "2026-07-01",
+        userId,
+      },
+      {
+        accountId: account.id,
+        amount: 30_000,
+        category: "Transfers",
+        categorySource: "rule" as const,
+        direction: "transfer" as const,
+        merchant: "SoFi Vault Invariant Matched",
+        needsReview: false,
+        pending: false,
+        providerCategory: "TRANSFER_OUT",
+        providerDirection: "expense" as const,
+        providerTransactionId: "legacy-invariant-matched",
+        reconciliationStatus: "matched" as const,
+        transactionDate: "2026-07-01",
+        transferGroupId: crypto.randomUUID(),
+        userId,
+      },
+    ]);
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId,
+    });
+    const maintenanceContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:reconcile:legacy-transfer-repair",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(userId),
+      requestId: `maintenance:${runId}:reconcile`,
+    };
+
+    const first = await service.repairHeuristicTransfersForUser(
+      userId,
+      { type: "all_outstanding" },
+      undefined,
+      maintenanceContext,
+      async () => {},
+    );
+    expect(first).toMatchObject({ complete: false, inspected: 100 });
+    expect(first.repaired).toBeGreaterThan(0);
+    const replay = await service.repairHeuristicTransfersForUser(
+      userId,
+      { type: "all_outstanding" },
+      undefined,
+      maintenanceContext,
+      async () => {},
+    );
+    expect(replay).toMatchObject({ complete: false, inspected: 100, repaired: 100 });
+    expect(replay.nextCursor).not.toBe(first.nextCursor);
+    let cursor = replay.nextCursor;
+    let repaired = first.repaired + replay.repaired;
+    let slices = 2;
+    while (cursor) {
+      const page = await service.repairHeuristicTransfersForUser(
+        userId,
+        { type: "all_outstanding" },
+        cursor,
+        maintenanceContext,
+        async () => {},
+      );
+      repaired += page.repaired;
+      slices += 1;
+      cursor = page.nextCursor;
+    }
+    expect({ repaired, slices }).toEqual({ repaired: 205, slices: 3 });
+    const rows = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.userId, userId));
+    expect(rows.filter((row) => row.providerTransactionId?.startsWith("legacy-transfer-"))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          direction: expect.stringMatching(/expense|income/),
+          needsReview: true,
+          reconciliationStatus: "candidate",
+          transferGroupId: null,
+        }),
+      ]),
+    );
+    expect(
+      rows.find((row) => row.providerTransactionId === "legacy-human-confirmed"),
+    ).toMatchObject({
+      direction: "transfer",
+      needsReview: false,
+      reconciliationStatus: "confirmed",
+    });
+    expect(
+      rows.find((row) => row.providerTransactionId === "legacy-invariant-matched"),
+    ).toMatchObject({ direction: "transfer", needsReview: false, reconciliationStatus: "matched" });
+    await expect(service.listOverview(userId, "2026-07")).resolves.toMatchObject({
+      spendingThisMonth: 10_405.06,
+    });
+    const repairAudits = await database.db
+      .select({ action: auditEvents.action, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, maintenanceContext.requestId));
+    expect(
+      repairAudits.filter((row) => row.action === "finance.transfer_heuristic_repaired"),
+    ).toHaveLength(205);
+    expect(repairAudits.filter((row) => row.action === "finance.review_queued")).toHaveLength(205);
+    expect(repairAudits[0]?.after).toMatchObject({
+      maintenance: maintenanceContext.maintenance,
+      source: { provider: "plaid", sourceType: "finance_transaction" },
+    });
+    await expect(
+      service.repairHeuristicTransfersForUser(
+        userId,
+        { type: "all_outstanding" },
+        undefined,
+        maintenanceContext,
+        async () => {},
+      ),
+    ).resolves.toEqual({ complete: true, inspected: 0, nextCursor: null, repaired: 0 });
+    const repairedTransaction = rows.find(
+      (row) => row.providerTransactionId === "legacy-transfer-0",
+    );
+    if (!repairedTransaction) throw new Error("The repaired transfer fixture was not found.");
+    const [repairedReview] = await database.db
+      .select({ id: financeReviewCases.id })
+      .from(financeReviewCases)
+      .where(eq(financeReviewCases.transactionId, repairedTransaction.id));
+    if (!repairedReview) throw new Error("The repaired transfer review fixture was not found.");
+    for (const scope of [
+      { end: "2026-07-31", start: "2026-07-01", type: "window" as const },
+      { entityType: "finance_account" as const, id: account.id, type: "target" as const },
+      {
+        entityType: "finance_transaction" as const,
+        id: repairedTransaction.id,
+        type: "target" as const,
+      },
+      {
+        entityType: "finance_review_case" as const,
+        id: repairedReview.id,
+        type: "target" as const,
+      },
+    ]) {
+      await expect(
+        service.repairHeuristicTransfersForUser(
+          userId,
+          scope,
+          undefined,
+          maintenanceContext,
+          async () => {},
+        ),
+      ).resolves.toEqual({ complete: true, inspected: 0, nextCursor: null, repaired: 0 });
+    }
+    const manualOnlyUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: manualOnlyUserId,
+      displayName: "Manual repair noop",
+      email: `manual-repair-${manualOnlyUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    await service.createAccount(
+      { balance: null, institution: "Cash", name: "Wallet", provider: "manual" },
+      { principal: financePrincipal(manualOnlyUserId), requestId: "manual-repair-setup" },
+    );
+    const manualRunId = crypto.randomUUID();
+    const manualClaimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: manualRunId,
+      leaseClaimId: manualClaimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId: manualOnlyUserId,
+    });
+    await expect(
+      service.repairHeuristicTransfersForUser(
+        manualOnlyUserId,
+        { type: "all_outstanding" },
+        undefined,
+        {
+          ...maintenanceContext,
+          maintenance: { ...maintenanceContext.maintenance, runId: manualRunId },
+          maintenanceClaim: { claimId: manualClaimId, runId: manualRunId },
+          principal: financeAgentPrincipal(manualOnlyUserId),
+          requestId: `maintenance:${manualRunId}:reconcile`,
+        },
+        async () => {},
+      ),
+    ).resolves.toEqual({ complete: true, inspected: 0, nextCursor: null, repaired: 0 });
   });
 
   it("bounds maintenance proposals and keeps ambiguous transfer matches as questions", async () => {
@@ -4880,7 +5334,11 @@ describe.sequential("finance service", () => {
       ),
     ).resolves.toMatchObject({ total: expect.any(Number) });
     const attributedAudits = await database.db
-      .select({ action: auditEvents.action, after: auditEvents.after })
+      .select({
+        action: auditEvents.action,
+        after: auditEvents.after,
+        entityId: auditEvents.entityId,
+      })
       .from(auditEvents)
       .where(eq(auditEvents.requestId, agentContext.requestId));
     expect(attributedAudits.map((audit) => audit.action)).toEqual(
@@ -4897,9 +5355,20 @@ describe.sequential("finance service", () => {
         source: { revision: expect.any(String), sourceType: "finance_transaction" },
       });
     }
+    const attributedQuestionCount = new Set(
+      attributedAudits
+        .filter((audit) => audit.action === "finance.review_queued")
+        .map((audit) => audit.entityId),
+    ).size;
+    expect(attributedQuestionCount).toBeGreaterThanOrEqual(4);
     await expect(
       service.summarizeMaintenanceEffectsForRun(maintenanceUser.id, agentContext.maintenance.runId),
-    ).resolves.toEqual({ categorizations: 1, duplicateActions: 0, transfers: 2 });
+    ).resolves.toEqual({
+      categorizations: 1,
+      duplicateActions: 0,
+      questions: attributedQuestionCount,
+      transfers: 2,
+    });
     for (const action of [
       "finance.rent_rule_applied",
       "finance.review_queued",
@@ -4929,6 +5398,11 @@ describe.sequential("finance service", () => {
     }
     await expect(
       service.summarizeMaintenanceEffectsForRun(maintenanceUser.id, agentContext.maintenance.runId),
-    ).resolves.toEqual({ categorizations: 1, duplicateActions: 3, transfers: 2 });
+    ).resolves.toEqual({
+      categorizations: 1,
+      duplicateActions: 3,
+      questions: attributedQuestionCount,
+      transfers: 2,
+    });
   });
 });

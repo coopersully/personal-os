@@ -50,8 +50,8 @@ describe("Finance health assessment", () => {
     expect(health.month.rating).toBe("unknown");
   });
 
-  it("reports provisional confidence when one account is stale", () => {
-    const health = assessFinanceHealth(
+  function provisionalHealth() {
+    return assessFinanceHealth(
       input({
         accounts: [
           ...input().accounts,
@@ -66,6 +66,10 @@ describe("Finance health assessment", () => {
       }),
       now,
     );
+  }
+
+  it("keeps current-month evidence unknown when confidence is provisional", () => {
+    const health = provisionalHealth();
 
     expect(health.confidence).toBe("provisional");
     expect(health.month).toMatchObject({
@@ -74,15 +78,19 @@ describe("Finance health assessment", () => {
       rating: "unknown",
     });
     expect(health.missingInputs).toContain("current_account_evidence");
-    expect(health.dimensions.spend).toMatchObject({
-      missingInputs: expect.arrayContaining(["current_account_evidence"]),
-      rating: "unknown",
-    });
-    expect(health.dimensions.save).toMatchObject({
-      missingInputs: expect.arrayContaining(["current_account_evidence"]),
-      rating: "unknown",
-    });
-    expect(health.dimensions.plan).toMatchObject({
+  });
+
+  it.each([
+    "borrow",
+    "invest",
+    "plan",
+    "save",
+    "spend",
+  ] as const)("keeps the %s dimension unknown when confidence is provisional", (dimension) => {
+    const health = provisionalHealth();
+
+    expect(health.confidence).toBe("provisional");
+    expect(health.dimensions[dimension]).toMatchObject({
       missingInputs: expect.arrayContaining(["current_account_evidence"]),
       rating: "unknown",
     });

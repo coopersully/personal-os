@@ -440,7 +440,8 @@ describe.sequential("Finance status service", () => {
         amount: 1_000,
         direction: "expense",
         merchant: "Target",
-        needsReview: false,
+        needsReview: true,
+        reconciliationStatus: "candidate",
         transactionDate: "2026-07-01",
         userId,
       })
@@ -456,6 +457,49 @@ describe.sequential("Finance status service", () => {
       })
       .returning();
     if (!review) throw new Error("Target review fixture was not created.");
+    const [siblingTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: source.id,
+        amount: 1_500,
+        direction: "expense",
+        merchant: "Sibling",
+        needsReview: true,
+        pending: true,
+        reconciliationStatus: "candidate",
+        transactionDate: "2026-07-02",
+        userId,
+      })
+      .returning();
+    if (!siblingTransaction) throw new Error("Sibling transaction fixture was not created.");
+    await database.db.insert(financeReviewCases).values({
+      reason: "unknown_merchant",
+      status: "open",
+      transactionId: siblingTransaction.id,
+      userId,
+    });
+    const distractorAccount = await account(userId, "current");
+    const [distractorTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: distractorAccount.id,
+        amount: 9_000,
+        direction: "expense",
+        merchant: "Other account",
+        needsReview: true,
+        pending: true,
+        reconciliationStatus: "candidate",
+        transactionDate: "2026-07-03",
+        userId,
+      })
+      .returning();
+    if (!distractorTransaction) throw new Error("Distractor transaction fixture was not created.");
+    await database.db.insert(financeReviewCases).values({
+      reason: "possible_duplicate",
+      status: "open",
+      transactionId: distractorTransaction.id,
+      userId,
+    });
     await database.db.insert(financeTransactions).values({
       accountId: source.id,
       amount: 2_000,
@@ -495,6 +539,22 @@ describe.sequential("Finance status service", () => {
     expect(transactionStatus.details.month.spending).toBe(20);
     expect(accountStatus.details.month.spending).toBe(20);
     expect(reviewStatus.details.month.spending).toBe(20);
+    expect(transactionStatus.details.ledger).toMatchObject({
+      candidateTransfers: 1,
+      pendingTransactions: 0,
+    });
+    expect(transactionStatus.details.review).toEqual({
+      byReason: { low_confidence: 1 },
+      total: 1,
+    });
+    expect(accountStatus.details.ledger).toMatchObject({
+      candidateTransfers: 2,
+      pendingTransactions: 1,
+    });
+    expect(accountStatus.details.review).toEqual({
+      byReason: { low_confidence: 1, unknown_merchant: 1 },
+      total: 2,
+    });
     expect(reviewStatus.details.review).toEqual({ byReason: { low_confidence: 1 }, total: 1 });
     expect(transactionStatus.activeRun).toMatchObject({ id: run.id, status: "awaiting_approval" });
     expect(transactionStatus.work.awaitingApproval).toBe(1);

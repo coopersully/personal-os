@@ -60,10 +60,24 @@ describe("Plaid connector", () => {
     const plaid = createPlaidConnector({
       clientId: "client-id",
       environment: "sandbox",
-      fetch: async (input) => {
+      fetch: async (input, init) => {
         switch (new URL(String(input)).pathname) {
-          case "/item/public_token/exchange":
+          case "/item/public_token/exchange": {
+            expect(JSON.parse(String(init?.body))).toEqual({
+              client_id: "client-id",
+              public_token: "public-token",
+              secret: "connector-secret",
+            });
             return Response.json({ access_token: "access-token", item_id: "item-1" });
+          }
+          case "/item/get": {
+            expect(JSON.parse(String(init?.body))).toEqual({
+              access_token: "access-token",
+              client_id: "client-id",
+              secret: "connector-secret",
+            });
+            return Response.json({ item_id: "item-1" });
+          }
           case "/accounts/get":
             return Response.json({
               accounts: [
@@ -123,7 +137,11 @@ describe("Plaid connector", () => {
       secret: "connector-secret",
     });
 
-    await expect(plaid.exchangePublicToken("public-token")).resolves.toBe("access-token");
+    await expect(plaid.exchangePublicToken("public-token")).resolves.toEqual({
+      accessToken: "access-token",
+      itemId: "item-1",
+    });
+    await expect(plaid.getItem("access-token")).resolves.toEqual({ itemId: "item-1" });
     await expect(plaid.getAccounts("access-token")).resolves.toEqual([
       {
         accountId: "account-1",
@@ -164,6 +182,45 @@ describe("Plaid connector", () => {
       hasMore: false,
       nextCursor: "cursor-1",
     });
+  });
+
+  it("classifies missing or malformed Plaid Item identities as invalid responses", async () => {
+    const exchangeMissing = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () => Response.json({ access_token: "access-token" }),
+      secret: "secret",
+    });
+    const exchangeMalformed = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () => Response.json({ access_token: "access-token", item_id: "" }),
+      secret: "secret",
+    });
+    const itemMissing = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () => Response.json({}),
+      secret: "secret",
+    });
+    const itemMalformed = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () => Response.json({ item_id: "" }),
+      secret: "secret",
+    });
+
+    for (const operation of [
+      () => exchangeMissing.exchangePublicToken("public-token"),
+      () => exchangeMalformed.exchangePublicToken("public-token"),
+      () => itemMissing.getItem("access-token"),
+      () => itemMalformed.getItem("access-token"),
+    ]) {
+      await expect(operation()).rejects.toMatchObject({
+        category: "invalid_response",
+        code: "plaid_invalid_response",
+      });
+    }
   });
 
   it("rejects non-JSON and malformed successful Plaid responses", async () => {

@@ -12,6 +12,9 @@ export type PlaidLinkTokenInput = {
   userId: string;
 };
 
+export type PlaidItemToken = { accessToken: string; itemId: string };
+export type PlaidItemSnapshot = { itemId: string };
+
 export type PlaidAccountSnapshot = {
   accountId: string;
   balanceCurrent: number | null;
@@ -53,7 +56,8 @@ export type PlaidTransactionPage = {
 export type PlaidConnector = {
   validateCredentials(): Promise<void>;
   createLinkToken(input: PlaidLinkTokenInput): Promise<string>;
-  exchangePublicToken(publicToken: string): Promise<string>;
+  exchangePublicToken(publicToken: string): Promise<PlaidItemToken>;
+  getItem(accessToken: string): Promise<PlaidItemSnapshot>;
   getAccounts(accessToken: string): Promise<PlaidAccountSnapshot[]>;
   syncTransactions(input: {
     accessToken: string;
@@ -209,10 +213,17 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
     },
     async exchangePublicToken(publicToken) {
       const value = parse(
-        z.object({ access_token: z.string().min(1) }),
+        z.object({ access_token: z.string().min(1), item_id: z.string().min(1) }),
         await plaidRequest("/item/public_token/exchange", { public_token: publicToken }),
       );
-      return value.access_token;
+      return { accessToken: value.access_token, itemId: value.item_id };
+    },
+    async getItem(accessToken) {
+      const value = parse(
+        z.object({ item_id: z.string().min(1) }),
+        await plaidRequest("/item/get", { access_token: accessToken }),
+      );
+      return { itemId: value.item_id };
     },
     async getAccounts(accessToken) {
       const value = parse(

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import {
   type Database,
   domainProfileApprovals,
-  domainProfiles,
   financeAccounts,
   financeBudgets,
   financeCategoryRules,
@@ -16,11 +15,14 @@ import {
 import {
   type FinanceAccount,
   type FinanceStatus,
+  financeDomainProfileSchema,
+  financeGuidedPreferencesSchema,
   financeStatusSchema,
   type MaintenanceScope,
 } from "@personal-os/domain";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
+import { AppError } from "./errors.js";
 import { assessFinanceHealth } from "./finance-health.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { createGoalsService } from "./goals-service.js";
@@ -43,6 +45,16 @@ const openRunStatuses = [
   "failed_recoverable",
 ] as const;
 const outstandingReviewStatuses = ["deferred", "open"] as const;
+const financeTargetTypes = [
+  "finance_account",
+  "finance_review_case",
+  "finance_transaction",
+] as const;
+type FinanceTargetType = (typeof financeTargetTypes)[number];
+
+function isFinanceTargetType(value: string): value is FinanceTargetType {
+  return financeTargetTypes.includes(value as FinanceTargetType);
+}
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value, (_key, nested: unknown) => {
@@ -96,6 +108,7 @@ function transactionIsInScope(
   row: typeof financeTransactions.$inferSelect,
   scope: MaintenanceScope,
   defaultMonth: string,
+  targetReviewTransactionId: string | null,
 ): boolean {
   if (scope.type === "window") {
     return row.transactionDate >= scope.start && row.transactionDate <= scope.end;
@@ -103,6 +116,7 @@ function transactionIsInScope(
   if (scope.type === "target") {
     if (scope.entityType === "finance_transaction") return row.id === scope.id;
     if (scope.entityType === "finance_account") return row.accountId === scope.id;
+    if (scope.entityType === "finance_review_case") return row.id === targetReviewTransactionId;
     return false;
   }
   return (
@@ -146,7 +160,10 @@ export function createFinanceStatusService({ db, now }: Options) {
     async getFinanceStatus(userId: string, scope: MaintenanceScope): Promise<FinanceStatus> {
       const asOfDate = now();
       const asOf = asOfDate.toISOString();
-      const selectedMonth = scope.type === "window" ? scope.start.slice(0, 7) : asOf.slice(0, 7);
+      const currentMonth = asOf.slice(0, 7);
+      if (scope.type === "target" && !isFinanceTargetType(scope.entityType)) {
+        throw new AppError("invalid_request", "The Finance target type is not supported.");
+      }
       return db.transaction(
         async (tx) => {
           const accounts = await tx
@@ -157,7 +174,7 @@ export function createFinanceStatusService({ db, now }: Options) {
           const budgets = await tx
             .select()
             .from(financeBudgets)
-            .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, selectedMonth)))
+            .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, currentMonth)))
             .orderBy(financeBudgets.id);
           const transactions = await tx
             .select()
@@ -167,21 +184,12 @@ export function createFinanceStatusService({ db, now }: Options) {
           const reviews = await tx
             .select()
             .from(financeReviewCases)
-            .where(
-              and(
-                eq(financeReviewCases.userId, userId),
-                inArray(financeReviewCases.status, [...outstandingReviewStatuses]),
-              ),
-            )
+            .where(eq(financeReviewCases.userId, userId))
             .orderBy(financeReviewCases.createdAt);
           const profiles = await tx
             .select()
             .from(financeProfiles)
             .where(eq(financeProfiles.userId, userId));
-          const domainProfileRows = await tx
-            .select()
-            .from(domainProfiles)
-            .where(and(eq(domainProfiles.userId, userId), eq(domainProfiles.domain, "finances")));
           const approvals = await tx
             .select()
             .from(domainProfileApprovals)
@@ -218,47 +226,69 @@ export function createFinanceStatusService({ db, now }: Options) {
             .orderBy(desc(workspaceMaintenanceRuns.createdAt))
             .limit(1);
 
-          const approvedProfile = domainProfileRows.find(
-            (profile) =>
-              profile.status === "active" &&
-              approvals.some(
-                (approval) =>
-                  approval.profileId === profile.id && approval.profileVersion === profile.version,
-              ),
+          const approvedProfile = approvals
+            .toSorted((left, right) => right.approvedAt.getTime() - left.approvedAt.getTime())
+            .map((approval) => {
+              const profile = financeDomainProfileSchema.safeParse(approval.profile);
+              if (
+                !profile.success ||
+                profile.data.id !== approval.profileId ||
+                profile.data.version !== approval.profileVersion ||
+                profile.data.status !== "active"
+              )
+                return null;
+              const preferences = financeGuidedPreferencesSchema.safeParse(
+                profile.data.preferences,
+              );
+              return preferences.success
+                ? { preferences: preferences.data, profile: profile.data }
+                : null;
+            })
+            .find((profile) => profile !== null);
+          const profilePolicy = approvedProfile?.preferences ?? null;
+          const outstandingReviews = reviews.filter((review) =>
+            outstandingReviewStatuses.includes(
+              review.status as (typeof outstandingReviewStatuses)[number],
+            ),
           );
-          const approvedPreferences = approvedProfile?.preferences as
-            | Record<string, unknown>
-            | undefined;
-          const profilePolicy = approvedProfile
-            ? {
-                ...(typeof approvedPreferences?.budgetOffTrackForecastRatio === "number"
-                  ? { budgetOffTrackForecastRatio: approvedPreferences.budgetOffTrackForecastRatio }
-                  : {}),
-                ...(typeof approvedPreferences?.budgetWatchForecastRatio === "number"
-                  ? { budgetWatchForecastRatio: approvedPreferences.budgetWatchForecastRatio }
-                  : {}),
-                ...(typeof approvedPreferences?.emergencyReserveTargetMonths === "number"
-                  ? {
-                      emergencyReserveTargetMonths:
-                        approvedPreferences.emergencyReserveTargetMonths,
-                    }
-                  : {}),
-              }
-            : null;
+          const targetReview =
+            scope.type === "target" && scope.entityType === "finance_review_case"
+              ? reviews.find((review) => review.id === scope.id)
+              : null;
+          if (
+            scope.type === "target" &&
+            ((scope.entityType === "finance_account" &&
+              !accounts.some((account) => account.id === scope.id)) ||
+              (scope.entityType === "finance_transaction" &&
+                !transactions.some((transaction) => transaction.id === scope.id)) ||
+              (scope.entityType === "finance_review_case" && targetReview === null))
+          ) {
+            throw new AppError("not_found", "The Finance target was not found.");
+          }
+          const currentTransactions = transactions.filter((row) =>
+            transactionIsInScope(row, { type: "all_outstanding" }, currentMonth, null),
+          );
           const scopedTransactions = transactions.filter((row) =>
-            transactionIsInScope(row, scope, selectedMonth),
+            transactionIsInScope(row, scope, currentMonth, targetReview?.transactionId ?? null),
           );
           const transactionById = new Map(transactions.map((row) => [row.id, row]));
-          const scopedReviews = reviews.filter((review) => {
+          const scopedReviews = outstandingReviews.filter((review) => {
             if (scope.type === "target" && scope.entityType === "finance_review_case")
               return review.id === scope.id;
             const transaction = transactionById.get(review.transactionId);
-            return transaction ? transactionIsInScope(transaction, scope, selectedMonth) : false;
+            return transaction
+              ? transactionIsInScope(
+                  transaction,
+                  scope,
+                  currentMonth,
+                  targetReview?.transactionId ?? null,
+                )
+              : false;
           });
-          const postedExpenses = scopedTransactions.filter(
+          const postedExpenses = currentTransactions.filter(
             (row) => !row.pending && row.direction === "expense",
           );
-          const postedIncome = scopedTransactions.filter(
+          const postedIncome = currentTransactions.filter(
             (row) => !row.pending && row.direction === "income",
           );
           const spending = postedExpenses.reduce((sum, row) => sum + row.amount, 0) / 100;
@@ -272,10 +302,9 @@ export function createFinanceStatusService({ db, now }: Options) {
                 : null;
           const budgetTotal =
             budgets.length > 0 ? budgets.reduce((sum, row) => sum + row.limit, 0) / 100 : null;
-          const selectedDay =
-            scope.type === "window" ? Number(scope.end.slice(-2)) : asOfDate.getUTCDate();
+          const selectedDay = asOfDate.getUTCDate();
           const daysInMonth = new Date(
-            Date.UTC(Number(selectedMonth.slice(0, 4)), Number(selectedMonth.slice(5, 7)), 0),
+            Date.UTC(Number(currentMonth.slice(0, 4)), Number(currentMonth.slice(5, 7)), 0),
           ).getUTCDate();
           const forecast =
             postedExpenses.length > 0 && selectedDay > 0
@@ -296,7 +325,7 @@ export function createFinanceStatusService({ db, now }: Options) {
               forecastSpending: forecast,
               investmentAllocationKnown: false,
               monthlyIncome,
-              postedTransactions: scopedTransactions.map((row) => ({
+              postedTransactions: currentTransactions.map((row) => ({
                 amount: row.amount / 100,
                 direction: row.direction,
                 pending: row.pending,
@@ -344,10 +373,12 @@ export function createFinanceStatusService({ db, now }: Options) {
           const byReason: Record<string, number> = {};
           for (const review of scopedReviews)
             byReason[review.reason] = (byReason[review.reason] ?? 0) + 1;
-          const questions = health.missingInputs.map((missing) => ({
-            code: missing,
-            prompt: `Provide ${missing.replaceAll("_", " ")} evidence.`,
-          }));
+          const questions = health.missingInputs
+            .filter((missing) => missing !== "account_roles")
+            .map((missing) => ({
+              code: missing,
+              prompt: `Provide ${missing.replaceAll("_", " ")} evidence.`,
+            }));
           const latestRun = maintenanceRuns[0];
           const activeRun =
             latestRun &&
@@ -377,7 +408,7 @@ export function createFinanceStatusService({ db, now }: Options) {
               revision: row.updatedAt.toISOString(),
             })),
             approvedFinanceProfile: approvedProfile
-              ? { id: approvedProfile.id, version: approvedProfile.version }
+              ? { id: approvedProfile.profile.id, version: approvedProfile.profile.version }
               : null,
             categoryRules: categoryRules.map((row) => ({
               id: row.id,
@@ -396,7 +427,7 @@ export function createFinanceStatusService({ db, now }: Options) {
             ].join(":");
             possibleDuplicateKeys.set(key, (possibleDuplicateKeys.get(key) ?? 0) + 1);
           }
-          const oldestOutstandingAt = reviews[0]?.createdAt.toISOString() ?? null;
+          const oldestOutstandingAt = outstandingReviews[0]?.createdAt.toISOString() ?? null;
           const work = {
             actionable: scopedReviews.length,
             awaitingApproval: latestRun?.status === "awaiting_approval" ? 1 : 0,
@@ -435,6 +466,7 @@ export function createFinanceStatusService({ db, now }: Options) {
             activeRun,
             asOf,
             details: {
+              accountRoles: { missingInputs: ["account_roles"], state: "unavailable" },
               accounts: {
                 blocked: blockedCount,
                 current: currentCount,
@@ -447,7 +479,7 @@ export function createFinanceStatusService({ db, now }: Options) {
               activeMotives: motives.map(serializeMotive),
               budget: {
                 approved: budgets.length > 0,
-                month: selectedMonth,
+                month: currentMonth,
                 total: evidenceCurrent ? budgetTotal : null,
               },
               cashFlow: { net: evidenceCurrent ? incomeObserved - spending : null },

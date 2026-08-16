@@ -67,6 +67,10 @@ const financeProposalSummarySchema = z.object({
 });
 
 export const financeStatusDetailsSchema = z.object({
+  accountRoles: z.object({
+    missingInputs: z.array(z.literal("account_roles")).length(1),
+    state: z.literal("unavailable"),
+  }),
   accounts: z.object({
     blocked: z.int().nonnegative(),
     current: z.int().nonnegative(),

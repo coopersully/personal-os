@@ -50,6 +50,10 @@ function dimension(
   return { evidence, missingInputs, nextAction, rating, trend: "unknown" };
 }
 
+function uniqueMissing(...inputs: Array<string | false>): string[] {
+  return [...new Set(inputs.filter((value): value is string => value !== false))];
+}
+
 export function assessFinanceHealth(input: FinanceHealthInput, now: Date): FinanceHealth {
   const plaidAccounts = input.accounts.filter((account) => account.provider === "plaid");
   const usableAccounts = input.accounts.filter(
@@ -80,9 +84,10 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
   ];
   const missingInputs: string[] = [];
   if (input.accounts.length === 0) missingInputs.push("accounts");
-  if (confidence === "insufficient") missingInputs.push("current_account_evidence");
+  if (confidence !== "reliable") missingInputs.push("current_account_evidence");
   if (input.approvedBudget === null) missingInputs.push("approved_budget");
   if (input.monthlyIncome === null) missingInputs.push("monthly_income");
+  missingInputs.push("account_roles");
 
   const postedSpending = input.postedTransactions
     .filter((transaction) => !transaction.pending && transaction.direction === "expense")
@@ -99,7 +104,7 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
       ? assessmentSpending / input.approvedBudget
       : null;
   const monthRating =
-    confidence === "insufficient" || input.approvedBudget === null || ratio === null
+    confidence !== "reliable" || input.approvedBudget === null || ratio === null
       ? "unknown"
       : ratio >= offTrackRatio
         ? "off_track"
@@ -118,9 +123,17 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
   const debtAprMissing = input.unknownDebtAprCount > 0;
   const dimensions: FinanceHealth["dimensions"] = {
     borrow: dimension(
-      debtAprMissing ? "unknown" : (input.totalDebt ?? 0) > 0 ? "watch" : "healthy",
+      confidence !== "reliable" || debtAprMissing
+        ? "unknown"
+        : (input.totalDebt ?? 0) > 0
+          ? "watch"
+          : "healthy",
       [{ label: "Total debt", source: "accounts", value: input.totalDebt }],
-      debtAprMissing ? ["debt_apr"] : [],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        debtAprMissing && "debt_apr",
+        "account_roles",
+      ),
       debtAprMissing ? "Add APR evidence before assessing borrowing health." : null,
     ),
     goals: dimension(
@@ -130,7 +143,7 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
       input.activeGoalCount > 0 ? null : "Add an active financial goal.",
     ),
     invest: dimension(
-      input.investmentAllocationKnown ? "healthy" : "unknown",
+      confidence === "reliable" && input.investmentAllocationKnown ? "healthy" : "unknown",
       [
         {
           label: "Allocation visible",
@@ -138,13 +151,17 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
           value: input.investmentAllocationKnown ? "yes" : "unknown",
         },
       ],
-      input.investmentAllocationKnown ? [] : ["investment_allocation"],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        !input.investmentAllocationKnown && "investment_allocation",
+        "account_roles",
+      ),
       input.investmentAllocationKnown
         ? null
         : "Provide allocation evidence before assessing investments.",
     ),
     plan: dimension(
-      input.approvedBudget === null
+      confidence !== "reliable" || input.approvedBudget === null
         ? "unknown"
         : monthRating === "off_track"
           ? "needs_attention"
@@ -152,13 +169,25 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
             ? "watch"
             : "healthy",
       [{ label: "Approved budget", source: "budget", value: input.approvedBudget }],
-      input.approvedBudget === null ? ["approved_budget"] : [],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        input.approvedBudget === null && "approved_budget",
+        "account_roles",
+      ),
       input.approvedBudget === null ? "Approve a monthly budget." : null,
     ),
     save: dimension(
-      reserveMonths === null ? "unknown" : reserveMonths >= reserveTarget ? "healthy" : "watch",
+      confidence !== "reliable" || reserveMonths === null
+        ? "unknown"
+        : reserveMonths >= reserveTarget
+          ? "healthy"
+          : "watch",
       [{ label: "Emergency reserve months", source: "accounts_and_income", value: reserveMonths }],
-      reserveMonths === null ? ["monthly_income_or_cash_balance"] : [],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        reserveMonths === null && "monthly_income_or_cash_balance",
+        "account_roles",
+      ),
       reserveMonths !== null && reserveMonths < reserveTarget
         ? `Build liquid reserves toward ${reserveTarget} months.`
         : null,
@@ -172,7 +201,11 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
             ? "watch"
             : "healthy",
       [{ label: "Forecast-to-budget ratio", source: "budget_and_ledger", value: ratio }],
-      monthRating === "unknown" ? ["reliable_budget_and_ledger"] : [],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        input.approvedBudget === null && "approved_budget",
+        "account_roles",
+      ),
       monthRating === "off_track" ? "Review forecast spending against the approved budget." : null,
     ),
   };
@@ -184,8 +217,8 @@ export function assessFinanceHealth(input: FinanceHealthInput, now: Date): Finan
     missingInputs: [...new Set(missingInputs)],
     month: {
       approvedBudget: input.approvedBudget,
-      forecastSpending: confidence === "insufficient" ? null : forecast,
-      postedSpending: confidence === "insufficient" ? null : postedSpending,
+      forecastSpending: confidence !== "reliable" ? null : forecast,
+      postedSpending: confidence !== "reliable" ? null : postedSpending,
       rating: monthRating,
     },
   };

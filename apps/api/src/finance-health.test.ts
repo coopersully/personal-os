@@ -51,23 +51,41 @@ describe("Finance health assessment", () => {
   });
 
   it("reports provisional confidence when one account is stale", () => {
-    expect(
-      assessFinanceHealth(
-        input({
-          accounts: [
-            ...input().accounts,
-            {
-              balance: 500,
-              kind: "cash",
-              lastSuccessAt: "2026-08-13T11:00:00.000Z",
-              provider: "plaid",
-              synchronizationState: "stale",
-            },
-          ],
-        }),
-        now,
-      ).confidence,
-    ).toBe("provisional");
+    const health = assessFinanceHealth(
+      input({
+        accounts: [
+          ...input().accounts,
+          {
+            balance: 500,
+            kind: "cash",
+            lastSuccessAt: "2026-08-13T11:00:00.000Z",
+            provider: "plaid",
+            synchronizationState: "stale",
+          },
+        ],
+      }),
+      now,
+    );
+
+    expect(health.confidence).toBe("provisional");
+    expect(health.month).toMatchObject({
+      forecastSpending: null,
+      postedSpending: null,
+      rating: "unknown",
+    });
+    expect(health.missingInputs).toContain("current_account_evidence");
+    expect(health.dimensions.spend).toMatchObject({
+      missingInputs: expect.arrayContaining(["current_account_evidence"]),
+      rating: "unknown",
+    });
+    expect(health.dimensions.save).toMatchObject({
+      missingInputs: expect.arrayContaining(["current_account_evidence"]),
+      rating: "unknown",
+    });
+    expect(health.dimensions.plan).toMatchObject({
+      missingInputs: expect.arrayContaining(["current_account_evidence"]),
+      rating: "unknown",
+    });
   });
 
   it("treats manual current state as authoritative without a provider sync timestamp", () => {
@@ -129,6 +147,16 @@ describe("Finance health assessment", () => {
       missingInputs: expect.arrayContaining(["investment_allocation"]),
       rating: "unknown",
     });
+  });
+
+  it("discloses unavailable account-role evidence in every affected dimension", () => {
+    const health = assessFinanceHealth(input(), now);
+
+    expect(health.missingInputs).toContain("account_roles");
+    for (const key of ["borrow", "invest", "plan", "save", "spend"] as const) {
+      expect(health.dimensions[key].missingInputs).toContain("account_roles");
+    }
+    expect(health.dimensions.goals.missingInputs).not.toContain("account_roles");
   });
 
   it("uses approved profile thresholds and reserve targets", () => {

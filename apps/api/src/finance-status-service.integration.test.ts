@@ -2,6 +2,8 @@ import { resolve } from "node:path";
 import {
   createDatabaseClient,
   type DatabaseClient,
+  domainProfileApprovals,
+  domainProfiles,
   financeAccounts,
   financeBudgets,
   financeReviewCases,
@@ -11,6 +13,7 @@ import {
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
 import { createFinanceStatusService } from "./finance-status-service.js";
 
 const now = new Date("2026-08-15T12:00:00.000Z");
@@ -143,6 +146,10 @@ describe.sequential("Finance status service", () => {
 
     expect(status.freshness.state).toBe("current");
     expect(status.details.accounts).toMatchObject({ current: 1, tracked: 1 });
+    expect(status.details.accountRoles).toEqual({
+      missingInputs: ["account_roles"],
+      state: "unavailable",
+    });
     expect(status.details.accounts.items[0]?.synchronization.nextRetryAt).toBeNull();
     expect(status.details.month.spending).toBe(400);
     expect(status.details.health.confidence).toBe("reliable");
@@ -186,6 +193,19 @@ describe.sequential("Finance status service", () => {
     });
     expect(status.details.month.spending).toBeNull();
     expect(status.details.month.forecast).toBeNull();
+    expect(status.details.health.month.rating).toBe("unknown");
+    expect(status.details.health.dimensions.spend).toMatchObject({
+      missingInputs: expect.arrayContaining(["current_account_evidence"]),
+      rating: "unknown",
+    });
+    expect(status.details.health.dimensions.save).toMatchObject({
+      missingInputs: expect.arrayContaining(["current_account_evidence"]),
+      rating: "unknown",
+    });
+    expect(status.details.health.dimensions.plan).toMatchObject({
+      missingInputs: expect.arrayContaining(["current_account_evidence"]),
+      rating: "unknown",
+    });
   });
 
   it("reports mixed current and stale account evidence as partial", async () => {
@@ -224,9 +244,13 @@ describe.sequential("Finance status service", () => {
     expect(status.details.month).toEqual({ forecast: null, spending: null });
   });
 
-  it("scopes detail to a window while preserving the oldest outstanding backlog time", async () => {
+  it("scopes work detail without replacing current-month budget and health evidence", async () => {
     const userId = await makeUser("Window Finance");
     const source = await account(userId, "current");
+    await database.db.insert(financeBudgets).values([
+      { category: "Food", limit: 50_000, month: "2026-07", userId },
+      { category: "Food", limit: 100_000, month: "2026-08", userId },
+    ]);
     const [oldTransaction, windowTransaction] = await database.db
       .insert(financeTransactions)
       .values([
@@ -236,7 +260,7 @@ describe.sequential("Finance status service", () => {
           direction: "expense",
           merchant: "Old",
           needsReview: true,
-          transactionDate: "2026-07-01",
+          transactionDate: "2026-06-01",
           userId,
         },
         {
@@ -245,23 +269,32 @@ describe.sequential("Finance status service", () => {
           direction: "expense",
           merchant: "Window",
           needsReview: true,
-          transactionDate: "2026-08-10",
+          transactionDate: "2026-07-10",
           userId,
         },
       ])
       .returning();
     if (!oldTransaction || !windowTransaction)
       throw new Error("Fixture transactions were not created.");
+    await database.db.insert(financeTransactions).values({
+      accountId: source.id,
+      amount: 40_000,
+      direction: "expense",
+      merchant: "Current month",
+      needsReview: false,
+      transactionDate: "2026-08-10",
+      userId,
+    });
     await database.db.insert(financeReviewCases).values([
       {
-        createdAt: new Date("2026-07-02T00:00:00.000Z"),
+        createdAt: new Date("2026-06-02T00:00:00.000Z"),
         reason: "low_confidence",
         status: "open",
         transactionId: oldTransaction.id,
         userId,
       },
       {
-        createdAt: new Date("2026-08-11T00:00:00.000Z"),
+        createdAt: new Date("2026-07-11T00:00:00.000Z"),
         reason: "unknown_merchant",
         status: "open",
         transactionId: windowTransaction.id,
@@ -271,16 +304,133 @@ describe.sequential("Finance status service", () => {
 
     const status = await service().getFinanceStatus(userId, {
       type: "window",
-      start: "2026-08-01",
-      end: "2026-08-15",
+      start: "2026-07-01",
+      end: "2026-07-31",
     });
 
     expect(status.details.review).toEqual({ byReason: { unknown_merchant: 1 }, total: 1 });
     expect(status.work.actionable).toBe(1);
-    expect(status.work.oldestOutstandingAt).toBe("2026-07-02T00:00:00.000Z");
+    expect(status.work.oldestOutstandingAt).toBe("2026-06-02T00:00:00.000Z");
+    expect(status.details.budget).toEqual({ approved: true, month: "2026-08", total: 1_000 });
+    expect(status.details.month.spending).toBe(400);
+    expect(status.details.month.forecast).toBeCloseTo(826.67, 2);
+    expect(status.details.health.month.rating).toBe("on_track");
   });
 
-  it("supports target scopes and exposes the latest active maintenance run", async () => {
+  it("uses a preserved approved Finance profile snapshot after the live profile becomes a draft", async () => {
+    const userId = await makeUser("Approved Snapshot Finance");
+    const source = await account(userId, "current");
+    await database.db
+      .insert(financeBudgets)
+      .values({ category: "Food", limit: 100_000, month: "2026-08", userId });
+    await database.db.insert(financeTransactions).values({
+      accountId: source.id,
+      amount: 52_258,
+      direction: "expense",
+      merchant: "Approved pace",
+      needsReview: false,
+      transactionDate: "2026-08-10",
+      userId,
+    });
+    const [profile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "finances",
+        instructions: [],
+        objective: "Keep the current month on track.",
+        preferences: {
+          budgetOffTrackForecastRatio: 1.3,
+          budgetWatchForecastRatio: 1.1,
+          emergencyReserveTargetMonths: 2,
+        },
+        sourceContexts: [
+          {
+            notes: null,
+            purpose: "Current spending",
+            sourceId: source.id,
+            sourceLabel: source.name,
+          },
+        ],
+        status: "active",
+        summary: "Signed Finance guidance.",
+        userId,
+        version: 1,
+      })
+      .returning();
+    if (!profile) throw new Error("Finance profile fixture was not created.");
+    const approvedSnapshot = {
+      categories: profile.categories,
+      createdAt: profile.createdAt.toISOString(),
+      domain: profile.domain,
+      id: profile.id,
+      instructions: profile.instructions,
+      objective: profile.objective,
+      preferences: profile.preferences,
+      sourceContexts: profile.sourceContexts,
+      status: profile.status,
+      summary: profile.summary,
+      updatedAt: profile.updatedAt.toISOString(),
+      version: profile.version,
+    };
+    const [approval] = await database.db
+      .insert(domainProfileApprovals)
+      .values({
+        approvedAt: new Date("2026-08-14T12:00:00.000Z"),
+        approvedByUserId: userId,
+        domain: "finances",
+        profile: approvedSnapshot,
+        profileId: profile.id,
+        profileVersion: 1,
+        userId,
+      })
+      .returning();
+    if (!approval) throw new Error("Finance approval fixture was not created.");
+    await database.db
+      .update(domainProfiles)
+      .set({
+        preferences: {
+          budgetOffTrackForecastRatio: 1.15,
+          budgetWatchForecastRatio: 1.05,
+          emergencyReserveTargetMonths: 6,
+        },
+        status: "draft",
+        summary: "Unapproved stricter draft.",
+        version: 2,
+      })
+      .where(eq(domainProfiles.id, profile.id));
+
+    const first = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    await database.db
+      .update(domainProfiles)
+      .set({ summary: "Another unapproved draft.", version: 3 })
+      .where(eq(domainProfiles.id, profile.id));
+    const second = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(first.details.health.month.rating).toBe("on_track");
+    expect(first.details.rulebookVersion).toBe(second.details.rulebookVersion);
+
+    await database.db
+      .update(domainProfileApprovals)
+      .set({
+        profile: {
+          ...approvedSnapshot,
+          preferences: {
+            budgetOffTrackForecastRatio: 1.05,
+            budgetWatchForecastRatio: 1.1,
+          },
+        },
+      })
+      .where(eq(domainProfileApprovals.id, approval.id));
+    const invalidSnapshot = await service().getFinanceStatus(userId, {
+      type: "all_outstanding",
+    });
+
+    expect(invalidSnapshot.details.health.month.rating).toBe("watch");
+    expect(invalidSnapshot.details.rulebookVersion).not.toBe(first.details.rulebookVersion);
+  });
+
+  it("validates and resolves target scopes before exposing scoped details", async () => {
     const userId = await makeUser("Target Finance");
     const source = await account(userId, "current");
     const [transaction] = await database.db
@@ -296,6 +446,25 @@ describe.sequential("Finance status service", () => {
       })
       .returning();
     if (!transaction) throw new Error("Target fixture transaction was not created.");
+    const [review] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        reason: "low_confidence",
+        status: "open",
+        transactionId: transaction.id,
+        userId,
+      })
+      .returning();
+    if (!review) throw new Error("Target review fixture was not created.");
+    await database.db.insert(financeTransactions).values({
+      accountId: source.id,
+      amount: 2_000,
+      direction: "expense",
+      merchant: "Current target month",
+      needsReview: false,
+      transactionDate: "2026-08-01",
+      userId,
+    });
     const [run] = await database.db
       .insert(workspaceMaintenanceRuns)
       .values({
@@ -318,16 +487,41 @@ describe.sequential("Finance status service", () => {
       id: source.id,
       type: "target",
     });
-    const unrelatedStatus = await service().getFinanceStatus(userId, {
-      entityType: "finance_budget",
-      id: crypto.randomUUID(),
+    const reviewStatus = await service().getFinanceStatus(userId, {
+      entityType: "finance_review_case",
+      id: review.id,
       type: "target",
     });
-
-    expect(transactionStatus.details.month.spending).toBe(10);
-    expect(accountStatus.details.month.spending).toBe(10);
-    expect(unrelatedStatus.details.month.spending).toBe(0);
+    expect(transactionStatus.details.month.spending).toBe(20);
+    expect(accountStatus.details.month.spending).toBe(20);
+    expect(reviewStatus.details.month.spending).toBe(20);
+    expect(reviewStatus.details.review).toEqual({ byReason: { low_confidence: 1 }, total: 1 });
     expect(transactionStatus.activeRun).toMatchObject({ id: run.id, status: "awaiting_approval" });
     expect(transactionStatus.work.awaitingApproval).toBe(1);
+
+    await expect(
+      service().getFinanceStatus(userId, {
+        entityType: "finance_budget",
+        id: crypto.randomUUID(),
+        type: "target",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request", status: 400 });
+    await expect(
+      service().getFinanceStatus(userId, {
+        entityType: "finance_transaction",
+        id: crypto.randomUUID(),
+        type: "target",
+      }),
+    ).rejects.toMatchObject({ code: "not_found", status: 404 });
+
+    const otherUserId = await makeUser("Other Target Finance");
+    const otherAccount = await account(otherUserId, "current");
+    await expect(
+      service().getFinanceStatus(userId, {
+        entityType: "finance_account",
+        id: otherAccount.id,
+        type: "target",
+      }),
+    ).rejects.toMatchObject({ code: "not_found", status: 404 });
   });
 });

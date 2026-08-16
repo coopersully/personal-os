@@ -154,6 +154,52 @@ describe.sequential("workspace maintenance service", () => {
     ).rejects.toMatchObject({ code: "conflict" });
   });
 
+  it("lists due work and durably releases a partial checkpoint for another runtime", async () => {
+    const firstRuntime = createWorkspaceMaintenanceService({
+      db: database.db,
+      now: () => new Date("2026-08-15T12:00:00.000Z"),
+    });
+    const secondRuntime = createWorkspaceMaintenanceService({
+      db: database.db,
+      now: () => new Date("2026-08-15T12:00:01.000Z"),
+    });
+    const owner = await database.db
+      .insert(users)
+      .values({
+        displayName: "Continuation owner",
+        email: `continuation-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning({ id: users.id });
+    const ownerId = owner[0]?.id;
+    if (!ownerId) throw new Error("Continuation fixture user was not created.");
+    const run = await firstRuntime.createOrResume(
+      ownerId,
+      "finances",
+      { type: "all_outstanding" },
+      "rules:v1",
+    );
+
+    await expect(firstRuntime.listDueRunIds("finances", 5)).resolves.toContain(run.id);
+    const claim = await firstRuntime.claim(run.id);
+    if (!claim) throw new Error("Continuation fixture run was not claimed.");
+    await expect(secondRuntime.listDueRunIds("finances", 5)).resolves.not.toContain(run.id);
+    await firstRuntime.checkpointAndRelease({
+      checkpoint: { cursor: "opaque-next", step: "categorize" },
+      claimId: claim.claimId,
+      runId: run.id,
+    });
+
+    await expect(secondRuntime.listDueRunIds("finances", 5)).resolves.toContain(run.id);
+    const resumedClaim = await secondRuntime.claim(run.id);
+    expect(resumedClaim?.run.checkpoint).toEqual({ cursor: "opaque-next", step: "categorize" });
+    await expect(secondRuntime.getOwnedRun(ownerId, run.id)).resolves.toMatchObject({ id: run.id });
+    await expect(secondRuntime.getOwnedRun(userId, run.id)).rejects.toMatchObject({
+      code: "not_found",
+    });
+  });
+
   it("commits each step once by stable name and idempotency key", async () => {
     const service = createWorkspaceMaintenanceService({
       db: database.db,

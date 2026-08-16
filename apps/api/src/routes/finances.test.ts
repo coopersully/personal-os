@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv } from "../types.js";
@@ -22,6 +23,7 @@ describe("finance routes", () => {
     });
     registerFinanceRoutes({
       app,
+      financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus } as unknown as FinanceStatusService,
       finances: {} as ReturnType<typeof createFinanceService>,
       mutationContext: (context) => ({
@@ -73,6 +75,7 @@ describe("finance routes", () => {
     );
     registerFinanceRoutes({
       app,
+      financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
       finances: finances as unknown as ReturnType<typeof createFinanceService>,
       mutationContext: (context) => ({
@@ -160,6 +163,7 @@ describe("finance routes", () => {
     });
     registerFinanceRoutes({
       app,
+      financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
       finances: finances as unknown as ReturnType<typeof createFinanceService>,
       mutationContext: (context) => ({
@@ -190,5 +194,48 @@ describe("finance routes", () => {
       id,
       expect.objectContaining({ limit: 50, review: "all" }),
     );
+  });
+
+  it("allows a scoped agent to start and read its durable Finance maintenance run", async () => {
+    const app = new Hono<AppEnv>();
+    const run = { id, scope: { type: "all_outstanding" }, status: "queued", userId: id };
+    const financeMaintenance = {
+      dispatchRun: vi.fn(async () => ({ ...run, status: "completed" })),
+      getRun: vi.fn(async () => ({ ...run, status: "completed" })),
+      startOrResume: vi.fn(async () => run),
+    };
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "request-maintenance");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: financeMaintenance as unknown as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const started = await app.request("/v1/finances/maintenance", { method: "POST" });
+    expect(started.status).toBe(200);
+    await expect(started.json()).resolves.toEqual({ run: { ...run, status: "completed" } });
+    expect(financeMaintenance.startOrResume).toHaveBeenCalledWith(id, {
+      type: "all_outstanding",
+    });
+    expect(financeMaintenance.dispatchRun).toHaveBeenCalledWith(id);
+
+    const read = await app.request(`/v1/finances/maintenance/${id}`);
+    expect(read.status).toBe(200);
+    await expect(read.json()).resolves.toEqual({ run: { ...run, status: "completed" } });
+    expect(financeMaintenance.getRun).toHaveBeenCalledWith(id, id);
   });
 });

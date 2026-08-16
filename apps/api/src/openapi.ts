@@ -2,6 +2,64 @@ export function createOpenApiDocument(apiBaseUrl: string) {
   const security = [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }];
   return {
     components: {
+      schemas: {
+        FinanceMaintenanceRequest: {
+          properties: {
+            scope: { $ref: "#/components/schemas/MaintenanceScope" },
+          },
+          type: "object",
+        },
+        MaintenanceRun: {
+          properties: {
+            id: { format: "uuid", type: "string" },
+            rulebookVersion: { type: "string" },
+            scope: { $ref: "#/components/schemas/MaintenanceScope" },
+            status: {
+              enum: [
+                "queued",
+                "running",
+                "completed",
+                "completed_with_questions",
+                "awaiting_approval",
+                "blocked",
+                "failed_recoverable",
+                "failed_terminal",
+              ],
+              type: "string",
+            },
+          },
+          required: ["id", "rulebookVersion", "scope", "status"],
+          type: "object",
+        },
+        MaintenanceScope: {
+          discriminator: { propertyName: "type" },
+          oneOf: [
+            {
+              properties: { type: { const: "all_outstanding" } },
+              required: ["type"],
+              type: "object",
+            },
+            {
+              properties: {
+                end: { format: "date", type: "string" },
+                start: { format: "date", type: "string" },
+                type: { const: "window" },
+              },
+              required: ["type", "start", "end"],
+              type: "object",
+            },
+            {
+              properties: {
+                entityType: { type: "string" },
+                id: { format: "uuid", type: "string" },
+                type: { const: "target" },
+              },
+              required: ["type", "entityType", "id"],
+              type: "object",
+            },
+          ],
+        },
+      },
       securitySchemes: {
         bearerAuth: { bearerFormat: "PersonalAccessToken", scheme: "bearer", type: "http" },
         cookieAuth: { in: "cookie", name: "personal_os_session", type: "apiKey" },
@@ -93,6 +151,54 @@ export function createOpenApiDocument(apiBaseUrl: string) {
         get: {
           security,
           responses: { 200: { description: "Authoritative Finance status" } },
+        },
+      },
+      "/v1/finances/maintenance": {
+        post: {
+          requestBody: {
+            content: {
+              "application/json": {
+                examples: {
+                  allOutstanding: { value: { scope: { type: "all_outstanding" } } },
+                  target: {
+                    value: {
+                      scope: {
+                        entityType: "finance_transaction",
+                        id: "11111111-1111-4111-8111-111111111111",
+                        type: "target",
+                      },
+                    },
+                  },
+                  window: {
+                    value: {
+                      scope: { end: "2026-08-15", start: "2026-08-01", type: "window" },
+                    },
+                  },
+                },
+                schema: { $ref: "#/components/schemas/FinanceMaintenanceRequest" },
+              },
+            },
+            required: false,
+          },
+          responses: {
+            200: { description: "Finance maintenance run accepted or advanced" },
+            403: { description: "The caller lacks finances:write" },
+            409: { description: "A conflicting Finance maintenance run or rulebook is active" },
+          },
+          security,
+        },
+      },
+      "/v1/finances/maintenance/{id}": {
+        get: {
+          parameters: [
+            { in: "path", name: "id", required: true, schema: { format: "uuid", type: "string" } },
+          ],
+          responses: {
+            200: { description: "Owned Finance maintenance run" },
+            403: { description: "The caller lacks finances:read" },
+            404: { description: "Finance maintenance run not found for this user" },
+          },
+          security,
         },
       },
       "/v1/reminders": {

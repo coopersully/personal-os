@@ -12,7 +12,7 @@ import {
   maintenanceRunSchema,
   maintenanceScopeSchema,
 } from "@personal-os/domain";
-import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "./errors.js";
 
 const openStatuses = [
@@ -57,6 +57,19 @@ type RequeueInput = {
   runId: string;
 };
 
+type CheckpointAndReleaseInput = {
+  checkpoint: unknown;
+  claimId: string;
+  runId: string;
+};
+
+export type WorkspaceMaintenanceStepRecord = {
+  idempotencyKey: string;
+  result: unknown;
+  status: "completed" | "failed_recoverable" | "failed_terminal";
+  step: string;
+};
+
 export type WorkspaceMaintenanceService = {
   createOrResume: (
     userId: string,
@@ -65,8 +78,12 @@ export type WorkspaceMaintenanceService = {
     rulebookVersion: string,
   ) => Promise<MaintenanceRun>;
   claim: (runId: string) => Promise<{ claimId: string; run: MaintenanceRun } | null>;
+  checkpointAndRelease: (input: CheckpointAndReleaseInput) => Promise<MaintenanceRun>;
   completeStep: (input: CompleteStepInput) => Promise<void>;
   failStep: (input: FailStepInput) => Promise<void>;
+  getOwnedRun: (userId: string, runId: string) => Promise<MaintenanceRun>;
+  listDueRunIds: (domain: AssistantDomain, limit: number) => Promise<string[]>;
+  listStepRecords: (runId: string) => Promise<WorkspaceMaintenanceStepRecord[]>;
   requeue: (input: RequeueInput) => Promise<MaintenanceRun>;
   settle: (input: SettleInput) => Promise<MaintenanceRun>;
 };
@@ -247,6 +264,33 @@ export function createWorkspaceMaintenanceService({
       return run ? { claimId, run: serializeRun(run) } : null;
     },
 
+    async checkpointAndRelease(input) {
+      const [run] = await db
+        .update(workspaceMaintenanceRuns)
+        .set({
+          checkpoint: input.checkpoint,
+          leaseClaimId: null,
+          leaseExpiresAt: null,
+          status: "queued",
+          updatedAt: sql`NOW()`,
+        })
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.id, input.runId),
+            eq(workspaceMaintenanceRuns.status, "running"),
+            eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
+            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+          ),
+        )
+        .returning();
+      if (!run) {
+        throw new AppError("conflict", "The workspace maintenance claim is no longer current.", {
+          runId: input.runId,
+        });
+      }
+      return serializeRun(run);
+    },
+
     async completeStep(input) {
       await db.transaction(async (transaction) => {
         await fenceClaim(transaction, input, {
@@ -376,6 +420,58 @@ export function createWorkspaceMaintenanceService({
           updatedAt: sql`NOW()`,
         });
       });
+    },
+
+    async getOwnedRun(userId, runId) {
+      const [run] = await db
+        .select()
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(eq(workspaceMaintenanceRuns.id, runId), eq(workspaceMaintenanceRuns.userId, userId)),
+        )
+        .limit(1);
+      if (!run) throw new AppError("not_found", "The workspace maintenance run was not found.");
+      return serializeRun(run);
+    },
+
+    async listDueRunIds(domain, limit) {
+      const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+      const rows = await db
+        .select({ id: workspaceMaintenanceRuns.id })
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.domain, domain),
+            or(
+              eq(workspaceMaintenanceRuns.status, "queued"),
+              and(
+                eq(workspaceMaintenanceRuns.status, "failed_recoverable"),
+                sql`${workspaceMaintenanceRuns.retryAt} <= NOW()`,
+              ),
+              and(
+                eq(workspaceMaintenanceRuns.status, "running"),
+                sql`${workspaceMaintenanceRuns.leaseExpiresAt} <= NOW()`,
+              ),
+            ),
+          ),
+        )
+        .orderBy(asc(workspaceMaintenanceRuns.updatedAt), asc(workspaceMaintenanceRuns.id))
+        .limit(boundedLimit);
+      return rows.map((row) => row.id);
+    },
+
+    async listStepRecords(runId) {
+      const rows = await db
+        .select()
+        .from(workspaceMaintenanceSteps)
+        .where(eq(workspaceMaintenanceSteps.runId, runId))
+        .orderBy(asc(workspaceMaintenanceSteps.createdAt), asc(workspaceMaintenanceSteps.id));
+      return rows.map((row) => ({
+        idempotencyKey: row.idempotencyKey,
+        result: row.safeResult ?? null,
+        status: row.status,
+        step: row.stepName,
+      }));
     },
 
     async requeue(input) {

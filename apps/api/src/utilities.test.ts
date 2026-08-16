@@ -133,6 +133,25 @@ describe("pagination, errors, and OpenAPI", () => {
     );
     expect(document.servers).toEqual([{ url: "https://api.example.com" }]);
     expect(Object.keys(document.paths)).toContain("/v1/connectors/{id}/sync");
+    expect(document.paths["/v1/finances/maintenance"].post).toMatchObject({
+      requestBody: {
+        content: {
+          "application/json": {
+            examples: {
+              allOutstanding: { value: { scope: { type: "all_outstanding" } } },
+            },
+          },
+        },
+      },
+      responses: {
+        200: { description: "Finance maintenance run accepted or advanced" },
+        409: { description: "A conflicting Finance maintenance run or rulebook is active" },
+      },
+    });
+    expect(document.paths["/v1/finances/maintenance/{id}"].get.responses).toMatchObject({
+      200: { description: "Owned Finance maintenance run" },
+      404: { description: "Finance maintenance run not found for this user" },
+    });
     expect(document.paths["/v1/calendars/commitments/preview"]).toEqual({
       post: {
         security: [{ bearerAuth: [] }, { cookieAuth: [] }, { sessionAuth: [] }],

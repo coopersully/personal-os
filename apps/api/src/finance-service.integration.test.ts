@@ -2460,8 +2460,9 @@ describe.sequential("finance service", () => {
     });
   });
 
-  it("excludes vault moves and matched card payments while preserving rent spending", async () => {
-    const service = createFinanceService({ db: database.db, now: () => now });
+  it("questions unpaired vault moves, matches card payments, and preserves rent spending", async () => {
+    let reconciliationNow = now;
+    const service = createFinanceService({ db: database.db, now: () => reconciliationNow });
     const context = { principal: financePrincipal(userId), requestId: "transfer-reconciliation" };
     const cash = await service.createAccount(
       { balance: 2000, institution: "SoFi", kind: "cash", name: "Checking", provider: "manual" },
@@ -2528,11 +2529,12 @@ describe.sequential("finance service", () => {
       .set({ categoryDecidedAt: null, categorySource: "provider" })
       .where(inArray(financeTransactions.id, [vault.id, payment.id, cardPayment.id]));
 
-    await expect(service.reconcileTransfers(userId)).resolves.toEqual({ paired: 1, transfers: 3 });
+    await expect(service.reconcileTransfers(userId)).resolves.toEqual({ paired: 1, transfers: 2 });
     const transactions = await service.listTransactions(userId, { limit: 200, review: "all" });
     expect(transactions.items.find((item) => item.id === vault.id)).toMatchObject({
-      category: "Transfers",
-      direction: "transfer",
+      direction: "expense",
+      needsReview: true,
+      reconciliationStatus: "candidate",
     });
     expect(transactions.items.find((item) => item.id === payment.id)).toMatchObject({
       category: "Transfers",
@@ -2542,10 +2544,18 @@ describe.sequential("finance service", () => {
       category: "Transfers",
       direction: "transfer",
     });
-    expect(transactions.items.find((item) => item.id === rent.id)).toMatchObject({
+    const categorizedRent = transactions.items.find((item) => item.id === rent.id);
+    expect(categorizedRent).toMatchObject({
       category: "RENT_AND_UTILITIES",
       direction: "expense",
     });
+    reconciliationNow = new Date(now.getTime() + 60_000);
+    await expect(service.reconcileTransfers(userId)).resolves.toEqual({ paired: 0, transfers: 0 });
+    expect(
+      (await service.listTransactions(userId, { limit: 200, review: "all" })).items.find(
+        (item) => item.id === rent.id,
+      )?.updatedAt,
+    ).toBe(categorizedRent?.updatedAt);
     const secondPayment = await service.createTransaction(
       {
         accountId: cash.id,
@@ -3153,7 +3163,7 @@ describe.sequential("finance service", () => {
       protectedRows.find((row) => row.providerTransactionId === "txn-late-counterpart"),
     ).toMatchObject({
       direction: "income",
-      reconciliationStatus: "not_applicable",
+      reconciliationStatus: "candidate",
       transferGroupId: null,
     });
     expect(await service.listReviewQueue(plaidOnlyUser.id)).toEqual(
@@ -3926,5 +3936,365 @@ describe.sequential("finance service", () => {
       "Plaid is temporarily unavailable.",
     );
     vi.unstubAllGlobals();
+  });
+
+  it("bounds maintenance proposals and keeps ambiguous transfer matches as questions", async () => {
+    const [maintenanceUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Maintenance operations",
+        email: `finance-operations-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!maintenanceUser) throw new Error("Maintenance operations user was not created.");
+    let maintenanceNow = now;
+    const service = createFinanceService({ db: database.db, now: () => maintenanceNow });
+    const context = {
+      principal: financePrincipal(maintenanceUser.id),
+      requestId: "maintenance-operations",
+    };
+    const agentContext = {
+      principal: financeAgentPrincipal(maintenanceUser.id),
+      requestId: "maintenance-agent",
+    };
+    const cash = await service.createAccount(
+      { balance: 1_000, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      context,
+    );
+    const debtOne = await service.createAccount(
+      { balance: -200, institution: "Card", kind: "debt", name: "Card one", provider: "manual" },
+      context,
+    );
+    const debtTwo = await service.createAccount(
+      { balance: -100, institution: "Card", kind: "debt", name: "Card two", provider: "manual" },
+      context,
+    );
+    const pending = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 10,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Whole Foods",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({
+        category: null,
+        categoryConfidence: null,
+        categoryId: null,
+        categorySource: null,
+        needsReview: true,
+        pending: true,
+      })
+      .where(eq(financeTransactions.id, pending.id));
+
+    const page = await service.proposeOutstandingCategorizations(maintenanceUser.id, {
+      type: "window",
+      start: "2026-07-19",
+      end: "2026-07-19",
+    });
+    expect(page.items.length).toBeLessThanOrEqual(50);
+    expect(page.items.every((item) => item.transaction.date === "2026-07-19")).toBe(true);
+    const pendingProposal = page.items.find((item) => item.transaction.id === pending.id);
+    if (!pendingProposal?.suggestedCategory) {
+      throw new Error("Pending categorization proposal was not prepared.");
+    }
+    await expect(
+      service.applyApprovedOneOffs(
+        {
+          decisions: [
+            {
+              categoryId: pendingProposal.suggestedCategory.id,
+              confidence: pendingProposal.confidence,
+              expectedTransactionUpdatedAt: pendingProposal.transaction.updatedAt,
+              learnMerchant: "never",
+              rationale: pendingProposal.rationale,
+              transactionId: pending.id,
+            },
+          ],
+        },
+        agentContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    const outgoing = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 125,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-18",
+        direction: "expense",
+        merchant: "CARD PAYMENT",
+        notes: null,
+      },
+      context,
+    );
+    const incomingOne = await service.createTransaction(
+      {
+        accountId: debtOne.id,
+        amount: 125,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "income",
+        merchant: "CARD PAYMENT",
+        notes: null,
+      },
+      context,
+    );
+    const incomingTwo = await service.createTransaction(
+      {
+        accountId: debtTwo.id,
+        amount: 125,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "income",
+        merchant: "CARD PAYMENT",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ categoryDecidedAt: null, categorySource: "provider" })
+      .where(inArray(financeTransactions.id, [outgoing.id, incomingOne.id, incomingTwo.id]));
+
+    await expect(
+      service.reconcileTransfersForUser(maintenanceUser.id, { type: "all_outstanding" }),
+    ).resolves.toEqual({ paired: 0, transfers: 0 });
+    const ambiguous = await database.db
+      .select({
+        id: financeReviewCases.id,
+        reason: financeReviewCases.reason,
+        transactionId: financeReviewCases.transactionId,
+        updatedAt: financeReviewCases.updatedAt,
+      })
+      .from(financeReviewCases)
+      .where(
+        and(
+          eq(financeReviewCases.userId, maintenanceUser.id),
+          eq(financeReviewCases.status, "open"),
+        ),
+      );
+    expect(ambiguous.some((review) => review.reason === "possible_transfer")).toBe(true);
+    const ambiguousTransactions = await database.db
+      .select({ id: financeTransactions.id, updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(inArray(financeTransactions.id, [outgoing.id, incomingOne.id, incomingTwo.id]))
+      .orderBy(financeTransactions.id);
+    const transferReview = ambiguous.find(
+      (review) => review.reason === "possible_transfer" && review.transactionId === outgoing.id,
+    );
+    if (!transferReview) throw new Error("The outgoing transfer question was not created.");
+    const targetTransactionPage = await service.proposeOutstandingCategorizations(
+      maintenanceUser.id,
+      { type: "target", entityType: "finance_transaction", id: outgoing.id },
+    );
+    expect(targetTransactionPage.items).toHaveLength(1);
+    await expect(
+      service.proposeOutstandingCategorizations(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_review_case",
+        id: transferReview.id,
+      }),
+    ).resolves.toMatchObject({ items: [{ transaction: { id: outgoing.id } }] });
+    await expect(
+      service.proposeOutstandingCategorizations(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_account",
+        id: cash.id,
+      }),
+    ).resolves.toMatchObject({ items: expect.any(Array) });
+    await expect(
+      service.proposeOutstandingCategorizations(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_budget",
+        id: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.applyApprovedOneOffs(
+        { decisions: [] },
+        { principal: financePrincipal(maintenanceUser.id), requestId: "maintenance-human" },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      service.applyApprovedOneOffs(
+        {
+          decisions: [
+            {
+              categoryId:
+                targetTransactionPage.items[0]?.suggestedCategory?.id ?? crypto.randomUUID(),
+              confidence: targetTransactionPage.items[0]?.confidence ?? 1,
+              expectedTransactionUpdatedAt:
+                targetTransactionPage.items[0]?.transaction.updatedAt ?? outgoing.updatedAt,
+              learnMerchant: "always",
+              rationale: "Maintenance must not create a durable rule.",
+              transactionId: outgoing.id,
+            },
+          ],
+        },
+        agentContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const targetProposal = targetTransactionPage.items[0];
+    if (!targetProposal?.suggestedCategory) {
+      throw new Error("The protected transfer proposal was not prepared.");
+    }
+    await expect(
+      service.applyApprovedOneOffs(
+        {
+          decisions: [
+            {
+              categoryId: targetProposal.suggestedCategory.id,
+              confidence: targetProposal.confidence,
+              expectedTransactionUpdatedAt: targetProposal.transaction.updatedAt,
+              learnMerchant: "never",
+              rationale: targetProposal.rationale,
+              transactionId: outgoing.id,
+            },
+          ],
+        },
+        agentContext,
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_review_case",
+        id: transferReview.id,
+      }),
+    ).resolves.toMatchObject({ created: 0, total: 1 });
+    maintenanceNow = new Date(now.getTime() + 60_000);
+    await service.reconcileTransfersForUser(maintenanceUser.id, { type: "all_outstanding" });
+    await expect(
+      database.db
+        .select({
+          id: financeReviewCases.id,
+          reason: financeReviewCases.reason,
+          transactionId: financeReviewCases.transactionId,
+          updatedAt: financeReviewCases.updatedAt,
+        })
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.userId, maintenanceUser.id),
+            eq(financeReviewCases.status, "open"),
+          ),
+        )
+        .orderBy(financeReviewCases.id),
+    ).resolves.toEqual(ambiguous.toSorted((left, right) => left.id.localeCompare(right.id)));
+    await expect(
+      database.db
+        .select({ id: financeTransactions.id, updatedAt: financeTransactions.updatedAt })
+        .from(financeTransactions)
+        .where(inArray(financeTransactions.id, [outgoing.id, incomingOne.id, incomingTwo.id]))
+        .orderBy(financeTransactions.id),
+    ).resolves.toEqual(ambiguousTransactions);
+
+    await database.db.delete(financeTransactions).where(eq(financeTransactions.id, incomingTwo.id));
+    await expect(
+      service.reconcileTransfersForUser(
+        maintenanceUser.id,
+        { type: "all_outstanding" },
+        agentContext,
+      ),
+    ).resolves.toEqual({ paired: 1, transfers: 2 });
+    const matched = await database.db
+      .select({ transferGroupId: financeTransactions.transferGroupId })
+      .from(financeTransactions)
+      .where(inArray(financeTransactions.id, [outgoing.id, incomingOne.id]));
+    expect(matched[0]?.transferGroupId).toBeTruthy();
+    expect(matched[1]?.transferGroupId).toBe(matched[0]?.transferGroupId);
+    await expect(
+      database.db
+        .select({ entityId: auditEvents.entityId })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "finance.transfer_reconciled")),
+    ).resolves.toEqual(
+      expect.arrayContaining([{ entityId: outgoing.id }, { entityId: incomingOne.id }]),
+    );
+    await expect(
+      database.db
+        .select({ id: financeReviewCases.id })
+        .from(financeReviewCases)
+        .where(
+          and(
+            inArray(financeReviewCases.transactionId, [outgoing.id, incomingOne.id]),
+            eq(financeReviewCases.status, "open"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+
+    const duplicateOne = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 42,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-21",
+        direction: "expense",
+        merchant: "Unclear duplicate merchant",
+        notes: null,
+      },
+      context,
+    );
+    const duplicateTwo = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 42,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-21",
+        direction: "expense",
+        merchant: "Unclear duplicate merchant",
+        notes: null,
+      },
+      context,
+    );
+    const firstQuestionRefresh = await service.refreshMaintenanceQuestionsForUser(
+      maintenanceUser.id,
+      { type: "window", start: "2026-07-21", end: "2026-07-21" },
+    );
+    expect(firstQuestionRefresh.created).toBe(1);
+    const duplicateReviews = await database.db
+      .select({ id: financeReviewCases.id, reason: financeReviewCases.reason })
+      .from(financeReviewCases)
+      .where(
+        and(
+          inArray(financeReviewCases.transactionId, [duplicateOne.id, duplicateTwo.id]),
+          eq(financeReviewCases.status, "open"),
+        ),
+      );
+    expect(duplicateReviews).toEqual([expect.objectContaining({ reason: "possible_duplicate" })]);
+    maintenanceNow = new Date(now.getTime() + 120_000);
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(maintenanceUser.id, {
+        type: "window",
+        start: "2026-07-21",
+        end: "2026-07-21",
+      }),
+    ).resolves.toMatchObject({ created: 0, total: 1 });
+    await expect(
+      database.db
+        .select({ id: financeReviewCases.id, reason: financeReviewCases.reason })
+        .from(financeReviewCases)
+        .where(
+          and(
+            inArray(financeReviewCases.transactionId, [duplicateOne.id, duplicateTwo.id]),
+            eq(financeReviewCases.status, "open"),
+          ),
+        ),
+    ).resolves.toEqual(duplicateReviews);
   });
 });

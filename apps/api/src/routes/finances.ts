@@ -10,6 +10,8 @@ import {
   financeMerchantQuerySchema,
   financeReviewDecisionInputSchema,
   financeTransactionQuerySchema,
+  idSchema,
+  maintenanceRequestSchema,
   maintenanceScopeQuerySchema,
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
@@ -21,15 +23,23 @@ import {
   upsertFinanceAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
+import {
+  parseBody,
+  parseOptionalBody,
+  requireFeatureAccess,
+  requireHuman,
+  requireScope,
+} from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
 type FinanceRouteOptions = {
   app: Hono<AppEnv>;
+  financeMaintenance: FinanceMaintenanceService;
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
@@ -38,6 +48,7 @@ type FinanceRouteOptions = {
 /** Register the Finance-owned HTTP surface without constructing shared services. */
 export function registerFinanceRoutes({
   app,
+  financeMaintenance,
   financeStatus,
   finances,
   mutationContext,
@@ -56,6 +67,23 @@ export function registerFinanceRoutes({
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  app.post("/v1/finances/maintenance", async (context) => {
+    const request = await parseOptionalBody(context, maintenanceRequestSchema);
+    const created = await financeMaintenance.startOrResume(
+      context.get("principal").userId,
+      request.scope,
+    );
+    const advanced = await financeMaintenance.dispatchRun(created.id);
+    return context.json({ run: advanced ?? created });
+  });
+  app.get("/v1/finances/maintenance/:id", async (context) =>
+    context.json({
+      run: await financeMaintenance.getRun(
+        context.get("principal").userId,
+        idSchema.parse(context.req.param("id")),
+      ),
+    }),
+  );
   app.get("/v1/finances/status", async (context) =>
     context.json({
       status: await financeStatus.getFinanceStatus(

@@ -42,6 +42,7 @@ import { createConnectorService } from "./connector-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
+import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
@@ -91,6 +92,7 @@ export type PersonalOsApp = Hono<AppEnv> & {
     userRowsScanned: number;
   }>;
   dispatchDueMailRuleWork: () => Promise<void>;
+  dispatchDueFinanceMaintenance: () => Promise<void>;
   superviseICloudMail: () => Promise<void>;
   syncDueConnectors: () => Promise<{
     attempted: number;
@@ -466,6 +468,12 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     goals: goalService,
     maintenance,
     now,
+  });
+  const financeMaintenance = createFinanceMaintenanceService({
+    finances,
+    maintenance,
+    now,
+    status: financeStatus,
   });
   const pinterest = createPinterestService({ db: dependencies.db, now });
 
@@ -1098,7 +1106,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 
-  registerFinanceRoutes({ app, financeStatus, finances, mutationContext });
+  registerFinanceRoutes({ app, financeMaintenance, financeStatus, finances, mutationContext });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 
@@ -1248,6 +1256,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
         });
         throw new Error("Scheduled Finance synchronization failed.");
       }
+    },
+    async dispatchDueFinanceMaintenance() {
+      await financeMaintenance.dispatchDue(5);
     },
   });
 }

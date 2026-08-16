@@ -24,6 +24,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
+import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
@@ -57,7 +58,11 @@ async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number
       FROM pg_stat_activity
       WHERE datname = current_database()
         AND wait_event_type = 'Lock'
-        AND (query LIKE '%finance_%' OR query LIKE '%workspace_maintenance_runs%')
+        AND (
+          query LIKE '%finance_%'
+          OR query LIKE '%workspace_maintenance_runs%'
+          OR query LIKE '%pg_advisory_xact_lock%'
+        )
         AND query NOT LIKE '%pg_stat_activity%'
     `);
     if (Number(result.rows[0]?.count ?? 0) >= expected) return;
@@ -1269,6 +1274,105 @@ describe.sequential("finance service", () => {
         .from(financeProviderItems)
         .where(eq(financeProviderItems.id, itemBefore.id)),
     ).resolves.toEqual([]);
+  });
+
+  it("serializes a relink with account deletion without orphaning credential Items", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Provider Item relink delete",
+        email: `provider-item-relink-delete-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Relink/delete user was not created.");
+    const context = {
+      principal: financePrincipal(owner.id),
+      requestId: "relink-delete-race",
+    };
+    const providerItems = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    const remote = (accountId: string) => ({
+      accountId,
+      balanceCurrent: 10,
+      currencyCode: "USD",
+      name: accountId,
+      officialName: null,
+    });
+    const [moving] = await providerItems.upsertConnection({
+      accessToken: "source-token",
+      accounts: [remote("relink-delete-moving")],
+      context,
+      institution: "Source Bank",
+      itemId: "relink-delete-source",
+    });
+    await providerItems.upsertConnection({
+      accessToken: "destination-token",
+      accounts: [remote("relink-delete-anchor")],
+      context,
+      institution: "Destination Bank",
+      itemId: "relink-delete-destination",
+    });
+    if (!moving) throw new Error("Relink/delete account was not created.");
+
+    const blocker = await database.pool.connect();
+    let relink: ReturnType<typeof providerItems.upsertConnection> | undefined;
+    let deletion: ReturnType<ReturnType<typeof createFinanceService>["deleteAccount"]> | undefined;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `finance-provider-topology:${owner.id}`,
+      ]);
+      relink = providerItems.upsertConnection({
+        accessToken: "destination-relink-token",
+        accounts: [remote("relink-delete-moving")],
+        context: { ...context, requestId: "relink-delete-move" },
+        institution: "Destination Bank",
+        itemId: "relink-delete-destination",
+      });
+      void relink.catch(() => undefined);
+      await waitForLockWaiters(database.pool, 1);
+      deletion = createFinanceService({ db: database.db, now: () => now }).deleteAccount(
+        moving.id,
+        { ...context, requestId: "relink-delete-delete" },
+      );
+      void deletion.catch(() => undefined);
+      await waitForLockWaiters(database.pool, 2);
+      await blocker.query("COMMIT");
+
+      await expect(relink).resolves.toHaveLength(1);
+      await expect(deletion).resolves.toBeUndefined();
+    } finally {
+      await blocker.query("ROLLBACK");
+      blocker.release();
+      await Promise.allSettled([relink, deletion].filter((value) => value !== undefined));
+    }
+
+    expect(
+      await database.db
+        .select({ providerAccountId: financeAccounts.providerAccountId })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.userId, owner.id)),
+    ).toEqual([{ providerAccountId: "relink-delete-anchor" }]);
+    expect(
+      await database.db
+        .select({ providerItemId: financeProviderItems.providerItemId })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.userId, owner.id)),
+    ).toEqual([{ providerItemId: "relink-delete-destination" }]);
+    const orphanItems = await database.pool.query<{ id: string }>(
+      `SELECT item.id
+       FROM finance_provider_items AS item
+       LEFT JOIN finance_accounts AS account ON account.provider_item_record_id = item.id
+       WHERE item.user_id = $1 AND account.id IS NULL`,
+      [owner.id],
+    );
+    expect(orphanItems.rows).toEqual([]);
+    await database.db.delete(users).where(eq(users.id, owner.id));
   });
 
   it("manages manual finances, review decisions, budgets, and safe unavailable Plaid state", async () => {
@@ -3872,9 +3976,7 @@ describe.sequential("finance service", () => {
       await waitForLockWaiters(database.pool, 2);
       await exchangeBlocker.query("COMMIT");
       await expect(reconnectExchange).resolves.toHaveLength(2);
-      await expect(reconnectSync).rejects.toThrow(
-        "connection changed while this sync was in progress",
-      );
+      await expect(reconnectSync).rejects.toMatchObject({ code: "conflict" });
       const reconnectedAccounts = await database.db
         .select({
           providerItemId: financeAccounts.providerItemId,
@@ -4136,6 +4238,15 @@ describe.sequential("finance service", () => {
          WHERE id = (SELECT provider_item_record_id FROM finance_accounts WHERE id = $1)`,
         [healthAccount.id, now],
       );
+    const repairAndMakeDue = async () =>
+      database.pool.query(
+        `UPDATE finance_provider_items
+         SET sync_state = 'stale', sync_error = NULL, sync_error_code = NULL,
+             sync_error_category = NULL, sync_recovery = NULL, sync_failure_count = 0,
+             next_sync_at = $2
+         WHERE id = (SELECT provider_item_record_id FROM finance_accounts WHERE id = $1)`,
+        [healthAccount.id, now],
+      );
     const unconfiguredWorker = createFinanceService({
       db: database.db,
       encryptionKey: key,
@@ -4166,7 +4277,7 @@ describe.sequential("finance service", () => {
       now: () => now,
       plaid,
     });
-    await makeDue();
+    await repairAndMakeDue();
     await expect(unencryptedWorker.syncDuePlaidAccounts()).resolves.toMatchObject({ failed: 1 });
     await expect(
       database.pool.query(
@@ -4185,7 +4296,7 @@ describe.sequential("finance service", () => {
     });
 
     mode = "configuration";
-    await makeDue();
+    await repairAndMakeDue();
     await expect(workerOne.syncDuePlaidAccounts()).resolves.toMatchObject({ failed: 1 });
     await expect(
       database.pool.query(
@@ -4207,7 +4318,7 @@ describe.sequential("finance service", () => {
     });
 
     mode = "rate";
-    await makeDue();
+    await repairAndMakeDue();
     await expect(workerOne.syncDuePlaidAccounts()).resolves.toMatchObject({ failed: 1 });
     await expect(
       database.pool.query(
@@ -4295,19 +4406,14 @@ describe.sequential("finance service", () => {
     });
 
     mode = "success";
-    await database.pool.query(
-      `UPDATE finance_accounts
-       SET status = 'connected'
-       WHERE provider_item_id = (
-         SELECT provider_item_id FROM finance_accounts WHERE id = $1
-       )`,
-      [healthAccount.id],
+    await workerOne.exchangePlaidToken(
+      { institution: "Health Bank", publicToken: "health-reconnect-token" },
+      { ...context, requestId: "plaid-health-reconnect" },
     );
-    await makeDue();
     await expect(workerOne.syncDuePlaidAccounts()).resolves.toEqual({
       attempted: 1,
       failed: 0,
-      recovered: 1,
+      recovered: 0,
       skipped: 0,
       succeeded: 1,
     });
@@ -4365,7 +4471,6 @@ describe.sequential("finance service", () => {
       expect.arrayContaining([
         expect.objectContaining({ event: "connector_sync_completed", provider: "plaid" }),
         expect.objectContaining({ event: "connector_sync_failed", provider: "plaid" }),
-        expect.objectContaining({ event: "connector_sync_recovered", provider: "plaid" }),
         expect.objectContaining({ event: "connector_sync_freshness_observed", provider: "plaid" }),
       ]),
     );

@@ -134,66 +134,164 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
         getEncryptionKey(),
       );
       const rows = await db.transaction(async (tx) => {
-        await input.prepareTransaction?.(tx);
-        const [item] = await tx
-          .insert(financeProviderItems)
-          .values({
-            encryptedCredentials,
-            lastSyncedAt: null,
-            nextSyncAt: connectedAt,
-            provider: "plaid",
-            providerItemId: input.itemId,
-            syncCursor: null,
-            syncState: "stale",
-            userId: input.context.principal.userId,
-          })
-          .onConflictDoUpdate({
-            set: {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${input.context.principal.userId}`}, 0))`,
+        );
+        const providerAccountIds = [...new Set(input.accounts.map((account) => account.accountId))];
+        const discoveredAccounts =
+          providerAccountIds.length === 0
+            ? []
+            : await tx
+                .select({
+                  id: financeAccounts.id,
+                  providerItemRecordId: financeAccounts.providerItemRecordId,
+                })
+                .from(financeAccounts)
+                .where(
+                  and(
+                    eq(financeAccounts.userId, input.context.principal.userId),
+                    eq(financeAccounts.provider, "plaid"),
+                    inArray(financeAccounts.providerAccountId, providerAccountIds),
+                  ),
+                );
+        let [item] = await tx
+          .select()
+          .from(financeProviderItems)
+          .where(
+            and(
+              eq(financeProviderItems.userId, input.context.principal.userId),
+              eq(financeProviderItems.provider, "plaid"),
+              eq(financeProviderItems.providerItemId, input.itemId),
+            ),
+          )
+          .limit(1);
+        if (!item) {
+          [item] = await tx
+            .insert(financeProviderItems)
+            .values({
               encryptedCredentials,
-              lastSyncAttemptAt: null,
               lastSyncedAt: null,
+              nextSyncAt: connectedAt,
+              provider: "plaid",
+              providerItemId: input.itemId,
+              syncCursor: null,
+              syncState: "stale",
+              userId: input.context.principal.userId,
+            })
+            .onConflictDoNothing()
+            .returning();
+          if (!item) {
+            [item] = await tx
+              .select()
+              .from(financeProviderItems)
+              .where(
+                and(
+                  eq(financeProviderItems.userId, input.context.principal.userId),
+                  eq(financeProviderItems.provider, "plaid"),
+                  eq(financeProviderItems.providerItemId, input.itemId),
+                ),
+              )
+              .limit(1);
+          }
+        }
+        if (!item) throw new AppError("internal_error", "The Plaid Item could not be saved.");
+
+        const sourceItemIds = [
+          ...new Set(
+            discoveredAccounts.flatMap((account) =>
+              account.providerItemRecordId && account.providerItemRecordId !== item.id
+                ? [account.providerItemRecordId]
+                : [],
+            ),
+          ),
+        ];
+        const itemIds = [...sourceItemIds, item.id].sort();
+        const lockedItems = await tx
+          .select()
+          .from(financeProviderItems)
+          .where(inArray(financeProviderItems.id, itemIds))
+          .orderBy(financeProviderItems.id)
+          .for("update");
+        if (lockedItems.length !== itemIds.length) {
+          throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
+        }
+        const activeDestinationClaims = await tx.execute<{ id: string }>(sql`
+          SELECT id
+          FROM finance_provider_items
+          WHERE id = ${item.id}
+            AND sync_claim_id IS NOT NULL
+            AND sync_claim_expires_at > CURRENT_TIMESTAMP
+        `);
+        if (activeDestinationClaims.rows[0]) {
+          throw new AppError("conflict", "The Plaid connection is synchronizing. Try again.");
+        }
+
+        const lockedAccounts =
+          providerAccountIds.length === 0
+            ? []
+            : await tx
+                .select()
+                .from(financeAccounts)
+                .where(
+                  and(
+                    eq(financeAccounts.userId, input.context.principal.userId),
+                    eq(financeAccounts.provider, "plaid"),
+                    inArray(financeAccounts.providerAccountId, providerAccountIds),
+                  ),
+                )
+                .orderBy(financeAccounts.id)
+                .for("update");
+        const discoveredById = new Map(
+          discoveredAccounts.map((account) => [account.id, account.providerItemRecordId]),
+        );
+        if (
+          lockedAccounts.length !== discoveredAccounts.length ||
+          lockedAccounts.some(
+            (account) => discoveredById.get(account.id) !== account.providerItemRecordId,
+          )
+        ) {
+          throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
+        }
+
+        if (sourceItemIds.length > 0) {
+          await tx
+            .update(financeProviderItems)
+            .set({
               nextSyncAt: connectedAt,
               syncClaimExpiresAt: null,
               syncClaimGeneration: null,
               syncClaimId: null,
               syncClaimOwner: null,
               syncClaimStartedAt: null,
-              syncCursor: null,
-              syncError: null,
-              syncErrorCategory: null,
-              syncErrorCode: null,
-              syncFailureCount: 0,
-              syncRecovery: null,
               syncState: "stale",
               updatedAt: connectedAt,
-            },
-            target: [
-              financeProviderItems.userId,
-              financeProviderItems.provider,
-              financeProviderItems.providerItemId,
-            ],
-            targetWhere: isNotNull(financeProviderItems.providerItemId),
-          })
-          .returning();
-        if (!item) throw new AppError("internal_error", "The Plaid Item could not be saved.");
-
-        if (input.accounts.length > 0) {
-          await tx
-            .select({ id: financeAccounts.id })
-            .from(financeAccounts)
-            .where(
-              and(
-                eq(financeAccounts.userId, input.context.principal.userId),
-                eq(financeAccounts.provider, "plaid"),
-                inArray(
-                  financeAccounts.providerAccountId,
-                  input.accounts.map((account) => account.accountId),
-                ),
-              ),
-            )
-            .orderBy(financeAccounts.id)
-            .for("update");
+            })
+            .where(inArray(financeProviderItems.id, sourceItemIds));
         }
+        await tx
+          .update(financeProviderItems)
+          .set({
+            encryptedCredentials,
+            lastSyncAttemptAt: null,
+            lastSyncedAt: null,
+            nextSyncAt: connectedAt,
+            syncClaimExpiresAt: null,
+            syncClaimGeneration: null,
+            syncClaimId: null,
+            syncClaimOwner: null,
+            syncClaimStartedAt: null,
+            syncCursor: null,
+            syncError: null,
+            syncErrorCategory: null,
+            syncErrorCode: null,
+            syncFailureCount: 0,
+            syncRecovery: null,
+            syncState: "stale",
+            updatedAt: connectedAt,
+          })
+          .where(eq(financeProviderItems.id, item.id));
+
+        await input.prepareTransaction?.(tx);
 
         const saved: Array<typeof financeAccounts.$inferSelect> = [];
         for (const remote of input.accounts) {
@@ -252,6 +350,23 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
           if (!account)
             throw new AppError("internal_error", "The Plaid account could not be saved.");
           saved.push(account);
+        }
+        if (sourceItemIds.length > 0) {
+          await tx
+            .delete(financeProviderItems)
+            .where(
+              and(
+                inArray(financeProviderItems.id, sourceItemIds),
+                notExists(
+                  tx
+                    .select({ id: financeAccounts.id })
+                    .from(financeAccounts)
+                    .where(eq(financeAccounts.providerItemRecordId, financeProviderItems.id)),
+                ),
+              ),
+            );
+        }
+        for (const account of saved) {
           await tx.insert(auditEvents).values(
             auditValues({
               action: "finance.plaid_connected",

@@ -15,7 +15,7 @@ import {
   financeTransactions,
 } from "@personal-os/database";
 import type { MaintenanceScope } from "@personal-os/domain";
-import { and, asc, desc, eq, exists, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, exists, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import {
   classifyConnectorSyncFailure,
@@ -257,6 +257,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
           and(
             eq(financeProviderItems.id, itemId),
             eq(financeProviderItems.userId, context.principal.userId),
+            ne(financeProviderItems.syncState, "blocked"),
             or(
               isNull(financeProviderItems.syncClaimId),
               sql`${financeProviderItems.syncClaimExpiresAt} <= NOW()`,
@@ -265,6 +266,25 @@ export function createFinanceProviderItemSyncService(options: Options) {
         )
         .returning();
       if (!claimed || claimed.syncClaimGeneration === null) {
+        const [blocked] = await tx
+          .select({ error: financeProviderItems.syncError, state: financeProviderItems.syncState })
+          .from(financeProviderItems)
+          .where(
+            and(
+              eq(financeProviderItems.id, itemId),
+              eq(financeProviderItems.userId, context.principal.userId),
+              eq(financeProviderItems.syncState, "blocked"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (blocked) {
+          throw new AppError(
+            "service_unavailable",
+            blocked.error ?? "This Finance Provider Item requires explicit repair before syncing.",
+            { itemId },
+          );
+        }
         throw new AppError("conflict", "This Finance Provider Item is already synchronizing.", {
           itemId,
         });
@@ -346,8 +366,11 @@ export function createFinanceProviderItemSyncService(options: Options) {
           account.providerAccountId ? [[account.providerAccountId, account]] : [],
         ),
       );
+      const preparedForLinkedAccounts = input.prepared.filter((prepared) =>
+        accountByProviderId.has(prepared.remote.accountId),
+      );
       const lookupByTransactionId = new Map<string, ProjectionLookups>();
-      const lookupOrder = [...input.prepared].sort(
+      const lookupOrder = [...preparedForLinkedAccounts].sort(
         (left, right) =>
           left.merchant.localeCompare(right.merchant) ||
           left.remote.transactionId.localeCompare(right.remote.transactionId),
@@ -362,7 +385,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
       let changed = 0;
       const removed = input.page.removed.map((entry) => entry.transactionId).sort();
       const replacements = new Set(
-        input.prepared.flatMap((prepared) =>
+        preparedForLinkedAccounts.flatMap((prepared) =>
           prepared.remote.pendingTransactionId ? [prepared.remote.pendingTransactionId] : [],
         ),
       );
@@ -419,7 +442,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
         changed += deleted.length;
       }
 
-      for (const prepared of [...input.prepared].sort((left, right) =>
+      for (const prepared of [...preparedForLinkedAccounts].sort((left, right) =>
         left.remote.transactionId.localeCompare(right.remote.transactionId),
       )) {
         const remote = prepared.remote;
@@ -615,10 +638,13 @@ export function createFinanceProviderItemSyncService(options: Options) {
         auditValues({
           action: "finance.plaid_page_projected",
           after: {
-            added: input.page.added.length,
+            added: input.page.added.filter((remote) => accountByProviderId.has(remote.accountId))
+              .length,
             changed,
             hasMore: input.page.hasMore,
-            modified: input.page.modified.length,
+            modified: input.page.modified.filter((remote) =>
+              accountByProviderId.has(remote.accountId),
+            ).length,
             removed: removedRows.length,
           },
           before: null,
@@ -769,16 +795,18 @@ export function createFinanceProviderItemSyncService(options: Options) {
         };
       }
       const failureCount = item.syncFailureCount + 1;
-      nextSyncAt = replayScheduled
-        ? failedAt
-        : failure.recovery === "reconnect"
-          ? null
-          : connectorRetryAt({
-              accountId: item.id,
-              failureCount,
-              now: failedAt,
-              retryAfterMs: failure.retryAfterMs,
-            });
+      nextSyncAt = replayFailed
+        ? null
+        : replayScheduled
+          ? failedAt
+          : failure.recovery === "reconnect"
+            ? null
+            : connectorRetryAt({
+                accountId: item.id,
+                failureCount,
+                now: failedAt,
+                retryAfterMs: failure.retryAfterMs,
+              });
       const preserveReplayMarker =
         replayInProgress && !invalidCursorReported && failure.recovery === "automatic";
       const itemValues = replayScheduled
@@ -897,6 +925,18 @@ export function createFinanceProviderItemSyncService(options: Options) {
         await preserveProgress(onProgress);
         const providerPage = await getPlaid().syncTransactions({ accessToken, cursor });
         await preserveProgress(onProgress);
+        if (
+          [...providerPage.added, ...providerPage.modified].some(
+            (remote) => remote.pendingTransactionId === remote.transactionId,
+          )
+        ) {
+          throw new ConnectorError({
+            category: "invalid_response",
+            code: "plaid_invalid_response",
+            disposition: "retry",
+            message: "Plaid returned an invalid response.",
+          });
+        }
         const page = {
           ...providerPage,
           added: providerPage.added.filter((remote) =>
@@ -1004,6 +1044,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
           and(
             eq(financeAccounts.id, targetAccountId),
             userId ? eq(financeAccounts.userId, userId) : undefined,
+            ne(financeProviderItems.syncState, "blocked"),
             lte(financeProviderItems.nextSyncAt, selectedAt),
           ),
         )
@@ -1015,6 +1056,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
       .where(
         and(
           userId ? eq(financeProviderItems.userId, userId) : undefined,
+          ne(financeProviderItems.syncState, "blocked"),
           lte(financeProviderItems.nextSyncAt, selectedAt),
           exists(
             db

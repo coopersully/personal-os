@@ -184,6 +184,41 @@ describe("Plaid connector", () => {
     });
   });
 
+  it("rejects a provider transaction whose pending identity self-references its transaction ID", async () => {
+    const plaid = createPlaidConnector({
+      clientId: "client-id",
+      environment: "sandbox",
+      fetch: async () =>
+        Response.json({
+          added: [
+            {
+              account_id: "account-1",
+              amount: 4.25,
+              date: "2026-08-16",
+              merchant_name: "Malformed pending",
+              name: "MALFORMED PENDING",
+              pending: true,
+              pending_transaction_id: "self-referential-transaction",
+              personal_finance_category: null,
+              transaction_id: "self-referential-transaction",
+            },
+          ],
+          has_more: false,
+          modified: [],
+          next_cursor: "must-not-commit",
+          removed: [],
+        }),
+      secret: "connector-secret",
+    });
+
+    await expect(
+      plaid.syncTransactions({ accessToken: "access-token", cursor: null }),
+    ).rejects.toMatchObject({
+      category: "invalid_response",
+      code: "plaid_invalid_response",
+    });
+  });
+
   it("classifies missing or malformed Plaid Item identities as invalid responses", async () => {
     const exchangeMissing = createPlaidConnector({
       clientId: "client",

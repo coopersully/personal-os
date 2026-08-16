@@ -238,6 +238,74 @@ describe.sequential("Finance Provider Item service", () => {
     expect(auditCount?.count).toBe(4);
   });
 
+  it("refuses to relink an account into a destination Item with an active claim", async () => {
+    const providerItems = service();
+    const context = { principal: principal(userId), requestId: "active-destination" };
+    const [sourceAccount] = await providerItems.upsertConnection({
+      accessToken: "source-token",
+      accounts: [remoteAccount("moving-account")],
+      context,
+      institution: "Source Bank",
+      itemId: "source-item",
+    });
+    await providerItems.upsertConnection({
+      accessToken: "destination-token",
+      accounts: [remoteAccount("destination-anchor")],
+      context,
+      institution: "Destination Bank",
+      itemId: "destination-item",
+    });
+    const [sourceItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.providerItemId, "source-item"));
+    const [destinationItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.providerItemId, "destination-item"));
+    if (!sourceAccount || !sourceItem || !destinationItem) {
+      throw new Error("Relink fixtures were not created.");
+    }
+    const claimId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimGeneration: 3,
+        syncClaimId: claimId,
+        syncClaimOwner: "destination-runtime",
+        syncClaimStartedAt: now,
+      })
+      .where(eq(financeProviderItems.id, destinationItem.id));
+
+    await expect(
+      providerItems.upsertConnection({
+        accessToken: "relink-token",
+        accounts: [remoteAccount("moving-account")],
+        context: { ...context, requestId: "active-destination-relink" },
+        institution: "Destination Bank",
+        itemId: "destination-item",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    expect(
+      (
+        await database.db
+          .select({ itemId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, sourceAccount.id))
+      )[0]?.itemId,
+    ).toBe(sourceItem.id);
+    expect(
+      (
+        await database.db
+          .select({ claimId: financeProviderItems.syncClaimId })
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, destinationItem.id))
+      )[0]?.claimId,
+    ).toBe(claimId);
+  });
+
   it("preserves equal legacy cursors and accepts independently encrypted equal credentials", async () => {
     const accounts = await insertLegacyGroup("legacy-equal", ["cursor-1", "cursor-1"]);
 

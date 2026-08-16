@@ -4650,6 +4650,9 @@ export function createFinanceService({
     },
     async deleteAccount(id: string, context: MutationContext) {
       await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${context.principal.userId}`}, 0))`,
+        );
         const [candidate] = await tx
           .select()
           .from(financeAccounts)
@@ -4673,34 +4676,37 @@ export function createFinanceService({
             )
             .for("update")
             .limit(1);
-          if (providerItem) {
-            const [activeClaim] = await tx
-              .select({ id: financeProviderItems.id })
-              .from(financeProviderItems)
-              .where(
-                and(
-                  eq(financeProviderItems.id, providerItem.id),
-                  sql`${financeProviderItems.syncClaimId} IS NOT NULL`,
-                  sql`${financeProviderItems.syncClaimExpiresAt} > NOW()`,
-                ),
-              )
-              .limit(1);
-            if (activeClaim) {
-              throw new AppError(
-                "conflict",
-                "The Plaid connection is synchronizing. Retry account deletion after it finishes.",
-              );
-            }
-            linkedAccounts = await tx
-              .select()
-              .from(financeAccounts)
-              .where(eq(financeAccounts.providerItemRecordId, providerItem.id))
-              .orderBy(financeAccounts.id)
-              .for("update");
-            before = linkedAccounts.find((account) => account.id === id);
+          if (!providerItem) {
+            throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
           }
-        }
-        if (!before) {
+          const [activeClaim] = await tx
+            .select({ id: financeProviderItems.id })
+            .from(financeProviderItems)
+            .where(
+              and(
+                eq(financeProviderItems.id, providerItem.id),
+                sql`${financeProviderItems.syncClaimId} IS NOT NULL`,
+                sql`${financeProviderItems.syncClaimExpiresAt} > NOW()`,
+              ),
+            )
+            .limit(1);
+          if (activeClaim) {
+            throw new AppError(
+              "conflict",
+              "The Plaid connection is synchronizing. Retry account deletion after it finishes.",
+            );
+          }
+          linkedAccounts = await tx
+            .select()
+            .from(financeAccounts)
+            .where(eq(financeAccounts.providerItemRecordId, providerItem.id))
+            .orderBy(financeAccounts.id)
+            .for("update");
+          before = linkedAccounts.find((account) => account.id === id);
+          if (!before || before.providerItemRecordId !== candidate.providerItemRecordId) {
+            throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
+          }
+        } else {
           [before] = await tx
             .select()
             .from(financeAccounts)
@@ -4709,6 +4715,9 @@ export function createFinanceService({
             )
             .for("update")
             .limit(1);
+          if (before?.providerItemRecordId) {
+            throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
+          }
         }
         if (!before) throw new AppError("not_found", "The financial account was not found.");
         const [profile] = await tx

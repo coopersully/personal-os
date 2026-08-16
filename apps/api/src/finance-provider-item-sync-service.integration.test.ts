@@ -15,6 +15,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
+import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceProviderItemSyncService } from "./finance-provider-item-sync-service.js";
 import { encryptJson } from "./security.js";
 import type { Principal, RequestLog } from "./types.js";
@@ -39,6 +40,16 @@ function emptyPage(cursor: string, hasMore = false) {
     nextCursor: cursor,
     removed: [],
     transactionsUpdateStatus: "HISTORICAL_UPDATE_COMPLETE" as const,
+  };
+}
+
+function remoteAccount(accountId: string, balanceCurrent = 12.34) {
+  return {
+    accountId,
+    balanceCurrent,
+    currencyCode: "USD",
+    name: `Account ${accountId}`,
+    officialName: null,
   };
 }
 
@@ -307,6 +318,137 @@ describe.sequential("Finance Provider Item synchronization", () => {
     expect(cursors).toEqual([null, "page-one", "page-one"]);
   });
 
+  it("fences a source Item when its account is relinked during a provider page", async () => {
+    const { accounts, item: sourceItem, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target?.providerAccountId) throw new Error("Relink target account was not created.");
+    const context = { principal: principal(userId), requestId: "relink-during-page" };
+    const providerItems = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    await providerItems.upsertConnection({
+      accessToken: "destination-token",
+      accounts: [
+        {
+          accountId: `destination-anchor-${userId}`,
+          balanceCurrent: 1,
+          currencyCode: "USD",
+          name: "Destination anchor",
+          officialName: null,
+        },
+      ],
+      context,
+      institution: "Destination Bank",
+      itemId: `destination-item-${userId}`,
+    });
+    const [destinationItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.providerItemId, `destination-item-${userId}`));
+    if (!destinationItem) throw new Error("Destination Item was not created.");
+
+    let releasePage!: () => void;
+    let signalPageStarted!: () => void;
+    const pageStarted = new Promise<void>((resolvePromise) => {
+      signalPageStarted = resolvePromise;
+    });
+    const pageRelease = new Promise<void>((resolvePromise) => {
+      releasePage = resolvePromise;
+    });
+    const resolveProjectionLookups = vi.fn(async () => ({ categoryId: null, merchantId: null }));
+    const syncService = createFinanceProviderItemSyncService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid: plaid({
+        syncTransactions: async () => {
+          signalPageStarted();
+          await pageRelease;
+          return {
+            ...emptyPage(`moved-page-${userId}`),
+            added: [
+              {
+                accountId: target.providerAccountId ?? "missing",
+                amount: 42,
+                currencyCode: "USD",
+                date: "2026-08-16",
+                merchantName: "Moved merchant",
+                name: "MOVED MERCHANT",
+                pending: false,
+                pendingTransactionId: null,
+                personalFinanceCategory: {
+                  confidenceLevel: "VERY_HIGH",
+                  detailed: "FOOD_AND_DRINK_RESTAURANTS",
+                  primary: "FOOD_AND_DRINK",
+                },
+                transactionId: `moved-transaction-${userId}`,
+              },
+            ],
+          };
+        },
+      }),
+      prepareTransaction: async (remote) => ({
+        category: remote.personalFinanceCategory?.primary ?? null,
+        categoryConfidence: null,
+        categorySource: "provider",
+        isTransfer: false,
+        merchant: remote.merchantName ?? remote.name,
+        needsReview: false,
+        remote,
+      }),
+      resolveProjectionLookups,
+      resolveScopeAccountId: async () => undefined,
+    });
+
+    const oldSync = syncService.syncAccount(target.id, context);
+    void oldSync.catch(() => undefined);
+    await pageStarted;
+    await expect(
+      providerItems.upsertConnection({
+        accessToken: "destination-token-relinked",
+        accounts: [remoteAccount(target.providerAccountId)],
+        context: { ...context, requestId: "relink-commit" },
+        institution: "Destination Bank",
+        itemId: `destination-item-${userId}`,
+      }),
+    ).resolves.toHaveLength(1);
+    releasePage();
+    await expect(oldSync).rejects.toMatchObject({ code: "conflict" });
+
+    expect(resolveProjectionLookups).not.toHaveBeenCalled();
+    expect(
+      await database.db
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, `moved-transaction-${userId}`)),
+    ).toEqual([]);
+    expect(
+      await database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "finance.plaid_page_projected"),
+            eq(auditEvents.entityId, sourceItem.id),
+          ),
+        ),
+    ).toEqual([]);
+    expect(
+      await database.db
+        .select({ itemId: financeAccounts.providerItemRecordId })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, target.id)),
+    ).toEqual([{ itemId: destinationItem.id }]);
+    expect(
+      await database.db
+        .select({ id: financeProviderItems.id })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, sourceItem.id)),
+    ).toEqual([]);
+  });
+
   it("durably carries a pending removal across process loss before successful settlement", async () => {
     const { accounts, item, userId } = await fixture();
     const target = accounts[0];
@@ -386,6 +528,63 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .from(financeProviderItems)
         .where(eq(financeProviderItems.id, item.id)),
     ).resolves.toEqual([{ state: "current" }]);
+  });
+
+  it("rejects a provider-added pending self-reference before it can be mistaken for a tombstone", async () => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    if (!target) throw new Error("Self-referential pending target was not created.");
+    const providerTransactionId = `self-referential-${userId}`;
+
+    await expect(
+      service(
+        plaid({
+          syncTransactions: async () => ({
+            ...emptyPage("must-not-commit"),
+            added: [
+              {
+                accountId: target.providerAccountId ?? "missing",
+                amount: 15,
+                currencyCode: "USD",
+                date: "2026-08-16",
+                merchantName: "Malformed pending",
+                name: "MALFORMED PENDING",
+                pending: true,
+                pendingTransactionId: providerTransactionId,
+                personalFinanceCategory: null,
+                transactionId: providerTransactionId,
+              },
+            ],
+          }),
+        }),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "self-referential-pending",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      database.db
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, providerTransactionId)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({ cursor: financeProviderItems.syncCursor })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ cursor: null }]);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, item.id),
+            eq(auditEvents.action, "finance.plaid_page_projected"),
+          ),
+        ),
+    ).resolves.toEqual([]);
   });
 
   it("clears an invalid Item cursor for one controlled replay", async () => {
@@ -511,6 +710,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .select({
           code: financeProviderItems.syncErrorCode,
           cursor: financeProviderItems.syncCursor,
+          nextSyncAt: financeProviderItems.nextSyncAt,
           recovery: financeProviderItems.syncRecovery,
           state: financeProviderItems.syncState,
         })
@@ -520,10 +720,35 @@ describe.sequential("Finance Provider Item synchronization", () => {
       {
         code: "plaid_invalid_cursor_replay_failed",
         cursor: "replay-page-one",
+        nextSyncAt: null,
         recovery: "operator",
         state: "blocked",
       },
     ]);
+    await database.db
+      .update(financeProviderItems)
+      .set({ nextSyncAt: now })
+      .where(eq(financeProviderItems.id, item.id));
+    const getAccounts = vi.fn(async () => []);
+    const syncTransactions = vi.fn(async () => emptyPage("must-not-restart"));
+    const blockedService = service(plaid({ getAccounts, syncTransactions }));
+    await expect(
+      blockedService.syncDueItemsForUser(userId, { type: "all_outstanding" }),
+    ).resolves.toEqual({
+      attempted: 0,
+      failed: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 0,
+    });
+    await expect(
+      blockedService.syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "invalid-cursor-terminal-direct-attempt",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    expect(getAccounts).not.toHaveBeenCalled();
+    expect(syncTransactions).not.toHaveBeenCalled();
   });
 
   it("uses one Item claim across sibling runtimes and fences page and final writes after claim loss", async () => {

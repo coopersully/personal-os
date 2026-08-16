@@ -85,31 +85,35 @@ const accountSchema = z.object({
   name: z.string(),
   official_name: z.string().nullable(),
 });
-const transactionSchema = z.object({
-  account_id: z.string().min(1),
-  amount: z.number(),
-  iso_currency_code: z
-    .string()
-    .regex(/^[A-Z]{3}$/u)
-    .nullable()
-    .optional(),
-  date: z.string().min(1),
-  merchant_name: z.string().nullable(),
-  name: z.string(),
-  pending: z.boolean().default(false),
-  pending_transaction_id: z.string().nullable().optional(),
-  personal_finance_category: z
-    .object({
-      confidence_level: z
-        .enum(["HIGH", "LOW", "MEDIUM", "UNKNOWN", "VERY_HIGH"])
-        .nullable()
-        .optional(),
-      detailed: z.string().nullable().optional(),
-      primary: z.string(),
-    })
-    .nullable(),
-  transaction_id: z.string().min(1),
-});
+const transactionSchema = z
+  .object({
+    account_id: z.string().min(1),
+    amount: z.number(),
+    iso_currency_code: z
+      .string()
+      .regex(/^[A-Z]{3}$/u)
+      .nullable()
+      .optional(),
+    date: z.string().min(1),
+    merchant_name: z.string().nullable(),
+    name: z.string(),
+    pending: z.boolean().default(false),
+    pending_transaction_id: z.string().nullable().optional(),
+    personal_finance_category: z
+      .object({
+        confidence_level: z
+          .enum(["HIGH", "LOW", "MEDIUM", "UNKNOWN", "VERY_HIGH"])
+          .nullable()
+          .optional(),
+        detailed: z.string().nullable().optional(),
+        primary: z.string(),
+      })
+      .nullable(),
+    transaction_id: z.string().min(1),
+  })
+  .refine((transaction) => transaction.pending_transaction_id !== transaction.transaction_id, {
+    path: ["pending_transaction_id"],
+  });
 const transactionPageSchema = z.object({
   added: z.array(transactionSchema),
   has_more: z.boolean(),

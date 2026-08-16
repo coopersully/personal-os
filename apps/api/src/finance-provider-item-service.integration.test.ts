@@ -1125,16 +1125,22 @@ describe.sequential("Finance Provider Item service", () => {
     expect(JSON.stringify(items)).not.toContain("raw-provider-canary");
   });
 
-  it("skips a locked stable group, progresses the next group, and converges on a later pass", async () => {
-    const locked = await insertLegacyGroup("a-locked", [null, null]);
-    if (!locked[1]) throw new Error("The locked sibling fixture was not created.");
-    await insertLegacyGroup("b-ready", [null]);
+  it("scans past more than limit plus one locked groups and converges without duplicate audits", async () => {
+    const lockedGroups = await Promise.all(
+      ["a-locked", "b-locked", "c-locked"].map(async (groupingKey) => {
+        const [account] = await insertLegacyGroup(groupingKey, [null]);
+        if (!account) throw new Error(`The ${groupingKey} fixture was not created.`);
+        return account;
+      }),
+    );
+    await insertLegacyGroup("z-ready", [null]);
     const lockClient = await database.pool.connect();
     try {
       await lockClient.query("BEGIN");
-      await lockClient.query("SELECT id FROM finance_accounts WHERE id = $1 FOR UPDATE", [
-        locked[1].id,
-      ]);
+      await lockClient.query(
+        "SELECT id FROM finance_accounts WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+        [lockedGroups.map((account) => account.id)],
+      );
 
       await expect(service().backfillLegacyItems(1)).resolves.toEqual({
         blocked: 0,
@@ -1144,20 +1150,121 @@ describe.sequential("Finance Provider Item service", () => {
         replayDue: 1,
       });
       expect((await database.db.select().from(financeProviderItems))[0]?.legacyGroupingKey).toBe(
-        "b-ready",
+        "z-ready",
       );
     } finally {
       await lockClient.query("ROLLBACK");
       lockClient.release();
     }
 
+    for (const complete of [false, false, true]) {
+      await expect(service().backfillLegacyItems(1)).resolves.toEqual({
+        blocked: 0,
+        complete,
+        created: 1,
+        linked: 1,
+        replayDue: 1,
+      });
+    }
+    const auditsAfterConvergence = await database.db.$count(auditEvents);
+    expect(auditsAfterConvergence).toBe(4);
     await expect(service().backfillLegacyItems(1)).resolves.toEqual({
       blocked: 0,
       complete: true,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+    expect(await database.db.$count(auditEvents)).toBe(auditsAfterConvergence);
+  });
+
+  it("scans beyond a busy default-limit prefix and preserves all mutation capacity for ready work", async () => {
+    const busyUserId = "00000000-0000-4000-8000-000000000001";
+    const readyUserId = "ffffffff-ffff-4fff-bfff-ffffffffffff";
+    await database.db.insert(users).values([
+      {
+        displayName: "Backfill busy prefix",
+        email: "backfill-busy-prefix@example.com",
+        id: busyUserId,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      },
+      {
+        displayName: "Backfill ready suffix",
+        email: "backfill-ready-suffix@example.com",
+        id: readyUserId,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      },
+    ]);
+    await database.db.insert(financeAccounts).values([
+      ...Array.from({ length: 101 }, (_, index) => ({
+        encryptedCredentials: encryptJson({ accessToken: `busy-token-${index}` }, encryptionKey),
+        institution: "Busy Prefix Bank",
+        name: `Busy ${String(index).padStart(3, "0")}`,
+        provider: "plaid" as const,
+        providerAccountId: `busy-account-${index}`,
+        providerItemId: `busy-${String(index).padStart(3, "0")}`,
+        status: "connected" as const,
+        userId: busyUserId,
+      })),
+      {
+        encryptedCredentials: encryptJson({ accessToken: "ready-token" }, encryptionKey),
+        institution: "Ready Suffix Bank",
+        name: "Ready suffix",
+        provider: "plaid" as const,
+        providerAccountId: "ready-suffix-account",
+        providerItemId: "ready-suffix",
+        status: "connected" as const,
+        userId: readyUserId,
+      },
+    ]);
+    const busyTopology = await database.pool.connect();
+    try {
+      await busyTopology.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+        `finance-provider-topology:${busyUserId}`,
+      ]);
+      await expect(service().backfillLegacyItems()).resolves.toEqual({
+        blocked: 0,
+        complete: false,
+        created: 1,
+        linked: 1,
+        replayDue: 1,
+      });
+      await expect(
+        database.db.select({ userId: financeProviderItems.userId }).from(financeProviderItems),
+      ).resolves.toEqual([{ userId: readyUserId }]);
+    } finally {
+      await busyTopology.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
+        `finance-provider-topology:${busyUserId}`,
+      ]);
+      busyTopology.release();
+    }
+
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 0,
+      complete: false,
+      created: 100,
+      linked: 100,
+      replayDue: 100,
+    });
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 0,
+      complete: true,
       created: 1,
-      linked: 2,
+      linked: 1,
       replayDue: 1,
     });
+    const auditsAfterConvergence = await database.db.$count(auditEvents);
+    expect(auditsAfterConvergence).toBe(102);
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 0,
+      complete: true,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+    expect(await database.db.$count(auditEvents)).toBe(auditsAfterConvergence);
   });
 
   it("processes at most 100 stable groups per pass and completed replay has no duplicate effects", async () => {

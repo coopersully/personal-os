@@ -3212,6 +3212,144 @@ describe.sequential("finance service", () => {
     });
   });
 
+  it("rejects foreign and non-Plaid Provider Item pointers from every account health projection", async () => {
+    const [foreignOwner, crossOwnerReader, manualReader] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "Foreign health owner",
+          email: `foreign-health-owner-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Cross-owner health reader",
+          email: `cross-owner-health-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Manual pointer reader",
+          email: `manual-pointer-health-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+      ])
+      .returning();
+    if (!foreignOwner || !crossOwnerReader || !manualReader) {
+      throw new Error("Account health integrity users were not created.");
+    }
+    const providerItems = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    const [foreignAccount] = await providerItems.upsertConnection({
+      accessToken: "foreign-health-token",
+      accounts: [
+        {
+          accountId: "foreign-health-anchor",
+          balanceCurrent: 10,
+          currencyCode: "USD",
+          name: "Foreign health anchor",
+          officialName: null,
+        },
+      ],
+      context: {
+        principal: financePrincipal(foreignOwner.id),
+        requestId: "foreign-health-connect",
+      },
+      institution: "Foreign Health Bank",
+      itemId: "foreign-health-item",
+    });
+    const [manualAnchor] = await providerItems.upsertConnection({
+      accessToken: "manual-pointer-token",
+      accounts: [
+        {
+          accountId: "manual-pointer-anchor",
+          balanceCurrent: 20,
+          currencyCode: "USD",
+          name: "Manual pointer anchor",
+          officialName: null,
+        },
+      ],
+      context: {
+        principal: financePrincipal(manualReader.id),
+        requestId: "manual-pointer-connect",
+      },
+      institution: "Manual Pointer Bank",
+      itemId: "manual-pointer-item",
+    });
+    if (!foreignAccount || !manualAnchor) {
+      throw new Error("Account health integrity Items were not created.");
+    }
+    const [foreignItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.userId, foreignOwner.id));
+    const [manualItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.userId, manualReader.id));
+    if (!foreignItem || !manualItem) {
+      throw new Error("Account health integrity Item rows were not created.");
+    }
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: null,
+        syncError: "FOREIGN_HEALTH_CANARY",
+        syncErrorCategory: "configuration",
+        syncErrorCode: "foreign_health_canary",
+        syncFailureCount: 1,
+        syncRecovery: "operator",
+        syncState: "blocked",
+      })
+      .where(eq(financeProviderItems.id, foreignItem.id));
+    await database.db.insert(financeAccounts).values([
+      {
+        institution: "Corrupt Cross-owner Bank",
+        name: "Cross-owner corrupt pointer",
+        provider: "plaid",
+        providerAccountId: "cross-owner-health-pointer",
+        providerItemRecordId: foreignItem.id,
+        status: "connected",
+        userId: crossOwnerReader.id,
+      },
+      {
+        institution: "Corrupt Manual Bank",
+        name: "Manual corrupt pointer",
+        provider: "manual",
+        providerItemRecordId: manualItem.id,
+        status: "manual",
+        userId: manualReader.id,
+      },
+    ]);
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const projections = (readerId: string) => [
+      service.listOverview(readerId),
+      service.exportData(readerId),
+      service.getGuidedSetupContext(readerId),
+      service.getLedgerHealth(readerId),
+    ];
+
+    for (const readerId of [crossOwnerReader.id, manualReader.id]) {
+      const results = await Promise.allSettled(projections(readerId));
+      expect(results).toHaveLength(4);
+      for (const result of results) {
+        expect(result.status).toBe("rejected");
+        if (result.status === "rejected") {
+          expect(result.reason).toMatchObject({ code: "conflict" });
+          expect(String(result.reason)).not.toContain("FOREIGN_HEALTH_CANARY");
+        }
+      }
+    }
+
+    await database.db
+      .delete(users)
+      .where(inArray(users.id, [foreignOwner.id, crossOwnerReader.id, manualReader.id]));
+  });
+
   it("builds an individual cash-flow profile, conservative paycheck stream, and high-confidence subscription", async () => {
     const userId = crypto.randomUUID();
     await database.db.insert(users).values({

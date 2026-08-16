@@ -50,6 +50,8 @@ type LegacyGroupCandidate = {
 };
 
 const backfillRequestId = "finance-provider-item-backfill";
+const backfillCandidatePageSize = 25;
+const backfillCandidateScanLimit = 500;
 const blockedReasons = {
   credentialInvalid: {
     code: "finance_provider_item_legacy_credential_invalid",
@@ -415,46 +417,74 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
       }
       const boundedLimit = Math.min(limit, 100);
       const result = await db.transaction(async (tx) => {
-        const claimed = await tx.execute<LegacyGroupCandidate>(sql`
-          WITH legacy_groups AS MATERIALIZED (
-            SELECT
-              account.user_id,
-              account.provider,
-              account.provider_item_id AS legacy_grouping_key,
-              min(account.id::text)::uuid AS representative_id,
-              count(*)::int AS group_size
-            FROM finance_accounts account
-            WHERE account.provider_item_record_id IS NULL
-              AND account.provider = 'plaid'
-              AND account.provider_item_id IS NOT NULL
-              AND NOT EXISTS (
-                SELECT 1
-                FROM finance_provider_items terminal_item
-                WHERE terminal_item.user_id = account.user_id
-                  AND terminal_item.provider = account.provider
-                  AND terminal_item.legacy_grouping_key = account.provider_item_id
-                  AND terminal_item.sync_state = 'blocked'
-              )
-            GROUP BY account.user_id, account.provider, account.provider_item_id
-          )
-          SELECT
-            legacy_groups.user_id AS "userId",
-            legacy_groups.provider,
-            legacy_groups.legacy_grouping_key AS "legacyGroupingKey",
-            legacy_groups.representative_id AS "representativeId",
-            legacy_groups.group_size AS "groupSize"
-          FROM legacy_groups
-          ORDER BY legacy_groups.user_id, legacy_groups.legacy_grouping_key,
-            legacy_groups.representative_id
-          LIMIT ${boundedLimit + 1}
-        `);
         let blocked = 0;
         let created = 0;
         let linked = 0;
         let replayDue = 0;
         let processedGroups = 0;
+        let scannedGroups = 0;
+        let scanCursor: Pick<LegacyGroupCandidate, "legacyGroupingKey" | "userId"> | undefined;
+        const candidates: LegacyGroupCandidate[] = [];
 
-        for (const candidate of claimed.rows) {
+        while (scannedGroups < backfillCandidateScanLimit) {
+          const pageLimit = Math.min(
+            backfillCandidatePageSize,
+            backfillCandidateScanLimit - scannedGroups,
+          );
+          const claimed = await tx.execute<LegacyGroupCandidate>(sql`
+            WITH legacy_groups AS MATERIALIZED (
+              SELECT
+                account.user_id,
+                account.provider,
+                account.provider_item_id AS legacy_grouping_key,
+                min(account.id::text)::uuid AS representative_id,
+                count(*)::int AS group_size
+              FROM finance_accounts account
+              WHERE account.provider_item_record_id IS NULL
+                AND account.provider = 'plaid'
+                AND account.provider_item_id IS NOT NULL
+                AND NOT EXISTS (
+                  SELECT 1
+                  FROM finance_provider_items terminal_item
+                  WHERE terminal_item.user_id = account.user_id
+                    AND terminal_item.provider = account.provider
+                    AND terminal_item.legacy_grouping_key = account.provider_item_id
+                    AND terminal_item.sync_state = 'blocked'
+                )
+              GROUP BY account.user_id, account.provider, account.provider_item_id
+            )
+            SELECT
+              legacy_groups.user_id AS "userId",
+              legacy_groups.provider,
+              legacy_groups.legacy_grouping_key AS "legacyGroupingKey",
+              legacy_groups.representative_id AS "representativeId",
+              legacy_groups.group_size AS "groupSize"
+            FROM legacy_groups
+            ${
+              scanCursor
+                ? sql`WHERE legacy_groups.user_id > ${scanCursor.userId}
+                    OR (
+                      legacy_groups.user_id = ${scanCursor.userId}
+                      AND legacy_groups.legacy_grouping_key > ${scanCursor.legacyGroupingKey}
+                    )`
+                : sql``
+            }
+            ORDER BY legacy_groups.user_id, legacy_groups.legacy_grouping_key,
+              legacy_groups.representative_id
+            LIMIT ${pageLimit}
+          `);
+          if (claimed.rows.length === 0) break;
+          scannedGroups += claimed.rows.length;
+          const lastCandidate = claimed.rows.at(-1);
+          if (!lastCandidate) break;
+          scanCursor = {
+            legacyGroupingKey: lastCandidate.legacyGroupingKey,
+            userId: lastCandidate.userId,
+          };
+          candidates.push(...claimed.rows);
+        }
+
+        for (const candidate of candidates) {
           if (processedGroups >= boundedLimit) break;
           const topologyLock = await tx.execute<{ acquired: boolean }>(
             sql`select pg_try_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${candidate.userId}`}, 0)) AS acquired`,

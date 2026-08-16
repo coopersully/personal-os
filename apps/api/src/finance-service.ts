@@ -582,9 +582,11 @@ export function createFinanceService({
   }
 
   async function serializeAccounts(rows: Array<typeof financeAccounts.$inferSelect>) {
-    const itemIds = rows.flatMap((row) =>
-      row.providerItemRecordId ? [row.providerItemRecordId] : [],
-    );
+    const itemIds = [
+      ...new Set(
+        rows.flatMap((row) => (row.providerItemRecordId ? [row.providerItemRecordId] : [])),
+      ),
+    ];
     const items =
       itemIds.length === 0
         ? []
@@ -593,6 +595,20 @@ export function createFinanceService({
             .from(financeProviderItems)
             .where(inArray(financeProviderItems.id, itemIds));
     const itemById = new Map(items.map((item) => [item.id, item]));
+    if (
+      rows.some((row) => {
+        if (!row.providerItemRecordId) return false;
+        const item = itemById.get(row.providerItemRecordId);
+        return (
+          !item ||
+          row.provider !== "plaid" ||
+          item.provider !== "plaid" ||
+          item.userId !== row.userId
+        );
+      })
+    ) {
+      throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+    }
     return rows.map((row) =>
       account(row, row.providerItemRecordId ? itemById.get(row.providerItemRecordId) : undefined),
     );

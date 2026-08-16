@@ -997,6 +997,82 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ]);
   });
 
+  it("classifies retryable operator contention as conflict while the winning runtime recovers", async () => {
+    const { accounts, item, userId } = await fixture();
+    const firstAccount = accounts[0];
+    const secondAccount = accounts[1];
+    if (!firstAccount || !secondAccount) {
+      throw new Error("Operator contention sibling accounts were not created.");
+    }
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: now,
+        syncError: "Plaid configuration requires repair.",
+        syncErrorCategory: "configuration",
+        syncErrorCode: "plaid_configuration_invalid",
+        syncFailureCount: 2,
+        syncRecovery: "operator",
+        syncState: "blocked",
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    let releaseWinner!: () => void;
+    const winnerRelease = new Promise<void>((resolvePromise) => {
+      releaseWinner = resolvePromise;
+    });
+    let markWinnerStarted!: () => void;
+    const winnerStarted = new Promise<void>((resolvePromise) => {
+      markWinnerStarted = resolvePromise;
+    });
+    const winnerProvider = plaid({
+      syncTransactions: async () => {
+        markWinnerStarted();
+        await winnerRelease;
+        return emptyPage("operator-recovered");
+      },
+    });
+    const losingGetAccounts = vi.fn(async () => []);
+    const losingSyncTransactions = vi.fn(async () => emptyPage("must-not-run"));
+    const winner = service(winnerProvider);
+    const loser = service(
+      plaid({ getAccounts: losingGetAccounts, syncTransactions: losingSyncTransactions }),
+    );
+    const winningSync = winner.syncAccount(firstAccount.id, {
+      principal: principal(userId),
+      requestId: "operator-contention-winner",
+    });
+    await winnerStarted;
+
+    await expect(
+      loser.syncAccount(secondAccount.id, {
+        principal: principal(userId),
+        requestId: "operator-contention-loser",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(loser.syncDueItemsForUser(userId, { type: "all_outstanding" })).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      recovered: 0,
+      skipped: 1,
+      succeeded: 0,
+    });
+    expect(losingGetAccounts).not.toHaveBeenCalled();
+    expect(losingSyncTransactions).not.toHaveBeenCalled();
+
+    releaseWinner();
+    await expect(winningSync).resolves.toEqual({ changed: 0 });
+    await expect(
+      database.db
+        .select({
+          syncErrorCode: financeProviderItems.syncErrorCode,
+          syncFailureCount: financeProviderItems.syncFailureCount,
+          syncState: financeProviderItems.syncState,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ syncErrorCode: null, syncFailureCount: 0, syncState: "current" }]);
+  });
+
   it("never automatically or directly claims a reconnect Item even with a stale due timestamp", async () => {
     const { accounts, item, userId } = await fixture();
     const target = accounts[0];

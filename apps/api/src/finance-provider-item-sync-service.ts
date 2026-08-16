@@ -309,22 +309,40 @@ export function createFinanceProviderItemSyncService(options: Options) {
         )
         .returning();
       if (!claimed || claimed.syncClaimGeneration === null) {
-        const [blocked] = await tx
-          .select({ error: financeProviderItems.syncError, state: financeProviderItems.syncState })
+        const [unavailable] = await tx
+          .select({
+            activeClaim: sql<boolean>`${financeProviderItems.syncClaimId} IS NOT NULL
+              AND ${financeProviderItems.syncClaimExpiresAt} > NOW()`,
+            error: financeProviderItems.syncError,
+            errorCode: financeProviderItems.syncErrorCode,
+            nextSyncAt: financeProviderItems.nextSyncAt,
+            recovery: financeProviderItems.syncRecovery,
+          })
           .from(financeProviderItems)
           .where(
             and(
               eq(financeProviderItems.id, itemId),
               eq(financeProviderItems.userId, context.principal.userId),
-              eq(financeProviderItems.syncState, "blocked"),
+              eq(financeProviderItems.provider, "plaid"),
             ),
           )
           .for("update")
           .limit(1);
-        if (blocked) {
+        if (unavailable?.activeClaim) {
+          throw new AppError("conflict", "This Finance Provider Item is already synchronizing.", {
+            itemId,
+          });
+        }
+        if (
+          unavailable &&
+          (unavailable.errorCode === invalidCursorReplayFailedCode ||
+            unavailable.recovery === "reconnect" ||
+            (unavailable.recovery === "operator" && unavailable.nextSyncAt === null))
+        ) {
           throw new AppError(
             "service_unavailable",
-            blocked.error ?? "This Finance Provider Item requires explicit repair before syncing.",
+            unavailable.error ??
+              "This Finance Provider Item requires explicit repair before syncing.",
             { itemId },
           );
         }

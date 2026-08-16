@@ -41,6 +41,7 @@ describe.sequential("iCloud UIDVALIDITY identity migration", () => {
         "0054_agent_access_work_item_snapshots",
         "0055_finance_sync_health",
         "0056_workspace_maintenance_runs",
+        "0057_finance_currency_evidence",
       ],
     );
     await migrateDatabase(database.db, migrationsBeforeUidValidity);

@@ -63,6 +63,11 @@ type CheckpointAndReleaseInput = {
   runId: string;
 };
 
+type RenewClaimInput = {
+  claimId: string;
+  runId: string;
+};
+
 export type WorkspaceMaintenanceStepRecord = {
   idempotencyKey: string;
   result: unknown;
@@ -84,6 +89,7 @@ export type WorkspaceMaintenanceService = {
   getOwnedRun: (userId: string, runId: string) => Promise<MaintenanceRun>;
   listDueRunIds: (domain: AssistantDomain, limit: number) => Promise<string[]>;
   listStepRecords: (runId: string) => Promise<WorkspaceMaintenanceStepRecord[]>;
+  renewClaim: (input: RenewClaimInput) => Promise<MaintenanceRun>;
   requeue: (input: RequeueInput) => Promise<MaintenanceRun>;
   settle: (input: SettleInput) => Promise<MaintenanceRun>;
 };
@@ -472,6 +478,30 @@ export function createWorkspaceMaintenanceService({
         status: row.status,
         step: row.stepName,
       }));
+    },
+
+    async renewClaim(input) {
+      const [run] = await db
+        .update(workspaceMaintenanceRuns)
+        .set({
+          leaseExpiresAt: sql`NOW() + ${leaseMilliseconds} * INTERVAL '1 millisecond'`,
+          updatedAt: sql`NOW()`,
+        })
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.id, input.runId),
+            eq(workspaceMaintenanceRuns.status, "running"),
+            eq(workspaceMaintenanceRuns.leaseClaimId, input.claimId),
+            sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
+          ),
+        )
+        .returning();
+      if (!run) {
+        throw new AppError("conflict", "The workspace maintenance claim is no longer current.", {
+          runId: input.runId,
+        });
+      }
+      return serializeRun(run);
     },
 
     async requeue(input) {

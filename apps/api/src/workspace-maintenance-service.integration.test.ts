@@ -154,6 +154,61 @@ describe.sequential("workspace maintenance service", () => {
     ).rejects.toMatchObject({ code: "conflict" });
   });
 
+  it("renews only the current unexpired claim using PostgreSQL time", async () => {
+    const service = createWorkspaceMaintenanceService({
+      db: database.db,
+      now: () => new Date("2100-01-01T00:00:00.000Z"),
+    });
+    const owner = await database.db
+      .insert(users)
+      .values({
+        displayName: "Lease renewal owner",
+        email: `lease-renewal-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning({ id: users.id });
+    const ownerId = owner[0]?.id;
+    if (!ownerId) throw new Error("Lease renewal fixture user was not created.");
+    const run = await service.createOrResume(
+      ownerId,
+      "finances",
+      { type: "all_outstanding" },
+      "rules:v1",
+    );
+    const claim = await service.claim(run.id);
+    if (!claim) throw new Error("Lease renewal fixture was not claimed.");
+
+    await database.pool.query(
+      `UPDATE workspace_maintenance_runs
+       SET lease_expires_at = NOW() + INTERVAL '10 seconds'
+       WHERE id = $1`,
+      [run.id],
+    );
+    const renewed = await service.renewClaim({ claimId: claim.claimId, runId: run.id });
+    expect(renewed.status).toBe("running");
+    const lease = await database.pool.query<{ remaining_ms: string }>(
+      `SELECT EXTRACT(EPOCH FROM (lease_expires_at - NOW())) * 1000 AS remaining_ms
+       FROM workspace_maintenance_runs
+       WHERE id = $1`,
+      [run.id],
+    );
+    expect(Number(lease.rows[0]?.remaining_ms)).toBeGreaterThan(110_000);
+
+    await expect(
+      service.renewClaim({ claimId: crypto.randomUUID(), runId: run.id }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await database.pool.query(
+      `UPDATE workspace_maintenance_runs
+       SET lease_expires_at = NOW() - INTERVAL '1 second'
+       WHERE id = $1`,
+      [run.id],
+    );
+    await expect(
+      service.renewClaim({ claimId: claim.claimId, runId: run.id }),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
   it("lists due work and durably releases a partial checkpoint for another runtime", async () => {
     const firstRuntime = createWorkspaceMaintenanceService({
       db: database.db,

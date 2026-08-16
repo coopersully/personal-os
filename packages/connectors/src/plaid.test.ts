@@ -69,8 +69,14 @@ describe("Plaid connector", () => {
               accounts: [
                 {
                   account_id: "account-1",
-                  balances: { current: 12.5 },
+                  balances: { current: 12.5, iso_currency_code: "USD" },
                   name: "Checking",
+                  official_name: null,
+                },
+                {
+                  account_id: "account-unknown-currency",
+                  balances: { current: 7.5 },
+                  name: "Legacy account",
                   official_name: null,
                 },
               ],
@@ -82,11 +88,27 @@ describe("Plaid connector", () => {
                   account_id: "account-1",
                   amount: 4.25,
                   date: "2026-08-15",
+                  iso_currency_code: "USD",
                   merchant_name: "Coffee",
                   name: "Coffee",
                   pending: false,
-                  personal_finance_category: { primary: "FOOD_AND_DRINK" },
+                  pending_transaction_id: "pending-transaction-1",
+                  personal_finance_category: {
+                    confidence_level: "VERY_HIGH",
+                    detailed: "FOOD_AND_DRINK_COFFEE",
+                    primary: "FOOD_AND_DRINK",
+                  },
                   transaction_id: "transaction-1",
+                },
+                {
+                  account_id: "account-unknown-currency",
+                  amount: 1.5,
+                  date: "2026-08-15",
+                  merchant_name: null,
+                  name: "Unknown currency",
+                  pending: false,
+                  personal_finance_category: null,
+                  transaction_id: "transaction-unknown-currency",
                 },
               ],
               has_more: false,
@@ -106,16 +128,65 @@ describe("Plaid connector", () => {
       {
         accountId: "account-1",
         balanceCurrent: 12.5,
+        currencyCode: "USD",
         name: "Checking",
+        officialName: null,
+      },
+      {
+        accountId: "account-unknown-currency",
+        balanceCurrent: 7.5,
+        currencyCode: null,
+        name: "Legacy account",
         officialName: null,
       },
     ]);
     await expect(
       plaid.syncTransactions({ accessToken: "access-token", cursor: null }),
     ).resolves.toMatchObject({
-      added: [{ accountId: "account-1", transactionId: "transaction-1" }],
+      added: expect.arrayContaining([
+        expect.objectContaining({
+          accountId: "account-1",
+          currencyCode: "USD",
+          pendingTransactionId: "pending-transaction-1",
+          personalFinanceCategory: {
+            confidenceLevel: "VERY_HIGH",
+            detailed: "FOOD_AND_DRINK_COFFEE",
+            primary: "FOOD_AND_DRINK",
+          },
+          transactionId: "transaction-1",
+        }),
+        expect.objectContaining({
+          accountId: "account-unknown-currency",
+          currencyCode: null,
+          transactionId: "transaction-unknown-currency",
+        }),
+      ]),
       hasMore: false,
       nextCursor: "cursor-1",
+    });
+  });
+
+  it("rejects non-JSON and malformed successful Plaid responses", async () => {
+    const nonJson = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () => new Response("not-json"),
+      secret: "secret",
+    });
+    const malformed = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async () => Response.json({ unexpected: true }),
+      secret: "secret",
+    });
+
+    await expect(nonJson.validateCredentials()).rejects.toMatchObject({
+      category: "invalid_response",
+      code: "plaid_invalid_response",
+    });
+    await expect(malformed.createLinkToken(linkInput)).rejects.toMatchObject({
+      category: "invalid_response",
+      code: "plaid_invalid_response",
     });
   });
 

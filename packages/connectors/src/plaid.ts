@@ -15,6 +15,7 @@ export type PlaidLinkTokenInput = {
 export type PlaidAccountSnapshot = {
   accountId: string;
   balanceCurrent: number | null;
+  currencyCode: string | null;
   name: string;
   officialName: string | null;
 };
@@ -22,6 +23,7 @@ export type PlaidAccountSnapshot = {
 export type PlaidTransactionSnapshot = {
   accountId: string;
   amount: number;
+  currencyCode: string | null;
   date: string;
   merchantName: string | null;
   name: string;
@@ -68,13 +70,25 @@ type PlaidConnectorOptions = {
 
 const accountSchema = z.object({
   account_id: z.string().min(1),
-  balances: z.object({ current: z.number().nullable() }),
+  balances: z.object({
+    current: z.number().nullable(),
+    iso_currency_code: z
+      .string()
+      .regex(/^[A-Z]{3}$/u)
+      .nullable()
+      .optional(),
+  }),
   name: z.string(),
   official_name: z.string().nullable(),
 });
 const transactionSchema = z.object({
   account_id: z.string().min(1),
   amount: z.number(),
+  iso_currency_code: z
+    .string()
+    .regex(/^[A-Z]{3}$/u)
+    .nullable()
+    .optional(),
   date: z.string().min(1),
   merchant_name: z.string().nullable(),
   name: z.string(),
@@ -153,6 +167,7 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
     return {
       accountId: value.account_id,
       amount: value.amount,
+      currencyCode: value.iso_currency_code ?? null,
       date: value.date,
       merchantName: value.merchant_name,
       name: value.name,
@@ -207,6 +222,7 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
       return value.accounts.map((account) => ({
         accountId: account.account_id,
         balanceCurrent: account.balances.current,
+        currencyCode: account.balances.iso_currency_code ?? null,
         name: account.name,
         officialName: account.official_name,
       }));

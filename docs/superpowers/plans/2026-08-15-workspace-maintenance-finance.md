@@ -684,7 +684,7 @@ git commit -m "feat: maintain Finance with durable runs"
 - Modify: `packages/domain/src/domain.test.ts`
 - Modify: `packages/database/src/schema.ts`
 - Modify: `packages/database/src/schema.test.ts`
-- Create: `packages/database/migrations/0057_finance_budget_proposals.sql`
+- Create: `packages/database/migrations/0058_finance_budget_proposals.sql`
 - Modify: `packages/database/migrations/meta/_journal.json`
 - Modify: `apps/api/src/finance-maintenance-service.ts`
 - Modify: `apps/api/src/finance-maintenance-service.integration.test.ts`
@@ -719,7 +719,7 @@ Expected: FAIL because proposals are not persisted.
 
 - [ ] **Step 3: Add normalized proposal tables**
 
-Add `finance_budget_proposals` with user/run/month/status/evidence hash/income basis/totals/cash-flow/conflicts/revision/approved-at timestamps and `finance_budget_proposal_items` with proposal/category/kind/limit/rationale/source evidence. Use unique `(user_id, month, status)` only for active `pending` proposals and unique `(proposal_id, category)` items. Run `pnpm --filter @personal-os/database db:generate -- --name finance_budget_proposals`, verify the generated tag is `0057_finance_budget_proposals`, and review its SQL and journal entry; it creates empty tables only.
+Add `finance_budget_proposals` with user/run/month/status/evidence hash/income basis/totals/cash-flow/conflicts/revision/approved-at timestamps and `finance_budget_proposal_items` with proposal/category/kind/limit/rationale/source evidence. Use unique `(user_id, month, status)` only for active `pending` proposals and unique `(proposal_id, category)` items. Run `pnpm --filter @personal-os/database db:generate -- --name finance_budget_proposals`, verify the generated tag is `0058_finance_budget_proposals`, and review its SQL and journal entry; it creates empty tables only.
 
 - [ ] **Step 4: Prepare proposals from explicit evidence**
 

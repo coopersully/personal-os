@@ -249,6 +249,7 @@ const brief: DailyBrief = {
 const financeAccount: FinanceAccount = {
   balance: 1200,
   createdAt: now,
+  currencyCode: null,
   id,
   institution: "Test bank",
   kind: "cash",
@@ -274,6 +275,7 @@ const financeTransaction: FinanceTransaction = {
   category: null,
   categoryConfidence: null,
   createdAt: now,
+  currencyCode: null,
   date: "2026-07-13",
   direction: "expense",
   id: accountId,

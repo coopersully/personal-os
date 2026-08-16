@@ -88,6 +88,11 @@ export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSc
 export const financeAccountSchema = z.object({
   balance: z.number().finite().nullable(),
   createdAt: isoDateTimeSchema,
+  currencyCode: z
+    .string()
+    .regex(/^[A-Z]{3}$/u)
+    .nullable()
+    .default(null),
   id: idSchema,
   institution: z.string().min(1).max(160),
   kind: financeAccountKindSchema,
@@ -246,6 +251,11 @@ export const financeTransactionSchema = z.object({
   categoryRationale: z.string().max(1_000).nullable().optional(),
   categorySource: z.enum(["agent", "provider", "rule", "user"]).nullable().optional(),
   createdAt: isoDateTimeSchema,
+  currencyCode: z
+    .string()
+    .regex(/^[A-Z]{3}$/u)
+    .nullable()
+    .default(null),
   date: z.iso.date(),
   direction: transactionDirectionSchema,
   id: idSchema,
@@ -460,6 +470,7 @@ export const financeCategorizationProposalSchema = z.object({
   meetsPolicyThreshold: z.boolean(),
   policy: z.literal("preview"),
   rationale: z.string().min(1).max(1_000),
+  suggestionBasis: z.enum(["merchant_rule", "transaction_evidence"]).nullable().default(null),
   source: materialSourceReferenceSchema,
   suggestedCategory: financeCategorySchema.nullable(),
   threshold: z.number().min(0).max(1),

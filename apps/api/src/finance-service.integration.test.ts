@@ -20,6 +20,7 @@ import {
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
+import { AppError } from "./errors.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
@@ -88,13 +89,13 @@ function plaidFetch(): typeof globalThis.fetch {
         accounts: [
           {
             account_id: "plaid-account-1",
-            balances: { current: 91.25 },
+            balances: { current: 91.25, iso_currency_code: "USD" },
             name: "Checking",
             official_name: null,
           },
           {
             account_id: "plaid-account-2",
-            balances: { current: null },
+            balances: { current: null, iso_currency_code: "USD" },
             name: "Savings",
             official_name: "High Yield Savings",
           },
@@ -113,6 +114,7 @@ function plaidFetch(): typeof globalThis.fetch {
                   account_id: "plaid-account-1",
                   amount: 20,
                   date: "2026-07-19",
+                  iso_currency_code: "USD",
                   merchant_name: "Acme Bookstore",
                   name: "ACME BOOKSTORE",
                   pending: true,
@@ -147,6 +149,7 @@ function plaidFetch(): typeof globalThis.fetch {
                     account_id: "plaid-account-1",
                     amount: 22,
                     date: "2026-07-19",
+                    iso_currency_code: "USD",
                     merchant_name: "Trader Joe's",
                     name: "TRADER JOE'S",
                     pending: true,
@@ -338,6 +341,7 @@ describe.sequential("finance service", () => {
       "0054_agent_access_work_item_snapshots",
       "0055_finance_sync_health",
       "0056_workspace_maintenance_runs",
+      "0057_finance_currency_evidence",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -2528,6 +2532,10 @@ describe.sequential("finance service", () => {
       .update(financeTransactions)
       .set({ categoryDecidedAt: null, categorySource: "provider" })
       .where(inArray(financeTransactions.id, [vault.id, payment.id, cardPayment.id]));
+    await database.db
+      .update(financeTransactions)
+      .set({ currencyCode: "USD" })
+      .where(inArray(financeTransactions.id, [payment.id, cardPayment.id]));
 
     await expect(service.reconcileTransfers(userId)).resolves.toEqual({ paired: 1, transfers: 2 });
     const transactions = await service.listTransactions(userId, { limit: 200, review: "all" });
@@ -2586,6 +2594,10 @@ describe.sequential("finance service", () => {
       .update(financeTransactions)
       .set({ categoryDecidedAt: null, categorySource: "provider" })
       .where(inArray(financeTransactions.id, [secondPayment.id, secondCardPayment.id]));
+    await database.db
+      .update(financeTransactions)
+      .set({ currencyCode: "USD" })
+      .where(inArray(financeTransactions.id, [secondPayment.id, secondCardPayment.id]));
     const concurrentReconciliations = await Promise.all([
       service.reconcileTransfers(userId),
       service.reconcileTransfers(userId),
@@ -2602,6 +2614,50 @@ describe.sequential("finance service", () => {
     expect(concurrentlyMatched[0]?.transferGroupId).toBeTruthy();
     expect(concurrentlyMatched[1]?.transferGroupId).toBe(concurrentlyMatched[0]?.transferGroupId);
     expect(concurrentlyMatched.every((item) => item.reconciliationStatus === "matched")).toBe(true);
+    const currencyOut = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 777,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-22",
+        direction: "expense",
+        merchant: "CARD PAYMENT",
+        notes: null,
+      },
+      context,
+    );
+    const currencyIn = await service.createTransaction(
+      {
+        accountId: card.id,
+        amount: 777,
+        category: "LOAN_PAYMENTS",
+        categoryConfidence: null,
+        date: "2026-07-22",
+        direction: "income",
+        merchant: "CARD PAYMENT",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ categoryDecidedAt: null, categorySource: "provider", currencyCode: "USD" })
+      .where(eq(financeTransactions.id, currencyOut.id));
+    await database.db
+      .update(financeTransactions)
+      .set({ categoryDecidedAt: null, categorySource: "provider", currencyCode: "EUR" })
+      .where(eq(financeTransactions.id, currencyIn.id));
+    await expect(service.reconcileTransfers(userId)).resolves.toEqual({ paired: 0, transfers: 0 });
+    await expect(
+      database.db
+        .select({ reconciliationStatus: financeTransactions.reconciliationStatus })
+        .from(financeTransactions)
+        .where(inArray(financeTransactions.id, [currencyOut.id, currencyIn.id])),
+    ).resolves.toEqual([
+      { reconciliationStatus: "candidate" },
+      { reconciliationStatus: "candidate" },
+    ]);
     await Promise.all([
       service.reconcileTransfers(userId),
       service.updateTransaction(rent.id, { category: "Shopping", learnMerchant: false }, context),
@@ -2991,6 +3047,7 @@ describe.sequential("finance service", () => {
       context,
     );
     expect(accounts).toHaveLength(2);
+    expect(accounts.every((account) => account.currencyCode === "USD")).toBe(true);
     await expect(service.listCategories(plaidOnlyUser.id)).resolves.not.toHaveLength(0);
     const plaidAccount = accounts[0];
     const debtAccount = accounts[1];
@@ -3022,6 +3079,7 @@ describe.sequential("finance service", () => {
     expect(transaction).toMatchObject({
       amount: 2200,
       categoryConfidence: 9850,
+      currencyCode: "USD",
       direction: "expense",
       needsReview: false,
       pending: true,
@@ -3938,6 +3996,106 @@ describe.sequential("finance service", () => {
     vi.unstubAllGlobals();
   });
 
+  it("fences normalized ingestion when the maintenance claim expires during provider work", async () => {
+    const [maintenanceUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Maintenance heartbeat",
+        email: `finance-heartbeat-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!maintenanceUser) throw new Error("Maintenance heartbeat user was not created.");
+    let providerReturned = false;
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async (input) => {
+        switch (new URL(String(input)).pathname) {
+          case "/item/public_token/exchange":
+            return Response.json({ access_token: "access-token" });
+          case "/accounts/get":
+            return Response.json({
+              accounts: [
+                {
+                  account_id: "heartbeat-account",
+                  balances: { current: 100 },
+                  name: "Checking",
+                  official_name: null,
+                },
+              ],
+            });
+          case "/transactions/sync":
+            providerReturned = true;
+            return Response.json({
+              added: [
+                {
+                  account_id: "heartbeat-account",
+                  amount: 25,
+                  date: "2026-07-19",
+                  merchant_name: "Heartbeat canary",
+                  name: "Heartbeat canary",
+                  pending: false,
+                  personal_finance_category: null,
+                  transaction_id: "heartbeat-transaction",
+                },
+              ],
+              has_more: false,
+              modified: [],
+              next_cursor: "heartbeat-cursor",
+              removed: [],
+            });
+          default:
+            return Response.json({}, { status: 404 });
+        }
+      },
+      secret: "secret",
+    });
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+    });
+    const context = {
+      principal: financePrincipal(maintenanceUser.id),
+      requestId: "maintenance-heartbeat",
+    };
+    const [account] = await service.exchangePlaidToken(
+      { institution: "Heartbeat Bank", publicToken: "public-token" },
+      context,
+    );
+    if (!account) throw new Error("Maintenance heartbeat account was not created.");
+
+    await expect(
+      service.syncDueAccountsForUser(maintenanceUser.id, async () => {
+        if (providerReturned) {
+          throw new AppError("conflict", "The maintenance claim expired.");
+        }
+      }),
+    ).resolves.toMatchObject({ failed: 0, skipped: 1, succeeded: 0 });
+    await expect(
+      database.db
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.userId, maintenanceUser.id)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({
+          syncClaimId: financeAccounts.syncClaimId,
+          syncCursor: financeAccounts.syncCursor,
+          syncFailureCount: financeAccounts.syncFailureCount,
+          syncState: financeAccounts.syncState,
+        })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, account.id)),
+    ).resolves.toEqual([
+      { syncClaimId: null, syncCursor: null, syncFailureCount: 0, syncState: "stale" },
+    ]);
+  });
+
   it("bounds maintenance proposals and keeps ambiguous transfer matches as questions", async () => {
     const [maintenanceUser] = await database.db
       .insert(users)
@@ -3956,6 +4114,12 @@ describe.sequential("finance service", () => {
       requestId: "maintenance-operations",
     };
     const agentContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:maintenance-test",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId: "11111111-1111-4111-8111-111111111111",
+      },
       principal: financeAgentPrincipal(maintenanceUser.id),
       requestId: "maintenance-agent",
     };
@@ -3971,6 +4135,26 @@ describe.sequential("finance service", () => {
       { balance: -100, institution: "Card", kind: "debt", name: "Card two", provider: "manual" },
       context,
     );
+    const foreignAccount = await service.createAccount(
+      { balance: 10, institution: "Elsewhere", name: "Foreign", provider: "manual" },
+      { principal: financePrincipal(userId), requestId: "maintenance-foreign-account" },
+    );
+    for (const id of [crypto.randomUUID(), foreignAccount.id]) {
+      await expect(
+        service.reconcileTransfersForUser(maintenanceUser.id, {
+          type: "target",
+          entityType: "finance_account",
+          id,
+        }),
+      ).rejects.toMatchObject({ code: "not_found" });
+      await expect(
+        service.refreshMaintenanceQuestionsForUser(maintenanceUser.id, {
+          type: "target",
+          entityType: "finance_account",
+          id,
+        }),
+      ).rejects.toMatchObject({ code: "not_found" });
+    }
     const pending = await service.createTransaction(
       {
         accountId: cash.id,
@@ -3984,6 +4168,30 @@ describe.sequential("finance service", () => {
       },
       context,
     );
+    const rentRuleCandidate = await service.createTransaction(
+      {
+        accountId: cash.id,
+        amount: 1_500,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Lee Tackman",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({
+        category: null,
+        categoryConfidence: null,
+        categoryDecidedAt: null,
+        categoryId: null,
+        categorySource: null,
+        needsReview: true,
+      })
+      .where(eq(financeTransactions.id, rentRuleCandidate.id));
     await database.db
       .update(financeTransactions)
       .set({
@@ -4007,6 +4215,29 @@ describe.sequential("finance service", () => {
     if (!pendingProposal?.suggestedCategory) {
       throw new Error("Pending categorization proposal was not prepared.");
     }
+    const pendingDecision = {
+      categoryId: pendingProposal.suggestedCategory.id,
+      confidence: pendingProposal.confidence,
+      expectedTransactionUpdatedAt: pendingProposal.transaction.updatedAt,
+      learnMerchant: "never" as const,
+      rationale: pendingProposal.rationale,
+      transactionId: pending.id,
+    };
+    await expect(
+      service.applyApprovedRules(
+        { decisions: [] },
+        { principal: financePrincipal(maintenanceUser.id), requestId: "maintenance-rule-human" },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      service.applyApprovedRules(
+        { decisions: [{ ...pendingDecision, learnMerchant: "always" }] },
+        agentContext,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.applyApprovedRules({ decisions: [pendingDecision] }, agentContext),
+    ).rejects.toMatchObject({ code: "invalid_request" });
     await expect(
       service.applyApprovedOneOffs(
         {
@@ -4066,11 +4297,15 @@ describe.sequential("finance service", () => {
     );
     await database.db
       .update(financeTransactions)
-      .set({ categoryDecidedAt: null, categorySource: "provider" })
+      .set({ categoryDecidedAt: null, categorySource: "provider", currencyCode: "USD" })
       .where(inArray(financeTransactions.id, [outgoing.id, incomingOne.id, incomingTwo.id]));
 
     await expect(
-      service.reconcileTransfersForUser(maintenanceUser.id, { type: "all_outstanding" }),
+      service.reconcileTransfersForUser(
+        maintenanceUser.id,
+        { type: "all_outstanding" },
+        agentContext,
+      ),
     ).resolves.toEqual({ paired: 0, transfers: 0 });
     const ambiguous = await database.db
       .select({
@@ -4118,6 +4353,13 @@ describe.sequential("finance service", () => {
     await expect(
       service.proposeOutstandingCategorizations(maintenanceUser.id, {
         type: "target",
+        entityType: "finance_account",
+        id: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.proposeOutstandingCategorizations(maintenanceUser.id, {
+        type: "target",
         entityType: "finance_budget",
         id: crypto.randomUUID(),
       }),
@@ -4151,6 +4393,17 @@ describe.sequential("finance service", () => {
     if (!targetProposal?.suggestedCategory) {
       throw new Error("The protected transfer proposal was not prepared.");
     }
+    const protectedTransferDecision = {
+      categoryId: targetProposal.suggestedCategory.id,
+      confidence: targetProposal.confidence,
+      expectedTransactionUpdatedAt: targetProposal.transaction.updatedAt,
+      learnMerchant: "never" as const,
+      rationale: targetProposal.rationale,
+      transactionId: outgoing.id,
+    };
+    await expect(
+      service.applyApprovedRules({ decisions: [protectedTransferDecision] }, agentContext),
+    ).rejects.toMatchObject({ code: "forbidden" });
     await expect(
       service.applyApprovedOneOffs(
         {
@@ -4176,7 +4429,17 @@ describe.sequential("finance service", () => {
       }),
     ).resolves.toMatchObject({ created: 0, total: 1 });
     maintenanceNow = new Date(now.getTime() + 60_000);
-    await service.reconcileTransfersForUser(maintenanceUser.id, { type: "all_outstanding" });
+    const auditCountBeforeReplay = (
+      await database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, agentContext.requestId))
+    ).length;
+    await service.reconcileTransfersForUser(
+      maintenanceUser.id,
+      { type: "all_outstanding" },
+      agentContext,
+    );
     await expect(
       database.db
         .select({
@@ -4201,6 +4464,12 @@ describe.sequential("finance service", () => {
         .where(inArray(financeTransactions.id, [outgoing.id, incomingOne.id, incomingTwo.id]))
         .orderBy(financeTransactions.id),
     ).resolves.toEqual(ambiguousTransactions);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, agentContext.requestId)),
+    ).resolves.toHaveLength(auditCountBeforeReplay);
 
     await database.db.delete(financeTransactions).where(eq(financeTransactions.id, incomingTwo.id));
     await expect(
@@ -4216,6 +4485,46 @@ describe.sequential("finance service", () => {
       .where(inArray(financeTransactions.id, [outgoing.id, incomingOne.id]));
     expect(matched[0]?.transferGroupId).toBeTruthy();
     expect(matched[1]?.transferGroupId).toBe(matched[0]?.transferGroupId);
+    await expect(
+      service.applyApprovedRules({ decisions: [protectedTransferDecision] }, agentContext),
+    ).resolves.toEqual([
+      expect.objectContaining({ applied: false, status: "failed", transactionId: outgoing.id }),
+    ]);
+    await expect(
+      service.proposeOutstandingCategorizations(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_transaction",
+        id: outgoing.id,
+      }),
+    ).resolves.toEqual({ items: [], nextCursor: null });
+    await expect(
+      service.proposeOutstandingCategorizations(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_review_case",
+        id: transferReview.id,
+      }),
+    ).resolves.toEqual({ items: [], nextCursor: null });
+    await expect(
+      service.proposeOutstandingCategorizations(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_review_case",
+        id: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.reconcileTransfersForUser(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_budget",
+        id: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(maintenanceUser.id, {
+        type: "target",
+        entityType: "finance_budget",
+        id: crypto.randomUUID(),
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
     await expect(
       database.db
         .select({ entityId: auditEvents.entityId })
@@ -4265,6 +4574,7 @@ describe.sequential("finance service", () => {
     const firstQuestionRefresh = await service.refreshMaintenanceQuestionsForUser(
       maintenanceUser.id,
       { type: "window", start: "2026-07-21", end: "2026-07-21" },
+      agentContext,
     );
     expect(firstQuestionRefresh.created).toBe(1);
     const duplicateReviews = await database.db
@@ -4279,11 +4589,15 @@ describe.sequential("finance service", () => {
     expect(duplicateReviews).toEqual([expect.objectContaining({ reason: "possible_duplicate" })]);
     maintenanceNow = new Date(now.getTime() + 120_000);
     await expect(
-      service.refreshMaintenanceQuestionsForUser(maintenanceUser.id, {
-        type: "window",
-        start: "2026-07-21",
-        end: "2026-07-21",
-      }),
+      service.refreshMaintenanceQuestionsForUser(
+        maintenanceUser.id,
+        {
+          type: "window",
+          start: "2026-07-21",
+          end: "2026-07-21",
+        },
+        agentContext,
+      ),
     ).resolves.toMatchObject({ created: 0, total: 1 });
     await expect(
       database.db
@@ -4296,5 +4610,37 @@ describe.sequential("finance service", () => {
           ),
         ),
     ).resolves.toEqual(duplicateReviews);
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(
+        maintenanceUser.id,
+        { type: "target", entityType: "finance_account", id: cash.id },
+        agentContext,
+      ),
+    ).resolves.toMatchObject({ total: expect.any(Number) });
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(
+        maintenanceUser.id,
+        { type: "target", entityType: "finance_transaction", id: duplicateOne.id },
+        agentContext,
+      ),
+    ).resolves.toMatchObject({ total: expect.any(Number) });
+    const attributedAudits = await database.db
+      .select({ action: auditEvents.action, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, agentContext.requestId));
+    expect(attributedAudits.map((audit) => audit.action)).toEqual(
+      expect.arrayContaining([
+        "finance.rent_rule_applied",
+        "finance.review_queued",
+        "finance.transfer_candidate_queued",
+        "finance.transfer_reconciled",
+      ]),
+    );
+    for (const audit of attributedAudits) {
+      expect(audit.after).toMatchObject({
+        maintenance: agentContext.maintenance,
+        source: { revision: expect.any(String), sourceType: "finance_transaction" },
+      });
+    }
   });
 });

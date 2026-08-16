@@ -1388,6 +1388,7 @@ export const financeAccounts = pgTable(
     name: text("name").notNull(),
     kind: text("kind").$type<"cash" | "investment" | "debt" | "other">().notNull().default("cash"),
     balance: integer("balance_cents"),
+    currencyCode: text("currency_code"),
     status: text("status")
       .$type<"connected" | "needs_reauth" | "manual">()
       .notNull()
@@ -1435,6 +1436,10 @@ export const financeAccounts = pgTable(
     check(
       "finance_accounts_sync_state_check",
       sql`${table.syncState} IN ('current', 'stale', 'retrying', 'blocked')`,
+    ),
+    check(
+      "finance_accounts_currency_code_check",
+      sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
     ),
     check(
       "finance_accounts_sync_claim_check",
@@ -1539,6 +1544,7 @@ export const financeTransactions = pgTable(
     providerDirection: text("provider_direction").$type<"expense" | "income">(),
     merchant: text("merchant").notNull(),
     amount: integer("amount_cents").notNull(),
+    currencyCode: text("currency_code"),
     direction: text("direction").$type<TransactionDirection>().notNull(),
     transactionDate: text("transaction_date").notNull(),
     category: text("category"),
@@ -1568,6 +1574,10 @@ export const financeTransactions = pgTable(
     check(
       "finance_transactions_provider_direction_check",
       sql`${table.providerDirection} IS NULL OR ${table.providerDirection} IN ('expense', 'income')`,
+    ),
+    check(
+      "finance_transactions_currency_code_check",
+      sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
     ),
   ],
 );

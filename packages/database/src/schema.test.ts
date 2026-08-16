@@ -7,6 +7,7 @@ import {
   connectorSyncTriggers,
   domainProfileApprovals,
   financeAccounts,
+  financeTransactions,
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
   oauthStates,
@@ -106,6 +107,29 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_initialization_idx"');
     expect(migrationSql).not.toMatch(/\bUPDATE "finance_accounts"/u);
     expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
+  it("keeps nullable authoritative Finance currency evidence without backfilling old rows", async () => {
+    const accounts = getTableConfig(financeAccounts);
+    const transactions = getTableConfig(financeTransactions);
+    expect(accounts.columns.map((column) => column.name)).toContain("currency_code");
+    expect(transactions.columns.map((column) => column.name)).toContain("currency_code");
+    expect(accounts.checks.map((candidate) => candidate.name)).toContain(
+      "finance_accounts_currency_code_check",
+    );
+    expect(transactions.checks.map((candidate) => candidate.name)).toContain(
+      "finance_transactions_currency_code_check",
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0057_finance_currency_evidence.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('ADD COLUMN "currency_code" text');
+    expect(migrationSql).toContain("finance_accounts_currency_code_check");
+    expect(migrationSql).toContain("finance_transactions_currency_code_check");
+    expect(migrationSql).not.toMatch(/^\s*(?:UPDATE|DELETE\s+FROM)\b/mu);
+    expect(migrationSql).not.toMatch(/\bDEFAULT\b/u);
   });
 
   it("keeps connector notification storage bounded and coalesced", async () => {

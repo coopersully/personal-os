@@ -260,6 +260,7 @@ describe("domain schemas", () => {
     const parsed = financeAccountSchema.parse({
       balance: 125,
       createdAt: start,
+      currencyCode: "USD",
       id,
       institution: "Example Bank",
       kind: "cash",
@@ -290,6 +291,7 @@ describe("domain schemas", () => {
       recovery: null,
       state: "stale",
     });
+    expect(parsed.currencyCode).toBe("USD");
   });
 
   it("validates paginated Agent Access work items and local actions", () => {

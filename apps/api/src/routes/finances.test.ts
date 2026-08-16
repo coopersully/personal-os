@@ -226,12 +226,12 @@ describe("finance routes", () => {
     });
 
     const started = await app.request("/v1/finances/maintenance", { method: "POST" });
-    expect(started.status).toBe(200);
-    await expect(started.json()).resolves.toEqual({ run: { ...run, status: "completed" } });
+    expect(started.status).toBe(202);
+    await expect(started.json()).resolves.toEqual({ run });
     expect(financeMaintenance.startOrResume).toHaveBeenCalledWith(id, {
       type: "all_outstanding",
     });
-    expect(financeMaintenance.dispatchRun).toHaveBeenCalledWith(id);
+    expect(financeMaintenance.dispatchRun).not.toHaveBeenCalled();
 
     const read = await app.request(`/v1/finances/maintenance/${id}`);
     expect(read.status).toBe(200);

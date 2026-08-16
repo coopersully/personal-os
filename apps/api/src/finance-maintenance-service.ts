@@ -23,9 +23,22 @@ export const financeMaintenanceSteps = [
 ] as const;
 
 type FinanceMaintenanceStep = (typeof financeMaintenanceSteps)[number];
-type MutationContext = { principal: Principal; requestId: string };
+type MutationContext = {
+  maintenance: {
+    idempotencyKey: string;
+    policy: "approved_rule";
+    rulebookVersion: string;
+    runId: string;
+  };
+  principal: Principal;
+  requestId: string;
+};
 
 export type FinanceMaintenanceOperations = {
+  applyApprovedRules: (
+    input: ApplyFinanceCategorizationsInput,
+    context: MutationContext,
+  ) => Promise<FinanceCategorizationApplyResult[]>;
   applyApprovedOneOffs: (
     input: ApplyFinanceCategorizationsInput,
     context: MutationContext,
@@ -44,8 +57,12 @@ export type FinanceMaintenanceOperations = {
   refreshMaintenanceQuestionsForUser: (
     userId: string,
     scope: MaintenanceScope,
+    context?: MutationContext,
   ) => Promise<{ created: number; total: number }>;
-  syncDueAccountsForUser: (userId: string) => Promise<FinanceSyncBatchResult>;
+  syncDueAccountsForUser: (
+    userId: string,
+    onProgress?: () => Promise<void>,
+  ) => Promise<FinanceSyncBatchResult>;
   summarizeMaintenanceEffectsForRun?: (
     userId: string,
     runId: string,
@@ -102,18 +119,23 @@ function completedStep(value: unknown): FinanceMaintenanceStep | null {
 }
 
 function mutationContext(
-  userId: string,
-  runId: string,
+  run: Pick<FinanceMaintenanceRun, "id" | "rulebookVersion" | "userId">,
   step: FinanceMaintenanceStep,
 ): MutationContext {
   return {
+    maintenance: {
+      idempotencyKey: `finances:${run.rulebookVersion}:${step}`,
+      policy: "approved_rule",
+      rulebookVersion: run.rulebookVersion,
+      runId: run.id,
+    },
     principal: {
-      actorId: userId,
+      actorId: run.userId,
       actorType: "agent",
       scopes: new Set(["finances:read", "finances:write"]),
-      userId,
+      userId: run.userId,
     },
-    requestId: `maintenance:${runId}:${step}`,
+    requestId: `maintenance:${run.id}:${step}`,
   };
 }
 
@@ -202,6 +224,21 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
     let categorizationApplied = continuation?.applied ?? 0;
 
     try {
+      if (lastCompleted === "verify") {
+        const observed = await currentStatus(run.userId, run.scope);
+        const result = await resultFor(runId, run.userId, observed);
+        return maintenance.settle({
+          claimId,
+          result,
+          runId,
+          status:
+            observed.freshness.blockers.length > 0 || observed.state === "blocked"
+              ? "blocked"
+              : result.questions.total > 0
+                ? "completed_with_questions"
+                : "completed",
+        });
+      }
       for (; startIndex < financeMaintenanceSteps.length; startIndex += 1) {
         const step = financeMaintenanceSteps[startIndex];
         if (!step) break;
@@ -219,7 +256,22 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
         }
         if (step === "synchronize") {
           await assertCurrentRulebook(run);
-          const synchronized = await finances.syncDueAccountsForUser(run.userId);
+          await maintenance.renewClaim({ claimId, runId });
+          const synchronized = await finances.syncDueAccountsForUser(run.userId, async () => {
+            await maintenance.renewClaim({ claimId, runId });
+          });
+          await maintenance.renewClaim({ claimId, runId });
+          const observed = await currentStatus(run.userId, run.scope);
+          if (
+            synchronized.failed > 0 ||
+            synchronized.skipped > 0 ||
+            observed.freshness.state !== "current"
+          ) {
+            throw new AppError(
+              "conflict",
+              "Finance synchronization is incomplete and will be retried.",
+            );
+          }
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
@@ -227,15 +279,6 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
             runId,
             step,
           });
-          const observed = await currentStatus(run.userId, run.scope);
-          if (observed.freshness.blockers.length > 0 || observed.state === "blocked") {
-            return maintenance.settle({
-              claimId,
-              result: await resultFor(runId, run.userId, observed),
-              runId,
-              status: "blocked",
-            });
-          }
           continue;
         }
         if (step === "reconcile") {
@@ -243,7 +286,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           const reconciled = await finances.reconcileTransfersForUser(
             run.userId,
             run.scope,
-            mutationContext(run.userId, run.id, step),
+            mutationContext(run, step),
           );
           await maintenance.completeStep({
             claimId,
@@ -263,19 +306,36 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           const eligible = page.items.filter(isEligibleOneOff).slice(0, 50);
           if (eligible.length > 0) {
             await assertCurrentRulebook(run);
-            const results = await finances.applyApprovedOneOffs(
-              {
-                decisions: eligible.map((proposal) => ({
-                  categoryId: proposal.suggestedCategory.id,
-                  confidence: proposal.confidence,
-                  expectedTransactionUpdatedAt: proposal.transaction.updatedAt,
-                  learnMerchant: "never" as const,
-                  rationale: proposal.rationale,
-                  transactionId: proposal.transaction.id,
-                })),
-              },
-              mutationContext(run.userId, run.id, step),
+            const decisions = (proposals: typeof eligible): ApplyFinanceCategorizationsInput => ({
+              decisions: proposals.map((proposal) => ({
+                categoryId: proposal.suggestedCategory.id,
+                confidence: proposal.confidence,
+                expectedTransactionUpdatedAt: proposal.transaction.updatedAt,
+                learnMerchant: "never" as const,
+                rationale: proposal.rationale,
+                transactionId: proposal.transaction.id,
+              })),
+            });
+            const ruleProposals = eligible.filter(
+              (proposal) => proposal.suggestionBasis === "merchant_rule",
             );
+            const oneOffProposals = eligible.filter(
+              (proposal) => proposal.suggestionBasis === "transaction_evidence",
+            );
+            const results = [
+              ...(ruleProposals.length > 0
+                ? await finances.applyApprovedRules(
+                    decisions(ruleProposals),
+                    mutationContext(run, step),
+                  )
+                : []),
+              ...(oneOffProposals.length > 0
+                ? await finances.applyApprovedOneOffs(
+                    decisions(oneOffProposals),
+                    mutationContext(run, step),
+                  )
+                : []),
+            ];
             const failed = results.find((result) => result.status === "failed");
             if (failed?.error) {
               throw new AppError(
@@ -309,6 +369,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           const refreshed = await finances.refreshMaintenanceQuestionsForUser(
             run.userId,
             run.scope,
+            mutationContext(run, step),
           );
           await maintenance.completeStep({
             claimId,
@@ -377,7 +438,9 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
       const step =
         financeMaintenanceSteps[Math.min(startIndex, financeMaintenanceSteps.length - 1)] ??
         "preflight";
-      const terminal = error instanceof AppError && error.code === "invalid_request";
+      const terminal =
+        error instanceof AppError &&
+        ["forbidden", "invalid_request", "not_found"].includes(error.code);
       await maintenance.failStep({
         claimId,
         code: errorCode(error),

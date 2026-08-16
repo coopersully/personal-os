@@ -8,6 +8,8 @@ import {
   financeTransactions,
   migrateDatabase,
   users,
+  workspaceMaintenanceRuns,
+  workspaceMaintenanceSteps,
 } from "@personal-os/database";
 import type {
   FinanceCategorizationProposal,
@@ -15,7 +17,7 @@ import type {
   MaintenanceScope,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import {
   createFinanceMaintenanceService,
@@ -37,6 +39,7 @@ function proposal(
     meetsPolicyThreshold: options.confidence >= 0.95,
     policy: "preview",
     rationale: "Fixture evidence.",
+    suggestionBasis: options.confidence > 0 ? "transaction_evidence" : null,
     source: {
       accountId: "33333333-3333-4333-8333-333333333333",
       provider: "local",
@@ -65,6 +68,7 @@ function proposal(
       categoryRationale: null,
       categorySource: null,
       createdAt: now.toISOString(),
+      currencyCode: null,
       date: "2026-08-14",
       direction: "expense",
       id,
@@ -154,6 +158,7 @@ describe.sequential("Finance maintenance service", () => {
     overrides: Partial<FinanceMaintenanceOperations> = {},
   ): FinanceMaintenanceOperations {
     return {
+      applyApprovedRules: async () => [],
       applyApprovedOneOffs: async () => [],
       proposeOutstandingCategorizations: async () => ({ items: [], nextCursor: null }),
       reconcileTransfersForUser: async () => ({ paired: 0, transfers: 0 }),
@@ -192,6 +197,7 @@ describe.sequential("Finance maintenance service", () => {
     } as unknown as FinanceStatus;
     const service = createFinanceMaintenanceService({
       finances: {
+        applyApprovedRules: async () => [],
         applyApprovedOneOffs: async (input) => {
           const results = input.decisions.map((decision) => {
             const replayed = applied.has(decision.transactionId);
@@ -400,6 +406,10 @@ describe.sequential("Finance maintenance service", () => {
       .update(financeTransactions)
       .set({ categoryDecidedAt: null, categorySource: "provider" })
       .where(eq(financeTransactions.userId, ownerId));
+    await database.db
+      .update(financeTransactions)
+      .set({ currencyCode: "USD" })
+      .where(inArray(financeTransactions.id, [transferOut.id, transferIn.id]));
     for (const id of [1, 2]) {
       await finances.createTransaction(
         {
@@ -448,15 +458,21 @@ describe.sequential("Finance maintenance service", () => {
       transfers: 2,
     });
     const appliedRows = await database.db
-      .select({ category: financeTransactions.category, id: financeTransactions.id })
+      .select({
+        category: financeTransactions.category,
+        categorySource: financeTransactions.categorySource,
+        id: financeTransactions.id,
+      })
       .from(financeTransactions)
       .where(eq(financeTransactions.userId, ownerId));
-    expect(
-      appliedRows.filter((row) => [exactRuleCandidate.id, oneOffCandidate.id].includes(row.id)),
-    ).toEqual([
-      expect.objectContaining({ category: "Groceries" }),
-      expect.objectContaining({ category: "Groceries" }),
-    ]);
+    expect(appliedRows.find((row) => row.id === exactRuleCandidate.id)).toMatchObject({
+      category: "Groceries",
+      categorySource: "rule",
+    });
+    expect(appliedRows.find((row) => row.id === oneOffCandidate.id)).toMatchObject({
+      category: "Groceries",
+      categorySource: "agent",
+    });
     expect(appliedRows.filter((row) => [transferOut.id, transferIn.id].includes(row.id))).toEqual([
       expect.objectContaining({ category: "Transfers" }),
       expect.objectContaining({ category: "Transfers" }),
@@ -470,9 +486,40 @@ describe.sequential("Finance maintenance service", () => {
       "unknown_merchant",
     ]);
     const auditsAfterFirst = await database.db
-      .select({ id: auditEvents.id })
+      .select({
+        action: auditEvents.action,
+        after: auditEvents.after,
+        id: auditEvents.id,
+        requestId: auditEvents.requestId,
+      })
       .from(auditEvents)
       .where(eq(auditEvents.userId, ownerId));
+    const maintenanceAudits = auditsAfterFirst.filter((audit) =>
+      audit.requestId.startsWith(`maintenance:${run.id}:`),
+    );
+    expect(maintenanceAudits.map((audit) => audit.action)).toEqual(
+      expect.arrayContaining([
+        "finance.review_queued",
+        "finance.transaction_categorized",
+        "finance.transfer_reconciled",
+      ]),
+    );
+    expect(maintenanceAudits).not.toHaveLength(0);
+    for (const audit of maintenanceAudits) {
+      expect(audit.after).toMatchObject({
+        maintenance: {
+          idempotencyKey: expect.stringContaining(run.rulebookVersion),
+          policy: "approved_rule",
+          rulebookVersion: run.rulebookVersion,
+          runId: run.id,
+        },
+        source: {
+          accountId: expect.any(String),
+          revision: expect.any(String),
+          sourceType: "finance_transaction",
+        },
+      });
+    }
 
     const replay = await service.startOrResume(ownerId, { type: "all_outstanding" });
     await service.dispatchRun(replay.id);
@@ -484,6 +531,8 @@ describe.sequential("Finance maintenance service", () => {
       },
       status: "completed_with_questions",
     });
+    await expect(service.dispatchDue(0)).resolves.toMatchObject({ attempted: 0 });
+    await expect(service.dispatchDue(100)).resolves.toMatchObject({ attempted: 0 });
     await expect(
       database.db
         .select({ id: financeReviewCases.id, reason: financeReviewCases.reason })
@@ -492,10 +541,58 @@ describe.sequential("Finance maintenance service", () => {
     ).resolves.toEqual(questionsAfterFirst);
     await expect(
       database.db
-        .select({ id: auditEvents.id })
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          id: auditEvents.id,
+          requestId: auditEvents.requestId,
+        })
         .from(auditEvents)
         .where(eq(auditEvents.userId, ownerId)),
     ).resolves.toEqual(auditsAfterFirst);
+  });
+
+  it("routes an exact merchant rule through only the rule-attributed writer", async () => {
+    const ownerId = await createUser("Finance rule-only maintenance");
+    let ruleWrites = 0;
+    let oneOffWrites = 0;
+    const exactRuleProposal = {
+      ...proposal(crypto.randomUUID(), { confidence: 1 }),
+      suggestionBasis: "merchant_rule" as const,
+    };
+    const service = createFinanceMaintenanceService({
+      finances: operations({
+        applyApprovedRules: async (input) => {
+          ruleWrites += input.decisions.length;
+          return input.decisions.map((decision) => ({
+            applied: true,
+            error: null,
+            replayed: false,
+            status: "applied" as const,
+            threshold: 0.95,
+            transaction: null,
+            transactionId: decision.transactionId,
+          }));
+        },
+        applyApprovedOneOffs: async () => {
+          oneOffWrites += 1;
+          return [];
+        },
+        proposeOutstandingCategorizations: async () => ({
+          items: [exactRuleProposal],
+          nextCursor: null,
+        }),
+      }),
+      maintenance: createWorkspaceMaintenanceService({ db: database.db, now: () => now }),
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+
+    await service.dispatchRun(run.id);
+
+    expect(ruleWrites).toBe(1);
+    expect(oneOffWrites).toBe(0);
   });
 
   it("persists a 50-item categorization cursor and resumes it on another runtime", async () => {
@@ -550,6 +647,110 @@ describe.sequential("Finance maintenance service", () => {
       status: "completed",
     });
     expect(batchSizes).toEqual([50, 1]);
+  });
+
+  it("settles a verify-complete run after process loss instead of stranding it running", async () => {
+    const ownerId = await createUser("Finance verify recovery");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    let crashBeforeSettlement = true;
+    const crashingMaintenance = {
+      ...workspace,
+      async settle(input: Parameters<typeof workspace.settle>[0]) {
+        if (crashBeforeSettlement) {
+          crashBeforeSettlement = false;
+          throw new Error("process exited after verify committed");
+        }
+        return workspace.settle(input);
+      },
+    };
+    const firstRuntime = createFinanceMaintenanceService({
+      finances: operations(),
+      maintenance: crashingMaintenance,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const run = await firstRuntime.startOrResume(ownerId, { type: "all_outstanding" });
+
+    await expect(firstRuntime.dispatchRun(run.id)).rejects.toThrow();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ leaseExpiresAt: sql`NOW() - INTERVAL '1 second'` })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
+    await database.db
+      .delete(workspaceMaintenanceSteps)
+      .where(
+        and(
+          eq(workspaceMaintenanceSteps.runId, run.id),
+          eq(workspaceMaintenanceSteps.stepName, "questions"),
+        ),
+      );
+    for (const stepName of ["categorize", "reconcile"]) {
+      await database.db
+        .delete(workspaceMaintenanceSteps)
+        .where(
+          and(
+            eq(workspaceMaintenanceSteps.runId, run.id),
+            eq(workspaceMaintenanceSteps.stepName, stepName),
+          ),
+        );
+    }
+
+    const recoveredRuntime = createFinanceMaintenanceService({
+      finances: operations(),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status(undefined, { questions: 1 }) },
+    });
+    await recoveredRuntime.dispatchRun(run.id);
+    await expect(recoveredRuntime.getRun(ownerId, run.id)).resolves.toMatchObject({
+      status: "completed_with_questions",
+    });
+
+    const blockedOwnerId = await createUser("Finance blocked verify recovery");
+    const blockedWorkspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    let blockedCrashBeforeSettlement = true;
+    let sourceBlocked = false;
+    const blockedCrashingMaintenance = {
+      ...blockedWorkspace,
+      async settle(input: Parameters<typeof blockedWorkspace.settle>[0]) {
+        if (blockedCrashBeforeSettlement) {
+          blockedCrashBeforeSettlement = false;
+          sourceBlocked = true;
+          throw new Error("process exited before blocked settlement");
+        }
+        return blockedWorkspace.settle(input);
+      },
+    };
+    const blockedStatus = async () => ({
+      ...status(),
+      state: sourceBlocked ? ("blocked" as const) : ("needs_work" as const),
+    });
+    const blockedFirstRuntime = createFinanceMaintenanceService({
+      finances: operations(),
+      maintenance: blockedCrashingMaintenance,
+      now: () => now,
+      status: { getFinanceStatus: blockedStatus },
+    });
+    const blockedRun = await blockedFirstRuntime.startOrResume(blockedOwnerId, {
+      type: "all_outstanding",
+    });
+
+    await expect(blockedFirstRuntime.dispatchRun(blockedRun.id)).rejects.toThrow();
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ leaseExpiresAt: sql`NOW() - INTERVAL '1 second'` })
+      .where(eq(workspaceMaintenanceRuns.id, blockedRun.id));
+
+    const blockedRecoveredRuntime = createFinanceMaintenanceService({
+      finances: operations(),
+      maintenance: blockedWorkspace,
+      now: () => now,
+      status: { getFinanceStatus: blockedStatus },
+    });
+    await blockedRecoveredRuntime.dispatchRun(blockedRun.id);
+    await expect(
+      blockedRecoveredRuntime.getRun(blockedOwnerId, blockedRun.id),
+    ).resolves.toMatchObject({ status: "blocked" });
   });
 
   it("recovers a committed categorization after process loss before its checkpoint", async () => {
@@ -633,7 +834,7 @@ describe.sequential("Finance maintenance service", () => {
     });
   });
 
-  it("settles blocked source evidence after preserving the successful synchronization checkpoint", async () => {
+  it("keeps failed source synchronization recoverable without preserving a false checkpoint", async () => {
     const ownerId = await createUser("Finance blocked sync");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
     let sourceBlocked = false;
@@ -659,17 +860,19 @@ describe.sequential("Finance maintenance service", () => {
     const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
     await service.dispatchRun(run.id);
 
-    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({ status: "blocked" });
+    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+      status: "failed_recoverable",
+    });
     await expect(workspace.listStepRecords(run.id)).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({ status: "completed", step: "preflight" }),
-        expect.objectContaining({ status: "completed", step: "synchronize" }),
+        expect.objectContaining({ status: "failed_recoverable", step: "synchronize" }),
       ]),
     );
 
     sourceBlocked = false;
     const recovered = await service.startOrResume(ownerId, { type: "all_outstanding" });
-    expect(recovered).toMatchObject({ id: run.id, status: "queued" });
+    expect(recovered).toMatchObject({ id: run.id, status: "failed_recoverable" });
   });
 
   it("blocks on a changed operative rulebook before the next mutation", async () => {
@@ -789,6 +992,76 @@ describe.sequential("Finance maintenance service", () => {
       lastSafeError: { code: "invalid_request", message: "The Finance target is invalid." },
       status: "failed_terminal",
     });
+
+    const missingOwner = await createUser("Finance missing target");
+    const missingWorkspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const missing = createFinanceMaintenanceService({
+      finances: operations({
+        reconcileTransfersForUser: async () => {
+          throw new AppError("not_found", "The Finance target was not found.");
+        },
+      }),
+      maintenance: missingWorkspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const missingRun = await missing.startOrResume(missingOwner, {
+      type: "target",
+      entityType: "finance_account",
+      id: crypto.randomUUID(),
+    });
+    await missing.dispatchRun(missingRun.id);
+    await expect(missing.getRun(missingOwner, missingRun.id)).resolves.toMatchObject({
+      lastSafeError: { code: "not_found" },
+      status: "failed_terminal",
+    });
+  });
+
+  it("keeps incomplete synchronization recoverable and does not run stale mutations", async () => {
+    for (const [label, syncResult, sourceCurrent] of [
+      ["failed", { attempted: 1, failed: 1, recovered: 0, skipped: 0, succeeded: 0 }, true],
+      ["busy", { attempted: 1, failed: 0, recovered: 0, skipped: 1, succeeded: 0 }, true],
+      ["non-current", { attempted: 0, failed: 0, recovered: 0, skipped: 0, succeeded: 0 }, false],
+    ] as const) {
+      const ownerId = await createUser(`Finance sync ${label}`);
+      const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+      let reconciliations = 0;
+      let synchronized = false;
+      const service = createFinanceMaintenanceService({
+        finances: operations({
+          reconcileTransfersForUser: async () => {
+            reconciliations += 1;
+            return { paired: 0, transfers: 0 };
+          },
+          syncDueAccountsForUser: async () => {
+            synchronized = true;
+            return syncResult;
+          },
+        }),
+        maintenance: workspace,
+        now: () => now,
+        status: {
+          getFinanceStatus: async () =>
+            status(undefined, { blocked: synchronized && !sourceCurrent }),
+        },
+      });
+      const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+      await service.dispatchRun(run.id);
+      await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+        status: "failed_recoverable",
+      });
+      expect(reconciliations).toBe(0);
+      expect(await workspace.listStepRecords(run.id)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ status: "failed_recoverable", step: "synchronize" }),
+        ]),
+      );
+      expect(await workspace.listStepRecords(run.id)).not.toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ status: "completed", step: "synchronize" }),
+        ]),
+      );
+    }
   });
 
   it("honors claim exclusion, failed apply results, and verification-only blockers", async () => {
@@ -808,6 +1081,7 @@ describe.sequential("Finance maintenance service", () => {
 
     for (const [label, code, expectedStatus] of [
       ["validation", "invalid_request", "failed_terminal"],
+      ["forbidden", "forbidden", "failed_terminal"],
       ["conflict", "conflict", "failed_recoverable"],
     ] as const) {
       const ownerId = await createUser(`Finance apply ${label}`);
@@ -869,6 +1143,11 @@ describe.sequential("Finance maintenance service", () => {
     await expect(
       verificationService.getRun(verificationOwner, verificationRun.id),
     ).resolves.toMatchObject({ status: "blocked" });
+
+    verificationBlocked = false;
+    await expect(
+      verificationService.startOrResume(verificationOwner, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({ id: verificationRun.id, status: "queued" });
   });
 
   it("forwards narrow windows and exact targets to every Finance operation", async () => {

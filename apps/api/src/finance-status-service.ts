@@ -78,6 +78,7 @@ function serializeAccount(row: typeof financeAccounts.$inferSelect): FinanceAcco
   return {
     balance: row.balance === null ? null : row.balance / 100,
     createdAt: row.createdAt.toISOString(),
+    currencyCode: row.currencyCode,
     id: row.id,
     institution: row.institution,
     kind: row.kind,

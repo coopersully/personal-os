@@ -73,8 +73,7 @@ export function registerFinanceRoutes({
       context.get("principal").userId,
       request.scope,
     );
-    const advanced = await financeMaintenance.dispatchRun(created.id);
-    return context.json({ run: advanced ?? created });
+    return context.json({ run: created }, 202);
   });
   app.get("/v1/finances/maintenance/:id", async (context) =>
     context.json({

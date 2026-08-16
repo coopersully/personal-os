@@ -1,6 +1,6 @@
 ---
 name: resolve-pr-comments
-description: Resolve outstanding GitHub pull request review threads, review summaries, top-level comments, and actionable bot feedback for the current ilo branch. Use when addressing PR feedback, requested changes, review comments, or re-review follow-up.
+description: Resolve outstanding GitHub pull request review threads, review summaries, top-level comments, and actionable bot feedback for the current Personal OS branch. Use when addressing PR feedback, requested changes, review comments, or re-review follow-up.
 ---
 
 # Resolve PR comments

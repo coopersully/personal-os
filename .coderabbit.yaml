@@ -1,0 +1,129 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: en-US
+tone_instructions: >-
+  Be concise and evidence-based. Prioritize correctness, security, privacy, data integrity,
+  accessibility, and production reliability. Do not repeat findings already enforced by a
+  deterministic repository check.
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary_in_walkthrough: true
+  poem: false
+  in_progress_fortune: false
+  review_details: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+    base_branches:
+      - main
+    ignore_usernames:
+      - dependabot[bot]
+
+  path_filters:
+    - "!pnpm-lock.yaml"
+    - "!apps/web/public/*.png"
+
+  tools:
+    github-checks:
+      enabled: true
+      timeout_ms: 900000
+    actionlint:
+      enabled: true
+    biome:
+      enabled: true
+    checkov:
+      enabled: true
+    osvScanner:
+      enabled: true
+    presidio:
+      enabled: true
+    tflint:
+      enabled: true
+    trivy:
+      enabled: true
+    zizmor:
+      enabled: true
+
+  path_instructions:
+    - path: "apps/api/src/**"
+      instructions: >-
+        Review authentication, authorization, owner isolation, input validation, durable external
+        handoffs, bounded timeouts, recovery, and privacy-safe observability.
+    - path: "apps/mcp/src/**"
+      instructions: >-
+        Review token scope, capability boundaries, safe tool and resource output, transport
+        security, and parity with the public MCP contract.
+    - path: "packages/database/**"
+      instructions: >-
+        Review append-only migration ordering, owner scoping, data integrity, backward
+        compatibility, rollback, and safe rollout.
+    - path: ".github/workflows/**"
+      instructions: >-
+        Review least privilege, immutable action references, untrusted input handling, secret
+        exposure, durable handoffs, and production-versus-configuration evidence.
+    - path: "infra/**"
+      instructions: >-
+        Review least privilege, rollback, health checks, network boundaries, state safety,
+        production-versus-plan evidence, and secret exposure.
+    - path: "apps/web/**"
+      instructions: >-
+        Review accessibility, keyboard and focus behavior, responsive priority, honest loading,
+        error, and empty states, and compliance with the repository design system.
+    - path: "e2e/**"
+      instructions: >-
+        Review observable user outcomes, realistic state coverage, accessibility, failure paths,
+        and whether assertions can fail for the intended regression.
+
+  pre_merge_checks:
+    override_requested_reviewers_only: true
+    docstrings:
+      mode: "off"
+    title:
+      mode: warning
+      requirements: >-
+        Follow docs/engineering/pr-rubric.md: use a concise noun or imperative phrase with no
+        conventional-commit prefix and no trailing punctuation.
+    description:
+      mode: warning
+    issue_assessment:
+      mode: warning
+    custom_checks:
+      - name: Public repository safety
+        mode: warning
+        instructions: >-
+          Pass only when the diff and pull-request text contain no credential, personal data,
+          provider payload, absolute developer-machine path, private reasoning, or
+          maintainer-private workflow detail. Clearly fictional reserved examples are allowed.
+      - name: External boundary evidence
+        mode: warning
+        instructions: >-
+          If the change adds or alters an external dependency, callback, webhook, scheduled
+          handoff, network path, credential, or production-only capability, pass only when the pull
+          request includes a Boundary analysis naming the durable commit point, a production
+          disconfirming case, the evidence proved, and the remaining production-only proof. Pass
+          when the change does not alter an external boundary.
+
+knowledge_base:
+  issues:
+    scope: local
+  pull_requests:
+    scope: local
+  learnings:
+    scope: local
+    approval_delay: 7
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - CONTRIBUTING.md
+      - SECURITY.md
+      - docs/engineering/pr-rubric.md
+      - docs/engineering/external-boundary-reliability.md
+      - docs/engineering/connector-reliability.md
+      - docs/engineering/feature-ownership.md
+      - docs/design/governance.md
+      - docs/design/system.md

@@ -1,9 +1,9 @@
 ---
 name: personal-os-mcp
-description: Build and review secure ilo MCP tools and transports. Use when changing `apps/mcp`, adding a tool or resource, modifying agent-token scopes, or evaluating agent-initiated mutations.
+description: Build and review secure Personal OS MCP tools and transports. Use when changing `apps/mcp`, adding a tool or resource, modifying agent-token scopes, or evaluating agent-initiated mutations.
 ---
 
-# ilo MCP
+# Personal OS MCP
 
 Read `docs/mcp.md` and the agent-action section of
 `docs/engineering/feature-ownership.md` before altering MCP behavior.

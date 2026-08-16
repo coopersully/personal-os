@@ -1,11 +1,11 @@
 ---
 name: github-work-context
-description: Apply ilo's GitHub work-tracking conventions when reading or updating GitHub issues, issue relationships, labels, assignees, milestones, Projects, branches, pull requests, or delivery status.
+description: Apply Personal OS GitHub work-tracking conventions when reading or updating GitHub issues, issue relationships, labels, assignees, milestones, Projects, branches, pull requests, or delivery status.
 ---
 
 # GitHub work context
 
-Use GitHub Issues as ilo's delivery graph and current repository docs as durable product and
+Use GitHub Issues as Personal OS's delivery graph and current repository docs as durable product and
 engineering truth.
 
 ## Resolve live context
@@ -60,8 +60,8 @@ Issue comments record material progress or decisions; they are not a second know
 - Use `Refs #123` when the PR is partial progress, a dependency, or contextual evidence.
 - Do not add both for the same issue.
 - Keep parent or follow-up issues open until their own acceptance criteria are complete.
-- Use a branch name such as `cooper/123-short-description` when an issue is already known; do not
-  rename a shared branch solely to add an issue number.
+- Follow the repository branch convention when an issue is already known; do not rename a shared
+  branch solely to add an issue number.
 
 ## Issue body
 

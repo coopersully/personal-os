@@ -1,9 +1,9 @@
 ---
 name: personal-os-database
-description: Safely evolve ilo PostgreSQL storage with Drizzle. Use when modifying `packages/database/src/schema.ts`, adding SQL migrations, changing repositories or persistence models, or reviewing migration safety.
+description: Safely evolve Personal OS PostgreSQL storage with Drizzle. Use when modifying `packages/database/src/schema.ts`, adding SQL migrations, changing repositories or persistence models, or reviewing migration safety.
 ---
 
-# ilo database
+# Personal OS database
 
 Follow `docs/engineering/database-migrations.md`. The Drizzle schema,
 generated SQL, and migration journal must describe the same release transition.

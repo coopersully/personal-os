@@ -1,6 +1,6 @@
 ---
 name: pr-briefing
-description: Audit ilo's open pull request queue and produce a concise read-only briefing grouped by author action, reviewer action, pending checks, dependency updates, and merge readiness. Use for open-PR triage, review queue summaries, or deciding what needs attention next.
+description: Audit the Personal OS open pull request queue and produce a concise read-only briefing grouped by author action, reviewer action, pending checks, dependency updates, and merge readiness. Use for open-PR triage, review queue summaries, or deciding what needs attention next.
 ---
 
 # PR briefing

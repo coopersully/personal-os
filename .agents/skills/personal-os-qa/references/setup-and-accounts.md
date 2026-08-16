@@ -32,7 +32,7 @@ All use `Testing12345!`. Reload fixtures after changing setup progress.
 
 1. Sign in as `qa+onboarding-new@ilo.test`.
 2. Confirm the app opens `/setup`, not the app shell.
-3. Confirm Step 1 introduces ilo, exposes a progress bar, and keeps
+3. Confirm Step 1 introduces Personal OS, exposes a progress bar, and keeps
    **Exit setup** visible.
 4. Continue to workspace selection. Confirm Calendar, Tasks, Mail, and Finances
    are whole-card checkbox targets; clicking either the copy or whitespace
@@ -82,7 +82,7 @@ All use `Testing12345!`. Reload fixtures after changing setup progress.
 - Every choice has a persistent label and keyboard target.
 - Back never becomes more visually prominent than the forward action.
 - Pending connection or progress writes prevent duplicate submission.
-- Apple Account fields start blank after signing in and never inherit the ilo
+- Apple Account fields start blank after signing in and never inherit the Personal OS
   login email or password.
 
 ## Regression sentinels

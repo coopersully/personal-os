@@ -1,9 +1,9 @@
 ---
 name: ilo-knowledge-base
-description: Find, apply, and update ilo's authoritative engineering-facing product, architecture, design, deployment, release, MCP, and development documentation. Use when implementation, review, planning, or debugging needs durable repository context or reveals behavior future engineers and agents must know.
+description: Find, apply, and update Personal OS's authoritative engineering-facing product, architecture, design, deployment, release, MCP, and development documentation. Use when implementation, review, planning, or debugging needs durable repository context or reveals behavior future engineers and agents must know.
 ---
 
-# ilo knowledge base
+# Personal OS knowledge base
 
 Use current repository docs as durable product and engineering truth. Do not infer behavior from
 code names, an old PR, or a historical plan when a current document exists.

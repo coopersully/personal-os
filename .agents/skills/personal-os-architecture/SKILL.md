@@ -1,9 +1,9 @@
 ---
 name: personal-os-architecture
-description: Keep ilo changes within the established monorepo boundaries and domain ownership model. Use when adding or refactoring a product domain, deciding package placement, changing app/API/MCP composition roots, or planning cross-domain behavior.
+description: Keep Personal OS changes within the established monorepo boundaries and domain ownership model. Use when adding or refactoring a product domain, deciding package placement, changing app/API/MCP composition roots, or planning cross-domain behavior.
 ---
 
-# ilo architecture
+# Personal OS architecture
 
 Treat `docs/architecture/0001-system-shape.md` as the system boundary and
 `docs/engineering/feature-ownership.md` as the path-ownership authority.

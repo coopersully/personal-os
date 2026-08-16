@@ -1,18 +1,18 @@
 ---
 name: create-pr
-description: Prepare, verify, publish, open, or refine a GitHub pull request from local ilo changes. Use when creating a PR, pushing a review branch, drafting a PR title/body, or repairing an existing current-branch PR.
+description: Prepare, verify, publish, open, or refine a GitHub pull request from local Personal OS changes. Use when creating a PR, pushing a review branch, drafting a PR title/body, or repairing an existing current-branch PR.
 ---
 
 # Create PR
 
-Create or refine an ilo pull request only after the changelist is scoped, verified, documented, and
+Create or refine a Personal OS pull request only after the changelist is scoped, verified, documented, and
 described according to the repository rubric.
 
 ## Core rules
 
 - Target `main` unless the user explicitly names another base.
-- Use a `cooper/<short-kebab-description>` branch by default. When an issue is already known,
-  prefer `cooper/<issue-number>-<short-description>`.
+- Follow the repository's documented branch convention. If no convention exists, use
+  `feature/<short-kebab-description>` or `feature/<issue-number>-<short-description>`.
 - Never push directly to `main`, stage unrelated user changes, or rename a shared branch merely for
   cosmetics.
 - Default new PRs to draft unless the user asks for ready-for-review.
@@ -94,7 +94,7 @@ does not.
 ### 5. Commit intentionally
 
 1. Re-run `git status --short`.
-2. Create a `cooper/` branch first when HEAD is detached or on `main`.
+2. Create a branch following the repository convention first when HEAD is detached or on `main`.
 3. Stage explicit in-scope paths only.
 4. Review the staged diff and staged file/line totals.
 5. Commit with a concise message describing the actual outcome.

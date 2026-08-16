@@ -1,0 +1,4 @@
+interface:
+  display_name: "Personal OS Current State"
+  short_description: "Read Personal OS delivery state at a glance"
+  default_prompt: "Use $ilo-current-state to summarize active Personal OS delivery work and its next action."

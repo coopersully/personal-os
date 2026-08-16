@@ -1,6 +1,6 @@
 ---
 name: github-work-sync
-description: Create, update, link, close, or audit ilo GitHub Issues from a request, branch, commit, pull request, review, or code changelist. Use for GitHub-native task creation, task status updates, duplicate checks, PR issue coverage, and work-tracking synchronization.
+description: Create, update, link, close, or audit Personal OS GitHub Issues from a request, branch, commit, pull request, review, or code changelist. Use for GitHub-native task creation, task status updates, duplicate checks, PR issue coverage, and work-tracking synchronization.
 ---
 
 # GitHub work sync

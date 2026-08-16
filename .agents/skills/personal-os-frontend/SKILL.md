@@ -1,9 +1,9 @@
 ---
 name: personal-os-frontend
-description: Build and refine accessible, domain-owned ilo React PWA experiences. Use when changing `apps/web`, critiquing or refining a screen, translating UX feedback into shared rules, adding a feature page or view state, composing shadcn primitives, changing API queries, or refactoring the application shell.
+description: Build and refine accessible, domain-owned Personal OS React PWA experiences. Use when changing `apps/web`, critiquing or refining a screen, translating UX feedback into shared rules, adding a feature page or view state, composing shadcn primitives, changing API queries, or refactoring the application shell.
 ---
 
-# ilo frontend
+# Personal OS frontend
 
 Follow `docs/design/foundations.md`, `docs/design/governance.md`,
 `docs/design/system.md`, the relevant page specification in
@@ -138,10 +138,10 @@ surface API policy or permission failures clearly.
 
 For agent-driven setup, render the authenticated server plan as the source of
 truth for current, blocked, and complete state. Ask the person only for the
-connection, preference decisions, or approvals Ilo cannot perform. Keep hosted
-skills and procedural prompts as optional compatibility references; never make
-the person copy setup instructions between Ilo and an agent after the agent can
-call Ilo.
+connection, preference decisions, or approvals Personal OS cannot perform.
+Keep hosted skills and procedural prompts as optional compatibility references;
+never make the person copy setup instructions between Personal OS and an agent
+after the agent can call Personal OS.
 
 ## Verify interaction behavior
 

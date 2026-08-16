@@ -1,4 +1,4 @@
 interface:
   display_name: "Review PR"
-  short_description: "Review ilo pull requests against repo standards."
-  default_prompt: "Use $review-pr to perform a substantive review of this ilo pull request."
+  short_description: "Review Personal OS pull requests against repo standards."
+  default_prompt: "Use $review-pr to perform a substantive review of this Personal OS pull request."

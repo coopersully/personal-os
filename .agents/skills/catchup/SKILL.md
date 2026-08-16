@@ -1,6 +1,6 @@
 ---
 name: catchup
-description: Update an ilo branch from its pull request base, make a PR current, inspect upstream changes, resolve conflicts, adapt branch assumptions, verify, commit, and push safely. Use for catch-up, stale-branch, base-sync, rebase, merge-main, or conflict-resolution requests.
+description: Update a Personal OS branch from its pull request base, make a PR current, inspect upstream changes, resolve conflicts, adapt branch assumptions, verify, commit, and push safely. Use for catch-up, stale-branch, base-sync, rebase, merge-main, or conflict-resolution requests.
 ---
 
 # Catch up branch

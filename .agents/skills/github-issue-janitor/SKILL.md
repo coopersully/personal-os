@@ -1,6 +1,6 @@
 ---
 name: github-issue-janitor
-description: Audit ilo GitHub issue and pull request hygiene, including missing links, stale open issues, merged work, duplicate candidates, branch evidence, milestones, assignees, and labels. Use for a bounded GitHub work-tracking cleanup or scheduled hygiene pass.
+description: Audit Personal OS GitHub issue and pull request hygiene, including missing links, stale open issues, merged work, duplicate candidates, branch evidence, milestones, assignees, and labels. Use for a bounded GitHub work-tracking cleanup or scheduled hygiene pass.
 ---
 
 # GitHub issue janitor

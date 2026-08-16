@@ -1,6 +1,6 @@
 ---
 name: pr-shepherd
-description: Run one bounded maintenance pass on an ilo GitHub pull request for CI failures, stale base, review feedback, metadata drift, GitHub Issue linkage, merge readiness, or terminal state. Use when babysitting, shepherding, maintaining, or checking progress on a PR.
+description: Run one bounded maintenance pass on a Personal OS GitHub pull request for CI failures, stale base, review feedback, metadata drift, GitHub Issue linkage, merge readiness, or terminal state. Use when babysitting, shepherding, maintaining, or checking progress on a PR.
 ---
 
 # PR Shepherd

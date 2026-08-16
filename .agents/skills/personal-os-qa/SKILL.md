@@ -1,33 +1,54 @@
 ---
 name: personal-os-qa
-description: Apply ilo's repository fixtures and run evidence-backed product QA in the in-app browser. Use when testing a branch or PR, smoke-testing the local app, reviewing responsive UX, validating onboarding or provider states, checking workspace switching, or writing a regression report for Today, Calendar, Tasks, Mail, Finances, Settings, or account setup.
+description: Run evidence-backed Personal OS product QA using the local runtime, committed automated tests, and the in-app browser. Use when testing a branch or PR, smoke-testing the app, reviewing responsive UX, validating an existing local flow, or writing a regression report.
 ---
 
-# ilo product QA
+# Personal OS product QA
 
-Use the real local runtime, repository fixtures, production routes, and visible
-browser behavior. Treat QA as a contract check, not a screenshot tour.
+Use the checked-in local runtime, committed tests, and visible browser behavior.
+Treat QA as a contract check, not a screenshot tour.
 
 ## Start safely
 
-1. Read `AGENTS.md`, `docs/engineering/qa-fixtures.md`, and the relevant design
-   or product specification.
-2. Read the category runbook selected below.
-3. Run:
+1. Read `AGENTS.md`, `docs/engineering/qa-fixtures.md`, the relevant design or
+   product specification, and the nearest implementation/testing skill.
+2. Run:
 
    ```bash
-   pnpm fixtures:load
    pnpm env:status
    ```
 
-4. If the runtime is unhealthy, use the checked-in `pnpm env:*` actions. Do not
+3. If the runtime is unhealthy, use the checked-in `pnpm env:*` actions. Do not
    invent another server process.
-5. Use `demo+full@ilo.test` for populated coverage. Use the `qa+` personas only
-   for the state they name.
 
-Fixture writes are disposable, but ordinary local accounts are not. Only mutate
-named fixture accounts. Reload fixtures after a pass that changes setup, mail,
-tasks, calendars, or finances.
+## Keep test data public-safe
+
+- Never sign into a real account, connect a real provider, send mail, move
+  money, or submit external data during routine QA.
+- Use only a disposable local account created for the pass or an existing
+  committed test fixture. Do not place credentials, personal content, provider
+  payloads, or local paths in a report.
+- When a selected runbook relies on committed personas, run `pnpm fixtures:load`
+  before the pass and reload after any mutation the runbook identifies. Never
+  mutate an ordinary local account to manufacture coverage.
+- If the scenario requires a populated application, recovery, or provider-specific state that the
+  repository does not create deterministically, add that coverage to automated
+  tests before claiming the state was accepted. Do not invent a manual fixture.
+
+## Select the relevant runbook
+
+Load only the runbooks relevant to the affected behavior:
+
+- Shell, navigation, workspace previews, responsive app frame, and motion:
+  [references/shell-and-switching.md](references/shell-and-switching.md)
+- Authentication, setup, resume, exit, and recovery:
+  [references/setup-and-accounts.md](references/setup-and-accounts.md)
+- Today, Calendar, Tasks, Reminders, Goals, and Motives:
+  [references/planning.md](references/planning.md)
+- Unified inbox, account rails, thread reader, and mailbox states:
+  [references/mail.md](references/mail.md)
+- Overview, ledger, budgets, cash flow, accounts, and review:
+  [references/finances.md](references/finances.md)
 
 ## Use the in-app browser
 
@@ -37,35 +58,25 @@ screenshot when hierarchy, clipping, motion, or density needs visual evidence.
 
 For each affected surface:
 
-1. Record route, fixture persona, viewport, and starting state.
-2. Verify the primary user job and production data, not only that a heading
-   renders.
+1. Record route, disposable test state, viewport, and starting state.
+2. Verify the primary user job and visible product state, not only that a
+   heading renders.
 3. Exercise the shortest representative interaction.
 4. Check loading, populated, empty, and recovery states when applicable.
 5. Check keyboard-accessible names, focus, and dismissal behavior.
 6. Check document horizontal overflow and the browser console.
 7. Inspect the normal viewport and a 390 × 844 narrow viewport for responsive
    changes. Reset the viewport override when finished.
-8. Leave the in-app browser on a useful, stable fixture page.
+8. Leave the in-app browser on a useful, stable local page.
 
-Do not connect a real provider, send mail, initiate money movement, or submit
-external data during QA unless the user explicitly requests that side effect.
+## Combine browser QA with automation
 
-## Select runbooks
-
-- Shell, navigation, workspace previews, motion, and responsive app frame:
-  [references/shell-and-switching.md](references/shell-and-switching.md)
-- Authentication, guided setup, resume, exit, and recovery:
-  [references/setup-and-accounts.md](references/setup-and-accounts.md)
-- Today, Calendar, Tasks, Reminders, Goals, and Motives:
-  [references/planning.md](references/planning.md)
-- Unified inbox, account rails, thread reader, and mailbox states:
-  [references/mail.md](references/mail.md)
-- Overview, ledger, budgets, cash flow, accounts, and review:
-  [references/finances.md](references/finances.md)
-
-Load only the runbooks relevant to the request, except for whole-branch QA,
-which starts with shell plus every changed product category.
+- Run the narrowest affected unit, integration, or component tests first.
+- Run `pnpm test:e2e` for a complete end-to-end regression pass. Use the
+  repository's Playwright projects rather than an ad hoc browser server.
+- Browser QA complements test evidence: it checks hierarchy, responsive
+  behavior, keyboard interaction, focus, and honest visible states that a
+  passing test alone does not prove.
 
 ## Report evidence
 
@@ -77,9 +88,10 @@ Lead with defects, ordered by user impact:
   broken but a workaround exists.
 - **P3**: polish, copy, density, or visual consistency defect.
 
-For every defect include the route, fixture, viewport, reproduction, expected
+For every defect include the route, test state, viewport, reproduction, expected
 contract, and observed result. Separate verified passes from areas not tested.
-Do not describe a route as passing if only its static shell loaded.
+Do not describe a route as passing if only its static shell loaded. State when
+an intended provider or recovery scenario lacks deterministic test coverage.
 
 If QA led to code changes, run the narrowest focused test while iterating and
 finish with `pnpm verify`. Validate changes to this skill with the skill

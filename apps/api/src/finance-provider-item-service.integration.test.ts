@@ -11,7 +11,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { decryptJson, encryptJson } from "./security.js";
 import type { Principal } from "./types.js";
@@ -267,6 +267,31 @@ describe.sequential("Finance Provider Item service", () => {
     expect(await database.db.$count(financeAccounts)).toBe(0);
     expect(await database.db.$count(auditEvents)).toBe(0);
     expect(await database.db.$count(financeCategories)).toBe(0);
+  });
+
+  it("rejects missing credential encryption and non-positive or fractional backfill bounds", async () => {
+    const unconfigured = createFinanceProviderItemService({
+      db: database.db,
+      now: () => now,
+    });
+    await expect(
+      unconfigured.upsertConnection({
+        accessToken: "must-not-persist",
+        accounts: [remoteAccount("unconfigured-account")],
+        context: { principal: principal(userId), requestId: "unconfigured-connection" },
+        institution: "Unconfigured Bank",
+        itemId: "unconfigured-item",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(service().backfillLegacyItems(0)).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    await expect(service().backfillLegacyItems(1.5)).rejects.toMatchObject({
+      code: "invalid_request",
+    });
+    expect(await database.db.$count(financeProviderItems)).toBe(0);
+    expect(await database.db.$count(financeAccounts)).toBe(0);
+    expect(await database.db.$count(auditEvents)).toBe(0);
   });
 
   it("refuses to relink an account into a destination Item with an active claim", async () => {
@@ -1123,6 +1148,115 @@ describe.sequential("Finance Provider Item service", () => {
       "finance_provider_item_legacy_provider_mismatch",
     ]);
     expect(JSON.stringify(items)).not.toContain("raw-provider-canary");
+  });
+
+  it("blocks every malformed decrypted legacy credential shape without exposing its value", async () => {
+    const malformedCredentials: unknown[] = [
+      null,
+      "raw-string-canary",
+      {},
+      { accessToken: 7 },
+      {
+        accessToken: "",
+      },
+    ];
+    await database.db.insert(financeAccounts).values(
+      malformedCredentials.map((credential, index) => ({
+        encryptedCredentials: encryptJson(credential, encryptionKey),
+        institution: "Malformed Legacy Bank",
+        name: `Malformed credential ${index}`,
+        provider: "plaid" as const,
+        providerAccountId: `malformed-credential-account-${index}`,
+        providerItemId: `malformed-credential-item-${index}`,
+        status: "connected" as const,
+        userId,
+      })),
+    );
+
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 5,
+      complete: true,
+      created: 5,
+      linked: 5,
+      replayDue: 0,
+    });
+    const items = await database.db.select().from(financeProviderItems);
+    expect(items).toHaveLength(5);
+    expect(
+      items.every(
+        (item) =>
+          item.syncErrorCode === "finance_provider_item_legacy_credential_invalid" &&
+          item.syncRecovery === "operator" &&
+          item.nextSyncAt === null,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(items)).not.toContain("raw-string-canary");
+  });
+
+  it("blocks late siblings when an existing Item credential is empty or undecryptable", async () => {
+    await insertLegacyGroup("existing-empty-credential", ["cursor-empty"]);
+    await insertLegacyGroup("existing-corrupt-credential", ["cursor-corrupt"]);
+    await service().backfillLegacyItems();
+    const items = await database.db
+      .select()
+      .from(financeProviderItems)
+      .orderBy(financeProviderItems.legacyGroupingKey);
+    const emptyItem = items.find((item) => item.legacyGroupingKey === "existing-empty-credential");
+    const corruptItem = items.find(
+      (item) => item.legacyGroupingKey === "existing-corrupt-credential",
+    );
+    if (!emptyItem || !corruptItem) throw new Error("Existing credential Items were not created.");
+    await database.db
+      .update(financeProviderItems)
+      .set({ encryptedCredentials: encryptJson({ accessToken: "" }, encryptionKey) })
+      .where(eq(financeProviderItems.id, emptyItem.id));
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        encryptedCredentials: {
+          ciphertext: "existing-item-raw-canary",
+          iv: "invalid",
+          tag: "invalid",
+          version: 1,
+        },
+      })
+      .where(eq(financeProviderItems.id, corruptItem.id));
+    const [emptySibling] = await insertLegacyGroup(
+      "existing-empty-credential",
+      ["cursor-empty"],
+      ["token-existing-empty-credential"],
+      1,
+    );
+    const [corruptSibling] = await insertLegacyGroup(
+      "existing-corrupt-credential",
+      ["cursor-corrupt"],
+      ["token-existing-corrupt-credential"],
+      1,
+    );
+    if (!emptySibling || !corruptSibling)
+      throw new Error("Late credential siblings were not saved.");
+
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 2,
+      complete: true,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+    await expect(
+      database.db
+        .select({ itemId: financeAccounts.providerItemRecordId })
+        .from(financeAccounts)
+        .where(inArray(financeAccounts.id, [emptySibling.id, corruptSibling.id])),
+    ).resolves.toEqual([{ itemId: null }, { itemId: null }]);
+    const blockedItems = await database.db
+      .select({ code: financeProviderItems.syncErrorCode, state: financeProviderItems.syncState })
+      .from(financeProviderItems);
+    expect(blockedItems).toEqual([
+      { code: "finance_provider_item_legacy_credential_invalid", state: "blocked" },
+      { code: "finance_provider_item_legacy_credential_invalid", state: "blocked" },
+    ]);
+    expect(JSON.stringify(blockedItems)).not.toContain("existing-item-raw-canary");
   });
 
   it("scans past more than limit plus one locked groups and converges without duplicate audits", async () => {

@@ -9,6 +9,7 @@ import {
   financeCategories,
   financeMerchants,
   financeProviderItems,
+  financeReviewCases,
   financeTransactions,
   migrateDatabase,
   users,
@@ -157,13 +158,17 @@ describe.sequential("Finance Provider Item synchronization", () => {
     return { accounts, item, userId };
   }
 
-  function service(provider: PlaidConnector, log?: (entry: RequestLog) => void) {
+  function service(
+    provider?: PlaidConnector,
+    log?: (entry: RequestLog) => void,
+    includeEncryptionKey = true,
+  ) {
     return createFinanceProviderItemSyncService({
       db: database.db,
-      encryptionKey: key,
+      ...(includeEncryptionKey ? { encryptionKey: key } : {}),
       ...(log ? { log } : {}),
       now: () => now,
-      plaid: provider,
+      ...(provider ? { plaid: provider } : {}),
       prepareTransaction: async (remote) => ({
         category: remote.personalFinanceCategory?.primary ?? null,
         categoryConfidence: null,
@@ -244,6 +249,155 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .from(financeProviderItems)
         .where(eq(financeProviderItems.id, item.id)),
     ).resolves.toEqual([{ code: "finance_provider_item_identity_conflict", state: "blocked" }]);
+  });
+
+  it("blocks legacy identity drift detected between provider resolution and the fenced commit", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 1, itemId: null });
+    const target = accounts[0];
+    if (!target) throw new Error("Identity drift target was not created.");
+    const getAccounts = vi.fn(async () => []);
+    const syncTransactions = vi.fn(async () => emptyPage("must-not-run"));
+
+    await expect(
+      service(
+        plaid({
+          getAccounts,
+          getItem: async () => {
+            await database.db
+              .update(financeProviderItems)
+              .set({ providerItemId: `drifted-${userId}` })
+              .where(eq(financeProviderItems.id, item.id));
+            return { itemId: `resolved-${userId}` };
+          },
+          syncTransactions,
+        }),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "legacy-identity-drift",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    expect(getAccounts).not.toHaveBeenCalled();
+    expect(syncTransactions).not.toHaveBeenCalled();
+    await expect(
+      database.db
+        .select({
+          code: financeProviderItems.syncErrorCode,
+          identity: financeProviderItems.providerItemId,
+          recovery: financeProviderItems.syncRecovery,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([
+      {
+        code: "finance_provider_item_identity_mismatch",
+        identity: `drifted-${userId}`,
+        recovery: "operator",
+      },
+    ]);
+  });
+
+  it("settles missing sync configuration safely and rejects unowned direct targets before provider work", async () => {
+    const missingProvider = await fixture({ accountCount: 1 });
+    const missingProviderTarget = missingProvider.accounts[0];
+    if (!missingProviderTarget) throw new Error("Missing-provider target was not created.");
+    await expect(
+      service().syncAccount(missingProviderTarget.id, {
+        principal: principal(missingProvider.userId),
+        requestId: "missing-provider",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      database.db
+        .select({ code: financeProviderItems.syncErrorCode })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, missingProvider.item.id)),
+    ).resolves.toEqual([{ code: "plaid_configuration_missing" }]);
+
+    const missingEncryption = await fixture({ accountCount: 1 });
+    const missingEncryptionTarget = missingEncryption.accounts[0];
+    if (!missingEncryptionTarget) throw new Error("Missing-encryption target was not created.");
+    await expect(
+      service(plaid(), undefined, false).syncAccount(missingEncryptionTarget.id, {
+        principal: principal(missingEncryption.userId),
+        requestId: "missing-encryption",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      database.db
+        .select({ code: financeProviderItems.syncErrorCode })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, missingEncryption.item.id)),
+    ).resolves.toEqual([{ code: "finance_encryption_configuration_missing" }]);
+
+    const providerCalls = vi.fn(async () => emptyPage("must-not-run"));
+    const guarded = service(plaid({ syncTransactions: providerCalls }));
+    await expect(
+      guarded.syncAccount(crypto.randomUUID(), {
+        principal: principal(missingProvider.userId),
+        requestId: "missing-direct-account",
+      }),
+    ).rejects.toMatchObject({ code: "not_found" });
+    const [manualAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Manual",
+        name: "Manual direct target",
+        provider: "manual",
+        status: "manual",
+        userId: missingProvider.userId,
+      })
+      .returning();
+    if (!manualAccount) throw new Error("Manual direct target was not created.");
+    await expect(
+      guarded.syncAccount(manualAccount.id, {
+        principal: principal(missingProvider.userId),
+        requestId: "manual-direct-account",
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    const foreign = await fixture({ accountCount: 1 });
+    const pointerOwnerId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      displayName: "Foreign pointer owner",
+      email: `foreign-pointer-${pointerOwnerId}@example.com`,
+      id: pointerOwnerId,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const [foreignPointer] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Foreign Pointer Bank",
+        name: "Foreign Item pointer",
+        provider: "plaid",
+        providerAccountId: `foreign-pointer-${pointerOwnerId}`,
+        providerItemRecordId: foreign.item.id,
+        status: "connected",
+        userId: pointerOwnerId,
+      })
+      .returning();
+    if (!foreignPointer) throw new Error("Foreign direct pointer was not created.");
+    const foreignBefore = (
+      await database.db
+        .select()
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, foreign.item.id))
+    )[0];
+    await expect(
+      guarded.syncAccount(foreignPointer.id, {
+        principal: principal(pointerOwnerId),
+        requestId: "foreign-direct-account",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, foreign.item.id))
+      )[0],
+    ).toEqual(foreignBefore);
+    expect(providerCalls).not.toHaveBeenCalled();
   });
 
   it("atomically checkpoints every page and resumes exactly there after process loss", async () => {
@@ -787,6 +941,172 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ).resolves.toEqual([]);
   });
 
+  it("preserves user and agent category decisions while reviewing provider sign reversals", async () => {
+    const { accounts, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target?.providerAccountId)
+      throw new Error("Protected transaction target was not created.");
+    const providerAccountId = target.providerAccountId;
+    const userTransactionId = `protected-user-${userId}`;
+    const agentTransactionId = `protected-agent-${userId}`;
+    const [userTransaction, agentTransaction] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: target.id,
+          amount: 1_000,
+          category: "USER_PROTECTED",
+          categoryConfidence: 10_000,
+          categoryDecidedAt: now,
+          categoryRationale: "User-confirmed category.",
+          categorySource: "user",
+          direction: "expense",
+          merchant: "Protected user merchant",
+          needsReview: false,
+          pending: false,
+          providerDirection: null,
+          providerTransactionId: userTransactionId,
+          reconciliationStatus: "not_applicable",
+          transactionDate: "2026-08-14",
+          userId,
+        },
+        {
+          accountId: target.id,
+          amount: 2_000,
+          category: "AGENT_PROTECTED",
+          categoryConfidence: 9_500,
+          categoryDecidedAt: now,
+          categoryRationale: "Agent-confirmed transfer.",
+          categorySource: "agent",
+          direction: "transfer",
+          merchant: "Protected agent merchant",
+          needsReview: false,
+          pending: false,
+          providerDirection: "expense",
+          providerTransactionId: agentTransactionId,
+          reconciliationStatus: "matched",
+          transactionDate: "2026-08-14",
+          userId,
+        },
+      ])
+      .returning();
+    if (!userTransaction || !agentTransaction) {
+      throw new Error("Protected transactions were not created.");
+    }
+    const [existingReview] = await database.db
+      .insert(financeReviewCases)
+      .values({
+        rationale: "Original review rationale.",
+        reason: "low_confidence",
+        status: "open",
+        transactionId: userTransaction.id,
+        userId,
+      })
+      .returning();
+    if (!existingReview) throw new Error("Protected transaction review was not created.");
+
+    await expect(
+      service(
+        plaid({
+          syncTransactions: async () => ({
+            ...emptyPage("protected-finished"),
+            modified: [
+              {
+                accountId: providerAccountId,
+                amount: -11,
+                currencyCode: "USD",
+                date: "2026-08-16",
+                merchantName: "Provider user rename",
+                name: "PROVIDER USER RENAME",
+                pending: false,
+                pendingTransactionId: null,
+                personalFinanceCategory: {
+                  confidenceLevel: "HIGH",
+                  detailed: "PROVIDER_USER_DETAIL",
+                  primary: "PROVIDER_USER",
+                },
+                transactionId: userTransactionId,
+              },
+              {
+                accountId: providerAccountId,
+                amount: -22,
+                currencyCode: "USD",
+                date: "2026-08-16",
+                merchantName: "Provider agent rename",
+                name: "PROVIDER AGENT RENAME",
+                pending: false,
+                pendingTransactionId: null,
+                personalFinanceCategory: {
+                  confidenceLevel: "HIGH",
+                  detailed: "PROVIDER_AGENT_DETAIL",
+                  primary: "PROVIDER_AGENT",
+                },
+                transactionId: agentTransactionId,
+              },
+            ],
+          }),
+        }),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "protected-sign-reversals",
+      }),
+    ).resolves.toEqual({ changed: 2 });
+    await expect(
+      database.db
+        .select({
+          category: financeTransactions.category,
+          categorySource: financeTransactions.categorySource,
+          direction: financeTransactions.direction,
+          needsReview: financeTransactions.needsReview,
+          providerDirection: financeTransactions.providerDirection,
+          reconciliationStatus: financeTransactions.reconciliationStatus,
+        })
+        .from(financeTransactions)
+        .where(inArray(financeTransactions.id, [userTransaction.id, agentTransaction.id]))
+        .orderBy(financeTransactions.category),
+    ).resolves.toEqual([
+      {
+        category: "AGENT_PROTECTED",
+        categorySource: "agent",
+        direction: "transfer",
+        needsReview: true,
+        providerDirection: "income",
+        reconciliationStatus: "matched",
+      },
+      {
+        category: "USER_PROTECTED",
+        categorySource: "user",
+        direction: "income",
+        needsReview: true,
+        providerDirection: "income",
+        reconciliationStatus: "not_applicable",
+      },
+    ]);
+    const reviews = await database.db
+      .select({
+        id: financeReviewCases.id,
+        reason: financeReviewCases.reason,
+        transactionId: financeReviewCases.transactionId,
+      })
+      .from(financeReviewCases)
+      .where(inArray(financeReviewCases.transactionId, [userTransaction.id, agentTransaction.id]));
+    expect(reviews).toHaveLength(2);
+    expect(reviews).toEqual(
+      expect.arrayContaining([
+        {
+          id: expect.any(String),
+          reason: "refund_or_reversal",
+          transactionId: agentTransaction.id,
+        },
+        {
+          id: existingReview.id,
+          reason: "refund_or_reversal",
+          transactionId: userTransaction.id,
+        },
+      ]),
+    );
+  });
+
   it("clears an invalid Item cursor for one controlled replay", async () => {
     const { accounts, item, userId } = await fixture({ cursor: "opaque-cursor" });
     const target = accounts[0];
@@ -951,6 +1271,72 @@ describe.sequential("Finance Provider Item synchronization", () => {
     expect(syncTransactions).not.toHaveBeenCalled();
   });
 
+  it("preserves an in-progress replay marker across an automatic transport failure and logs safely", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target) throw new Error("Replay-marker target was not created.");
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: now,
+        syncError: "Plaid transaction history is being replayed from a safe checkpoint.",
+        syncErrorCategory: "rejected",
+        syncErrorCode: "plaid_invalid_cursor_replay_in_progress",
+        syncFailureCount: 1,
+        syncRecovery: "automatic",
+        syncState: "retrying",
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    const logs: RequestLog[] = [];
+
+    await expect(
+      service(
+        plaid({
+          syncTransactions: async () => {
+            throw new ConnectorError({
+              category: "temporary",
+              code: "plaid_transport_failure",
+              disposition: "retry",
+              message: "raw replay transport canary",
+            });
+          },
+        }),
+        (entry) => logs.push(entry),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "replay-marker-transport-failure",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    await expect(
+      database.db
+        .select({
+          code: financeProviderItems.syncErrorCode,
+          failureCount: financeProviderItems.syncFailureCount,
+          message: financeProviderItems.syncError,
+          recovery: financeProviderItems.syncRecovery,
+          state: financeProviderItems.syncState,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([
+      {
+        code: "plaid_invalid_cursor_replay_in_progress",
+        failureCount: 2,
+        message: "Plaid transaction history is being replayed from a safe checkpoint.",
+        recovery: "automatic",
+        state: "retrying",
+      },
+    ]);
+    expect(logs).toEqual([
+      expect.objectContaining({
+        code: "plaid_transport_failure",
+        event: "connector_sync_failed",
+        status: 503,
+      }),
+    ]);
+    expect(JSON.stringify(logs)).not.toContain("raw replay transport canary");
+  });
+
   it("retries an ordinary operator-owned failure after its configuration is repaired and due", async () => {
     const { accounts, item, userId } = await fixture();
     const target = accounts[0];
@@ -995,6 +1381,76 @@ describe.sequential("Finance Provider Item synchronization", () => {
         syncState: "current",
       },
     ]);
+  });
+
+  it("skips missing provider account identities while logging a durable retry recovery", async () => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    const identityMissing = accounts[1];
+    if (!target || !identityMissing) throw new Error("Missing-identity siblings were not created.");
+    await database.db
+      .update(financeAccounts)
+      .set({ name: "Must remain unchanged", providerAccountId: null })
+      .where(eq(financeAccounts.id, identityMissing.id));
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: now,
+        syncError: "Temporary provider failure.",
+        syncErrorCategory: "temporary",
+        syncErrorCode: "plaid_transport_failure",
+        syncFailureCount: 2,
+        syncRecovery: "automatic",
+        syncState: "retrying",
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    const logs: RequestLog[] = [];
+
+    await expect(
+      service(
+        plaid({
+          getAccounts: async () => [
+            {
+              accountId: target.providerAccountId ?? "missing",
+              balanceCurrent: 88.5,
+              currencyCode: "USD",
+              name: "Recovered target",
+              officialName: null,
+            },
+          ],
+          syncTransactions: async () => emptyPage("recovered-cursor"),
+        }),
+        (entry) => logs.push(entry),
+      ).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "missing-provider-account-identity",
+      }),
+    ).resolves.toEqual({ changed: 0 });
+    await expect(
+      database.db
+        .select({
+          name: financeAccounts.name,
+          providerAccountId: financeAccounts.providerAccountId,
+        })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, identityMissing.id)),
+    ).resolves.toEqual([{ name: "Must remain unchanged", providerAccountId: null }]);
+    expect(logs.map((entry) => entry.event)).toEqual([
+      "connector_sync_completed",
+      "connector_sync_recovered",
+    ]);
+    expect(logs[1]).toMatchObject({ failureCount: 2, provider: "plaid", status: 200 });
+    await expect(
+      database.db
+        .select({ action: auditEvents.action, after: auditEvents.after })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, item.id),
+            eq(auditEvents.action, "finance.plaid_accounts_projected"),
+          ),
+        ),
+    ).resolves.toEqual([{ action: "finance.plaid_accounts_projected", after: { projected: 1 } }]);
   });
 
   it("classifies retryable operator contention as conflict while the winning runtime recovers", async () => {

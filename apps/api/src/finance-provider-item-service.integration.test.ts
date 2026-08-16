@@ -18,6 +18,33 @@ import type { Principal } from "./types.js";
 const encryptionKey = Buffer.alloc(32, 7).toString("base64");
 const now = new Date("2026-08-16T12:00:00.000Z");
 
+async function attemptOldItemClaimCommit(
+  pool: DatabaseClient["pool"],
+  itemId: string,
+  claimId: string,
+  generation: number,
+) {
+  return pool.query<{ id: string }>(
+    `UPDATE finance_provider_items
+     SET sync_cursor = 'cursor-from-revoked-claim',
+         sync_state = 'current',
+         sync_claim_id = NULL,
+         sync_claim_owner = NULL,
+         sync_claim_generation = NULL,
+         sync_claim_started_at = NULL,
+         sync_claim_expires_at = NULL,
+         next_sync_at = NULL,
+         sync_error = NULL,
+         sync_error_code = NULL,
+         sync_error_category = NULL,
+         sync_recovery = NULL,
+         sync_failure_count = 0
+     WHERE id = $1 AND sync_claim_id = $2 AND sync_claim_generation = $3
+     RETURNING id`,
+    [itemId, claimId, generation],
+  );
+}
+
 async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -276,10 +303,17 @@ describe.sequential("Finance Provider Item service", () => {
     await service().backfillLegacyItems();
     const [existingItem] = await database.db.select().from(financeProviderItems);
     if (!existingItem) throw new Error("The initial legacy Item was not created.");
+    const claimId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const claimGeneration = 7;
     await database.db
       .update(financeProviderItems)
       .set({
         nextSyncAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimGeneration: claimGeneration,
+        syncClaimId: claimId,
+        syncClaimOwner: "runtime-before-replay",
+        syncClaimStartedAt: new Date("2026-08-16T11:59:00.000Z"),
         syncCursor: "cursor-advanced",
         syncState: "current",
       })
@@ -301,9 +335,26 @@ describe.sequential("Finance Provider Item service", () => {
       .where(eq(financeProviderItems.id, existingItem.id));
     expect(reconciledItem).toMatchObject({
       nextSyncAt: now,
+      syncClaimExpiresAt: null,
+      syncClaimGeneration: null,
+      syncClaimId: null,
+      syncClaimOwner: null,
+      syncClaimStartedAt: null,
       syncCursor: null,
       syncState: "stale",
     });
+    expect(
+      (await attemptOldItemClaimCommit(database.pool, existingItem.id, claimId, claimGeneration))
+        .rowCount,
+    ).toBe(0);
+    expect(
+      (
+        await database.db
+          .select({ syncCursor: financeProviderItems.syncCursor })
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, existingItem.id))
+      )[0]?.syncCursor,
+    ).toBeNull();
     expect(
       (
         await database.db
@@ -319,6 +370,18 @@ describe.sequential("Finance Provider Item service", () => {
     await service().backfillLegacyItems();
     const [existingItem] = await database.db.select().from(financeProviderItems);
     if (!existingItem) throw new Error("The initial credential Item was not created.");
+    const claimId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const claimGeneration = 11;
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimGeneration: claimGeneration,
+        syncClaimId: claimId,
+        syncClaimOwner: "runtime-before-block",
+        syncClaimStartedAt: new Date("2026-08-16T11:59:00.000Z"),
+      })
+      .where(eq(financeProviderItems.id, existingItem.id));
     const [lateSibling] = await insertLegacyGroup(
       "legacy-late-credential",
       ["cursor-original"],
@@ -329,7 +392,7 @@ describe.sequential("Finance Provider Item service", () => {
 
     await expect(service().backfillLegacyItems()).resolves.toEqual({
       blocked: 1,
-      complete: false,
+      complete: true,
       created: 0,
       linked: 0,
       replayDue: 0,
@@ -344,9 +407,26 @@ describe.sequential("Finance Provider Item service", () => {
       )[0],
     ).toMatchObject({
       nextSyncAt: null,
+      syncClaimExpiresAt: null,
+      syncClaimGeneration: null,
+      syncClaimId: null,
+      syncClaimOwner: null,
+      syncClaimStartedAt: null,
       syncErrorCode: "finance_provider_item_legacy_credential_mismatch",
       syncState: "blocked",
     });
+    expect(
+      (await attemptOldItemClaimCommit(database.pool, existingItem.id, claimId, claimGeneration))
+        .rowCount,
+    ).toBe(0);
+    expect(
+      (
+        await database.db
+          .select({ syncCursor: financeProviderItems.syncCursor })
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, existingItem.id))
+      )[0]?.syncCursor,
+    ).toBeNull();
     expect(
       (
         await database.db
@@ -357,8 +437,8 @@ describe.sequential("Finance Provider Item service", () => {
     ).toBeNull();
     const auditCount = await database.db.$count(auditEvents);
     await expect(service().backfillLegacyItems()).resolves.toEqual({
-      blocked: 1,
-      complete: false,
+      blocked: 0,
+      complete: true,
       created: 0,
       linked: 0,
       replayDue: 0,
@@ -372,6 +452,59 @@ describe.sequential("Finance Provider Item service", () => {
           .where(eq(financeProviderItems.id, existingItem.id))
       )[0]?.syncFailureCount,
     ).toBe(1);
+  });
+
+  it("does not let a terminal blocked group starve the next healthy group", async () => {
+    await insertLegacyGroup("a-terminal-blocked", ["cursor-original"], ["token-original"]);
+    await service().backfillLegacyItems(1);
+    await insertLegacyGroup("a-terminal-blocked", ["cursor-original"], ["token-conflict"], 1);
+    await expect(service().backfillLegacyItems(1)).resolves.toMatchObject({
+      blocked: 1,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+    await insertLegacyGroup("b-healthy", ["cursor-healthy"]);
+    const auditsBeforeHealthyPass = await database.db.$count(auditEvents);
+    const [blockedItemBeforeHealthyPass] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.legacyGroupingKey, "a-terminal-blocked"));
+    if (!blockedItemBeforeHealthyPass) throw new Error("The terminal blocked Item was not saved.");
+
+    await expect(service().backfillLegacyItems(1)).resolves.toEqual({
+      blocked: 0,
+      complete: true,
+      created: 1,
+      linked: 1,
+      replayDue: 0,
+    });
+    expect(
+      (
+        await database.db
+          .select({ providerItemRecordId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.providerAccountId, "b-healthy-account-0"))
+      )[0]?.providerItemRecordId,
+    ).not.toBeNull();
+    expect(await database.db.$count(auditEvents)).toBe(auditsBeforeHealthyPass + 1);
+
+    await expect(service().backfillLegacyItems(1)).resolves.toEqual({
+      blocked: 0,
+      complete: true,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+    expect(await database.db.$count(auditEvents)).toBe(auditsBeforeHealthyPass + 1);
+    expect(
+      (
+        await database.db
+          .select({ syncFailureCount: financeProviderItems.syncFailureCount })
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, blockedItemBeforeHealthyPass.id))
+      )[0]?.syncFailureCount,
+    ).toBe(blockedItemBeforeHealthyPass.syncFailureCount);
   });
 
   it("links only the exact legacy account IDs present in its locked snapshot", async () => {

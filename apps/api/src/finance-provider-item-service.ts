@@ -7,7 +7,7 @@ import {
   financeProviderItems,
 } from "@personal-os/database";
 import type { FinanceAccount } from "@personal-os/domain";
-import { and, asc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, notExists, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { decryptJson, encryptJson } from "./security.js";
@@ -286,6 +286,14 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
             WHERE account.provider_item_record_id IS NULL
               AND account.provider = 'plaid'
               AND account.provider_item_id IS NOT NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM finance_provider_items terminal_item
+                WHERE terminal_item.user_id = account.user_id
+                  AND terminal_item.provider = account.provider
+                  AND terminal_item.legacy_grouping_key = account.provider_item_id
+                  AND terminal_item.sync_state = 'blocked'
+              )
             GROUP BY account.user_id, account.provider, account.provider_item_id
           )
           SELECT
@@ -440,14 +448,17 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
                 item.syncCursor === null &&
                 item.nextSyncAt === null
               ) {
-                blocked += 1;
-                processedGroups += 1;
                 continue;
               }
               const [blockedItem] = await tx
                 .update(financeProviderItems)
                 .set({
                   nextSyncAt: null,
+                  syncClaimExpiresAt: null,
+                  syncClaimGeneration: null,
+                  syncClaimId: null,
+                  syncClaimOwner: null,
+                  syncClaimStartedAt: null,
                   syncCursor: null,
                   syncError: blockedReason.message,
                   syncErrorCategory: "configuration",
@@ -464,8 +475,6 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
               authoritativeItem = blockedItem;
               needsReplay = false;
             } else if (item.syncState === "blocked") {
-              blocked += 1;
-              processedGroups += 1;
               continue;
             } else {
               needsReplay =
@@ -478,6 +487,11 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
                   .update(financeProviderItems)
                   .set({
                     nextSyncAt: now(),
+                    syncClaimExpiresAt: null,
+                    syncClaimGeneration: null,
+                    syncClaimId: null,
+                    syncClaimOwner: null,
+                    syncClaimStartedAt: null,
                     syncCursor: null,
                     syncError: null,
                     syncErrorCategory: null,
@@ -552,6 +566,19 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
             eq(financeAccounts.provider, "plaid"),
             isNotNull(financeAccounts.providerItemId),
             isNull(financeAccounts.providerItemRecordId),
+            notExists(
+              db
+                .select({ id: financeProviderItems.id })
+                .from(financeProviderItems)
+                .where(
+                  and(
+                    eq(financeProviderItems.userId, financeAccounts.userId),
+                    eq(financeProviderItems.provider, financeAccounts.provider),
+                    eq(financeProviderItems.legacyGroupingKey, financeAccounts.providerItemId),
+                    eq(financeProviderItems.syncState, "blocked"),
+                  ),
+                ),
+            ),
           ),
         )
         .limit(1);

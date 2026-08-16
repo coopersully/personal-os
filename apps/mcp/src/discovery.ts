@@ -206,7 +206,7 @@ function registerPrompts(server: McpServer, scopes: ReadonlySet<AccessScope>): v
     {
       description: "Review finances with freshness, source, and reconciliation context.",
       name: "review_finances",
-      text: "Call get_ilo_context and get_finance_overview, then inspect ledger health and the review queue. State data freshness and uncertainty; proposals are not committed categorizations.",
+      text: "Call get_ilo_context and get_finance_status. State data freshness and uncertainty. When the caller intends maintenance and has finances:write, invoke maintain_finances once; Ilo keeps questions and approvals pending rather than guessing.",
       title: "Review finances",
     },
     {

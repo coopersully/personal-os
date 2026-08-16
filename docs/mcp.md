@@ -196,7 +196,13 @@ matching behavior changes, and connector sync executes only enabled `approved_ru
 MCP annotations remain untrusted UX hints. The API and durable scheduler remain authoritative;
 Mail-to-Calendar intake does not use experimental MCP task execution.
 
-Finance tools are a read/proposal adapter over the same Finance API used by the web app.
+Finance tools are an adapter over the same Finance API used by the web app. The preferred
+complete-workspace operations are `get_finance_status` and `maintain_finances`. Status reports the
+authoritative readiness, freshness, outstanding work, open questions, and recoverable run state;
+maintenance durably starts, resumes, or verifies one Ilo-owned turn for all outstanding work, a
+bounded window, or an exact target. No-argument maintenance means all outstanding work. MCP does
+not poll, schedule, or sequence this work: the API owns its durable lifecycle, questions,
+approvals, recovery, and terminal result.
 `get_finance_guided_setup` is the entry point for a short Finance interview: it
 returns the shared durable profile together with owned account sources, review
 and ledger readiness, human-only boundaries, and suggested workflows. The

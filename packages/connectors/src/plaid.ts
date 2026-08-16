@@ -220,10 +220,10 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
     },
     async getItem(accessToken) {
       const value = parse(
-        z.object({ item_id: z.string().min(1) }),
+        z.object({ item: z.object({ item_id: z.string().min(1) }) }),
         await plaidRequest("/item/get", { access_token: accessToken }),
       );
-      return { itemId: value.item_id };
+      return { itemId: value.item.item_id };
     },
     async getAccounts(accessToken) {
       const value = parse(

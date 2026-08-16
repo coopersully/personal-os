@@ -76,7 +76,7 @@ describe("Plaid connector", () => {
               client_id: "client-id",
               secret: "connector-secret",
             });
-            return Response.json({ item_id: "item-1" });
+            return Response.json({ item: { item_id: "item-1" } });
           }
           case "/accounts/get":
             return Response.json({
@@ -206,7 +206,7 @@ describe("Plaid connector", () => {
     const itemMalformed = createPlaidConnector({
       clientId: "client",
       environment: "sandbox",
-      fetch: async () => Response.json({ item_id: "" }),
+      fetch: async () => Response.json({ item: { item_id: "" } }),
       secret: "secret",
     });
 

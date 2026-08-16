@@ -10,9 +10,55 @@ import {
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
   oauthStates,
+  workspaceMaintenanceRuns,
+  workspaceMaintenanceSteps,
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps workspace maintenance runs durable, exclusive, and claimable", async () => {
+    const runs = getTableConfig(workspaceMaintenanceRuns);
+    const steps = getTableConfig(workspaceMaintenanceSteps);
+
+    expect(runs.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "domain",
+        "scope",
+        "status",
+        "rulebook_version",
+        "source_snapshot",
+        "checkpoint",
+        "lease_claim_id",
+        "lease_expires_at",
+        "last_safe_error",
+        "settled_result",
+      ]),
+    );
+    expect(runs.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining([
+        "workspace_maintenance_runs_open_user_domain_idx",
+        "workspace_maintenance_runs_claimable_idx",
+      ]),
+    );
+    expect(steps.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining([
+        "workspace_maintenance_steps_run_step_idx",
+        "workspace_maintenance_steps_run_idempotency_idx",
+      ]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0056_workspace_maintenance_runs.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "workspace_maintenance_runs"');
+    expect(migrationSql).toContain('CREATE TABLE "workspace_maintenance_steps"');
+    expect(migrationSql).toContain(
+      "WHERE \"status\" IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable')",
+    );
+    expect(migrationSql).not.toMatch(/^\s*(?:UPDATE|DELETE\s+FROM)\b/mu);
+    expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
   it("keeps Finance synchronization health and expiring claims aligned", async () => {
     const table = getTableConfig(financeAccounts);
     expect(table.columns.map((column) => column.name)).toEqual(

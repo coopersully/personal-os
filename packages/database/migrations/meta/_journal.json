@@ -393,6 +393,13 @@
       "when": 1786957200000,
       "tag": "0055_finance_sync_health",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1786960800000,
+      "tag": "0056_workspace_maintenance_runs",
+      "breakpoints": true
     }
   ]
 }

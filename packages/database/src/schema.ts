@@ -33,6 +33,8 @@ import type {
   MailRuleCondition,
   MailRuleProviderEffect,
   MailRuleWorkStatus,
+  MaintenanceRunStatus,
+  MaintenanceScope,
   MaterialSourceReference,
   Theme,
   TransactionDirection,
@@ -88,6 +90,95 @@ export const users = pgTable("users", {
     .default(17 * 60),
   ...timestamps,
 });
+
+type MaintenanceSafeError = { code: string; message: string };
+
+export const workspaceMaintenanceRuns = pgTable(
+  "workspace_maintenance_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    domain: text("domain").$type<AssistantDomain>().notNull(),
+    scope: jsonb("scope").$type<MaintenanceScope>().notNull(),
+    status: text("status").$type<MaintenanceRunStatus>().notNull().default("queued"),
+    rulebookVersion: text("rulebook_version").notNull(),
+    sourceSnapshot: jsonb("source_snapshot").$type<unknown>(),
+    checkpoint: jsonb("checkpoint").$type<unknown>(),
+    leaseClaimId: uuid("lease_claim_id"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    lastSafeError: jsonb("last_safe_error").$type<MaintenanceSafeError>(),
+    settledResult: jsonb("settled_result").$type<unknown>(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "workspace_maintenance_runs_status_check",
+      sql`${table.status} IN ('queued', 'running', 'completed', 'completed_with_questions', 'awaiting_approval', 'blocked', 'failed_recoverable', 'failed_terminal')`,
+    ),
+    check(
+      "workspace_maintenance_runs_lease_check",
+      sql`(
+        (${table.status} = 'running' AND ${table.leaseClaimId} IS NOT NULL AND ${table.leaseExpiresAt} IS NOT NULL)
+        OR
+        (${table.status} <> 'running' AND ${table.leaseClaimId} IS NULL AND ${table.leaseExpiresAt} IS NULL)
+      )`,
+    ),
+    uniqueIndex("workspace_maintenance_runs_open_user_domain_idx")
+      .on(table.userId, table.domain)
+      .where(
+        sql`${table.status} IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable')`,
+      ),
+    index("workspace_maintenance_runs_claimable_idx")
+      .on(table.status, table.leaseExpiresAt, table.updatedAt)
+      .where(sql`${table.status} IN ('queued', 'running', 'failed_recoverable')`),
+    index("workspace_maintenance_runs_user_history_idx").on(
+      table.userId,
+      table.domain,
+      table.createdAt,
+    ),
+  ],
+);
+
+export const workspaceMaintenanceSteps = pgTable(
+  "workspace_maintenance_steps",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    stepName: text("step_name").notNull(),
+    status: text("status")
+      .$type<"completed" | "failed_recoverable" | "failed_terminal">()
+      .notNull(),
+    attemptCount: integer("attempt_count").notNull().default(1),
+    idempotencyKey: text("idempotency_key").notNull(),
+    safeResult: jsonb("safe_result").$type<unknown>(),
+    safeError: jsonb("safe_error").$type<MaintenanceSafeError>(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "workspace_maintenance_steps_status_check",
+      sql`${table.status} IN ('completed', 'failed_recoverable', 'failed_terminal')`,
+    ),
+    check("workspace_maintenance_steps_attempt_check", sql`${table.attemptCount} > 0`),
+    check(
+      "workspace_maintenance_steps_result_check",
+      sql`(
+        (${table.status} = 'completed' AND ${table.safeError} IS NULL)
+        OR
+        (${table.status} IN ('failed_recoverable', 'failed_terminal') AND ${table.safeResult} IS NULL AND ${table.safeError} IS NOT NULL)
+      )`,
+    ),
+    uniqueIndex("workspace_maintenance_steps_run_step_idx").on(table.runId, table.stepName),
+    uniqueIndex("workspace_maintenance_steps_run_idempotency_idx").on(
+      table.runId,
+      table.idempotencyKey,
+    ),
+  ],
+);
 
 export const accountActionTokens = pgTable(
   "account_action_tokens",

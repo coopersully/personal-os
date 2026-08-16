@@ -142,6 +142,7 @@ describe.sequential("mail service", () => {
       "0053_oauth_states_expiry_index",
       "0054_agent_access_work_item_snapshots",
       "0055_finance_sync_health",
+      "0056_workspace_maintenance_runs",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -182,6 +183,7 @@ describe.sequential("mail service", () => {
       "0053_oauth_states_expiry_index",
       "0054_agent_access_work_item_snapshots",
       "0055_finance_sync_health",
+      "0056_workspace_maintenance_runs",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

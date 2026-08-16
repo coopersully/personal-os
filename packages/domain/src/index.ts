@@ -9,6 +9,7 @@ export * from "./finance.js";
 export * from "./goals.js";
 export * from "./ilo-setup-release.js";
 export * from "./mail.js";
+export * from "./maintenance.js";
 export * from "./pinterest.js";
 export * from "./reflection.js";
 export * from "./reminder.js";

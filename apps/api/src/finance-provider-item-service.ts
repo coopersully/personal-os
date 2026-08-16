@@ -30,6 +30,7 @@ type UpsertConnectionInput = {
   context: MutationContext;
   institution: string;
   itemId: string;
+  prepareTransaction?: (executor: Pick<Database, "insert" | "select">) => Promise<void>;
 };
 
 export type FinanceProviderItemBackfillResult = {
@@ -133,6 +134,7 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
         getEncryptionKey(),
       );
       const rows = await db.transaction(async (tx) => {
+        await input.prepareTransaction?.(tx);
         const [item] = await tx
           .insert(financeProviderItems)
           .values({
@@ -366,7 +368,7 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
             cursors.every((cursor) => cursor === cursors[0])
               ? (cursors[0] ?? null)
               : null;
-          const needsReplay = !blockedReason && preservedCursor === null;
+          let needsReplay = !blockedReason && preservedCursor === null;
           const sourceCredential = ownedRows.find(
             (row) => row.encryptedCredentials !== null,
           )?.encryptedCredentials;
@@ -412,20 +414,113 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
           if (!item)
             throw new AppError("internal_error", "The legacy Plaid Item could not be saved.");
 
-          await tx
-            .update(financeAccounts)
-            .set({ providerItemRecordId: item.id, updatedAt: now() })
-            .where(
-              and(
-                eq(financeAccounts.userId, candidate.userId),
-                eq(financeAccounts.provider, "plaid"),
-                eq(financeAccounts.providerItemId, candidate.legacyGroupingKey),
-                isNull(financeAccounts.providerItemRecordId),
-              ),
-            );
+          let authoritativeItem = item;
+          if (!inserted) {
+            if (!blockedReason) {
+              try {
+                const itemCredentials = decryptJson<unknown>(
+                  item.encryptedCredentials,
+                  getEncryptionKey(),
+                );
+                const itemAccessToken = validatedAccessToken(itemCredentials);
+                if (!itemAccessToken) {
+                  blockedReason = blockedReasons.credentialInvalid;
+                } else if (itemAccessToken !== accessToken) {
+                  blockedReason = blockedReasons.credentialMismatch;
+                }
+              } catch {
+                blockedReason = blockedReasons.credentialInvalid;
+              }
+            }
+
+            if (blockedReason) {
+              if (
+                item.syncState === "blocked" &&
+                item.syncErrorCode === blockedReason.code &&
+                item.syncCursor === null &&
+                item.nextSyncAt === null
+              ) {
+                blocked += 1;
+                processedGroups += 1;
+                continue;
+              }
+              const [blockedItem] = await tx
+                .update(financeProviderItems)
+                .set({
+                  nextSyncAt: null,
+                  syncCursor: null,
+                  syncError: blockedReason.message,
+                  syncErrorCategory: "configuration",
+                  syncErrorCode: blockedReason.code,
+                  syncFailureCount: Math.max(1, item.syncFailureCount + 1),
+                  syncRecovery: "operator",
+                  syncState: "blocked",
+                  updatedAt: now(),
+                })
+                .where(eq(financeProviderItems.id, item.id))
+                .returning();
+              if (!blockedItem)
+                throw new AppError("internal_error", "The legacy Plaid Item could not be blocked.");
+              authoritativeItem = blockedItem;
+              needsReplay = false;
+            } else if (item.syncState === "blocked") {
+              blocked += 1;
+              processedGroups += 1;
+              continue;
+            } else {
+              needsReplay =
+                item.syncCursor === null ||
+                ownedRows.some(
+                  (row) => row.syncCursor === null || row.syncCursor !== item.syncCursor,
+                );
+              if (needsReplay) {
+                const [replayItem] = await tx
+                  .update(financeProviderItems)
+                  .set({
+                    nextSyncAt: now(),
+                    syncCursor: null,
+                    syncError: null,
+                    syncErrorCategory: null,
+                    syncErrorCode: null,
+                    syncFailureCount: 0,
+                    syncRecovery: null,
+                    syncState: "stale",
+                    updatedAt: now(),
+                  })
+                  .where(eq(financeProviderItems.id, item.id))
+                  .returning();
+                if (!replayItem)
+                  throw new AppError(
+                    "internal_error",
+                    "The legacy Plaid Item replay could not be scheduled.",
+                  );
+                authoritativeItem = replayItem;
+              }
+            }
+          }
+
+          const shouldLink = Boolean(inserted) || !blockedReason;
+          const linkedRows = shouldLink
+            ? await tx
+                .update(financeAccounts)
+                .set({ providerItemRecordId: authoritativeItem.id, updatedAt: now() })
+                .where(
+                  and(
+                    inArray(
+                      financeAccounts.id,
+                      ownedRows.map((row) => row.id),
+                    ),
+                    isNull(financeAccounts.providerItemRecordId),
+                  ),
+                )
+                .returning({ id: financeAccounts.id })
+            : [];
+          if (shouldLink && linkedRows.length !== ownedRows.length) {
+            throw new AppError("conflict", "The legacy Plaid account group changed while linking.");
+          }
           if (inserted) created += 1;
           processedGroups += 1;
-          linked += ownedRows.length;
+          linked += linkedRows.length;
           if (blockedReason) blocked += 1;
           if (needsReplay) replayDue += 1;
           await tx.insert(auditEvents).values({
@@ -435,13 +530,13 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
             actorId: candidate.userId,
             actorType: "system",
             after: {
-              accountCount: ownedRows.length,
+              accountCount: linkedRows.length,
               provider: "plaid",
               ...(blockedReason ? { failureCode: blockedReason.code } : {}),
               replayDue: needsReplay,
             },
             before: null,
-            entityId: item.id,
+            entityId: authoritativeItem.id,
             entityType: "finance_provider_item",
             requestId: backfillRequestId,
             userId: candidate.userId,

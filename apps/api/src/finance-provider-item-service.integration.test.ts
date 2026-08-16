@@ -18,6 +18,23 @@ import type { Principal } from "./types.js";
 const encryptionKey = Buffer.alloc(32, 7).toString("base64");
 const now = new Date("2026-08-16T12:00:00.000Z");
 
+async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(`
+      SELECT count(*)::text AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND wait_event_type = 'Lock'
+        AND query LIKE '%finance_provider_items%'
+        AND query NOT LIKE '%pg_stat_activity%'
+    `);
+    if (Number(result.rows[0]?.count ?? 0) >= expected) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error(`Expected at least ${expected} Provider Item lock waiter(s).`);
+}
+
 function principal(userId: string): Principal {
   return {
     actorId: userId,
@@ -86,6 +103,7 @@ describe.sequential("Finance Provider Item service", () => {
     groupingKey: string,
     cursors: Array<string | null>,
     accessTokens: string[] = cursors.map(() => `token-${groupingKey}`),
+    indexOffset = 0,
   ) {
     return database.db
       .insert(financeAccounts)
@@ -96,9 +114,9 @@ describe.sequential("Finance Provider Item service", () => {
             encryptionKey,
           ),
           institution: "Legacy Bank",
-          name: `${groupingKey}-${index}`,
+          name: `${groupingKey}-${index + indexOffset}`,
           provider: "plaid" as const,
-          providerAccountId: `${groupingKey}-account-${index}`,
+          providerAccountId: `${groupingKey}-account-${index + indexOffset}`,
           providerItemId: groupingKey,
           status: "connected" as const,
           syncCursor,
@@ -251,6 +269,155 @@ describe.sequential("Finance Provider Item service", () => {
         syncCursor: null,
       }),
     ]);
+  });
+
+  it("reconciles a late sibling against the existing Item cursor before linking", async () => {
+    await insertLegacyGroup("legacy-late-cursor", ["cursor-original"]);
+    await service().backfillLegacyItems();
+    const [existingItem] = await database.db.select().from(financeProviderItems);
+    if (!existingItem) throw new Error("The initial legacy Item was not created.");
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncCursor: "cursor-advanced",
+        syncState: "current",
+      })
+      .where(eq(financeProviderItems.id, existingItem.id));
+    const [lateSibling] = await insertLegacyGroup("legacy-late-cursor", [null], undefined, 1);
+    if (!lateSibling) throw new Error("The late cursor sibling was not created.");
+
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 0,
+      complete: true,
+      created: 0,
+      linked: 1,
+      replayDue: 1,
+    });
+
+    const [reconciledItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.id, existingItem.id));
+    expect(reconciledItem).toMatchObject({
+      nextSyncAt: now,
+      syncCursor: null,
+      syncState: "stale",
+    });
+    expect(
+      (
+        await database.db
+          .select({ providerItemRecordId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, lateSibling.id))
+      )[0]?.providerItemRecordId,
+    ).toBe(existingItem.id);
+  });
+
+  it("blocks an existing Item and leaves a late mismatched-credential sibling unlinked", async () => {
+    await insertLegacyGroup("legacy-late-credential", ["cursor-original"], ["token-original"]);
+    await service().backfillLegacyItems();
+    const [existingItem] = await database.db.select().from(financeProviderItems);
+    if (!existingItem) throw new Error("The initial credential Item was not created.");
+    const [lateSibling] = await insertLegacyGroup(
+      "legacy-late-credential",
+      ["cursor-original"],
+      ["token-conflict"],
+      1,
+    );
+    if (!lateSibling) throw new Error("The late credential sibling was not created.");
+
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 1,
+      complete: false,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, existingItem.id))
+      )[0],
+    ).toMatchObject({
+      nextSyncAt: null,
+      syncErrorCode: "finance_provider_item_legacy_credential_mismatch",
+      syncState: "blocked",
+    });
+    expect(
+      (
+        await database.db
+          .select({ providerItemRecordId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, lateSibling.id))
+      )[0]?.providerItemRecordId,
+    ).toBeNull();
+    const auditCount = await database.db.$count(auditEvents);
+    await expect(service().backfillLegacyItems()).resolves.toEqual({
+      blocked: 1,
+      complete: false,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+    expect(await database.db.$count(auditEvents)).toBe(auditCount);
+    expect(
+      (
+        await database.db
+          .select({ syncFailureCount: financeProviderItems.syncFailureCount })
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, existingItem.id))
+      )[0]?.syncFailureCount,
+    ).toBe(1);
+  });
+
+  it("links only the exact legacy account IDs present in its locked snapshot", async () => {
+    await insertLegacyGroup("legacy-phantom", ["cursor-original"], undefined, 1);
+    await service().backfillLegacyItems();
+    const [existingItem] = await database.db.select().from(financeProviderItems);
+    if (!existingItem) throw new Error("The initial phantom-test Item was not created.");
+    await insertLegacyGroup("legacy-phantom", ["cursor-original"]);
+    const itemLock = await database.pool.connect();
+    let backfill: ReturnType<ReturnType<typeof service>["backfillLegacyItems"]> | undefined;
+    try {
+      await itemLock.query("BEGIN");
+      await itemLock.query("SELECT id FROM finance_provider_items WHERE id = $1 FOR UPDATE", [
+        existingItem.id,
+      ]);
+      backfill = service().backfillLegacyItems();
+      void backfill.catch(() => undefined);
+      await waitForLockWaiters(database.pool, 1);
+      const [phantom] = await insertLegacyGroup(
+        "legacy-phantom",
+        ["cursor-original"],
+        undefined,
+        2,
+      );
+      if (!phantom) throw new Error("The phantom legacy sibling was not created.");
+      await itemLock.query("COMMIT");
+      await expect(backfill).resolves.toEqual({
+        blocked: 0,
+        complete: false,
+        created: 0,
+        linked: 1,
+        replayDue: 0,
+      });
+      expect(
+        (
+          await database.db
+            .select({ providerItemRecordId: financeAccounts.providerItemRecordId })
+            .from(financeAccounts)
+            .where(eq(financeAccounts.id, phantom.id))
+        )[0]?.providerItemRecordId,
+      ).toBeNull();
+    } finally {
+      await itemLock.query("ROLLBACK");
+      itemLock.release();
+      if (backfill) await Promise.allSettled([backfill]);
+    }
   });
 
   it("blocks conflicting or undecryptable credential groups with only safe Ilo-authored reasons", async () => {

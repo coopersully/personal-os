@@ -13,6 +13,7 @@ import {
   financeCategories,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeProviderItems,
   financeRecurringObligations,
   financeReviewCases,
   financeSetupBackfillState,
@@ -2257,6 +2258,109 @@ describe.sequential("finance service", () => {
     await expect(
       database.db.select().from(financeAccounts).where(eq(financeAccounts.userId, atomicUserId)),
     ).resolves.toHaveLength(0);
+  });
+
+  it("commits Plaid categories, Item, accounts, and audits atomically", async () => {
+    const atomicUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: atomicUserId,
+      displayName: "Atomic Plaid Finance",
+      email: `atomic-plaid-finance-${atomicUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async (input) => {
+        switch (new URL(String(input)).pathname) {
+          case "/item/public_token/exchange":
+            return Response.json({ access_token: "atomic-token", item_id: "atomic-item" });
+          case "/accounts/get":
+            return Response.json({
+              accounts: [
+                {
+                  account_id: "atomic-account",
+                  balances: { current: 42, iso_currency_code: "USD" },
+                  name: "Atomic checking",
+                  official_name: null,
+                },
+              ],
+            });
+          default:
+            return Response.json({}, { status: 404 });
+        }
+      },
+      secret: "secret",
+    });
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+    });
+    const context = {
+      principal: financePrincipal(atomicUserId),
+      requestId: "atomic-plaid-connect",
+    };
+    await database.pool.query(`
+      CREATE FUNCTION fail_atomic_provider_item() RETURNS trigger AS $$
+      BEGIN
+        RAISE EXCEPTION 'forced Provider Item persistence failure';
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_atomic_provider_item
+      BEFORE INSERT ON finance_provider_items
+      FOR EACH ROW EXECUTE FUNCTION fail_atomic_provider_item();
+    `);
+    try {
+      await expect(
+        service.exchangePlaidToken(
+          { institution: "Atomic Bank", publicToken: "atomic-public-token" },
+          context,
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER fail_atomic_provider_item ON finance_provider_items;
+        DROP FUNCTION fail_atomic_provider_item();
+      `);
+    }
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, atomicUserId)),
+    ).resolves.toHaveLength(0);
+    await expect(
+      database.db.select().from(financeAccounts).where(eq(financeAccounts.userId, atomicUserId)),
+    ).resolves.toHaveLength(0);
+
+    await expect(
+      service.exchangePlaidToken(
+        { institution: "Atomic Bank", publicToken: "atomic-public-token" },
+        context,
+      ),
+    ).resolves.toHaveLength(1);
+    await expect(
+      database.db
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, atomicUserId)),
+    ).resolves.toHaveLength(20);
+    await expect(
+      database.db
+        .select()
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.userId, atomicUserId)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      database.db.select().from(financeAccounts).where(eq(financeAccounts.userId, atomicUserId)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      database.db.select().from(auditEvents).where(eq(auditEvents.userId, atomicUserId)),
+    ).resolves.toHaveLength(1);
+    await database.db.delete(users).where(eq(users.id, atomicUserId));
   });
 
   it("completes a partial default taxonomy under concurrent reconciliation", async () => {

@@ -3258,13 +3258,15 @@ export function createFinanceService({
       const plaid = getPlaid();
       const { accessToken, itemId } = await plaid.exchangePublicToken(input.publicToken);
       const accounts = await plaid.getAccounts(accessToken);
-      await ensureCategories(context.principal.userId);
       return providerItems.upsertConnection({
         accessToken,
         accounts,
         context,
         institution: input.institution ?? "Plaid",
         itemId,
+        prepareTransaction: async (transaction) => {
+          await ensureCategories(context.principal.userId, transaction);
+        },
       });
     },
     async syncPlaidAccount(

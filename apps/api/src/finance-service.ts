@@ -4672,6 +4672,7 @@ export function createFinanceService({
               and(
                 eq(financeProviderItems.id, candidate.providerItemRecordId),
                 eq(financeProviderItems.userId, context.principal.userId),
+                eq(financeProviderItems.provider, "plaid"),
               ),
             )
             .for("update")
@@ -4702,6 +4703,14 @@ export function createFinanceService({
             .where(eq(financeAccounts.providerItemRecordId, providerItem.id))
             .orderBy(financeAccounts.id)
             .for("update");
+          if (
+            linkedAccounts.some(
+              (account) =>
+                account.userId !== context.principal.userId || account.provider !== "plaid",
+            )
+          ) {
+            throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+          }
           before = linkedAccounts.find((account) => account.id === id);
           if (!before || before.providerItemRecordId !== candidate.providerItemRecordId) {
             throw new AppError("conflict", "The Plaid connection topology changed. Try again.");

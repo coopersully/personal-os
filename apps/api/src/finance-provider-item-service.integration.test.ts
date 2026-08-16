@@ -5,6 +5,7 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeAccounts,
+  financeCategories,
   financeProviderItems,
   migrateDatabase,
   users,
@@ -53,7 +54,11 @@ async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number
       FROM pg_stat_activity
       WHERE datname = current_database()
         AND wait_event_type = 'Lock'
-        AND query LIKE '%finance_provider_items%'
+        AND (
+          query LIKE '%finance_provider_items%'
+          OR query LIKE '%finance_accounts%'
+          OR query LIKE '%pg_advisory_xact_lock%'
+        )
         AND query NOT LIKE '%pg_stat_activity%'
     `);
     if (Number(result.rows[0]?.count ?? 0) >= expected) return;
@@ -116,6 +121,7 @@ describe.sequential("Finance Provider Item service", () => {
     await database.db.delete(auditEvents);
     await database.db.delete(financeAccounts);
     await database.db.delete(financeProviderItems);
+    await database.db.delete(financeCategories);
   });
 
   function service() {
@@ -238,6 +244,31 @@ describe.sequential("Finance Provider Item service", () => {
     expect(auditCount?.count).toBe(4);
   });
 
+  it("rejects an empty account snapshot before any credential Item or connection effects persist", async () => {
+    await expect(
+      service().upsertConnection({
+        accessToken: "empty-snapshot-token",
+        accounts: [],
+        context: { principal: principal(userId), requestId: "empty-account-snapshot" },
+        institution: "Empty Bank",
+        itemId: "empty-account-item",
+        prepareTransaction: async (tx) => {
+          await tx.insert(financeCategories).values({
+            group: "expense",
+            name: "Must not persist",
+            slug: "must-not-persist",
+            userId,
+          });
+        },
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+
+    expect(await database.db.$count(financeProviderItems)).toBe(0);
+    expect(await database.db.$count(financeAccounts)).toBe(0);
+    expect(await database.db.$count(auditEvents)).toBe(0);
+    expect(await database.db.$count(financeCategories)).toBe(0);
+  });
+
   it("refuses to relink an account into a destination Item with an active claim", async () => {
     const providerItems = service();
     const context = { principal: principal(userId), requestId: "active-destination" };
@@ -304,6 +335,257 @@ describe.sequential("Finance Provider Item service", () => {
           .where(eq(financeProviderItems.id, destinationItem.id))
       )[0]?.claimId,
     ).toBe(claimId);
+  });
+
+  it("rejects a relink whose source pointer targets another user's Provider Item", async () => {
+    const [otherUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Foreign Provider Item Owner",
+        email: `foreign-provider-item-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!otherUser) throw new Error("Foreign Provider Item owner was not created.");
+    const providerItems = service();
+    await providerItems.upsertConnection({
+      accessToken: "foreign-token",
+      accounts: [remoteAccount("foreign-anchor")],
+      context: { principal: principal(otherUser.id), requestId: "foreign-connect" },
+      institution: "Foreign Bank",
+      itemId: "foreign-item",
+    });
+    await providerItems.upsertConnection({
+      accessToken: "owned-destination-token",
+      accounts: [remoteAccount("owned-destination-anchor")],
+      context: { principal: principal(userId), requestId: "owned-destination-connect" },
+      institution: "Owned Bank",
+      itemId: "owned-destination-item",
+    });
+    const [foreignItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.userId, otherUser.id));
+    if (!foreignItem) throw new Error("Foreign Provider Item was not created.");
+    const foreignClaimId = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimGeneration: 5,
+        syncClaimId: foreignClaimId,
+        syncClaimOwner: "foreign-runtime",
+        syncClaimStartedAt: now,
+      })
+      .where(eq(financeProviderItems.id, foreignItem.id));
+    const [malformedAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Malformed Bank",
+        name: "Cross-owner pointer",
+        provider: "plaid",
+        providerAccountId: "cross-owner-moving",
+        providerItemId: "foreign-item",
+        providerItemRecordId: foreignItem.id,
+        status: "connected",
+        userId,
+      })
+      .returning();
+    if (!malformedAccount) throw new Error("Cross-owner account pointer was not created.");
+    const foreignBefore = (
+      await database.db
+        .select()
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, foreignItem.id))
+    )[0];
+    const auditsBefore = await database.db.$count(auditEvents);
+
+    await expect(
+      providerItems.upsertConnection({
+        accessToken: "must-not-relink-token",
+        accounts: [remoteAccount("cross-owner-moving")],
+        context: { principal: principal(userId), requestId: "cross-owner-relink" },
+        institution: "Owned Bank",
+        itemId: "owned-destination-item",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    expect(
+      (
+        await database.db
+          .select({ itemId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, malformedAccount.id))
+      )[0]?.itemId,
+    ).toBe(foreignItem.id);
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, foreignItem.id))
+      )[0],
+    ).toEqual(foreignBefore);
+    expect(await database.db.$count(auditEvents)).toBe(auditsBefore);
+  });
+
+  it("rejects a relink when the destination Item has a linked non-Plaid account", async () => {
+    const providerItems = service();
+    const context = { principal: principal(userId), requestId: "cross-provider-relink" };
+    const [moving] = await providerItems.upsertConnection({
+      accessToken: "cross-provider-source-token",
+      accounts: [remoteAccount("cross-provider-moving")],
+      context,
+      institution: "Source Bank",
+      itemId: "cross-provider-source",
+    });
+    await providerItems.upsertConnection({
+      accessToken: "cross-provider-destination-token",
+      accounts: [remoteAccount("cross-provider-destination-anchor")],
+      context,
+      institution: "Destination Bank",
+      itemId: "cross-provider-destination",
+    });
+    const [sourceItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.providerItemId, "cross-provider-source"));
+    const [destinationItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.providerItemId, "cross-provider-destination"));
+    if (!moving || !sourceItem || !destinationItem) {
+      throw new Error("Cross-provider relink fixtures were not created.");
+    }
+    const [manualPointer] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Manual Pointer",
+        name: "Manual destination pointer",
+        provider: "manual",
+        providerItemRecordId: destinationItem.id,
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!manualPointer) throw new Error("Manual destination pointer was not created.");
+    const auditsBefore = await database.db.$count(auditEvents);
+
+    await expect(
+      providerItems.upsertConnection({
+        accessToken: "must-not-move-token",
+        accounts: [remoteAccount("cross-provider-moving")],
+        context: { ...context, requestId: "cross-provider-relink-attempt" },
+        institution: "Destination Bank",
+        itemId: "cross-provider-destination",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    expect(
+      (
+        await database.db
+          .select({ itemId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, moving.id))
+      )[0]?.itemId,
+    ).toBe(sourceItem.id);
+    expect(
+      (
+        await database.db
+          .select({ itemId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, manualPointer.id))
+      )[0]?.itemId,
+    ).toBe(destinationItem.id);
+    expect(await database.db.$count(auditEvents)).toBe(auditsBefore);
+  });
+
+  it.each([
+    {
+      category: "temporary" as const,
+      code: "plaid_transport_failure",
+      recovery: "automatic" as const,
+      state: "retrying" as const,
+    },
+    {
+      category: "configuration" as const,
+      code: "plaid_configuration_invalid",
+      recovery: "operator" as const,
+      state: "blocked" as const,
+    },
+  ])("relinks from a $state source without leaving an invalid failure tuple", async (failure) => {
+    const providerItems = service();
+    const context = { principal: principal(userId), requestId: `relink-${failure.state}` };
+    const [moving] = await providerItems.upsertConnection({
+      accessToken: "source-token",
+      accounts: [
+        remoteAccount(`moving-${failure.state}`),
+        remoteAccount(`anchor-${failure.state}`),
+      ],
+      context,
+      institution: "Source Bank",
+      itemId: `source-${failure.state}`,
+    });
+    await providerItems.upsertConnection({
+      accessToken: "destination-token",
+      accounts: [remoteAccount(`destination-${failure.state}`)],
+      context,
+      institution: "Destination Bank",
+      itemId: `destination-${failure.state}`,
+    });
+    const [sourceItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.providerItemId, `source-${failure.state}`));
+    if (!moving || !sourceItem) throw new Error("Failure-state relink fixture was not created.");
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: now,
+        syncError: "Safe failure",
+        syncErrorCategory: failure.category,
+        syncErrorCode: failure.code,
+        syncFailureCount: 2,
+        syncRecovery: failure.recovery,
+        syncState: failure.state,
+      })
+      .where(eq(financeProviderItems.id, sourceItem.id));
+
+    await expect(
+      providerItems.upsertConnection({
+        accessToken: "relinked-token",
+        accounts: [remoteAccount(`moving-${failure.state}`)],
+        context: { ...context, requestId: `relink-${failure.state}-commit` },
+        institution: "Destination Bank",
+        itemId: `destination-${failure.state}`,
+      }),
+    ).resolves.toHaveLength(1);
+
+    await expect(
+      database.db
+        .select({
+          nextSyncAt: financeProviderItems.nextSyncAt,
+          syncError: financeProviderItems.syncError,
+          syncErrorCategory: financeProviderItems.syncErrorCategory,
+          syncErrorCode: financeProviderItems.syncErrorCode,
+          syncFailureCount: financeProviderItems.syncFailureCount,
+          syncRecovery: financeProviderItems.syncRecovery,
+          syncState: financeProviderItems.syncState,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, sourceItem.id)),
+    ).resolves.toEqual([
+      {
+        nextSyncAt: now,
+        syncError: null,
+        syncErrorCategory: null,
+        syncErrorCode: null,
+        syncFailureCount: 0,
+        syncRecovery: null,
+        syncState: "stale",
+      },
+    ]);
   });
 
   it("preserves equal legacy cursors and accepts independently encrypted equal credentials", async () => {
@@ -575,7 +857,7 @@ describe.sequential("Finance Provider Item service", () => {
     ).toBe(blockedItemBeforeHealthyPass.syncFailureCount);
   });
 
-  it("links only the exact legacy account IDs present in its locked snapshot", async () => {
+  it("skips a legacy group changed after selection and converges on the next pass", async () => {
     await insertLegacyGroup("legacy-phantom", ["cursor-original"], undefined, 1);
     await service().backfillLegacyItems();
     const [existingItem] = await database.db.select().from(financeProviderItems);
@@ -590,7 +872,13 @@ describe.sequential("Finance Provider Item service", () => {
       ]);
       backfill = service().backfillLegacyItems();
       void backfill.catch(() => undefined);
-      await waitForLockWaiters(database.pool, 1);
+      await expect(backfill).resolves.toEqual({
+        blocked: 0,
+        complete: false,
+        created: 0,
+        linked: 0,
+        replayDue: 0,
+      });
       const [phantom] = await insertLegacyGroup(
         "legacy-phantom",
         ["cursor-original"],
@@ -599,13 +887,6 @@ describe.sequential("Finance Provider Item service", () => {
       );
       if (!phantom) throw new Error("The phantom legacy sibling was not created.");
       await itemLock.query("COMMIT");
-      await expect(backfill).resolves.toEqual({
-        blocked: 0,
-        complete: false,
-        created: 0,
-        linked: 1,
-        replayDue: 0,
-      });
       expect(
         (
           await database.db
@@ -614,11 +895,145 @@ describe.sequential("Finance Provider Item service", () => {
             .where(eq(financeAccounts.id, phantom.id))
         )[0]?.providerItemRecordId,
       ).toBeNull();
+      await expect(service().backfillLegacyItems()).resolves.toMatchObject({
+        complete: true,
+        linked: 2,
+      });
     } finally {
       await itemLock.query("ROLLBACK");
       itemLock.release();
       if (backfill) await Promise.allSettled([backfill]);
     }
+  });
+
+  it("locks an existing Item before its late legacy account group", async () => {
+    await insertLegacyGroup("legacy-item-first", ["cursor-original"], undefined, 1);
+    await service().backfillLegacyItems();
+    const [existingItem] = await database.db.select().from(financeProviderItems);
+    if (!existingItem) throw new Error("Item-first legacy Item was not created.");
+    const [lateSibling] = await insertLegacyGroup(
+      "legacy-item-first",
+      ["cursor-original"],
+      undefined,
+      2,
+    );
+    if (!lateSibling) throw new Error("Item-first late sibling was not created.");
+    const itemBlocker = await database.pool.connect();
+    const accountProbe = await database.pool.connect();
+    let backfill: ReturnType<ReturnType<typeof service>["backfillLegacyItems"]> | undefined;
+    try {
+      await itemBlocker.query("BEGIN");
+      await itemBlocker.query("SELECT id FROM finance_provider_items WHERE id = $1 FOR UPDATE", [
+        existingItem.id,
+      ]);
+      backfill = service().backfillLegacyItems();
+      void backfill.catch(() => undefined);
+      await expect(backfill).resolves.toMatchObject({ complete: false, linked: 0 });
+
+      await accountProbe.query("BEGIN");
+      await accountProbe.query("SET LOCAL lock_timeout = '200ms'");
+      await expect(
+        accountProbe.query("SELECT id FROM finance_accounts WHERE id = $1 FOR UPDATE", [
+          lateSibling.id,
+        ]),
+      ).resolves.toMatchObject({ rowCount: 1 });
+      await accountProbe.query("ROLLBACK");
+      await itemBlocker.query("COMMIT");
+      await expect(service().backfillLegacyItems()).resolves.toMatchObject({ linked: 1 });
+    } finally {
+      await accountProbe.query("ROLLBACK");
+      accountProbe.release();
+      await itemBlocker.query("ROLLBACK");
+      itemBlocker.release();
+      if (backfill) await Promise.allSettled([backfill]);
+    }
+  });
+
+  it("serializes a legacy backfill behind a crossed relink without deadlock or orphaning", async () => {
+    const linked = await insertLegacyGroup("legacy-relink-cross", ["cursor-1", "cursor-1"]);
+    await service().backfillLegacyItems();
+    const [sourceItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.legacyGroupingKey, "legacy-relink-cross"));
+    const moving = linked[0];
+    if (!sourceItem || !moving?.providerAccountId) {
+      throw new Error("Backfill/relink source fixture was not created.");
+    }
+    const [lateSibling] = await insertLegacyGroup(
+      "legacy-relink-cross",
+      ["cursor-1"],
+      undefined,
+      2,
+    );
+    if (!lateSibling) throw new Error("Backfill/relink late sibling was not created.");
+    await service().upsertConnection({
+      accessToken: "cross-destination-token",
+      accounts: [remoteAccount("cross-destination-anchor")],
+      context: { principal: principal(userId), requestId: "cross-destination-connect" },
+      institution: "Cross Destination",
+      itemId: "cross-destination-item",
+    });
+    const [destinationItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.providerItemId, "cross-destination-item"));
+    if (!destinationItem) throw new Error("Backfill/relink destination Item was not created.");
+
+    const accountBlocker = await database.pool.connect();
+    let relink: ReturnType<ReturnType<typeof service>["upsertConnection"]> | undefined;
+    let backfill: ReturnType<ReturnType<typeof service>["backfillLegacyItems"]> | undefined;
+    try {
+      await accountBlocker.query("BEGIN");
+      await accountBlocker.query("SELECT id FROM finance_accounts WHERE id = $1 FOR UPDATE", [
+        moving.id,
+      ]);
+      relink = service().upsertConnection({
+        accessToken: "cross-relink-token",
+        accounts: [remoteAccount(moving.providerAccountId)],
+        context: { principal: principal(userId), requestId: "cross-relink" },
+        institution: "Cross Destination",
+        itemId: "cross-destination-item",
+      });
+      void relink.catch(() => undefined);
+      await waitForLockWaiters(database.pool, 1);
+      backfill = service().backfillLegacyItems();
+      void backfill.catch(() => undefined);
+      await expect(backfill).resolves.toMatchObject({ complete: false, linked: 0 });
+      await accountBlocker.query("COMMIT");
+
+      await expect(relink).resolves.toHaveLength(1);
+      await expect(service().backfillLegacyItems()).resolves.toMatchObject({ linked: 1 });
+    } finally {
+      await accountBlocker.query("ROLLBACK");
+      accountBlocker.release();
+      await Promise.allSettled([relink, backfill].filter((value) => value !== undefined));
+    }
+
+    expect(
+      (
+        await database.db
+          .select({ itemId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, moving.id))
+      )[0]?.itemId,
+    ).toBe(destinationItem.id);
+    expect(
+      (
+        await database.db
+          .select({ itemId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, lateSibling.id))
+      )[0]?.itemId,
+    ).toBe(sourceItem.id);
+    const orphanItems = await database.pool.query<{ id: string }>(
+      `SELECT item.id
+       FROM finance_provider_items AS item
+       LEFT JOIN finance_accounts AS account ON account.provider_item_record_id = item.id
+       WHERE item.user_id = $1 AND account.id IS NULL`,
+      [userId],
+    );
+    expect(orphanItems.rows).toEqual([]);
   });
 
   it("blocks conflicting or undecryptable credential groups with only safe Ilo-authored reasons", async () => {

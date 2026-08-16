@@ -184,6 +184,23 @@ describe("Plaid connector", () => {
     });
   });
 
+  it("rejects an empty Plaid account snapshot with a sanitized invalid response", async () => {
+    const plaid = createPlaidConnector({
+      clientId: "client-id",
+      environment: "sandbox",
+      fetch: async () => Response.json({ accounts: [] }),
+      secret: "connector-secret",
+    });
+
+    const error = await connectorErrorFrom(() => plaid.getAccounts("sensitive-access-token"));
+    expect(error).toMatchObject({
+      category: "invalid_response",
+      code: "plaid_invalid_response",
+      message: "Plaid returned an invalid response.",
+    });
+    assertRedactedMessage(error.message, ["sensitive-access-token"]);
+  });
+
   it("rejects a provider transaction whose pending identity self-references its transaction ID", async () => {
     const plaid = createPlaidConnector({
       clientId: "client-id",

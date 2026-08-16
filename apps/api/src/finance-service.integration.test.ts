@@ -1276,6 +1276,166 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual([]);
   });
 
+  it("rejects account deletion when an owned Item has a cross-owner account pointer", async () => {
+    const [owner, foreignOwner] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "Delete topology owner",
+          email: `delete-topology-owner-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Delete topology foreign owner",
+          email: `delete-topology-foreign-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+      ])
+      .returning();
+    if (!owner || !foreignOwner) throw new Error("Delete topology users were not created.");
+    const context = {
+      principal: financePrincipal(owner.id),
+      requestId: "delete-cross-owner-pointer",
+    };
+    const providerItems = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    const [target] = await providerItems.upsertConnection({
+      accessToken: "delete-owned-token",
+      accounts: [
+        {
+          accountId: "delete-owned-account",
+          balanceCurrent: 10,
+          currencyCode: "USD",
+          name: "Delete owned account",
+          officialName: null,
+        },
+      ],
+      context,
+      institution: "Delete Owned Bank",
+      itemId: "delete-owned-item",
+    });
+    const [ownedItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.userId, owner.id));
+    if (!target || !ownedItem) throw new Error("Delete topology Item was not created.");
+    const [foreignPointer] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Foreign Pointer Bank",
+        name: "Foreign pointer account",
+        provider: "plaid",
+        providerAccountId: "delete-foreign-pointer",
+        providerItemId: "delete-owned-item",
+        providerItemRecordId: ownedItem.id,
+        status: "connected",
+        userId: foreignOwner.id,
+      })
+      .returning();
+    if (!foreignPointer) throw new Error("Foreign delete pointer was not created.");
+    const itemBefore = (
+      await database.db
+        .select()
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, ownedItem.id))
+    )[0];
+    const auditsBefore = await database.db.$count(auditEvents);
+
+    await expect(
+      createFinanceService({ db: database.db, now: () => now }).deleteAccount(target.id, context),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    expect(
+      await database.db
+        .select({ id: financeAccounts.id })
+        .from(financeAccounts)
+        .where(inArray(financeAccounts.id, [target.id, foreignPointer.id])),
+    ).toHaveLength(2);
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, ownedItem.id))
+      )[0],
+    ).toEqual(itemBefore);
+    expect(await database.db.$count(auditEvents)).toBe(auditsBefore);
+    await database.db.delete(users).where(inArray(users.id, [owner.id, foreignOwner.id]));
+  });
+
+  it("rejects account deletion when an owned Item has a linked non-Plaid account", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Delete provider-integrity owner",
+        email: `delete-provider-integrity-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Delete provider-integrity owner was not created.");
+    const context = {
+      principal: financePrincipal(owner.id),
+      requestId: "delete-cross-provider-pointer",
+    };
+    const providerItems = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    const [target] = await providerItems.upsertConnection({
+      accessToken: "delete-provider-token",
+      accounts: [
+        {
+          accountId: "delete-provider-account",
+          balanceCurrent: 10,
+          currencyCode: "USD",
+          name: "Delete provider account",
+          officialName: null,
+        },
+      ],
+      context,
+      institution: "Delete Provider Bank",
+      itemId: "delete-provider-item",
+    });
+    const [ownedItem] = await database.db
+      .select()
+      .from(financeProviderItems)
+      .where(eq(financeProviderItems.userId, owner.id));
+    if (!target || !ownedItem) throw new Error("Delete provider Item was not created.");
+    const [manualPointer] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Manual Pointer",
+        name: "Manual delete pointer",
+        provider: "manual",
+        providerItemRecordId: ownedItem.id,
+        status: "manual",
+        userId: owner.id,
+      })
+      .returning();
+    if (!manualPointer) throw new Error("Manual delete pointer was not created.");
+    const auditsBefore = await database.db.$count(auditEvents);
+
+    await expect(
+      createFinanceService({ db: database.db, now: () => now }).deleteAccount(target.id, context),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    expect(
+      await database.db
+        .select({ id: financeAccounts.id })
+        .from(financeAccounts)
+        .where(inArray(financeAccounts.id, [target.id, manualPointer.id])),
+    ).toHaveLength(2);
+    expect(await database.db.$count(auditEvents)).toBe(auditsBefore);
+    await database.db.delete(users).where(eq(users.id, owner.id));
+  });
+
   it("serializes a relink with account deletion without orphaning credential Items", async () => {
     const [owner] = await database.db
       .insert(users)

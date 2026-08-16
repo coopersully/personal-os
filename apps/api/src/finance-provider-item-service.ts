@@ -7,7 +7,7 @@ import {
   financeProviderItems,
 } from "@personal-os/database";
 import type { FinanceAccount } from "@personal-os/domain";
-import { and, asc, eq, inArray, isNotNull, isNull, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, notExists, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { decryptJson, encryptJson } from "./security.js";
@@ -128,6 +128,12 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
 
   return {
     async upsertConnection(input: UpsertConnectionInput): Promise<FinanceAccount[]> {
+      if (input.accounts.length === 0) {
+        throw new AppError(
+          "service_unavailable",
+          "Plaid returned no accounts for this connection.",
+        );
+      }
       const connectedAt = now();
       const encryptedCredentials = encryptJson(
         { accessToken: input.accessToken },
@@ -215,6 +221,15 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
         if (lockedItems.length !== itemIds.length) {
           throw new AppError("conflict", "The Plaid connection topology changed. Try again.");
         }
+        if (
+          lockedItems.some(
+            (lockedItem) =>
+              lockedItem.userId !== input.context.principal.userId ||
+              lockedItem.provider !== "plaid",
+          )
+        ) {
+          throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+        }
         const activeDestinationClaims = await tx.execute<{ id: string }>(sql`
           SELECT id
           FROM finance_provider_items
@@ -226,27 +241,33 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
           throw new AppError("conflict", "The Plaid connection is synchronizing. Try again.");
         }
 
-        const lockedAccounts =
-          providerAccountIds.length === 0
-            ? []
-            : await tx
-                .select()
-                .from(financeAccounts)
-                .where(
-                  and(
-                    eq(financeAccounts.userId, input.context.principal.userId),
-                    eq(financeAccounts.provider, "plaid"),
-                    inArray(financeAccounts.providerAccountId, providerAccountIds),
-                  ),
-                )
-                .orderBy(financeAccounts.id)
-                .for("update");
+        const discoveredAccountIds = discoveredAccounts.map((account) => account.id);
+        const lockedAccounts = await tx
+          .select()
+          .from(financeAccounts)
+          .where(
+            or(
+              inArray(financeAccounts.providerItemRecordId, itemIds),
+              discoveredAccountIds.length > 0
+                ? inArray(financeAccounts.id, discoveredAccountIds)
+                : undefined,
+            ),
+          )
+          .orderBy(financeAccounts.id)
+          .for("update");
         const discoveredById = new Map(
           discoveredAccounts.map((account) => [account.id, account.providerItemRecordId]),
         );
+        const lockedAffectedAccounts = lockedAccounts.filter((account) =>
+          discoveredById.has(account.id),
+        );
         if (
-          lockedAccounts.length !== discoveredAccounts.length ||
           lockedAccounts.some(
+            (account) =>
+              account.userId !== input.context.principal.userId || account.provider !== "plaid",
+          ) ||
+          lockedAffectedAccounts.length !== discoveredAccounts.length ||
+          lockedAffectedAccounts.some(
             (account) => discoveredById.get(account.id) !== account.providerItemRecordId,
           )
         ) {
@@ -263,6 +284,11 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
               syncClaimId: null,
               syncClaimOwner: null,
               syncClaimStartedAt: null,
+              syncError: null,
+              syncErrorCategory: null,
+              syncErrorCode: null,
+              syncFailureCount: 0,
+              syncRecovery: null,
               syncState: "stale",
               updatedAt: connectedAt,
             })
@@ -418,11 +444,8 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
             legacy_groups.representative_id AS "representativeId",
             legacy_groups.group_size AS "groupSize"
           FROM legacy_groups
-          INNER JOIN finance_accounts representative
-            ON representative.id = legacy_groups.representative_id
           ORDER BY legacy_groups.user_id, legacy_groups.legacy_grouping_key,
             legacy_groups.representative_id
-          FOR UPDATE OF representative SKIP LOCKED
           LIMIT ${boundedLimit + 1}
         `);
         let blocked = 0;
@@ -433,19 +456,78 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
 
         for (const candidate of claimed.rows) {
           if (processedGroups >= boundedLimit) break;
-          const ownedRows = await tx
+          const topologyLock = await tx.execute<{ acquired: boolean }>(
+            sql`select pg_try_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${candidate.userId}`}, 0)) AS acquired`,
+          );
+          if (!topologyLock.rows[0]?.acquired) continue;
+          const [existingItemSnapshot] = await tx
             .select()
-            .from(financeAccounts)
+            .from(financeProviderItems)
             .where(
               and(
-                eq(financeAccounts.userId, candidate.userId),
-                eq(financeAccounts.provider, "plaid"),
-                eq(financeAccounts.providerItemId, candidate.legacyGroupingKey),
-                isNull(financeAccounts.providerItemRecordId),
+                eq(financeProviderItems.userId, candidate.userId),
+                eq(financeProviderItems.provider, "plaid"),
+                eq(financeProviderItems.legacyGroupingKey, candidate.legacyGroupingKey),
               ),
             )
-            .orderBy(asc(financeAccounts.id))
-            .for("update", { skipLocked: true });
+            .limit(1);
+          const [existingItem] = existingItemSnapshot
+            ? await tx
+                .select()
+                .from(financeProviderItems)
+                .where(eq(financeProviderItems.id, existingItemSnapshot.id))
+                .limit(1)
+                .for("update", { skipLocked: true })
+            : [];
+          if (existingItemSnapshot && !existingItem) continue;
+          const candidateAccountCondition = or(
+            and(
+              eq(financeAccounts.userId, candidate.userId),
+              eq(financeAccounts.provider, "plaid"),
+              eq(financeAccounts.providerItemId, candidate.legacyGroupingKey),
+              isNull(financeAccounts.providerItemRecordId),
+            ),
+            existingItem ? eq(financeAccounts.providerItemRecordId, existingItem.id) : undefined,
+          );
+          const candidateAccountSnapshot = await tx
+            .select()
+            .from(financeAccounts)
+            .where(candidateAccountCondition)
+            .orderBy(asc(financeAccounts.id));
+          const lockedCandidateAccounts =
+            candidateAccountSnapshot.length === 0
+              ? []
+              : await tx
+                  .select()
+                  .from(financeAccounts)
+                  .where(
+                    inArray(
+                      financeAccounts.id,
+                      candidateAccountSnapshot.map((account) => account.id),
+                    ),
+                  )
+                  .orderBy(asc(financeAccounts.id))
+                  .for("update", { skipLocked: true });
+          if (lockedCandidateAccounts.length !== candidateAccountSnapshot.length) continue;
+          const linkedTopologyRows = existingItem
+            ? lockedCandidateAccounts.filter(
+                (account) => account.providerItemRecordId === existingItem.id,
+              )
+            : [];
+          if (
+            linkedTopologyRows.some(
+              (account) => account.userId !== candidate.userId || account.provider !== "plaid",
+            )
+          ) {
+            throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+          }
+          const ownedRows = lockedCandidateAccounts.filter(
+            (account) =>
+              account.userId === candidate.userId &&
+              account.provider === "plaid" &&
+              account.providerItemId === candidate.legacyGroupingKey &&
+              account.providerItemRecordId === null,
+          );
           if (ownedRows.length !== candidate.groupSize) continue;
 
           const relatedRows = await tx
@@ -501,41 +583,29 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
               : blockedReason || !accessToken
                 ? sourceCredential
                 : encryptJson({ accessToken }, getEncryptionKey());
-          const [inserted] = await tx
-            .insert(financeProviderItems)
-            .values({
-              encryptedCredentials: credentials,
-              legacyGroupingKey: candidate.legacyGroupingKey,
-              nextSyncAt: blockedReason ? null : now(),
-              provider: "plaid",
-              providerItemId: null,
-              syncCursor: blockedReason ? null : preservedCursor,
-              syncError: blockedReason?.message ?? null,
-              syncErrorCategory: blockedReason ? "configuration" : null,
-              syncErrorCode: blockedReason?.code ?? null,
-              syncFailureCount: blockedReason ? 1 : 0,
-              syncRecovery: blockedReason ? "operator" : null,
-              syncState: blockedReason ? "blocked" : "stale",
-              userId: candidate.userId,
-            })
-            .onConflictDoNothing()
-            .returning();
-          const [item] = inserted
-            ? [inserted]
+          const [inserted] = existingItem
+            ? []
             : await tx
-                .select()
-                .from(financeProviderItems)
-                .where(
-                  and(
-                    eq(financeProviderItems.userId, candidate.userId),
-                    eq(financeProviderItems.provider, "plaid"),
-                    eq(financeProviderItems.legacyGroupingKey, candidate.legacyGroupingKey),
-                  ),
-                )
-                .limit(1)
-                .for("update");
-          if (!item)
-            throw new AppError("internal_error", "The legacy Plaid Item could not be saved.");
+                .insert(financeProviderItems)
+                .values({
+                  encryptedCredentials: credentials,
+                  legacyGroupingKey: candidate.legacyGroupingKey,
+                  nextSyncAt: blockedReason ? null : now(),
+                  provider: "plaid",
+                  providerItemId: null,
+                  syncCursor: blockedReason ? null : preservedCursor,
+                  syncError: blockedReason?.message ?? null,
+                  syncErrorCategory: blockedReason ? "configuration" : null,
+                  syncErrorCode: blockedReason?.code ?? null,
+                  syncFailureCount: blockedReason ? 1 : 0,
+                  syncRecovery: blockedReason ? "operator" : null,
+                  syncState: blockedReason ? "blocked" : "stale",
+                  userId: candidate.userId,
+                })
+                .onConflictDoNothing()
+                .returning();
+          const item = inserted ?? existingItem;
+          if (!item) throw new AppError("conflict", "The legacy Plaid Item changed while linking.");
 
           let authoritativeItem = item;
           if (!inserted) {
@@ -624,6 +694,33 @@ export function createFinanceProviderItemService({ db, encryptionKey, now }: Opt
                     "The legacy Plaid Item replay could not be scheduled.",
                   );
                 authoritativeItem = replayItem;
+              } else if (ownedRows.length > 0) {
+                const [staleItem] = await tx
+                  .update(financeProviderItems)
+                  .set({
+                    nextSyncAt: now(),
+                    syncClaimExpiresAt: null,
+                    syncClaimGeneration: null,
+                    syncClaimId: null,
+                    syncClaimOwner: null,
+                    syncClaimStartedAt: null,
+                    syncError: null,
+                    syncErrorCategory: null,
+                    syncErrorCode: null,
+                    syncFailureCount: 0,
+                    syncRecovery: null,
+                    syncState: "stale",
+                    updatedAt: now(),
+                  })
+                  .where(eq(financeProviderItems.id, item.id))
+                  .returning();
+                if (!staleItem) {
+                  throw new AppError(
+                    "internal_error",
+                    "The legacy Plaid Item could not be rescheduled.",
+                  );
+                }
+                authoritativeItem = staleItem;
               }
             }
           }

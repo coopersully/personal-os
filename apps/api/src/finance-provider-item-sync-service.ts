@@ -15,7 +15,20 @@ import {
   financeTransactions,
 } from "@personal-os/database";
 import type { MaintenanceScope } from "@personal-os/domain";
-import { and, asc, desc, eq, exists, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  exists,
+  inArray,
+  isNotNull,
+  isNull,
+  lte,
+  ne,
+  or,
+  sql,
+} from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import {
   classifyConnectorSyncFailure,
@@ -90,6 +103,7 @@ const batchLimit = 25;
 const concurrency = 3;
 const invalidCursorCodes = new Set(["plaid_invalid_cursor", "plaid_transactions_cursor_invalid"]);
 const invalidCursorReplayCode = "plaid_invalid_cursor_replay_in_progress";
+const invalidCursorReplayFailedCode = "plaid_invalid_cursor_replay_failed";
 
 type ActiveClaim = {
   generation: number;
@@ -133,6 +147,23 @@ export function createFinanceProviderItemSyncService(options: Options) {
   const { db, log, now, prepareTransaction, resolveProjectionLookups, resolveScopeAccountId } =
     options;
   const claimOwner = randomUUID();
+
+  function claimableFailureState() {
+    return and(
+      or(
+        isNull(financeProviderItems.syncRecovery),
+        eq(financeProviderItems.syncRecovery, "automatic"),
+        and(
+          eq(financeProviderItems.syncRecovery, "operator"),
+          isNotNull(financeProviderItems.nextSyncAt),
+        ),
+      ),
+      or(
+        isNull(financeProviderItems.syncErrorCode),
+        ne(financeProviderItems.syncErrorCode, invalidCursorReplayFailedCode),
+      ),
+    );
+  }
 
   async function assertMaintenanceClaim(
     executor: FinanceWriteExecutor,
@@ -184,6 +215,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
     executor: FinanceWriteExecutor,
     itemId: string,
     claim: ActiveClaim,
+    userId: string,
   ) {
     const [item] = await executor
       .select()
@@ -191,6 +223,8 @@ export function createFinanceProviderItemSyncService(options: Options) {
       .where(
         and(
           eq(financeProviderItems.id, itemId),
+          eq(financeProviderItems.userId, userId),
+          eq(financeProviderItems.provider, "plaid"),
           eq(financeProviderItems.syncClaimId, claim.id),
           eq(financeProviderItems.syncClaimOwner, claim.owner),
           eq(financeProviderItems.syncClaimGeneration, claim.generation),
@@ -222,13 +256,21 @@ export function createFinanceProviderItemSyncService(options: Options) {
     return item;
   }
 
-  async function lockLinkedAccounts(executor: FinanceWriteExecutor, itemId: string) {
-    return executor
+  async function lockLinkedAccounts(
+    executor: FinanceWriteExecutor,
+    itemId: string,
+    userId: string,
+  ) {
+    const accounts = await executor
       .select()
       .from(financeAccounts)
       .where(eq(financeAccounts.providerItemRecordId, itemId))
       .orderBy(asc(financeAccounts.id))
       .for("update");
+    if (accounts.some((account) => account.userId !== userId || account.provider !== "plaid")) {
+      throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+    }
+    return accounts;
   }
 
   async function claimItem(
@@ -257,7 +299,8 @@ export function createFinanceProviderItemSyncService(options: Options) {
           and(
             eq(financeProviderItems.id, itemId),
             eq(financeProviderItems.userId, context.principal.userId),
-            ne(financeProviderItems.syncState, "blocked"),
+            eq(financeProviderItems.provider, "plaid"),
+            claimableFailureState(),
             or(
               isNull(financeProviderItems.syncClaimId),
               sql`${financeProviderItems.syncClaimExpiresAt} <= NOW()`,
@@ -289,7 +332,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
           itemId,
         });
       }
-      const accounts = await lockLinkedAccounts(tx, itemId);
+      const accounts = await lockLinkedAccounts(tx, itemId, context.principal.userId);
       if (accounts.length === 0) {
         throw new AppError(
           "conflict",
@@ -314,8 +357,8 @@ export function createFinanceProviderItemSyncService(options: Options) {
     try {
       await db.transaction(async (tx) => {
         await assertMaintenanceClaim(tx, context);
-        const item = await lockActiveClaim(tx, itemId, claim);
-        await lockLinkedAccounts(tx, itemId);
+        const item = await lockActiveClaim(tx, itemId, claim, context.principal.userId);
+        await lockLinkedAccounts(tx, itemId, context.principal.userId);
         if (item.providerItemId !== null && item.providerItemId !== snapshot.itemId) {
           throw new ConnectorError({
             category: "configuration",
@@ -356,8 +399,8 @@ export function createFinanceProviderItemSyncService(options: Options) {
   }): Promise<number> {
     return db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
-      await lockActiveClaim(tx, input.itemId, input.claim);
-      const accounts = await lockLinkedAccounts(tx, input.itemId);
+      await lockActiveClaim(tx, input.itemId, input.claim, input.context.principal.userId);
+      const accounts = await lockLinkedAccounts(tx, input.itemId, input.context.principal.userId);
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-lookups:${input.context.principal.userId}`}, 0))`,
       );
@@ -665,8 +708,12 @@ export function createFinanceProviderItemSyncService(options: Options) {
   }) {
     await db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
-      await lockActiveClaim(tx, input.itemId, input.claim);
-      const linkedAccounts = await lockLinkedAccounts(tx, input.itemId);
+      await lockActiveClaim(tx, input.itemId, input.claim, input.context.principal.userId);
+      const linkedAccounts = await lockLinkedAccounts(
+        tx,
+        input.itemId,
+        input.context.principal.userId,
+      );
       const snapshotByProviderId = new Map(
         input.accounts.map((account) => [account.accountId, account]),
       );
@@ -712,8 +759,8 @@ export function createFinanceProviderItemSyncService(options: Options) {
     const completedAt = now();
     await db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
-      await lockActiveClaim(tx, input.itemId, input.claim);
-      await lockLinkedAccounts(tx, input.itemId);
+      await lockActiveClaim(tx, input.itemId, input.claim, input.context.principal.userId);
+      await lockLinkedAccounts(tx, input.itemId, input.context.principal.userId);
       const nextSyncAt = new Date(completedAt.getTime() + syncIntervalMs);
       await tx
         .update(financeProviderItems)
@@ -780,8 +827,13 @@ export function createFinanceProviderItemSyncService(options: Options) {
     let nextSyncAt: Date | null = null;
     await db.transaction(async (tx) => {
       await assertMaintenanceClaim(tx, input.context);
-      const item = await lockActiveClaim(tx, input.itemId, input.claim);
-      await lockLinkedAccounts(tx, input.itemId);
+      const item = await lockActiveClaim(
+        tx,
+        input.itemId,
+        input.claim,
+        input.context.principal.userId,
+      );
+      await lockLinkedAccounts(tx, input.itemId, input.context.principal.userId);
       const replayInProgress = item.syncErrorCode === invalidCursorReplayCode;
       const replayScheduled =
         invalidCursorReported && !replayInProgress && item.syncCursor !== null;
@@ -789,7 +841,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
       if (replayFailed) {
         failure = {
           ...failure,
-          code: "plaid_invalid_cursor_replay_failed",
+          code: invalidCursorReplayFailedCode,
           message: "Plaid could not restart transaction synchronization. ilo is resolving this.",
           recovery: "operator",
         };
@@ -1044,7 +1096,10 @@ export function createFinanceProviderItemSyncService(options: Options) {
           and(
             eq(financeAccounts.id, targetAccountId),
             userId ? eq(financeAccounts.userId, userId) : undefined,
-            ne(financeProviderItems.syncState, "blocked"),
+            eq(financeAccounts.provider, "plaid"),
+            eq(financeProviderItems.userId, financeAccounts.userId),
+            eq(financeProviderItems.provider, "plaid"),
+            claimableFailureState(),
             lte(financeProviderItems.nextSyncAt, selectedAt),
           ),
         )
@@ -1056,13 +1111,20 @@ export function createFinanceProviderItemSyncService(options: Options) {
       .where(
         and(
           userId ? eq(financeProviderItems.userId, userId) : undefined,
-          ne(financeProviderItems.syncState, "blocked"),
+          eq(financeProviderItems.provider, "plaid"),
+          claimableFailureState(),
           lte(financeProviderItems.nextSyncAt, selectedAt),
           exists(
             db
               .select({ id: financeAccounts.id })
               .from(financeAccounts)
-              .where(eq(financeAccounts.providerItemRecordId, financeProviderItems.id)),
+              .where(
+                and(
+                  eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
+                  eq(financeAccounts.userId, financeProviderItems.userId),
+                  eq(financeAccounts.provider, "plaid"),
+                ),
+              ),
           ),
         ),
       )
@@ -1072,10 +1134,18 @@ export function createFinanceProviderItemSyncService(options: Options) {
     const representatives = await db
       .select({ id: financeAccounts.id, itemId: financeAccounts.providerItemRecordId })
       .from(financeAccounts)
+      .innerJoin(
+        financeProviderItems,
+        eq(financeProviderItems.id, financeAccounts.providerItemRecordId),
+      )
       .where(
-        inArray(
-          financeAccounts.providerItemRecordId,
-          items.map((item) => item.id),
+        and(
+          inArray(
+            financeAccounts.providerItemRecordId,
+            items.map((item) => item.id),
+          ),
+          eq(financeAccounts.userId, financeProviderItems.userId),
+          eq(financeAccounts.provider, "plaid"),
         ),
       )
       .orderBy(asc(financeAccounts.id));
@@ -1147,6 +1217,20 @@ export function createFinanceProviderItemSyncService(options: Options) {
       if (owned.provider !== "plaid" || !owned.itemId) {
         throw new AppError("invalid_request", "This is not a connected Plaid account.");
       }
+      const [ownedItem] = await db
+        .select({ id: financeProviderItems.id })
+        .from(financeProviderItems)
+        .where(
+          and(
+            eq(financeProviderItems.id, owned.itemId),
+            eq(financeProviderItems.userId, context.principal.userId),
+            eq(financeProviderItems.provider, "plaid"),
+          ),
+        )
+        .limit(1);
+      if (!ownedItem) {
+        throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+      }
       return synchronizeItem(owned.itemId, accountId, context, onProgress);
     },
 
@@ -1170,7 +1254,13 @@ export function createFinanceProviderItemSyncService(options: Options) {
             db
               .select({ id: financeAccounts.id })
               .from(financeAccounts)
-              .where(eq(financeAccounts.providerItemRecordId, financeProviderItems.id)),
+              .where(
+                and(
+                  eq(financeAccounts.providerItemRecordId, financeProviderItems.id),
+                  eq(financeAccounts.userId, financeProviderItems.userId),
+                  eq(financeAccounts.provider, "plaid"),
+                ),
+              ),
           ),
         );
       const freshnessAgeMs =

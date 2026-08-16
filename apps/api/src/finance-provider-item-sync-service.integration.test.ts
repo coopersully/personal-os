@@ -449,6 +449,206 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ).toEqual([]);
   });
 
+  it("rejects an Item whose linked account has a different provider before provider work", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target) throw new Error("Provider-integrity target account was not created.");
+    const [foreignProviderAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Manual Bank",
+        name: "Malformed manual pointer",
+        provider: "manual",
+        providerAccountId: `manual-pointer-${userId}`,
+        providerItemRecordId: item.id,
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!foreignProviderAccount) throw new Error("Malformed provider pointer was not created.");
+    const itemBefore = (
+      await database.db
+        .select()
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id))
+    )[0];
+    const accountBefore = (
+      await database.db
+        .select()
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, foreignProviderAccount.id))
+    )[0];
+    const auditsBefore = await database.db.$count(auditEvents);
+    const getAccounts = vi.fn(async () => []);
+    const syncTransactions = vi.fn(async () => emptyPage("must-not-run"));
+
+    await expect(
+      service(plaid({ getAccounts, syncTransactions })).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "cross-provider-sync",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    expect(getAccounts).not.toHaveBeenCalled();
+    expect(syncTransactions).not.toHaveBeenCalled();
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, item.id))
+      )[0],
+    ).toEqual(itemBefore);
+    expect(
+      (
+        await database.db
+          .select()
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, foreignProviderAccount.id))
+      )[0],
+    ).toEqual(accountBefore);
+    expect(await database.db.$count(auditEvents)).toBe(auditsBefore);
+  });
+
+  it("rejects an Item with a cross-owner linked account before provider work", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 1 });
+    const target = accounts[0];
+    if (!target) throw new Error("Ownership-integrity target account was not created.");
+    const otherUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      displayName: "Foreign sync pointer owner",
+      email: `foreign-sync-pointer-${otherUserId}@example.com`,
+      id: otherUserId,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const [foreignAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Foreign Bank",
+        name: "Cross-owner sync pointer",
+        provider: "plaid",
+        providerAccountId: `foreign-sync-${otherUserId}`,
+        providerItemRecordId: item.id,
+        status: "connected",
+        userId: otherUserId,
+      })
+      .returning();
+    if (!foreignAccount) throw new Error("Cross-owner sync pointer was not created.");
+    const getAccounts = vi.fn(async () => []);
+    const syncTransactions = vi.fn(async () => emptyPage("must-not-run"));
+    const auditsBefore = await database.db.$count(auditEvents);
+
+    await expect(
+      service(plaid({ getAccounts, syncTransactions })).syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "cross-owner-sync",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+
+    expect(getAccounts).not.toHaveBeenCalled();
+    expect(syncTransactions).not.toHaveBeenCalled();
+    expect(await database.db.$count(auditEvents)).toBe(auditsBefore);
+    expect(
+      (
+        await database.db
+          .select({ itemId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, foreignAccount.id))
+      )[0]?.itemId,
+    ).toBe(item.id);
+  });
+
+  it("fences an active sync when backfill links a late equal-cursor sibling", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 1, cursor: "shared-cursor" });
+    const target = accounts[0];
+    if (!target) throw new Error("Backfill/sync target account was not created.");
+    const legacyGroupingKey = `legacy-active-sync-${userId}`;
+    await database.db
+      .update(financeProviderItems)
+      .set({ legacyGroupingKey })
+      .where(eq(financeProviderItems.id, item.id));
+    const [lateSibling] = await database.db
+      .insert(financeAccounts)
+      .values({
+        encryptedCredentials: encryptJson({ accessToken: `token-${userId}` }, key),
+        institution: "Late Legacy Bank",
+        name: "Late equal-cursor sibling",
+        provider: "plaid",
+        providerAccountId: `late-provider-${userId}`,
+        providerItemId: legacyGroupingKey,
+        status: "connected",
+        syncCursor: "shared-cursor",
+        userId,
+      })
+      .returning();
+    if (!lateSibling) throw new Error("Backfill/sync late sibling was not created.");
+    let releaseProvider!: () => void;
+    let signalProviderStarted!: () => void;
+    const providerStarted = new Promise<void>((resolvePromise) => {
+      signalProviderStarted = resolvePromise;
+    });
+    const providerRelease = new Promise<void>((resolvePromise) => {
+      releaseProvider = resolvePromise;
+    });
+    const activeSync = service(
+      plaid({
+        syncTransactions: async ({ cursor }) => {
+          expect(cursor).toBe("shared-cursor");
+          signalProviderStarted();
+          await providerRelease;
+          return emptyPage("must-not-commit");
+        },
+      }),
+    ).syncAccount(target.id, {
+      principal: principal(userId),
+      requestId: "backfill-active-sync",
+    });
+    void activeSync.catch(() => undefined);
+    await providerStarted;
+
+    const providerItems = createFinanceProviderItemService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+    });
+    await expect(providerItems.backfillLegacyItems()).resolves.toMatchObject({ linked: 1 });
+    releaseProvider();
+    await expect(activeSync).rejects.toMatchObject({ code: "conflict" });
+
+    expect(
+      (
+        await database.db
+          .select({ itemId: financeAccounts.providerItemRecordId })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, lateSibling.id))
+      )[0]?.itemId,
+    ).toBe(item.id);
+    expect(
+      (
+        await database.db
+          .select({
+            claimId: financeProviderItems.syncClaimId,
+            cursor: financeProviderItems.syncCursor,
+            state: financeProviderItems.syncState,
+          })
+          .from(financeProviderItems)
+          .where(eq(financeProviderItems.id, item.id))
+      )[0],
+    ).toEqual({ claimId: null, cursor: "shared-cursor", state: "stale" });
+    expect(
+      await database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.action, "finance.plaid_page_projected"),
+            eq(auditEvents.entityId, item.id),
+          ),
+        ),
+    ).toEqual([]);
+  });
+
   it("durably carries a pending removal across process loss before successful settlement", async () => {
     const { accounts, item, userId } = await fixture();
     const target = accounts[0];
@@ -745,6 +945,91 @@ describe.sequential("Finance Provider Item synchronization", () => {
       blockedService.syncAccount(target.id, {
         principal: principal(userId),
         requestId: "invalid-cursor-terminal-direct-attempt",
+      }),
+    ).rejects.toMatchObject({ code: "service_unavailable" });
+    expect(getAccounts).not.toHaveBeenCalled();
+    expect(syncTransactions).not.toHaveBeenCalled();
+  });
+
+  it("retries an ordinary operator-owned failure after its configuration is repaired and due", async () => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    if (!target) throw new Error("Operator retry target account was not created.");
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: now,
+        syncError: "Plaid configuration requires repair.",
+        syncErrorCategory: "configuration",
+        syncErrorCode: "plaid_configuration_invalid",
+        syncFailureCount: 2,
+        syncRecovery: "operator",
+        syncState: "blocked",
+      })
+      .where(eq(financeProviderItems.id, item.id));
+
+    await expect(
+      service(plaid()).syncDueItemsForUser(userId, { type: "all_outstanding" }),
+    ).resolves.toEqual({
+      attempted: 1,
+      failed: 0,
+      recovered: 1,
+      skipped: 0,
+      succeeded: 1,
+    });
+    await expect(
+      database.db
+        .select({
+          nextSyncAt: financeProviderItems.nextSyncAt,
+          syncErrorCode: financeProviderItems.syncErrorCode,
+          syncFailureCount: financeProviderItems.syncFailureCount,
+          syncState: financeProviderItems.syncState,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([
+      {
+        nextSyncAt: new Date(now.getTime() + 6 * 60 * 60_000),
+        syncErrorCode: null,
+        syncFailureCount: 0,
+        syncState: "current",
+      },
+    ]);
+  });
+
+  it("never automatically or directly claims a reconnect Item even with a stale due timestamp", async () => {
+    const { accounts, item, userId } = await fixture();
+    const target = accounts[0];
+    if (!target) throw new Error("Reconnect target account was not created.");
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: now,
+        syncError: "Reconnect Plaid to continue.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "plaid_authorization_failed",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncState: "blocked",
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    const getAccounts = vi.fn(async () => []);
+    const syncTransactions = vi.fn(async () => emptyPage("must-not-run"));
+    const reconnectService = service(plaid({ getAccounts, syncTransactions }));
+
+    await expect(
+      reconnectService.syncDueItemsForUser(userId, { type: "all_outstanding" }),
+    ).resolves.toEqual({
+      attempted: 0,
+      failed: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 0,
+    });
+    await expect(
+      reconnectService.syncAccount(target.id, {
+        principal: principal(userId),
+        requestId: "reconnect-direct-attempt",
       }),
     ).rejects.toMatchObject({ code: "service_unavailable" });
     expect(getAccounts).not.toHaveBeenCalled();

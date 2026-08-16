@@ -280,7 +280,7 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
     },
     async getAccounts(accessToken) {
       const value = parse(
-        z.object({ accounts: z.array(accountSchema) }),
+        z.object({ accounts: z.array(accountSchema).min(1) }),
         await plaidRequest("/accounts/get", { access_token: accessToken }),
       );
       return value.accounts.map((account) => ({

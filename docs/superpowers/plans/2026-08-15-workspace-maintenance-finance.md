@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Keep MCP stateless: it may call only `@personal-os/api-client`, never PostgreSQL, Plaid, or domain business logic.
-- `get_finance_status` requires `finances:read`; `maintain_finances` requires `finances:write` and has static policy `approved_rule`.
+- `get_finance_status` requires `finances:read`; `maintain_finances` requires separately consented `finances:maintain` and has static policy `approved_rule`.
 - `maintain_finances` cannot answer a human question, approve a budget, create an unapproved permanent rule, move money, or trade investments.
 - The no-argument maintenance scope is `all_outstanding`; windowed and target scopes are optional.
 - Budgets are complete proposals committed atomically through one explicit signed-in human approval.
@@ -818,7 +818,7 @@ expect(toolCatalog.maintain_finances).toMatchObject({
   domain: "finances",
   policy: "approved_rule",
   readOnly: false,
-  requiredScopes: ["finances:write"],
+  requiredScopes: ["finances:maintain"],
   stage: "commit",
 });
 ```
@@ -833,7 +833,7 @@ Do not add Plaid, retry, confidence, cursor, batch, or policy inputs.
 
 - [ ] **Step 6: Reduce the prompt to client-agnostic discovery**
 
-Change `review_finances` to direct the host to `get_finance_status` for inspection and `maintain_finances` when write scope and user intent permit. Do not prescribe a client schedule or multi-tool pagination loop.
+Change `review_finances` to direct the host to `get_finance_status` for inspection and `maintain_finances` when maintenance scope and user intent permit. Do not prescribe a client schedule or multi-tool pagination loop.
 
 - [ ] **Step 7: Run MCP verification**
 

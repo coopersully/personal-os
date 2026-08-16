@@ -26,8 +26,8 @@ export function financeAgentAccessReadiness({
     hosts,
     label: "Finances",
     readScope: "finances:read",
-    writeCapability: "save Finance guidance drafts",
-    writeScope: "finances:write",
+    writeCapability: "maintain Finances through a durable, approval-aware run",
+    writeScope: "finances:maintain",
   });
   if (setup.state !== "ready") {
     const unavailable = setup.state === "unavailable";

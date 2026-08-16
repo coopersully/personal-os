@@ -27,9 +27,12 @@ import type {
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceStatus,
   FinanceTransaction,
   FinanceTransactionQuery,
   FinanceWealthSummary,
+  MaintenanceRun,
+  MaintenanceScope,
   MergeFinanceMerchantsInput,
   ResolveFinanceAlertInput,
   UpdateFinanceIncomeStreamInput,
@@ -39,6 +42,7 @@ import type {
   UpdateFinanceTransactionInput,
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
+import { financeStatusSchema, maintenanceRunSchema } from "@personal-os/domain";
 
 export type FinanceRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -105,6 +109,27 @@ export function createFinanceApi(request: FinanceRequest) {
         "/v1/finances/guided-setup",
       );
       return response.setup;
+    },
+    async getFinanceStatus(scope?: MaintenanceScope): Promise<FinanceStatus> {
+      const response = await request<{ status: unknown }>(
+        `/v1/finances/status${financeMaintenanceScopeQuery(scope)}`,
+      );
+      return financeStatusSchema.parse(response.status);
+    },
+    async maintainFinances(
+      scope: MaintenanceScope = { type: "all_outstanding" },
+    ): Promise<MaintenanceRun> {
+      const response = await request<{ run: unknown }>("/v1/finances/maintenance", {
+        body: JSON.stringify({ scope }),
+        method: "POST",
+      });
+      return maintenanceRunSchema.parse(response.run);
+    },
+    async getFinanceMaintenanceRun(id: string): Promise<MaintenanceRun> {
+      const response = await request<{ run: unknown }>(
+        `/v1/finances/maintenance/${encodeURIComponent(id)}`,
+      );
+      return maintenanceRunSchema.parse(response.run);
     },
     async getFinanceOverviewForMonth(month: string): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>(
@@ -328,4 +353,17 @@ export function createFinanceApi(request: FinanceRequest) {
       return response.merchant;
     },
   };
+}
+
+function financeMaintenanceScopeQuery(scope?: MaintenanceScope): string {
+  if (!scope || scope.type === "all_outstanding") return "";
+  const parameters = new URLSearchParams();
+  if (scope.type === "window") {
+    parameters.set("start", scope.start);
+    parameters.set("end", scope.end);
+  } else {
+    parameters.set("entityType", scope.entityType);
+    parameters.set("targetId", scope.id);
+  }
+  return `?${parameters}`;
 }

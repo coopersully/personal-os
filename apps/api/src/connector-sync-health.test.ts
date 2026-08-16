@@ -142,4 +142,44 @@ describe("connector sync health policy", () => {
       details: { nextSyncAt: null },
     });
   });
+
+  it("classifies Plaid configuration and rate-limit failures without provider text", () => {
+    const configuration = classifyConnectorSyncFailure(
+      new ConnectorError({
+        category: "configuration",
+        code: "plaid_configuration_invalid",
+        disposition: "operator",
+        message: "raw-plaid-configuration-canary",
+        status: 400,
+      }),
+      "plaid",
+    );
+    expect(configuration).toEqual({
+      category: "configuration",
+      code: "plaid_configuration_invalid",
+      message: "Plaid is not configured correctly. ilo is resolving this.",
+      recovery: "operator",
+      retryAfterMs: null,
+      status: 400,
+    });
+
+    const rateLimited = classifyConnectorSyncFailure(
+      new ConnectorError({
+        category: "rate_limited",
+        code: "plaid_rate_limited",
+        disposition: "retry",
+        message: "raw-plaid-rate-limit-canary",
+        retryAfterMs: 120_000,
+        status: 429,
+      }),
+      "plaid",
+    );
+    expect(rateLimited).toMatchObject({
+      category: "rate_limited",
+      message: "Plaid is temporarily rate-limiting ilo. ilo will retry automatically.",
+      recovery: "automatic",
+      retryAfterMs: 120_000,
+    });
+    expect(JSON.stringify([configuration, rateLimited])).not.toContain("raw-plaid");
+  });
 });

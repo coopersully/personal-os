@@ -38,16 +38,49 @@ export class ConnectorError extends Error {
 
 export async function connectorHttpError(
   response: Response,
-  provider: "google" | "x",
+  provider: "google" | "plaid" | "x",
 ): Promise<ConnectorError> {
   const retryAfterMs = retryAfter(response.headers.get("retry-after"));
-  const googleOAuthError = provider === "google" ? await readGoogleOAuthErrorCode(response) : null;
-  if (provider !== "google" || googleOAuthError === null) {
+  const safeProviderError =
+    provider === "google"
+      ? await readGoogleOAuthErrorCode(response)
+      : provider === "plaid"
+        ? await readPlaidErrorCode(response)
+        : null;
+  if (safeProviderError === null) {
     await response.body?.cancel().catch(() => undefined);
   }
-  const label = provider === "google" ? "Google" : "X";
-  const prefix = provider === "google" ? "google" : "x";
-  if (googleOAuthError === "invalid_grant") {
+  const label = provider === "google" ? "Google" : provider === "plaid" ? "Plaid" : "X";
+  const prefix = provider;
+  if (provider === "plaid" && safeProviderError === "INVALID_API_KEYS") {
+    return new ConnectorError({
+      category: "configuration",
+      code: "plaid_configuration_invalid",
+      disposition: "operator",
+      message: "Plaid is not configured correctly.",
+      status: response.status,
+    });
+  }
+  if (provider === "plaid" && safeProviderError === "ITEM_LOGIN_REQUIRED") {
+    return new ConnectorError({
+      category: "authorization",
+      code: "plaid_authorization_failed",
+      disposition: "reconnect",
+      message: "Plaid authorization is no longer valid.",
+      status: response.status,
+    });
+  }
+  if (provider === "plaid" && safeProviderError === "RATE_LIMIT_EXCEEDED") {
+    return new ConnectorError({
+      category: "rate_limited",
+      code: "plaid_rate_limited",
+      disposition: "retry",
+      message: "Plaid is temporarily rate-limiting ilo.",
+      ...(retryAfterMs === null ? {} : { retryAfterMs }),
+      status: response.status,
+    });
+  }
+  if (safeProviderError === "invalid_grant") {
     return new ConnectorError({
       category: "authorization",
       code: "google_authorization_failed",
@@ -57,9 +90,9 @@ export async function connectorHttpError(
     });
   }
   if (
-    googleOAuthError === "invalid_client" ||
-    googleOAuthError === "unauthorized_client" ||
-    googleOAuthError === "redirect_uri_mismatch"
+    safeProviderError === "invalid_client" ||
+    safeProviderError === "unauthorized_client" ||
+    safeProviderError === "redirect_uri_mismatch"
   ) {
     return new ConnectorError({
       category: "configuration",
@@ -162,6 +195,7 @@ type GoogleOAuthErrorCode =
   | "invalid_grant"
   | "redirect_uri_mismatch"
   | "unauthorized_client";
+type PlaidErrorCode = "INVALID_API_KEYS" | "ITEM_LOGIN_REQUIRED" | "RATE_LIMIT_EXCEEDED";
 
 async function readGoogleOAuthErrorCode(response: Response): Promise<GoogleOAuthErrorCode | null> {
   if (
@@ -209,6 +243,53 @@ async function readGoogleOAuthErrorCode(response: Response): Promise<GoogleOAuth
     return null;
   }
   return null;
+}
+
+async function readPlaidErrorCode(response: Response): Promise<PlaidErrorCode | null> {
+  if (
+    !response.headers.get("content-type")?.toLowerCase().includes("application/json") ||
+    !response.body
+  ) {
+    return null;
+  }
+
+  const serialized = await readBoundedProviderBody(response);
+  if (serialized === null) return null;
+  try {
+    const errorCode = objectDetails(JSON.parse(serialized))?.error_code;
+    return errorCode === "INVALID_API_KEYS" ||
+      errorCode === "ITEM_LOGIN_REQUIRED" ||
+      errorCode === "RATE_LIMIT_EXCEEDED"
+      ? errorCode
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readBoundedProviderBody(response: Response): Promise<string | null> {
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  const decoder = new TextDecoder();
+  let serialized = "";
+  let bytes = 0;
+  try {
+    reader = response.body?.getReader() ?? null;
+    if (!reader) return null;
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_PROVIDER_ERROR_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      serialized += decoder.decode(chunk.value, { stream: true });
+    }
+    return serialized + decoder.decode();
+  } catch {
+    await reader?.cancel().catch(() => undefined);
+    return null;
+  }
 }
 
 function retryAfter(value: string | null): number | null {

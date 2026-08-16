@@ -209,6 +209,7 @@ export const accessScopeSchema = z.enum([
   "audit:read",
   "finances:read",
   "finances:write",
+  "finances:maintain",
   "bookmarks:read",
 ]);
 export type AccessScope = z.infer<typeof accessScopeSchema>;

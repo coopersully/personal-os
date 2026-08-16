@@ -117,6 +117,53 @@ describe("API runtime lifecycle", () => {
     expect(order).toEqual(["scheduler-stopped", "server-close-started", "database"]);
   });
 
+  it("tracks the owned Finance Provider Item pass through sync and shutdown", async () => {
+    const lifecycle = createRuntimeLifecycle();
+    const providerItemPass = deferred();
+    const order: string[] = [];
+    expect(
+      lifecycle.startBackgroundTask("startup-finance-sync", async () => {
+        order.push("backfill-started");
+        await providerItemPass.promise;
+        order.push("backfill-completed");
+        order.push("sync-started");
+      }),
+    ).toBe(true);
+    await Promise.resolve();
+
+    const shutdown = shutdownApiRuntime({
+      closeDatabase: async () => {
+        order.push("database");
+      },
+      closeHttpServer: async () => {
+        order.push("server");
+      },
+      lifecycle,
+      stopScheduling: () => order.push("scheduler"),
+      timeoutMs: 1_000,
+    });
+    await Promise.resolve();
+    expect(order).toEqual(["backfill-started", "scheduler", "server"]);
+    expect(lifecycle.inFlight()).toMatchObject({
+      background: 1,
+      backgroundLabels: ["startup-finance-sync"],
+    });
+    expect(order).not.toContain("sync-started");
+    expect(order).not.toContain("database");
+
+    providerItemPass.resolve();
+    await shutdown;
+    expect(order).toEqual([
+      "backfill-started",
+      "scheduler",
+      "server",
+      "backfill-completed",
+      "sync-started",
+      "database",
+    ]);
+    expect(lifecycle.inFlight()).toMatchObject({ background: 0, backgroundLabels: [] });
+  });
+
   it("fails without closing the database when the bounded drain expires", async () => {
     vi.useFakeTimers();
     const lifecycle = createRuntimeLifecycle();

@@ -1,0 +1,226 @@
+import type {
+  FinanceAccountKind,
+  FinanceDataConfidence,
+  FinanceHealth,
+  FinanceHealthDimensionKey,
+  FinanceProvider,
+  TransactionDirection,
+} from "@personal-os/domain";
+
+export const defaultFinanceHealthPolicy = {
+  budgetOffTrackForecastRatio: 1.15,
+  budgetWatchForecastRatio: 1.05,
+  emergencyReserveTargetMonths: 3,
+  staleAfterHours: 24,
+} as const;
+
+export type FinanceHealthInput = {
+  accounts: Array<{
+    balance: number | null;
+    kind: FinanceAccountKind;
+    lastSuccessAt: string | null;
+    provider: FinanceProvider;
+    synchronizationState: "blocked" | "current" | "retrying" | "stale";
+  }>;
+  activeGoalCount: number;
+  approvedBudget: number | null;
+  forecastSpending: number | null;
+  investmentAllocationKnown: boolean;
+  monthlyIncome: number | null;
+  postedTransactions: Array<{
+    amount: number;
+    direction: TransactionDirection;
+    pending: boolean;
+  }>;
+  profile?: {
+    budgetOffTrackForecastRatio?: number;
+    budgetWatchForecastRatio?: number;
+    emergencyReserveTargetMonths?: number;
+  } | null;
+  totalDebt: number | null;
+  unknownDebtAprCount: number;
+};
+
+function dimension(
+  rating: FinanceHealth["dimensions"][FinanceHealthDimensionKey]["rating"],
+  evidence: FinanceHealth["dimensions"][FinanceHealthDimensionKey]["evidence"],
+  missingInputs: string[],
+  nextAction: string | null,
+): FinanceHealth["dimensions"][FinanceHealthDimensionKey] {
+  return { evidence, missingInputs, nextAction, rating, trend: "unknown" };
+}
+
+function uniqueMissing(...inputs: Array<string | false>): string[] {
+  return [...new Set(inputs.filter((value): value is string => value !== false))];
+}
+
+export function assessFinanceHealth(input: FinanceHealthInput, now: Date): FinanceHealth {
+  const plaidAccounts = input.accounts.filter((account) => account.provider === "plaid");
+  const usableAccounts = input.accounts.filter(
+    (account) => account.synchronizationState !== "blocked" && account.balance !== null,
+  );
+  const allPlaidBlocked =
+    plaidAccounts.length > 0 &&
+    plaidAccounts.every((account) => account.synchronizationState === "blocked");
+  const staleCutoff = now.getTime() - defaultFinanceHealthPolicy.staleAfterHours * 60 * 60 * 1_000;
+  const staleAccounts = input.accounts.filter(
+    (account) =>
+      account.synchronizationState !== "current" ||
+      (account.provider === "plaid" &&
+        (account.lastSuccessAt === null ||
+          new Date(account.lastSuccessAt).getTime() < staleCutoff)),
+  );
+  let confidence: FinanceDataConfidence = "reliable";
+  if (input.accounts.length === 0 || usableAccounts.length === 0 || allPlaidBlocked) {
+    confidence = "insufficient";
+  } else if (staleAccounts.length > 0 || usableAccounts.length < input.accounts.length) {
+    confidence = "provisional";
+  }
+
+  const confidenceEvidence = [
+    `${input.accounts.length} account(s) tracked`,
+    `${usableAccounts.length} account(s) have usable balances`,
+    `${staleAccounts.length} account(s) are not current`,
+  ];
+  const missingInputs: string[] = [];
+  if (input.accounts.length === 0) missingInputs.push("accounts");
+  if (confidence !== "reliable") missingInputs.push("current_account_evidence");
+  if (input.approvedBudget === null) missingInputs.push("approved_budget");
+  if (input.monthlyIncome === null) missingInputs.push("monthly_income");
+  missingInputs.push("account_roles");
+
+  const postedSpending = input.postedTransactions
+    .filter((transaction) => !transaction.pending && transaction.direction === "expense")
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const forecast = input.forecastSpending;
+  const watchRatio =
+    input.profile?.budgetWatchForecastRatio ?? defaultFinanceHealthPolicy.budgetWatchForecastRatio;
+  const offTrackRatio =
+    input.profile?.budgetOffTrackForecastRatio ??
+    defaultFinanceHealthPolicy.budgetOffTrackForecastRatio;
+  const assessmentSpending = forecast ?? postedSpending;
+  const ratio =
+    input.approvedBudget !== null && input.approvedBudget > 0
+      ? assessmentSpending / input.approvedBudget
+      : null;
+  const monthRating =
+    confidence !== "reliable" || input.approvedBudget === null || ratio === null
+      ? "unknown"
+      : ratio >= offTrackRatio
+        ? "off_track"
+        : ratio >= watchRatio
+          ? "watch"
+          : "on_track";
+
+  const cash = usableAccounts
+    .filter((account) => account.kind === "cash")
+    .reduce((sum, account) => sum + (account.balance ?? 0), 0);
+  const reserveTarget =
+    input.profile?.emergencyReserveTargetMonths ??
+    defaultFinanceHealthPolicy.emergencyReserveTargetMonths;
+  const reserveMonths =
+    input.monthlyIncome !== null && input.monthlyIncome > 0 ? cash / input.monthlyIncome : null;
+  const debtAprMissing = input.unknownDebtAprCount > 0;
+  const dimensions: FinanceHealth["dimensions"] = {
+    borrow: dimension(
+      confidence !== "reliable" || debtAprMissing || input.totalDebt === null
+        ? "unknown"
+        : input.totalDebt > 0
+          ? "watch"
+          : "healthy",
+      [{ label: "Total debt", source: "accounts", value: input.totalDebt }],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        debtAprMissing && "debt_apr",
+        input.totalDebt === null && "total_debt",
+        "account_roles",
+      ),
+      debtAprMissing ? "Add APR evidence before assessing borrowing health." : null,
+    ),
+    goals: dimension(
+      input.activeGoalCount > 0 ? "healthy" : "unknown",
+      [{ label: "Active goals", source: "goals", value: input.activeGoalCount }],
+      input.activeGoalCount > 0 ? [] : ["active_goals"],
+      input.activeGoalCount > 0 ? null : "Add an active financial goal.",
+    ),
+    invest: dimension(
+      confidence === "reliable" && input.investmentAllocationKnown ? "healthy" : "unknown",
+      [
+        {
+          label: "Allocation visible",
+          source: "accounts",
+          value: input.investmentAllocationKnown ? "yes" : "unknown",
+        },
+      ],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        !input.investmentAllocationKnown && "investment_allocation",
+        "account_roles",
+      ),
+      input.investmentAllocationKnown
+        ? null
+        : "Provide allocation evidence before assessing investments.",
+    ),
+    plan: dimension(
+      confidence !== "reliable" || input.approvedBudget === null
+        ? "unknown"
+        : monthRating === "off_track"
+          ? "needs_attention"
+          : monthRating === "watch"
+            ? "watch"
+            : "healthy",
+      [{ label: "Approved budget", source: "budget", value: input.approvedBudget }],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        input.approvedBudget === null && "approved_budget",
+        "account_roles",
+      ),
+      input.approvedBudget === null ? "Approve a monthly budget." : null,
+    ),
+    save: dimension(
+      confidence !== "reliable" || reserveMonths === null
+        ? "unknown"
+        : reserveMonths >= reserveTarget
+          ? "healthy"
+          : "watch",
+      [{ label: "Emergency reserve months", source: "accounts_and_income", value: reserveMonths }],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        reserveMonths === null && "monthly_income_or_cash_balance",
+        "account_roles",
+      ),
+      reserveMonths !== null && reserveMonths < reserveTarget
+        ? `Build liquid reserves toward ${reserveTarget} months.`
+        : null,
+    ),
+    spend: dimension(
+      monthRating === "unknown"
+        ? "unknown"
+        : monthRating === "off_track"
+          ? "needs_attention"
+          : monthRating === "watch"
+            ? "watch"
+            : "healthy",
+      [{ label: "Forecast-to-budget ratio", source: "budget_and_ledger", value: ratio }],
+      uniqueMissing(
+        confidence !== "reliable" && "current_account_evidence",
+        input.approvedBudget === null && "approved_budget",
+        "account_roles",
+      ),
+      monthRating === "off_track" ? "Review forecast spending against the approved budget." : null,
+    ),
+  };
+
+  return {
+    confidence,
+    confidenceEvidence,
+    dimensions,
+    missingInputs: [...new Set(missingInputs)],
+    month: {
+      approvedBudget: input.approvedBudget,
+      forecastSpending: confidence !== "reliable" ? null : forecast,
+      postedSpending: confidence !== "reliable" ? null : postedSpending,
+      rating: monthRating,
+    },
+  };
+}

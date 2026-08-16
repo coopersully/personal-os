@@ -9,7 +9,7 @@ import type {
   Reminder,
   Task,
 } from "@personal-os/domain";
-import { accessScopeSchema } from "@personal-os/domain";
+import { type AccessScope, accessScopeSchema } from "@personal-os/domain";
 import { createPersonalOsMcpServer } from "./server.js";
 import { availableToolNames } from "./tool-catalog.js";
 
@@ -298,6 +298,21 @@ function mockApi() {
         },
       },
       suggestedWorkflows: [],
+    })),
+    getFinanceStatus: vi.fn(async () => ({
+      activeRun: null,
+      domain: "finances",
+      state: "needs_work",
+    })),
+    maintainFinances: vi.fn(async () => ({
+      id,
+      scope: { type: "all_outstanding" as const },
+      status: "queued" as const,
+    })),
+    getFinanceMaintenanceRun: vi.fn(async () => ({
+      id,
+      scope: { type: "all_outstanding" as const },
+      status: "queued" as const,
     })),
     upsertDomainProfile: vi.fn(async () => domainProfile),
     listAttentionItems: vi.fn(async () => [attentionItem]),
@@ -674,7 +689,8 @@ describe("ilo MCP server", () => {
     });
     for (const tool of tools.tools.filter(
       (candidate) =>
-        candidate.name.includes("finance") && candidate.name !== "create_finance_attention_item",
+        candidate.name.includes("finance") &&
+        !["create_finance_attention_item", "maintain_finances"].includes(candidate.name),
     )) {
       expect(tool.annotations).toEqual({
         destructiveHint: false,
@@ -1486,6 +1502,168 @@ describe("ilo MCP server", () => {
 
     await client.close();
     await server.close();
+  });
+
+  it("exposes complete-workspace Finance status and maintenance intents", async () => {
+    const api = mockApi();
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      appBaseUrl: "https://app.example.com",
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const tools = await client.listTools();
+    expect(tools.tools.find((tool) => tool.name === "get_finance_status")).toMatchObject({
+      _meta: {
+        "ilo/domain": "finances",
+        "ilo/policy": "read_only",
+        "ilo/stage": "inspect",
+      },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+        readOnlyHint: true,
+      },
+      inputSchema: { additionalProperties: false, properties: { scope: expect.any(Object) } },
+    });
+    expect(tools.tools.find((tool) => tool.name === "maintain_finances")).toMatchObject({
+      _meta: {
+        "ilo/domain": "finances",
+        "ilo/policy": "approved_rule",
+        "ilo/stage": "commit",
+      },
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
+      inputSchema: { additionalProperties: false, properties: { scope: expect.any(Object) } },
+    });
+
+    const maintenance = await client.callTool({ arguments: {}, name: "maintain_finances" });
+    expect(api.maintainFinances).toHaveBeenCalledWith({ type: "all_outstanding" });
+    expect(maintenance).toMatchObject({
+      structuredContent: {
+        _ilo: {
+          domain: "finances",
+          links: { recovery: "https://app.example.com/settings?section=connections" },
+          policy: "approved_rule",
+          readOnly: false,
+          stage: "commit",
+        },
+        result: { id, status: "queued" },
+      },
+    });
+
+    await client.callTool({
+      arguments: { scope: { end: "2026-08-16", start: "2026-08-01", type: "window" } },
+      name: "maintain_finances",
+    });
+    expect(api.maintainFinances).toHaveBeenLastCalledWith({
+      end: "2026-08-16",
+      start: "2026-08-01",
+      type: "window",
+    });
+    await client.callTool({
+      arguments: { scope: { entityType: "finance_transaction", id, type: "target" } },
+      name: "get_finance_status",
+    });
+    expect(api.getFinanceStatus).toHaveBeenLastCalledWith({
+      entityType: "finance_transaction",
+      id,
+      type: "target",
+    });
+
+    const unsupported = await client.callTool({
+      arguments: { batch: 5, scope: { type: "all_outstanding" } },
+      name: "maintain_finances",
+    });
+    expect(unsupported.isError).toBe(true);
+    expect(api.maintainFinances).toHaveBeenCalledTimes(2);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("preserves Finance maintenance API errors at the durable handoff boundary", async () => {
+    const api = mockApi();
+    api.maintainFinances.mockRejectedValueOnce(
+      new ApiClientError({
+        code: "conflict",
+        details: { activeRunId: id },
+        message: "A Finance maintenance run is already active.",
+        requestId: "finance-maintenance-request-123",
+        status: 409,
+      }),
+    );
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      appBaseUrl: "https://app.example.com",
+      timeZone: "America/New_York",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const response = await client.callTool({ arguments: {}, name: "maintain_finances" });
+    const expectedError = {
+      code: "conflict",
+      details: { activeRunId: id },
+      message: "A Finance maintenance run is already active.",
+      requestId: "finance-maintenance-request-123",
+      status: 409,
+    };
+    expect(response).toMatchObject({
+      isError: true,
+      structuredContent: {
+        _ilo: { domain: "finances", policy: "approved_rule", stage: "commit" },
+        error: expectedError,
+      },
+    });
+    expect(response.content).toEqual([
+      { text: JSON.stringify({ error: expectedError }, null, 2), type: "text" },
+    ]);
+
+    await client.close();
+    await server.close();
+  });
+
+  it("renders the Finance review prompt without a maintenance handoff on read-only or status-only access", async () => {
+    const limitedAccessOptions: Array<{ readOnly: boolean; scopes: Set<AccessScope> }> = [
+      { readOnly: true, scopes: new Set(["finances:read", "finances:maintain"]) },
+      { readOnly: false, scopes: new Set(["finances:read"]) },
+    ];
+    for (const options of limitedAccessOptions) {
+      const api = mockApi();
+      const server = createPersonalOsMcpServer({
+        api: api as unknown as PersonalOsApiClient,
+        ...options,
+        timeZone: "America/New_York",
+      });
+      const client = new Client({ name: "test", version: "1.0.0" });
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+      const prompts = await client.listPrompts();
+      expect(prompts.prompts.map((prompt) => prompt.name)).toContain("review_finances");
+      const prompt = await client.getPrompt({ arguments: {}, name: "review_finances" });
+      const text =
+        prompt.messages[0]?.content.type === "text" ? prompt.messages[0].content.text : "";
+      expect(text).toContain("get_finance_status");
+      expect(text).toContain("Present pending work");
+      expect(text).not.toContain("maintain_finances");
+      expect((await client.listTools()).tools.map((tool) => tool.name)).not.toContain(
+        "maintain_finances",
+      );
+
+      await client.close();
+      await server.close();
+    }
   });
 
   it("uses the hardened Mail send schema for normalization and header injection rejection", async () => {

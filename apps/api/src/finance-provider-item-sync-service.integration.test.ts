@@ -382,7 +382,10 @@ describe.sequential("Finance Provider Item synchronization", () => {
     await expect(
       service(
         plaid({
-          getAccounts: async () => [remoteAccount(presentProviderAccountId, 81.25)],
+          getAccounts: async () => [
+            remoteAccount(presentProviderAccountId, 81.25),
+            remoteAccount(`unlinked-${userId}`, 999),
+          ],
           syncTransactions: async () => emptyPage("membership-cursor"),
         }),
       ).syncAccount(present.id, {
@@ -433,6 +436,55 @@ describe.sequential("Finance Provider Item synchronization", () => {
         .from(financeAccounts)
         .where(eq(financeAccounts.id, present.id)),
     ).resolves.toEqual([{ balance: 8_125, state: "current" }]);
+  });
+
+  it("stops before projection when a linked account loses the mirrored Item lease", async () => {
+    const { accounts, item, userId } = await fixture({ accountCount: 2 });
+    const target = accounts[0];
+    if (!target) throw new Error("Mirrored-lease target account was not created.");
+    let releaseAccounts!: () => void;
+    let signalAccountsStarted!: () => void;
+    const accountsStarted = new Promise<void>((resolvePromise) => {
+      signalAccountsStarted = resolvePromise;
+    });
+    const accountsRelease = new Promise<void>((resolvePromise) => {
+      releaseAccounts = resolvePromise;
+    });
+    const syncTransactions = vi.fn(async () => emptyPage("must-not-project"));
+    const synchronization = service(
+      plaid({
+        getAccounts: async () => {
+          signalAccountsStarted();
+          await accountsRelease;
+          return accounts.flatMap((account) =>
+            account.providerAccountId ? [remoteAccount(account.providerAccountId)] : [],
+          );
+        },
+        syncTransactions,
+      }),
+    ).syncAccount(target.id, {
+      principal: principal(userId),
+      requestId: "mirrored-account-lease-lost",
+    });
+    void synchronization.catch(() => undefined);
+    await accountsStarted;
+    await database.db
+      .update(financeAccounts)
+      .set({ syncClaimExpiresAt: null, syncClaimId: null })
+      .where(eq(financeAccounts.id, target.id));
+    releaseAccounts();
+
+    await expect(synchronization).rejects.toMatchObject({ code: "conflict" });
+    expect(syncTransactions).not.toHaveBeenCalled();
+    await expect(
+      database.db
+        .select({
+          claimId: financeProviderItems.syncClaimId,
+          cursor: financeProviderItems.syncCursor,
+        })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ claimId: expect.any(String), cursor: null }]);
   });
 
   it("blocks a legacy Item when its resolved remote identity already belongs to another aggregate", async () => {

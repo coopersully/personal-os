@@ -22,7 +22,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
             asOf: { format: "date-time", type: "string" },
             health: {
               properties: {
-                applicability: { enum: ["applied", "skipped_scoped"], type: "string" },
+                applicability: { enum: ["not_run", "applied", "skipped_scoped"], type: "string" },
                 confidence: {
                   enum: ["insufficient", "provisional", "reliable"],
                   type: "string",

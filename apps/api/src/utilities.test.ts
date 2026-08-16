@@ -163,7 +163,7 @@ describe("pagination, errors, and OpenAPI", () => {
       properties: {
         health: {
           properties: {
-            applicability: { enum: ["applied", "skipped_scoped"], type: "string" },
+            applicability: { enum: ["not_run", "applied", "skipped_scoped"], type: "string" },
             refreshed: { type: "boolean" },
           },
           required: ["applicability", "confidence", "refreshed"],

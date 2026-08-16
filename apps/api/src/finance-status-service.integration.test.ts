@@ -146,6 +146,7 @@ describe.sequential("Finance status service", () => {
 
     expect(status.freshness.state).toBe("current");
     expect(status.details.accounts).toMatchObject({ current: 1, tracked: 1 });
+    expect(status.details.accounts.providerItems).toEqual([]);
     expect(status.details.accountRoles).toEqual({
       missingInputs: ["account_roles"],
       state: "unavailable",
@@ -177,6 +178,20 @@ describe.sequential("Finance status service", () => {
 
     expect(status.freshness.state).toBe("current");
     expect(status.details.health.confidence).toBe("reliable");
+  });
+
+  it("rejects retrying Provider Items with incomplete failure recovery evidence", async () => {
+    const userId = await makeUser("Invalid Provider Item failure evidence");
+
+    await expect(
+      database.pool.query(
+        `INSERT INTO finance_provider_items (
+          user_id, provider, provider_item_id, encrypted_credentials, sync_state,
+          sync_error, sync_error_code, sync_failure_count
+        ) VALUES ($1, 'plaid', $2, '{}'::jsonb, 'retrying', 'Temporary failure.', 'TEMPORARY', 1)`,
+        [userId, `item-${crypto.randomUUID()}`],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
   });
 
   it.each([

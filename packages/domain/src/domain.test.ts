@@ -227,28 +227,11 @@ describe("workspace maintenance", () => {
         blocked: 0,
         current: 0,
         items: [],
-        providerItems: [
-          {
-            accountIds: [accountId],
-            id,
-            provider: "plaid",
-            synchronization: {
-              failureCode: null,
-              failureCount: 0,
-              lastAttemptAt: null,
-              lastSuccessAt: null,
-              message: null,
-              nextRetryAt: null,
-              recovery: null,
-              state: "stale",
-            },
-          },
-        ],
         retrying: 0,
         stale: 1,
         tracked: 1,
       }),
-    ).toMatchObject({ providerItems: [{ id, accountIds: [accountId] }] });
+    ).toMatchObject({ providerItems: [] });
   });
 
   it("reports a Finance health step that did not run", () => {

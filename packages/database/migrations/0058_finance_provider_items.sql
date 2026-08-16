@@ -52,6 +52,8 @@ CREATE TABLE "finance_provider_items" (
 			AND "sync_failure_count" > 0
 			AND "sync_error" IS NOT NULL
 			AND "sync_error_code" IS NOT NULL
+			AND "sync_error_category" IS NOT NULL
+			AND "sync_recovery" IS NOT NULL
 			AND "sync_error_category" IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown')
 			AND "sync_recovery" = 'automatic'
 		)
@@ -60,6 +62,8 @@ CREATE TABLE "finance_provider_items" (
 			AND "sync_failure_count" > 0
 			AND "sync_error" IS NOT NULL
 			AND "sync_error_code" IS NOT NULL
+			AND "sync_error_category" IS NOT NULL
+			AND "sync_recovery" IS NOT NULL
 			AND "sync_error_category" IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown')
 			AND "sync_recovery" IN ('operator', 'reconnect')
 		)

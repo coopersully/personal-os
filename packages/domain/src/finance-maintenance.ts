@@ -75,7 +75,7 @@ export const financeStatusDetailsSchema = z.object({
     blocked: z.int().nonnegative(),
     current: z.int().nonnegative(),
     items: z.array(financeAccountSchema),
-    providerItems: z.array(financeProviderItemHealthSchema),
+    providerItems: z.array(financeProviderItemHealthSchema).default([]),
     retrying: z.int().nonnegative(),
     stale: z.int().nonnegative(),
     tracked: z.int().nonnegative(),

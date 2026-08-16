@@ -4499,6 +4499,15 @@ describe.sequential("finance service", () => {
     );
     await expect(
       settlementFastClockWorker.syncPlaidAccount(healthAccount.id, context),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET sync_claim_expires_at = NOW() - INTERVAL '1 second'
+       WHERE id = $1`,
+      [healthAccount.id],
+    );
+    await expect(
+      settlementFastClockWorker.syncPlaidAccount(healthAccount.id, context),
     ).resolves.toEqual({ changed: 0 });
     await expect(
       database.pool.query(`SELECT sync_claim_id, sync_state FROM finance_accounts WHERE id = $1`, [
@@ -5118,7 +5127,12 @@ describe.sequential("finance service", () => {
         .from(financeAccounts)
         .where(eq(financeAccounts.id, account.id)),
     ).resolves.toEqual([
-      { syncClaimId: null, syncCursor: null, syncFailureCount: 0, syncState: "stale" },
+      {
+        syncClaimId: expect.any(String),
+        syncCursor: null,
+        syncFailureCount: 0,
+        syncState: "stale",
+      },
     ]);
     await expect(
       database.pool.query(

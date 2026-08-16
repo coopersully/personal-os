@@ -3490,8 +3490,13 @@ describe("ilo web app", () => {
     });
     const view = setup("/tasks?view=today");
     await screen.findByText("Both containers");
-    expect(screen.getByText(/Work \/ Launch/)).toBeInTheDocument();
-    expect(screen.getByText("Work")).toBeInTheDocument();
+    const taskRows = within(screen.getByRole("main"));
+    const bothRow = taskRows.getByText("Both containers").closest('[role="listitem"]');
+    const listRow = taskRows.getByText("List container").closest('[role="listitem"]');
+    expect(bothRow).not.toBeNull();
+    expect(listRow).not.toBeNull();
+    expect(within(bothRow as HTMLElement).getByText(/Work \/ Launch/)).toBeInTheDocument();
+    expect(within(listRow as HTMLElement).getByText(/^Work ·/u)).toBeInTheDocument();
     view.unmount();
   });
 

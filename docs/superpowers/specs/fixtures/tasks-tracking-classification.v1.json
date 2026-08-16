@@ -162,7 +162,7 @@
       "category": "organization",
       "expected": {
         "decision": "commit_ready",
-        "operations": [{ "name": "Errands", "type": "create_list" }],
+        "operations": [{ "name": "Errands", "type": "create_task_list" }],
         "reasonCode": "explicit_list",
         "speechAct": "mutate"
       },
@@ -174,7 +174,7 @@
       "expected": {
         "decision": "commit_ready",
         "operations": [
-          { "listId": "list-personal", "name": "Organize recipes", "type": "create_project" }
+          { "listId": "list-personal", "name": "Organize recipes", "type": "create_task_project" }
         ],
         "reasonCode": "explicit_project_with_list",
         "speechAct": "mutate"
@@ -308,7 +308,11 @@
       "expected": {
         "decision": "commit_ready",
         "operations": [
-          { "listId": "list-personal", "name": "Plan the birthday party", "type": "create_project" }
+          {
+            "listId": "list-personal",
+            "name": "Plan the birthday party",
+            "type": "create_task_project"
+          }
         ],
         "reasonCode": "explicit_project",
         "speechAct": "mutate"
@@ -341,7 +345,7 @@
             "deadline": { "date": "2026-12-31", "precision": "date" },
             "target": { "amount": 10000, "currency": "USD", "operator": "at_least" },
             "title": "Increase savings",
-            "type": "create_goal"
+            "type": "create_tracking_goal"
           }
         ],
         "reasonCode": "measurable_desired_state",
@@ -651,7 +655,7 @@
             "observedFrom": "2026-08-11T23:30:00-04:00",
             "observedTo": "2026-08-12T07:00:00-04:00",
             "trackerId": "tracker-sleep",
-            "type": "answer_checkin"
+            "type": "answer_check_in"
           }
         ],
         "reasonCode": "compatible_open_checkin_answer",
@@ -669,7 +673,7 @@
             "observedAt": "2026-08-12T10:00:00-04:00",
             "primaryValue": "Leftover curry",
             "trackerId": "tracker-meals",
-            "type": "record_entry"
+            "type": "record_tracking_entry"
           }
         ],
         "reasonCode": "unique_alias_compatible_tracker",
@@ -687,7 +691,7 @@
             "checkinId": "checkin-meditation-today",
             "primaryValue": "completed",
             "trackerId": "tracker-meditation",
-            "type": "answer_checkin"
+            "type": "answer_check_in"
           }
         ],
         "reasonCode": "outcome_habit_positive_report",
@@ -705,7 +709,7 @@
             "checkinId": "checkin-meditation-today",
             "primaryValue": "not_completed",
             "trackerId": "tracker-meditation",
-            "type": "answer_checkin"
+            "type": "answer_check_in"
           }
         ],
         "reasonCode": "outcome_habit_negative_report",
@@ -718,7 +722,7 @@
       "category": "entries",
       "expected": {
         "decision": "commit_ready",
-        "operations": [{ "checkinId": "checkin-meditation-today", "type": "skip_checkin" }],
+        "operations": [{ "checkinId": "checkin-meditation-today", "type": "skip_check_in" }],
         "reasonCode": "explicit_skip_no_entry",
         "speechAct": "mutate"
       },
@@ -773,7 +777,7 @@
           {
             "entryId": "entry-sleep-last",
             "replacement": { "observedTo": "2026-08-12T07:30:00-04:00" },
-            "type": "correct_entry"
+            "type": "correct_tracking_entry"
           }
         ],
         "reasonCode": "unique_recent_entry_correction",
@@ -818,7 +822,7 @@
         "operations": [
           {
             "checkinId": "checkin-meditation-today",
-            "type": "mark_checkin_not_applicable"
+            "type": "mark_check_in_not_applicable"
           }
         ],
         "reasonCode": "explicit_not_applicable_no_entry",
@@ -836,7 +840,7 @@
             "checkinId": "checkin-meditation-today",
             "primaryValue": "partial",
             "trackerId": "tracker-meditation",
-            "type": "answer_checkin"
+            "type": "answer_check_in"
           }
         ],
         "reasonCode": "explicit_partial_outcome",
@@ -849,7 +853,7 @@
       "category": "occurrence_lifecycle",
       "expected": {
         "decision": "commit_ready",
-        "operations": [{ "checkinId": "checkin-meditation-today", "type": "expire_checkin" }],
+        "operations": [{ "checkinId": "checkin-meditation-today", "type": "expire_check_in" }],
         "reasonCode": "response_window_expired_without_entry",
         "speechAct": "mutate"
       },
@@ -950,7 +954,7 @@
           {
             "period": "2026-08-01/2026-09-01",
             "trackerId": "tracker-workouts",
-            "type": "query_entries"
+            "type": "query_tracking_entries"
           }
         ],
         "reasonCode": "tracking_query",
@@ -1073,7 +1077,11 @@
       "expected": {
         "decision": "commit_ready",
         "operations": [
-          { "listId": "list-personal", "name": "Get a new passport", "type": "create_project" },
+          {
+            "listId": "list-personal",
+            "name": "Get a new passport",
+            "type": "create_task_project"
+          },
           {
             "listId": "list-personal",
             "projectOperation": 0,
@@ -1121,7 +1129,7 @@
           {
             "deadline": { "date": "2026-09-01", "precision": "date" },
             "title": "Launch the new website",
-            "type": "create_goal"
+            "type": "create_tracking_goal"
           }
         ],
         "reasonCode": "explicit_goal_wins_without_silent_project",

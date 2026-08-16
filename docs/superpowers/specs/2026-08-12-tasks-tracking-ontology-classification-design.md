@@ -266,7 +266,7 @@ evidence[]
 ```
 
 `operations` is an ordered plan of focused domain mutations. It is not a generic database write.
-Examples include `create_task` followed by `create_prompt`, or `answer_checkin` followed by the Entry
+Examples include `create_task` followed by `create_prompt`, or `answer_check_in` followed by the Entry
 it owns. A preview is committed through the relevant API operations with a shared idempotency and
 audit correlation, not through a generic MCP “manage life” tool.
 
@@ -403,7 +403,7 @@ the same result. MCP may expose focused prepare tools such as `preview_task_capt
 cross-domain commit tool.
 
 Entity mutations remain focused (`create_task_list`, `create_task_project`, `create_task`,
-`record_entry`, etc.). A host can follow the returned plan, but the API rechecks context versions
+`record_tracking_entry`, etc.). A host can follow the returned plan, but the API rechecks context versions
 and returns a structured conflict if names, revisions, time, permissions, or open occurrences
 changed after preview.
 

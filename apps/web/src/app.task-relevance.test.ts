@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import type { Task, TaskListQuery } from "@personal-os/domain";
-import * as appModule from "./app.js";
+import { loadAllTaskPages, selectTodayTasks } from "./app.js";
+import { loadAllTaskContainerPages } from "./features/tasks/page.js";
 
 const taskBase: Task = {
   cancelledAt: null,
@@ -43,26 +44,8 @@ function task(sequence: number, values: Partial<Task> = {}): Task {
   };
 }
 
-type AppTaskHelpers = {
-  loadAllTaskPages: (
-    loadPage: (query: Partial<TaskListQuery>) => Promise<{
-      items: Task[];
-      nextCursor: string | null;
-    }>,
-    query: Partial<TaskListQuery>,
-  ) => Promise<{ items: Task[]; nextCursor: null }>;
-  selectTodayTasks: (
-    tasks: Task[],
-    current: Date,
-    timeZone: string,
-  ) => { overdue: Task[]; today: Task[] };
-};
-
-const helpers = appModule as typeof appModule & Partial<AppTaskHelpers>;
-
 describe("Task relevance in shared web surfaces", () => {
   it("loads every open Task page for exact badge and workspace counts", async () => {
-    expect(helpers.loadAllTaskPages).toBeTypeOf("function");
     const first = Array.from({ length: 100 }, (_, index) => task(index + 1));
     const older = Array.from({ length: 31 }, (_, index) =>
       task(index + 101, {
@@ -73,10 +56,10 @@ describe("Task relevance in shared web surfaces", () => {
       query.cursor ? { items: older, nextCursor: null } : { items: first, nextCursor: "page-2" },
     );
 
-    const result = await helpers.loadAllTaskPages?.(loadPage, { lifecycle: "open" });
+    const result = await loadAllTaskPages(loadPage, { lifecycle: "open" });
 
-    expect(result?.items).toHaveLength(131);
-    expect(result?.items.filter((candidate) => candidate.dueAt !== null)).toHaveLength(1);
+    expect(result.items).toHaveLength(131);
+    expect(result.items.filter((candidate) => candidate.dueAt !== null)).toHaveLength(1);
     expect(loadPage).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ cursor: "page-2", lifecycle: "open", limit: 100 }),
@@ -84,17 +67,15 @@ describe("Task relevance in shared web surfaces", () => {
   });
 
   it("guards a repeated Task cursor instead of looping or returning a false total", async () => {
-    expect(helpers.loadAllTaskPages).toBeTypeOf("function");
     const loadPage = vi.fn(async () => ({ items: [task(1)], nextCursor: "repeat" }));
 
-    await expect(helpers.loadAllTaskPages?.(loadPage, { lifecycle: "open" })).rejects.toThrow(
+    await expect(loadAllTaskPages(loadPage, { lifecycle: "open" })).rejects.toThrow(
       "repeated cursor",
     );
     expect(loadPage).toHaveBeenCalledTimes(2);
   });
 
   it("selects only overdue or locally due/reserved Tasks across a timezone boundary", () => {
-    expect(helpers.selectTodayTasks).toBeTypeOf("function");
     const current = new Date("2026-08-12T03:30:00.000Z"); // Aug 11, 11:30 PM in New York.
     const overdue = task(1, { dueAt: "2026-08-12T02:30:00.000Z" });
     const reservedToday = task(2, { scheduledAt: "2026-08-12T02:00:00.000Z" });
@@ -105,7 +86,7 @@ describe("Task relevance in shared web surfaces", () => {
     const reservedTomorrow = task(5, { scheduledAt: "2026-08-12T05:00:00.000Z" });
     const undated = task(6);
 
-    const selected = helpers.selectTodayTasks?.(
+    const selected = selectTodayTasks(
       [
         overdue,
         reservedToday,
@@ -118,18 +99,24 @@ describe("Task relevance in shared web surfaces", () => {
       "America/New_York",
     );
 
-    expect(selected?.overdue.map(({ id }) => id)).toEqual([overdue.id]);
-    expect(selected?.today.map(({ id }) => id)).toEqual([reservedToday.id, dueToday.id]);
+    expect(selected.overdue.map(({ id }) => id)).toEqual([overdue.id]);
+    expect(selected.today.map(({ id }) => id)).toEqual([reservedToday.id, dueToday.id]);
   });
 
   it("includes a scheduled-today Task even when it has no deadline", () => {
-    expect(helpers.selectTodayTasks).toBeTypeOf("function");
     const reserved = task(1, { scheduledAt: "2026-08-12T15:00:00.000Z" });
 
     expect(
-      helpers
-        .selectTodayTasks?.([reserved], new Date("2026-08-12T14:00:00.000Z"), "UTC")
-        .today.map(({ id }) => id),
+      selectTodayTasks([reserved], new Date("2026-08-12T14:00:00.000Z"), "UTC").today.map(
+        ({ id }) => id,
+      ),
     ).toEqual([reserved.id]);
+  });
+
+  it("guards repeated Task container cursors instead of looping forever", async () => {
+    const loadPage = vi.fn(async () => ({ items: ["container"], nextCursor: "repeat" }));
+
+    await expect(loadAllTaskContainerPages(loadPage)).rejects.toThrow("repeated cursor");
+    expect(loadPage).toHaveBeenCalledTimes(2);
   });
 });

@@ -52,7 +52,32 @@
                 "items": {
                   "type": "object",
                   "required": ["type"],
-                  "properties": { "type": { "type": "string", "minLength": 1 } }
+                  "properties": {
+                    "type": {
+                      "enum": [
+                        "answer_check_in",
+                        "complete_project",
+                        "complete_task",
+                        "correct_tracking_entry",
+                        "create_prompt",
+                        "create_prompt_rule",
+                        "create_task",
+                        "create_task_list",
+                        "create_task_project",
+                        "create_tracker",
+                        "create_tracking_goal",
+                        "expire_check_in",
+                        "mark_check_in_not_applicable",
+                        "move_project",
+                        "move_task",
+                        "query_project_tasks",
+                        "query_tracking_entries",
+                        "record_tracking_entry",
+                        "skip_check_in",
+                        "update_tracker"
+                      ]
+                    }
+                  }
                 }
               },
               "reasonCode": { "type": "string", "pattern": "^[a-z0-9_]+$" },

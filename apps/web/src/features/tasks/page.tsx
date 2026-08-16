@@ -630,26 +630,36 @@ function taskDescription(task: Task, list?: TaskList, project?: TaskProject): st
   return details.length > 0 ? details.join(" · ") : null;
 }
 
-export async function listAllTaskLists() {
-  const items: TaskList[] = [];
-  let cursor: string | null = null;
-  do {
-    const page = await api.listTaskLists({ limit: 100, ...(cursor ? { cursor } : {}) });
+const maximumTaskContainerPages = 100;
+
+export async function loadAllTaskContainerPages<T>(
+  loadPage: (query: { cursor?: string; limit: number }) => Promise<{
+    items: T[];
+    nextCursor: string | null;
+  }>,
+): Promise<{ items: T[]; nextCursor: null }> {
+  const items: T[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (let pageNumber = 0; pageNumber < maximumTaskContainerPages; pageNumber += 1) {
+    const page = await loadPage({ limit: 100, ...(cursor ? { cursor } : {}) });
     items.push(...page.items);
+    if (page.nextCursor === null) return { items, nextCursor: null };
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("Task container pagination returned a repeated cursor.");
+    }
+    seenCursors.add(page.nextCursor);
     cursor = page.nextCursor;
-  } while (cursor);
-  return { items, nextCursor: null };
+  }
+  throw new Error(`Task container pagination exceeded ${maximumTaskContainerPages} pages.`);
+}
+
+export async function listAllTaskLists() {
+  return loadAllTaskContainerPages<TaskList>(api.listTaskLists);
 }
 
 export async function listAllTaskProjects() {
-  const items: TaskProject[] = [];
-  let cursor: string | null = null;
-  do {
-    const page = await api.listTaskProjects({ limit: 100, ...(cursor ? { cursor } : {}) });
-    items.push(...page.items);
-    cursor = page.nextCursor;
-  } while (cursor);
-  return { items, nextCursor: null };
+  return loadAllTaskContainerPages<TaskProject>(api.listTaskProjects);
 }
 
 function taskLifecycleLabel(task: Task) {

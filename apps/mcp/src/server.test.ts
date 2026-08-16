@@ -758,7 +758,12 @@ describe("ilo MCP server", () => {
     ]);
     const previewNames = new Set(["preview_task_project_move", "preview_task_move"]);
     const createNames = new Set(["create_task_list", "create_task_project", "create_task"]);
-    const destructiveNames = new Set(["archive_task_list", "archive_task_project", "trash_task"]);
+    const destructiveNames = new Set([
+      "archive_task_list",
+      "archive_task_project",
+      "move_task_project",
+      "trash_task",
+    ]);
     for (const tool of taskTools) {
       const isRead = readNames.has(tool.name);
       const isPreview = previewNames.has(tool.name);

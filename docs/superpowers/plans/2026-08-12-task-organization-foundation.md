@@ -4,7 +4,7 @@
 
 **Goal:** Ship a clean Tasks workspace with protected Inbox organization, Lists, Projects, canonical Task lifecycle and timing, revision-safe mutations, and a complete truthful MCP surface without losing or silently reinterpreting any existing task.
 
-**Architecture:** `packages/domain` owns the final List, Project, and Task contracts. PostgreSQL adds `task_lists` and `task_projects`, then expands the existing mixed `reminders` table with Task-only organization, lifecycle, revision, and idempotency columns plus kind-sensitive constraints. Migration `0054` creates one Inbox per user and upgrades every existing Task in place without changing its ID, timing, or audit timestamps. The API treats the canonical Task columns as authority and exposes the old mixed status only as bounded review metadata. Physical Task extraction happens later, in the Prompt/reminder compatibility plan, when the remaining reminder rows have an explicit destination and no dual-write period is required.
+**Architecture:** `packages/domain` owns the final List, Project, and Task contracts. PostgreSQL adds `task_lists` and `task_projects`, then expands the existing mixed `reminders` table with Task-only organization, lifecycle, revision, and idempotency columns plus kind-sensitive constraints. Migration `0055` creates one Inbox per user and upgrades every existing Task in place without changing its ID, timing, or audit timestamps. The API treats the canonical Task columns as authority and exposes the old mixed status only as bounded review metadata. Physical Task extraction happens later, in the Prompt/reminder compatibility plan, when the remaining reminder rows have an explicit destination and no dual-write period is required.
 
 **Tech Stack:** TypeScript, Zod, Hono, Drizzle/PostgreSQL, React, TanStack Query, React Router, MCP, Vitest, Playwright.
 
@@ -183,7 +183,7 @@ Require checks, indexes, and foreign keys for:
 - Inbox immutability triggers;
 - automatic Inbox creation after direct user insertion.
 
-Build a `0053` fixture containing open Inbox/Next/Scheduled Tasks, completed and cancelled Tasks, a trashed Task, and ordinary reminders. Apply `0054` and assert every Task ID and material field is preserved, every upgraded Task points to that user's Inbox, lifecycle mapping is exact, legacy status is retained, and reminder rows receive no Task-only values.
+Build a `0054` fixture containing open Inbox/Next/Scheduled Tasks, completed and cancelled Tasks, a trashed Task, and ordinary reminders. Apply `0055` and assert every Task ID and material field is preserved, every upgraded Task points to that user's Inbox, lifecycle mapping is exact, legacy status is retained, and reminder rows receive no Task-only values.
 
 - [ ] **Step 2: Run and verify RED**
 
@@ -194,7 +194,7 @@ pnpm exec vitest run packages/database/src/schema.test.ts \
   apps/api/src/task-organization-migration.integration.test.ts
 ```
 
-Expected: FAIL because migration `0054`, both organization tables, and the expanded Task columns are absent.
+Expected: FAIL because migration `0055`, both organization tables, and the expanded Task columns are absent.
 
 - [ ] **Step 3: Add exact Drizzle tables**
 
@@ -206,7 +206,7 @@ Expand `reminders` with nullable `taskListId`, `taskProjectId`, `taskWhy`, `task
 
 Use composite foreign keys so a Project and Task cannot cross user or List boundaries. Kind-sensitive checks prevent ordinary reminders from acquiring Task organization or lifecycle. Use partial unique indexes that include archived records but exclude only soft-deleted records, matching the approved name-reuse rule.
 
-- [ ] **Step 4: Implement migration `0054`**
+- [ ] **Step 4: Implement migration `0055`**
 
 The migration must:
 

@@ -109,7 +109,7 @@ export const iloToolCatalog = {
   cancel_task_project: write("tasks", ["tasks:write"]),
   archive_task_project: write("tasks", ["tasks:write"], { destructive: true }),
   preview_task_project_move: preview("tasks", ["tasks:read"]),
-  move_task_project: write("tasks", ["tasks:write"]),
+  move_task_project: write("tasks", ["tasks:write"], { destructive: true }),
   list_tasks: read("tasks", ["tasks:read"]),
   get_task: read("tasks", ["tasks:read"]),
   create_task: write("tasks", ["tasks:write"], { idempotent: true }),

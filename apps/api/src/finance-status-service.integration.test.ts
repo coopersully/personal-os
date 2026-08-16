@@ -280,6 +280,37 @@ describe.sequential("Finance status service", () => {
       freshness: { state: "current" },
     });
 
+    for (const lastSyncedAt of [new Date(now.getTime() - 24 * 60 * 60 * 1_000 - 1), null]) {
+      await database.db
+        .update(financeProviderItems)
+        .set({ lastSyncedAt, syncState: "current" })
+        .where(eq(financeProviderItems.id, item.id));
+      await expect(
+        service().getFinanceStatus(userId, { type: "all_outstanding" }),
+      ).resolves.toMatchObject({
+        details: {
+          accounts: {
+            current: 0,
+            items: expect.arrayContaining([
+              expect.objectContaining({
+                lastSyncedAt: lastSyncedAt?.toISOString() ?? null,
+                synchronization: expect.objectContaining({ state: "stale" }),
+              }),
+            ]),
+            providerItems: [
+              expect.objectContaining({
+                synchronization: expect.objectContaining({ state: "stale" }),
+              }),
+            ],
+            retrying: 0,
+            stale: 1,
+          },
+          health: { confidence: "provisional" },
+        },
+        freshness: { blockers: [], state: "stale" },
+      });
+    }
+
     await database.db
       .update(financeProviderItems)
       .set({

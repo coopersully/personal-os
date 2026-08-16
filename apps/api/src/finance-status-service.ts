@@ -111,11 +111,25 @@ function synchronization(source: SynchronizationSource) {
   };
 }
 
+function effectiveSynchronization(source: SynchronizationSource, asOf: Date, manual = false) {
+  const value = synchronization(source);
+  if (
+    !manual &&
+    value.state === "current" &&
+    (source.lastSyncedAt === null ||
+      asOf.getTime() - source.lastSyncedAt.getTime() > 24 * 60 * 60 * 1_000)
+  ) {
+    return { ...value, state: "stale" as const };
+  }
+  return value;
+}
+
 function serializeAccount(
   row: typeof financeAccounts.$inferSelect,
-  item?: typeof financeProviderItems.$inferSelect,
+  source?: SynchronizationSource,
+  sourceSynchronization?: ReturnType<typeof synchronization>,
 ): FinanceAccount {
-  const source = item ?? row;
+  const synchronizationSource = source ?? row;
   const legacyPlaid = row.provider === "plaid" && row.providerItemRecordId === null;
   return {
     balance: row.balance === null ? null : row.balance / 100,
@@ -124,11 +138,13 @@ function serializeAccount(
     id: row.id,
     institution: row.institution,
     kind: row.kind,
-    lastSyncedAt: legacyPlaid ? null : iso(source.lastSyncedAt),
+    lastSyncedAt: legacyPlaid ? null : iso(synchronizationSource.lastSyncedAt),
     name: row.name,
     provider: row.provider,
     status: row.status,
-    synchronization: legacyPlaid ? migrationBlockedSynchronization : synchronization(source),
+    synchronization: legacyPlaid
+      ? migrationBlockedSynchronization
+      : (sourceSynchronization ?? synchronization(synchronizationSource)),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -366,26 +382,40 @@ export function createFinanceStatusService({ db, now }: Options) {
             linked.push(account.id);
             accountIdsByItem.set(account.providerItemRecordId, linked);
           }
+          const providerItemSynchronizationById = new Map(
+            providerItems.map((item) => [item.id, effectiveSynchronization(item, asOfDate)]),
+          );
+          const providerItemSynchronization = (itemId: string) => {
+            const value = providerItemSynchronizationById.get(itemId);
+            if (!value)
+              throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+            return value;
+          };
           const serializedAccounts = accounts.map((account) =>
             serializeAccount(
               account,
               account.providerItemRecordId
                 ? providerItemById.get(account.providerItemRecordId)
                 : undefined,
+              account.providerItemRecordId
+                ? providerItemSynchronizationById.get(account.providerItemRecordId)
+                : effectiveSynchronization(account, asOfDate, account.provider === "manual"),
             ),
           );
           const sourceSynchronizations = [
             ...providerItems.map((item) => ({
               accountIds: accountIdsByItem.get(item.id) ?? [],
-              manual: false,
-              synchronization: synchronization(item),
+              synchronization: providerItemSynchronization(item.id),
             })),
             ...accounts
               .filter((account) => account.provider !== "plaid")
               .map((account) => ({
                 accountIds: [account.id],
-                manual: account.provider === "manual",
-                synchronization: synchronization(account),
+                synchronization: effectiveSynchronization(
+                  account,
+                  asOfDate,
+                  account.provider === "manual",
+                ),
               })),
             ...accounts
               .filter(
@@ -393,7 +423,6 @@ export function createFinanceStatusService({ db, now }: Options) {
               )
               .map((account) => ({
                 accountIds: [account.id],
-                manual: false,
                 synchronization: migrationBlockedSynchronization,
               })),
           ];
@@ -429,12 +458,7 @@ export function createFinanceStatusService({ db, now }: Options) {
             asOfDate,
           );
           const currentCount = sourceSynchronizations.filter(
-            (source) =>
-              source.synchronization.state === "current" &&
-              (source.manual ||
-                (source.synchronization.lastSuccessAt !== null &&
-                  asOfDate.getTime() - new Date(source.synchronization.lastSuccessAt).getTime() <=
-                    24 * 60 * 60 * 1_000)),
+            (source) => source.synchronization.state === "current",
           ).length;
           const blockedSources = sourceSynchronizations.filter(
             (source) => source.synchronization.state === "blocked",
@@ -571,7 +595,7 @@ export function createFinanceStatusService({ db, now }: Options) {
                   accountIds: (accountIdsByItem.get(item.id) ?? []).toSorted(),
                   id: item.id,
                   provider: item.provider,
-                  synchronization: synchronization(item),
+                  synchronization: providerItemSynchronization(item.id),
                 })),
                 retrying: retryingCount,
                 stale: staleCount,

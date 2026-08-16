@@ -253,17 +253,24 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
     const durableEffects = finances.summarizeMaintenanceEffectsForRun
       ? await finances.summarizeMaintenanceEffectsForRun(run.userId, run.id)
       : null;
+    const reportedHealth = health?.applicability
+      ? {
+          applicability: health.applicability,
+          confidence: health.confidence ?? verificationStatus.details.health.confidence,
+          refreshed: health.refreshed ?? false,
+        }
+      : {
+          applicability: "not_run" as const,
+          confidence: "insufficient" as const,
+          refreshed: false,
+        };
     return {
       applied: {
         categorizations: durableEffects?.categorizations ?? categorization?.applied ?? 0,
         transfers: durableEffects?.transfers ?? reconciliation?.transfers ?? 0,
       },
       asOf: now().toISOString(),
-      health: {
-        applicability: health?.applicability ?? "not_run",
-        confidence: health?.confidence ?? verificationStatus.details.health.confidence,
-        refreshed: health?.refreshed ?? false,
-      },
+      health: reportedHealth,
       questions: {
         created:
           questions === undefined

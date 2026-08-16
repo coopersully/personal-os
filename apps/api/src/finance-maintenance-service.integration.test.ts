@@ -22,7 +22,6 @@ import { AppError } from "./errors.js";
 import {
   createFinanceMaintenanceService,
   type FinanceMaintenanceOperations,
-  financeMaintenanceSteps,
 } from "./finance-maintenance-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -1233,7 +1232,18 @@ describe.sequential("Finance maintenance service", () => {
       maintenance: workspace,
       now: () => now,
       status: {
-        getFinanceStatus: async () => status(undefined, { blocked: sourceBlocked }),
+        getFinanceStatus: async () => {
+          const observed = status(undefined, { blocked: sourceBlocked });
+          return sourceBlocked
+            ? {
+                ...observed,
+                details: {
+                  ...observed.details,
+                  health: { ...observed.details.health, confidence: "reliable" },
+                },
+              }
+            : observed;
+        },
       },
     });
     const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
@@ -1241,9 +1251,23 @@ describe.sequential("Finance maintenance service", () => {
 
     await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
       retryAt: null,
-      settledResult: { health: { applicability: "not_run", refreshed: false } },
+      settledResult: {
+        health: { applicability: "not_run", confidence: "insufficient", refreshed: false },
+      },
       status: "blocked",
     });
+    await expect(
+      database.db
+        .select({ settledResult: workspaceMaintenanceRuns.settledResult })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.id, run.id)),
+    ).resolves.toEqual([
+      {
+        settledResult: expect.objectContaining({
+          health: { applicability: "not_run", confidence: "insufficient", refreshed: false },
+        }),
+      },
+    ]);
     await expect(workspace.listStepRecords(run.id)).resolves.toEqual(
       expect.arrayContaining([expect.objectContaining({ status: "completed", step: "preflight" })]),
     );
@@ -1254,43 +1278,6 @@ describe.sequential("Finance maintenance service", () => {
     sourceBlocked = false;
     const recovered = await service.startOrResume(ownerId, { type: "all_outstanding" });
     expect(recovered).toMatchObject({ id: run.id, status: "queued" });
-  });
-
-  it("does not infer an unrecorded health applicability from an all-outstanding run", async () => {
-    const ownerId = await createUser("Finance missing health applicability");
-    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
-    const service = createFinanceMaintenanceService({
-      finances: operations(),
-      maintenance: workspace,
-      now: () => now,
-      status: { getFinanceStatus: async () => status() },
-    });
-    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
-    const claim = await workspace.claim(run.id);
-    if (!claim) throw new Error("Fixture maintenance run was not claimed.");
-    for (const step of financeMaintenanceSteps) {
-      await workspace.completeStep({
-        claimId: claim.claimId,
-        idempotencyKey: `finances:${run.rulebookVersion}:${step}`,
-        result: step === "health" ? {} : { complete: true },
-        runId: run.id,
-        step,
-      });
-    }
-    await workspace.checkpointAndRelease({
-      checkpoint: { completedStep: "verify" },
-      claimId: claim.claimId,
-      runId: run.id,
-    });
-
-    await service.dispatchRun(run.id);
-
-    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
-      settledResult: {
-        health: { applicability: "not_run", confidence: "reliable", refreshed: false },
-      },
-      status: "completed",
-    });
   });
 
   it("blocks on a changed operative rulebook before the next mutation", async () => {

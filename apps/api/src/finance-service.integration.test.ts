@@ -2921,7 +2921,12 @@ describe.sequential("finance service", () => {
       principal: financeAgentPrincipal(userId),
       requestId: `maintenance:${runId}:health`,
     };
-    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await healthService.refreshCashflowForUser(
+      userId,
+      { type: "all_outstanding" },
+      maintenanceContext,
+      async () => {},
+    );
     const firstHealthRows = await database.pool.query(
       `SELECT id, updated_at FROM finance_income_streams WHERE user_id = $1
        UNION ALL
@@ -2944,7 +2949,12 @@ describe.sequential("finance service", () => {
       });
     }
     healthNow = new Date("2026-07-19T12:01:00.000Z");
-    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await healthService.refreshCashflowForUser(
+      userId,
+      { type: "all_outstanding" },
+      maintenanceContext,
+      async () => {},
+    );
     await expect(
       database.pool.query(
         `SELECT id, updated_at FROM finance_income_streams WHERE user_id = $1
@@ -2961,7 +2971,12 @@ describe.sequential("finance service", () => {
         .where(eq(auditEvents.requestId, maintenanceContext.requestId)),
     ).resolves.toHaveLength(2);
     healthNow = new Date("2026-09-01T12:00:00.000Z");
-    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await healthService.refreshCashflowForUser(
+      userId,
+      { type: "all_outstanding" },
+      maintenanceContext,
+      async () => {},
+    );
     const healthActionsAfterAlerts = await database.db
       .select({ action: auditEvents.action })
       .from(auditEvents)
@@ -2973,7 +2988,12 @@ describe.sequential("finance service", () => {
       "finance.recurring_refreshed",
     ]);
     healthNow = new Date("2026-09-01T12:01:00.000Z");
-    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await healthService.refreshCashflowForUser(
+      userId,
+      { type: "all_outstanding" },
+      maintenanceContext,
+      async () => {},
+    );
     await expect(
       database.db
         .select({ id: auditEvents.id })
@@ -3007,7 +3027,12 @@ describe.sequential("finance service", () => {
       },
     ]);
     healthNow = new Date("2026-09-02T12:00:00.000Z");
-    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await healthService.refreshCashflowForUser(
+      userId,
+      { type: "all_outstanding" },
+      maintenanceContext,
+      async () => {},
+    );
     const healthActionsAfterRecovery = await database.db
       .select({ action: auditEvents.action })
       .from(auditEvents)
@@ -3023,7 +3048,12 @@ describe.sequential("finance service", () => {
       "finance.recurring_refreshed",
     ]);
     healthNow = new Date("2026-09-02T12:01:00.000Z");
-    await healthService.refreshCashflowForUser(userId, maintenanceContext, async () => {});
+    await healthService.refreshCashflowForUser(
+      userId,
+      { type: "all_outstanding" },
+      maintenanceContext,
+      async () => {},
+    );
     await expect(
       database.db
         .select({ id: auditEvents.id })
@@ -3066,6 +3096,150 @@ describe.sequential("finance service", () => {
     await expect(service.backfillCashflowInsights()).resolves.toMatchObject({
       processed: expect.any(Number),
     });
+  });
+
+  it("audits manual cashflow alert creation and resolution from stable configured-record evidence", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Configured cashflow evidence",
+      email: `configured-cashflow-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const account = await service.createAccount(
+      { balance: 0, institution: "Manual", kind: "cash", name: "Checking", provider: "manual" },
+      { principal: financePrincipal(userId), requestId: "configured-cashflow-account" },
+    );
+    const [stream] = await database.db
+      .insert(financeIncomeStreams)
+      .values({
+        accountId: account.id,
+        amountTolerance: 10_000,
+        cadence: "monthly",
+        confidence: 10_000,
+        displayName: "Configured paycheck",
+        expectedAmount: 250_000,
+        nextExpectedDate: "2026-07-01",
+        payer: "Configured employer",
+        source: "user",
+        status: "active",
+        userId,
+      })
+      .returning();
+    const [obligation] = await database.db
+      .insert(financeRecurringObligations)
+      .values({
+        accountId: account.id,
+        amountTolerance: 500,
+        cadence: "monthly",
+        confidence: 10_000,
+        displayName: "Configured bill",
+        expectedAmount: 12_000,
+        kind: "bill",
+        merchant: "Configured utility",
+        nextExpectedDate: "2026-07-01",
+        source: "user",
+        status: "active",
+        userId,
+      })
+      .returning();
+    if (!stream || !obligation) throw new Error("Configured cashflow fixtures were not created.");
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "all_outstanding" },
+      status: "running",
+      userId,
+    });
+    const maintenanceContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:health",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(userId),
+      requestId: `maintenance:${runId}:health`,
+    };
+
+    await service.refreshCashflowForUser(userId, { type: "all_outstanding" }, maintenanceContext);
+    await expect(
+      database.db
+        .select({ action: auditEvents.action, after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, maintenanceContext.requestId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "finance.alert_queued",
+          after: expect.objectContaining({
+            source: expect.objectContaining({
+              provider: "local",
+              remoteId: stream.id,
+              sourceType: "finance_income_stream",
+            }),
+          }),
+        }),
+        expect.objectContaining({
+          action: "finance.alert_queued",
+          after: expect.objectContaining({
+            source: expect.objectContaining({
+              provider: "local",
+              remoteId: obligation.id,
+              sourceType: "finance_recurring_obligation",
+            }),
+          }),
+        }),
+      ]),
+    );
+    await service.refreshCashflowForUser(userId, { type: "all_outstanding" }, maintenanceContext);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, maintenanceContext.requestId)),
+    ).resolves.toHaveLength(2);
+
+    await database.db
+      .update(financeIncomeStreams)
+      .set({ nextExpectedDate: "2026-08-01", updatedAt: new Date(now.getTime() + 1_000) })
+      .where(eq(financeIncomeStreams.id, stream.id));
+    await database.db
+      .update(financeRecurringObligations)
+      .set({ nextExpectedDate: "2026-08-01", updatedAt: new Date(now.getTime() + 1_000) })
+      .where(eq(financeRecurringObligations.id, obligation.id));
+    await service.refreshCashflowForUser(userId, { type: "all_outstanding" }, maintenanceContext);
+    const resolvedAudits = await database.db
+      .select({ action: auditEvents.action, after: auditEvents.after })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, maintenanceContext.requestId));
+    expect(resolvedAudits.filter((item) => item.action === "finance.alert_resolved")).toEqual([
+      expect.objectContaining({
+        after: expect.objectContaining({
+          source: expect.objectContaining({ sourceType: "finance_income_stream" }),
+        }),
+      }),
+      expect.objectContaining({
+        after: expect.objectContaining({
+          source: expect.objectContaining({ sourceType: "finance_recurring_obligation" }),
+        }),
+      }),
+    ]);
+    await service.refreshCashflowForUser(userId, { type: "all_outstanding" }, maintenanceContext);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, maintenanceContext.requestId)),
+    ).resolves.toHaveLength(4);
   });
 
   it("calculates budget pace across complete display periods with neutral blank cells", async () => {
@@ -4313,7 +4487,12 @@ describe.sequential("finance service", () => {
     );
 
     await expect(
-      service.syncDueAccountsForUser(maintenanceUser.id, async () => {}, maintenanceContext),
+      service.syncDueAccountsForUser(
+        maintenanceUser.id,
+        { type: "all_outstanding" },
+        maintenanceContext,
+        async () => {},
+      ),
     ).resolves.toMatchObject({ failed: 0, skipped: 1, succeeded: 0 });
     await expect(
       database.db
@@ -4346,6 +4525,343 @@ describe.sequential("finance service", () => {
         [maintenanceUser.id],
       ),
     ).resolves.toMatchObject({ rows: effectsBefore.rows });
+  });
+
+  it("keeps scoped maintenance synchronization and health mutations inside the requested evidence", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Scoped provider maintenance",
+      email: `scoped-provider-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    let syncCall = 0;
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "sandbox",
+      fetch: async (input) => {
+        switch (new URL(String(input)).pathname) {
+          case "/item/public_token/exchange":
+            return Response.json({ access_token: "scope-access", item_id: "scope-item" });
+          case "/accounts/get":
+            return Response.json({
+              accounts: [
+                {
+                  account_id: "scope-account-one",
+                  balances: { current: 100, iso_currency_code: "USD" },
+                  name: "Scope checking",
+                  official_name: null,
+                },
+                {
+                  account_id: "scope-account-two",
+                  balances: { current: 200, iso_currency_code: "USD" },
+                  name: "Unrelated savings",
+                  official_name: null,
+                },
+              ],
+            });
+          case "/transactions/sync": {
+            syncCall += 1;
+            if (syncCall === 3) {
+              return Response.json(
+                { error_message: "Temporary provider failure" },
+                { status: 500 },
+              );
+            }
+            const targetPass = syncCall > 1;
+            return Response.json({
+              added: targetPass
+                ? [
+                    {
+                      account_id: "scope-account-one",
+                      amount: 10,
+                      date: "2026-07-19",
+                      iso_currency_code: "USD",
+                      merchant_name: "Target account evidence",
+                      name: "TARGET ACCOUNT EVIDENCE",
+                      pending: false,
+                      personal_finance_category: null,
+                      transaction_id: "scope-target-one",
+                    },
+                    {
+                      account_id: "scope-account-two",
+                      amount: 20,
+                      date: "2026-07-19",
+                      iso_currency_code: "USD",
+                      merchant_name: "Unrelated account evidence",
+                      name: "UNRELATED ACCOUNT EVIDENCE",
+                      pending: false,
+                      personal_finance_category: null,
+                      transaction_id: "scope-target-two",
+                    },
+                  ]
+                : [
+                    {
+                      account_id: "scope-account-one",
+                      amount: 75,
+                      date: "2026-07-01",
+                      iso_currency_code: "USD",
+                      merchant_name: "Outside window outgoing",
+                      name: "OUTSIDE WINDOW OUTGOING",
+                      pending: false,
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_OUT_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_OUT",
+                      },
+                      transaction_id: "scope-window-out",
+                    },
+                    {
+                      account_id: "scope-account-two",
+                      amount: -75,
+                      date: "2026-07-01",
+                      iso_currency_code: "USD",
+                      merchant_name: "Outside window incoming",
+                      name: "OUTSIDE WINDOW INCOMING",
+                      pending: false,
+                      personal_finance_category: {
+                        confidence_level: "VERY_HIGH",
+                        detailed: "TRANSFER_IN_ACCOUNT_TRANSFER",
+                        primary: "TRANSFER_IN",
+                      },
+                      transaction_id: "scope-window-in",
+                    },
+                  ],
+              has_more: false,
+              modified: [],
+              next_cursor: targetPass ? "scope-target-cursor" : "scope-window-cursor",
+              removed: [],
+            });
+          }
+          default:
+            return Response.json({}, { status: 404 });
+        }
+      },
+      secret: "secret",
+    });
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid,
+    });
+    const accounts = await service.exchangePlaidToken(
+      { institution: "Scope Bank", publicToken: "scope-token" },
+      { principal: financePrincipal(userId), requestId: "scope-connect" },
+    );
+    const targetAccount = accounts.find((account) => account.name === "Scope checking");
+    const unrelatedAccount = accounts.find((account) => account.name === "Unrelated savings");
+    if (!targetAccount || !unrelatedAccount)
+      throw new Error("Scoped Plaid accounts were not saved.");
+    const windowScope = { type: "window", start: "2026-07-10", end: "2026-07-19" } as const;
+    const windowRunId = crypto.randomUUID();
+    const windowClaimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: windowRunId,
+      leaseClaimId: windowClaimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: windowScope,
+      status: "running",
+      userId,
+    });
+    const windowContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:synchronize",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId: windowRunId,
+      },
+      maintenanceClaim: { claimId: windowClaimId, runId: windowRunId },
+      principal: financeAgentPrincipal(userId),
+      requestId: `maintenance:${windowRunId}:synchronize`,
+    };
+    const unrelatedUserId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: unrelatedUserId,
+      displayName: "Unrelated sync health",
+      email: `unrelated-sync-health-${unrelatedUserId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const unrelatedUserAccount = await service.createAccount(
+      { balance: 0, institution: "Other", name: "Other wallet", provider: "manual" },
+      { principal: financePrincipal(unrelatedUserId), requestId: "unrelated-sync-health" },
+    );
+    await database.db
+      .update(financeAccounts)
+      .set({ nextSyncAt: null, syncState: "stale" })
+      .where(eq(financeAccounts.id, unrelatedUserAccount.id));
+
+    await expect(
+      service.syncDueAccountsForUser(userId, windowScope, windowContext, async () => {}),
+    ).resolves.toEqual({ attempted: 1, failed: 0, recovered: 0, skipped: 0, succeeded: 1 });
+    await expect(
+      database.db
+        .select({
+          direction: financeTransactions.direction,
+          reconciliationStatus: financeTransactions.reconciliationStatus,
+          transferGroupId: financeTransactions.transferGroupId,
+        })
+        .from(financeTransactions)
+        .where(
+          inArray(financeTransactions.providerTransactionId, [
+            "scope-window-out",
+            "scope-window-in",
+          ]),
+        )
+        .orderBy(financeTransactions.providerTransactionId),
+    ).resolves.toEqual([
+      { direction: "income", reconciliationStatus: "candidate", transferGroupId: null },
+      { direction: "expense", reconciliationStatus: "candidate", transferGroupId: null },
+    ]);
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.requestId, windowContext.requestId),
+            eq(auditEvents.action, "finance.transfer_reconciled"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({ nextSyncAt: financeAccounts.nextSyncAt, syncState: financeAccounts.syncState })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, unrelatedUserAccount.id)),
+    ).resolves.toEqual([{ nextSyncAt: null, syncState: "stale" }]);
+
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ leaseClaimId: null, leaseExpiresAt: null, status: "completed" })
+      .where(eq(workspaceMaintenanceRuns.id, windowRunId));
+    await database.db
+      .update(financeAccounts)
+      .set({ nextSyncAt: now, syncState: "stale" })
+      .where(inArray(financeAccounts.id, [targetAccount.id, unrelatedAccount.id]));
+    await database.db
+      .update(financeAccounts)
+      .set({ nextSyncAt: null, syncState: "stale" })
+      .where(eq(financeAccounts.id, unrelatedAccount.id));
+    const targetScope = {
+      type: "target",
+      entityType: "finance_account",
+      id: targetAccount.id,
+    } as const;
+    const targetRunId = crypto.randomUUID();
+    const targetClaimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: targetRunId,
+      leaseClaimId: targetClaimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: targetScope,
+      status: "running",
+      userId,
+    });
+    const targetContext = {
+      ...windowContext,
+      maintenance: { ...windowContext.maintenance, runId: targetRunId },
+      maintenanceClaim: { claimId: targetClaimId, runId: targetRunId },
+      requestId: `maintenance:${targetRunId}:synchronize`,
+    };
+    await expect(
+      service.syncDueAccountsForUser(userId, targetScope, targetContext, async () => {}),
+    ).resolves.toEqual({ attempted: 1, failed: 0, recovered: 0, skipped: 0, succeeded: 1 });
+    await expect(
+      database.db
+        .select({
+          accountId: financeTransactions.accountId,
+          providerId: financeTransactions.providerTransactionId,
+        })
+        .from(financeTransactions)
+        .where(
+          inArray(financeTransactions.providerTransactionId, [
+            "scope-target-one",
+            "scope-target-two",
+          ]),
+        ),
+    ).resolves.toEqual([{ accountId: targetAccount.id, providerId: "scope-target-one" }]);
+    await expect(
+      database.db
+        .select({ nextSyncAt: financeAccounts.nextSyncAt, syncState: financeAccounts.syncState })
+        .from(financeAccounts)
+        .where(eq(financeAccounts.id, unrelatedAccount.id)),
+    ).resolves.toEqual([{ nextSyncAt: null, syncState: "stale" }]);
+
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({ leaseClaimId: null, leaseExpiresAt: null, status: "completed" })
+      .where(eq(workspaceMaintenanceRuns.id, targetRunId));
+    await database.db
+      .update(financeAccounts)
+      .set({ nextSyncAt: now, syncState: "stale" })
+      .where(eq(financeAccounts.id, targetAccount.id));
+    const failureRunId = crypto.randomUUID();
+    const failureClaimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: failureRunId,
+      leaseClaimId: failureClaimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: targetScope,
+      status: "running",
+      userId,
+    });
+    const failureContext = {
+      ...targetContext,
+      maintenance: { ...targetContext.maintenance, runId: failureRunId },
+      maintenanceClaim: { claimId: failureClaimId, runId: failureRunId },
+      requestId: `maintenance:${failureRunId}:synchronize`,
+    };
+    await expect(
+      service.syncDueAccountsForUser(userId, targetScope, failureContext, async () => {}),
+    ).resolves.toEqual({ attempted: 1, failed: 1, recovered: 0, skipped: 0, succeeded: 0 });
+    await expect(
+      database.db
+        .select({ id: financeAccounts.id, syncState: financeAccounts.syncState })
+        .from(financeAccounts)
+        .where(inArray(financeAccounts.id, [targetAccount.id, unrelatedAccount.id]))
+        .orderBy(financeAccounts.id),
+    ).resolves.toEqual(
+      [
+        { id: targetAccount.id, syncState: "retrying" },
+        { id: unrelatedAccount.id, syncState: "stale" },
+      ].toSorted((left, right) => left.id.localeCompare(right.id)),
+    );
+
+    const [stream] = await database.db
+      .insert(financeIncomeStreams)
+      .values({
+        accountId: unrelatedAccount.id,
+        amountTolerance: 100,
+        cadence: "monthly",
+        confidence: 10_000,
+        displayName: "Unrelated overdue income",
+        expectedAmount: 10_000,
+        nextExpectedDate: "2026-07-01",
+        payer: "Unrelated payer",
+        source: "user",
+        status: "active",
+        userId,
+      })
+      .returning();
+    if (!stream) throw new Error("Scoped cashflow fixture was not saved.");
+    await expect(
+      service.refreshCashflowForUser(userId, targetScope, targetContext, async () => {}),
+    ).resolves.toEqual({ refreshed: false });
+    await expect(
+      database.db
+        .select({ id: financeAlerts.id })
+        .from(financeAlerts)
+        .where(eq(financeAlerts.incomeStreamId, stream.id)),
+    ).resolves.toEqual([]);
   });
 
   it("fences reconciliation mutations when another runtime takes the maintenance run", async () => {
@@ -4624,6 +5140,22 @@ describe.sequential("finance service", () => {
         transferGroupId: crypto.randomUUID(),
         userId,
       },
+      {
+        accountId: account.id,
+        amount: 40_000,
+        category: "Transfers",
+        categorySource: "provider" as const,
+        direction: "transfer" as const,
+        merchant: "SoFi Vault Pending",
+        needsReview: false,
+        pending: true,
+        providerCategory: "TRANSFER_OUT",
+        providerDirection: "expense" as const,
+        providerTransactionId: "legacy-pending",
+        reconciliationStatus: "confirmed" as const,
+        transactionDate: "2026-07-01",
+        userId,
+      },
     ]);
     const runId = crypto.randomUUID();
     const claimId = crypto.randomUUID();
@@ -4682,7 +5214,7 @@ describe.sequential("finance service", () => {
       slices += 1;
       cursor = page.nextCursor;
     }
-    expect({ repaired, slices }).toEqual({ repaired: 205, slices: 3 });
+    expect({ repaired, slices }).toEqual({ repaired: 206, slices: 3 });
     const rows = await database.db
       .select()
       .from(financeTransactions)
@@ -4707,6 +5239,20 @@ describe.sequential("finance service", () => {
     expect(
       rows.find((row) => row.providerTransactionId === "legacy-invariant-matched"),
     ).toMatchObject({ direction: "transfer", needsReview: false, reconciliationStatus: "matched" });
+    const pendingRepair = rows.find((row) => row.providerTransactionId === "legacy-pending");
+    expect(pendingRepair).toMatchObject({
+      direction: "expense",
+      needsReview: true,
+      pending: true,
+      reconciliationStatus: "candidate",
+    });
+    if (!pendingRepair) throw new Error("The pending repair fixture was not found.");
+    await expect(
+      database.db
+        .select({ id: financeReviewCases.id })
+        .from(financeReviewCases)
+        .where(eq(financeReviewCases.transactionId, pendingRepair.id)),
+    ).resolves.toEqual([]);
     await expect(service.listOverview(userId, "2026-07")).resolves.toMatchObject({
       spendingThisMonth: 10_405.06,
     });
@@ -4716,12 +5262,32 @@ describe.sequential("finance service", () => {
       .where(eq(auditEvents.requestId, maintenanceContext.requestId));
     expect(
       repairAudits.filter((row) => row.action === "finance.transfer_heuristic_repaired"),
-    ).toHaveLength(205);
+    ).toHaveLength(206);
     expect(repairAudits.filter((row) => row.action === "finance.review_queued")).toHaveLength(205);
     expect(repairAudits[0]?.after).toMatchObject({
       maintenance: maintenanceContext.maintenance,
       source: { provider: "plaid", sourceType: "finance_transaction" },
     });
+    await expect(
+      service.summarizeMaintenanceEffectsForRun(userId, maintenanceContext.maintenance.runId),
+    ).resolves.toMatchObject({ heuristicTransfersRepaired: 206, questions: 205 });
+    await database.db
+      .update(financeTransactions)
+      .set({ pending: false, updatedAt: new Date(now.getTime() + 1_000) })
+      .where(eq(financeTransactions.id, pendingRepair.id));
+    await expect(
+      service.reconcileTransfersForUser(
+        userId,
+        { type: "target", entityType: "finance_transaction", id: pendingRepair.id },
+        maintenanceContext,
+      ),
+    ).resolves.toEqual({ paired: 0, transfers: 0 });
+    await expect(
+      database.db
+        .select({ reason: financeReviewCases.reason })
+        .from(financeReviewCases)
+        .where(eq(financeReviewCases.transactionId, pendingRepair.id)),
+    ).resolves.toEqual([{ reason: "possible_transfer" }]);
     await expect(
       service.repairHeuristicTransfersForUser(
         userId,
@@ -4803,6 +5369,91 @@ describe.sequential("finance service", () => {
         async () => {},
       ),
     ).resolves.toEqual({ complete: true, inspected: 0, nextCursor: null, repaired: 0 });
+  });
+
+  it("counts only newly created maintenance questions when an existing review is refreshed", async () => {
+    const userId = crypto.randomUUID();
+    await database.db.insert(users).values({
+      id: userId,
+      displayName: "Existing question refresh",
+      email: `existing-question-${userId}@example.com`,
+      passwordHash: "unused",
+      planningTimezone: "UTC",
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const userContext = {
+      principal: financePrincipal(userId),
+      requestId: "existing-question-fixture",
+    };
+    const account = await service.createAccount(
+      { balance: 0, institution: "Cash", kind: "cash", name: "Wallet", provider: "manual" },
+      userContext,
+    );
+    const item = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 17,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Unfamiliar purchase",
+        notes: null,
+      },
+      userContext,
+    );
+    await database.db.insert(financeReviewCases).values({
+      rationale: "An older review rationale.",
+      reason: "one_time",
+      status: "open",
+      transactionId: item.id,
+      userId,
+    });
+    const runId = crypto.randomUUID();
+    const claimId = crypto.randomUUID();
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      domain: "finances",
+      id: runId,
+      leaseClaimId: claimId,
+      leaseExpiresAt: new Date(Date.now() + 60_000),
+      rulebookVersion: "rules:v1",
+      scope: { type: "target", entityType: "finance_transaction", id: item.id },
+      status: "running",
+      userId,
+    });
+    const maintenanceContext = {
+      maintenance: {
+        idempotencyKey: "finances:rules:v1:questions",
+        policy: "approved_rule" as const,
+        rulebookVersion: "rules:v1",
+        runId,
+      },
+      maintenanceClaim: { claimId, runId },
+      principal: financeAgentPrincipal(userId),
+      requestId: `maintenance:${runId}:questions`,
+    };
+
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(
+        userId,
+        { type: "target", entityType: "finance_transaction", id: item.id },
+        maintenanceContext,
+      ),
+    ).resolves.toEqual({ created: 0, total: 1 });
+    await expect(
+      database.db
+        .select({ before: auditEvents.before })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.requestId, maintenanceContext.requestId),
+            eq(auditEvents.action, "finance.review_queued"),
+          ),
+        ),
+    ).resolves.toEqual([{ before: expect.objectContaining({ id: expect.any(String) }) }]);
+    await expect(service.summarizeMaintenanceEffectsForRun(userId, runId)).resolves.toMatchObject({
+      questions: 0,
+    });
   });
 
   it("bounds maintenance proposals and keeps ambiguous transfer matches as questions", async () => {
@@ -5366,6 +6017,7 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual({
       categorizations: 1,
       duplicateActions: 0,
+      heuristicTransfersRepaired: 0,
       questions: attributedQuestionCount,
       transfers: 2,
     });
@@ -5401,6 +6053,7 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual({
       categorizations: 1,
       duplicateActions: 3,
+      heuristicTransfersRepaired: 0,
       questions: attributedQuestionCount,
       transfers: 2,
     });

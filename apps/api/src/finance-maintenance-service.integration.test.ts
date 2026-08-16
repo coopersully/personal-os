@@ -17,7 +17,7 @@ import type {
   MaintenanceScope,
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import {
   createFinanceMaintenanceService,
@@ -275,6 +275,33 @@ describe.sequential("Finance maintenance service", () => {
     expect(questionEffects).toBe(2);
   });
 
+  it("prefers the authoritative question-step creation count over refreshed review audits", async () => {
+    const ownerId = await createUser("Finance refreshed question count");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const service = createFinanceMaintenanceService({
+      finances: operations({
+        refreshMaintenanceQuestionsForUser: async () => ({ created: 0, total: 1 }),
+        summarizeMaintenanceEffectsForRun: async () => ({
+          categorizations: 0,
+          duplicateActions: 0,
+          questions: 0,
+          transfers: 0,
+        }),
+      }),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status(undefined, { questions: 1 }) },
+    });
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
+
+    await service.dispatchRun(run.id);
+
+    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+      settledResult: { questions: { created: 0, total: 1 } },
+      status: "completed_with_questions",
+    });
+  });
+
   it("maintains a real Finance ledger and repeats with no duplicate mutations, questions, or audits", async () => {
     const ownerId = await createUser("Real Finance maintenance");
     const finances = createFinanceService({ db: database.db, now: () => now });
@@ -467,6 +494,7 @@ describe.sequential("Finance maintenance service", () => {
     await expect(finances.summarizeMaintenanceEffectsForRun(ownerId, run.id)).resolves.toEqual({
       categorizations: 2,
       duplicateActions: 0,
+      heuristicTransfersRepaired: 0,
       questions: 2,
       transfers: 2,
     });
@@ -669,35 +697,30 @@ describe.sequential("Finance maintenance service", () => {
     const financeOperations = operations({
       repairHeuristicTransfersForUser: async (_userId, _scope, cursor, context) => {
         repairCursors.push(cursor);
-        const [firstPage] = await database.db
+        const committedPages = await database.db
           .select({ id: auditEvents.id })
           .from(auditEvents)
           .where(
             and(
               eq(auditEvents.userId, ownerId),
               eq(auditEvents.action, "fixture.transfer_heuristic_repaired"),
-              eq(auditEvents.entityId, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
             ),
-          )
-          .limit(1);
-        const page = cursor ? 3 : firstPage ? 2 : 1;
-        const entityId =
-          page === 1
-            ? "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-            : page === 2
-              ? "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
-              : "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-        await database.db.insert(auditEvents).values({
-          action: "fixture.transfer_heuristic_repaired",
-          actorId: context.principal.actorId,
-          actorType: context.principal.actorType,
-          after: { maintenance: context.maintenance },
-          before: null,
-          entityId,
-          entityType: "finance_transaction",
-          requestId: context.requestId,
-          userId: ownerId,
-        });
+          );
+        const page = cursor ? 3 : committedPages.length >= 100 ? 2 : 1;
+        const pageSize = page === 3 ? 1 : 100;
+        await database.db.insert(auditEvents).values(
+          Array.from({ length: pageSize }, () => ({
+            action: "fixture.transfer_heuristic_repaired",
+            actorId: context.principal.actorId,
+            actorType: context.principal.actorType,
+            after: { maintenance: context.maintenance },
+            before: null,
+            entityId: crypto.randomUUID(),
+            entityType: "finance_transaction",
+            requestId: context.requestId,
+            userId: ownerId,
+          })),
+        );
         return page === 3
           ? { complete: true, inspected: 1, nextCursor: null, repaired: 1 }
           : {
@@ -706,6 +729,25 @@ describe.sequential("Finance maintenance service", () => {
               nextCursor: `repair-page-${page}`,
               repaired: 100,
             };
+      },
+      summarizeMaintenanceEffectsForRun: async (userId, runId) => {
+        const rows = await database.db
+          .select({ action: auditEvents.action, entityId: auditEvents.entityId })
+          .from(auditEvents)
+          .where(
+            and(
+              eq(auditEvents.userId, userId),
+              eq(auditEvents.action, "fixture.transfer_heuristic_repaired"),
+              like(auditEvents.requestId, `maintenance:${runId}:%`),
+            ),
+          );
+        return {
+          categorizations: 0,
+          duplicateActions: rows.length - new Set(rows.map((row) => row.entityId)).size,
+          heuristicTransfersRepaired: new Set(rows.map((row) => row.entityId)).size,
+          questions: 0,
+          transfers: 0,
+        };
       },
     });
     let loseProcess = true;
@@ -749,7 +791,7 @@ describe.sequential("Finance maintenance service", () => {
     const recovered = await recoveredRuntime.getRun(ownerId, run.id);
     expect(recovered.lastSafeError).toBeNull();
     expect(recovered).toMatchObject({
-      checkpoint: { cursor: "repair-page-2", repaired: 100, step: "reconcile" },
+      checkpoint: { cursor: "repair-page-2", repaired: 200, step: "reconcile" },
       status: "queued",
     });
     await recoveredRuntime.dispatchRun(run.id);
@@ -762,7 +804,7 @@ describe.sequential("Finance maintenance service", () => {
         .select({ id: auditEvents.id })
         .from(auditEvents)
         .where(eq(auditEvents.action, "fixture.transfer_heuristic_repaired")),
-    ).resolves.toHaveLength(3);
+    ).resolves.toHaveLength(201);
   });
 
   it("settles a verify-complete run after process loss instead of stranding it running", async () => {
@@ -1458,6 +1500,14 @@ describe.sequential("Finance maintenance service", () => {
           observedScopes.push(scope);
           return { created: 0, total: 0 };
         },
+        refreshCashflowForUser: async (_userId, scope) => {
+          observedScopes.push(scope);
+          return { refreshed: scope.type === "all_outstanding" };
+        },
+        syncDueAccountsForUser: async (_userId, scope) => {
+          observedScopes.push(scope);
+          return { attempted: 0, failed: 0, recovered: 0, skipped: 0, succeeded: 0 };
+        },
       }),
       maintenance: createWorkspaceMaintenanceService({ db: database.db, now: () => now }),
       now: () => now,
@@ -1465,7 +1515,13 @@ describe.sequential("Finance maintenance service", () => {
     });
     const windowRun = await windowService.startOrResume(windowOwner, windowScope);
     await windowService.dispatchRun(windowRun.id);
-    expect(observedScopes).toEqual([windowScope, windowScope, windowScope]);
+    expect(observedScopes).toEqual([
+      windowScope,
+      windowScope,
+      windowScope,
+      windowScope,
+      windowScope,
+    ]);
     await expect(windowService.getRun(windowOwner, windowRun.id)).resolves.toMatchObject({
       scope: windowScope,
       status: "completed",
@@ -1492,6 +1548,14 @@ describe.sequential("Finance maintenance service", () => {
           targetScopes.push(scope);
           return { created: 0, total: 0 };
         },
+        refreshCashflowForUser: async (_userId, scope) => {
+          targetScopes.push(scope);
+          return { refreshed: scope.type === "all_outstanding" };
+        },
+        syncDueAccountsForUser: async (_userId, scope) => {
+          targetScopes.push(scope);
+          return { attempted: 0, failed: 0, recovered: 0, skipped: 0, succeeded: 0 };
+        },
       }),
       maintenance: createWorkspaceMaintenanceService({ db: database.db, now: () => now }),
       now: () => now,
@@ -1499,6 +1563,6 @@ describe.sequential("Finance maintenance service", () => {
     });
     const targetRun = await targetService.startOrResume(targetOwner, targetScope);
     await targetService.dispatchRun(targetRun.id);
-    expect(targetScopes).toEqual([targetScope, targetScope, targetScope]);
+    expect(targetScopes).toEqual([targetScope, targetScope, targetScope, targetScope, targetScope]);
   });
 });

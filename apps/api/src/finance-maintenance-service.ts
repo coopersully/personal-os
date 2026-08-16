@@ -70,6 +70,7 @@ export type FinanceMaintenanceOperations = {
   ) => Promise<{ paired: number; transfers: number }>;
   refreshCashflowForUser: (
     userId: string,
+    scope: MaintenanceScope,
     context?: MutationContext,
     onProgress?: () => Promise<void>,
   ) => Promise<{ refreshed: boolean }>;
@@ -81,8 +82,9 @@ export type FinanceMaintenanceOperations = {
   ) => Promise<{ created: number; total: number }>;
   syncDueAccountsForUser: (
     userId: string,
-    onProgress?: () => Promise<void>,
+    scope: MaintenanceScope,
     context?: MutationContext,
+    onProgress?: () => Promise<void>,
   ) => Promise<FinanceSyncBatchResult>;
   summarizeMaintenanceEffectsForRun?: (
     userId: string,
@@ -90,6 +92,7 @@ export type FinanceMaintenanceOperations = {
   ) => Promise<{
     categorizations: number;
     duplicateActions: number;
+    heuristicTransfersRepaired?: number;
     questions?: number;
     transfers: number;
   }>;
@@ -249,7 +252,10 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
       },
       asOf: now().toISOString(),
       questions: {
-        created: durableEffects?.questions ?? questions?.created ?? 0,
+        created:
+          questions === undefined
+            ? (durableEffects?.questions ?? 0)
+            : Math.max(questions.created ?? 0, durableEffects?.questions ?? 0),
         total: questions?.total ?? verificationStatus.details.review.total,
       },
       verification: {
@@ -279,6 +285,13 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
     let heuristicTransfersRepaired = reconciliationContinuation?.repaired ?? 0;
 
     try {
+      const recoveredEffects = finances.summarizeMaintenanceEffectsForRun
+        ? await finances.summarizeMaintenanceEffectsForRun(run.userId, runId)
+        : null;
+      heuristicTransfersRepaired = Math.max(
+        heuristicTransfersRepaired,
+        recoveredEffects?.heuristicTransfersRepaired ?? 0,
+      );
       if (lastCompleted === "verify") {
         const observed = await assertCurrentRulebook(run);
         if (observed.freshness.blockers.length === 0 && observed.freshness.state !== "current") {
@@ -322,10 +335,11 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           await maintenance.renewClaim({ claimId, runId });
           const synchronized = await finances.syncDueAccountsForUser(
             run.userId,
+            run.scope,
+            mutationContext(run, step, claimId),
             async () => {
               await maintenance.renewClaim({ claimId, runId });
             },
-            mutationContext(run, step, claimId),
           );
           await maintenance.renewClaim({ claimId, runId });
           const observed = await currentStatus(run.userId, run.scope);
@@ -508,6 +522,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           await assertCurrentRulebook(run);
           const refreshed = await finances.refreshCashflowForUser(
             run.userId,
+            run.scope,
             mutationContext(run, step, claimId),
             async () => {
               await maintenance.renewClaim({ claimId, runId });

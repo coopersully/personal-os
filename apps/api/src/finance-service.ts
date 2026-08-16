@@ -1299,16 +1299,18 @@ export function createFinanceService({
             ...context,
           }),
         );
-        await putInReview(
-          item.id,
-          userId,
-          "possible_transfer",
-          null,
-          "A previous provider or merchant heuristic marked this as a transfer without authoritative matching evidence.",
-          tx,
-          context,
-          source,
-        );
+        if (!item.pending) {
+          await putInReview(
+            item.id,
+            userId,
+            "possible_transfer",
+            null,
+            "A previous provider or merchant heuristic marked this as a transfer without authoritative matching evidence.",
+            tx,
+            context,
+            source,
+          );
+        }
         repaired += 1;
       }
       const complete = rows.length < sliceLimit;
@@ -1373,6 +1375,30 @@ export function createFinanceService({
     }
     throw new AppError("invalid_request", "The Finance target type is not supported.");
   }
+  async function maintenanceScopeAccountId(
+    userId: string,
+    scope: MaintenanceScope,
+  ): Promise<string | undefined> {
+    if (scope.type !== "target") return undefined;
+    if (scope.entityType === "finance_account") return (await ownedAccount(userId, scope.id)).id;
+    if (scope.entityType === "finance_transaction") {
+      return (await ownedTransaction(userId, scope.id)).accountId;
+    }
+    if (scope.entityType === "finance_review_case") {
+      const [row] = await db
+        .select({ accountId: financeTransactions.accountId })
+        .from(financeReviewCases)
+        .innerJoin(
+          financeTransactions,
+          eq(financeTransactions.id, financeReviewCases.transactionId),
+        )
+        .where(and(eq(financeReviewCases.id, scope.id), eq(financeReviewCases.userId, userId)))
+        .limit(1);
+      if (!row) throw new AppError("not_found", "The finance review case was not found.");
+      return row.accountId;
+    }
+    throw new AppError("invalid_request", "The Finance target type is not supported.");
+  }
   async function financeTransactionSource(
     userId: string,
     item: typeof financeTransactions.$inferSelect,
@@ -1397,6 +1423,28 @@ export function createFinanceService({
       remoteId: provider === "local" ? item.id : item.providerTransactionId,
       revision: item.updatedAt.toISOString(),
       sourceType: "finance_transaction",
+    };
+  }
+  function financeIncomeStreamSourceValue(
+    stream: typeof financeIncomeStreams.$inferSelect,
+  ): MaterialSourceReference {
+    return {
+      accountId: stream.accountId,
+      provider: "local",
+      remoteId: stream.id,
+      revision: stream.updatedAt.toISOString(),
+      sourceType: "finance_income_stream",
+    };
+  }
+  function financeRecurringObligationSourceValue(
+    obligation: typeof financeRecurringObligations.$inferSelect,
+  ): MaterialSourceReference {
+    return {
+      accountId: obligation.accountId,
+      provider: "local",
+      remoteId: obligation.id,
+      revision: obligation.updatedAt.toISOString(),
+      sourceType: "finance_recurring_obligation",
     };
   }
   async function ownedMerchant(userId: string, id: string) {
@@ -2126,6 +2174,9 @@ export function createFinanceService({
     context?: MutationContext,
     source?: MaterialSourceReference,
   ) {
+    if (context?.maintenance && !source) {
+      throw new AppError("conflict", "The Finance alert source evidence is unavailable.");
+    }
     const existing = await executor
       .select({ id: financeAlerts.id })
       .from(financeAlerts)
@@ -2465,7 +2516,14 @@ export function createFinanceService({
             : obligation
               ? expensesByMerchant.get(obligation.merchant)?.at(-1)
               : undefined;
-          if (!sourceTransaction) {
+          const source = sourceTransaction
+            ? await financeTransactionSource(userId, sourceTransaction, executor)
+            : stream
+              ? financeIncomeStreamSourceValue(stream)
+              : obligation
+                ? financeRecurringObligationSourceValue(obligation)
+                : null;
+          if (!source) {
             throw new AppError("conflict", "The Finance alert source evidence is unavailable.");
           }
           const [saved] = await executor
@@ -2474,7 +2532,6 @@ export function createFinanceService({
             .where(and(eq(financeAlerts.id, alertId), eq(financeAlerts.status, "open")))
             .returning();
           if (!saved) continue;
-          const source = await financeTransactionSource(userId, sourceTransaction, executor);
           await executor.insert(auditEvents).values(
             auditValues({
               action: "finance.alert_resolved",
@@ -2520,7 +2577,7 @@ export function createFinanceService({
                 incomeByPayer.get(stream.payer)?.at(-1) as typeof financeTransactions.$inferSelect,
                 executor,
               )
-            : undefined,
+            : financeIncomeStreamSourceValue(stream),
         );
     }
     for (const obligation of obligations.filter(
@@ -2550,7 +2607,7 @@ export function createFinanceService({
                   ?.at(-1) as typeof financeTransactions.$inferSelect,
                 executor,
               )
-            : undefined,
+            : financeRecurringObligationSourceValue(obligation),
         );
     }
   }
@@ -3276,7 +3333,12 @@ export function createFinanceService({
       });
       return rows.map(account);
     },
-    async syncPlaidAccount(id: string, context: MutationContext, onProgress?: FinanceSyncProgress) {
+    async syncPlaidAccount(
+      id: string,
+      context: MutationContext,
+      onProgress?: FinanceSyncProgress,
+      scope: MaintenanceScope = { type: "all_outstanding" },
+    ) {
       const before = await ownedAccount(context.principal.userId, id);
       if (
         before.provider !== "plaid" ||
@@ -3285,6 +3347,7 @@ export function createFinanceService({
       ) {
         throw new AppError("invalid_request", "This is not a connected Plaid account.");
       }
+      const targetAccountId = await maintenanceScopeAccountId(context.principal.userId, scope);
       const claimItemAccounts = before.providerItemId
         ? await db
             .select()
@@ -3300,6 +3363,7 @@ export function createFinanceService({
         : [before];
       const claimTarget = claimItemAccounts[0] ?? before;
       const claimItemAccountIds = claimItemAccounts.map((financeAccount) => financeAccount.id);
+      const syncHealthAccountIds = targetAccountId ? [targetAccountId] : claimItemAccountIds;
       const startedAt = Date.now();
       const syncClaimId = randomUUID();
       const [claimedAccount] = await db
@@ -3384,17 +3448,21 @@ export function createFinanceService({
                 )
               : eq(financeAccounts.id, before.id),
           );
-        const syncAccount = itemAccounts.find((row) => row.encryptedCredentials) ?? before;
+        const scopedItemAccounts = targetAccountId
+          ? itemAccounts.filter((row) => row.id === targetAccountId)
+          : itemAccounts;
+        const syncAccount = scopedItemAccounts.find((row) => row.encryptedCredentials) ?? before;
         const credentials = decryptJson<PlaidCredentials>(
           syncAccount.encryptedCredentials as EncryptedCredentials,
           encryptionKey,
         );
         const accountsByProviderId = new Map(
-          itemAccounts.flatMap((row) =>
+          scopedItemAccounts.flatMap((row) =>
             row.providerAccountId ? [[row.providerAccountId, row]] : [],
           ),
         );
-        const itemAccountIds = itemAccounts.map((row) => row.id).sort();
+        const itemAccountIds = scopedItemAccounts.map((row) => row.id).sort();
+        const lockedItemAccountIds = claimItemAccounts.map((row) => row.id).sort();
         const persistedCursor = syncAccount.syncCursor;
         let cursor = persistedCursor;
         let hasMore = true;
@@ -3459,7 +3527,7 @@ export function createFinanceService({
             const lockedItemAccounts = await tx
               .select()
               .from(financeAccounts)
-              .where(inArray(financeAccounts.id, itemAccountIds))
+              .where(inArray(financeAccounts.id, lockedItemAccountIds))
               .orderBy(financeAccounts.id)
               .for("update");
             const currentSyncAccount = lockedItemAccounts.find(
@@ -3723,40 +3791,44 @@ export function createFinanceService({
           hasMore = page.hasMore;
         }
         await preserveMaintenanceClaim();
-        const reconciliation = await reconcileBudgetTransfers(
-          context.principal.userId,
-          { type: "all_outstanding" },
-          context,
-        );
+        const reconciliation = context.maintenance
+          ? { paired: 0, transfers: 0 }
+          : await reconcileBudgetTransfers(context.principal.userId);
         await preserveMaintenanceClaim();
-        if (context.maintenanceClaim) {
-          await db.transaction(async (tx) => {
-            await assertMaintenanceClaim(tx, context);
-            await refreshCashflowIntelligence(context.principal.userId, tx, context);
-          });
-        } else {
+        if (!context.maintenance) {
           await refreshCashflowIntelligence(context.principal.userId);
         }
         await preserveMaintenanceClaim();
         const completedAt = now();
         await db.transaction(async (tx) => {
           await assertMaintenanceClaim(tx, context);
+          await tx
+            .select({ id: financeAccounts.id })
+            .from(financeAccounts)
+            .where(inArray(financeAccounts.id, lockedItemAccountIds))
+            .orderBy(financeAccounts.id)
+            .for("update");
+          const claimedAccountIsScoped = itemAccountIds.includes(claimedAccount.id);
           const [settledAccount] = await tx
             .update(financeAccounts)
-            .set({
-              lastSyncedAt: completedAt,
-              nextSyncAt: new Date(completedAt.getTime() + financeSyncIntervalMs),
-              syncClaimExpiresAt: null,
-              syncClaimId: null,
-              syncError: null,
-              syncErrorCategory: null,
-              syncErrorCode: null,
-              syncFailureCount: 0,
-              syncRecovery: null,
-              syncState: "current",
-              status: "connected",
-              updatedAt: completedAt,
-            })
+            .set(
+              claimedAccountIsScoped
+                ? {
+                    lastSyncedAt: completedAt,
+                    nextSyncAt: new Date(completedAt.getTime() + financeSyncIntervalMs),
+                    syncClaimExpiresAt: null,
+                    syncClaimId: null,
+                    syncError: null,
+                    syncErrorCategory: null,
+                    syncErrorCode: null,
+                    syncFailureCount: 0,
+                    syncRecovery: null,
+                    syncState: "current",
+                    status: "connected",
+                    updatedAt: completedAt,
+                  }
+                : { syncClaimExpiresAt: null, syncClaimId: null, updatedAt: completedAt },
+            )
             .where(
               and(
                 eq(financeAccounts.id, claimedAccount.id),
@@ -3868,34 +3940,47 @@ export function createFinanceService({
           );
         }
         const failedAt = now();
-        const failureCount = claimedAccount.syncFailureCount + 1;
+        const failureCount = before.syncFailureCount + 1;
         const failure = classifyConnectorSyncFailure(error, "plaid");
         const nextSyncAt =
           failure.recovery === "reconnect"
             ? null
             : connectorRetryAt({
-                accountId: claimedAccount.id,
+                accountId: before.id,
                 failureCount,
                 now: failedAt,
                 retryAfterMs: failure.retryAfterMs,
               });
         await db.transaction(async (tx) => {
           await assertMaintenanceClaim(tx, context);
+          await tx
+            .select({ id: financeAccounts.id })
+            .from(financeAccounts)
+            .where(inArray(financeAccounts.id, claimItemAccountIds))
+            .orderBy(financeAccounts.id)
+            .for("update");
+          const claimedAccountIsScoped = syncHealthAccountIds.includes(claimedAccount.id);
           const [settledAccount] = await tx
             .update(financeAccounts)
-            .set({
-              ...(failure.recovery === "reconnect" ? { status: "needs_reauth" as const } : {}),
-              nextSyncAt,
-              syncClaimExpiresAt: null,
-              syncClaimId: null,
-              syncError: failure.message,
-              syncErrorCategory: failure.category,
-              syncErrorCode: failure.code,
-              syncFailureCount: failureCount,
-              syncRecovery: failure.recovery,
-              syncState: failure.recovery === "automatic" ? "retrying" : "blocked",
-              updatedAt: failedAt,
-            })
+            .set(
+              claimedAccountIsScoped
+                ? {
+                    ...(failure.recovery === "reconnect"
+                      ? { status: "needs_reauth" as const }
+                      : {}),
+                    nextSyncAt,
+                    syncClaimExpiresAt: null,
+                    syncClaimId: null,
+                    syncError: failure.message,
+                    syncErrorCategory: failure.category,
+                    syncErrorCode: failure.code,
+                    syncFailureCount: failureCount,
+                    syncRecovery: failure.recovery,
+                    syncState: failure.recovery === "automatic" ? "retrying" : "blocked",
+                    updatedAt: failedAt,
+                  }
+                : { syncClaimExpiresAt: null, syncClaimId: null, updatedAt: failedAt },
+            )
             .where(
               and(
                 eq(financeAccounts.id, claimedAccount.id),
@@ -3910,7 +3995,7 @@ export function createFinanceService({
               "The Finance synchronization claim was superseded before failure settlement.",
             );
           }
-          const siblingAccountIds = claimItemAccountIds.filter(
+          const siblingAccountIds = syncHealthAccountIds.filter(
             (accountId) => accountId !== claimedAccount.id,
           );
           if (siblingAccountIds.length > 0) {
@@ -3939,7 +4024,7 @@ export function createFinanceService({
           }
         });
         log?.({
-          accountId: claimedAccount.id,
+          accountId: before.id,
           category: failure.category,
           code: failure.code,
           disposition: failure.recovery,
@@ -3954,7 +4039,7 @@ export function createFinanceService({
           status: failure.status ?? 503,
         });
         if (error instanceof AppError && error.code === "conflict") throw error;
-        throw connectorSyncAppError(failure, claimedAccount.id, "plaid", nextSyncAt);
+        throw connectorSyncAppError(failure, before.id, "plaid", nextSyncAt);
       }
     },
     async initializeSyncHealth(
@@ -4047,19 +4132,61 @@ export function createFinanceService({
     },
     async syncDueAccountsForUser(
       userId: string,
-      onProgress?: FinanceSyncProgress,
+      scope: MaintenanceScope,
       context?: MutationContext,
+      onProgress?: FinanceSyncProgress,
     ): Promise<FinanceSyncBatchResult> {
       await onProgress?.();
-      await this.initializeSyncHealth();
+      await assertMaintenanceScopeOwned(userId, scope);
+      const targetAccountId = await maintenanceScopeAccountId(userId, scope);
+      const initializationAt = now();
+      await db.transaction(async (tx) => {
+        await assertMaintenanceClaim(tx, context);
+        const rows = await tx
+          .select({ id: financeAccounts.id, provider: financeAccounts.provider })
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, userId),
+              targetAccountId ? eq(financeAccounts.id, targetAccountId) : undefined,
+              or(
+                and(
+                  eq(financeAccounts.provider, "manual"),
+                  eq(financeAccounts.syncState, "stale"),
+                  isNull(financeAccounts.nextSyncAt),
+                ),
+                and(
+                  eq(financeAccounts.provider, "plaid"),
+                  eq(financeAccounts.status, "connected"),
+                  eq(financeAccounts.syncState, "stale"),
+                  isNull(financeAccounts.nextSyncAt),
+                ),
+              ),
+            ),
+          )
+          .orderBy(financeAccounts.id)
+          .limit(financeSyncBatchLimit)
+          .for("update", { skipLocked: true });
+        for (const row of rows) {
+          await tx
+            .update(financeAccounts)
+            .set(
+              row.provider === "manual"
+                ? { syncState: "current", updatedAt: initializationAt }
+                : { nextSyncAt: initializationAt, updatedAt: initializationAt },
+            )
+            .where(eq(financeAccounts.id, row.id));
+        }
+      });
       await onProgress?.();
       const selectedAt = now();
-      const dueAccounts = await db
-        .select({ id: financeAccounts.id })
+      const selectedAccounts = await db
+        .select({ id: financeAccounts.id, providerItemId: financeAccounts.providerItemId })
         .from(financeAccounts)
         .where(
           and(
             eq(financeAccounts.userId, userId),
+            targetAccountId ? eq(financeAccounts.id, targetAccountId) : undefined,
             eq(financeAccounts.provider, "plaid"),
             eq(financeAccounts.status, "connected"),
             lte(financeAccounts.nextSyncAt, selectedAt),
@@ -4067,6 +4194,14 @@ export function createFinanceService({
         )
         .orderBy(asc(financeAccounts.nextSyncAt), asc(financeAccounts.updatedAt))
         .limit(financeSyncBatchLimit);
+      const dueAccounts: typeof selectedAccounts = [];
+      const selectedItems = new Set<string>();
+      for (const account of selectedAccounts) {
+        const itemKey = account.providerItemId ?? account.id;
+        if (selectedItems.has(itemKey)) continue;
+        selectedItems.add(itemKey);
+        dueAccounts.push(account);
+      }
       const result: FinanceSyncBatchResult = {
         attempted: dueAccounts.length,
         failed: 0,
@@ -4098,6 +4233,7 @@ export function createFinanceService({
                 requestId: `maintenance:finance:sync:${due.id}:${selectedAt.toISOString()}`,
               },
               onProgress,
+              scope,
             );
             result.succeeded += 1;
             if ((before?.syncFailureCount ?? 0) > 0) result.recovered += 1;
@@ -4242,10 +4378,13 @@ export function createFinanceService({
     },
     async refreshCashflowForUser(
       userId: string,
+      scope: MaintenanceScope,
       context?: MutationContext,
       onProgress?: FinanceSyncProgress,
     ) {
       await onProgress?.();
+      await assertMaintenanceScopeOwned(userId, scope);
+      if (scope.type !== "all_outstanding") return { refreshed: false };
       if (context?.maintenanceClaim) {
         await db.transaction(async (tx) => {
           await assertMaintenanceClaim(tx, context);
@@ -4258,7 +4397,11 @@ export function createFinanceService({
     },
     async summarizeMaintenanceEffectsForRun(userId: string, runId: string) {
       const rows = await db
-        .select({ action: auditEvents.action, entityId: auditEvents.entityId })
+        .select({
+          action: auditEvents.action,
+          before: auditEvents.before,
+          entityId: auditEvents.entityId,
+        })
         .from(auditEvents)
         .where(
           and(
@@ -4278,7 +4421,12 @@ export function createFinanceService({
           ["finance.rent_rule_applied", "finance.transaction_categorized"].includes(row.action),
         ).length,
         duplicateActions: rows.length - distinct.size,
-        questions: distinctRows.filter((row) => row.action === "finance.review_queued").length,
+        heuristicTransfersRepaired: distinctRows.filter(
+          (row) => row.action === "finance.transfer_heuristic_repaired",
+        ).length,
+        questions: distinctRows.filter(
+          (row) => row.action === "finance.review_queued" && row.before === null,
+        ).length,
         transfers: distinctRows.filter((row) => row.action === "finance.transfer_reconciled")
           .length,
       };

@@ -552,7 +552,7 @@ describe.sequential("finance service", () => {
     }
     expect(firstInitializationPass).toMatchObject({
       complete: false,
-      initialized: 2,
+      initialized: 1,
     });
     await expect(
       database.pool.query<{ initialized: string }>(
@@ -561,7 +561,7 @@ describe.sequential("finance service", () => {
          WHERE (provider = 'manual' AND sync_state = 'current')
             OR (provider = 'plaid' AND next_sync_at IS NOT NULL)`,
       ),
-    ).resolves.toMatchObject({ rows: [{ initialized: "2" }] });
+    ).resolves.toMatchObject({ rows: [{ initialized: "1" }] });
     const restartedSyncHealthService = createFinanceService({
       db: database.db,
       log: initializationLogs,
@@ -584,7 +584,7 @@ describe.sequential("finance service", () => {
         }),
         { initialized: 0, manual: 0, plaidCurrent: 0, plaidDue: 0 },
       ),
-    ).toEqual({ initialized: 4, manual: 2, plaidCurrent: 1, plaidDue: 1 });
+    ).toEqual({ initialized: 2, manual: 2, plaidCurrent: 0, plaidDue: 0 });
     await expect(restartedSyncHealthService.initializeSyncHealth(1)).resolves.toEqual({
       complete: true,
       initialized: 0,
@@ -593,8 +593,8 @@ describe.sequential("finance service", () => {
       plaidDue: 0,
     });
     await expect(restartedSyncHealthService.syncDuePlaidAccounts()).resolves.toMatchObject({
-      attempted: 1,
-      failed: 1,
+      attempted: 0,
+      failed: 0,
     });
     await database.pool.query(
       `UPDATE finance_accounts
@@ -3985,9 +3985,10 @@ describe.sequential("finance service", () => {
     });
 
     await database.pool.query(
-      `UPDATE finance_accounts
+      `UPDATE finance_provider_items
        SET next_sync_at = $2
-       WHERE provider = 'plaid' AND id <> $1 AND next_sync_at <= $3`,
+       WHERE id <> (SELECT provider_item_record_id FROM finance_accounts WHERE id = $1)
+         AND next_sync_at <= $3`,
       [healthAccount.id, new Date(now.getTime() + 24 * 60 * 60_000), now],
     );
     const firstPass = slowClockWorker.syncPlaidAccount(healthAccount.id, context);
@@ -4001,8 +4002,8 @@ describe.sequential("finance service", () => {
     ]);
     const activeLease = await database.pool.query<{ remaining_ms: number }>(
       `SELECT EXTRACT(EPOCH FROM (sync_claim_expires_at - NOW())) * 1000 AS remaining_ms
-       FROM finance_accounts
-       WHERE id = $1`,
+       FROM finance_provider_items
+       WHERE id = (SELECT provider_item_record_id FROM finance_accounts WHERE id = $1)`,
       [healthSiblingAccount.id],
     );
     const remainingLeaseMs = Number(activeLease.rows[0]?.remaining_ms);
@@ -4041,7 +4042,7 @@ describe.sequential("finance service", () => {
         healthAccount.id,
       ]),
     ).resolves.toMatchObject({
-      rows: [{ sync_claim_id: siblingLeaseId, sync_state: "stale" }],
+      rows: [{ sync_claim_id: null, sync_state: "current" }],
     });
     await database.pool.query(
       `UPDATE finance_accounts
@@ -4066,10 +4067,12 @@ describe.sequential("finance service", () => {
     });
 
     const makeDue = async () =>
-      database.pool.query(`UPDATE finance_accounts SET next_sync_at = $2 WHERE id = $1`, [
-        healthAccount.id,
-        now,
-      ]);
+      database.pool.query(
+        `UPDATE finance_provider_items
+         SET next_sync_at = $2
+         WHERE id = (SELECT provider_item_record_id FROM finance_accounts WHERE id = $1)`,
+        [healthAccount.id, now],
+      );
     const unconfiguredWorker = createFinanceService({
       db: database.db,
       encryptionKey: key,
@@ -4159,6 +4162,18 @@ describe.sequential("finance service", () => {
         },
       ],
     });
+    await database.db
+      .update(financeAccounts)
+      .set({
+        nextSyncAt: null,
+        syncError: null,
+        syncErrorCategory: null,
+        syncErrorCode: null,
+        syncFailureCount: 0,
+        syncRecovery: null,
+        syncState: "current",
+      })
+      .where(eq(financeAccounts.id, healthAccount.id));
     expect(
       (await workerOne.listOverview(healthUser.id)).accounts.find(
         (financeAccount) => financeAccount.id === healthAccount.id,
@@ -4167,6 +4182,23 @@ describe.sequential("finance service", () => {
       nextRetryAt: expect.any(String),
       recovery: "automatic",
       state: "retrying",
+    });
+    await database.pool.query(
+      `UPDATE finance_provider_items
+       SET last_synced_at = $2
+       WHERE id = (SELECT provider_item_record_id FROM finance_accounts WHERE id = $1)`,
+      [healthAccount.id, new Date(now.getTime() - 48 * 60 * 60_000)],
+    );
+    await database.pool.query(
+      `UPDATE finance_accounts
+       SET last_synced_at = $2
+       WHERE provider_item_record_id = (
+         SELECT provider_item_record_id FROM finance_accounts WHERE id = $1
+       )`,
+      [healthAccount.id, now],
+    );
+    await expect(workerOne.getLedgerHealth(healthUser.id)).resolves.toMatchObject({
+      staleAccounts: 2,
     });
 
     mode = "authorization";
@@ -4202,12 +4234,13 @@ describe.sequential("finance service", () => {
     mode = "success";
     await database.pool.query(
       `UPDATE finance_accounts
-       SET status = 'connected', next_sync_at = $2
+       SET status = 'connected'
        WHERE provider_item_id = (
          SELECT provider_item_id FROM finance_accounts WHERE id = $1
        )`,
-      [healthAccount.id, now],
+      [healthAccount.id],
     );
+    await makeDue();
     await expect(workerOne.syncDuePlaidAccounts()).resolves.toEqual({
       attempted: 1,
       failed: 0,
@@ -4247,11 +4280,9 @@ describe.sequential("finance service", () => {
       ),
     ).resolves.toMatchObject({ rows: [{ status: "connected" }, { status: "connected" }] });
     await database.pool.query(
-      `UPDATE finance_accounts
+      `UPDATE finance_provider_items
        SET next_sync_at = $2
-       WHERE provider_item_id = (
-         SELECT provider_item_id FROM finance_accounts WHERE id = $1
-       )`,
+       WHERE id = (SELECT provider_item_record_id FROM finance_accounts WHERE id = $1)`,
       [healthAccount.id, new Date(now.getTime() + 24 * 60 * 60_000)],
     );
     await database.pool.query(
@@ -4261,11 +4292,11 @@ describe.sequential("finance service", () => {
       [healthAccount.id, now],
     );
     await expect(workerOne.syncDuePlaidAccounts()).resolves.toEqual({
-      attempted: 1,
+      attempted: 0,
       failed: 0,
       recovered: 0,
       skipped: 0,
-      succeeded: 1,
+      succeeded: 0,
     });
     expect(logs.mock.calls.map(([entry]) => entry)).toEqual(
       expect.arrayContaining([
@@ -4278,7 +4309,7 @@ describe.sequential("finance service", () => {
     expect(JSON.stringify(logs.mock.calls)).not.toContain("raw-");
   }, 20_000);
 
-  it("omits Plaid freshness age when no connected account supplies evidence", async () => {
+  it("observes Provider Item freshness without reading account status shadows", async () => {
     const connectedAccounts = await database.db
       .select({ id: financeAccounts.id })
       .from(financeAccounts)
@@ -4292,6 +4323,7 @@ describe.sequential("finance service", () => {
           connectedAccounts.map((account) => account.id),
         ),
       );
+    await database.db.update(financeProviderItems).set({ nextSyncAt: null });
     const logs = vi.fn();
     try {
       const service = createFinanceService({ db: database.db, log: logs, now: () => now });
@@ -4305,8 +4337,11 @@ describe.sequential("finance service", () => {
       const freshness = logs.mock.calls
         .map(([entry]) => entry)
         .findLast((entry) => entry.event === "connector_sync_freshness_observed");
-      expect(freshness).toMatchObject({ eligibleAccountCount: 0, provider: "plaid" });
-      expect(freshness).not.toHaveProperty("freshnessAgeMs");
+      expect(freshness).toMatchObject({
+        eligibleAccountCount: expect.any(Number),
+        freshnessAgeMs: expect.any(Number),
+        provider: "plaid",
+      });
     } finally {
       await database.db
         .update(financeAccounts)
@@ -4320,7 +4355,7 @@ describe.sequential("finance service", () => {
     }
   });
 
-  it("replays a removal window when a later Plaid page fails before the cursor checkpoint", async () => {
+  it("resumes a removal window from its last atomically projected Item page", async () => {
     const [restartUser] = await database.db
       .insert(users)
       .values({
@@ -4422,16 +4457,16 @@ describe.sequential("finance service", () => {
         .select({ syncCursor: financeAccounts.syncCursor })
         .from(financeAccounts)
         .where(eq(financeAccounts.id, restartAccount.id)),
-    ).resolves.toEqual([{ syncCursor: null }]);
+    ).resolves.toEqual([{ syncCursor: "restart-page-1" }]);
     await expect(
       database.db
         .select()
         .from(financeTransactions)
         .where(eq(financeTransactions.id, staleTransaction.id)),
-    ).resolves.toHaveLength(1);
+    ).resolves.toHaveLength(0);
 
     await expect(service.syncPlaidAccount(restartAccount.id, context)).resolves.toEqual({
-      changed: 1,
+      changed: 0,
     });
     await expect(
       database.db
@@ -4586,7 +4621,8 @@ describe.sequential("finance service", () => {
         (SELECT count(*)::int FROM finance_merchants WHERE user_id = $1) AS merchants,
         (SELECT count(*)::int FROM finance_merchant_aliases WHERE user_id = $1) AS aliases,
         (SELECT count(*)::int FROM finance_categories WHERE user_id = $1) AS categories,
-        (SELECT count(*)::int FROM audit_events WHERE user_id = $1) AS audits
+        (SELECT count(*)::int FROM audit_events
+          WHERE user_id = $1 AND action <> 'finance.plaid_accounts_projected') AS audits
     `,
       [maintenanceUser.id],
     );
@@ -4625,7 +4661,8 @@ describe.sequential("finance service", () => {
           (SELECT count(*)::int FROM finance_merchants WHERE user_id = $1) AS merchants,
           (SELECT count(*)::int FROM finance_merchant_aliases WHERE user_id = $1) AS aliases,
           (SELECT count(*)::int FROM finance_categories WHERE user_id = $1) AS categories,
-          (SELECT count(*)::int FROM audit_events WHERE user_id = $1) AS audits
+          (SELECT count(*)::int FROM audit_events
+            WHERE user_id = $1 AND action <> 'finance.plaid_accounts_projected') AS audits
       `,
         [maintenanceUser.id],
       ),
@@ -4770,6 +4807,15 @@ describe.sequential("finance service", () => {
     const unrelatedAccount = accounts.find((account) => account.name === "Unrelated savings");
     if (!targetAccount || !unrelatedAccount)
       throw new Error("Scoped Plaid accounts were not saved.");
+    const makeScopedItemDue = async () =>
+      database.pool.query(
+        `UPDATE finance_provider_items
+         SET next_sync_at = $2, sync_state = 'stale', sync_error = NULL,
+             sync_error_code = NULL, sync_error_category = NULL,
+             sync_recovery = NULL, sync_failure_count = 0
+         WHERE id = (SELECT provider_item_record_id FROM finance_accounts WHERE id = $1)`,
+        [targetAccount.id, now],
+      );
     const scopedManualAccount = await service.createAccount(
       { balance: 0, institution: "Cash", name: "Scoped manual wallet", provider: "manual" },
       { principal: financePrincipal(userId), requestId: "scope-manual" },
@@ -4839,25 +4885,7 @@ describe.sequential("finance service", () => {
         .from(auditEvents)
         .where(eq(auditEvents.action, "finance.sync_health_initialized"))
         .orderBy(auditEvents.entityId),
-    ).resolves.toEqual(
-      [
-        { accountId: targetAccount.id, remoteId: "scope-account-one" },
-        { accountId: unrelatedAccount.id, remoteId: "scope-account-two" },
-      ]
-        .sort((left, right) => left.accountId.localeCompare(right.accountId))
-        .map(({ accountId, remoteId }) => ({
-          action: "finance.sync_health_initialized",
-          after: expect.objectContaining({
-            maintenance: windowContext.maintenance,
-            source: expect.objectContaining({
-              accountId,
-              remoteId,
-              sourceType: "finance_account",
-            }),
-          }),
-          entityId: accountId,
-        })),
-    );
+    ).resolves.toEqual([]);
     await expect(
       database.db
         .select({ syncState: financeAccounts.syncState })
@@ -4905,10 +4933,7 @@ describe.sequential("finance service", () => {
       .update(workspaceMaintenanceRuns)
       .set({ leaseClaimId: null, leaseExpiresAt: null, status: "completed" })
       .where(eq(workspaceMaintenanceRuns.id, windowRunId));
-    await database.db
-      .update(financeAccounts)
-      .set({ nextSyncAt: null, syncState: "stale" })
-      .where(inArray(financeAccounts.id, [targetAccount.id, unrelatedAccount.id]));
+    await makeScopedItemDue();
     const targetScope = {
       type: "target",
       entityType: "finance_account",
@@ -4966,7 +4991,7 @@ describe.sequential("finance service", () => {
             eq(auditEvents.requestId, targetContext.requestId),
           ),
         ),
-    ).resolves.toEqual([{ entityId: targetAccount.id }]);
+    ).resolves.toEqual([]);
     await expect(
       database.db
         .select({ cursor: financeAccounts.syncCursor })
@@ -4979,7 +5004,7 @@ describe.sequential("finance service", () => {
         .select({ nextSyncAt: financeAccounts.nextSyncAt, syncState: financeAccounts.syncState })
         .from(financeAccounts)
         .where(eq(financeAccounts.id, unrelatedAccount.id)),
-    ).resolves.toEqual([{ nextSyncAt: null, syncState: "stale" }]);
+    ).resolves.toEqual([{ nextSyncAt: expect.any(Date), syncState: "current" }]);
 
     await database.db
       .update(workspaceMaintenanceRuns)
@@ -5003,6 +5028,7 @@ describe.sequential("finance service", () => {
       maintenanceClaim: { claimId: allClaimId, runId: allRunId },
       requestId: `maintenance:${allRunId}:synchronize`,
     };
+    await makeScopedItemDue();
     await expect(
       service.syncDueAccountsForUser(
         userId,
@@ -5030,7 +5056,7 @@ describe.sequential("finance service", () => {
         .select({ action: auditEvents.action, entityId: auditEvents.entityId })
         .from(auditEvents)
         .where(eq(auditEvents.action, "finance.sync_health_initialized")),
-    ).resolves.toHaveLength(5);
+    ).resolves.toHaveLength(1);
     await expect(
       database.db
         .select({ after: auditEvents.after, entityId: auditEvents.entityId })
@@ -5043,7 +5069,7 @@ describe.sequential("finance service", () => {
         )
         .orderBy(auditEvents.entityId),
     ).resolves.toEqual(
-      [unrelatedAccount.id, scopedManualAccount.id].sort().map((accountId) => ({
+      [scopedManualAccount.id].map((accountId) => ({
         after: expect.objectContaining({
           maintenance: allContext.maintenance,
           source: expect.objectContaining({ accountId, sourceType: "finance_account" }),
@@ -5087,15 +5113,12 @@ describe.sequential("finance service", () => {
         .select({ id: auditEvents.id })
         .from(auditEvents)
         .where(eq(auditEvents.action, "finance.sync_health_initialized")),
-    ).resolves.toHaveLength(5);
+    ).resolves.toHaveLength(1);
     await database.db
       .update(workspaceMaintenanceRuns)
       .set({ leaseClaimId: null, leaseExpiresAt: null, status: "completed" })
       .where(eq(workspaceMaintenanceRuns.id, replayRunId));
-    await database.db
-      .update(financeAccounts)
-      .set({ nextSyncAt: now, syncState: "stale" })
-      .where(eq(financeAccounts.id, targetAccount.id));
+    await makeScopedItemDue();
     const failureRunId = crypto.randomUUID();
     const failureClaimId = crypto.randomUUID();
     await database.db.insert(workspaceMaintenanceRuns).values({
@@ -5126,7 +5149,7 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual(
       [
         { id: targetAccount.id, syncState: "retrying" },
-        { id: unrelatedAccount.id, syncState: "current" },
+        { id: unrelatedAccount.id, syncState: "retrying" },
       ].toSorted((left, right) => left.id.localeCompare(right.id)),
     );
 
@@ -5158,7 +5181,7 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual([]);
   });
 
-  it("uses one oldest item cursor and one item claim across scoped Plaid runtimes", async () => {
+  it("uses the null Item cursor and one Item claim despite divergent account shadows", async () => {
     const userId = crypto.randomUUID();
     await database.db.insert(users).values({
       id: userId,
@@ -5304,7 +5327,7 @@ describe.sequential("finance service", () => {
     releaseProvider();
     await expect(first).resolves.toEqual({ changed: 1 });
 
-    expect(observedCursors).toEqual(["oldest-cursor"]);
+    expect(observedCursors).toEqual([null]);
     await expect(
       database.db
         .select({ cursor: financeAccounts.syncCursor })

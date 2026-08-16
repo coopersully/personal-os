@@ -1,16 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
-import {
-  ConnectorError,
-  type PlaidConnector,
-  type PlaidTransactionSnapshot,
-} from "@personal-os/connectors";
+import type { PlaidConnector, PlaidTransactionSnapshot } from "@personal-os/connectors";
 import {
   attentionItems,
   auditEvents,
   type Database,
   domainProfileApprovals,
   domainProfiles,
-  type EncryptedCredentials,
   financeAccounts,
   financeAlerts,
   financeBudgets,
@@ -21,6 +16,7 @@ import {
   financeMerchantAliases,
   financeMerchants,
   financeProfiles,
+  financeProviderItems,
   financeRecurringObligations,
   financeReviewCases,
   financeSetupBackfillState,
@@ -73,11 +69,6 @@ import type {
 import { financeDomainProfileSchema, idSchema, localDateAt } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
-import {
-  classifyConnectorSyncFailure,
-  connectorRetryAt,
-  connectorSyncAppError,
-} from "./connector-sync-health.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
 import {
@@ -88,7 +79,10 @@ import {
 } from "./finance-cashflow.js";
 import { parseFinanceCsv } from "./finance-csv.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
-import { decryptJson } from "./security.js";
+import {
+  createFinanceProviderItemSyncService,
+  type FinanceSyncBatchResult,
+} from "./finance-provider-item-sync-service.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
 
@@ -117,26 +111,12 @@ type FinanceProfileSourceExecutor = Pick<Database, "select">;
 type FinanceReadExecutor = Pick<Database, "select">;
 type FinanceReviewExecutor = Pick<Database, "insert" | "select" | "update">;
 type FinanceWriteExecutor = Pick<Database, "insert" | "select" | "update">;
-type PlaidCredentials = { accessToken: string };
 type PlaidCategoryConfidence = NonNullable<
   PlaidTransactionSnapshot["personalFinanceCategory"]
 >["confidenceLevel"];
 type FinanceSyncProgress = () => Promise<void>;
 
-class FinanceSyncMaintenanceClaimLostError extends Error {
-  public constructor() {
-    super("The Finance maintenance claim expired during synchronization.");
-    this.name = "FinanceSyncMaintenanceClaimLostError";
-  }
-}
-
-export type FinanceSyncBatchResult = {
-  attempted: number;
-  failed: number;
-  recovered: number;
-  skipped: number;
-  succeeded: number;
-};
+export type { FinanceSyncBatchResult } from "./finance-provider-item-sync-service.js";
 
 export type FinanceSyncHealthInitializationResult = {
   complete: boolean;
@@ -146,11 +126,8 @@ export type FinanceSyncHealthInitializationResult = {
   plaidDue: number;
 };
 
-const financeSyncClaimMs = 5 * 60_000;
 const financeMaintenanceClaimMs = 2 * 60_000;
-const financeSyncIntervalMs = 6 * 60 * 60_000;
 const financeSyncBatchLimit = 25;
-const financeSyncConcurrency = 3;
 
 const categoryRules: Array<[RegExp, string]> = [
   [/uber|lyft|mta|transit|amtrak|airlines/i, "Transportation"],
@@ -407,7 +384,11 @@ async function mapWithConcurrency<T, R>(
 function currency(cents: number | null) {
   return cents === null ? null : cents / 100;
 }
-function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
+function account(
+  row: typeof financeAccounts.$inferSelect,
+  item?: typeof financeProviderItems.$inferSelect,
+): FinanceAccount {
+  const synchronization = item ?? row;
   return {
     balance: currency(row.balance),
     createdAt: row.createdAt.toISOString(),
@@ -415,19 +396,22 @@ function account(row: typeof financeAccounts.$inferSelect): FinanceAccount {
     id: row.id,
     institution: row.institution,
     kind: row.kind,
-    lastSyncedAt: row.lastSyncedAt?.toISOString() ?? null,
+    lastSyncedAt: synchronization.lastSyncedAt?.toISOString() ?? null,
     name: row.name,
     provider: row.provider,
-    status: row.status,
+    status: item ? (item.syncRecovery === "reconnect" ? "needs_reauth" : "connected") : row.status,
     synchronization: {
-      failureCode: row.syncErrorCode,
-      failureCount: row.syncFailureCount,
-      lastAttemptAt: row.lastSyncAttemptAt?.toISOString() ?? null,
-      lastSuccessAt: row.lastSyncedAt?.toISOString() ?? null,
-      message: row.syncError,
-      nextRetryAt: row.syncFailureCount > 0 ? (row.nextSyncAt?.toISOString() ?? null) : null,
-      recovery: row.syncRecovery,
-      state: row.syncState,
+      failureCode: synchronization.syncErrorCode,
+      failureCount: synchronization.syncFailureCount,
+      lastAttemptAt: synchronization.lastSyncAttemptAt?.toISOString() ?? null,
+      lastSuccessAt: synchronization.lastSyncedAt?.toISOString() ?? null,
+      message: synchronization.syncError,
+      nextRetryAt:
+        synchronization.syncFailureCount > 0
+          ? (synchronization.nextSyncAt?.toISOString() ?? null)
+          : null,
+      recovery: synchronization.syncRecovery,
+      state: synchronization.syncState,
     },
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -597,23 +581,21 @@ export function createFinanceService({
     }
   }
 
-  async function maintenanceClaimIsCurrent(context?: MutationContext): Promise<boolean> {
-    if (!context?.maintenanceClaim) return true;
-    const [current] = await db
-      .select({ id: workspaceMaintenanceRuns.id })
-      .from(workspaceMaintenanceRuns)
-      .where(
-        and(
-          eq(workspaceMaintenanceRuns.id, context.maintenanceClaim.runId),
-          eq(workspaceMaintenanceRuns.userId, context.principal.userId),
-          eq(workspaceMaintenanceRuns.domain, "finances"),
-          eq(workspaceMaintenanceRuns.status, "running"),
-          eq(workspaceMaintenanceRuns.leaseClaimId, context.maintenanceClaim.claimId),
-          sql`${workspaceMaintenanceRuns.leaseExpiresAt} > NOW()`,
-        ),
-      )
-      .limit(1);
-    return current !== undefined;
+  async function serializeAccounts(rows: Array<typeof financeAccounts.$inferSelect>) {
+    const itemIds = rows.flatMap((row) =>
+      row.providerItemRecordId ? [row.providerItemRecordId] : [],
+    );
+    const items =
+      itemIds.length === 0
+        ? []
+        : await db
+            .select()
+            .from(financeProviderItems)
+            .where(inArray(financeProviderItems.id, itemIds));
+    const itemById = new Map(items.map((item) => [item.id, item]));
+    return rows.map((row) =>
+      account(row, row.providerItemRecordId ? itemById.get(row.providerItemRecordId) : undefined),
+    );
   }
 
   async function seedCategories(
@@ -2627,6 +2609,53 @@ export function createFinanceService({
         );
     }
   }
+  const providerItemSync = createFinanceProviderItemSyncService({
+    assertMaintenanceClaim,
+    db,
+    ...(encryptionKey ? { encryptionKey } : {}),
+    ...(log ? { log } : {}),
+    now,
+    ...(plaid ? { plaid } : {}),
+    async prepareTransaction(remote, userId) {
+      const merchant = remote.merchantName ?? remote.name;
+      const learned = await learnedCategory(userId, merchant);
+      const automatic = learned ? categorization(merchant, learned) : null;
+      const providerCategory = remote.personalFinanceCategory;
+      const inferred = isRentMerchant(merchant)
+        ? categorization(merchant)
+        : (automatic ??
+          (providerCategory?.primary
+            ? {
+                category: providerCategory.primary,
+                confidence: (() => {
+                  const confidence = providerConfidence(providerCategory.confidenceLevel);
+                  return confidence === null ? null : Math.round(confidence * 10_000);
+                })(),
+                needsReview: providerNeedsReview(providerCategory.confidenceLevel),
+              }
+            : categorization(merchant)));
+      const isTransfer =
+        !isRentMerchant(merchant) &&
+        (isSoFiVaultTransfer(merchant) || isProviderTransfer(inferred.category));
+      return {
+        category: isTransfer ? transferCategory : inferred.category,
+        categoryConfidence: inferred.confidence,
+        categorySource: automatic ? "rule" : providerCategory?.primary ? "provider" : null,
+        isTransfer,
+        merchant,
+        needsReview: inferred.needsReview,
+        remote,
+      };
+    },
+    async resolveProjectionLookups(executor, userId, prepared) {
+      const merchant = await merchantFor(userId, prepared.merchant, "provider", executor);
+      const category = prepared.category
+        ? await categoryForName(userId, prepared.category, executor)
+        : null;
+      return { categoryId: category?.id ?? null, merchantId: merchant.id };
+    },
+    resolveScopeAccountId: maintenanceScopeAccountId,
+  });
   return {
     async upsertAttentionItem(
       transactionId: string,
@@ -2868,7 +2897,7 @@ export function createFinanceService({
         unavailableReason: available ? null : unavailableReason,
       });
       return {
-        accountSources: accountRows.map(account),
+        accountSources: await serializeAccounts(accountRows),
         alertSummary: {
           open: alerts.length,
           warnings: alerts.filter((item) => item.severity === "warning").length,
@@ -3275,750 +3304,23 @@ export function createFinanceService({
       onProgress?: FinanceSyncProgress,
       scope: MaintenanceScope = { type: "all_outstanding" },
     ) {
-      const before = await ownedAccount(context.principal.userId, id);
-      if (
-        before.provider !== "plaid" ||
-        !before.providerAccountId ||
-        !before.encryptedCredentials
-      ) {
-        throw new AppError("invalid_request", "This is not a connected Plaid account.");
+      const synchronized = await providerItemSync.syncAccount(id, context, onProgress, scope);
+      if (!context.maintenance) {
+        await reconcileBudgetTransfers(context.principal.userId, scope, context, onProgress);
+        await refreshCashflowIntelligence(context.principal.userId);
       }
-      const targetAccountId = await maintenanceScopeAccountId(context.principal.userId, scope);
-      const claimItemAccounts = before.providerItemId
-        ? await db
-            .select()
-            .from(financeAccounts)
-            .where(
-              and(
-                eq(financeAccounts.userId, before.userId),
-                eq(financeAccounts.provider, "plaid"),
-                eq(financeAccounts.providerItemId, before.providerItemId),
-              ),
-            )
-            .orderBy(asc(financeAccounts.id))
-        : [before];
-      const claimTarget = claimItemAccounts[0] ?? before;
-      const claimItemAccountIds = claimItemAccounts.map((financeAccount) => financeAccount.id);
-      const syncHealthAccountIds = targetAccountId ? [targetAccountId] : claimItemAccountIds;
-      const startedAt = Date.now();
-      const syncClaimId = randomUUID();
-      const [claimedAccount] = await db
-        .update(financeAccounts)
-        .set({
-          lastSyncAttemptAt: sql`NOW()`,
-          syncClaimExpiresAt: sql`NOW() + ${financeSyncClaimMs} * INTERVAL '1 millisecond'`,
-          syncClaimId,
-        })
-        .where(
-          and(
-            eq(financeAccounts.id, claimTarget.id),
-            or(
-              isNull(financeAccounts.syncClaimId),
-              sql`${financeAccounts.syncClaimExpiresAt} <= NOW()`,
-            ),
-          ),
-        )
-        .returning();
-      if (!claimedAccount) {
-        throw new AppError("conflict", "This Finance account is already synchronizing.", {
-          accountId: before.id,
-        });
-      }
-      if (
-        claimedAccount.providerItemId !== claimTarget.providerItemId ||
-        claimedAccount.syncCursor !== claimTarget.syncCursor ||
-        JSON.stringify(claimedAccount.encryptedCredentials) !==
-          JSON.stringify(claimTarget.encryptedCredentials)
-      ) {
-        await db
-          .update(financeAccounts)
-          .set({ syncClaimExpiresAt: null, syncClaimId: null })
-          .where(
-            and(
-              eq(financeAccounts.id, claimedAccount.id),
-              eq(financeAccounts.syncClaimId, syncClaimId),
-            ),
-          );
-        throw new AppError(
-          "conflict",
-          "The Plaid connection changed while this sync was in progress. Retry against the current connection.",
-        );
-      }
-      try {
-        const preserveMaintenanceClaim = async () => {
-          if (!onProgress) return;
-          try {
-            await onProgress();
-          } catch {
-            throw new FinanceSyncMaintenanceClaimLostError();
-          }
-        };
-        await preserveMaintenanceClaim();
-        if (!plaid) {
-          throw new ConnectorError({
-            category: "configuration",
-            code: "plaid_configuration_missing",
-            disposition: "operator",
-            message: "Plaid is not configured for this ilo instance.",
-            status: 503,
-          });
-        }
-        if (!encryptionKey) {
-          throw new ConnectorError({
-            category: "configuration",
-            code: "finance_encryption_configuration_missing",
-            disposition: "operator",
-            message: "Finance credential encryption is not configured.",
-            status: 503,
-          });
-        }
-        const itemAccounts = await db
-          .select()
-          .from(financeAccounts)
-          .where(
-            before.providerItemId
-              ? and(
-                  eq(financeAccounts.userId, context.principal.userId),
-                  eq(financeAccounts.provider, "plaid"),
-                  eq(financeAccounts.providerItemId, before.providerItemId),
-                )
-              : eq(financeAccounts.id, before.id),
-          )
-          .orderBy(asc(financeAccounts.id));
-        const canonicalItemAccounts = [...itemAccounts].sort((left, right) => {
-          if ((left.syncCursor === null) !== (right.syncCursor === null)) {
-            return left.syncCursor === null ? -1 : 1;
-          }
-          const lastSyncDifference =
-            (left.lastSyncedAt?.getTime() ?? Number.NEGATIVE_INFINITY) -
-            (right.lastSyncedAt?.getTime() ?? Number.NEGATIVE_INFINITY);
-          return lastSyncDifference === 0 ? left.id.localeCompare(right.id) : lastSyncDifference;
-        });
-        const canonicalCursorAccount = canonicalItemAccounts[0] ?? before;
-        const credentialAccount = canonicalCursorAccount.encryptedCredentials
-          ? canonicalCursorAccount
-          : (canonicalItemAccounts.find((row) => row.encryptedCredentials) ?? before);
-        const credentials = decryptJson<PlaidCredentials>(
-          credentialAccount.encryptedCredentials as EncryptedCredentials,
-          encryptionKey,
-        );
-        const accountsByProviderId = new Map(
-          itemAccounts.flatMap((row) =>
-            row.providerAccountId ? [[row.providerAccountId, row]] : [],
-          ),
-        );
-        const itemAccountIds = itemAccounts.map((row) => row.id).sort();
-        const lockedItemAccountIds = [...itemAccountIds];
-        const expectedItemState = new Map(
-          itemAccounts.map((row) => [
-            row.id,
-            {
-              encryptedCredentials: row.encryptedCredentials,
-              providerItemId: row.providerItemId,
-              syncCursor: row.syncCursor,
-            },
-          ]),
-        );
-        const persistedCursor = canonicalCursorAccount.syncCursor;
-        let cursor = persistedCursor;
-        let hasMore = true;
-        let changed = 0;
-        const removedTransactionIds = new Set<string>();
-        const replacedPendingTransactionIds = new Set<string>();
-        while (hasMore) {
-          await preserveMaintenanceClaim();
-          const page = await plaid.syncTransactions({
-            accessToken: credentials.accessToken,
-            cursor,
-          });
-          await preserveMaintenanceClaim();
-          for (const removed of page.removed) {
-            removedTransactionIds.add(removed.transactionId);
-          }
-          for (const remote of [...page.added, ...page.modified]) {
-            if (remote.pendingTransactionId) {
-              replacedPendingTransactionIds.add(remote.pendingTransactionId);
-            }
-          }
-          const prepared = await Promise.all(
-            [...page.added, ...page.modified]
-              .filter((remote) => accountsByProviderId.has(remote.accountId))
-              .map(async (remote) => {
-                const merchant = remote.merchantName ?? remote.name;
-                const learned = await learnedCategory(context.principal.userId, merchant);
-                const automatic = learned ? categorization(merchant, learned) : null;
-                const providerCategory = remote.personalFinanceCategory;
-                const inferred = isRentMerchant(merchant)
-                  ? categorization(merchant)
-                  : (automatic ??
-                    (providerCategory?.primary
-                      ? {
-                          category: providerCategory.primary,
-                          confidence: (() => {
-                            const confidence = providerConfidence(providerCategory.confidenceLevel);
-                            return confidence === null ? null : Math.round(confidence * 10_000);
-                          })(),
-                          needsReview: providerNeedsReview(providerCategory.confidenceLevel),
-                        }
-                      : categorization(merchant)));
-                const isTransfer =
-                  !isRentMerchant(merchant) &&
-                  (isSoFiVaultTransfer(merchant) || isProviderTransfer(inferred.category));
-                return {
-                  automatic,
-                  inferred,
-                  isTransfer,
-                  merchant,
-                  providerCategory,
-                  remote,
-                };
-              }),
-          );
-          await preserveMaintenanceClaim();
-          await db.transaction(async (tx) => {
-            await assertMaintenanceClaim(tx, context);
-            // Reconciliation takes account locks before transaction locks. Keep
-            // provider sync in the same deterministic order so the two paths
-            // cannot deadlock while touching the same item.
-            const lockedItemAccounts = await tx
-              .select()
-              .from(financeAccounts)
-              .where(inArray(financeAccounts.id, lockedItemAccountIds))
-              .orderBy(financeAccounts.id)
-              .for("update");
-            const currentClaimedAccount = lockedItemAccounts.find(
-              (accountRow) => accountRow.id === claimedAccount.id,
-            );
-            const [activeClaim] = await tx
-              .select({ id: financeAccounts.id })
-              .from(financeAccounts)
-              .where(
-                and(
-                  eq(financeAccounts.id, claimedAccount.id),
-                  eq(financeAccounts.syncClaimId, syncClaimId),
-                  sql`${financeAccounts.syncClaimExpiresAt} > NOW()`,
-                ),
-              )
-              .limit(1);
-            if (
-              !currentClaimedAccount ||
-              !activeClaim ||
-              currentClaimedAccount.syncClaimId !== syncClaimId ||
-              currentClaimedAccount.syncClaimExpiresAt === null ||
-              lockedItemAccounts.some((accountRow) => {
-                const expected = expectedItemState.get(accountRow.id);
-                return (
-                  !expected ||
-                  accountRow.providerItemId !== expected.providerItemId ||
-                  accountRow.syncCursor !== expected.syncCursor ||
-                  JSON.stringify(accountRow.encryptedCredentials) !==
-                    JSON.stringify(expected.encryptedCredentials)
-                );
-              })
-            ) {
-              throw new AppError(
-                "conflict",
-                "The Plaid connection changed while this sync was in progress. Retry against the current connection.",
-              );
-            }
-            for (const {
-              automatic,
-              inferred,
-              isTransfer,
-              merchant,
-              providerCategory,
-              remote,
-            } of prepared) {
-              const localAccount = accountsByProviderId.get(remote.accountId);
-              if (!localAccount) continue;
-              const merchantRecord = await merchantFor(
-                context.principal.userId,
-                merchant,
-                "provider",
-                tx,
-              );
-              const categoryRecord = isTransfer
-                ? await categoryForName(context.principal.userId, transferCategory, tx)
-                : inferred.category
-                  ? await categoryForName(context.principal.userId, inferred.category, tx)
-                  : null;
-              const providerDirection = remote.amount < 0 ? "income" : "expense";
-              let [existingTransaction] = await tx
-                .select()
-                .from(financeTransactions)
-                .where(
-                  and(
-                    eq(financeTransactions.accountId, localAccount.id),
-                    eq(financeTransactions.providerTransactionId, remote.transactionId),
-                  ),
-                )
-                .for("update")
-                .limit(1);
-              if (!existingTransaction && remote.pendingTransactionId) {
-                [existingTransaction] = await tx
-                  .select()
-                  .from(financeTransactions)
-                  .where(
-                    and(
-                      eq(financeTransactions.accountId, localAccount.id),
-                      eq(financeTransactions.providerTransactionId, remote.pendingTransactionId),
-                    ),
-                  )
-                  .for("update")
-                  .limit(1);
-                if (existingTransaction) {
-                  await tx
-                    .update(financeTransactions)
-                    .set({ providerTransactionId: remote.transactionId })
-                    .where(eq(financeTransactions.id, existingTransaction.id));
-                }
-              }
-              const protectedTransaction =
-                existingTransaction &&
-                existingTransaction.categoryDecidedAt !== null &&
-                (existingTransaction.categorySource === "user" ||
-                  existingTransaction.categorySource === "agent")
-                  ? existingTransaction
-                  : null;
-              const previousProviderDirection =
-                protectedTransaction?.providerDirection ??
-                (protectedTransaction?.direction === "expense" ||
-                protectedTransaction?.direction === "income"
-                  ? protectedTransaction.direction
-                  : null);
-              const providerSignChanged =
-                protectedTransaction !== null &&
-                previousProviderDirection !== null &&
-                previousProviderDirection !== providerDirection;
-              await tx
-                .insert(financeTransactions)
-                .values({
-                  accountId: localAccount.id,
-                  amount: Math.round(Math.abs(remote.amount) * 100),
-                  category: isTransfer ? transferCategory : inferred.category,
-                  categoryId: categoryRecord?.id ?? null,
-                  categoryConfidence: inferred.confidence,
-                  categorySource: automatic
-                    ? "rule"
-                    : providerCategory?.primary
-                      ? "provider"
-                      : null,
-                  direction: providerDirection,
-                  currencyCode: remote.currencyCode,
-                  merchant,
-                  merchantId: merchantRecord.id,
-                  needsReview: isTransfer ? true : inferred.needsReview,
-                  pending: remote.pending ?? false,
-                  pendingTransactionId: remote.pendingTransactionId,
-                  providerCategory: providerCategory?.primary ?? null,
-                  providerCategoryDetailed: providerCategory?.detailed ?? null,
-                  providerCategoryConfidence: providerCategory?.confidenceLevel ?? null,
-                  providerDirection,
-                  providerTransactionId: remote.transactionId,
-                  reconciliationStatus: isTransfer ? "candidate" : "not_applicable",
-                  transactionDate: remote.date,
-                  userId: context.principal.userId,
-                })
-                .onConflictDoUpdate({
-                  set: {
-                    amount: Math.round(Math.abs(remote.amount) * 100),
-                    category: protectedTransaction
-                      ? protectedTransaction.category
-                      : isTransfer
-                        ? transferCategory
-                        : inferred.category,
-                    categoryConfidence: protectedTransaction
-                      ? protectedTransaction.categoryConfidence
-                      : inferred.confidence,
-                    categoryDecidedAt: protectedTransaction
-                      ? protectedTransaction.categoryDecidedAt
-                      : null,
-                    categoryId: protectedTransaction
-                      ? protectedTransaction.categoryId
-                      : (categoryRecord?.id ?? null),
-                    categoryRationale: protectedTransaction
-                      ? protectedTransaction.categoryRationale
-                      : null,
-                    categorySource: protectedTransaction
-                      ? protectedTransaction.categorySource
-                      : automatic
-                        ? "rule"
-                        : providerCategory?.primary
-                          ? "provider"
-                          : null,
-                    direction: protectedTransaction
-                      ? providerSignChanged && protectedTransaction.direction !== "transfer"
-                        ? providerDirection
-                        : protectedTransaction.direction
-                      : providerDirection,
-                    currencyCode: remote.currencyCode,
-                    merchant,
-                    merchantId: merchantRecord.id,
-                    needsReview: protectedTransaction
-                      ? providerSignChanged || protectedTransaction.needsReview
-                      : isTransfer
-                        ? true
-                        : inferred.needsReview,
-                    pending: remote.pending ?? false,
-                    pendingTransactionId: remote.pendingTransactionId,
-                    providerCategory: providerCategory?.primary ?? null,
-                    providerCategoryDetailed: providerCategory?.detailed ?? null,
-                    providerCategoryConfidence: providerCategory?.confidenceLevel ?? null,
-                    providerDirection,
-                    reconciliationStatus: protectedTransaction
-                      ? protectedTransaction.reconciliationStatus
-                      : isTransfer
-                        ? "candidate"
-                        : "not_applicable",
-                    transactionDate: remote.date,
-                    transferGroupId: protectedTransaction
-                      ? protectedTransaction.transferGroupId
-                      : null,
-                    updatedAt: now(),
-                  },
-                  target: [
-                    financeTransactions.accountId,
-                    financeTransactions.providerTransactionId,
-                  ],
-                });
-              if (providerSignChanged && existingTransaction) {
-                const [existingReview] = await tx
-                  .select()
-                  .from(financeReviewCases)
-                  .where(
-                    and(
-                      eq(financeReviewCases.transactionId, existingTransaction.id),
-                      inArray(financeReviewCases.status, ["deferred", "open"]),
-                    ),
-                  )
-                  .orderBy(desc(financeReviewCases.updatedAt))
-                  .for("update")
-                  .limit(1);
-                if (existingReview) {
-                  await tx
-                    .update(financeReviewCases)
-                    .set({
-                      rationale:
-                        "The provider changed the transaction direction after categorization.",
-                      reason: "refund_or_reversal",
-                      suggestedCategoryId: existingTransaction.categoryId,
-                      updatedAt: now(),
-                    })
-                    .where(eq(financeReviewCases.id, existingReview.id));
-                } else {
-                  await tx.insert(financeReviewCases).values({
-                    rationale:
-                      "The provider changed the transaction direction after categorization.",
-                    reason: "refund_or_reversal",
-                    status: "open",
-                    suggestedCategoryId: existingTransaction.categoryId,
-                    transactionId: existingTransaction.id,
-                    userId: context.principal.userId,
-                  });
-                }
-              }
-              changed += 1;
-            }
-            if (!page.hasMore) {
-              const deletableTransactionIds = [...removedTransactionIds].filter(
-                (transactionId) => !replacedPendingTransactionIds.has(transactionId),
-              );
-              for (let offset = 0; offset < deletableTransactionIds.length; offset += 1_000) {
-                const transactionIds = deletableTransactionIds.slice(offset, offset + 1_000);
-                const deleted = await tx
-                  .delete(financeTransactions)
-                  .where(
-                    and(
-                      inArray(financeTransactions.accountId, itemAccountIds),
-                      inArray(financeTransactions.providerTransactionId, transactionIds),
-                    ),
-                  )
-                  .returning({ id: financeTransactions.id });
-                changed += deleted.length;
-              }
-              await tx
-                .update(financeAccounts)
-                .set({
-                  syncCursor: page.nextCursor,
-                  updatedAt: now(),
-                })
-                .where(inArray(financeAccounts.id, itemAccountIds));
-            }
-          });
-          cursor = page.nextCursor;
-          hasMore = page.hasMore;
-        }
-        await preserveMaintenanceClaim();
-        const reconciliation = context.maintenance
-          ? { paired: 0, transfers: 0 }
-          : await reconcileBudgetTransfers(context.principal.userId);
-        await preserveMaintenanceClaim();
-        if (!context.maintenance) {
-          await refreshCashflowIntelligence(context.principal.userId);
-        }
-        await preserveMaintenanceClaim();
-        const completedAt = now();
-        await db.transaction(async (tx) => {
-          await assertMaintenanceClaim(tx, context);
-          await tx
-            .select({ id: financeAccounts.id })
-            .from(financeAccounts)
-            .where(inArray(financeAccounts.id, lockedItemAccountIds))
-            .orderBy(financeAccounts.id)
-            .for("update");
-          const claimedAccountIsScoped = syncHealthAccountIds.includes(claimedAccount.id);
-          const [settledAccount] = await tx
-            .update(financeAccounts)
-            .set(
-              claimedAccountIsScoped
-                ? {
-                    lastSyncedAt: completedAt,
-                    nextSyncAt: new Date(completedAt.getTime() + financeSyncIntervalMs),
-                    syncClaimExpiresAt: null,
-                    syncClaimId: null,
-                    syncError: null,
-                    syncErrorCategory: null,
-                    syncErrorCode: null,
-                    syncFailureCount: 0,
-                    syncRecovery: null,
-                    syncState: "current",
-                    status: "connected",
-                    updatedAt: completedAt,
-                  }
-                : { syncClaimExpiresAt: null, syncClaimId: null, updatedAt: completedAt },
-            )
-            .where(
-              and(
-                eq(financeAccounts.id, claimedAccount.id),
-                eq(financeAccounts.syncClaimId, syncClaimId),
-                sql`${financeAccounts.syncClaimExpiresAt} > NOW()`,
-              ),
-            )
-            .returning({ id: financeAccounts.id });
-          if (!settledAccount) {
-            throw new AppError(
-              "conflict",
-              "The Finance synchronization claim was superseded before completion.",
-            );
-          }
-          const siblingAccountIds = syncHealthAccountIds.filter(
-            (accountId) => accountId !== claimedAccount.id,
-          );
-          if (siblingAccountIds.length > 0) {
-            await tx
-              .update(financeAccounts)
-              .set({
-                lastSyncedAt: completedAt,
-                nextSyncAt: new Date(completedAt.getTime() + financeSyncIntervalMs),
-                syncClaimExpiresAt: null,
-                syncClaimId: null,
-                syncError: null,
-                syncErrorCategory: null,
-                syncErrorCode: null,
-                syncFailureCount: 0,
-                syncRecovery: null,
-                syncState: "current",
-                status: "connected",
-                updatedAt: completedAt,
-              })
-              .where(
-                and(
-                  inArray(financeAccounts.id, siblingAccountIds),
-                  or(
-                    isNull(financeAccounts.syncClaimId),
-                    sql`${financeAccounts.syncClaimExpiresAt} <= NOW()`,
-                  ),
-                ),
-              );
-          }
-          await tx.insert(auditEvents).values(
-            auditValues({
-              action: "finance.plaid_synced",
-              after: { ...reconciliation, changed },
-              before: null,
-              entityId: before.id,
-              entityType: "finance_account",
-              ...context,
-            }),
-          );
-        });
-        const requestId = `sync:finance:${syncClaimId}`;
-        log?.({
-          accountId: claimedAccount.id,
-          durationMs: Date.now() - startedAt,
-          event: "connector_sync_completed",
-          freshnessAgeMs: Math.max(
-            0,
-            completedAt.getTime() -
-              (
-                claimedAccount.lastSyncedAt ??
-                claimedAccount.lastSyncAttemptAt ??
-                claimedAccount.createdAt
-              ).getTime(),
-          ),
-          method: "CONNECTOR",
-          path: `/internal/finances/${claimedAccount.id}/sync`,
-          provider: "plaid",
-          requestId,
-          status: 200,
-        });
-        if (claimedAccount.syncFailureCount > 0) {
-          log?.({
-            accountId: claimedAccount.id,
-            durationMs: Date.now() - startedAt,
-            event: "connector_sync_recovered",
-            failureCount: claimedAccount.syncFailureCount,
-            method: "CONNECTOR",
-            path: `/internal/finances/${claimedAccount.id}/sync`,
-            provider: "plaid",
-            requestId,
-            status: 200,
-          });
-        }
-        return { changed };
-      } catch (error) {
-        if (
-          error instanceof FinanceSyncMaintenanceClaimLostError ||
-          (context.maintenanceClaim && !(await maintenanceClaimIsCurrent(context)))
-        ) {
-          await db
-            .update(financeAccounts)
-            .set({ syncClaimExpiresAt: null, syncClaimId: null, updatedAt: sql`NOW()` })
-            .where(
-              and(
-                eq(financeAccounts.id, claimedAccount.id),
-                eq(financeAccounts.syncClaimId, syncClaimId),
-              ),
-            );
-          throw new AppError(
-            "conflict",
-            error instanceof FinanceSyncMaintenanceClaimLostError
-              ? error.message
-              : "The Finance maintenance claim expired during synchronization.",
-          );
-        }
-        const failedAt = now();
-        const failureCount = before.syncFailureCount + 1;
-        const failure = classifyConnectorSyncFailure(error, "plaid");
-        const nextSyncAt =
-          failure.recovery === "reconnect"
-            ? null
-            : connectorRetryAt({
-                accountId: before.id,
-                failureCount,
-                now: failedAt,
-                retryAfterMs: failure.retryAfterMs,
-              });
-        await db.transaction(async (tx) => {
-          await assertMaintenanceClaim(tx, context);
-          await tx
-            .select({ id: financeAccounts.id })
-            .from(financeAccounts)
-            .where(inArray(financeAccounts.id, claimItemAccountIds))
-            .orderBy(financeAccounts.id)
-            .for("update");
-          const claimedAccountIsScoped = syncHealthAccountIds.includes(claimedAccount.id);
-          const [settledAccount] = await tx
-            .update(financeAccounts)
-            .set(
-              claimedAccountIsScoped
-                ? {
-                    ...(failure.recovery === "reconnect"
-                      ? { status: "needs_reauth" as const }
-                      : {}),
-                    nextSyncAt,
-                    syncClaimExpiresAt: null,
-                    syncClaimId: null,
-                    syncError: failure.message,
-                    syncErrorCategory: failure.category,
-                    syncErrorCode: failure.code,
-                    syncFailureCount: failureCount,
-                    syncRecovery: failure.recovery,
-                    syncState: failure.recovery === "automatic" ? "retrying" : "blocked",
-                    updatedAt: failedAt,
-                  }
-                : { syncClaimExpiresAt: null, syncClaimId: null, updatedAt: failedAt },
-            )
-            .where(
-              and(
-                eq(financeAccounts.id, claimedAccount.id),
-                eq(financeAccounts.syncClaimId, syncClaimId),
-                sql`${financeAccounts.syncClaimExpiresAt} > NOW()`,
-              ),
-            )
-            .returning({ id: financeAccounts.id });
-          if (!settledAccount) {
-            throw new AppError(
-              "conflict",
-              "The Finance synchronization claim was superseded before failure settlement.",
-            );
-          }
-          const siblingAccountIds = syncHealthAccountIds.filter(
-            (accountId) => accountId !== claimedAccount.id,
-          );
-          if (siblingAccountIds.length > 0) {
-            await tx
-              .update(financeAccounts)
-              .set({
-                ...(failure.recovery === "reconnect" ? { status: "needs_reauth" as const } : {}),
-                nextSyncAt,
-                syncError: failure.message,
-                syncErrorCategory: failure.category,
-                syncErrorCode: failure.code,
-                syncFailureCount: failureCount,
-                syncRecovery: failure.recovery,
-                syncState: failure.recovery === "automatic" ? "retrying" : "blocked",
-                updatedAt: failedAt,
-              })
-              .where(
-                and(
-                  inArray(financeAccounts.id, siblingAccountIds),
-                  or(
-                    isNull(financeAccounts.syncClaimId),
-                    sql`${financeAccounts.syncClaimExpiresAt} <= NOW()`,
-                  ),
-                ),
-              );
-          }
-        });
-        log?.({
-          accountId: before.id,
-          category: failure.category,
-          code: failure.code,
-          disposition: failure.recovery,
-          durationMs: Date.now() - startedAt,
-          event: "connector_sync_failed",
-          failureCount,
-          method: "CONNECTOR",
-          nextSyncAt: nextSyncAt?.toISOString() ?? null,
-          path: `/internal/finances/${claimedAccount.id}/sync`,
-          provider: "plaid",
-          requestId: `sync:finance:${syncClaimId}`,
-          status: failure.status ?? 503,
-        });
-        if (error instanceof AppError && error.code === "conflict") throw error;
-        throw connectorSyncAppError(failure, before.id, "plaid", nextSyncAt);
-      }
+      return synchronized;
     },
     async initializeSyncHealth(
       limit = financeSyncBatchLimit,
     ): Promise<FinanceSyncHealthInitializationResult> {
       const startedAt = Date.now();
-      const initializationAt = now();
       const requestedLimit = Number.isFinite(limit) ? Math.trunc(limit) : financeSyncBatchLimit;
       const scanLimit = Math.max(1, Math.min(financeSyncBatchLimit, requestedLimit));
-      const uninitializedSyncHealth = or(
-        and(
-          eq(financeAccounts.provider, "manual"),
-          eq(financeAccounts.syncState, "stale"),
-          isNull(financeAccounts.nextSyncAt),
-        ),
-        and(
-          eq(financeAccounts.provider, "plaid"),
-          eq(financeAccounts.status, "connected"),
-          eq(financeAccounts.syncState, "stale"),
-          isNull(financeAccounts.nextSyncAt),
-        ),
+      const uninitializedSyncHealth = and(
+        eq(financeAccounts.provider, "manual"),
+        eq(financeAccounts.syncState, "stale"),
+        isNull(financeAccounts.nextSyncAt),
       );
       const initialized = await db.transaction(async (tx) => {
         const rows = await tx
@@ -4033,34 +3335,11 @@ export function createFinanceService({
           .for("update", { skipLocked: true });
         const result = { manual: 0, plaidCurrent: 0, plaidDue: 0 };
         for (const row of rows) {
-          if (row.provider === "manual") {
-            await tx
-              .update(financeAccounts)
-              .set({ syncState: "current", updatedAt: sql`NOW()` })
-              .where(eq(financeAccounts.id, row.id));
-            result.manual += 1;
-            continue;
-          }
-          const [updated] = await tx
+          await tx
             .update(financeAccounts)
-            .set({
-              nextSyncAt: sql`CASE
-                WHEN ${financeAccounts.lastSyncedAt} >= NOW() - INTERVAL '24 hours'
-                  THEN ${financeAccounts.lastSyncedAt} + INTERVAL '24 hours'
-                ELSE ${initializationAt}
-              END`,
-              syncState: sql`CASE
-                WHEN ${financeAccounts.lastSyncedAt} >= NOW() - INTERVAL '24 hours'
-                  THEN 'current'
-                ELSE 'stale'
-              END`,
-              updatedAt: sql`NOW()`,
-            })
-            .where(eq(financeAccounts.id, row.id))
-            .returning({ syncState: financeAccounts.syncState });
-          const isCurrent = updated?.syncState === "current";
-          if (isCurrent) result.plaidCurrent += 1;
-          else result.plaidDue += 1;
+            .set({ syncState: "current", updatedAt: sql`NOW()` })
+            .where(eq(financeAccounts.id, row.id));
+          result.manual += 1;
         }
         return { ...result, initialized: rows.length };
       });
@@ -4097,251 +3376,65 @@ export function createFinanceService({
       await onProgress?.();
       await assertMaintenanceScopeOwned(userId, scope);
       const targetAccountId = await maintenanceScopeAccountId(userId, scope);
-      const initializationAt = now();
-      await db.transaction(async (tx) => {
-        await assertMaintenanceClaim(tx, context);
-        const rows = await tx
-          .select()
-          .from(financeAccounts)
-          .where(
-            and(
-              eq(financeAccounts.userId, userId),
-              targetAccountId ? eq(financeAccounts.id, targetAccountId) : undefined,
-              or(
-                scope.type === "window"
-                  ? undefined
-                  : and(
-                      eq(financeAccounts.provider, "manual"),
-                      eq(financeAccounts.syncState, "stale"),
-                      isNull(financeAccounts.nextSyncAt),
-                    ),
-                and(
-                  eq(financeAccounts.provider, "plaid"),
-                  eq(financeAccounts.status, "connected"),
-                  eq(financeAccounts.syncState, "stale"),
-                  isNull(financeAccounts.nextSyncAt),
-                ),
+      if (scope.type !== "window") {
+        const initializationAt = now();
+        await db.transaction(async (tx) => {
+          await assertMaintenanceClaim(tx, context);
+          const rows = await tx
+            .select()
+            .from(financeAccounts)
+            .where(
+              and(
+                eq(financeAccounts.userId, userId),
+                targetAccountId ? eq(financeAccounts.id, targetAccountId) : undefined,
+                eq(financeAccounts.provider, "manual"),
+                eq(financeAccounts.syncState, "stale"),
+                isNull(financeAccounts.nextSyncAt),
               ),
-            ),
-          )
-          .orderBy(financeAccounts.id)
-          .limit(financeSyncBatchLimit)
-          .for("update", { skipLocked: true });
-        for (const row of rows) {
-          if (!context?.maintenance) {
-            throw new AppError(
-              "invalid_request",
-              "Finance maintenance attribution is required to initialize synchronization health.",
-            );
-          }
-          const [updated] = await tx
-            .update(financeAccounts)
-            .set(
-              row.provider === "manual"
-                ? { syncState: "current", updatedAt: initializationAt }
-                : { nextSyncAt: initializationAt, updatedAt: initializationAt },
             )
-            .where(eq(financeAccounts.id, row.id))
-            .returning();
-          if (!updated) continue;
-          const source = financeAccountSourceValue(row);
-          await tx.insert(auditEvents).values(
-            auditValues({
-              action: "finance.sync_health_initialized",
-              after: {
-                nextSyncAt: updated.nextSyncAt?.toISOString() ?? null,
-                syncState: updated.syncState,
-                ...maintenanceAuditAttribution(context, source),
-              },
-              before: {
-                nextSyncAt: row.nextSyncAt?.toISOString() ?? null,
-                syncState: row.syncState,
-                updatedAt: row.updatedAt.toISOString(),
-              },
-              entityId: row.id,
-              entityType: "finance_account",
-              ...context,
-            }),
-          );
-        }
-      });
-      await onProgress?.();
-      const selectedAt = now();
-      const selectedAccounts = await db
-        .select({ id: financeAccounts.id, providerItemId: financeAccounts.providerItemId })
-        .from(financeAccounts)
-        .where(
-          and(
-            eq(financeAccounts.userId, userId),
-            targetAccountId ? eq(financeAccounts.id, targetAccountId) : undefined,
-            eq(financeAccounts.provider, "plaid"),
-            eq(financeAccounts.status, "connected"),
-            lte(financeAccounts.nextSyncAt, selectedAt),
-          ),
-        )
-        .orderBy(asc(financeAccounts.nextSyncAt), asc(financeAccounts.updatedAt))
-        .limit(financeSyncBatchLimit);
-      const dueAccounts: typeof selectedAccounts = [];
-      const selectedItems = new Set<string>();
-      for (const account of selectedAccounts) {
-        const itemKey = account.providerItemId ?? account.id;
-        if (selectedItems.has(itemKey)) continue;
-        selectedItems.add(itemKey);
-        dueAccounts.push(account);
-      }
-      const result: FinanceSyncBatchResult = {
-        attempted: dueAccounts.length,
-        failed: 0,
-        recovered: 0,
-        skipped: 0,
-        succeeded: 0,
-      };
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < dueAccounts.length) {
-          const due = dueAccounts[cursor];
-          cursor += 1;
-          if (!due) continue;
-          try {
-            const [before] = await db
-              .select({ syncFailureCount: financeAccounts.syncFailureCount })
-              .from(financeAccounts)
-              .where(eq(financeAccounts.id, due.id))
-              .limit(1);
-            await this.syncPlaidAccount(
-              due.id,
-              context ?? {
-                principal: {
-                  actorId: userId,
-                  actorType: "agent",
-                  scopes: new Set(["finances:read", "finances:write"]),
-                  userId,
+            .orderBy(financeAccounts.id)
+            .limit(financeSyncBatchLimit)
+            .for("update", { skipLocked: true });
+          for (const row of rows) {
+            if (!context?.maintenance) {
+              throw new AppError(
+                "invalid_request",
+                "Finance maintenance attribution is required to initialize synchronization health.",
+              );
+            }
+            const [updated] = await tx
+              .update(financeAccounts)
+              .set({ syncState: "current", updatedAt: initializationAt })
+              .where(eq(financeAccounts.id, row.id))
+              .returning();
+            if (!updated) continue;
+            await tx.insert(auditEvents).values(
+              auditValues({
+                action: "finance.sync_health_initialized",
+                after: {
+                  nextSyncAt: null,
+                  syncState: updated.syncState,
+                  ...maintenanceAuditAttribution(context, financeAccountSourceValue(row)),
                 },
-                requestId: `maintenance:finance:sync:${due.id}:${selectedAt.toISOString()}`,
-              },
-              onProgress,
-              scope,
+                before: {
+                  nextSyncAt: null,
+                  syncState: row.syncState,
+                  updatedAt: row.updatedAt.toISOString(),
+                },
+                entityId: row.id,
+                entityType: "finance_account",
+                ...context,
+              }),
             );
-            result.succeeded += 1;
-            if ((before?.syncFailureCount ?? 0) > 0) result.recovered += 1;
-          } catch (error) {
-            if (error instanceof AppError && error.code === "conflict") result.skipped += 1;
-            else result.failed += 1;
           }
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(financeSyncConcurrency, dueAccounts.length) }, async () =>
-          worker(),
-        ),
-      );
-      return result;
+        });
+      }
+      await onProgress?.();
+      return providerItemSync.syncDueItemsForUser(userId, scope, context, onProgress);
     },
     async syncDuePlaidAccounts(): Promise<FinanceSyncBatchResult> {
       await this.initializeSyncHealth();
-      const selectedAt = now();
-      const selectedRows = await db
-        .select({
-          id: financeAccounts.id,
-          providerItemId: financeAccounts.providerItemId,
-          userId: financeAccounts.userId,
-        })
-        .from(financeAccounts)
-        .where(
-          and(
-            eq(financeAccounts.provider, "plaid"),
-            eq(financeAccounts.status, "connected"),
-            lte(financeAccounts.nextSyncAt, selectedAt),
-          ),
-        )
-        .orderBy(asc(financeAccounts.nextSyncAt), asc(financeAccounts.updatedAt))
-        .limit(financeSyncBatchLimit * 4);
-      const dueAccounts: typeof selectedRows = [];
-      const selectedItems = new Set<string>();
-      for (const due of selectedRows) {
-        const itemKey = due.providerItemId ?? due.id;
-        if (selectedItems.has(itemKey)) continue;
-        selectedItems.add(itemKey);
-        dueAccounts.push(due);
-        if (dueAccounts.length >= financeSyncBatchLimit) break;
-      }
-      const result: FinanceSyncBatchResult = {
-        attempted: dueAccounts.length,
-        failed: 0,
-        recovered: 0,
-        skipped: 0,
-        succeeded: 0,
-      };
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < dueAccounts.length) {
-          const due = dueAccounts[cursor];
-          cursor += 1;
-          if (!due) continue;
-          try {
-            const [before] = await db
-              .select({ syncFailureCount: financeAccounts.syncFailureCount })
-              .from(financeAccounts)
-              .where(eq(financeAccounts.id, due.id))
-              .limit(1);
-            await this.syncPlaidAccount(due.id, {
-              principal: {
-                actorId: due.userId,
-                actorType: "user",
-                scopes: new Set(["finances:read", "finances:write"]),
-                userId: due.userId,
-              },
-              requestId: `scheduler:finance:${due.id}:${selectedAt.toISOString()}`,
-            });
-            result.succeeded += 1;
-            if ((before?.syncFailureCount ?? 0) > 0) result.recovered += 1;
-          } catch (error) {
-            if (error instanceof AppError && error.code === "conflict") result.skipped += 1;
-            else result.failed += 1;
-          }
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(financeSyncConcurrency, dueAccounts.length) }, async () =>
-          worker(),
-        ),
-      );
-
-      const freshnessStartedAt = Date.now();
-      const freshnessAccounts = await db
-        .select({
-          createdAt: financeAccounts.createdAt,
-          lastSyncedAt: financeAccounts.lastSyncedAt,
-        })
-        .from(financeAccounts)
-        .where(and(eq(financeAccounts.provider, "plaid"), eq(financeAccounts.status, "connected")));
-      const freshnessAgeMs =
-        freshnessAccounts.length === 0
-          ? undefined
-          : freshnessAccounts.reduce(
-              (maximumAge, financeAccount) =>
-                Math.max(
-                  maximumAge,
-                  Math.max(
-                    0,
-                    selectedAt.getTime() -
-                      (financeAccount.lastSyncedAt ?? financeAccount.createdAt).getTime(),
-                  ),
-                ),
-              0,
-            );
-      log?.({
-        durationMs: Date.now() - freshnessStartedAt,
-        eligibleAccountCount: freshnessAccounts.length,
-        event: "connector_sync_freshness_observed",
-        ...(freshnessAgeMs === undefined ? {} : { freshnessAgeMs }),
-        method: "SCHEDULER",
-        path: "/internal/finances/freshness",
-        provider: "plaid",
-        requestId: randomUUID(),
-        status: 200,
-      });
-      return result;
+      return providerItemSync.syncDueItems();
     },
     async reconcileTransfers(userId: string) {
       return reconcileBudgetTransfers(userId);
@@ -5852,7 +4945,7 @@ export function createFinanceService({
         0,
       );
       return {
-        accounts: accounts.map(account),
+        accounts: await serializeAccounts(accounts),
         budgets: budgets.map(budget),
         reviewCount: scopedTransactions.filter((item) => item.needsReview).length,
         pendingSpendThisMonth: pendingSpend / 100,
@@ -5931,6 +5024,7 @@ export function createFinanceService({
             ),
           ),
       ]);
+      const synchronizedAccounts = await serializeAccounts(accounts);
       const cutoff = now().getTime() - 24 * 60 * 60 * 1000;
       const duplicateKeys = new Map<string, number>();
       for (const item of transactions) {
@@ -5956,10 +5050,10 @@ export function createFinanceService({
         ).length,
         pendingTransactions: transactions.filter((item) => item.pending).length,
         possibleDuplicates: [...duplicateKeys.values()].filter((count) => count > 1).length,
-        staleAccounts: accounts.filter(
+        staleAccounts: synchronizedAccounts.filter(
           (account) =>
             account.status === "connected" &&
-            (!account.lastSyncedAt || account.lastSyncedAt.getTime() < cutoff),
+            (!account.lastSyncedAt || new Date(account.lastSyncedAt).getTime() < cutoff),
         ).length,
         unresolvedReviews: reviews.length,
       };
@@ -5997,7 +5091,7 @@ export function createFinanceService({
         this.listAlerts(userId),
       ]);
       return {
-        accounts: accounts.map(account),
+        accounts: await serializeAccounts(accounts),
         alerts,
         asOf: now().toISOString(),
         budgets: budgets.map(budget),

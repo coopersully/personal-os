@@ -139,6 +139,43 @@ function invalidResponse(): ConnectorError {
   });
 }
 
+async function isInvalidCursorResponse(response: Response): Promise<boolean> {
+  if (
+    response.status !== 400 ||
+    !response.headers.get("content-type")?.toLowerCase().includes("application/json") ||
+    !response.body
+  ) {
+    return false;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let serialized = "";
+  let bytes = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > 4_096) {
+        await reader.cancel().catch(() => undefined);
+        return false;
+      }
+      serialized += decoder.decode(chunk.value, { stream: true });
+    }
+    serialized += decoder.decode();
+    const parsed = JSON.parse(serialized) as unknown;
+    return (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "error_code" in parsed &&
+      parsed.error_code === "INVALID_CURSOR"
+    );
+  } catch {
+    await reader.cancel().catch(() => undefined);
+    return false;
+  }
+}
+
 export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConnector {
   const baseUrl = `https://${options.environment}.plaid.com`;
 
@@ -153,7 +190,19 @@ export function createPlaidConnector(options: PlaidConnectorOptions): PlaidConne
     } catch {
       throw transportFailure();
     }
-    if (!response.ok) throw await connectorHttpError(response, "plaid");
+    if (!response.ok) {
+      if (await isInvalidCursorResponse(response.clone())) {
+        await response.body?.cancel().catch(() => undefined);
+        throw new ConnectorError({
+          category: "rejected",
+          code: "plaid_invalid_cursor",
+          disposition: "retry",
+          message: "Plaid requires a controlled transaction replay.",
+          status: response.status,
+        });
+      }
+      throw await connectorHttpError(response, "plaid");
+    }
     try {
       return await response.json();
     } catch {

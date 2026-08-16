@@ -245,7 +245,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
       | undefined;
     const health = records.find((record) => record.step === "health")?.result as
       | {
-          applicability?: "applied" | "skipped_scoped";
+          applicability?: "applied" | "not_run" | "skipped_scoped";
           confidence?: FinanceStatus["details"]["health"]["confidence"];
           refreshed?: boolean;
         }
@@ -262,7 +262,11 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
       health: {
         applicability:
           health?.applicability ??
-          (run.scope.type === "all_outstanding" ? "applied" : "skipped_scoped"),
+          (records.some((record) => record.step === "health")
+            ? run.scope.type === "all_outstanding"
+              ? "applied"
+              : "skipped_scoped"
+            : "not_run"),
         confidence: health?.confidence ?? verificationStatus.details.health.confidence,
         refreshed: health?.refreshed ?? false,
       },

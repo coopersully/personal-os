@@ -1240,6 +1240,7 @@ describe.sequential("Finance maintenance service", () => {
 
     await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
       retryAt: null,
+      settledResult: { health: { applicability: "not_run", refreshed: false } },
       status: "blocked",
     });
     await expect(workspace.listStepRecords(run.id)).resolves.toEqual(

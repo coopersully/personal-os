@@ -267,6 +267,28 @@ describe("Plaid connector", () => {
     });
   });
 
+  it("classifies an invalid transaction cursor for one safe controlled replay", async () => {
+    const rawCanary = "raw-invalid-cursor-provider-message";
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "production",
+      fetch: async () =>
+        Response.json({ error_code: "INVALID_CURSOR", error_message: rawCanary }, { status: 400 }),
+      secret: "secret",
+    });
+
+    const error = await connectorErrorFrom(() =>
+      plaid.syncTransactions({ accessToken: "access-token", cursor: "opaque-cursor" }),
+    );
+    expect(error).toMatchObject({
+      category: "rejected",
+      code: "plaid_invalid_cursor",
+      disposition: "retry",
+      status: 400,
+    });
+    assertRedactedMessage(error.message, [rawCanary, "opaque-cursor", "access-token"]);
+  });
+
   it("classifies an item that needs reauthentication as reconnect", async () => {
     const plaid = createPlaidConnector({
       clientId: "client",

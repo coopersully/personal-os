@@ -2,7 +2,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { createDatabaseClient, migrateDatabase } from "@personal-os/database";
-import { createApp } from "./app.js";
+import { createApp, type PersonalOsApp } from "./app.js";
 import { loadConfig } from "./config.js";
 import {
   closeNodeHttpServer,
@@ -79,6 +79,18 @@ runtimeLifecycle.startBackgroundTask(
 );
 
 async function dispatchFinanceSync(): Promise<void> {
+  let backfill: Awaited<ReturnType<PersonalOsApp["backfillFinanceProviderItems"]>>;
+  try {
+    backfill = await app.backfillFinanceProviderItems();
+  } catch {
+    process.stderr.write("[personal-os] Finance Provider Item backfill failed\n");
+    throw new Error("Finance Provider Item backfill failed.");
+  }
+  if (backfill.created || backfill.linked || backfill.blocked || !backfill.complete) {
+    process.stdout.write(
+      `[personal-os] Finance Provider Item backfill: ${backfill.created} Items created, ${backfill.linked} accounts linked, ${backfill.blocked} blocked, ${backfill.replayDue} due for replay, complete=${backfill.complete}.\n`,
+    );
+  }
   await app.syncDueFinances();
 }
 

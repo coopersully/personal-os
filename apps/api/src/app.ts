@@ -43,6 +43,7 @@ import { createDailyBriefService } from "./daily-brief-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
+import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
 import { createGoalsService } from "./goals-service.js";
@@ -74,6 +75,13 @@ import { createWorkspaceMaintenanceService } from "./workspace-maintenance-servi
 import { createXBookmarksService } from "./x-bookmarks-service.js";
 
 export type PersonalOsApp = Hono<AppEnv> & {
+  backfillFinanceProviderItems: () => Promise<{
+    blocked: number;
+    complete: boolean;
+    created: number;
+    linked: number;
+    replayDue: number;
+  }>;
   backfillFinanceCashflowInsights: () => Promise<{ processed: number }>;
   backfillFinanceLedgerIntegrity: () => Promise<{
     confirmedMovements: number;
@@ -384,12 +392,18 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
           secret: dependencies.config.plaidSecret,
         })
       : undefined);
+  const financeProviderItems = createFinanceProviderItemService({
+    db: dependencies.db,
+    encryptionKey: dependencies.config.encryptionKey,
+    now,
+  });
   const finances = createFinanceService({
     db: dependencies.db,
     encryptionKey: dependencies.config.encryptionKey,
     ...(dependencies.log ? { log: dependencies.log } : {}),
     now,
     ...(plaid ? { plaid } : {}),
+    providerItems: financeProviderItems,
   });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
@@ -1141,6 +1155,9 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   }
 
   return Object.assign(app, {
+    async backfillFinanceProviderItems() {
+      return financeProviderItems.backfillLegacyItems();
+    },
     async backfillFinanceCashflowInsights() {
       return finances.backfillCashflowInsights();
     },

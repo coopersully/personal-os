@@ -87,7 +87,8 @@ import {
   selectEffectiveRecord,
 } from "./finance-cashflow.js";
 import { parseFinanceCsv } from "./finance-csv.js";
-import { decryptJson, encryptJson } from "./security.js";
+import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
+import { decryptJson } from "./security.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
 
@@ -110,6 +111,7 @@ type Options = {
   now: () => Date;
   onProposalSnapshotRead?: () => Promise<void>;
   plaid?: PlaidConnector;
+  providerItems?: ReturnType<typeof createFinanceProviderItemService>;
 };
 type FinanceProfileSourceExecutor = Pick<Database, "select">;
 type FinanceReadExecutor = Pick<Database, "select">;
@@ -559,7 +561,15 @@ export function createFinanceService({
   now,
   onProposalSnapshotRead,
   plaid,
+  providerItems: configuredProviderItems,
 }: Options) {
+  const providerItems =
+    configuredProviderItems ??
+    createFinanceProviderItemService({
+      db,
+      ...(encryptionKey ? { encryptionKey } : {}),
+      now,
+    });
   async function assertMaintenanceClaim(
     executor: FinanceWriteExecutor,
     context?: MutationContext,
@@ -1330,12 +1340,6 @@ export function createFinanceService({
     }
     return plaid;
   }
-  function getEncryptionKey() {
-    if (!encryptionKey) {
-      throw new AppError("invalid_request", "Finance credential encryption is not configured.");
-    }
-    return encryptionKey;
-  }
   async function ownedAccount(userId: string, id: string) {
     const [row] = await db
       .select()
@@ -1439,10 +1443,11 @@ export function createFinanceService({
   function financeAccountSourceValue(
     financeAccount: typeof financeAccounts.$inferSelect,
   ): MaterialSourceReference {
+    const provider = financeAccount.provider === "manual" ? "local" : financeAccount.provider;
     return {
       accountId: financeAccount.id,
-      provider: financeAccount.provider === "manual" ? "local" : financeAccount.provider,
-      remoteId: financeAccount.id,
+      provider,
+      remoteId: provider === "local" ? financeAccount.id : financeAccount.providerAccountId,
       revision: financeAccount.updatedAt.toISOString(),
       sourceType: "finance_account",
     };
@@ -3251,98 +3256,16 @@ export function createFinanceService({
       context: MutationContext,
     ): Promise<FinanceAccount[]> {
       const plaid = getPlaid();
-      const accessToken = await plaid.exchangePublicToken(input.publicToken);
-      const accountsResponse = await plaid.getAccounts(accessToken);
-      const itemKey = createHash("sha256").update(accessToken).digest("hex");
-      const key = getEncryptionKey();
-      const connectedAt = now();
-      const rows = await db.transaction(async (tx) => {
-        await ensureCategories(context.principal.userId, tx);
-        await tx
-          .select({ id: financeAccounts.id })
-          .from(financeAccounts)
-          .where(
-            and(
-              eq(financeAccounts.userId, context.principal.userId),
-              eq(financeAccounts.provider, "plaid"),
-              inArray(
-                financeAccounts.providerAccountId,
-                accountsResponse.map((remote) => remote.accountId),
-              ),
-            ),
-          )
-          .orderBy(financeAccounts.id)
-          .for("update");
-        const created: Array<typeof financeAccounts.$inferSelect> = [];
-        for (const remote of accountsResponse) {
-          const record = requireDatabaseRecord(
-            (
-              await tx
-                .insert(financeAccounts)
-                .values({
-                  balance:
-                    remote.balanceCurrent === null ? null : Math.round(remote.balanceCurrent * 100),
-                  currencyCode: remote.currencyCode,
-                  encryptedCredentials: encryptJson({ accessToken }, key),
-                  institution: input.institution ?? "Plaid",
-                  lastSyncedAt: null,
-                  name: remote.officialName ?? remote.name,
-                  nextSyncAt: connectedAt,
-                  provider: "plaid",
-                  providerAccountId: remote.accountId,
-                  providerItemId: itemKey,
-                  status: "connected",
-                  syncState: "stale",
-                  userId: context.principal.userId,
-                })
-                .onConflictDoUpdate({
-                  set: {
-                    balance:
-                      remote.balanceCurrent === null
-                        ? null
-                        : Math.round(remote.balanceCurrent * 100),
-                    currencyCode: remote.currencyCode,
-                    encryptedCredentials: encryptJson({ accessToken }, key),
-                    name: remote.officialName ?? remote.name,
-                    providerItemId: itemKey,
-                    status: "connected",
-                    syncClaimExpiresAt: null,
-                    syncClaimId: null,
-                    syncCursor: null,
-                    syncError: null,
-                    syncErrorCategory: null,
-                    syncErrorCode: null,
-                    syncFailureCount: 0,
-                    syncRecovery: null,
-                    syncState: "stale",
-                    nextSyncAt: connectedAt,
-                    updatedAt: connectedAt,
-                  },
-                  target: [
-                    financeAccounts.userId,
-                    financeAccounts.provider,
-                    financeAccounts.providerAccountId,
-                  ],
-                })
-                .returning()
-            )[0],
-            "Plaid account could not be saved.",
-          );
-          created.push(record);
-          await tx.insert(auditEvents).values(
-            auditValues({
-              action: "finance.plaid_connected",
-              after: accountAuditSnapshot(account(record)),
-              before: null,
-              entityId: record.id,
-              entityType: "finance_account",
-              ...context,
-            }),
-          );
-        }
-        return created;
+      const { accessToken, itemId } = await plaid.exchangePublicToken(input.publicToken);
+      const accounts = await plaid.getAccounts(accessToken);
+      await ensureCategories(context.principal.userId);
+      return providerItems.upsertConnection({
+        accessToken,
+        accounts,
+        context,
+        institution: input.institution ?? "Plaid",
+        itemId,
       });
-      return rows.map(account);
     },
     async syncPlaidAccount(
       id: string,

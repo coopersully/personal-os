@@ -4399,7 +4399,7 @@ describe.sequential("finance service", () => {
       fetch: async (input) => {
         switch (new URL(String(input)).pathname) {
           case "/item/public_token/exchange":
-            return Response.json({ access_token: "access-token" });
+            return Response.json({ access_token: "access-token", item_id: "heartbeat-item" });
           case "/accounts/get":
             return Response.json({
               accounts: [
@@ -4736,18 +4736,23 @@ describe.sequential("finance service", () => {
         .where(eq(auditEvents.action, "finance.sync_health_initialized"))
         .orderBy(auditEvents.entityId),
     ).resolves.toEqual(
-      [targetAccount.id, unrelatedAccount.id].sort().map((accountId) => ({
-        action: "finance.sync_health_initialized",
-        after: expect.objectContaining({
-          maintenance: windowContext.maintenance,
-          source: expect.objectContaining({
-            accountId,
-            remoteId: accountId,
-            sourceType: "finance_account",
+      [
+        { accountId: targetAccount.id, remoteId: "scope-account-one" },
+        { accountId: unrelatedAccount.id, remoteId: "scope-account-two" },
+      ]
+        .sort((left, right) => left.accountId.localeCompare(right.accountId))
+        .map(({ accountId, remoteId }) => ({
+          action: "finance.sync_health_initialized",
+          after: expect.objectContaining({
+            maintenance: windowContext.maintenance,
+            source: expect.objectContaining({
+              accountId,
+              remoteId,
+              sourceType: "finance_account",
+            }),
           }),
-        }),
-        entityId: accountId,
-      })),
+          entityId: accountId,
+        })),
     );
     await expect(
       database.db

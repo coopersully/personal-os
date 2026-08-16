@@ -196,6 +196,16 @@ describe.sequential("ilo API", () => {
     return response.status === 204 ? null : response.json();
   }
 
+  it("exposes one bounded Finance Provider Item backfill pass through the app lifecycle", async () => {
+    await expect(app.backfillFinanceProviderItems()).resolves.toEqual({
+      blocked: 0,
+      complete: true,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+  });
+
   it("returns every connector callback to ilo when persistence fails unexpectedly", async () => {
     const callbackLogs = vi.fn();
     const failingDatabase = new Proxy(database.db, {

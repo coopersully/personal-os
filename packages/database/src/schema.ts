@@ -108,6 +108,7 @@ export const workspaceMaintenanceRuns = pgTable(
     checkpoint: jsonb("checkpoint").$type<unknown>(),
     leaseClaimId: uuid("lease_claim_id"),
     leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
+    retryAt: timestamp("retry_at", { withTimezone: true }),
     lastSafeError: jsonb("last_safe_error").$type<MaintenanceSafeError>(),
     settledResult: jsonb("settled_result").$type<unknown>(),
     ...timestamps,
@@ -125,13 +126,21 @@ export const workspaceMaintenanceRuns = pgTable(
         (${table.status} <> 'running' AND ${table.leaseClaimId} IS NULL AND ${table.leaseExpiresAt} IS NULL)
       )`,
     ),
+    check(
+      "workspace_maintenance_runs_retry_check",
+      sql`(
+        (${table.status} = 'failed_recoverable' AND ${table.retryAt} IS NOT NULL)
+        OR
+        (${table.status} <> 'failed_recoverable' AND ${table.retryAt} IS NULL)
+      )`,
+    ),
     uniqueIndex("workspace_maintenance_runs_open_user_domain_idx")
       .on(table.userId, table.domain)
       .where(
         sql`${table.status} IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable')`,
       ),
     index("workspace_maintenance_runs_claimable_idx")
-      .on(table.status, table.leaseExpiresAt, table.updatedAt)
+      .on(table.status, table.retryAt, table.leaseExpiresAt, table.updatedAt)
       .where(sql`${table.status} IN ('queued', 'running', 'failed_recoverable')`),
     index("workspace_maintenance_runs_user_history_idx").on(
       table.userId,
@@ -154,6 +163,7 @@ export const workspaceMaintenanceSteps = pgTable(
       .notNull(),
     attemptCount: integer("attempt_count").notNull().default(1),
     idempotencyKey: text("idempotency_key").notNull(),
+    attemptClaimId: uuid("attempt_claim_id").notNull(),
     safeResult: jsonb("safe_result").$type<unknown>(),
     safeError: jsonb("safe_error").$type<MaintenanceSafeError>(),
     ...timestamps,

@@ -218,6 +218,7 @@ describe("workspace maintenance", () => {
       domain: "finances",
       id,
       lastSafeError: null,
+      retryAt: null,
       rulebookVersion: "rules:v1",
       scope: { type: "all_outstanding" },
       settledResult: null,
@@ -236,6 +237,21 @@ describe("workspace maintenance", () => {
         leaseExpiresAt: end,
       }).success,
     ).toBe(false);
+    expect(
+      maintenanceRunSchema.safeParse({
+        ...runBase,
+        status: "failed_recoverable",
+        leaseExpiresAt: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      maintenanceRunSchema.safeParse({
+        ...runBase,
+        status: "failed_recoverable",
+        leaseExpiresAt: null,
+        retryAt: end,
+      }).success,
+    ).toBe(true);
   });
 });
 

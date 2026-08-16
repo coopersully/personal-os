@@ -12,7 +12,7 @@ import {
   maintenanceRunSchema,
   maintenanceScopeSchema,
 } from "@personal-os/domain";
-import { and, eq, inArray, or, sql } from "drizzle-orm";
+import { and, eq, inArray, or, type SQL, sql } from "drizzle-orm";
 import { AppError, isUniqueViolation } from "./errors.js";
 
 const openStatuses = [
@@ -23,6 +23,7 @@ const openStatuses = [
   "failed_recoverable",
 ] as const;
 const leaseMilliseconds = 2 * 60_000;
+const recoverableRetryMilliseconds = 60_000;
 
 type Options = { db: Database; now: () => Date };
 
@@ -50,6 +51,12 @@ type SettleInput = {
   status: MaintenanceSettlementStatus;
 };
 
+type RequeueInput = {
+  expectedRulebookVersion: string;
+  expectedStatus: "awaiting_approval" | "blocked";
+  runId: string;
+};
+
 export type WorkspaceMaintenanceService = {
   createOrResume: (
     userId: string,
@@ -60,10 +67,17 @@ export type WorkspaceMaintenanceService = {
   claim: (runId: string) => Promise<{ claimId: string; run: MaintenanceRun } | null>;
   completeStep: (input: CompleteStepInput) => Promise<void>;
   failStep: (input: FailStepInput) => Promise<void>;
+  requeue: (input: RequeueInput) => Promise<MaintenanceRun>;
   settle: (input: SettleInput) => Promise<MaintenanceRun>;
 };
 
 type RunRow = typeof workspaceMaintenanceRuns.$inferSelect;
+type FencedRunUpdate = Omit<
+  Partial<typeof workspaceMaintenanceRuns.$inferInsert>,
+  "retryAt" | "updatedAt"
+> & {
+  retryAt?: Date | null | SQL;
+};
 
 function serializeRun(row: RunRow): MaintenanceRun {
   return maintenanceRunSchema.parse({
@@ -76,6 +90,7 @@ function serializeRun(row: RunRow): MaintenanceRun {
     sourceSnapshot: row.sourceSnapshot ?? null,
     checkpoint: row.checkpoint ?? null,
     leaseExpiresAt: row.leaseExpiresAt?.toISOString() ?? null,
+    retryAt: row.retryAt?.toISOString() ?? null,
     lastSafeError: row.lastSafeError ?? null,
     settledResult: row.settledResult ?? null,
     createdAt: row.createdAt.toISOString(),
@@ -83,8 +98,22 @@ function serializeRun(row: RunRow): MaintenanceRun {
   });
 }
 
-function scopesMatch(left: MaintenanceScope, right: MaintenanceScope): boolean {
-  return JSON.stringify(left) === JSON.stringify(right);
+function stableJson(value: unknown): string | undefined {
+  return JSON.stringify(value, (_key, nestedValue: unknown) => {
+    if (nestedValue !== null && typeof nestedValue === "object" && !Array.isArray(nestedValue)) {
+      const record = nestedValue as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(record)
+          .sort()
+          .map((key) => [key, record[key]]),
+      );
+    }
+    return nestedValue;
+  });
+}
+
+function jsonMatches(left: unknown, right: unknown): boolean {
+  return stableJson(left) === stableJson(right);
 }
 
 function incompatibleRun(current: RunRow): AppError {
@@ -119,7 +148,7 @@ export function createWorkspaceMaintenanceService({
     scope: MaintenanceScope,
     rulebookVersion: string,
   ): MaintenanceRun {
-    if (current.rulebookVersion !== rulebookVersion || !scopesMatch(current.scope, scope)) {
+    if (current.rulebookVersion !== rulebookVersion || !jsonMatches(current.scope, scope)) {
       throw incompatibleRun(current);
     }
     return serializeRun(current);
@@ -128,11 +157,11 @@ export function createWorkspaceMaintenanceService({
   async function fenceClaim(
     transaction: Parameters<Parameters<Database["transaction"]>[0]>[0],
     input: { claimId: string; runId: string },
-    update: Partial<typeof workspaceMaintenanceRuns.$inferInsert>,
+    update: FencedRunUpdate,
   ): Promise<RunRow> {
     const [run] = await transaction
       .update(workspaceMaintenanceRuns)
-      .set(update)
+      .set({ ...update, updatedAt: sql`NOW()` })
       .where(
         and(
           eq(workspaceMaintenanceRuns.id, input.runId),
@@ -194,6 +223,7 @@ export function createWorkspaceMaintenanceService({
         .set({
           leaseClaimId: claimId,
           leaseExpiresAt: sql`NOW() + ${leaseMilliseconds} * INTERVAL '1 millisecond'`,
+          retryAt: null,
           status: "running",
           updatedAt: sql`NOW()`,
         })
@@ -202,7 +232,10 @@ export function createWorkspaceMaintenanceService({
             eq(workspaceMaintenanceRuns.id, runId),
             or(
               eq(workspaceMaintenanceRuns.status, "queued"),
-              eq(workspaceMaintenanceRuns.status, "failed_recoverable"),
+              and(
+                eq(workspaceMaintenanceRuns.status, "failed_recoverable"),
+                sql`${workspaceMaintenanceRuns.retryAt} <= NOW()`,
+              ),
               and(
                 eq(workspaceMaintenanceRuns.status, "running"),
                 sql`${workspaceMaintenanceRuns.leaseExpiresAt} <= NOW()`,
@@ -218,9 +251,8 @@ export function createWorkspaceMaintenanceService({
       await db.transaction(async (transaction) => {
         await fenceClaim(transaction, input, {
           checkpoint: { completedStep: input.step },
-          updatedAt: now(),
         });
-        const [existing] = await transaction
+        const existing = await transaction
           .select()
           .from(workspaceMaintenanceSteps)
           .where(
@@ -232,12 +264,14 @@ export function createWorkspaceMaintenanceService({
               ),
             ),
           );
-        if (existing) {
+        const existingByStep = existing.find((row) => row.stepName === input.step);
+        const existingByIdempotencyKey = existing.find(
+          (row) => row.idempotencyKey === input.idempotencyKey,
+        );
+        if (existingByStep?.status === "completed") {
           if (
-            existing.stepName === input.step &&
-            existing.idempotencyKey === input.idempotencyKey &&
-            existing.status === "completed" &&
-            JSON.stringify(existing.safeResult) === JSON.stringify(input.result)
+            existingByStep.id === existingByIdempotencyKey?.id &&
+            jsonMatches(existingByStep.safeResult, input.result)
           ) {
             return;
           }
@@ -247,13 +281,36 @@ export function createWorkspaceMaintenanceService({
             { runId: input.runId, step: input.step },
           );
         }
+        if (existingByIdempotencyKey) {
+          throw new AppError(
+            "conflict",
+            "The maintenance step name or idempotency key was already used.",
+            { runId: input.runId, step: input.step },
+          );
+        }
+        if (existingByStep) {
+          await transaction
+            .update(workspaceMaintenanceSteps)
+            .set({
+              attemptClaimId: input.claimId,
+              attemptCount: sql`${workspaceMaintenanceSteps.attemptCount} + 1`,
+              idempotencyKey: input.idempotencyKey,
+              safeError: null,
+              safeResult: input.result,
+              status: "completed",
+              updatedAt: sql`NOW()`,
+            })
+            .where(eq(workspaceMaintenanceSteps.id, existingByStep.id));
+          return;
+        }
         await transaction.insert(workspaceMaintenanceSteps).values({
           idempotencyKey: input.idempotencyKey,
+          attemptClaimId: input.claimId,
           runId: input.runId,
           safeResult: input.result,
           status: "completed",
           stepName: input.step,
-          updatedAt: now(),
+          updatedAt: sql`NOW()`,
         });
       });
     },
@@ -262,13 +319,6 @@ export function createWorkspaceMaintenanceService({
       const safeError = { code: input.code, message: input.safeMessage };
       const status = input.recoverable ? "failed_recoverable" : "failed_terminal";
       await db.transaction(async (transaction) => {
-        await fenceClaim(transaction, input, {
-          lastSafeError: safeError,
-          leaseClaimId: null,
-          leaseExpiresAt: null,
-          status,
-          updatedAt: now(),
-        });
         const [existing] = await transaction
           .select()
           .from(workspaceMaintenanceSteps)
@@ -278,6 +328,23 @@ export function createWorkspaceMaintenanceService({
               eq(workspaceMaintenanceSteps.stepName, input.step),
             ),
           );
+        if (existing?.attemptClaimId === input.claimId) {
+          if (existing.status === status && jsonMatches(existing.safeError, safeError)) return;
+          throw new AppError(
+            "conflict",
+            "The maintenance failure was already recorded with different content.",
+            { runId: input.runId, step: input.step },
+          );
+        }
+        await fenceClaim(transaction, input, {
+          lastSafeError: safeError,
+          leaseClaimId: null,
+          leaseExpiresAt: null,
+          retryAt: input.recoverable
+            ? sql`NOW() + ${recoverableRetryMilliseconds} * INTERVAL '1 millisecond'`
+            : null,
+          status,
+        });
         if (existing?.status === "completed") {
           throw new AppError(
             "conflict",
@@ -290,23 +357,61 @@ export function createWorkspaceMaintenanceService({
             .update(workspaceMaintenanceSteps)
             .set({
               attemptCount: sql`${workspaceMaintenanceSteps.attemptCount} + 1`,
+              attemptClaimId: input.claimId,
               safeError,
               safeResult: null,
               status,
-              updatedAt: now(),
+              updatedAt: sql`NOW()`,
             })
             .where(eq(workspaceMaintenanceSteps.id, existing.id));
           return;
         }
         await transaction.insert(workspaceMaintenanceSteps).values({
           idempotencyKey: `failure:${input.step}`,
+          attemptClaimId: input.claimId,
           runId: input.runId,
           safeError,
           status,
           stepName: input.step,
-          updatedAt: now(),
+          updatedAt: sql`NOW()`,
         });
       });
+    },
+
+    async requeue(input) {
+      if (input.expectedStatus !== "blocked" && input.expectedStatus !== "awaiting_approval") {
+        throw new AppError(
+          "invalid_request",
+          "Only blocked or awaiting-approval maintenance runs can be requeued.",
+        );
+      }
+      const [run] = await db
+        .update(workspaceMaintenanceRuns)
+        .set({
+          lastSafeError: null,
+          leaseClaimId: null,
+          leaseExpiresAt: null,
+          retryAt: null,
+          settledResult: null,
+          status: "queued",
+          updatedAt: sql`NOW()`,
+        })
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.id, input.runId),
+            eq(workspaceMaintenanceRuns.status, input.expectedStatus),
+            eq(workspaceMaintenanceRuns.rulebookVersion, input.expectedRulebookVersion),
+          ),
+        )
+        .returning();
+      if (!run) {
+        throw new AppError(
+          "conflict",
+          "The workspace maintenance run no longer matches the requeue evidence.",
+          { runId: input.runId },
+        );
+      }
+      return serializeRun(run);
     },
 
     async settle(input) {
@@ -316,9 +421,13 @@ export function createWorkspaceMaintenanceService({
           lastSafeError: null,
           leaseClaimId: null,
           leaseExpiresAt: null,
+          retryAt:
+            input.status === "failed_recoverable"
+              ? sql`NOW() + ${recoverableRetryMilliseconds} * INTERVAL '1 millisecond'`
+              : null,
           settledResult: input.result,
           status: input.status,
-          updatedAt: now(),
+          updatedAt: sql`NOW()`,
         })
         .where(
           and(

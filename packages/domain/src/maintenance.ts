@@ -153,28 +153,45 @@ const maintenanceRunBaseSchema = z.object({
 });
 
 export const maintenanceRunSchema = z.discriminatedUnion("status", [
-  maintenanceRunBaseSchema.extend({ status: z.literal("queued"), leaseExpiresAt: z.null() }),
+  maintenanceRunBaseSchema.extend({
+    status: z.literal("queued"),
+    leaseExpiresAt: z.null(),
+    retryAt: z.null(),
+  }),
   maintenanceRunBaseSchema.extend({
     status: z.literal("running"),
     leaseExpiresAt: isoDateTimeSchema,
+    retryAt: z.null(),
   }),
-  maintenanceRunBaseSchema.extend({ status: z.literal("completed"), leaseExpiresAt: z.null() }),
+  maintenanceRunBaseSchema.extend({
+    status: z.literal("completed"),
+    leaseExpiresAt: z.null(),
+    retryAt: z.null(),
+  }),
   maintenanceRunBaseSchema.extend({
     status: z.literal("completed_with_questions"),
     leaseExpiresAt: z.null(),
+    retryAt: z.null(),
   }),
   maintenanceRunBaseSchema.extend({
     status: z.literal("awaiting_approval"),
     leaseExpiresAt: z.null(),
+    retryAt: z.null(),
   }),
-  maintenanceRunBaseSchema.extend({ status: z.literal("blocked"), leaseExpiresAt: z.null() }),
+  maintenanceRunBaseSchema.extend({
+    status: z.literal("blocked"),
+    leaseExpiresAt: z.null(),
+    retryAt: z.null(),
+  }),
   maintenanceRunBaseSchema.extend({
     status: z.literal("failed_recoverable"),
     leaseExpiresAt: z.null(),
+    retryAt: isoDateTimeSchema,
   }),
   maintenanceRunBaseSchema.extend({
     status: z.literal("failed_terminal"),
     leaseExpiresAt: z.null(),
+    retryAt: z.null(),
   }),
 ]);
 export type MaintenanceRun = z.infer<typeof maintenanceRunSchema>;

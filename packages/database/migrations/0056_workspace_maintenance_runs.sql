@@ -9,6 +9,7 @@ CREATE TABLE "workspace_maintenance_runs" (
 	"checkpoint" jsonb,
 	"lease_claim_id" uuid,
 	"lease_expires_at" timestamp with time zone,
+	"retry_at" timestamp with time zone,
 	"last_safe_error" jsonb,
 	"settled_result" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -18,6 +19,11 @@ CREATE TABLE "workspace_maintenance_runs" (
 		("status" = 'running' AND "lease_claim_id" IS NOT NULL AND "lease_expires_at" IS NOT NULL)
 		OR
 		("status" <> 'running' AND "lease_claim_id" IS NULL AND "lease_expires_at" IS NULL)
+	),
+	CONSTRAINT "workspace_maintenance_runs_retry_check" CHECK (
+		("status" = 'failed_recoverable' AND "retry_at" IS NOT NULL)
+		OR
+		("status" <> 'failed_recoverable' AND "retry_at" IS NULL)
 	)
 );
 --> statement-breakpoint
@@ -28,6 +34,7 @@ CREATE TABLE "workspace_maintenance_steps" (
 	"status" text NOT NULL,
 	"attempt_count" integer DEFAULT 1 NOT NULL,
 	"idempotency_key" text NOT NULL,
+	"attempt_claim_id" uuid NOT NULL,
 	"safe_result" jsonb,
 	"safe_error" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
@@ -47,7 +54,7 @@ ALTER TABLE "workspace_maintenance_steps" ADD CONSTRAINT "workspace_maintenance_
 --> statement-breakpoint
 CREATE UNIQUE INDEX "workspace_maintenance_runs_open_user_domain_idx" ON "workspace_maintenance_runs" USING btree ("user_id", "domain") WHERE "status" IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable');
 --> statement-breakpoint
-CREATE INDEX "workspace_maintenance_runs_claimable_idx" ON "workspace_maintenance_runs" USING btree ("status", "lease_expires_at", "updated_at") WHERE "status" IN ('queued', 'running', 'failed_recoverable');
+CREATE INDEX "workspace_maintenance_runs_claimable_idx" ON "workspace_maintenance_runs" USING btree ("status", "retry_at", "lease_expires_at", "updated_at") WHERE "status" IN ('queued', 'running', 'failed_recoverable');
 --> statement-breakpoint
 CREATE INDEX "workspace_maintenance_runs_user_history_idx" ON "workspace_maintenance_runs" USING btree ("user_id", "domain", "created_at");
 --> statement-breakpoint

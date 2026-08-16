@@ -29,6 +29,7 @@ describe("database schema contracts", () => {
         "checkpoint",
         "lease_claim_id",
         "lease_expires_at",
+        "retry_at",
         "last_safe_error",
         "settled_result",
       ]),
@@ -44,6 +45,10 @@ describe("database schema contracts", () => {
         "workspace_maintenance_steps_run_step_idx",
         "workspace_maintenance_steps_run_idempotency_idx",
       ]),
+    );
+    expect(steps.columns.map((column) => column.name)).toContain("attempt_claim_id");
+    expect(runs.checks.map((candidate) => candidate.name)).toContain(
+      "workspace_maintenance_runs_retry_check",
     );
 
     const migrationSql = await readFile(

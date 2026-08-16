@@ -63,6 +63,26 @@ describe.sequential("workspace maintenance service", () => {
       userId,
     });
 
+    const targetId = "11111111-1111-4111-8111-111111111111";
+    await database.pool.query(
+      `UPDATE workspace_maintenance_runs
+       SET scope = jsonb_build_object(
+         'id', $2::text,
+         'type', 'target',
+         'entityType', 'finance_transaction'
+       )
+       WHERE id = $1`,
+      [first.id, targetId],
+    );
+    await expect(
+      serviceOne.createOrResume(
+        userId,
+        "finances",
+        { id: targetId, entityType: "finance_transaction", type: "target" },
+        "rules:v1",
+      ),
+    ).resolves.toMatchObject({ id: first.id, scope: { type: "target", id: targetId } });
+
     await expect(
       serviceOne.createOrResume(
         userId,
@@ -137,7 +157,7 @@ describe.sequential("workspace maintenance service", () => {
   it("commits each step once by stable name and idempotency key", async () => {
     const service = createWorkspaceMaintenanceService({
       db: database.db,
-      now: () => new Date("2026-08-15T13:00:00.000Z"),
+      now: () => new Date("2100-01-01T00:00:00.000Z"),
     });
     const run = await service.createOrResume(
       userId,
@@ -150,13 +170,34 @@ describe.sequential("workspace maintenance service", () => {
     const input = {
       claimId: claim.claimId,
       idempotencyKey: "calendar:preflight:v1",
-      result: { inspected: 3 },
+      result: {
+        inspected: 3,
+        groups: { pending: 1, completed: 2 },
+        ids: ["one", "two"],
+      },
       runId: run.id,
       step: "preflight",
     };
 
     await service.completeStep(input);
-    await service.completeStep(input);
+    await service.completeStep({
+      ...input,
+      result: {
+        ids: ["one", "two"],
+        groups: { completed: 2, pending: 1 },
+        inspected: 3,
+      },
+    });
+    await expect(
+      service.completeStep({
+        ...input,
+        result: {
+          ids: ["two", "one"],
+          groups: { completed: 2, pending: 1 },
+          inspected: 3,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
     await expect(
       service.completeStep({ ...input, idempotencyKey: "calendar:preflight:v2" }),
     ).rejects.toMatchObject({ code: "conflict" });
@@ -166,7 +207,9 @@ describe.sequential("workspace maintenance service", () => {
 
     await expect(
       database.pool.query(
-        `SELECT step_name, status, attempt_count, idempotency_key, safe_result
+        `SELECT step_name, status, attempt_count, idempotency_key, safe_result,
+                attempt_claim_id,
+                ABS(EXTRACT(EPOCH FROM (updated_at - NOW()))) AS updated_age_seconds
          FROM workspace_maintenance_steps
          WHERE run_id = $1`,
         [run.id],
@@ -175,19 +218,57 @@ describe.sequential("workspace maintenance service", () => {
       rows: [
         {
           attempt_count: 1,
+          attempt_claim_id: claim.claimId,
           idempotency_key: "calendar:preflight:v1",
-          safe_result: { inspected: 3 },
+          safe_result: {
+            groups: { completed: 2, pending: 1 },
+            ids: ["one", "two"],
+            inspected: 3,
+          },
           status: "completed",
           step_name: "preflight",
         },
       ],
     });
+    const completedTimestamps = await database.pool.query<{
+      run_age_seconds: string;
+      step_age_seconds: string;
+    }>(
+      `SELECT
+         ABS(EXTRACT(EPOCH FROM (runs.updated_at - NOW()))) AS run_age_seconds,
+         ABS(EXTRACT(EPOCH FROM (steps.updated_at - NOW()))) AS step_age_seconds
+       FROM workspace_maintenance_runs AS runs
+       JOIN workspace_maintenance_steps AS steps ON steps.run_id = runs.id
+       WHERE runs.id = $1`,
+      [run.id],
+    );
+    expect(Number(completedTimestamps.rows[0]?.run_age_seconds)).toBeLessThan(5);
+    expect(Number(completedTimestamps.rows[0]?.step_age_seconds)).toBeLessThan(5);
+
+    await database.pool.query(
+      `UPDATE workspace_maintenance_runs
+       SET lease_expires_at = NOW() - INTERVAL '1 second'
+       WHERE id = $1`,
+      [run.id],
+    );
+    const retryClaim = await service.claim(run.id);
+    if (!retryClaim) throw new Error("Maintenance run was not reclaimed.");
+    await expect(
+      service.failStep({
+        claimId: retryClaim.claimId,
+        code: "late_failure",
+        recoverable: false,
+        runId: run.id,
+        safeMessage: "A completed step cannot be replaced.",
+        step: "preflight",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
   });
 
   it("settles only the current unexpired claim and frees terminal history from the open slot", async () => {
     const service = createWorkspaceMaintenanceService({
       db: database.db,
-      now: () => new Date("2026-08-15T14:00:00.000Z"),
+      now: () => new Date("2100-01-01T00:00:00.000Z"),
     });
     const run = await service.createOrResume(
       userId,
@@ -209,6 +290,12 @@ describe.sequential("workspace maintenance service", () => {
       settledResult: { completedSteps: 1 },
       status: "completed",
     });
+    const settledTimestamp = await database.pool.query<{ age_seconds: string }>(
+      `SELECT ABS(EXTRACT(EPOCH FROM (updated_at - NOW()))) AS age_seconds
+       FROM workspace_maintenance_runs WHERE id = $1`,
+      [run.id],
+    );
+    expect(Number(settledTimestamp.rows[0]?.age_seconds)).toBeLessThan(5);
     await expect(
       service.settle({
         claimId: claim.claimId,
@@ -230,7 +317,7 @@ describe.sequential("workspace maintenance service", () => {
   it("persists recoverable and terminal step failures with fenced recovery", async () => {
     const service = createWorkspaceMaintenanceService({
       db: database.db,
-      now: () => new Date("2026-08-15T15:00:00.000Z"),
+      now: () => new Date("2100-01-01T00:00:00.000Z"),
     });
     const run = await service.createOrResume(
       userId,
@@ -240,13 +327,21 @@ describe.sequential("workspace maintenance service", () => {
     );
     const firstClaim = await service.claim(run.id);
     if (!firstClaim) throw new Error("Maintenance run was not claimed.");
-    await service.failStep({
+    const firstFailure = {
       claimId: firstClaim.claimId,
       code: "temporarily_unavailable",
       recoverable: true,
       runId: run.id,
       safeMessage: "The dependency is temporarily unavailable.",
       step: "synchronize",
+    } as const;
+    await service.failStep(firstFailure);
+    await service.failStep(firstFailure);
+    await expect(
+      service.failStep({ ...firstFailure, safeMessage: "Different failure content." }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(service.failStep({ ...firstFailure, recoverable: false })).rejects.toMatchObject({
+      code: "conflict",
     });
 
     const recovered = await service.createOrResume(
@@ -255,9 +350,51 @@ describe.sequential("workspace maintenance service", () => {
       { type: "all_outstanding" },
       "rules:v1",
     );
-    expect(recovered).toMatchObject({ id: run.id, status: "failed_recoverable" });
+    expect(recovered).toMatchObject({
+      id: run.id,
+      retryAt: expect.any(String),
+      status: "failed_recoverable",
+    });
+    await expect(service.claim(run.id)).resolves.toBeNull();
+    const firstFailureState = await database.pool.query<{
+      attempt_claim_id: string;
+      attempt_count: number;
+      run_age_seconds: string;
+      step_age_seconds: string;
+      retry_remaining_seconds: string;
+    }>(
+      `SELECT steps.attempt_claim_id, steps.attempt_count,
+              ABS(EXTRACT(EPOCH FROM (runs.updated_at - NOW()))) AS run_age_seconds,
+              ABS(EXTRACT(EPOCH FROM (steps.updated_at - NOW()))) AS step_age_seconds,
+              EXTRACT(EPOCH FROM (runs.retry_at - NOW())) AS retry_remaining_seconds
+       FROM workspace_maintenance_runs AS runs
+       JOIN workspace_maintenance_steps AS steps ON steps.run_id = runs.id
+       WHERE runs.id = $1 AND steps.step_name = 'synchronize'`,
+      [run.id],
+    );
+    expect(firstFailureState.rows[0]).toMatchObject({
+      attempt_claim_id: firstClaim.claimId,
+      attempt_count: 1,
+    });
+    expect(Number(firstFailureState.rows[0]?.retry_remaining_seconds)).toBeGreaterThan(50);
+    expect(Number(firstFailureState.rows[0]?.retry_remaining_seconds)).toBeLessThanOrEqual(60);
+    expect(Number(firstFailureState.rows[0]?.run_age_seconds)).toBeLessThan(5);
+    expect(Number(firstFailureState.rows[0]?.step_age_seconds)).toBeLessThan(5);
+
+    await database.pool.query(
+      `UPDATE workspace_maintenance_runs SET retry_at = NOW() - INTERVAL '1 second' WHERE id = $1`,
+      [run.id],
+    );
     const secondClaim = await service.claim(run.id);
     if (!secondClaim) throw new Error("Recoverable maintenance run was not reclaimed.");
+    await service.failStep({
+      claimId: secondClaim.claimId,
+      code: "invalid_rulebook",
+      recoverable: false,
+      runId: run.id,
+      safeMessage: "The current rulebook cannot be executed.",
+      step: "synchronize",
+    });
     await service.failStep({
       claimId: secondClaim.claimId,
       code: "invalid_rulebook",
@@ -270,7 +407,7 @@ describe.sequential("workspace maintenance service", () => {
     await expect(service.claim(run.id)).resolves.toBeNull();
     await expect(
       database.pool.query(
-        `SELECT status, attempt_count, safe_error
+        `SELECT status, attempt_count, attempt_claim_id, safe_error
          FROM workspace_maintenance_steps
          WHERE run_id = $1 AND step_name = 'synchronize'`,
         [run.id],
@@ -279,6 +416,7 @@ describe.sequential("workspace maintenance service", () => {
       rows: [
         {
           attempt_count: 2,
+          attempt_claim_id: secondClaim.claimId,
           safe_error: {
             code: "invalid_rulebook",
             message: "The current rulebook cannot be executed.",
@@ -287,5 +425,152 @@ describe.sequential("workspace maintenance service", () => {
         },
       ],
     });
+
+    const successAfterRetryRun = await service.createOrResume(
+      userId,
+      "goals",
+      { type: "all_outstanding" },
+      "rules:v1",
+    );
+    expect(successAfterRetryRun.id).not.toBe(run.id);
+    const failedClaim = await service.claim(successAfterRetryRun.id);
+    if (!failedClaim) throw new Error("Retry-success run was not claimed.");
+    await service.failStep({
+      claimId: failedClaim.claimId,
+      code: "temporarily_unavailable",
+      recoverable: true,
+      runId: successAfterRetryRun.id,
+      safeMessage: "The dependency is temporarily unavailable.",
+      step: "synchronize",
+    });
+    await database.pool.query(
+      `UPDATE workspace_maintenance_runs SET retry_at = NOW() - INTERVAL '1 second' WHERE id = $1`,
+      [successAfterRetryRun.id],
+    );
+    const successfulClaim = await service.claim(successAfterRetryRun.id);
+    if (!successfulClaim) throw new Error("Due retry-success run was not reclaimed.");
+    await service.completeStep({
+      claimId: successfulClaim.claimId,
+      idempotencyKey: "goals:synchronize:v1",
+      result: { synchronized: true },
+      runId: successAfterRetryRun.id,
+      step: "synchronize",
+    });
+    await expect(
+      database.pool.query(
+        `SELECT status, attempt_count, attempt_claim_id, idempotency_key, safe_error, safe_result
+         FROM workspace_maintenance_steps
+         WHERE run_id = $1 AND step_name = 'synchronize'`,
+        [successAfterRetryRun.id],
+      ),
+    ).resolves.toMatchObject({
+      rows: [
+        {
+          attempt_claim_id: successfulClaim.claimId,
+          attempt_count: 2,
+          idempotency_key: "goals:synchronize:v1",
+          safe_error: null,
+          safe_result: { synchronized: true },
+          status: "completed",
+        },
+      ],
+    });
+  });
+
+  it("authoritatively requeues blocked and approval runs with optimistic evidence", async () => {
+    const service = createWorkspaceMaintenanceService({
+      db: database.db,
+      now: () => new Date("2100-01-01T00:00:00.000Z"),
+    });
+    const run = await service.createOrResume(
+      userId,
+      "reminders",
+      { type: "all_outstanding" },
+      "rules:v1",
+    );
+    const blockedClaim = await service.claim(run.id);
+    if (!blockedClaim) throw new Error("Maintenance run was not claimed.");
+    await service.settle({
+      claimId: blockedClaim.claimId,
+      result: { blocker: "authorization" },
+      runId: run.id,
+      status: "blocked",
+    });
+
+    await expect(
+      service.requeue({
+        expectedRulebookVersion: "rules:v1",
+        expectedStatus: "awaiting_approval",
+        runId: run.id,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.requeue({
+        expectedRulebookVersion: "rules:v2",
+        expectedStatus: "blocked",
+        runId: run.id,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    const queuedFromBlocked = await service.requeue({
+      expectedRulebookVersion: "rules:v1",
+      expectedStatus: "blocked",
+      runId: run.id,
+    });
+    expect(queuedFromBlocked).toMatchObject({
+      id: run.id,
+      lastSafeError: null,
+      retryAt: null,
+      settledResult: null,
+      status: "queued",
+    });
+    await expect(
+      service.requeue({
+        expectedRulebookVersion: "rules:v1",
+        expectedStatus: "blocked",
+        runId: run.id,
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      service.requeue({
+        expectedRulebookVersion: "rules:v1",
+        expectedStatus: "queued" as never,
+        runId: run.id,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+    const requeueTimestamp = await database.pool.query<{ age_seconds: string }>(
+      `SELECT ABS(EXTRACT(EPOCH FROM (updated_at - NOW()))) AS age_seconds
+       FROM workspace_maintenance_runs WHERE id = $1`,
+      [run.id],
+    );
+    expect(Number(requeueTimestamp.rows[0]?.age_seconds)).toBeLessThan(5);
+
+    const approvalClaim = await service.claim(run.id);
+    if (!approvalClaim) throw new Error("Requeued maintenance run was not claimable.");
+    await service.settle({
+      claimId: approvalClaim.claimId,
+      result: { approvalId: "approval-1" },
+      runId: run.id,
+      status: "awaiting_approval",
+    });
+    const queuedFromApproval = await service.requeue({
+      expectedRulebookVersion: "rules:v1",
+      expectedStatus: "awaiting_approval",
+      runId: run.id,
+    });
+    expect(queuedFromApproval).toMatchObject({ id: run.id, status: "queued" });
+    const recoverableClaim = await service.claim(run.id);
+    if (!recoverableClaim) throw new Error("Approval-requeued run was not claimable.");
+    const recoverable = await service.settle({
+      claimId: recoverableClaim.claimId,
+      result: { retryReason: "provider unavailable" },
+      runId: run.id,
+      status: "failed_recoverable",
+    });
+    expect(recoverable).toMatchObject({
+      id: run.id,
+      retryAt: expect.any(String),
+      status: "failed_recoverable",
+    });
+    await expect(service.claim(run.id)).resolves.toBeNull();
   });
 });

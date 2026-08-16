@@ -407,6 +407,13 @@
       "when": 1786964400000,
       "tag": "0057_finance_currency_evidence",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1786968000000,
+      "tag": "0058_finance_provider_items",
+      "breakpoints": true
     }
   ]
 }

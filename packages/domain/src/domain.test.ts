@@ -39,7 +39,9 @@ import {
   financeAccountSchema,
   financeGuidedPreferencesSchema,
   financeMaintenanceResultSchema,
+  financeProviderItemHealthSchema,
   financeReviewDecisionInputSchema,
+  financeStatusDetailsSchema,
   financeTransactionQuerySchema,
   formatDateOnly,
   formatDateWithOrdinal,
@@ -183,6 +185,84 @@ describe("workspace maintenance", () => {
     ]);
     expect(maintenanceSettlementStatusSchema.safeParse("queued").success).toBe(false);
     expect(maintenanceSettlementStatusSchema.safeParse("running").success).toBe(false);
+  });
+
+  it("projects Provider Item synchronization without remote identity or credentials", () => {
+    expect(
+      financeProviderItemHealthSchema.parse({
+        accountIds: [accountId],
+        id,
+        provider: "plaid",
+        synchronization: {
+          failureCode: null,
+          failureCount: 0,
+          lastAttemptAt: null,
+          lastSuccessAt: null,
+          message: null,
+          nextRetryAt: null,
+          recovery: null,
+          state: "stale",
+        },
+      }),
+    ).toEqual({
+      accountIds: [accountId],
+      id,
+      provider: "plaid",
+      synchronization: {
+        failureCode: null,
+        failureCount: 0,
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        message: null,
+        nextRetryAt: null,
+        recovery: null,
+        state: "stale",
+      },
+    });
+  });
+
+  it("includes Provider Item health in Finance account status details", () => {
+    expect(
+      financeStatusDetailsSchema.shape.accounts.parse({
+        blocked: 0,
+        current: 0,
+        items: [],
+        providerItems: [
+          {
+            accountIds: [accountId],
+            id,
+            provider: "plaid",
+            synchronization: {
+              failureCode: null,
+              failureCount: 0,
+              lastAttemptAt: null,
+              lastSuccessAt: null,
+              message: null,
+              nextRetryAt: null,
+              recovery: null,
+              state: "stale",
+            },
+          },
+        ],
+        retrying: 0,
+        stale: 1,
+        tracked: 1,
+      }),
+    ).toMatchObject({ providerItems: [{ id, accountIds: [accountId] }] });
+  });
+
+  it("reports a Finance health step that did not run", () => {
+    expect(
+      financeMaintenanceResultSchema.parse({
+        applied: { categorizations: 0, transfers: 0 },
+        asOf: start,
+        health: { applicability: "not_run", confidence: "insufficient", refreshed: false },
+        questions: { created: 0, total: 0 },
+        verification: { duplicateActions: 0, freshness: "stale", state: "blocked" },
+      }),
+    ).toMatchObject({
+      health: { applicability: "not_run", refreshed: false },
+    });
   });
 
   it("makes scoped Finance health applicability explicit in maintenance results", () => {

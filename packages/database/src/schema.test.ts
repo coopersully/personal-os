@@ -7,6 +7,7 @@ import {
   connectorSyncTriggers,
   domainProfileApprovals,
   financeAccounts,
+  financeProviderItems,
   financeTransactions,
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
@@ -107,6 +108,93 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE INDEX "finance_accounts_sync_initialization_idx"');
     expect(migrationSql).not.toMatch(/\bUPDATE "finance_accounts"/u);
     expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
+  it("keeps Provider Item synchronization authority isolated from Finance account projections", async () => {
+    const items = getTableConfig(financeProviderItems);
+    const accounts = getTableConfig(financeAccounts);
+
+    expect(items.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "user_id",
+        "provider",
+        "provider_item_id",
+        "legacy_grouping_key",
+        "encrypted_credentials",
+        "sync_cursor",
+        "sync_state",
+        "sync_claim_id",
+        "sync_claim_owner",
+        "sync_claim_generation",
+        "sync_claim_started_at",
+        "sync_claim_expires_at",
+        "last_sync_attempt_at",
+        "next_sync_at",
+        "sync_error",
+        "sync_error_code",
+        "sync_error_category",
+        "sync_recovery",
+        "sync_failure_count",
+        "last_synced_at",
+        "created_at",
+        "updated_at",
+      ]),
+    );
+    expect(items.indexes.map((candidate) => candidate.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_provider_items_remote_identity_idx",
+        "finance_provider_items_legacy_identity_idx",
+        "finance_provider_items_sync_due_idx",
+        "finance_provider_items_sync_claim_recovery_idx",
+      ]),
+    );
+    expect(items.checks.map((candidate) => candidate.name)).toEqual(
+      expect.arrayContaining([
+        "finance_provider_items_provider_check",
+        "finance_provider_items_identity_check",
+        "finance_provider_items_sync_claim_check",
+        "finance_provider_items_sync_claim_generation_check",
+        "finance_provider_items_sync_failure_check",
+      ]),
+    );
+    expect(
+      accounts.columns.find((column) => column.name === "provider_item_record_id"),
+    ).toMatchObject({
+      name: "provider_item_record_id",
+      notNull: false,
+    });
+    expect(accounts.indexes.map((candidate) => candidate.config.name)).toContain(
+      "finance_accounts_provider_item_record_id_idx",
+    );
+    expect(accounts.foreignKeys.map((key) => key.getName())).toContain(
+      "finance_accounts_provider_item_record_id_finance_provider_items_id_fk",
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0058_finance_provider_items.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_provider_items"');
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_provider_items_remote_identity_idx" ON "finance_provider_items" USING btree ("user_id", "provider", "provider_item_id") WHERE "provider_item_id" IS NOT NULL',
+    );
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_provider_items_legacy_identity_idx" ON "finance_provider_items" USING btree ("user_id", "provider", "legacy_grouping_key") WHERE "legacy_grouping_key" IS NOT NULL',
+    );
+    expect(migrationSql).toContain("finance_provider_items_identity_check");
+    expect(migrationSql).toContain("finance_provider_items_sync_claim_check");
+    expect(migrationSql).toContain("finance_provider_items_sync_failure_check");
+    expect(migrationSql).toContain('ADD COLUMN "provider_item_record_id" uuid');
+    expect(migrationSql).toContain(
+      'FOREIGN KEY ("provider_item_record_id") REFERENCES "public"."finance_provider_items"("id") ON DELETE set null',
+    );
+    expect(migrationSql).toContain('CREATE INDEX "finance_accounts_provider_item_record_id_idx"');
+    expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
+    expect(migrationSql).not.toMatch(/https?:\/\//u);
+    expect(migrationSql).not.toMatch(
+      /(?:access[_ -]?token|client[_ -]?secret|credential[_ -]?value)/iu,
+    );
   });
 
   it("keeps nullable authoritative Finance currency evidence without backfilling old rows", async () => {

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { financeAccountSchema } from "./finance.js";
+import { financeAccountSchema, financeProviderItemHealthSchema } from "./finance.js";
 import { goalSchema, motiveSchema } from "./goals.js";
 import { workspaceStatusSchema } from "./maintenance.js";
 
@@ -75,6 +75,7 @@ export const financeStatusDetailsSchema = z.object({
     blocked: z.int().nonnegative(),
     current: z.int().nonnegative(),
     items: z.array(financeAccountSchema),
+    providerItems: z.array(financeProviderItemHealthSchema),
     retrying: z.int().nonnegative(),
     stale: z.int().nonnegative(),
     tracked: z.int().nonnegative(),
@@ -123,7 +124,7 @@ export const financeMaintenanceResultSchema = z.object({
   }),
   asOf: z.iso.datetime(),
   health: z.object({
-    applicability: z.enum(["applied", "skipped_scoped"]),
+    applicability: z.enum(["not_run", "applied", "skipped_scoped"]),
     confidence: financeDataConfidenceSchema,
     refreshed: z.boolean(),
   }),

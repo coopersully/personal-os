@@ -1376,6 +1376,82 @@ export const reminders = pgTable(
   ],
 );
 
+export const financeProviderItems = pgTable(
+  "finance_provider_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    provider: text("provider").$type<"plaid">().notNull(),
+    providerItemId: text("provider_item_id"),
+    legacyGroupingKey: text("legacy_grouping_key"),
+    encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>().notNull(),
+    syncCursor: text("sync_cursor"),
+    syncState: text("sync_state")
+      .$type<"current" | "stale" | "retrying" | "blocked">()
+      .notNull()
+      .default("stale"),
+    syncClaimId: uuid("sync_claim_id"),
+    syncClaimOwner: text("sync_claim_owner"),
+    syncClaimGeneration: integer("sync_claim_generation"),
+    syncClaimStartedAt: timestamp("sync_claim_started_at", { withTimezone: true }),
+    syncClaimExpiresAt: timestamp("sync_claim_expires_at", { withTimezone: true }),
+    lastSyncAttemptAt: timestamp("last_sync_attempt_at", { withTimezone: true }),
+    nextSyncAt: timestamp("next_sync_at", { withTimezone: true }),
+    syncError: text("sync_error"),
+    syncErrorCode: text("sync_error_code"),
+    syncErrorCategory: text("sync_error_category").$type<ConnectorFailureCategory>(),
+    syncRecovery: text("sync_recovery").$type<ConnectorSyncRecovery>(),
+    syncFailureCount: integer("sync_failure_count").notNull().default(0),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_provider_items_user_idx").on(table.userId),
+    uniqueIndex("finance_provider_items_remote_identity_idx")
+      .on(table.userId, table.provider, table.providerItemId)
+      .where(sql`${table.providerItemId} IS NOT NULL`),
+    uniqueIndex("finance_provider_items_legacy_identity_idx")
+      .on(table.userId, table.provider, table.legacyGroupingKey)
+      .where(sql`${table.legacyGroupingKey} IS NOT NULL`),
+    index("finance_provider_items_sync_due_idx")
+      .on(table.nextSyncAt, table.updatedAt)
+      .where(sql`${table.nextSyncAt} IS NOT NULL`),
+    index("finance_provider_items_sync_claim_recovery_idx")
+      .on(table.syncClaimExpiresAt)
+      .where(sql`${table.syncClaimId} IS NOT NULL`),
+    check("finance_provider_items_provider_check", sql`${table.provider} = 'plaid'`),
+    check(
+      "finance_provider_items_identity_check",
+      sql`${table.providerItemId} IS NOT NULL OR ${table.legacyGroupingKey} IS NOT NULL`,
+    ),
+    check(
+      "finance_provider_items_sync_state_check",
+      sql`${table.syncState} IN ('current', 'stale', 'retrying', 'blocked')`,
+    ),
+    check(
+      "finance_provider_items_sync_claim_check",
+      sql`num_nonnulls(${table.syncClaimId}, ${table.syncClaimOwner}, ${table.syncClaimGeneration}, ${table.syncClaimStartedAt}, ${table.syncClaimExpiresAt}) IN (0, 5)`,
+    ),
+    check(
+      "finance_provider_items_sync_claim_generation_check",
+      sql`${table.syncClaimGeneration} IS NULL OR ${table.syncClaimGeneration} >= 0`,
+    ),
+    check("finance_provider_items_sync_failure_count_check", sql`${table.syncFailureCount} >= 0`),
+    check(
+      "finance_provider_items_sync_failure_check",
+      sql`(
+        (${table.syncState} IN ('current', 'stale') AND ${table.syncFailureCount} = 0 AND ${table.syncError} IS NULL AND ${table.syncErrorCode} IS NULL AND ${table.syncErrorCategory} IS NULL AND ${table.syncRecovery} IS NULL)
+        OR
+        (${table.syncState} = 'retrying' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} = 'automatic')
+        OR
+        (${table.syncState} = 'blocked' AND ${table.syncFailureCount} > 0 AND ${table.syncError} IS NOT NULL AND ${table.syncErrorCode} IS NOT NULL AND ${table.syncErrorCategory} IN ('authorization', 'configuration', 'invalid_response', 'not_found', 'rate_limited', 'rejected', 'temporary', 'transport', 'unknown') AND ${table.syncRecovery} IN ('operator', 'reconnect'))
+      )`,
+    ),
+  ],
+);
+
 export const financeAccounts = pgTable(
   "finance_accounts",
   {
@@ -1396,6 +1472,12 @@ export const financeAccounts = pgTable(
     encryptedCredentials: jsonb("encrypted_credentials").$type<EncryptedCredentials>(),
     providerAccountId: text("provider_account_id"),
     providerItemId: text("provider_item_id"),
+    providerItemRecordId: uuid("provider_item_record_id").references(
+      () => financeProviderItems.id,
+      {
+        onDelete: "set null",
+      },
+    ),
     syncCursor: text("sync_cursor"),
     syncState: text("sync_state")
       .$type<"current" | "stale" | "retrying" | "blocked">()
@@ -1415,6 +1497,7 @@ export const financeAccounts = pgTable(
   },
   (table) => [
     index("finance_accounts_user_idx").on(table.userId),
+    index("finance_accounts_provider_item_record_id_idx").on(table.providerItemRecordId),
     index("finance_accounts_sync_claim_idx")
       .on(table.syncClaimExpiresAt)
       .where(sql`${table.syncClaimId} IS NOT NULL`),

@@ -27,6 +27,19 @@ export const financeSynchronizationSchema = z.object({
 });
 export type FinanceSynchronization = z.infer<typeof financeSynchronizationSchema>;
 
+/**
+ * Public, local-only synchronization health for the authoritative Plaid Item.
+ * Remote Item identity, credentials, cursors, claims, and legacy grouping
+ * values remain storage and service implementation details.
+ */
+export const financeProviderItemHealthSchema = z.object({
+  accountIds: z.array(idSchema),
+  id: idSchema,
+  provider: z.literal("plaid"),
+  synchronization: financeSynchronizationSchema,
+});
+export type FinanceProviderItemHealth = z.infer<typeof financeProviderItemHealthSchema>;
+
 const moneySchema = z.number().finite().nonnegative().max(100_000_000);
 const categorySchema = z.string().trim().min(1).max(80);
 

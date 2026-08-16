@@ -260,13 +260,7 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
       },
       asOf: now().toISOString(),
       health: {
-        applicability:
-          health?.applicability ??
-          (records.some((record) => record.step === "health")
-            ? run.scope.type === "all_outstanding"
-              ? "applied"
-              : "skipped_scoped"
-            : "not_run"),
+        applicability: health?.applicability ?? "not_run",
         confidence: health?.confidence ?? verificationStatus.details.health.confidence,
         refreshed: health?.refreshed ?? false,
       },

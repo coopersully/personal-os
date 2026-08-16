@@ -6,6 +6,7 @@ import {
   domainProfiles,
   financeAccounts,
   financeBudgets,
+  financeProviderItems,
   financeReviewCases,
   financeTransactions,
   migrateDatabase,
@@ -13,7 +14,7 @@ import {
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { createFinanceStatusService } from "./finance-status-service.js";
 
 const now = new Date("2026-08-15T12:00:00.000Z");
@@ -65,7 +66,7 @@ describe.sequential("Finance status service", () => {
   async function account(
     userId: string,
     state: "blocked" | "current" | "retrying" | "stale",
-    provider: "manual" | "plaid" = "plaid",
+    provider: "manual" | "plaid" = "manual",
   ) {
     const [created] = await database.db
       .insert(financeAccounts)
@@ -178,6 +179,225 @@ describe.sequential("Finance status service", () => {
 
     expect(status.freshness.state).toBe("current");
     expect(status.details.health.confidence).toBe("reliable");
+  });
+
+  it("projects one authoritative Provider Item across sibling accounts without trusting account shadows", async () => {
+    const userId = await makeUser("Authoritative Provider Item Finance");
+    const first = await account(userId, "current", "plaid");
+    const second = await account(userId, "current", "plaid");
+    const [item] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        encryptedCredentials: { ciphertext: "fixture", iv: "fixture", tag: "fixture", version: 1 },
+        lastSyncedAt: new Date("2026-08-13T11:00:00.000Z"),
+        provider: "plaid",
+        providerItemId: `item-${crypto.randomUUID()}`,
+        syncState: "stale",
+        userId,
+      })
+      .returning();
+    if (!item) throw new Error("Fixture Provider Item was not created.");
+    await database.db
+      .update(financeAccounts)
+      .set({ providerItemRecordId: item.id })
+      .where(inArray(financeAccounts.id, [first.id, second.id]));
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.accounts).toMatchObject({
+      blocked: 0,
+      current: 0,
+      providerItems: [
+        {
+          accountIds: [first.id, second.id].sort(),
+          id: item.id,
+          provider: "plaid",
+          synchronization: {
+            lastSuccessAt: "2026-08-13T11:00:00.000Z",
+            state: "stale",
+          },
+        },
+      ],
+      retrying: 0,
+      stale: 1,
+      tracked: 2,
+    });
+    expect(status.details.accounts.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          balance: 5_000,
+          id: first.id,
+          lastSyncedAt: "2026-08-13T11:00:00.000Z",
+          synchronization: expect.objectContaining({ state: "stale" }),
+        }),
+        expect.objectContaining({
+          balance: 5_000,
+          id: second.id,
+          lastSyncedAt: "2026-08-13T11:00:00.000Z",
+          synchronization: expect.objectContaining({ state: "stale" }),
+        }),
+      ]),
+    );
+    expect(status.freshness).toMatchObject({ blockers: [], state: "stale" });
+    expect(status.details.month.spending).toBeNull();
+    expect(status.details.income.monthly).toBeNull();
+    expect(status.details.budget.total).toBeNull();
+    expect(status.details.wealth).toEqual({
+      cash: null,
+      debt: null,
+      investments: null,
+      netWorth: null,
+    });
+    expect(status.details.health.confidence).toBe("provisional");
+
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        lastSyncedAt: now,
+        syncError: null,
+        syncErrorCategory: null,
+        syncErrorCode: null,
+        syncFailureCount: 0,
+        syncRecovery: null,
+        syncState: "current",
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    await expect(
+      service().getFinanceStatus(userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      details: {
+        accounts: {
+          current: 1,
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              synchronization: expect.objectContaining({ state: "current" }),
+            }),
+          ]),
+          retrying: 0,
+          stale: 0,
+        },
+      },
+      freshness: { state: "current" },
+    });
+
+    await database.db
+      .update(financeProviderItems)
+      .set({
+        nextSyncAt: new Date("2026-08-15T12:05:00.000Z"),
+        syncError: "Temporary provider failure.",
+        syncErrorCategory: "temporary",
+        syncErrorCode: "PROVIDER_DOWN",
+        syncFailureCount: 1,
+        syncRecovery: "automatic",
+        syncState: "retrying",
+      })
+      .where(eq(financeProviderItems.id, item.id));
+    await expect(
+      service().getFinanceStatus(userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      details: {
+        accounts: {
+          current: 0,
+          items: expect.arrayContaining([
+            expect.objectContaining({
+              synchronization: expect.objectContaining({ state: "retrying" }),
+            }),
+          ]),
+          retrying: 1,
+          stale: 0,
+        },
+      },
+      freshness: { blockers: [], state: "stale" },
+    });
+  });
+
+  it("counts a blocked Provider Item once and migration-blocks unlinked Plaid accounts", async () => {
+    const userId = await makeUser("Blocked Provider Item Finance");
+    const first = await account(userId, "current", "plaid");
+    const second = await account(userId, "current", "plaid");
+    const legacy = await account(userId, "current", "plaid");
+    const [item] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        encryptedCredentials: { ciphertext: "fixture", iv: "fixture", tag: "fixture", version: 1 },
+        provider: "plaid",
+        providerItemId: `item-${crypto.randomUUID()}`,
+        syncError: "Reconnect the linked bank.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "ITEM_LOGIN_REQUIRED",
+        syncFailureCount: 1,
+        syncRecovery: "reconnect",
+        syncState: "blocked",
+        userId,
+      })
+      .returning();
+    if (!item) throw new Error("Blocked fixture Provider Item was not created.");
+    await database.db
+      .update(financeAccounts)
+      .set({ providerItemRecordId: item.id })
+      .where(inArray(financeAccounts.id, [first.id, second.id]));
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.accounts).toMatchObject({
+      blocked: 2,
+      current: 0,
+      retrying: 0,
+      stale: 0,
+      tracked: 3,
+    });
+    expect(status.freshness).toMatchObject({
+      blockers: [
+        {
+          code: "ITEM_LOGIN_REQUIRED",
+          message: "Reconnect the linked bank.",
+          recovery: "reconnect",
+        },
+        expect.objectContaining({ code: "finance_provider_item_migration_required" }),
+      ],
+      state: "unavailable",
+    });
+    expect(status.details.accounts.items.find((row) => row.id === legacy.id)).toMatchObject({
+      lastSyncedAt: null,
+      synchronization: {
+        failureCode: "finance_provider_item_migration_required",
+        recovery: "operator",
+        state: "blocked",
+      },
+    });
+  });
+
+  it("rejects a foreign Provider Item link without exposing its synchronization evidence", async () => {
+    const ownerId = await makeUser("Finance status topology owner");
+    const foreignId = await makeUser("Finance status topology foreign");
+    const linked = await account(ownerId, "current", "plaid");
+    const [foreignItem] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        encryptedCredentials: { ciphertext: "fixture", iv: "fixture", tag: "fixture", version: 1 },
+        provider: "plaid",
+        providerItemId: `item-${crypto.randomUUID()}`,
+        syncError: "Foreign source detail must not be disclosed.",
+        syncErrorCategory: "authorization",
+        syncErrorCode: "FOREIGN_PROVIDER_ITEM",
+        syncFailureCount: 1,
+        syncRecovery: "operator",
+        syncState: "blocked",
+        userId: foreignId,
+      })
+      .returning();
+    if (!foreignItem) throw new Error("Foreign fixture Provider Item was not created.");
+    await database.db
+      .update(financeAccounts)
+      .set({ providerItemRecordId: foreignItem.id })
+      .where(eq(financeAccounts.id, linked.id));
+
+    await expect(
+      service().getFinanceStatus(ownerId, { type: "all_outstanding" }),
+    ).rejects.toMatchObject({
+      code: "conflict",
+      message: "The Plaid connection topology is inconsistent.",
+    });
   });
 
   it("rejects retrying Provider Items with incomplete failure recovery evidence", async () => {

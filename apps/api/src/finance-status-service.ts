@@ -6,6 +6,7 @@ import {
   financeBudgets,
   financeCategoryRules,
   financeProfiles,
+  financeProviderItems,
   financeReviewCases,
   financeTransactions,
   goals as goalRows,
@@ -74,7 +75,48 @@ function iso(value: Date | null): string | null {
   return value?.toISOString() ?? null;
 }
 
-function serializeAccount(row: typeof financeAccounts.$inferSelect): FinanceAccount {
+type SynchronizationSource = Pick<
+  typeof financeAccounts.$inferSelect,
+  | "lastSyncedAt"
+  | "lastSyncAttemptAt"
+  | "nextSyncAt"
+  | "syncError"
+  | "syncErrorCode"
+  | "syncFailureCount"
+  | "syncRecovery"
+  | "syncState"
+>;
+
+const migrationBlockedSynchronization = {
+  failureCode: "finance_provider_item_migration_required",
+  failureCount: 1,
+  lastAttemptAt: null,
+  lastSuccessAt: null,
+  message: "This Plaid account must be linked to an authoritative Provider Item.",
+  nextRetryAt: null,
+  recovery: "operator" as const,
+  state: "blocked" as const,
+};
+
+function synchronization(source: SynchronizationSource) {
+  return {
+    failureCode: source.syncErrorCode,
+    failureCount: source.syncFailureCount,
+    lastAttemptAt: iso(source.lastSyncAttemptAt),
+    lastSuccessAt: iso(source.lastSyncedAt),
+    message: source.syncError,
+    nextRetryAt: source.syncFailureCount > 0 ? iso(source.nextSyncAt) : null,
+    recovery: source.syncRecovery,
+    state: source.syncState,
+  };
+}
+
+function serializeAccount(
+  row: typeof financeAccounts.$inferSelect,
+  item?: typeof financeProviderItems.$inferSelect,
+): FinanceAccount {
+  const source = item ?? row;
+  const legacyPlaid = row.provider === "plaid" && row.providerItemRecordId === null;
   return {
     balance: row.balance === null ? null : row.balance / 100,
     createdAt: row.createdAt.toISOString(),
@@ -82,20 +124,11 @@ function serializeAccount(row: typeof financeAccounts.$inferSelect): FinanceAcco
     id: row.id,
     institution: row.institution,
     kind: row.kind,
-    lastSyncedAt: iso(row.lastSyncedAt),
+    lastSyncedAt: legacyPlaid ? null : iso(source.lastSyncedAt),
     name: row.name,
     provider: row.provider,
     status: row.status,
-    synchronization: {
-      failureCode: row.syncErrorCode,
-      failureCount: row.syncFailureCount,
-      lastAttemptAt: iso(row.lastSyncAttemptAt),
-      lastSuccessAt: iso(row.lastSyncedAt),
-      message: row.syncError,
-      nextRetryAt: row.syncFailureCount > 0 ? iso(row.nextSyncAt) : null,
-      recovery: row.syncRecovery,
-      state: row.syncState,
-    },
+    synchronization: legacyPlaid ? migrationBlockedSynchronization : synchronization(source),
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -172,6 +205,11 @@ export function createFinanceStatusService({ db, now }: Options) {
             .from(financeAccounts)
             .where(eq(financeAccounts.userId, userId))
             .orderBy(financeAccounts.id);
+          const providerItems = await tx
+            .select()
+            .from(financeProviderItems)
+            .where(eq(financeProviderItems.userId, userId))
+            .orderBy(financeProviderItems.id);
           const budgets = await tx
             .select()
             .from(financeBudgets)
@@ -311,7 +349,54 @@ export function createFinanceStatusService({ db, now }: Options) {
             postedExpenses.length > 0 && selectedDay > 0
               ? (spending / selectedDay) * daysInMonth
               : null;
-          const serializedAccounts = accounts.map(serializeAccount);
+          const providerItemById = new Map(providerItems.map((item) => [item.id, item]));
+          if (
+            accounts.some((account) => {
+              if (!account.providerItemRecordId) return false;
+              const item = providerItemById.get(account.providerItemRecordId);
+              return !item || account.provider !== "plaid" || item.provider !== "plaid";
+            })
+          ) {
+            throw new AppError("conflict", "The Plaid connection topology is inconsistent.");
+          }
+          const accountIdsByItem = new Map<string, string[]>();
+          for (const account of accounts) {
+            if (!account.providerItemRecordId) continue;
+            const linked = accountIdsByItem.get(account.providerItemRecordId) ?? [];
+            linked.push(account.id);
+            accountIdsByItem.set(account.providerItemRecordId, linked);
+          }
+          const serializedAccounts = accounts.map((account) =>
+            serializeAccount(
+              account,
+              account.providerItemRecordId
+                ? providerItemById.get(account.providerItemRecordId)
+                : undefined,
+            ),
+          );
+          const sourceSynchronizations = [
+            ...providerItems.map((item) => ({
+              accountIds: accountIdsByItem.get(item.id) ?? [],
+              manual: false,
+              synchronization: synchronization(item),
+            })),
+            ...accounts
+              .filter((account) => account.provider !== "plaid")
+              .map((account) => ({
+                accountIds: [account.id],
+                manual: account.provider === "manual",
+                synchronization: synchronization(account),
+              })),
+            ...accounts
+              .filter(
+                (account) => account.provider === "plaid" && account.providerItemRecordId === null,
+              )
+              .map((account) => ({
+                accountIds: [account.id],
+                manual: false,
+                synchronization: migrationBlockedSynchronization,
+              })),
+          ];
           const health = assessFinanceHealth(
             {
               accounts: serializedAccounts.map((account) => ({
@@ -343,34 +428,44 @@ export function createFinanceStatusService({ db, now }: Options) {
             },
             asOfDate,
           );
-          const currentCount = accounts.filter(
-            (row) =>
-              row.syncState === "current" &&
-              (row.provider === "manual" ||
-                (row.lastSyncedAt !== null &&
-                  asOfDate.getTime() - row.lastSyncedAt.getTime() <= 24 * 60 * 60 * 1_000)),
+          const currentCount = sourceSynchronizations.filter(
+            (source) =>
+              source.synchronization.state === "current" &&
+              (source.manual ||
+                (source.synchronization.lastSuccessAt !== null &&
+                  asOfDate.getTime() - new Date(source.synchronization.lastSuccessAt).getTime() <=
+                    24 * 60 * 60 * 1_000)),
           ).length;
-          const blockedCount = accounts.filter((row) => row.syncState === "blocked").length;
-          const retryingCount = accounts.filter((row) => row.syncState === "retrying").length;
-          const staleCount = accounts.length - currentCount - blockedCount - retryingCount;
-          const usableCount = accounts.filter(
-            (row) => row.syncState !== "blocked" && row.balance !== null,
+          const blockedSources = sourceSynchronizations.filter(
+            (source) => source.synchronization.state === "blocked",
+          );
+          const blockedCount = blockedSources.length;
+          const retryingCount = sourceSynchronizations.filter(
+            (source) => source.synchronization.state === "retrying",
+          ).length;
+          const staleCount =
+            sourceSynchronizations.length - currentCount - blockedCount - retryingCount;
+          const usableCount = sourceSynchronizations.filter(
+            (source) =>
+              source.synchronization.state !== "blocked" &&
+              source.accountIds.some(
+                (accountId) =>
+                  accounts.find((account) => account.id === accountId)?.balance !== null,
+              ),
           ).length;
           const freshnessState =
             usableCount === 0
               ? "unavailable"
-              : currentCount === accounts.length
+              : currentCount === sourceSynchronizations.length
                 ? "current"
                 : currentCount > 0
                   ? "partial"
                   : "stale";
-          const blockers = accounts
-            .filter((row) => row.syncState === "blocked")
-            .map((row) => ({
-              code: row.syncErrorCode ?? "finance_account_blocked",
-              message: row.syncError ?? "A Finance account is blocked.",
-              recovery: row.syncRecovery,
-            }));
+          const blockers = blockedSources.map((source) => ({
+            code: source.synchronization.failureCode ?? "finance_account_blocked",
+            message: source.synchronization.message ?? "A Finance account is blocked.",
+            recovery: source.synchronization.recovery,
+          }));
           const byReason: Record<string, number> = {};
           for (const review of scopedReviews)
             byReason[review.reason] = (byReason[review.reason] ?? 0) + 1;
@@ -472,6 +567,12 @@ export function createFinanceStatusService({ db, now }: Options) {
                 blocked: blockedCount,
                 current: currentCount,
                 items: serializedAccounts,
+                providerItems: providerItems.map((item) => ({
+                  accountIds: (accountIdsByItem.get(item.id) ?? []).toSorted(),
+                  id: item.id,
+                  provider: item.provider,
+                  synchronization: synchronization(item),
+                })),
                 retrying: retryingCount,
                 stale: staleCount,
                 tracked: accounts.length,

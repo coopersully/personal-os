@@ -677,6 +677,7 @@ describe.sequential("ilo API", () => {
     await expect(response.json()).resolves.toMatchObject({
       status: {
         details: {
+          accounts: { providerItems: [] },
           health: { confidence: "insufficient" },
           month: { forecast: null, spending: null },
         },

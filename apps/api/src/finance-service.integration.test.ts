@@ -5538,7 +5538,12 @@ describe.sequential("finance service", () => {
       [scopedManualAccount.id].map((accountId) => ({
         after: expect.objectContaining({
           maintenance: allContext.maintenance,
-          source: expect.objectContaining({ accountId, sourceType: "finance_account" }),
+          source: expect.objectContaining({
+            accountId,
+            provider: "local",
+            remoteId: accountId,
+            sourceType: "finance_account",
+          }),
         }),
         entityId: accountId,
       })),

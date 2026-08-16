@@ -941,7 +941,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ).resolves.toEqual([]);
   });
 
-  it("preserves user and agent category decisions while reviewing provider sign reversals", async () => {
+  it("preserves user and agent decisions while reviewing only provider sign reversals", async () => {
     const { accounts, userId } = await fixture({ accountCount: 1 });
     const target = accounts[0];
     if (!target?.providerAccountId)
@@ -960,7 +960,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
           categoryDecidedAt: now,
           categoryRationale: "User-confirmed category.",
           categorySource: "user",
-          direction: "expense",
+          direction: "income",
           merchant: "Protected user merchant",
           needsReview: false,
           pending: false,
@@ -1016,7 +1016,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
                 amount: -11,
                 currencyCode: "USD",
                 date: "2026-08-16",
-                merchantName: "Provider user rename",
+                merchantName: "Shared provider merchant",
                 name: "PROVIDER USER RENAME",
                 pending: false,
                 pendingTransactionId: null,
@@ -1032,7 +1032,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
                 amount: -22,
                 currencyCode: "USD",
                 date: "2026-08-16",
-                merchantName: "Provider agent rename",
+                merchantName: "Shared provider merchant",
                 name: "PROVIDER AGENT RENAME",
                 pending: false,
                 pendingTransactionId: null,
@@ -1077,7 +1077,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
         category: "USER_PROTECTED",
         categorySource: "user",
         direction: "income",
-        needsReview: true,
+        needsReview: false,
         providerDirection: "income",
         reconciliationStatus: "not_applicable",
       },
@@ -1100,7 +1100,7 @@ describe.sequential("Finance Provider Item synchronization", () => {
         },
         {
           id: existingReview.id,
-          reason: "refund_or_reversal",
+          reason: "low_confidence",
           transactionId: userTransaction.id,
         },
       ]),
@@ -1566,6 +1566,62 @@ describe.sequential("Finance Provider Item synchronization", () => {
     ).rejects.toMatchObject({ code: "service_unavailable" });
     expect(getAccounts).not.toHaveBeenCalled();
     expect(syncTransactions).not.toHaveBeenCalled();
+  });
+
+  it("returns stored repair guidance for terminal reconnect and operator Items", async () => {
+    for (const recovery of ["reconnect", "operator"] as const) {
+      const { accounts, item, userId } = await fixture({ accountCount: 1 });
+      const target = accounts[0];
+      if (!target) throw new Error("Terminal target account was not created.");
+      await database.db
+        .update(financeProviderItems)
+        .set({
+          nextSyncAt: null,
+          syncError: "Stored repair guidance.",
+          syncErrorCategory: recovery === "reconnect" ? "authorization" : "configuration",
+          syncErrorCode:
+            recovery === "reconnect" ? "plaid_authorization_failed" : "plaid_configuration_missing",
+          syncFailureCount: 1,
+          syncRecovery: recovery,
+          syncState: "blocked",
+        })
+        .where(eq(financeProviderItems.id, item.id));
+
+      await expect(
+        service(plaid()).syncAccount(target.id, {
+          principal: principal(userId),
+          requestId: `terminal-without-message-${recovery}`,
+        }),
+      ).rejects.toMatchObject({
+        code: "service_unavailable",
+        message: "Stored repair guidance.",
+      });
+    }
+  });
+
+  it("turns a failed maintenance heartbeat into claim loss before provider work", async () => {
+    const { item, userId } = await fixture({ accountCount: 1 });
+    const getAccounts = vi.fn(async () => []);
+    const syncTransactions = vi.fn(async () => emptyPage("must-not-run"));
+
+    await expect(
+      service(plaid({ getAccounts, syncTransactions })).syncDueItemsForUser(
+        userId,
+        { type: "all_outstanding" },
+        undefined,
+        async () => {
+          throw new Error("maintenance lease expired");
+        },
+      ),
+    ).rejects.toMatchObject({ name: "MaintenanceClaimLostError" });
+    expect(getAccounts).not.toHaveBeenCalled();
+    expect(syncTransactions).not.toHaveBeenCalled();
+    await expect(
+      database.db
+        .select({ claimId: financeProviderItems.syncClaimId })
+        .from(financeProviderItems)
+        .where(eq(financeProviderItems.id, item.id)),
+    ).resolves.toEqual([{ claimId: null }]);
   });
 
   it("uses one Item claim across sibling runtimes and fences page and final writes after claim loss", async () => {

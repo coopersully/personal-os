@@ -60,8 +60,18 @@ function projectScenario(plan: ScenarioPlan, horizonMonths: number): FinanceScen
     allocations;
   const essentialMonthlyOutflow = plan.monthlyHousingCost + plan.monthlyDebtPayment;
   return {
-    debtPayoffMonths: null,
-    goalDateEffects: [],
+    debtPayoffMonths:
+      plan.debtBalance !== undefined && plan.monthlyDebtPayment > 0
+        ? Math.ceil(plan.debtBalance / plan.monthlyDebtPayment)
+        : null,
+    goalDateEffects:
+      plan.goalTarget !== undefined &&
+      plan.goalCurrent !== undefined &&
+      plan.monthlyReserveContribution > 0
+        ? [
+            `Goal reaches its target in ${Math.ceil(Math.max(0, plan.goalTarget - plan.goalCurrent) / plan.monthlyReserveContribution)} months.`,
+          ]
+        : [],
     label: plan.label,
     monthlyCashFlow,
     projectedLowestBalance: projectedLowestBalance(
@@ -115,7 +125,10 @@ export function compareFinanceScenarios(input: FinanceScenarioInput): FinanceSce
     goalConflicts: allPlans
       .filter((plan) => plan.monthlyCashFlow < 0)
       .map((plan) => `${plan.label} spends more than its stated monthly income.`),
-    missingInputs: ["Debt balance is needed to estimate payoff timing."],
+    missingInputs:
+      normalized.baseline.monthlyDebtPayment > 0 && normalized.baseline.debtBalance === undefined
+        ? ["Debt balance is needed to estimate payoff timing."]
+        : [],
     sensitivityWarnings: [
       "Scenarios use fixed income and expenses; returns and irregular costs are not modeled.",
       ...(allPlans.some((plan) => plan.monthlyCashFlow < 0)

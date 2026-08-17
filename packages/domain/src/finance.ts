@@ -407,6 +407,9 @@ const financeScenarioPlanSchema = z
     monthlyHousingCost: moneySchema.default(0),
     monthlyIncome: moneySchema,
     monthlyReserveContribution: moneySchema.default(0),
+    debtBalance: moneySchema.optional(),
+    goalTarget: moneySchema.optional(),
+    goalCurrent: moneySchema.optional(),
     startingCash: z.number().finite().min(-100_000_000).max(100_000_000),
   })
   .superRefine((value, context) => {
@@ -440,7 +443,7 @@ export type FinanceScenarioProjection = z.infer<typeof financeScenarioProjection
 export const financeScenarioResultSchema = z.object({
   alternatives: z.array(financeScenarioProjectionSchema).max(5),
   asOf: z.iso.date(),
-  assumptions: z.array(z.string().trim().min(1).max(500)).max(100),
+  assumptions: z.array(z.string().trim().min(1).max(500)).max(150),
   baseline: financeScenarioProjectionSchema,
   fingerprint: z.string().trim().min(1).max(128),
   goalConflicts: z.array(z.string().trim().min(1).max(500)).max(25),

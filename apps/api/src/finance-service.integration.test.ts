@@ -76,6 +76,20 @@ async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number
   throw new Error(`Expected at least ${expected} database lock waiter(s).`);
 }
 
+async function waitForPostgresSleep(pool: DatabaseClient["pool"]) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(`
+      SELECT count(*)::text AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event = 'PgSleep'
+    `);
+    if (Number(result.rows[0]?.count ?? 0) > 0) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error("Expected the first Finance budget plan write to reach its test barrier.");
+}
+
 function plaidFetch(): typeof globalThis.fetch {
   let exchangeCall = 0;
   let syncCall = 0;
@@ -1133,6 +1147,96 @@ describe.sequential("finance service", () => {
     await expect(database.db.$count(auditEvents, eq(auditEvents.userId, owner.id))).resolves.toBe(
       auditCount,
     );
+  });
+
+  it("serializes concurrent complete budget-plan replacements across disjoint categories", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Concurrent budget plan owner",
+        email: "concurrent-budget-plan-owner@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Fixture user was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const [firstCategory, secondCategory] = await service.listCategories(owner.id);
+    if (!firstCategory || !secondCategory)
+      throw new Error("Default Finance categories were not seeded.");
+    const firstPlan = {
+      acknowledgeOverAllocation: false,
+      allocations: [{ categoryId: firstCategory.id, limit: 250 }],
+      assumptions: [],
+      goalIds: [],
+      month: "2026-10",
+      rationale: "First complete plan.",
+      replace: true,
+      scenarioFingerprint: "finance-race-first",
+    };
+    const secondPlan = {
+      ...firstPlan,
+      allocations: [{ categoryId: secondCategory.id, limit: 500 }],
+      rationale: "Second complete plan.",
+      scenarioFingerprint: "finance-race-second",
+    };
+
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION pause_first_finance_budget_plan_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.month = '2026-10' AND NEW.scenario_fingerprint = 'finance-race-first' THEN
+          PERFORM pg_sleep(0.25);
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER pause_first_finance_budget_plan_for_test
+      AFTER INSERT OR UPDATE ON finance_budget_plans
+      FOR EACH ROW EXECUTE FUNCTION pause_first_finance_budget_plan_for_test();
+    `);
+    let first: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
+    let second: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
+    try {
+      first = service.setBudgetPlan(firstPlan, {
+        principal: financePrincipal(owner.id),
+        requestId: "concurrent-budget-plan-first",
+      });
+      void first.catch(() => undefined);
+      await waitForPostgresSleep(database.pool);
+      second = service.setBudgetPlan(secondPlan, {
+        principal: financePrincipal(owner.id),
+        requestId: "concurrent-budget-plan-second",
+      });
+      void second.catch(() => undefined);
+      await expect(Promise.all([first, second])).resolves.toEqual([firstPlan, secondPlan]);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS pause_first_finance_budget_plan_for_test ON finance_budget_plans;
+        DROP FUNCTION IF EXISTS pause_first_finance_budget_plan_for_test();
+      `);
+      await Promise.allSettled([first, second].filter((value) => value !== undefined));
+    }
+
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, firstPlan.month))),
+    ).resolves.toEqual([{ category: secondCategory.name, limit: 50_000 }]);
+    await expect(
+      database.db
+        .select({
+          scenarioFingerprint: financeBudgetPlans.scenarioFingerprint,
+          version: financeBudgetPlans.version,
+        })
+        .from(financeBudgetPlans)
+        .where(
+          and(
+            eq(financeBudgetPlans.userId, owner.id),
+            eq(financeBudgetPlans.month, firstPlan.month),
+          ),
+        ),
+    ).resolves.toEqual([{ scenarioFingerprint: secondPlan.scenarioFingerprint, version: 2 }]);
   });
 
   it("derives Finance attention provenance, deduplicates open items, and audits atomically", async () => {

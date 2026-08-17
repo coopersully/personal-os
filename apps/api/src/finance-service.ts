@@ -4634,6 +4634,9 @@ export function createFinanceService({
       context: MutationContext,
     ): Promise<FinanceBudgetPlan> {
       await db.transaction(async (tx) => {
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
+        );
         await ensureCategories(context.principal.userId, tx);
         const categoryIds = input.allocations.map((allocation) => allocation.categoryId);
         const categoryRows = await tx

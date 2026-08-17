@@ -82,3 +82,17 @@ Status: DONE
 - `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts` — 67 tests passed.
 - `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/database typecheck` — passed.
 - Scoped Biome, formatter, and `git diff --check` — passed after removing the remaining action-integration non-null assertion warnings.
+
+## Fix round 4A — approval provenance and merchant-rule basis
+
+Status: DONE
+
+- Human approval now records one redacted `finance.action_review_approved` audit row in the terminal approval transaction. It includes only the review ID, action kind, and fingerprint, and retains the human approver/request attribution without changing the requesting agent attribution used by the underlying mutation.
+- Terminal replay returns the saved outcome without a second approval audit. A failed terminal review update rolls the approval audit back with the writer, and bypass application creates no human-approval audit.
+- Transaction-action preparation now derives the current server-validated categorization basis. Merchant-rule proposals carry that basis through revalidation and application, producing rule provenance while the underlying writer remains agent-attributed; stale, absent, or otherwise invalid evidence remains a recoverable `needs_input` result.
+
+### Verification
+
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts packages/domain/src/domain.test.ts` — 106 tests passed.
+- `pnpm --filter @personal-os/api typecheck`, `pnpm --filter @personal-os/domain typecheck`, and `pnpm --filter @personal-os/database typecheck` — passed.
+- Scoped Biome, formatter, and `git diff --check` — passed.

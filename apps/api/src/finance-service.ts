@@ -4190,41 +4190,44 @@ export function createFinanceService({
         review: "needs_review",
       });
     },
+    async preparedCategorizationBasis(
+      decision: ApplyFinanceCategorizationsInput["decisions"][number],
+      userId: string,
+      executor: FinanceReadExecutor = db,
+    ): Promise<"merchant_rule" | "transaction_evidence" | null> {
+      const item = await ownedTransaction(userId, decision.transactionId, executor);
+      if (item.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) return null;
+      if (item.reconciliationStatus === "candidate") return null;
+      const [transferReview] = await executor
+        .select({ id: financeReviewCases.id })
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.transactionId, item.id),
+            eq(financeReviewCases.userId, userId),
+            eq(financeReviewCases.reason, "possible_transfer"),
+            inArray(financeReviewCases.status, ["deferred", "open"]),
+          ),
+        )
+        .limit(1);
+      if (transferReview) return null;
+      const proposal = await categorizationProposal(userId, transaction(item), undefined, executor);
+      if (
+        proposal.suggestedCategory?.id !== decision.categoryId ||
+        proposal.confidence !== decision.confidence ||
+        !proposal.meetsPolicyThreshold ||
+        !["merchant_rule", "transaction_evidence"].includes(proposal.suggestionBasis ?? "")
+      )
+        return null;
+      return proposal.suggestionBasis;
+    },
     async validatePreparedCategorizations(
       input: ApplyFinanceCategorizationsInput,
       userId: string,
       executor: FinanceReadExecutor = db,
     ) {
       for (const decision of input.decisions) {
-        const item = await ownedTransaction(userId, decision.transactionId, executor);
-        if (item.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) return false;
-        if (item.reconciliationStatus === "candidate") return false;
-        const [transferReview] = await executor
-          .select({ id: financeReviewCases.id })
-          .from(financeReviewCases)
-          .where(
-            and(
-              eq(financeReviewCases.transactionId, item.id),
-              eq(financeReviewCases.userId, userId),
-              eq(financeReviewCases.reason, "possible_transfer"),
-              inArray(financeReviewCases.status, ["deferred", "open"]),
-            ),
-          )
-          .limit(1);
-        if (transferReview) return false;
-        const proposal = await categorizationProposal(
-          userId,
-          transaction(item),
-          undefined,
-          executor,
-        );
-        if (
-          proposal.suggestedCategory?.id !== decision.categoryId ||
-          proposal.confidence !== decision.confidence ||
-          !proposal.meetsPolicyThreshold ||
-          !["merchant_rule", "transaction_evidence"].includes(proposal.suggestionBasis ?? "")
-        )
-          return false;
+        if (!(await this.preparedCategorizationBasis(decision, userId, executor))) return false;
       }
       return true;
     },
@@ -5695,7 +5698,7 @@ export function createFinanceService({
               transactionId: before.id,
             },
             context,
-            "agent",
+            input.suggestionBasis === "merchant_rule" ? "rule" : "agent",
             "confirmed",
             {},
             tx,

@@ -8,6 +8,7 @@ import {
   financeAlerts,
   financeAutomationSettings,
   financeCategories,
+  financeCategoryRules,
   financeClassificationDecisions,
   financeIncomeStreams,
   financeMerchants,
@@ -376,6 +377,120 @@ describe.sequential("finance action service", () => {
     expect(updateProfile).toHaveBeenCalledOnce();
   });
 
+  it("audits human approval once without attributing bypass application to the approver", async () => {
+    const updateProfile = vi.fn(async () => ({ id: "approved-profile" }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile } as never,
+      now: () => now,
+    });
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    await expect(
+      service.performDirect(
+        "profile",
+        { effectiveDate: "2026-12-10", employer: "Bypass profile" },
+        { principal: agent(userId), requestId: "approval-audit-bypass" },
+      ),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, "approval-audit-bypass")),
+    ).resolves.toEqual([]);
+
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const queued = await service.performDirect(
+      "profile",
+      { effectiveDate: "2026-12-11", employer: "Approved profile" },
+      { principal: agent(userId), requestId: "approval-audit-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending Finance review.");
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "approval-audit-approve",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          actorId: auditEvents.actorId,
+          actorType: auditEvents.actorType,
+          requestId: auditEvents.requestId,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, queued.review.id)),
+    ).resolves.toContainEqual({
+      action: "finance.action_review_approved",
+      after: {
+        actionKind: "profile",
+        fingerprint: queued.review.fingerprint,
+        reviewId: queued.review.id,
+      },
+      actorId: userId,
+      actorType: "user",
+      requestId: "approval-audit-approve",
+    });
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "approval-audit-replay",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, queued.review.id)),
+    ).resolves.toHaveLength(1);
+
+    const rollback = await service.performDirect(
+      "profile",
+      { effectiveDate: "2026-12-12", employer: "Rollback profile" },
+      { principal: agent(userId), requestId: "approval-audit-rollback-queue" },
+    );
+    if (rollback.status !== "pending_review") throw new Error("Expected a pending Finance review.");
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_finance_action_approval_audit() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'applied' THEN RAISE EXCEPTION 'forced action approval failure'; END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_finance_action_approval_audit
+      BEFORE UPDATE ON finance_agent_action_reviews
+      FOR EACH ROW EXECUTE FUNCTION fail_finance_action_approval_audit();
+    `);
+    try {
+      await expect(
+        service.approve(rollback.review.id, {
+          principal: user(userId),
+          requestId: "approval-audit-rollback-approve",
+        }),
+      ).rejects.toThrow(/finance_agent_action_reviews/);
+    } finally {
+      await database.pool.query(
+        "DROP TRIGGER fail_finance_action_approval_audit ON finance_agent_action_reviews",
+      );
+      await database.pool.query("DROP FUNCTION fail_finance_action_approval_audit()");
+    }
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, rollback.review.id)),
+    ).resolves.toEqual([]);
+  });
+
   it("holds the bypass settings lock until a bypassed agent action is applied", async () => {
     await database.db
       .update(financeAutomationSettings)
@@ -646,6 +761,20 @@ describe.sequential("finance action service", () => {
         before: null,
         entityId: userId,
         entityType: "finance_alert",
+        requestId: "refresh-audit-approve",
+      },
+      {
+        action: "finance.action_review_approved",
+        actorId: userId,
+        actorType: "user",
+        after: {
+          actionKind: "alert",
+          fingerprint: queued.review.fingerprint,
+          reviewId: queued.review.id,
+        },
+        before: null,
+        entityId: queued.review.id,
+        entityType: "finance_agent_action_review",
         requestId: "refresh-audit-approve",
       },
     ]);
@@ -2658,6 +2787,139 @@ describe.sequential("finance action service", () => {
         .from(financeTransactions)
         .where(eq(financeTransactions.id, transaction.id)),
     ).resolves.toEqual([{ categoryRationale: rationale, categorySource: "agent" }]);
+  });
+
+  it("applies server-validated merchant-rule transaction updates through bypass and human approval", async () => {
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Merchant rule basis bank",
+        name: "Merchant rule basis checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Merchant rule basis",
+        name: "Merchant rule basis category",
+        slug: `merchant-rule-basis-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Merchant rule basis fixtures were not created.");
+    await database.db.insert(financeCategoryRules).values({
+      category: category.name,
+      merchantNormalized: "merchant rule vendor",
+      userId,
+    });
+    const transactions = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 1200,
+          direction: "expense",
+          merchant: "Merchant Rule Vendor #1234",
+          transactionDate: "2026-12-13",
+          userId,
+        },
+        {
+          accountId: account.id,
+          amount: 3400,
+          direction: "expense",
+          merchant: "Merchant Rule Vendor #5678",
+          transactionDate: "2026-12-14",
+          userId,
+        },
+      ])
+      .returning();
+    if (transactions.length !== 2)
+      throw new Error("Merchant rule basis transactions were not created.");
+    const [bypassTransaction, approvalTransaction] = transactions;
+    if (!bypassTransaction || !approvalTransaction)
+      throw new Error("Merchant rule basis transactions were not created.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    const proposal = (transaction: (typeof transactions)[number]) => ({
+      category: category.name,
+      confidence: 1,
+      expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+      id: transaction.id,
+      rationale: "The approved merchant rule matches this transaction.",
+      suggestionBasis: "merchant_rule" as const,
+    });
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const bypass = await service.performDirect("transaction", proposal(bypassTransaction), {
+      principal: agent(userId),
+      requestId: "merchant-rule-bypass",
+    });
+    expect(bypass).toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({ categorySource: financeTransactions.categorySource })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, bypassTransaction.id)),
+    ).resolves.toEqual([{ categorySource: "rule" }]);
+
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const queued = await service.performDirect("transaction", proposal(approvalTransaction), {
+      principal: agent(userId),
+      requestId: "merchant-rule-queue",
+    });
+    if (queued.status !== "pending_review") throw new Error("Expected a pending Finance review.");
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "merchant-rule-approve",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({ categorySource: financeTransactions.categorySource })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, approvalTransaction.id)),
+    ).resolves.toEqual([{ categorySource: "rule" }]);
+    await expect(
+      database.db
+        .select({ actorId: auditEvents.actorId, actorType: auditEvents.actorType })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, "merchant-rule-approve")),
+    ).resolves.toContainEqual({ actorId: "finance-agent", actorType: "agent" });
+
+    const [withoutRule] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 5600,
+        direction: "expense",
+        merchant: "Merchant Rule Missing Vendor",
+        transactionDate: "2026-12-15",
+        userId,
+      })
+      .returning();
+    if (!withoutRule) throw new Error("Missing merchant rule transaction was not created.");
+    await expect(
+      service.performDirect(
+        "transaction",
+        {
+          ...proposal(withoutRule),
+          suggestionBasis: "merchant_rule",
+        },
+        { principal: agent(userId), requestId: "merchant-rule-missing" },
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
   });
 
   it("resumes a human answer with the requesting agent authority and audits the responder", async () => {

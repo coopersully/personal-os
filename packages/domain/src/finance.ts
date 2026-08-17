@@ -941,6 +941,7 @@ export const updateFinanceTransactionInputSchema = z
     learnMerchant: z.boolean().optional(),
     notes: z.string().trim().max(4_000).nullable().optional(),
     rationale: z.string().trim().min(1).max(1_000).optional(),
+    suggestionBasis: z.enum(["merchant_rule", "transaction_evidence"]).optional(),
   })
   .refine(
     (value) => value.category !== undefined || value.notes !== undefined,

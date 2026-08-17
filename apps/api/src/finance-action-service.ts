@@ -1069,13 +1069,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             rationale,
             transactionId: item.id,
           };
-          if (
-            !(await finances.validatePreparedCategorizations(
-              { decisions: [decision] },
-              userId,
-              executor,
-            ))
-          )
+          const suggestionBasis = await finances.preparedCategorizationBasis(
+            decision,
+            userId,
+            executor,
+          );
+          if (!suggestionBasis)
             return missing(
               "The transaction categorization evidence is incomplete, low-confidence, stale, or protected as an ambiguous transfer.",
               [
@@ -1086,6 +1085,18 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               ],
               [transactionSource(item, account)],
             );
+          return prepared(
+            { ...input, id, suggestionBasis },
+            item.updatedAt.toISOString(),
+            [
+              {
+                entityId: item.id,
+                entityType: "finance_transaction",
+                summary: `Set ${item.merchant} category to ${String(input.category)}.`,
+              },
+            ],
+            [transactionSource(item, account)],
+          );
         }
         return prepared(
           { ...input, id },
@@ -1578,6 +1589,20 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .update(financeAgentActionReviews)
           .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })
           .where(eq(financeAgentActionReviews.id, review.id));
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.action_review_approved",
+            after: {
+              actionKind: review.actionKind,
+              fingerprint: review.fingerprint,
+              reviewId: review.id,
+            },
+            before: null,
+            entityId: review.id,
+            entityType: "finance_agent_action_review",
+            ...context,
+          }),
+        );
         return { result: result as T, status: "applied" };
       });
     },

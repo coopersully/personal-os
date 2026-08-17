@@ -158,9 +158,6 @@ function profileProjection(
   field("nextPayday", "next payday");
   field("payAccountId", "pay account", (value) => (value == null ? "unset" : "selected account"));
   field("housingStatus", "housing status", (value) => String(value).replaceAll("_", " "));
-  field("monthlyHousingCost", "housing cost", (value) =>
-    value == null ? "unset" : `$${Number(value).toFixed(2)}`,
-  );
   field("investmentRiskCapacity", "risk capacity", (value) => String(value).replaceAll("_", " "));
   field("investmentRiskWillingness", "risk willingness", (value) =>
     String(value).replaceAll("_", " "),
@@ -168,21 +165,16 @@ function profileProjection(
   field("reserveTargetMonths", "reserve target", (value) =>
     value == null ? "unset" : `${String(value)} months`,
   );
-  const beforeNetPay = before?.expectedNetPay == null ? null : before.expectedNetPay / 100;
-  if (input.expectedNetPay !== undefined && input.expectedNetPay !== beforeNetPay) {
-    changes.push(
-      `net pay ${before?.expectedNetPay == null ? "unset" : `$${(before.expectedNetPay / 100).toFixed(2)}`} → $${Number(input.expectedNetPay).toFixed(2)}`,
-    );
-  }
-  if (
-    input.grossAnnualIncome !== undefined &&
-    input.grossAnnualIncome !==
-      (before?.grossAnnualIncome == null ? null : before.grossAnnualIncome / 100)
-  ) {
-    changes.push(
-      `annual income ${before?.grossAnnualIncome == null ? "unset" : `$${(before.grossAnnualIncome / 100).toFixed(2)}`} → $${Number(input.grossAnnualIncome).toFixed(2)}`,
-    );
-  }
+  const moneyField = (name: string, label: string, beforeCents: number | null | undefined) => {
+    const newValue = input[name];
+    const oldValue = beforeCents == null ? null : beforeCents / 100;
+    if (newValue === undefined || (oldValue ?? null) === (newValue ?? null)) return;
+    const format = (value: number | null) => (value == null ? "unset" : `$${value.toFixed(2)}`);
+    changes.push(`${label} ${format(oldValue)} → ${format(newValue as number | null)}`);
+  };
+  moneyField("expectedNetPay", "net pay", before?.expectedNetPay);
+  moneyField("grossAnnualIncome", "annual income", before?.grossAnnualIncome);
+  moneyField("monthlyHousingCost", "housing cost", before?.monthlyHousingCost);
   field("householdSize", "household size");
   field("dependents", "dependents");
   return `Update profile effective ${String(input.effectiveDate)}${changes.length ? `: ${changes.join("; ")}.` : "."}`;
@@ -253,6 +245,51 @@ function expectedAnswer(
   options: Pick<ExpectedAnswer, "choices" | "example"> = {},
 ): ExpectedAnswer {
   return { name, required: true, type, ...options };
+}
+
+const profileValidationAnswers: Record<string, ExpectedAnswer> = {
+  dependents: expectedAnswer("dependents", "number", { example: "0 to 20" }),
+  effectiveDate: expectedAnswer("effectiveDate", "string", { example: "YYYY-MM-DD" }),
+  employer: expectedAnswer("employer", "string", { example: "Up to 160 characters" }),
+  employmentType: expectedAnswer("employmentType", "string", {
+    choices: ["contract", "full_time", "part_time", "self_employed", "unemployed"],
+  }),
+  expectedNetPay: expectedAnswer("expectedNetPay", "number", { example: "0 to 100000000" }),
+  grossAnnualIncome: expectedAnswer("grossAnnualIncome", "number", {
+    example: "0 to 100000000",
+  }),
+  householdSize: expectedAnswer("householdSize", "number", { example: "1 to 50" }),
+  housingStatus: expectedAnswer("housingStatus", "string", {
+    choices: ["owning", "renting", "shared", "other"],
+  }),
+  investmentRiskCapacity: expectedAnswer("investmentRiskCapacity", "string", {
+    choices: ["low", "moderate", "high"],
+  }),
+  investmentRiskWillingness: expectedAnswer("investmentRiskWillingness", "string", {
+    choices: ["conservative", "balanced", "growth"],
+  }),
+  monthlyHousingCost: expectedAnswer("monthlyHousingCost", "number", {
+    example: "0 to 100000000",
+  }),
+  nextPayday: expectedAnswer("nextPayday", "string", { example: "YYYY-MM-DD" }),
+  payAccountId: expectedAnswer("payAccountId", "string", { example: "Account ID" }),
+  payFrequency: expectedAnswer("payFrequency", "string", {
+    choices: ["biweekly", "irregular", "monthly", "semimonthly", "weekly"],
+  }),
+  reserveTargetMonths: expectedAnswer("reserveTargetMonths", "number", {
+    example: "More than 0 to 60",
+  }),
+  role: expectedAnswer("role", "string", { example: "Up to 160 characters" }),
+};
+
+function profileValidationAnswer(input: Record<string, unknown>): ExpectedAnswer {
+  const parsed = updateFinanceProfileInputSchema.safeParse(input);
+  const field = parsed.success
+    ? null
+    : parsed.error.issues.find((issue) => typeof issue.path[0] === "string")?.path[0];
+  const fallback = profileValidationAnswers.effectiveDate;
+  if (!fallback) throw new Error("Finance profile validation descriptors are incomplete.");
+  return (typeof field === "string" ? profileValidationAnswers[field] : undefined) ?? fallback;
 }
 
 function isExpectedAnswerValue(field: ExpectedAnswer, value: unknown): boolean {
@@ -401,14 +438,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       case "profile": {
         const input = parse<Record<string, unknown>>(updateFinanceProfileInputSchema);
         if (!input)
-          return missing(
-            "Provide a complete valid Finance profile.",
-            "grossAnnualIncome" in rawInput &&
-              rawInput.grossAnnualIncome !== null &&
-              typeof rawInput.grossAnnualIncome !== "number"
-              ? [expectedAnswer("grossAnnualIncome", "number")]
-              : [expectedAnswer("effectiveDate", "string", { example: "2026-08-17" })],
-          );
+          return missing("Provide a complete valid Finance profile.", [
+            profileValidationAnswer(rawInput),
+          ]);
         const account = input.payAccountId
           ? await row(
               lockRead(
@@ -603,6 +635,20 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             payAccount: payAccount ? [payAccount.id, payAccount.updatedAt.toISOString()] : null,
             obligations: obligations.map((item) => [item.id, item.updatedAt.toISOString()]),
           });
+          const incomingCategoryNames = new Set(categories.map((category) => category.name));
+          const existingDetails = currentBudgets.map((budget) => {
+            const disposition =
+              plan.replace === true
+                ? incomingCategoryNames.has(budget.category)
+                  ? "replaced"
+                  : "removed"
+                : "retained";
+            return `${budget.category} $${(budget.limit / 100).toFixed(2)} → ${disposition}`;
+          });
+          const boundedExistingDetails = existingDetails.slice(0, 3).join("; ").slice(0, 220);
+          const existingSummary = currentBudgets.length
+            ? ` Existing ${currentBudgets.length} allocation${currentBudgets.length === 1 ? "" : "s"}: ${boundedExistingDetails}${currentBudgets.length > 3 ? "; additional allocations omitted" : ""}.`
+            : " No existing allocations.";
           return prepared(
             {
               ...plan,
@@ -611,10 +657,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                 : {}),
             },
             revision,
-            allocations.map((item) => ({
+            allocations.map((item, index) => ({
               entityId: item.categoryId,
               entityType: "finance_budget",
-              summary: `Set ${String(plan.month)} ${categories.find((category) => category.id === item.categoryId)?.name ?? "selected category"} allocation to $${item.limit.toFixed(2)} (${allocations.length} allocations).`,
+              summary: `${index === 0 ? `Replace ${String(plan.replace)}.${existingSummary} ` : ""}Set ${String(plan.month)} ${categories.find((category) => category.id === item.categoryId)?.name ?? "selected category"} allocation to $${item.limit.toFixed(2)} (${allocations.length} allocations).`,
             })),
             [
               ...categories.map((item) => localSource(item.id, item.updatedAt.toISOString())),

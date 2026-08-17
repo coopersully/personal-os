@@ -66,3 +66,34 @@ Status: DONE
 - `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts packages/api-client/src/client.test.ts apps/mcp/src/server.test.ts` — 89 tests passed.
 - API, Domain, API-client, MCP, and Web type checks passed.
 - Scoped Biome and `git diff --check` passed with the four existing `noNonNullAssertion` warnings in the Finance action integration test.
+
+## Fix round 3B — actionable reviews and deterministic account locks
+
+Status: DONE
+
+- Revalidation discovers referenced accounts without locking, then locks owned accounts in sorted ID order before locking sorted transactions and categories. Transaction updates use the same account-before-transaction order, matching account deletion and eliminating the crossed lock cycle.
+- A real PostgreSQL barrier regression holds account deletion after its account lock, starts pending transaction approval, and verifies both operations finish without a deadlock; the deleted account and transaction are absent afterward.
+- Profile reviews describe material non-sensitive fields, redact employer and role values, and use a specific recoverable descriptor for invalid gross income. Budget allocations include category labels, amounts, and counts; merchant renames include both names.
+- Pending Finance questions reuse the same ID only for the same requesting agent; an identical request from another agent receives an independent question.
+
+## Fix round 4A — approval provenance and merchant-rule basis
+
+Status: DONE
+
+- Human approval records one redacted `finance.action_review_approved` audit row in the terminal approval transaction, retaining human approver/request attribution while the underlying mutation keeps requesting-agent attribution.
+- Terminal replay returns the saved outcome without another approval audit. A failed terminal update rolls its approval audit back, and bypass application creates no human-approval audit.
+- Transaction actions derive the current server-validated categorization basis. Valid merchant-rule proposals preserve rule provenance through bypass or human approval; stale, absent, or invalid evidence returns `needs_input`.
+
+## Fix round 4B — complete projections and profile recovery
+
+Status: DONE
+
+- Nullable Finance profile fields and money clears are rendered as explicit `before → unset` changes; no clear is represented as `$0.00`.
+- Budget-plan review rows disclose replacement mode plus a bounded, labeled account of existing allocations that are replaced, removed, or retained, alongside every incoming allocation.
+- Profile validation derives its recoverable answer descriptor from the failing Zod path, including date, enums, numeric ranges, account fields, risk fields, and nullable-field recovery.
+
+### Verification
+
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts` — 72 tests passed.
+- `pnpm --filter @personal-os/api typecheck`, `pnpm --filter @personal-os/domain typecheck`, and `pnpm --filter @personal-os/database typecheck` — passed.
+- Scoped Biome, formatter, and `git diff --check` — passed.

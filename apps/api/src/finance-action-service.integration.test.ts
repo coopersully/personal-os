@@ -7,6 +7,7 @@ import {
   financeAgentActionReviews,
   financeAlerts,
   financeAutomationSettings,
+  financeBudgets,
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
@@ -1636,6 +1637,115 @@ describe.sequential("finance action service", () => {
     expect(summary.length).toBeLessThanOrEqual(500);
   });
 
+  it("renders nullable profile clears as unset without converting them to zero", async () => {
+    const [existing] = await database.db
+      .insert(financeProfiles)
+      .values({
+        effectiveDate: "2026-12-05",
+        expectedNetPay: 123_456,
+        grossAnnualIncome: 9_876_543,
+        monthlyHousingCost: 2_100_00,
+        payFrequency: "monthly",
+        reserveTargetMonths: 6,
+        userId,
+      })
+      .returning();
+    if (!existing) throw new Error("Clearable Finance profile was not created.");
+    const outcome = await createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile: vi.fn() } as never,
+      now: () => now,
+    }).performDirect(
+      "profile",
+      {
+        effectiveDate: existing.effectiveDate,
+        expectedNetPay: null,
+        grossAnnualIncome: null,
+        monthlyHousingCost: null,
+        payFrequency: null,
+        reserveTargetMonths: null,
+      },
+      { principal: agent(userId), requestId: "profile-clear-projection" },
+    );
+    if (outcome.status !== "pending_review") throw new Error("Expected a pending review.");
+    const summary = outcome.review.changes[0]?.summary ?? "";
+    expect(summary).toContain("net pay $1234.56 → unset");
+    expect(summary).toContain("annual income $98765.43 → unset");
+    expect(summary).toContain("housing cost $2100.00 → unset");
+    expect(summary).toContain("pay frequency monthly → unset");
+    expect(summary).toContain("reserve target 6 months → unset");
+    expect(summary).not.toContain("$0.00");
+  });
+
+  it("describes and recovers each representative invalid profile field", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const updateProfile = vi.fn(async () => ({ id: "recovered-profile" }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile } as never,
+      now: () => now,
+    });
+    const cases = [
+      {
+        expected: {
+          choices: ["contract", "full_time", "part_time", "self_employed", "unemployed"],
+          name: "employmentType",
+          type: "string",
+        },
+        input: {
+          effectiveDate: "2026-12-06",
+          employmentType: "sometimes",
+          monthlyHousingCost: null,
+        },
+        patch: { employmentType: "full_time" },
+      },
+      {
+        expected: { example: "0 to 20", name: "dependents", type: "number" },
+        input: { dependents: 21, effectiveDate: "2026-12-07" },
+        patch: { dependents: 1 },
+      },
+      {
+        expected: { example: "YYYY-MM-DD", name: "nextPayday", type: "string" },
+        input: { effectiveDate: "2026-12-08", nextPayday: "tomorrow" },
+        patch: { nextPayday: "2026-12-09" },
+      },
+      {
+        expected: { example: "0 to 100000000", name: "monthlyHousingCost", type: "number" },
+        input: { effectiveDate: "2026-12-09", monthlyHousingCost: -1 },
+        patch: { monthlyHousingCost: 1_500 },
+      },
+    ];
+    for (const item of cases) {
+      const asked = await service.performDirect("profile", item.input, {
+        principal: agent(userId),
+        requestId: `profile-invalid-${item.expected.name}`,
+      });
+      if (asked.status !== "needs_input")
+        throw new Error("Expected a recoverable Finance question.");
+      expect(asked.question.expectedAnswer).toEqual([
+        expect.objectContaining({ ...item.expected, required: true }),
+      ]);
+      await expect(
+        service.answerQuestion(asked.question.id, JSON.stringify(item.patch), {
+          principal: agent(userId),
+          requestId: `profile-recover-${item.expected.name}`,
+        }),
+      ).resolves.toMatchObject({ status: "applied" });
+    }
+    expect(updateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ monthlyHousingCost: null }),
+      expect.anything(),
+      expect.anything(),
+    );
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+  });
+
   it("labels merchant merge source and target by their requested IDs", async () => {
     const [source] = await database.db
       .insert(financeMerchants)
@@ -2019,9 +2129,86 @@ describe.sequential("finance action service", () => {
     expect(outcome.review.changes).toHaveLength(2);
     expect(outcome.review.changes.map((change) => change.summary)).toEqual(
       expect.arrayContaining([
-        "Set 2026-12 Budget review groceries allocation to $123.45 (2 allocations).",
+        expect.stringContaining(
+          "Set 2026-12 Budget review groceries allocation to $123.45 (2 allocations).",
+        ),
         "Set 2026-12 Budget review utilities allocation to $67.89 (2 allocations).",
       ]),
+    );
+  });
+
+  it("discloses plan replacement mode and bounded existing allocation effects", async () => {
+    const categories = await database.db
+      .insert(financeCategories)
+      .values([
+        {
+          group: "Replacement review",
+          name: "Replacement groceries",
+          slug: `replacement-groceries-${crypto.randomUUID()}`,
+          userId,
+        },
+        {
+          group: "Replacement review",
+          name: "Replacement transit",
+          slug: `replacement-transit-${crypto.randomUUID()}`,
+          userId,
+        },
+      ])
+      .returning();
+    if (categories.length !== 2) throw new Error("Replacement review categories were not created.");
+    await database.db.insert(financeBudgets).values([
+      { category: "Replacement groceries", limit: 4_000, month: "2026-11", userId },
+      { category: "Legacy removed category", limit: 2_500, month: "2026-11", userId },
+    ]);
+    const outcome = await createFinanceActionService({
+      db: database.db,
+      finances: { setBudgetPlan: vi.fn() } as never,
+      now: () => now,
+    }).performDirect(
+      "budget_plan",
+      {
+        allocations: [
+          { categoryId: categories[0]?.id, limit: 123.45 },
+          { categoryId: categories[1]?.id, limit: 67.89 },
+        ],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-11",
+        rationale: "Review replacement effects.",
+        replace: true,
+        scenarioFingerprint: null,
+      },
+      { principal: agent(userId), requestId: "budget-plan-replacement-summary" },
+    );
+    if (outcome.status !== "pending_review") throw new Error("Expected a pending review.");
+    const summary = outcome.review.changes[0]?.summary ?? "";
+    expect(summary).toContain("Replace true");
+    expect(summary).toContain("Replacement groceries $40.00 → replaced");
+    expect(summary).toContain("Legacy removed category $25.00 → removed");
+    expect(summary).toContain("Set 2026-11 Replacement groceries allocation to $123.45");
+    expect(summary.length).toBeLessThanOrEqual(500);
+
+    const retained = await createFinanceActionService({
+      db: database.db,
+      finances: { setBudgetPlan: vi.fn() } as never,
+      now: () => now,
+    }).performDirect(
+      "budget_plan",
+      {
+        allocations: [{ categoryId: categories[0]?.id, limit: 123.45 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-11",
+        rationale: "Review retained allocations.",
+        replace: false,
+        scenarioFingerprint: null,
+      },
+      { principal: agent(userId), requestId: "budget-plan-retained-summary" },
+    );
+    if (retained.status !== "pending_review") throw new Error("Expected a pending review.");
+    expect(retained.review.changes[0]?.summary).toContain("Replace false");
+    expect(retained.review.changes[0]?.summary).toContain(
+      "Legacy removed category $25.00 → retained",
     );
   });
 

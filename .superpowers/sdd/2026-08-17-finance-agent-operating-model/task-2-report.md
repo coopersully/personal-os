@@ -25,6 +25,21 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 1 — C4 Pass 2 (route transport tests)
+
+Status: DONE_WITH_CONCERNS
+
+Commit `5a17966b7e1b66caffe5a2b73a3e69c76809ce33` adds direct route coverage for `POST /v1/finances/scenarios/compare` and `PUT /v1/finances/budget-plan`. The test verifies parsed input forwarding, required read/write scopes, successful response status, and response envelopes under current Task 2 behavior.
+
+Verification passed:
+
+- `pnpm exec biome check --write apps/api/src/routes/finances.test.ts` (exited 0)
+- `pnpm exec vitest run apps/api/src/routes/finances.test.ts --reporter=dot` (1 file, 6 tests passed)
+- `pnpm --filter @personal-os/api typecheck` (exited 0)
+- `git diff --check` (exited 0 before commit)
+
+The planned Task 3 review-disposition behavior remains deliberately deferred; this coverage exercises only the current Task 2 user-request route behavior.
+
 ## Fix round 1 — completion chain
 
 `0299446`, `4f9bf75`, `ad8da10`, `cc80ff0`, `c272fdb`, `a02b435`, and `8baaca4` respectively tightened close readiness/OAuth consent, centralized cadence-aware capacity, grounded evidence cutoff and missing facts, preserved provider evidence references, stabilized goal priority, projected conditional debt/goals, and added scenario boundary coverage. Focused scenario/status/client/MCP tests and API/domain typechecks were run during these batches; all reported passing except the corrected test-first typecheck iteration, which passed after the fixture was completed. Task 3 review dispositions and bypass recheck remain deliberately deferred by plan.

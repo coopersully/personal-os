@@ -1477,14 +1477,25 @@ describe("ilo MCP server", () => {
       limit: 50,
       review: "needs_review",
     });
-    expect(api.compareFinanceScenarios).toHaveBeenCalledWith(expect.objectContaining({
-      alternatives: [], asOf: "2026-07-13",
-      baseline: expect.objectContaining({ label: "Baseline", monthlyIncome: 3_000, startingCash: 1_000 }),
-      horizonMonths: 3,
-    }));
-    expect(api.setFinanceBudgetPlan).toHaveBeenCalledWith(expect.objectContaining({
-      allocations: [{ categoryId: id, limit: 250 }], month: "2026-07", rationale: "Match current spending.",
-    }));
+    expect(api.compareFinanceScenarios).toHaveBeenCalledWith(
+      expect.objectContaining({
+        alternatives: [],
+        asOf: "2026-07-13",
+        baseline: expect.objectContaining({
+          label: "Baseline",
+          monthlyIncome: 3_000,
+          startingCash: 1_000,
+        }),
+        horizonMonths: 3,
+      }),
+    );
+    expect(api.setFinanceBudgetPlan).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allocations: [{ categoryId: id, limit: 250 }],
+        month: "2026-07",
+        rationale: "Match current spending.",
+      }),
+    );
     expect(api.upsertFinanceAttentionItem).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ importance: "high", kind: "important" }),

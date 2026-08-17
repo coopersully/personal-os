@@ -4701,6 +4701,7 @@ export function createFinanceService({
         const capacity = reliableMonthlyCapacity({
           expectedNetPay:
             effectiveProfile?.expectedNetPay == null ? null : effectiveProfile.expectedNetPay / 100,
+          expectedNetPayFrequency: effectiveProfile?.payFrequency ?? null,
           grossAnnualIncome:
             effectiveProfile?.grossAnnualIncome == null
               ? null

@@ -790,11 +790,16 @@ export function createFinanceStatusService({ db, now }: Options) {
           const budgetCapacity = reliableMonthlyCapacity({
             expectedNetPay:
               activeProfile?.expectedNetPay == null ? null : activeProfile.expectedNetPay / 100,
+            expectedNetPayFrequency: activeProfile?.payFrequency ?? null,
             grossAnnualIncome:
               activeProfile?.grossAnnualIncome == null
                 ? null
                 : activeProfile.grossAnnualIncome / 100,
             observedMonthlyIncome: observedIncome,
+            observedIncomeWindow: {
+              complete: selectedDay === daysInMonth,
+              days: selectedDay,
+            },
             recurring: recurringObligations.map((item) => ({
               amount: item.expectedAmount / 100,
               cadence: item.cadence,

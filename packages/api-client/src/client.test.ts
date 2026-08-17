@@ -1223,6 +1223,82 @@ describe("ilo API client", () => {
     ]);
   });
 
+  it("serializes Finance scenario comparisons and budget plans", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const scenarioInput = {
+      alternatives: [],
+      asOf: "2026-08-01",
+      baseline: {
+        assumptions: [],
+        budgetAllocations: [],
+        label: "Baseline",
+        monthlyDebtPayment: 0,
+        monthlyHousingCost: 0,
+        monthlyIncome: 3000,
+        monthlyReserveContribution: 250,
+        startingCash: 1000,
+      },
+      horizonMonths: 3,
+    };
+    const scenario = {
+      alternatives: [],
+      asOf: "2026-08-01",
+      assumptions: [],
+      baseline: {
+        debtPayoffMonths: null,
+        goalDateEffects: [],
+        label: "Baseline",
+        monthlyCashFlow: 2750,
+        projectedLowestBalance: 1000,
+        reserveRunwayMonths: 4,
+      },
+      fingerprint: "scenario-fingerprint",
+      goalConflicts: [],
+      missingInputs: [],
+      sensitivityWarnings: [],
+    };
+    const budgetPlan = {
+      acknowledgeOverAllocation: false,
+      allocations: [{ categoryId: id, limit: 250 }],
+      assumptions: ["Income remains stable."],
+      goalIds: [],
+      month: "2026-08",
+      rationale: "Allocate within reliable monthly capacity.",
+      replace: true,
+      scenarioFingerprint: "scenario-fingerprint",
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        if (url.pathname === "/v1/finances/scenarios/compare") return json({ scenario });
+        if (url.pathname === "/v1/finances/budget-plan") return json({ plan: budgetPlan });
+        return json({ error: { code: "not_found", message: "Not found" } }, 404);
+      },
+    });
+
+    await expect(api.compareFinanceScenarios(scenarioInput)).resolves.toEqual(scenario);
+    await expect(api.setFinanceBudgetPlan(budgetPlan)).resolves.toEqual(budgetPlan);
+
+    expect(requests).toEqual([
+      {
+        body: JSON.stringify(scenarioInput),
+        method: "POST",
+        path: "/v1/finances/scenarios/compare",
+      },
+      {
+        body: JSON.stringify(budgetPlan),
+        method: "PUT",
+        path: "/v1/finances/budget-plan",
+      },
+    ]);
+  });
+
   it("preserves Finance maintenance API errors with their request IDs", async () => {
     const api = createApiClient({
       baseUrl: "https://api.example.com",

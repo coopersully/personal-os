@@ -5,6 +5,7 @@ import {
   domainProfileSchema,
 } from "./assistant.js";
 import { idSchema, isoDateTimeSchema } from "./common.js";
+import { connectorSyncRecoverySchema } from "./connection.js";
 import { agentMutationPolicies, materialSourceReferenceSchema } from "./feature-contracts.js";
 
 export const financeProviderSchema = z.enum(["plaid", "paypal", "venmo", "zelle", "manual"]);
@@ -13,6 +14,31 @@ export const transactionDirectionSchema = z.enum(["income", "expense", "transfer
 export type TransactionDirection = z.infer<typeof transactionDirectionSchema>;
 export const financeAccountKindSchema = z.enum(["cash", "investment", "debt", "other"]);
 export type FinanceAccountKind = z.infer<typeof financeAccountKindSchema>;
+
+export const financeSynchronizationSchema = z.object({
+  failureCode: z.string().max(120).nullable(),
+  failureCount: z.number().int().nonnegative(),
+  lastAttemptAt: isoDateTimeSchema.nullable(),
+  lastSuccessAt: isoDateTimeSchema.nullable(),
+  message: z.string().max(300).nullable(),
+  nextRetryAt: isoDateTimeSchema.nullable(),
+  recovery: connectorSyncRecoverySchema.nullable(),
+  state: z.enum(["current", "stale", "retrying", "blocked"]),
+});
+export type FinanceSynchronization = z.infer<typeof financeSynchronizationSchema>;
+
+/**
+ * Public, local-only synchronization health for the authoritative Plaid Item.
+ * Remote Item identity, credentials, cursors, claims, and legacy grouping
+ * values remain storage and service implementation details.
+ */
+export const financeProviderItemHealthSchema = z.object({
+  accountIds: z.array(idSchema),
+  id: idSchema,
+  provider: z.literal("plaid"),
+  synchronization: financeSynchronizationSchema,
+});
+export type FinanceProviderItemHealth = z.infer<typeof financeProviderItemHealthSchema>;
 
 const moneySchema = z.number().finite().nonnegative().max(100_000_000);
 const categorySchema = z.string().trim().min(1).max(80);
@@ -25,9 +51,12 @@ const categorySchema = z.string().trim().min(1).max(80);
 export const financeGuidedPreferencesSchema = z
   .object({
     billReviewLeadDays: z.number().int().min(0).max(90).optional(),
+    budgetOffTrackForecastRatio: z.number().finite().gt(1).max(10).default(1.15),
     budgetStyle: z
       .enum(["category", "envelope", "flexible", "unspecified", "zero_based"])
       .optional(),
+    budgetWatchForecastRatio: z.number().finite().gt(1).max(10).default(1.05),
+    emergencyReserveTargetMonths: z.number().finite().positive().max(60).default(3),
     largeExpenseAlertAmount: moneySchema.positive().optional(),
     lowBalanceAlertAmount: moneySchema.optional(),
     planningCurrency: z.literal("USD").optional(),
@@ -49,6 +78,13 @@ export const financeGuidedPreferencesSchema = z
     ]),
   )
   .superRefine((value, context) => {
+    if (value.budgetWatchForecastRatio >= value.budgetOffTrackForecastRatio) {
+      context.addIssue({
+        code: "custom",
+        message: "The Finance budget watch ratio must be lower than the off-track ratio.",
+        path: ["budgetWatchForecastRatio"],
+      });
+    }
     if (
       (value.largeExpenseAlertAmount !== undefined || value.lowBalanceAlertAmount !== undefined) &&
       value.planningCurrency !== "USD"
@@ -65,6 +101,11 @@ export type FinanceGuidedPreferences = z.infer<typeof financeGuidedPreferencesSc
 export const financeAccountSchema = z.object({
   balance: z.number().finite().nullable(),
   createdAt: isoDateTimeSchema,
+  currencyCode: z
+    .string()
+    .regex(/^[A-Z]{3}$/u)
+    .nullable()
+    .default(null),
   id: idSchema,
   institution: z.string().min(1).max(160),
   kind: financeAccountKindSchema,
@@ -72,6 +113,7 @@ export const financeAccountSchema = z.object({
   name: z.string().min(1).max(160),
   provider: financeProviderSchema,
   status: z.enum(["connected", "needs_reauth", "manual"]),
+  synchronization: financeSynchronizationSchema,
   updatedAt: isoDateTimeSchema,
 });
 export type FinanceAccount = z.infer<typeof financeAccountSchema>;
@@ -222,6 +264,11 @@ export const financeTransactionSchema = z.object({
   categoryRationale: z.string().max(1_000).nullable().optional(),
   categorySource: z.enum(["agent", "provider", "rule", "user"]).nullable().optional(),
   createdAt: isoDateTimeSchema,
+  currencyCode: z
+    .string()
+    .regex(/^[A-Z]{3}$/u)
+    .nullable()
+    .default(null),
   date: z.iso.date(),
   direction: transactionDirectionSchema,
   id: idSchema,
@@ -436,6 +483,7 @@ export const financeCategorizationProposalSchema = z.object({
   meetsPolicyThreshold: z.boolean(),
   policy: z.literal("preview"),
   rationale: z.string().min(1).max(1_000),
+  suggestionBasis: z.enum(["merchant_rule", "transaction_evidence"]).nullable().default(null),
   source: materialSourceReferenceSchema,
   suggestedCategory: financeCategorySchema.nullable(),
   threshold: z.number().min(0).max(1),

@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
-import { upsertFinanceAttentionItemInputSchema } from "@personal-os/domain";
+import { maintenanceScopeSchema, upsertFinanceAttentionItemInputSchema } from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
@@ -14,6 +14,39 @@ const readAnnotations = {
 
 /** Finance-owned MCP surface. Domain policy remains enforced by the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
+  server.registerTool(
+    "get_finance_status",
+    {
+      annotations: readAnnotations,
+      description:
+        "Preferred complete-workspace Finance status operation. Read readiness, freshness, outstanding work, active or recoverable maintenance, and open questions for the selected scope. With no arguments, inspect all outstanding work; questions and approvals remain pending rather than guessed.",
+      inputSchema: z
+        .object({ scope: maintenanceScopeSchema.default({ type: "all_outstanding" }) })
+        .strict(),
+      title: "Get Finance status",
+    },
+    async (input) => apiResult(() => api.getFinanceStatus(input.scope)),
+  );
+
+  server.registerTool(
+    "maintain_finances",
+    {
+      annotations: {
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+        readOnlyHint: false,
+      },
+      description:
+        "Preferred complete-workspace Finance maintenance operation. Start or resume Ilo's durable maintenance turn for the selected scope. With no arguments, submit all outstanding work; questions and approvals remain pending rather than guessed.",
+      inputSchema: z
+        .object({ scope: maintenanceScopeSchema.default({ type: "all_outstanding" }) })
+        .strict(),
+      title: "Maintain Finances",
+    },
+    async (input) => apiResult(() => api.maintainFinances(input.scope)),
+  );
+
   server.registerTool(
     "get_finance_guided_setup",
     {

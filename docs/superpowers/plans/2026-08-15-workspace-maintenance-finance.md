@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Keep MCP stateless: it may call only `@personal-os/api-client`, never PostgreSQL, Plaid, or domain business logic.
-- `get_finance_status` requires `finances:read`; `maintain_finances` requires `finances:write` and has static policy `approved_rule`.
+- `get_finance_status` requires `finances:read`; `maintain_finances` requires separately consented `finances:maintain` and has static policy `approved_rule`.
 - `maintain_finances` cannot answer a human question, approve a budget, create an unapproved permanent rule, move money, or trade investments.
 - The no-argument maintenance scope is `all_outstanding`; windowed and target scopes are optional.
 - Budgets are complete proposals committed atomically through one explicit signed-in human approval.
@@ -646,7 +646,7 @@ Auto-match only equal-and-opposite posted transactions owned by the same user, o
 
 - [ ] **Step 6: Add authenticated maintenance routes**
 
-`POST /v1/finances/maintenance` parses `maintenanceRequestSchema`, requires `finances:write`, creates/resumes the run, advances one bounded slice, and returns `{ run }`. It must not use `requireHuman`. `GET /v1/finances/maintenance/:id` requires `finances:read`, enforces user ownership, and returns the stable run. Add both operations, schemas, scope examples, and conflict responses to `apps/api/src/openapi.ts`.
+`POST /v1/finances/maintenance` parses `maintenanceRequestSchema`, requires separately consented `finances:maintain`, creates/resumes the run, advances one bounded slice, and returns `{ run }`. It must not use `requireHuman`. `GET /v1/finances/maintenance/:id` requires `finances:read`, enforces user ownership, and returns the stable run. Add both operations, schemas, scope examples, and conflict responses to `apps/api/src/openapi.ts`.
 
 - [ ] **Step 7: Add server-owned continuation**
 
@@ -684,7 +684,7 @@ git commit -m "feat: maintain Finance with durable runs"
 - Modify: `packages/domain/src/domain.test.ts`
 - Modify: `packages/database/src/schema.ts`
 - Modify: `packages/database/src/schema.test.ts`
-- Create: `packages/database/migrations/0057_finance_budget_proposals.sql`
+- Create: `packages/database/migrations/0059_finance_budget_proposals.sql`
 - Modify: `packages/database/migrations/meta/_journal.json`
 - Modify: `apps/api/src/finance-maintenance-service.ts`
 - Modify: `apps/api/src/finance-maintenance-service.integration.test.ts`
@@ -719,7 +719,7 @@ Expected: FAIL because proposals are not persisted.
 
 - [ ] **Step 3: Add normalized proposal tables**
 
-Add `finance_budget_proposals` with user/run/month/status/evidence hash/income basis/totals/cash-flow/conflicts/revision/approved-at timestamps and `finance_budget_proposal_items` with proposal/category/kind/limit/rationale/source evidence. Use unique `(user_id, month, status)` only for active `pending` proposals and unique `(proposal_id, category)` items. Run `pnpm --filter @personal-os/database db:generate -- --name finance_budget_proposals`, verify the generated tag is `0057_finance_budget_proposals`, and review its SQL and journal entry; it creates empty tables only.
+Add `finance_budget_proposals` with user/run/month/status/evidence hash/income basis/totals/cash-flow/conflicts/revision/approved-at timestamps and `finance_budget_proposal_items` with proposal/category/kind/limit/rationale/source evidence. Use unique `(user_id, month, status)` only for active `pending` proposals and unique `(proposal_id, category)` items. Run `pnpm --filter @personal-os/database db:generate --name finance_budget_proposals`, verify the generated tag is `0059_finance_budget_proposals`, and review its SQL and journal entry; it creates empty tables only. Migration `0058_finance_provider_items` is reserved by the approved Provider Item synchronization correction in `docs/superpowers/specs/2026-08-16-finance-provider-item-sync-design.md`.
 
 - [ ] **Step 4: Prepare proposals from explicit evidence**
 
@@ -755,6 +755,15 @@ git commit -m "feat: add approved Finance budget proposals"
 ```
 
 ### Task 8: Publish the typed API and two preferred MCP tools
+
+> Delivery note (2026-08-16): the Provider Item correction delivered and verified the complete
+> status/maintenance slice: `getFinanceStatus`, `maintainFinances`,
+> `getFinanceMaintenanceRun`, MCP `get_finance_status`, and MCP `maintain_finances`. Maintenance
+> uses the explicit `finances:maintain` consent scope so existing draft-only `finances:write`
+> grants do not silently expand. Read-only transports expose status without suggesting an
+> unavailable write. Do not reimplement this slice after Task 7; only the two budget-proposal
+> client methods remain dependent on the proposal endpoints. The checkboxes below remain open
+> until that five-method combined task is fully reconciled.
 
 **Files:**
 - Modify: `packages/api-client/src/features/finances.ts`
@@ -809,12 +818,14 @@ expect(toolCatalog.maintain_finances).toMatchObject({
   domain: "finances",
   policy: "approved_rule",
   readOnly: false,
-  requiredScopes: ["finances:write"],
+  requiredScopes: ["finances:maintain"],
   stage: "commit",
 });
 ```
 
-Prove a read-only token sees status but not maintenance, a write token sees both, no-argument invocation sends `all_outstanding`, and results contain `_ilo` metadata plus useful text.
+Prove a read-only or write-only token sees status but not maintenance, a separately consented
+`finances:maintain` token sees both, no-argument invocation sends `all_outstanding`, and results
+contain `_ilo` metadata plus useful text.
 
 - [ ] **Step 5: Register the two tools**
 
@@ -824,7 +835,7 @@ Do not add Plaid, retry, confidence, cursor, batch, or policy inputs.
 
 - [ ] **Step 6: Reduce the prompt to client-agnostic discovery**
 
-Change `review_finances` to direct the host to `get_finance_status` for inspection and `maintain_finances` when write scope and user intent permit. Do not prescribe a client schedule or multi-tool pagination loop.
+Change `review_finances` to direct the host to `get_finance_status` for inspection and `maintain_finances` when maintenance scope and user intent permit. Do not prescribe a client schedule or multi-tool pagination loop.
 
 - [ ] **Step 7: Run MCP verification**
 

@@ -8,7 +8,7 @@ import type {
 } from "@personal-os/domain";
 import { AppError } from "./errors.js";
 
-type ExternalCalendarProvider = Extract<CalendarProvider, "google" | "icloud">;
+type ExternalConnectorProvider = Extract<CalendarProvider, "google" | "icloud"> | "plaid";
 
 export type ConnectorSyncFailure = {
   category: ConnectorFailureCategory;
@@ -21,7 +21,7 @@ export type ConnectorSyncFailure = {
 
 export function classifyConnectorSyncFailure(
   error: unknown,
-  provider: ExternalCalendarProvider,
+  provider: ExternalConnectorProvider,
 ): ConnectorSyncFailure {
   if (error instanceof ConnectorError) {
     const recovery =
@@ -91,7 +91,7 @@ export function connectionHealthForAccount(account: {
 export function connectorSyncAppError(
   failure: ConnectorSyncFailure,
   accountId: string,
-  provider: ExternalCalendarProvider,
+  provider: ExternalConnectorProvider,
   nextSyncAt: Date | null,
 ): AppError {
   return new AppError(
@@ -108,7 +108,7 @@ export function connectorSyncAppError(
 }
 
 function safeConnectorMessage(
-  provider: ExternalCalendarProvider,
+  provider: ExternalConnectorProvider,
   category: ConnectorFailureCategory,
   recovery: ConnectorSyncRecovery,
 ): string {
@@ -131,8 +131,10 @@ function safeConnectorMessage(
   return `${label} is temporarily unavailable. ilo will retry automatically.`;
 }
 
-function providerLabel(provider: ExternalCalendarProvider): string {
-  return provider === "google" ? "Google" : "iCloud";
+function providerLabel(provider: ExternalConnectorProvider): string {
+  if (provider === "google") return "Google";
+  if (provider === "plaid") return "Plaid";
+  return "iCloud";
 }
 
 function retryDelayMs(failureCount: number): number {

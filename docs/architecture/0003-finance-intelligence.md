@@ -158,6 +158,15 @@ Pending transactions remain distinct from posted spending.
 They may be organized provisionally, but cannot create classification evidence
 or permanent merchant learning before posting.
 
+Plaid transaction synchronization is item-atomic. The Provider Item owns the
+sole authoritative opaque cursor; account cursor fields are compatibility
+shadows only. Missing or divergent legacy shadows force a null-cursor replay,
+never timestamp-based cursor inference. A sync projects deltas for every owned
+sibling account, then advances the Item cursor and compatibility shadows only
+after every page payload has committed. A window or exact maintenance target may narrow later
+reconciliation, categorization, questions, and cash-flow health work; it never
+narrows the raw provider item projection or discards a sibling delta.
+
 ## Income, recurring activity, and cash flow
 
 Profiles are effective-dated. Reads select the latest profile whose effective

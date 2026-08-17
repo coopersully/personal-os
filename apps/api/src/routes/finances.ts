@@ -10,6 +10,9 @@ import {
   financeMerchantQuerySchema,
   financeReviewDecisionInputSchema,
   financeTransactionQuerySchema,
+  idSchema,
+  maintenanceRequestSchema,
+  maintenanceScopeQuerySchema,
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
   updateFinanceIncomeStreamInputSchema,
@@ -20,23 +23,44 @@ import {
   upsertFinanceAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import type { createFinanceService } from "../finance-service.js";
+import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
-import { parseBody, requireFeatureAccess, requireHuman, requireScope } from "./support.js";
+import {
+  parseBody,
+  parseOptionalBody,
+  requireFeatureAccess,
+  requireHuman,
+  requireScope,
+} from "./support.js";
 
 type MutationContext = { principal: Principal; requestId: string };
 
 type FinanceRouteOptions = {
   app: Hono<AppEnv>;
+  financeMaintenance: FinanceMaintenanceService;
+  financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
 };
 
 /** Register the Finance-owned HTTP surface without constructing shared services. */
-export function registerFinanceRoutes({ app, finances, mutationContext }: FinanceRouteOptions) {
+export function registerFinanceRoutes({
+  app,
+  financeMaintenance,
+  financeStatus,
+  finances,
+  mutationContext,
+}: FinanceRouteOptions) {
   const requireFinanceScope = requireFeatureAccess("finances");
   const requireFinanceRead = requireScope("finances:read");
+  const requireFinanceMaintenance = requireScope("finances:maintain");
   const requireFinanceAccess: MiddlewareHandler<AppEnv> = async (context, next) => {
+    if (context.req.method === "POST" && context.req.path === "/v1/finances/maintenance") {
+      await requireFinanceMaintenance(context, next);
+      return;
+    }
     if (
       context.req.method === "POST" &&
       context.req.path === "/v1/finances/categorizations/propose"
@@ -48,6 +72,30 @@ export function registerFinanceRoutes({ app, finances, mutationContext }: Financ
   };
   app.use("/v1/finances", requireFinanceAccess);
   app.use("/v1/finances/*", requireFinanceAccess);
+  app.post("/v1/finances/maintenance", async (context) => {
+    const request = await parseOptionalBody(context, maintenanceRequestSchema);
+    const created = await financeMaintenance.startOrResume(
+      context.get("principal").userId,
+      request.scope,
+    );
+    return context.json({ run: created }, 202);
+  });
+  app.get("/v1/finances/maintenance/:id", async (context) =>
+    context.json({
+      run: await financeMaintenance.getRun(
+        context.get("principal").userId,
+        idSchema.parse(context.req.param("id")),
+      ),
+    }),
+  );
+  app.get("/v1/finances/status", async (context) =>
+    context.json({
+      status: await financeStatus.getFinanceStatus(
+        context.get("principal").userId,
+        maintenanceScopeQuerySchema.parse(context.req.query()),
+      ),
+    }),
+  );
   app.get("/v1/finances", async (context) => {
     const query = financeBudgetStatusQuerySchema.parse(context.req.query());
     const accountIds = context.req.query("accountIds")?.split(",").filter(Boolean);

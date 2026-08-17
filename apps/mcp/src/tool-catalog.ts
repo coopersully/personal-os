@@ -179,6 +179,17 @@ export const iloToolCatalog = {
   restore_reminder: write("reminders", ["reminders:write"]),
 
   get_finance_guided_setup: read("finances", ["finances:read"], "context", { ui: true }),
+  get_finance_status: {
+    ...read("finances", ["finances:read"]),
+    idempotent: true,
+    openWorld: false,
+  },
+  maintain_finances: write("finances", ["finances:maintain"], {
+    idempotent: false,
+    openWorld: false,
+    policy: "approved_rule",
+    stage: "commit",
+  }),
   get_finance_wealth_summary: read("finances", ["finances:read"]),
   get_finance_cashflow: read("finances", ["finances:read"]),
   get_finance_ledger_health: read("finances", ["finances:read"]),

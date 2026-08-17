@@ -6,6 +6,7 @@ import { migrationsWithout } from "./test-migrations.js";
 
 const migrationsFolder = resolve(process.cwd(), "packages/database/migrations");
 const migrationPath = resolve(migrationsFolder, "0055_task_organization.sql");
+const reconciliationMigration = "0059_task_organization_reconciliation";
 
 function databaseUri(connectionUri: string, databaseName: string): string {
   const uri = new URL(connectionUri);
@@ -37,7 +38,14 @@ describe.sequential("Task organization migration", () => {
   }
 
   async function migrationsBeforeTaskOrganization(prefix: string): Promise<string> {
-    const folder = await migrationsWithout(migrationsFolder, prefix, ["0055_task_organization"]);
+    const folder = await migrationsWithout(migrationsFolder, prefix, [
+      "0055_task_organization",
+      "0055_finance_sync_health",
+      "0056_workspace_maintenance_runs",
+      "0057_finance_currency_evidence",
+      "0058_finance_provider_items",
+      reconciliationMigration,
+    ]);
     temporaryMigrationFolders.push(folder);
     return folder;
   }
@@ -302,6 +310,39 @@ describe.sequential("Task organization migration", () => {
       [userId],
     );
     expect(remainingLists.rows[0]?.count).toBe("0");
+  });
+
+  it("reconciles Task organization after the parallel Finance migration was already applied", async () => {
+    const database = await createIsolatedDatabase("task_organization_parallel_0055");
+    const financeHistory = await migrationsWithout(
+      migrationsFolder,
+      "ilo-task-organization-parallel-0055-",
+      ["0055_task_organization", reconciliationMigration],
+    );
+    temporaryMigrationFolders.push(financeHistory);
+    await migrateDatabase(database.db, financeHistory);
+
+    await database.pool.query(
+      `INSERT INTO users (id, email, password_hash, display_name)
+       VALUES ('10000000-0000-4000-8000-000000000099', 'parallel-0055@example.com', 'unused', 'Parallel 0055')`,
+    );
+    await database.pool.query(
+      `INSERT INTO reminders (user_id, title, kind, status)
+       VALUES ('10000000-0000-4000-8000-000000000099', 'Legacy parallel Task', 'task', 'inbox')`,
+    );
+
+    await migrateDatabase(database.db, migrationsFolder);
+
+    await expect(
+      database.pool.query(
+        `SELECT reminder.task_lifecycle, reminder.task_revision, list.kind
+         FROM reminders AS reminder
+         JOIN task_lists AS list ON list.id = reminder.task_list_id
+         WHERE reminder.user_id = '10000000-0000-4000-8000-000000000099'`,
+      ),
+    ).resolves.toMatchObject({
+      rows: [{ kind: "inbox", task_lifecycle: "open", task_revision: 1 }],
+    });
   });
 
   it("rejects a Task whose canonical lifecycle is null", async () => {

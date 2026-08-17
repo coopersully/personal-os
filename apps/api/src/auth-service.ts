@@ -45,6 +45,7 @@ const allScopes = new Set<AccessScope>([
   "goals:write",
   "finances:read",
   "finances:write",
+  "finances:maintain",
   "reminders:read",
   "reminders:write",
   "tasks:read",

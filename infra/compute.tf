@@ -142,6 +142,13 @@ resource "aws_ecs_task_definition" "api" {
     operating_system_family = "LINUX"
   }
 
+  lifecycle {
+    precondition {
+      condition     = !var.plaid_enabled || var.plaid_environment == "production"
+      error_message = "Production Plaid credentials require plaid_environment=production."
+    }
+  }
+
   container_definitions = jsonencode([{
     name           = "api"
     image          = "${aws_ecr_repository.api.repository_url}:bootstrap"

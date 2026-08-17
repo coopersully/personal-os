@@ -94,6 +94,7 @@ const protectedResourceMetadata = {
     "audit:read",
     "finances:read",
     "finances:write",
+    "finances:maintain",
     "bookmarks:read",
   ],
 };

@@ -3967,6 +3967,16 @@ describe.sequential("ilo API", () => {
     });
   });
 
+  it("exposes one bounded Finance Provider Item backfill pass through the app lifecycle", async () => {
+    await expect(app.backfillFinanceProviderItems()).resolves.toEqual({
+      blocked: 0,
+      complete: true,
+      created: 0,
+      linked: 0,
+      replayDue: 0,
+    });
+  });
+
   it("returns every connector callback to ilo when persistence fails unexpectedly", async () => {
     const callbackLogs = vi.fn();
     const failingDatabase = new Proxy(database.db, {
@@ -4392,7 +4402,61 @@ describe.sequential("ilo API", () => {
       profilesComplete: true,
       profilesDemoted: 0,
     });
-    await expect(app.syncDueFinances()).resolves.toEqual({ failed: 0, reasons: [], synced: 0 });
+    await expect(app.syncDueFinances()).resolves.toEqual({
+      attempted: 0,
+      failed: 0,
+      recovered: 0,
+      skipped: 0,
+      succeeded: 0,
+    });
+  });
+
+  it("returns finance status through the authenticated app composition", async () => {
+    const openApi = (await app.request("/openapi.json")).json();
+    await expect(openApi).resolves.toMatchObject({
+      paths: {
+        "/v1/finances/status": {
+          get: { responses: { 200: { description: "Authoritative Finance status" } } },
+        },
+      },
+    });
+    const [statusUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Finance Status",
+        email: `finance-status-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!statusUser) throw new Error("Finance status user was not created.");
+    const statusAuth = createAuthService({
+      db: database.db,
+      now: () => new Date("2026-08-15T12:00:00.000Z"),
+      sessionTtlDays: 30,
+    });
+    const statusToken = await statusAuth.createAccessToken(statusUser.id, {
+      name: "Finance status reader",
+      scopes: ["finances:read"],
+    });
+
+    const response = await app.request("/v1/finances/status", {
+      headers: { authorization: `Bearer ${statusToken.token}` },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      status: {
+        details: {
+          accounts: { providerItems: [] },
+          health: { confidence: "insufficient" },
+          month: { forecast: null, spending: null },
+        },
+        domain: "finances",
+        freshness: { state: "unavailable" },
+        state: "needs_input",
+      },
+    });
   });
 
   it("enforces owner-issued, one-time invitations for private beta sign-up", async () => {
@@ -6747,7 +6811,11 @@ describe.sequential("ilo API", () => {
     expect(
       logs.mock.calls
         .map(([entry]) => entry)
-        .filter(({ event }) => event === "connector_sync_freshness_observed"),
+        .filter(
+          ({ event, path }) =>
+            event === "connector_sync_freshness_observed" &&
+            path === "/internal/connectors/freshness",
+        ),
     ).toEqual([
       expect.objectContaining({
         eligibleAccountCount: expect.any(Number),
@@ -7410,7 +7478,7 @@ describe.sequential("ilo API", () => {
       code_challenge_method: "S256",
       redirect_uri: "http://127.0.0.1:4312/callback",
       resource: "https://api.example.com/mcp",
-      scope: "tasks:read",
+      scope: "tasks:read finances:maintain",
       state: "test-state",
     }).toString();
     const consent = await app.request(authorize.pathname + authorize.search, {
@@ -7420,6 +7488,11 @@ describe.sequential("ilo API", () => {
     const consentPage = await consent.text();
     expect(consentPage).toContain("Connect Protocol test client");
     expect(consentPage).toContain("Read tasks");
+    expect(consentPage).toContain("Maintain Finances");
+    expect(consentPage).toContain("provider synchronization");
+    expect(consentPage).toContain("rule-approved categorization and reconciliation");
+    expect(consentPage).toContain("pending rather than guessed");
+    expect(consentPage).toContain("durable Finance maintenance run");
     expect(consentPage).toContain("Connected provider credentials remain inside Ilo");
     expect(consentPage).toContain('class="oauth-card"');
     expect(consentPage).toContain("Requested access");
@@ -7469,7 +7542,7 @@ describe.sequential("ilo API", () => {
       expect.objectContaining({
         id: client.client_id,
         name: "Protocol test client",
-        scopes: ["tasks:read"],
+        scopes: ["tasks:read", "finances:maintain"],
       }),
     ]);
     expect(

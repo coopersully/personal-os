@@ -206,7 +206,7 @@ export function createFinanceApi(request: FinanceRequest) {
         body: JSON.stringify(input),
         method: "PUT",
       });
-      return response.profile;
+      return actionResult(response, "profile");
     },
     async listFinanceIncomeStreams(): Promise<FinanceIncomeStream[]> {
       const response = await request<{ incomeStreams: FinanceIncomeStream[] }>(
@@ -238,7 +238,7 @@ export function createFinanceApi(request: FinanceRequest) {
         `/v1/finances/recurring/${id}`,
         { body: JSON.stringify(input), method: "PATCH" },
       );
-      return response.recurring;
+      return actionResult(response, "recurring");
     },
     async getFinanceForecast(): Promise<FinanceForecast> {
       const response = await request<{ forecast: FinanceForecast }>("/v1/finances/forecast");

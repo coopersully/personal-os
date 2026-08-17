@@ -11,6 +11,7 @@ import {
   financeAccounts,
   financeAlerts,
   financeAutomationSettings,
+  financeBudgetPlans,
   financeBudgets,
   financeCategories,
   financeClassificationDecisions,
@@ -21,6 +22,7 @@ import {
   financeReviewCases,
   financeSetupBackfillState,
   financeTransactions,
+  goals,
   migrateDatabase,
   users,
   workspaceMaintenanceRuns,
@@ -931,6 +933,206 @@ describe.sequential("finance service", () => {
         context,
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("keeps budget-plan ownership, durable metadata, and audits atomic and private", async () => {
+    const [owner, otherUser] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "Budget plan metadata owner",
+          email: "budget-plan-metadata-owner@example.com",
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Budget plan metadata other user",
+          email: "budget-plan-metadata-other@example.com",
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+      ])
+      .returning();
+    if (!owner || !otherUser) throw new Error("Fixture users were not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const [category, secondCategory] = await service.listCategories(owner.id);
+    const [foreignCategory] = await service.listCategories(otherUser.id);
+    if (!category || !secondCategory || !foreignCategory)
+      throw new Error("Default Finance categories were not seeded.");
+    const [goal, foreignGoal] = await database.db
+      .insert(goals)
+      .values([
+        { title: "Owner goal", userId: owner.id },
+        { title: "Foreign goal", userId: otherUser.id },
+      ])
+      .returning();
+    if (!goal || !foreignGoal) throw new Error("Finance goals were not created.");
+    const input = {
+      acknowledgeOverAllocation: false,
+      allocations: [{ categoryId: category.id, limit: 400 }],
+      assumptions: ["Income stays stable.", "Housing cost is unchanged."],
+      goalIds: [goal.id],
+      month: "2026-07",
+      rationale: "Fund essentials first.",
+      replace: true,
+      scenarioFingerprint: `sha256:${"b".repeat(64)}`,
+    };
+    const context = { principal: financePrincipal(owner.id), requestId: "budget-plan-metadata" };
+
+    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(
+      database.db
+        .select({
+          assumptions: financeBudgetPlans.assumptions,
+          goalIds: financeBudgetPlans.goalIds,
+          rationale: financeBudgetPlans.rationale,
+          replace: financeBudgetPlans.replace,
+          scenarioFingerprint: financeBudgetPlans.scenarioFingerprint,
+          version: financeBudgetPlans.version,
+        })
+        .from(financeBudgetPlans)
+        .where(
+          and(eq(financeBudgetPlans.userId, owner.id), eq(financeBudgetPlans.month, input.month)),
+        ),
+    ).resolves.toEqual([
+      {
+        assumptions: input.assumptions,
+        goalIds: input.goalIds,
+        rationale: input.rationale,
+        replace: input.replace,
+        scenarioFingerprint: input.scenarioFingerprint,
+        version: 1,
+      },
+    ]);
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, input.month))),
+    ).resolves.toEqual([{ category: category.name, limit: 40_000 }]);
+    await expect(
+      database.db
+        .select({ after: auditEvents.after, before: auditEvents.before })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, context.requestId)),
+    ).resolves.toEqual([
+      {
+        after: {
+          allocationCount: 1,
+          assumptionsCount: 2,
+          goalCount: 1,
+          month: input.month,
+          planVersion: 1,
+          rationaleProvided: true,
+          scenarioFingerprint: input.scenarioFingerprint,
+        },
+        before: { allocationCount: 0, month: input.month, priorAllocationCount: 0 },
+      },
+    ]);
+
+    const persistedPlan = await database.db
+      .select({ rationale: financeBudgetPlans.rationale, version: financeBudgetPlans.version })
+      .from(financeBudgetPlans)
+      .where(
+        and(eq(financeBudgetPlans.userId, owner.id), eq(financeBudgetPlans.month, input.month)),
+      );
+    const persistedBudgets = await database.db
+      .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+      .from(financeBudgets)
+      .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, input.month)));
+    const auditCount = await database.db.$count(auditEvents, eq(auditEvents.userId, owner.id));
+
+    await expect(
+      service.setBudgetPlan(
+        { ...input, allocations: [{ categoryId: foreignCategory.id, limit: 100 }] },
+        { ...context, requestId: "budget-plan-foreign-category" },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.setBudgetPlan(
+        { ...input, goalIds: [foreignGoal.id] },
+        { ...context, requestId: "budget-plan-foreign-goal" },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    await expect(
+      database.db
+        .select({ rationale: financeBudgetPlans.rationale, version: financeBudgetPlans.version })
+        .from(financeBudgetPlans)
+        .where(
+          and(eq(financeBudgetPlans.userId, owner.id), eq(financeBudgetPlans.month, input.month)),
+        ),
+    ).resolves.toEqual(persistedPlan);
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, input.month))),
+    ).resolves.toEqual(persistedBudgets);
+    await expect(database.db.$count(auditEvents, eq(auditEvents.userId, owner.id))).resolves.toBe(
+      auditCount,
+    );
+
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_finance_budget_plan_allocation_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.month = '2026-07' AND (
+          SELECT count(*) FROM finance_budgets WHERE user_id = NEW.user_id AND month = NEW.month
+        ) >= 1 THEN
+          RAISE EXCEPTION 'forced Finance budget plan allocation failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_finance_budget_plan_allocation_for_test
+      BEFORE INSERT ON finance_budgets
+      FOR EACH ROW EXECUTE FUNCTION fail_finance_budget_plan_allocation_for_test();
+    `);
+    try {
+      let allocationFailure: unknown;
+      try {
+        await service.setBudgetPlan(
+          {
+            ...input,
+            allocations: [
+              { categoryId: category.id, limit: 350 },
+              { categoryId: secondCategory.id, limit: 50 },
+            ],
+            rationale: "Attempt a replacement that will fail midway.",
+          },
+          { ...context, requestId: "budget-plan-allocation-rollback" },
+        );
+      } catch (error) {
+        allocationFailure = error;
+      }
+      expect(allocationFailure).toBeInstanceOf(Error);
+      expect((allocationFailure as Error & { cause?: Error }).cause?.message).toContain(
+        "forced Finance budget plan allocation failure",
+      );
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_finance_budget_plan_allocation_for_test ON finance_budgets;
+        DROP FUNCTION IF EXISTS fail_finance_budget_plan_allocation_for_test();
+      `);
+    }
+
+    await expect(
+      database.db
+        .select({ rationale: financeBudgetPlans.rationale, version: financeBudgetPlans.version })
+        .from(financeBudgetPlans)
+        .where(
+          and(eq(financeBudgetPlans.userId, owner.id), eq(financeBudgetPlans.month, input.month)),
+        ),
+    ).resolves.toEqual(persistedPlan);
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, input.month))),
+    ).resolves.toEqual(persistedBudgets);
+    await expect(database.db.$count(auditEvents, eq(auditEvents.userId, owner.id))).resolves.toBe(
+      auditCount,
+    );
   });
 
   it("derives Finance attention provenance, deduplicates open items, and audits atomically", async () => {

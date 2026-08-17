@@ -25,6 +25,21 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 2 — Batch D (status evidence, reconciliation, and goal priority)
+
+Status: DONE_WITH_CONCERNS
+
+Commit `fdc84e60906cd6c1c97a2036d978b0b04f2cb5e8` derives Finance evidence cutoff from the oldest current source, falls back to the oldest local manual-account revision when no provider timestamp exists, and omits provider evidence references that lack a provider transaction ID. Close readiness now includes pending ledger work and `reconciledThrough` stops before the earliest unresolved transaction/review/duplicate/provenance exception. Goal priority is now sourced only from the latest durable budget plan's ordered `goalIds`; active goals without that order remain deterministic in the separate active-goal list but prompt for an explicit priority and do not receive fabricated ranks.
+
+Verification passed:
+
+- `pnpm exec vitest run apps/api/src/finance-status-service.integration.test.ts --reporter=dot` (1 file, 17 tests passed after the red phase demonstrated the prior cutoff/priority failures)
+- `pnpm exec vitest run apps/api/src/finance-status-service.integration.test.ts packages/domain/src/domain.test.ts --reporter=dot` (2 files, 47 tests passed)
+- `pnpm --filter @personal-os/api typecheck` (exited 0)
+- `pnpm --filter @personal-os/domain typecheck` (exited 0)
+- `pnpm exec biome check --write apps/api/src/finance-status-service.ts apps/api/src/finance-status-service.integration.test.ts` (exited 0)
+- `git diff --check` (exited 0)
+
 ## Fix round 2 — Batch C (scenario correctness)
 
 Status: DONE_WITH_CONCERNS

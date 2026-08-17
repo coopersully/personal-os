@@ -36,7 +36,7 @@ import {
   updateFinanceRecurringObligationInputSchema,
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
@@ -912,7 +912,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       const rows = await db
         .select()
         .from(financeAgentActionReviews)
-        .where(eq(financeAgentActionReviews.userId, userId))
+        .where(
+          and(
+            eq(financeAgentActionReviews.userId, userId),
+            ne(financeAgentActionReviews.actionKind, "question"),
+          ),
+        )
         .orderBy(desc(financeAgentActionReviews.createdAt))
         .limit(limit);
       return rows.map(reviewFromRow);
@@ -1003,6 +1008,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       });
     },
     async answerQuestion(id: string, answer: string, context: MutationContext) {
+      const answerValue = answer.trim();
+      if (answerValue.length === 0 || answerValue.length > 4_000) {
+        throw new AppError("invalid_request", "Provide a bounded Finance question answer.");
+      }
       return db.transaction(async (tx) => {
         const [review] = await tx
           .select()
@@ -1012,21 +1021,80 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               eq(financeAgentActionReviews.id, id),
               eq(financeAgentActionReviews.userId, context.principal.userId),
               eq(financeAgentActionReviews.actionKind, "question"),
-              eq(financeAgentActionReviews.status, "pending"),
             ),
           )
           .for("update")
           .limit(1);
         if (!review) throw new AppError("not_found", "The Finance question was not found.");
-        const payload = review.privatePayload as { question: FinanceQuestion };
-        // The answer is durable, but it is not an approval and it cannot alter
-        // bypass. A subsequent prepared action consumes it as evidence rather
-        // than guessing a transaction/category mutation from free text.
+        const payload = review.privatePayload as {
+          answer?: string;
+          original: { actionKind: SupportedActionKind; input: Record<string, unknown> };
+          outcome?: FinanceActionOutcome<unknown>;
+          question: FinanceQuestion;
+        };
+        if (review.status !== "pending") {
+          if (payload.answer === answerValue && payload.outcome) return payload.outcome;
+          throw new AppError("conflict", "This Finance question has already been answered.");
+        }
+        let supplied: Record<string, unknown>;
+        try {
+          const parsed = JSON.parse(answerValue);
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
+          supplied = parsed as Record<string, unknown>;
+        } catch {
+          const outcome: FinanceActionOutcome<unknown> = {
+            question: {
+              ...question(
+                payload.original.actionKind,
+                "Answer with the bounded fields requested for this Finance action.",
+              ),
+              id: review.id,
+            },
+            status: "needs_input",
+          };
+          await tx
+            .update(financeAgentActionReviews)
+            .set({
+              privatePayload: { ...payload, answer: answerValue, outcome },
+              status: "superseded",
+              updatedAt: now(),
+            })
+            .where(eq(financeAgentActionReviews.id, review.id));
+          return outcome;
+        }
+        const prepared = await prepare(
+          payload.original.actionKind,
+          { ...payload.original.input, ...supplied },
+          context.principal.userId,
+          tx,
+        );
+        let outcome: FinanceActionOutcome<unknown>;
+        if ("status" in prepared) {
+          outcome = prepared;
+        } else if (
+          context.principal.actorType === "agent" &&
+          !(await readBypass(tx, context.principal.userId, true))
+        ) {
+          outcome = {
+            review: (await queue(prepared, context, tx)) as FinancePendingActionReview,
+            status: "pending_review",
+          };
+        } else {
+          const current = await revalidate(prepared, context.principal.userId, tx);
+          outcome =
+            "status" in current
+              ? current
+              : { result: await applyPrepared(current, context, tx), status: "applied" };
+        }
         await tx
           .update(financeAgentActionReviews)
-          .set({ privatePayload: { ...payload, answer }, updatedAt: now() })
+          .set({
+            privatePayload: { ...payload, answer: answerValue, outcome },
+            status: "superseded",
+            updatedAt: now(),
+          })
           .where(eq(financeAgentActionReviews.id, review.id));
-        return { question: payload.question, status: "needs_input" as const };
+        return outcome;
       });
     },
   };

@@ -53,3 +53,20 @@ Verification:
 - `git diff --check` — passed.
 
 Remaining concern for later batches: durable question answers still do not resume prepared actions, and concurrent supersession policy remains intentionally untouched. Existing route-level schemas reject malformed path IDs before this service receives them; the service returns a bounded `needs_input` outcome for malformed direct action payloads.
+
+## Fix round 1/5 — Batch C: durable questions and compatibility
+
+Status: DONE_WITH_CONCERNS
+
+Question rows are now excluded from approval listing/projection. Answering a question locks it, accepts only bounded JSON object input, merges it into its referenced original action, reruns preparation and bypass disposition inside the same transaction, records the terminal outcome, and supersedes the original question. Exact terminal replay is idempotent. The MCP `resolve_finance_review` alias is documented as deprecated and accepts either the current answer shape or a legacy transaction-categorization shape, translating the latter to the same answer path; it cannot toggle bypass or approve a generic action review.
+
+Verification:
+
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.test.ts apps/mcp/src/server.test.ts packages/api-client/src/client.test.ts` — 34 passed.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/mcp typecheck` — passed.
+- `pnpm --filter @personal-os/api-client typecheck` — passed.
+- `pnpm exec biome check --write apps/api/src/finance-action-service.ts apps/api/src/finance-action-service.integration.test.ts apps/mcp/src/tools/finances.ts` — passed.
+- `git diff --check` — passed.
+
+Remaining concern for later batches: answer extraction currently accepts a bounded JSON object and relies on the original action's typed prepare schema for the final field validation. It does not yet expose individually tailored UI/MCP answer schemas for every possible prepare failure, and supersession-race coverage remains deferred.

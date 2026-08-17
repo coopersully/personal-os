@@ -296,6 +296,20 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     answer,
   }: z.infer<typeof answerFinanceQuestionInput>) =>
     apiResult(() => api.answerFinanceQuestion(questionId, answer));
+  const legacyFinanceReviewInput = z.union([
+    answerFinanceQuestionInput,
+    z
+      .object({
+        categoryId: id,
+        confidence: z.number().min(0).max(1).default(1),
+        expectedTransactionUpdatedAt: z.iso.datetime(),
+        id,
+        learnMerchant: z.enum(["always", "never", "suggest"]).default("suggest"),
+        rationale: z.string().trim().min(1).max(1_000),
+        transactionId: id,
+      })
+      .strict(),
+  ]);
   server.registerTool(
     "answer_finance_question",
     {
@@ -312,11 +326,30 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: writeAnnotations,
       description:
-        "Compatibility alias for answer_finance_question. It answers bounded questions only; it cannot approve an action review or change review bypass.",
-      inputSchema: answerFinanceQuestionInput,
+        "Deprecated compatibility alias for answer_finance_question. It translates legacy transaction categorization answers only; it cannot approve an action review or change review bypass.",
+      inputSchema: legacyFinanceReviewInput,
       title: "Answer Finance question (compatibility)",
     },
-    answerFinanceQuestion,
+    async (input) =>
+      "answer" in input
+        ? answerFinanceQuestion(input)
+        : apiResult(() =>
+            api.answerFinanceQuestion(
+              input.id,
+              JSON.stringify({
+                decisions: [
+                  {
+                    categoryId: input.categoryId,
+                    confidence: input.confidence,
+                    expectedTransactionUpdatedAt: input.expectedTransactionUpdatedAt,
+                    learnMerchant: input.learnMerchant,
+                    rationale: input.rationale,
+                    transactionId: input.transactionId,
+                  },
+                ],
+              }),
+            ),
+          ),
   );
 
   server.registerTool(

@@ -445,4 +445,73 @@ describe.sequential("finance action service", () => {
         .where(eq(financeAgentActionReviews.id, queued.review.id)),
     ).resolves.toEqual([{ status: "superseded" }]);
   });
+
+  it("excludes question rows from approvals and terminalizes a valid answer", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Question bank",
+        name: "Question checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Question account was not created.");
+    const [stored] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        actionKind: "question",
+        fingerprint: "question-list-and-answer",
+        privatePayload: {
+          original: {
+            actionKind: "profile",
+            input: { payAccountId: "00000000-0000-4000-8000-000000000000" },
+          },
+          question: {
+            actionKind: "profile",
+            choices: [],
+            id: "00000000-0000-4000-8000-000000000001",
+            prompt: "Choose a pay account.",
+            sourceRefs: [],
+            why: "The supplied account is not owned.",
+          },
+        },
+        requestingAgentId: "finance-agent",
+        safeChanges: [
+          { entityId: null, entityType: "finance_profile", summary: "Supply account." },
+        ],
+        sourceRefs: [],
+        userId,
+      })
+      .returning();
+    if (!stored) throw new Error("Question row was not created.");
+    const updateProfile = vi.fn(async () => ({ id: "answered-profile" }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile } as never,
+      now: () => now,
+    });
+
+    await expect(service.listReviews(userId)).resolves.not.toContainEqual(
+      expect.objectContaining({ id: stored.id }),
+    );
+    await expect(
+      service.answerQuestion(stored.id, JSON.stringify({ payAccountId: account.id }), {
+        principal: agent(userId),
+        requestId: "answer-question",
+      }),
+    ).resolves.toMatchObject({ result: { id: "answered-profile" }, status: "applied" });
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, stored.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+    expect(updateProfile).toHaveBeenCalledOnce();
+  });
 });

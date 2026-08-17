@@ -1,4 +1,3 @@
-import type { FinanceActionKind } from "@personal-os/domain";
 import {
   applyFinanceCategorizationsInputSchema,
   createFinanceAccountInputSchema,
@@ -28,7 +27,7 @@ import {
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
-import type { createFinanceActionService } from "../finance-action-service.js";
+import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
@@ -76,7 +75,7 @@ export function registerFinanceRoutes({
     mutationContext(context);
   const act = async (
     context: Context<AppEnv>,
-    actionKind: FinanceActionKind,
+    actionKind: SupportedActionKind,
     input: Record<string, unknown>,
     direct: () => Promise<Response>,
   ) => {

@@ -1,10 +1,24 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
   type Database,
+  financeAccounts,
   financeAgentActionReviews,
+  financeAlerts,
   financeAutomationSettings,
+  financeBudgetPlans,
+  financeBudgets,
+  financeCategories,
+  financeIncomeStreams,
+  financeMerchants,
+  financeProfiles,
+  financeRecurringObligations,
+  financeTransactions,
+  goals,
 } from "@personal-os/database";
 import {
+  applyFinanceCategorizationsInputSchema,
+  createFinanceBudgetInputSchema,
+  createFinanceTransactionInputSchema,
   type FinanceActionKind,
   type FinanceActionOutcome,
   type FinanceActionReview,
@@ -12,6 +26,15 @@ import {
   type FinanceQuestion,
   type FinanceSafeChange,
   financeActionReviewSchema,
+  type MaterialSourceReference,
+  mergeFinanceMerchantsInputSchema,
+  resolveFinanceAlertInputSchema,
+  setFinanceBudgetPlanInputSchema,
+  updateFinanceIncomeStreamInputSchema,
+  updateFinanceMerchantInputSchema,
+  updateFinanceProfileInputSchema,
+  updateFinanceRecurringObligationInputSchema,
+  updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { AppError } from "./errors.js";
@@ -23,19 +46,34 @@ type MutationContext = {
   requestId: string;
 };
 
+export type SupportedActionKind = Extract<
+  FinanceActionKind,
+  | "alert"
+  | "budget_plan"
+  | "categorization"
+  | "income_stream"
+  | "merchant"
+  | "profile"
+  | "recurring_obligation"
+  | "transaction"
+>;
+
 type PreparedAction = {
-  actionKind: FinanceActionKind;
+  actionKind: SupportedActionKind;
   expectedRevision: string | null;
   fingerprint: string;
   input: Record<string, unknown>;
   rationale: string;
   safeChanges: FinanceSafeChange[];
+  assumptions: string[];
+  sourceRefs: MaterialSourceReference[];
 };
 
 type StoredPayload = {
   input: Record<string, unknown>;
   rationale: string;
   result?: unknown;
+  assumptions?: string[];
 };
 
 type FinanceActionServiceOptions = {
@@ -64,21 +102,26 @@ function actionFingerprint(actionKind: FinanceActionKind, input: Record<string, 
     .digest("hex");
 }
 
-function targetFor(
-  actionKind: FinanceActionKind,
-  input: Record<string, unknown>,
-): FinanceSafeChange {
-  const entityId =
-    typeof input.id === "string"
-      ? input.id
-      : typeof input.transactionId === "string"
-        ? input.transactionId
-        : null;
+function localSource(id: string, revision: string | null): MaterialSourceReference {
+  return { accountId: null, provider: "local", remoteId: id, revision, sourceType: "local" };
+}
+
+function transactionSource(
+  transaction: typeof financeTransactions.$inferSelect,
+  account: typeof financeAccounts.$inferSelect,
+): MaterialSourceReference {
+  const provider = account.provider === "manual" ? "local" : account.provider;
   return {
-    entityId,
-    entityType: `finance_${actionKind}`,
-    summary: `Apply prepared ${actionKind.replaceAll("_", " ")} change.`,
+    accountId: account.id,
+    provider,
+    remoteId: provider === "local" ? transaction.id : transaction.providerTransactionId,
+    revision: transaction.updatedAt.toISOString(),
+    sourceType: "finance_transaction",
   };
+}
+
+function assertNever(value: never): never {
+  throw new AppError("invalid_request", `Unsupported Finance action kind: ${String(value)}.`);
 }
 
 function question(actionKind: FinanceActionKind, why: string): FinanceQuestion {
@@ -96,7 +139,7 @@ function reviewFromRow(row: typeof financeAgentActionReviews.$inferSelect): Fina
   const payload = row.privatePayload as StoredPayload;
   return financeActionReviewSchema.parse({
     actionKind: row.actionKind,
-    assumptions: [],
+    assumptions: payload.assumptions ?? [],
     changes: row.safeChanges,
     expectedRevision: row.expectedRevision,
     fingerprint: row.fingerprint,
@@ -116,46 +159,34 @@ function reviewFromRow(row: typeof financeAgentActionReviews.$inferSelect): Fina
  */
 export function createFinanceActionService({ db, finances, now }: FinanceActionServiceOptions) {
   async function prepare(
-    actionKind: FinanceActionKind,
-    input: Record<string, unknown>,
+    actionKind: SupportedActionKind,
+    rawInput: Record<string, unknown>,
+    userId: string,
+    executor: Pick<Database, "select"> = db,
   ): Promise<PreparedAction | { status: "needs_input"; question: FinanceQuestion }> {
-    // Evidence is evaluated before any bypass setting is read. Empty batches and
-    // revisionless categorizations cannot become permission merely because a
-    // person has elected direct application for justified work.
-    if (actionKind === "categorization") {
-      const decisions = input.decisions;
-      if (!Array.isArray(decisions) || decisions.length === 0) {
-        return {
-          question: question(actionKind, "No transaction categorization evidence was supplied."),
-          status: "needs_input",
-        };
-      }
-      if (
-        decisions.some(
-          (decision) =>
-            !decision ||
-            typeof decision !== "object" ||
-            typeof (decision as Record<string, unknown>).rationale !== "string" ||
-            typeof (decision as Record<string, unknown>).expectedTransactionUpdatedAt !== "string",
-        )
-      ) {
-        return {
-          question: question(
-            actionKind,
-            "Each categorization needs rationale and a displayed transaction revision.",
-          ),
-          status: "needs_input",
-        };
-      }
-    }
-    const expectedRevision =
-      typeof input.expectedTransactionUpdatedAt === "string"
-        ? input.expectedTransactionUpdatedAt
-        : actionKind === "categorization"
-          ? createHash("sha256").update(stableJson(input.decisions)).digest("hex")
-          : null;
-    return {
+    const missing = (why: string, sourceRefs: MaterialSourceReference[] = []) => ({
+      question: { ...question(actionKind, why), sourceRefs },
+      status: "needs_input" as const,
+    });
+    const parse = <T>(schema: {
+      safeParse: (value: unknown) => { success: boolean; data?: T };
+    }) => {
+      const parsed = schema.safeParse(rawInput);
+      return parsed.success ? parsed.data : null;
+    };
+    const row = async <T>(query: Promise<T[]>, why: string) => {
+      const item = (await query)[0];
+      return item ?? missing(why);
+    };
+    const prepared = (
+      input: Record<string, unknown>,
+      expectedRevision: string | null,
+      safeChanges: FinanceSafeChange[],
+      sourceRefs: MaterialSourceReference[],
+      assumptions: string[] = [],
+    ): PreparedAction => ({
       actionKind,
+      assumptions,
       expectedRevision,
       fingerprint: actionFingerprint(actionKind, input),
       input,
@@ -163,8 +194,419 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         typeof input.rationale === "string" && input.rationale.trim()
           ? input.rationale
           : `Requested ${actionKind.replaceAll("_", " ")} change.`,
-      safeChanges: [targetFor(actionKind, input)],
-    };
+      safeChanges,
+      sourceRefs,
+    });
+
+    switch (actionKind) {
+      case "profile": {
+        const input = parse<Record<string, unknown>>(updateFinanceProfileInputSchema);
+        if (!input) return missing("Provide a complete valid Finance profile.");
+        const account = input.payAccountId
+          ? await row(
+              executor
+                .select()
+                .from(financeAccounts)
+                .where(
+                  and(
+                    eq(financeAccounts.id, String(input.payAccountId)),
+                    eq(financeAccounts.userId, userId),
+                  ),
+                )
+                .limit(1),
+              "Choose one of your Finance accounts for pay deposits.",
+            )
+          : null;
+        if (account && "question" in account) return account;
+        const existing = await executor
+          .select()
+          .from(financeProfiles)
+          .where(
+            and(
+              eq(financeProfiles.userId, userId),
+              eq(financeProfiles.effectiveDate, String(input.effectiveDate)),
+            ),
+          )
+          .limit(1);
+        const revision = existing[0]?.updatedAt.toISOString() ?? "absent";
+        return prepared(
+          input,
+          revision,
+          [
+            {
+              entityId: existing[0]?.id ?? null,
+              entityType: "finance_profile",
+              summary: `Update profile effective ${String(input.effectiveDate)}.`,
+            },
+          ],
+          [
+            localSource(`profile:${String(input.effectiveDate)}`, revision),
+            ...(account ? [localSource(account.id, account.updatedAt.toISOString())] : []),
+          ],
+        );
+      }
+      case "budget_plan": {
+        const plan = parse<Record<string, unknown>>(setFinanceBudgetPlanInputSchema);
+        if (plan) {
+          const allocations = plan.allocations as Array<{ categoryId: string; limit: number }>;
+          const categoryIds = allocations.map((item) => item.categoryId);
+          const categories = await executor
+            .select()
+            .from(financeCategories)
+            .where(
+              and(eq(financeCategories.userId, userId), inArray(financeCategories.id, categoryIds)),
+            );
+          if (categories.length !== categoryIds.length)
+            return missing("Every budget allocation must reference one of your categories.");
+          const goalIds = plan.goalIds as string[];
+          const ownedGoals = goalIds.length
+            ? await executor
+                .select()
+                .from(goals)
+                .where(and(eq(goals.userId, userId), inArray(goals.id, goalIds)))
+            : [];
+          if (ownedGoals.length !== goalIds.length)
+            return missing("Every budget-plan goal must belong to you.");
+          const planRows = await executor
+            .select()
+            .from(financeBudgetPlans)
+            .where(
+              and(
+                eq(financeBudgetPlans.userId, userId),
+                eq(financeBudgetPlans.month, String(plan.month)),
+              ),
+            )
+            .limit(1);
+          const revision = stableJson({
+            plan: planRows[0]?.version ?? 0,
+            categories: categories.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
+            goals: ownedGoals.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
+          });
+          return prepared(
+            plan,
+            revision,
+            allocations.map((item) => ({
+              entityId: item.categoryId,
+              entityType: "finance_budget",
+              summary: `Set ${String(plan.month)} allocation to $${item.limit.toFixed(2)}.`,
+            })),
+            [
+              ...categories.map((item) => localSource(item.id, item.updatedAt.toISOString())),
+              ...ownedGoals.map((item) => localSource(item.id, item.updatedAt.toISOString())),
+            ],
+            (plan.assumptions as string[]) ?? [],
+          );
+        }
+        const input = parse<Record<string, unknown>>(createFinanceBudgetInputSchema);
+        if (!input)
+          return missing("Provide a complete Finance budget or complete monthly budget plan.");
+        const existing = await executor
+          .select()
+          .from(financeBudgets)
+          .where(
+            and(
+              eq(financeBudgets.userId, userId),
+              eq(financeBudgets.month, String(input.month)),
+              eq(financeBudgets.category, String(input.category)),
+            ),
+          )
+          .limit(1);
+        const revision = existing[0]?.updatedAt.toISOString() ?? "absent";
+        return prepared(
+          input,
+          revision,
+          [
+            {
+              entityId: existing[0]?.id ?? null,
+              entityType: "finance_budget",
+              summary: `Set ${String(input.category)} budget to $${Number(input.limit).toFixed(2)} for ${String(input.month)}.`,
+            },
+          ],
+          [localSource(`budget:${String(input.month)}:${String(input.category)}`, revision)],
+        );
+      }
+      case "categorization": {
+        const input = parse<Record<string, unknown>>(applyFinanceCategorizationsInputSchema);
+        if (!input)
+          return missing(
+            "Each categorization needs a valid transaction, category, rationale, confidence, and displayed revision.",
+          );
+        const decisions = input.decisions as Array<{
+          transactionId: string;
+          categoryId: string;
+          expectedTransactionUpdatedAt: string;
+          rationale: string;
+        }>;
+        const transactions = await executor
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              inArray(
+                financeTransactions.id,
+                decisions.map((item) => item.transactionId),
+              ),
+            ),
+          );
+        if (transactions.length !== decisions.length)
+          return missing("Every categorization must target one of your transactions.");
+        if (
+          transactions.some(
+            (item) =>
+              item.updatedAt.toISOString() !==
+              decisions.find((decision) => decision.transactionId === item.id)
+                ?.expectedTransactionUpdatedAt,
+          )
+        )
+          return missing(
+            "A transaction changed; refresh the categorization evidence before applying it.",
+          );
+        const categories = await executor
+          .select()
+          .from(financeCategories)
+          .where(
+            and(
+              eq(financeCategories.userId, userId),
+              inArray(
+                financeCategories.id,
+                decisions.map((item) => item.categoryId),
+              ),
+            ),
+          );
+        if (categories.length !== new Set(decisions.map((item) => item.categoryId)).size)
+          return missing("Every categorization must use one of your categories.");
+        const accounts = await executor
+          .select()
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, userId),
+              inArray(
+                financeAccounts.id,
+                transactions.map((item) => item.accountId),
+              ),
+            ),
+          );
+        const sourceRefs: MaterialSourceReference[] = [];
+        for (const item of transactions) {
+          const account = accounts.find((candidate) => candidate.id === item.accountId);
+          if (!account) return missing("A transaction account is unavailable.");
+          sourceRefs.push(transactionSource(item, account));
+        }
+        return prepared(
+          input,
+          stableJson(transactions.map((item) => [item.id, item.updatedAt.toISOString()]).sort()),
+          transactions.map((item) => ({
+            entityId: item.id,
+            entityType: "finance_transaction",
+            summary: `Categorize ${item.merchant} as ${categories.find((category) => category.id === decisions.find((decision) => decision.transactionId === item.id)?.categoryId)?.name ?? "selected category"}.`,
+          })),
+          sourceRefs,
+        );
+      }
+      case "merchant": {
+        const merge = parse<Record<string, unknown>>(mergeFinanceMerchantsInputSchema);
+        const input = merge ?? parse<Record<string, unknown>>(updateFinanceMerchantInputSchema);
+        const ids = merge
+          ? [String(merge.sourceMerchantId), String(merge.targetMerchantId)]
+          : [String(rawInput.id ?? "")];
+        if (!input || ids.some((id) => !id))
+          return missing("Provide a valid merchant change and merchant ID.");
+        const merchants = await executor
+          .select()
+          .from(financeMerchants)
+          .where(and(eq(financeMerchants.userId, userId), inArray(financeMerchants.id, ids)));
+        if (merchants.length !== ids.length)
+          return missing("Choose only merchants that belong to you.");
+        const revision = stableJson(
+          merchants.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
+        );
+        return prepared(
+          { ...input, ...(merge ? {} : { id: ids[0] }) },
+          revision,
+          merge
+            ? [
+                {
+                  entityId: ids[0] ?? null,
+                  entityType: "finance_merchant",
+                  summary: `Merge ${merchants[0]?.displayName} into ${merchants[1]?.displayName}.`,
+                },
+              ]
+            : [
+                {
+                  entityId: ids[0] ?? null,
+                  entityType: "finance_merchant",
+                  summary: `Rename merchant to ${String(input.displayName)}.`,
+                },
+              ],
+          merchants.map((item) => localSource(item.id, item.updatedAt.toISOString())),
+        );
+      }
+      case "recurring_obligation": {
+        const input = parse<Record<string, unknown>>(updateFinanceRecurringObligationInputSchema);
+        const id = typeof rawInput.id === "string" ? rawInput.id : "";
+        if (!input || !id) return missing("Provide a valid recurring-obligation ID and status.");
+        const item = await row(
+          executor
+            .select()
+            .from(financeRecurringObligations)
+            .where(
+              and(
+                eq(financeRecurringObligations.id, id),
+                eq(financeRecurringObligations.userId, userId),
+              ),
+            )
+            .limit(1),
+          "Choose one of your recurring obligations.",
+        );
+        if ("question" in item) return item;
+        return prepared(
+          { ...input, id },
+          item.updatedAt.toISOString(),
+          [
+            {
+              entityId: item.id,
+              entityType: "finance_recurring_obligation",
+              summary: `Set ${item.displayName} to ${String(input.status)}.`,
+            },
+          ],
+          [localSource(item.id, item.updatedAt.toISOString())],
+        );
+      }
+      case "alert": {
+        if (rawInput.operation === "refresh")
+          return prepared(
+            { operation: "refresh" },
+            null,
+            [
+              {
+                entityId: null,
+                entityType: "finance_alert",
+                summary: "Refresh Finance cash-flow insights.",
+              },
+            ],
+            [],
+          );
+        const input = parse<Record<string, unknown>>(resolveFinanceAlertInputSchema);
+        const id = typeof rawInput.id === "string" ? rawInput.id : "";
+        if (!input || !id) return missing("Provide a valid Finance alert ID and resolution.");
+        const item = await row(
+          executor
+            .select()
+            .from(financeAlerts)
+            .where(and(eq(financeAlerts.id, id), eq(financeAlerts.userId, userId)))
+            .limit(1),
+          "Choose one of your Finance alerts.",
+        );
+        if ("question" in item) return item;
+        return prepared(
+          { ...input, id },
+          item.updatedAt.toISOString(),
+          [
+            {
+              entityId: item.id,
+              entityType: "finance_alert",
+              summary: `${String(input.action) === "dismiss" ? "Dismiss" : "Resolve"} ${item.title}.`,
+            },
+          ],
+          [localSource(item.id, item.updatedAt.toISOString())],
+        );
+      }
+      case "transaction": {
+        const create = parse<Record<string, unknown>>(createFinanceTransactionInputSchema);
+        if (create) {
+          const account = await row(
+            executor
+              .select()
+              .from(financeAccounts)
+              .where(
+                and(
+                  eq(financeAccounts.id, String(create.accountId)),
+                  eq(financeAccounts.userId, userId),
+                ),
+              )
+              .limit(1),
+            "Choose one of your Finance accounts.",
+          );
+          if ("question" in account) return account;
+          return prepared(
+            create,
+            account.updatedAt.toISOString(),
+            [
+              {
+                entityId: null,
+                entityType: "finance_transaction",
+                summary: `Create ${String(create.direction)} transaction for $${Number(create.amount).toFixed(2)} at ${String(create.merchant)}.`,
+              },
+            ],
+            [localSource(account.id, account.updatedAt.toISOString())],
+          );
+        }
+        const input = parse<Record<string, unknown>>(updateFinanceTransactionInputSchema);
+        const id = typeof rawInput.id === "string" ? rawInput.id : "";
+        if (!input || !id)
+          return missing("Provide a valid transaction ID and a category or note change.");
+        const item = await row(
+          executor
+            .select()
+            .from(financeTransactions)
+            .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
+            .limit(1),
+          "Choose one of your Finance transactions.",
+        );
+        if ("question" in item) return item;
+        const [account] = await executor
+          .select()
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, item.accountId))
+          .limit(1);
+        if (!account) return missing("The transaction account is unavailable.");
+        return prepared(
+          { ...input, id },
+          item.updatedAt.toISOString(),
+          [
+            {
+              entityId: item.id,
+              entityType: "finance_transaction",
+              summary:
+                input.category !== undefined
+                  ? `Set ${item.merchant} category to ${String(input.category)}.`
+                  : `Update note for ${item.merchant}.`,
+            },
+          ],
+          [transactionSource(item, account)],
+        );
+      }
+      case "income_stream": {
+        const input = parse<Record<string, unknown>>(updateFinanceIncomeStreamInputSchema);
+        const id = typeof rawInput.id === "string" ? rawInput.id : "";
+        if (!input || !id) return missing("Provide a valid income-stream ID and status.");
+        const item = await row(
+          executor
+            .select()
+            .from(financeIncomeStreams)
+            .where(and(eq(financeIncomeStreams.id, id), eq(financeIncomeStreams.userId, userId)))
+            .limit(1),
+          "Choose one of your income streams.",
+        );
+        if ("question" in item) return item;
+        return prepared(
+          { ...input, id },
+          item.updatedAt.toISOString(),
+          [
+            {
+              entityId: item.id,
+              entityType: "finance_income_stream",
+              summary: `Set ${item.displayName} to ${String(input.status)}.`,
+            },
+          ],
+          [localSource(item.id, item.updatedAt.toISOString())],
+        );
+      }
+      default:
+        return assertNever(actionKind);
+    }
   }
 
   async function readBypass(executor: FinanceExecutor, userId: string, lock = false) {
@@ -208,11 +650,13 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               executor as never,
             );
       case "categorization":
-        return invoke(
-          finances.applyCategorizations,
-          input as never,
-          privilegedContext as never,
-          executor as never,
+        return ensureApplied(
+          await invoke(
+            finances.applyCategorizations,
+            input as never,
+            privilegedContext as never,
+            executor as never,
+          ),
         );
       case "recurring_obligation":
         return invoke(
@@ -270,12 +714,40 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               privilegedContext as never,
               executor as never,
             );
-      default:
-        throw new AppError(
-          "invalid_request",
-          `Unsupported Finance action kind: ${prepared.actionKind}.`,
-        );
     }
+    return assertNever(prepared.actionKind);
+  }
+
+  function ensureApplied(result: unknown) {
+    if (
+      Array.isArray(result) &&
+      result.some(
+        (item) =>
+          item && typeof item === "object" && (item as { status?: unknown }).status === "failed",
+      )
+    ) {
+      throw new AppError("conflict", "A prepared Finance categorization no longer applies.");
+    }
+    return result;
+  }
+
+  async function revalidate(
+    prepared: PreparedAction,
+    userId: string,
+    executor: Pick<Database, "select">,
+  ) {
+    const current = await prepare(prepared.actionKind, prepared.input, userId, executor);
+    if ("status" in current) return current;
+    if (current.expectedRevision !== prepared.expectedRevision) {
+      return {
+        question: question(
+          prepared.actionKind,
+          "The Finance records changed after this action was prepared. Refresh the evidence and submit a new action.",
+        ),
+        status: "needs_input" as const,
+      };
+    }
+    return current;
   }
 
   async function queue(
@@ -324,10 +796,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           expectedRevision: prepared.expectedRevision,
           fingerprint: prepared.fingerprint,
           maintenanceRunId: null,
-          privatePayload: { input: prepared.input, rationale: prepared.rationale },
+          privatePayload: {
+            assumptions: prepared.assumptions,
+            input: prepared.input,
+            rationale: prepared.rationale,
+          },
           requestingAgentId: context.principal.actorId,
           safeChanges: prepared.safeChanges,
-          sourceRefs: [],
+          sourceRefs: prepared.sourceRefs,
           userId: context.principal.userId,
         })
         .returning();
@@ -355,11 +831,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
   return {
     prepare,
     async performDirect<T>(
-      actionKind: FinanceActionKind,
+      actionKind: SupportedActionKind,
       input: Record<string, unknown>,
       context: MutationContext,
     ): Promise<FinanceActionOutcome<T>> {
-      const prepared = await prepare(actionKind, input);
+      const prepared = await prepare(actionKind, input, context.principal.userId);
       if ("status" in prepared) {
         const [stored] = await db
           .insert(financeAgentActionReviews)
@@ -370,8 +846,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             maintenanceRunId: null,
             privatePayload: { original: { actionKind, input }, question: prepared.question },
             requestingAgentId: context.principal.actorId,
-            safeChanges: [targetFor(actionKind, input)],
-            sourceRefs: [],
+            safeChanges: [
+              {
+                entityId: null,
+                entityType: `finance_${actionKind}`,
+                summary: "Supply the requested Finance evidence.",
+              },
+            ],
+            sourceRefs: prepared.question.sourceRefs,
             userId: context.principal.userId,
           })
           .onConflictDoNothing()
@@ -416,8 +898,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               status: "pending_review",
             };
           }
+          const current = await revalidate(prepared, context.principal.userId, tx);
+          if ("status" in current) return current;
           return {
-            result: (await applyPrepared(prepared, context, tx)) as T,
+            result: (await applyPrepared(current, context, tx)) as T,
             status: "applied",
           };
         });
@@ -461,16 +945,24 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           throw new AppError("conflict", "This Finance action review is no longer pending.");
         }
         const prepared: PreparedAction = {
-          actionKind: review.actionKind as FinanceActionKind,
+          actionKind: review.actionKind as SupportedActionKind,
           expectedRevision: review.expectedRevision,
           fingerprint: review.fingerprint,
           input: payload.input,
           rationale: payload.rationale,
           safeChanges: review.safeChanges as FinanceSafeChange[],
+          assumptions: payload.assumptions ?? [],
+          sourceRefs: review.sourceRefs as MaterialSourceReference[],
         };
-        // Semantic writers validate their current records. The review lock
-        // prevents two humans from replaying this prepared action.
-        const result = await applyPrepared(prepared, context, tx);
+        const current = await revalidate(prepared, context.principal.userId, tx);
+        if ("status" in current) {
+          await tx
+            .update(financeAgentActionReviews)
+            .set({ status: "superseded", updatedAt: now() })
+            .where(eq(financeAgentActionReviews.id, review.id));
+          return current;
+        }
+        const result = await applyPrepared(current, context, tx);
         await tx
           .update(financeAgentActionReviews)
           .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })

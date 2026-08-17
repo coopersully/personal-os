@@ -37,3 +37,19 @@ Verification:
 - `git diff --check` — passed.
 
 Remaining concern for later batches: prepare/revision evidence is not yet exhaustive across every action kind. This batch deliberately does not alter prepare/question/supersession behavior.
+
+## Fix round 1/5 — Batch B: exhaustive prepare/revalidate/public review
+
+Status: DONE_WITH_CONCERNS
+
+Added schema-normalized, action-specific prepare handlers for profile, budget creation and plans, categorization, merchant rename/merge, recurring obligations, alerts, transactions, and income streams. Preparation verifies owned referenced records before reading bypass and records redacted change projections, source references, assumptions, and revision snapshots. The semantic commit and approval paths rebuild that snapshot under their transaction lock; revision drift supersedes the review and returns `needs_input` without invoking a writer. Categorization results containing a semantic failure are rejected rather than terminalized as applied.
+
+Verification:
+
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.test.ts` — 14 passed, including stale-review supersession without writer invocation.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/database typecheck` — passed.
+- `pnpm exec biome check --write apps/api/src/finance-action-service.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.ts` — passed after formatting.
+- `git diff --check` — passed.
+
+Remaining concern for later batches: durable question answers still do not resume prepared actions, and concurrent supersession policy remains intentionally untouched. Existing route-level schemas reject malformed path IDs before this service receives them; the service returns a bounded `needs_input` outcome for malformed direct action payloads.

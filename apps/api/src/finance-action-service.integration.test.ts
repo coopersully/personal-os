@@ -387,4 +387,62 @@ describe.sequential("finance action service", () => {
         .where(eq(financeAgentActionReviews.id, queued.review.id)),
     ).resolves.toEqual([{ status: "pending" }]);
   });
+
+  it("supersedes a stale prepared transaction instead of applying it on approval", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Stale test bank",
+        name: "Stale checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Stale test account was not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 2_500,
+        direction: "expense",
+        merchant: "Stale merchant",
+        notes: "before",
+        transactionDate: "2026-08-22",
+        userId,
+      })
+      .returning();
+    if (!transaction) throw new Error("Stale test transaction was not created.");
+    const updateTransaction = vi.fn(async () => ({ id: transaction.id }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateTransaction } as never,
+      now: () => now,
+    });
+    const queued = await service.performDirect(
+      "transaction",
+      { id: transaction.id, notes: "prepared edit" },
+      { principal: agent(userId), requestId: "stale-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending Finance review.");
+    await database.db
+      .update(financeTransactions)
+      .set({ notes: "changed elsewhere", updatedAt: new Date("2026-08-17T12:01:00.000Z") })
+      .where(eq(financeTransactions.id, transaction.id));
+
+    await expect(
+      service.approve(queued.review.id, { principal: user(userId), requestId: "stale-approve" }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    expect(updateTransaction).not.toHaveBeenCalled();
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+  });
 });

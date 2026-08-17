@@ -6,6 +6,7 @@ import {
   financeAlerts,
   financeAutomationSettings,
   financeCategories,
+  financeClassificationDecisions,
   financeIncomeStreams,
   financeMerchants,
   financeProfiles,
@@ -672,6 +673,7 @@ describe.sequential("finance action service", () => {
         updateProfile: vi.fn(async () => ({})),
         updateRecurringObligation: vi.fn(async () => ({})),
         updateTransaction: vi.fn(async () => ({})),
+        validatePreparedCategorizations: vi.fn(async () => true),
       } as never,
       now: () => now,
     });
@@ -747,6 +749,153 @@ describe.sequential("finance action service", () => {
         status: "needs_input",
       });
     }
+  });
+
+  it("keeps bypass out of categorization evidence while allowing prepared permanent rules", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Evidence",
+        name: "Evidence",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Test",
+        name: "Evidence category",
+        slug: `evidence-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    const [merchant] = await database.db
+      .insert(financeMerchants)
+      .values({
+        displayName: "Evidence merchant",
+        normalizedName: `evidence-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category || !merchant) throw new Error("Evidence targets were not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 100,
+        direction: "expense",
+        merchant: merchant.displayName,
+        merchantId: merchant.id,
+        transactionDate: "2026-08-17",
+        userId,
+      })
+      .returning();
+    if (!transaction) throw new Error("Evidence transaction was not created.");
+    const decision = (confidence: number, learnMerchant: "always" | "suggest" = "suggest") => ({
+      decisions: [
+        {
+          categoryId: category.id,
+          confidence,
+          expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+          learnMerchant,
+          rationale: "Two confirmed merchant observations.",
+          transactionId: transaction.id,
+        },
+      ],
+    });
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    const context = { principal: agent(userId), requestId: "evidence-bypass" };
+
+    await expect(
+      service.performDirect("categorization", decision(0.5), context),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactions.categoryId })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ categoryId: null }]);
+    await database.db
+      .update(financeTransactions)
+      .set({ reconciliationStatus: "candidate" })
+      .where(eq(financeTransactions.id, transaction.id));
+    await expect(
+      service.performDirect("categorization", decision(0.5), context),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await database.db
+      .update(financeTransactions)
+      .set({ reconciliationStatus: "not_applicable", updatedAt: transaction.updatedAt })
+      .where(eq(financeTransactions.id, transaction.id));
+    await database.db.insert(financeClassificationDecisions).values([
+      {
+        categoryId: category.id,
+        categoryName: category.name,
+        confidence: 10_000,
+        merchantId: merchant.id,
+        outcome: "confirmed",
+        source: "user",
+        transactionId: transaction.id,
+        userId,
+      },
+      {
+        categoryId: category.id,
+        categoryName: category.name,
+        confidence: 10_000,
+        merchantId: merchant.id,
+        outcome: "confirmed",
+        source: "user",
+        transactionId: transaction.id,
+        userId,
+      },
+    ]);
+    await expect(
+      service.performDirect("categorization", decision(0.965, "always"), context),
+    ).resolves.toMatchObject({ status: "applied" });
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const [nextTransaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 101,
+        direction: "expense",
+        merchant: merchant.displayName,
+        merchantId: merchant.id,
+        transactionDate: "2026-08-18",
+        userId,
+      })
+      .returning();
+    if (!nextTransaction) throw new Error("Queued evidence transaction was not created.");
+    await expect(
+      service.performDirect(
+        "categorization",
+        {
+          decisions: [
+            {
+              categoryId: category.id,
+              confidence: 1,
+              expectedTransactionUpdatedAt: nextTransaction.updatedAt.toISOString(),
+              learnMerchant: "always",
+              rationale: "Two confirmed merchant observations.",
+              transactionId: nextTransaction.id,
+            },
+          ],
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({ status: "pending_review" });
   });
 
   it("excludes question rows from approvals and terminalizes a valid answer", async () => {
@@ -942,7 +1091,10 @@ describe.sequential("finance action service", () => {
       .returning();
     const service = createFinanceActionService({
       db: database.db,
-      finances: { applyCategorizations: vi.fn() } as never,
+      finances: {
+        applyCategorizations: vi.fn(),
+        validatePreparedCategorizations: vi.fn(async () => true),
+      } as never,
       now: () => now,
     });
     const decision = (rationale: string) => ({

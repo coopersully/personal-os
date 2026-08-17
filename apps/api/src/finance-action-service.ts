@@ -570,6 +570,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           if (!account) return missing("A transaction account is unavailable.");
           sourceRefs.push(transactionSource(item, account));
         }
+        if (!(await finances.validatePreparedCategorizations(input as never, userId, executor)))
+          return missing(
+            "The categorization evidence is incomplete, low-confidence, or protected as an ambiguous transfer.",
+          );
         return prepared(
           input,
           stableJson(transactions.map((item) => [item.id, item.updatedAt.toISOString()]).sort()),
@@ -800,7 +804,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     executor?: FinanceExecutor,
   ) {
     const input = prepared.input;
-    const privilegedContext = { ...context, financeReviewBypass: true };
+    const privilegedContext = { ...context, financePreparedAction: true };
     const writer = (method: unknown) => method as TransactionalWriter;
     const invoke = (method: unknown, ...args: unknown[]) => writer(method).call(finances, ...args);
     switch (prepared.actionKind) {

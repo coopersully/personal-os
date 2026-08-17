@@ -101,7 +101,8 @@ type MaintenanceMutationAttribution = {
   runId: string;
 };
 type MutationContext = {
-  financeReviewBypass?: boolean;
+  /** Internal action-service capability; never derived from a token or MCP input. */
+  financePreparedAction?: boolean;
   maintenance?: MaintenanceMutationAttribution;
   maintenanceClaim?: { claimId: string; runId: string };
   principal: Principal;
@@ -1806,8 +1807,7 @@ export function createFinanceService({
       confidence = proposal.confidence;
       threshold = proposal.threshold;
     }
-    const canApply =
-      source !== "agent" || context.financeReviewBypass === true || confidence >= threshold;
+    const canApply = source !== "agent" || confidence >= threshold;
     if (!canApply) {
       const defer = async (tx: FinanceActionWriteExecutor) => {
         await assertMaintenanceClaim(tx, context);
@@ -1871,7 +1871,7 @@ export function createFinanceService({
           threshold = currentProposal.threshold;
         }
         const [protectedReview] =
-          source === "agent" && context.financeReviewBypass !== true
+          source === "agent"
             ? await tx
                 .select({ id: financeReviewCases.id })
                 .from(financeReviewCases)
@@ -1887,7 +1887,6 @@ export function createFinanceService({
             : [];
         if (
           source === "agent" &&
-          context.financeReviewBypass !== true &&
           (current.reconciliationStatus === "candidate" || protectedReview)
         ) {
           throw new AppError(
@@ -2064,8 +2063,7 @@ export function createFinanceService({
         confidence = currentProposal.confidence;
         threshold = currentProposal.threshold;
       }
-      const mustProtectAmbiguousTransfer =
-        source === "rule" || (source === "agent" && context.financeReviewBypass !== true);
+      const mustProtectAmbiguousTransfer = source === "rule" || source === "agent";
       const [protectedReview] = mustProtectAmbiguousTransfer
         ? await tx
             .select({ id: financeReviewCases.id })
@@ -4176,6 +4174,44 @@ export function createFinanceService({
         review: "needs_review",
       });
     },
+    async validatePreparedCategorizations(
+      input: ApplyFinanceCategorizationsInput,
+      userId: string,
+      executor: FinanceReadExecutor = db,
+    ) {
+      for (const decision of input.decisions) {
+        const item = await ownedTransaction(userId, decision.transactionId, executor);
+        if (item.updatedAt.toISOString() !== decision.expectedTransactionUpdatedAt) return false;
+        if (item.reconciliationStatus === "candidate") return false;
+        const [transferReview] = await executor
+          .select({ id: financeReviewCases.id })
+          .from(financeReviewCases)
+          .where(
+            and(
+              eq(financeReviewCases.transactionId, item.id),
+              eq(financeReviewCases.userId, userId),
+              eq(financeReviewCases.reason, "possible_transfer"),
+              inArray(financeReviewCases.status, ["deferred", "open"]),
+            ),
+          )
+          .limit(1);
+        if (transferReview) return false;
+        const proposal = await categorizationProposal(
+          userId,
+          transaction(item),
+          undefined,
+          executor,
+        );
+        if (
+          proposal.suggestedCategory?.id !== decision.categoryId ||
+          proposal.confidence !== decision.confidence ||
+          !proposal.meetsPolicyThreshold ||
+          !["merchant_rule", "transaction_evidence"].includes(proposal.suggestionBasis ?? "")
+        )
+          return false;
+      }
+      return true;
+    },
     async applyCategorizations(
       input: ApplyFinanceCategorizationsInput,
       context: MutationContext,
@@ -4183,12 +4219,12 @@ export function createFinanceService({
     ): Promise<FinanceCategorizationApplyResult[]> {
       if (
         context.principal.actorType === "agent" &&
-        context.financeReviewBypass !== true &&
+        context.financePreparedAction !== true &&
         input.decisions.some((decision) => decision.learnMerchant === "always")
       ) {
         throw new AppError(
           "forbidden",
-          "Permanent merchant rules require review in an interactive user session.",
+          "Permanent merchant rules require review or an explicitly prepared Finance action.",
         );
       }
       // An action-review approval is all-or-nothing: letting the legacy batch
@@ -4493,21 +4529,13 @@ export function createFinanceService({
         )
         .limit(1);
       if (!review) throw new AppError("not_found", "The finance review case was not found.");
-      if (
-        context.principal.actorType === "agent" &&
-        context.financeReviewBypass !== true &&
-        input.learnMerchant === "always"
-      ) {
+      if (context.principal.actorType === "agent" && input.learnMerchant === "always") {
         throw new AppError(
           "forbidden",
           "Permanent merchant rules require review in an interactive user session.",
         );
       }
-      if (
-        context.principal.actorType === "agent" &&
-        context.financeReviewBypass !== true &&
-        input.action === "confirm_transfer"
-      ) {
+      if (context.principal.actorType === "agent" && input.action === "confirm_transfer") {
         throw new AppError(
           "forbidden",
           "Confirming an ambiguous transfer requires an interactive user session.",
@@ -5612,7 +5640,7 @@ export function createFinanceService({
       context: MutationContext,
       executor?: FinanceActionWriteExecutor,
     ) {
-      if (context.principal.actorType === "agent" && context.financeReviewBypass !== true) {
+      if (context.principal.actorType === "agent" && context.financePreparedAction !== true) {
         throw new AppError(
           "forbidden",
           "Finance transaction edits require an interactive user session.",

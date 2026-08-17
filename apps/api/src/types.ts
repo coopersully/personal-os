@@ -91,7 +91,6 @@ export type RequestLog = {
 };
 
 export type AppVariables = {
-  financeReviewBypass?: boolean;
   principal: Principal;
   requestId: string;
 };

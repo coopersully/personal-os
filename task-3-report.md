@@ -34,3 +34,11 @@ Status: DONE
 - `pnpm --filter @personal-os/mcp typecheck` — passed.
 - `pnpm lint` — passed (four existing non-blocking integration-test warnings; no errors).
 - `git diff --check` — passed.
+
+## Evidence-authority follow-up
+
+Status: DONE
+
+- Review bypass now controls disposition only. Prepared categorization revalidates confidence, evidence basis, and ambiguous-transfer protections before any apply.
+- An internal action-service-only capability permits an explicitly prepared permanent merchant rule; it is absent from tokens and MCP inputs.
+- Focused Finance action and service integration suites passed (54 tests), together with API type checking and scoped Biome (four existing warnings, no errors).

@@ -6,6 +6,7 @@ CREATE TABLE "finance_agent_action_reviews" (
 	"action_kind" text NOT NULL,
 	"private_payload" jsonb NOT NULL,
 	"safe_changes" jsonb DEFAULT '[]'::jsonb NOT NULL,
+	"semantic_target_keys" jsonb DEFAULT '[]'::jsonb NOT NULL,
 	"maintenance_run_id" uuid,
 	"expected_revision" text,
 	"fingerprint" text NOT NULL,
@@ -35,6 +36,8 @@ ALTER TABLE "finance_profiles" ADD COLUMN "investment_risk_capacity" text;
 CREATE INDEX "finance_agent_action_reviews_user_status_idx" ON "finance_agent_action_reviews" USING btree ("user_id", "status", "created_at");
 --> statement-breakpoint
 CREATE UNIQUE INDEX "finance_agent_action_reviews_pending_fingerprint_idx" ON "finance_agent_action_reviews" USING btree ("user_id", "fingerprint") WHERE "status" = 'pending';
+--> statement-breakpoint
+CREATE INDEX "finance_agent_action_reviews_target_keys_idx" ON "finance_agent_action_reviews" USING gin ("semantic_target_keys");
 --> statement-breakpoint
 CREATE TABLE "finance_budget_plans" (
   "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,

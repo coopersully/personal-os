@@ -36,7 +36,7 @@ import {
   updateFinanceRecurringObligationInputSchema,
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
@@ -67,6 +67,7 @@ type PreparedAction = {
   safeChanges: FinanceSafeChange[];
   assumptions: string[];
   sourceRefs: MaterialSourceReference[];
+  semanticTargetKeys: string[];
 };
 
 type StoredPayload = {
@@ -82,7 +83,7 @@ type FinanceActionServiceOptions = {
   now: () => Date;
 };
 
-type FinanceExecutor = Pick<Database, "insert" | "select" | "update">;
+type FinanceExecutor = Pick<Database, "execute" | "insert" | "select" | "update">;
 type TransactionalWriter = (...args: unknown[]) => Promise<unknown>;
 
 function stableJson(value: unknown): string {
@@ -122,6 +123,41 @@ function transactionSource(
 
 function assertNever(value: never): never {
   throw new AppError("invalid_request", `Unsupported Finance action kind: ${String(value)}.`);
+}
+function semanticTargetKeys(actionKind: SupportedActionKind, input: Record<string, unknown>) {
+  const ids = (value: unknown) => (Array.isArray(value) ? value.map(String).sort() : []);
+  switch (actionKind) {
+    case "profile":
+      return [`profile:${String(input.effectiveDate)}`];
+    case "budget_plan":
+      return [
+        "allocations" in input
+          ? `budget-plan:${String(input.month)}`
+          : `budget:${String(input.month)}:${String(input.category)}`,
+      ];
+    case "categorization":
+      return ids(
+        (input.decisions as Array<Record<string, unknown>> | undefined)?.map(
+          (item) => item.transactionId,
+        ),
+      );
+    case "merchant":
+      return "sourceMerchantId" in input
+        ? ids([input.sourceMerchantId, input.targetMerchantId]).map((id) => `merchant:${id}`)
+        : [`merchant:${String(input.id)}`];
+    case "recurring_obligation":
+      return [`recurring:${String(input.id)}`];
+    case "alert":
+      return [input.operation === "refresh" ? "alert:refresh" : `alert:${String(input.id)}`];
+    case "transaction":
+      return [
+        "accountId" in input
+          ? `transaction-create:${String(input.accountId)}:${String(input.date)}:${String(input.merchant)}`
+          : `transaction:${String(input.id)}`,
+      ];
+    case "income_stream":
+      return [`income:${String(input.id)}`];
+  }
 }
 
 function question(actionKind: FinanceActionKind, why: string): FinanceQuestion {
@@ -195,6 +231,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           ? input.rationale
           : `Requested ${actionKind.replaceAll("_", " ")} change.`,
       safeChanges,
+      semanticTargetKeys: semanticTargetKeys(actionKind, input),
       sourceRefs,
     });
 
@@ -755,6 +792,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     context: MutationContext,
     executor: FinanceExecutor = db,
   ) {
+    for (const key of prepared.semanticTargetKeys) {
+      await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+    }
     const pending = await executor
       .select()
       .from(financeAgentActionReviews)
@@ -767,15 +807,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       .orderBy(desc(financeAgentActionReviews.updatedAt));
     const existing = pending.find((row) => row.fingerprint === prepared.fingerprint);
     if (existing) return reviewFromRow(existing);
-    const entityIds = new Set(
-      prepared.safeChanges.map((change) => change.entityId).filter(Boolean),
-    );
+    const keys = new Set(prepared.semanticTargetKeys);
     const stale = pending.filter(
       (row) =>
         row.actionKind === prepared.actionKind &&
-        (row.safeChanges as FinanceSafeChange[]).some((change) =>
-          change.entityId ? entityIds.has(change.entityId) : false,
-        ),
+        (row.semanticTargetKeys as string[]).some((key) => keys.has(key)),
     );
     if (stale.length) {
       await executor
@@ -803,6 +839,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           },
           requestingAgentId: context.principal.actorId,
           safeChanges: prepared.safeChanges,
+          semanticTargetKeys: prepared.semanticTargetKeys,
           sourceRefs: prepared.sourceRefs,
           userId: context.principal.userId,
         })
@@ -958,6 +995,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           safeChanges: review.safeChanges as FinanceSafeChange[],
           assumptions: payload.assumptions ?? [],
           sourceRefs: review.sourceRefs as MaterialSourceReference[],
+          semanticTargetKeys: review.semanticTargetKeys as string[],
         };
         const current = await revalidate(prepared, context.principal.userId, tx);
         if ("status" in current) {

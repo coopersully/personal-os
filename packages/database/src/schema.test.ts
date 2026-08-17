@@ -33,6 +33,7 @@ describe("database schema contracts", () => {
         "action_kind",
         "private_payload",
         "safe_changes",
+        "semantic_target_keys",
         "maintenance_run_id",
         "expected_revision",
         "fingerprint",
@@ -42,6 +43,7 @@ describe("database schema contracts", () => {
     expect(reviews.indexes.map((index) => index.config.name)).toEqual([
       "finance_agent_action_reviews_user_status_idx",
       "finance_agent_action_reviews_pending_fingerprint_idx",
+      "finance_agent_action_reviews_target_keys_idx",
     ]);
     const userStatusIndex = reviews.indexes.find(
       (index) => index.config.name === "finance_agent_action_reviews_user_status_idx",
@@ -105,10 +107,12 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE TABLE "finance_agent_action_reviews"');
     expect(migrationSql).toContain('"private_payload" jsonb NOT NULL');
     expect(migrationSql).toContain("\"safe_changes\" jsonb DEFAULT '[]'::jsonb NOT NULL");
+    expect(migrationSql).toContain("\"semantic_target_keys\" jsonb DEFAULT '[]'::jsonb NOT NULL");
     expect(migrationSql).toContain(
       'CREATE UNIQUE INDEX "finance_agent_action_reviews_pending_fingerprint_idx" ON "finance_agent_action_reviews" USING btree ("user_id", "fingerprint") WHERE "status" = \'pending\'',
     );
     expect(migrationSql).toContain('CREATE INDEX "finance_agent_action_reviews_user_status_idx"');
+    expect(migrationSql).toContain('CREATE INDEX "finance_agent_action_reviews_target_keys_idx"');
     expect(migrationSql).toContain('ADD COLUMN "household_size" integer');
     expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
     expect(migrationSql).not.toMatch(/https?:\/\//u);

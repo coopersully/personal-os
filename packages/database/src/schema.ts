@@ -1833,6 +1833,7 @@ export const financeAgentActionReviews = pgTable(
       .$type<Array<Record<string, unknown>>>()
       .notNull()
       .default([]),
+    semanticTargetKeys: jsonb("semantic_target_keys").$type<string[]>().notNull().default([]),
     maintenanceRunId: uuid("maintenance_run_id").references(() => workspaceMaintenanceRuns.id, {
       onDelete: "set null",
     }),
@@ -1853,6 +1854,7 @@ export const financeAgentActionReviews = pgTable(
     uniqueIndex("finance_agent_action_reviews_pending_fingerprint_idx")
       .on(table.userId, table.fingerprint)
       .where(sql`${table.status} = 'pending'`),
+    index("finance_agent_action_reviews_target_keys_idx").using("gin", table.semanticTargetKeys),
   ],
 );
 

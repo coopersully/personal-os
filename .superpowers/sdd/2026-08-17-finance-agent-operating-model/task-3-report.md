@@ -70,3 +70,18 @@ Verification:
 - `git diff --check` — passed.
 
 Remaining concern for later batches: answer extraction currently accepts a bounded JSON object and relies on the original action's typed prepare schema for the final field validation. It does not yet expose individually tailored UI/MCP answer schemas for every possible prepare failure, and supersession-race coverage remains deferred.
+
+## Fix round 1/5 — Batch D micro: semantic queue keys
+
+Status: DONE_WITH_CONCERNS
+
+Added internal durable `semantic_target_keys` to the unshipped Finance action-review migration and Drizzle schema. Prepared actions derive deterministic keys by family; queueing obtains sorted transaction-scoped advisory locks, then reuses an exact fingerprint or supersedes overlapping pending target keys before inserting the next review. Public `safeChanges` remains UUID-or-null and does not expose those internal keys.
+
+Verification:
+
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts packages/database/src/schema.test.ts` — 23 passed.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/database typecheck` — passed.
+- `pnpm exec biome check --write apps/api/src/finance-action-service.ts packages/database/src/schema.ts packages/database/src/schema.test.ts` — passed.
+
+Remaining concern: the full concurrent same/disjoint target matrix remains to be added.

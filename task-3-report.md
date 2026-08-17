@@ -1,18 +1,36 @@
-# Task 3 question-answer contract report
+# Task 3 Finance action disposition report
 
 Status: DONE
 
-- Published bounded, action-specific public answer descriptors for all supported Finance action families.
-- Rejected malformed JSON, unknown fields, invalid types, and invalid enumerated choices without superseding the pending question.
-- Preserved pending questions when a valid shaped answer needs another preparation pass; a valid answer can proceed to normal disposition.
-- Verified with focused domain and Finance action-service integration tests, both domain/API type checks, Biome formatting, and a diff check.
+## Authoritative commit chain
 
-Biome reports four pre-existing non-null assertion warnings in `apps/api/src/finance-action-service.integration.test.ts`; it exits successfully and reports no errors.
+1. `4f22087 fix(finances): serialize review targets`
+2. `76a6b59 test(finances): cover review target serialization`
+3. `42a3deb test(finances): cover review queue concurrency`
+4. `e7baa15 test(finances): cover categorization queue overlap`
+5. `5c6f1ad test(finances): cover budget queue overlap`
+6. `536591b feat(finances): add action review client methods`
+7. `0768c82 test(finances): cover action review client transport`
+8. `350b7e5 fix(finances): preserve client action outcomes`
+9. `d1eb227 test(finances): preserve client dispositions`
+10. `b47c915 fix(finances): describe question answers`
+11. `db0cfad test(finances): cover action dispositions`
+12. `docs(finances): document action disposition` (this documentation commit)
 
-## Disposition matrix follow-up
+## Delivered behavior
 
-Status: DONE
+- Every supported Finance mutation returns `applied`, `pending_review`, or `needs_input`.
+- A persisted app-only setting controls the durable review bypass; agents cannot toggle it.
+- Only signed-in human review routes approve or dismiss queued action reviews.
+- `answer_finance_question` can supply bounded evidence without approval authority. The deprecated `resolve_finance_review` alias only translates legacy categorization answers.
+- Public questions and reviews expose bounded descriptors, safe changes, and source references without private payloads.
+- No Finance route or MCP tool executes external financial activity.
 
-- Added table-driven API coverage for all eight supported action families across bypass-on apply, bypass-off review, missing evidence, and foreign-target denial.
-- Asserted public reviews retain action-specific changes and source references without private payloads.
-- Added MCP coverage that `set_finance_budget_plan` preserves `applied`, `pending_review`, and `needs_input` outcomes unchanged.
+## Verification
+
+- `pnpm exec vitest run packages/domain/src/domain.test.ts apps/api/src/finance-action-service.integration.test.ts apps/mcp/src/server.test.ts` — 59 tests passed.
+- `pnpm --filter @personal-os/domain typecheck` — passed.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/mcp typecheck` — passed.
+- `pnpm lint` — passed (four existing non-blocking integration-test warnings; no errors).
+- `git diff --check` — passed.

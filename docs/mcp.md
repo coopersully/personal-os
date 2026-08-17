@@ -114,8 +114,12 @@ Finance includes read tools for ledger context and the current automation settin
 `finances:write` tools that mutate the accounting ledger, profile and income data, and budget
 plans. Budgets are not human-only. Only a signed-in user can enable the single Finance review
 bypass; MCP cannot change that setting, connect institutions, import transactions, administer
-accounts, or execute external financial activity. Task 3 will return `applied`,
-`pending_review`, or `needs_input` for these mutation requests based on that app-only setting.
+accounts, approve or dismiss action reviews, or execute external financial activity. Each
+supported mutation returns `applied`, `pending_review`, or `needs_input`: the API derives that
+disposition from evidence, ownership, revisions, policy, and the persisted app-only bypass
+setting. The signed-in app's **Finances → Review** routes are the only approval/dismissal path.
+`answer_finance_question` supplies bounded evidence without approving a queued action; the
+deprecated `resolve_finance_review` alias safely translates legacy categorization answers only.
 
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
 
@@ -235,10 +239,14 @@ Categorization is intentionally proposal-first:
 the compatibility `POST` and does not mutate anything. Proposal pages return
 an opaque `nextCursor`, and hosts can continue without making read calls mutate
 the ledger. `finances:write` tools may submit the ledger, profile, and budget
-mutations described above; Task 3 will make their `applied`, `pending_review`,
-or `needs_input` disposition depend on the signed-in user's app-only review
-bypass. Provider administration, account connection and import, permanent
-merchant rules, ambiguous transfer confirmation, and every external financial
+mutations described above and receive `applied`, `pending_review`, or
+`needs_input`. The API derives the disposition from the signed-in user's
+persisted app-only review bypass and current evidence; agents cannot toggle the
+bypass or approve/dismiss action reviews. `answer_finance_question` may provide
+bounded evidence, while the deprecated `resolve_finance_review` compatibility
+alias only translates legacy categorization answers. Provider administration,
+account connection and import, permanent merchant rules, ambiguous transfer
+confirmation, action-review approval/dismissal, and every external financial
 activity remain human-only and unavailable to MCP.
 
 The signed-in categorization batch API predates this guided-setup work and

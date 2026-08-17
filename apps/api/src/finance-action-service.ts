@@ -103,6 +103,10 @@ function actionFingerprint(actionKind: FinanceActionKind, input: Record<string, 
     .digest("hex");
 }
 
+function snapshotRevision(value: unknown): string {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
 function localSource(id: string, revision: string | null): MaterialSourceReference {
   return { accountId: null, provider: "local", remoteId: id, revision, sourceType: "local" };
 }
@@ -453,7 +457,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               ),
             )
             .limit(1);
-          const revision = stableJson({
+          const revision = snapshotRevision({
             plan: planRows[0]?.version ?? 0,
             categories: categories.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
             goals: ownedGoals.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
@@ -576,7 +580,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           );
         return prepared(
           input,
-          stableJson(transactions.map((item) => [item.id, item.updatedAt.toISOString()]).sort()),
+          snapshotRevision(
+            transactions.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
+          ),
           transactions.map((item) => ({
             entityId: item.id,
             entityType: "finance_transaction",
@@ -599,7 +605,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .where(and(eq(financeMerchants.userId, userId), inArray(financeMerchants.id, ids)));
         if (merchants.length !== ids.length)
           return missing("Choose only merchants that belong to you.");
-        const revision = stableJson(
+        const revision = snapshotRevision(
           merchants.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
         );
         return prepared(
@@ -934,7 +940,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
   async function queue(
     prepared: PreparedAction,
     context: MutationContext,
-    executor: FinanceExecutor = db,
+    executor: FinanceExecutor,
   ) {
     for (const key of prepared.semanticTargetKeys) {
       await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
@@ -1059,23 +1065,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const payload = existing.privatePayload as { question: FinanceQuestion };
         return { question: { ...payload.question, id: existing.id }, status: "needs_input" };
       }
-      if (
-        context.principal.actorType === "agent" &&
-        !(await readBypass(db, context.principal.userId))
-      ) {
-        return {
-          review: (await queue(prepared, context)) as FinancePendingActionReview,
-          status: "pending_review",
-        };
-      }
       // Lock and re-read immediately before the semantic writer. This closes
       // the setting TOCTOU window for agent actions without accepting token or
       // request-body bypass authority.
       if (context.principal.actorType === "agent") {
         return db.transaction(async (tx) => {
           if (!(await readBypass(tx, context.principal.userId, true))) {
+            const current = await revalidate(prepared, context.principal.userId, tx);
+            if ("status" in current) return current;
             return {
-              review: (await queue(prepared, context, tx)) as FinancePendingActionReview,
+              review: (await queue(current, context, tx)) as FinancePendingActionReview,
               status: "pending_review",
             };
           }

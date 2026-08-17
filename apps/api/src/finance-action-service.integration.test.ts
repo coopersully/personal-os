@@ -701,6 +701,7 @@ describe.sequential("finance action service", () => {
         throw new Error("Expected a pending Finance review.");
       expect(outcome.review.actionKind).toBe(item.actionKind);
       expect(outcome.review.status).toBe("pending");
+      expect(outcome.review.expectedRevision?.length ?? 0).toBeLessThanOrEqual(128);
       expect(outcome.review.changes).toContainEqual(
         expect.objectContaining({ entityType: expect.stringContaining("finance_") }),
       );

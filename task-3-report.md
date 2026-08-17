@@ -42,3 +42,10 @@ Status: DONE
 - Review bypass now controls disposition only. Prepared categorization revalidates confidence, evidence basis, and ambiguous-transfer protections before any apply.
 - An internal action-service-only capability permits an explicitly prepared permanent merchant rule; it is absent from tokens and MCP inputs.
 - Focused Finance action and service integration suites passed (54 tests), together with API type checking and scoped Biome (four existing warnings, no errors).
+
+## Transactional queue and bounded revisions follow-up
+
+Status: DONE
+
+- Bypass-off disposition now revalidates and queues only inside the locked database transaction.
+- Multi-item budget, categorization, and merchant revisions use bounded SHA-256 snapshot digests.

@@ -15,7 +15,7 @@ Verification passed:
 - API, API-client, MCP, and domain `typecheck` commands passed.
 - Biome check/write for Task 2 files and `git diff --check` passed.
 
-Concern: the shared worktree had intentional pre-existing Finance review-bypass changes in several Task 2-owned files. They remained required integration context and are included by the task commit; unrelated migration `0059`, migration journal/schema changes, web changes, docs, and domain automation-settings changes remain unstaged.
+Concern: the formerly dirty automation-settings dependency, including migration `0059` and its schema/domain support, is now committed in the Task 2 chain. Unrelated web and documentation edits remain unstaged.
 
 ## Fix round 1 — Batch A
 
@@ -24,3 +24,7 @@ Status: DONE_WITH_CONCERNS
 Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist budget plans`). This makes the automation-settings dependency and 0059→0060 migration chain self-contained, adds a versioned durable budget-plan parent record, records plan metadata atomically, adds an explicit over-allocation acknowledgement, and removes exact totals from the new plan audit metadata.
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
+
+## Fix round 1 — completion chain
+
+`0299446`, `4f9bf75`, `ad8da10`, `cc80ff0`, `c272fdb`, `a02b435`, and `8baaca4` respectively tightened close readiness/OAuth consent, centralized cadence-aware capacity, grounded evidence cutoff and missing facts, preserved provider evidence references, stabilized goal priority, projected conditional debt/goals, and added scenario boundary coverage. Focused scenario/status/client/MCP tests and API/domain typechecks were run during these batches; all reported passing except the corrected test-first typecheck iteration, which passed after the fixture was completed. Task 3 review dispositions and bypass recheck remain deliberately deferred by plan.

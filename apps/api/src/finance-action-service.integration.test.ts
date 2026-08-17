@@ -1693,6 +1693,7 @@ describe.sequential("finance action service", () => {
         expected: {
           choices: ["contract", "full_time", "part_time", "self_employed", "unemployed"],
           name: "employmentType",
+          nullable: true,
           type: "string",
         },
         input: {
@@ -1700,22 +1701,27 @@ describe.sequential("finance action service", () => {
           employmentType: "sometimes",
           monthlyHousingCost: null,
         },
-        patch: { employmentType: "full_time" },
+        patch: { employmentType: null },
       },
       {
-        expected: { example: "0 to 20", name: "dependents", type: "number" },
+        expected: { example: "0 to 20", name: "dependents", nullable: true, type: "number" },
         input: { dependents: 21, effectiveDate: "2026-12-07" },
         patch: { dependents: 1 },
       },
       {
-        expected: { example: "YYYY-MM-DD", name: "nextPayday", type: "string" },
+        expected: { example: "YYYY-MM-DD", name: "nextPayday", nullable: true, type: "string" },
         input: { effectiveDate: "2026-12-08", nextPayday: "tomorrow" },
-        patch: { nextPayday: "2026-12-09" },
+        patch: { nextPayday: null },
       },
       {
-        expected: { example: "0 to 100000000", name: "monthlyHousingCost", type: "number" },
+        expected: {
+          example: "0 to 100000000",
+          name: "monthlyHousingCost",
+          nullable: true,
+          type: "number",
+        },
         input: { effectiveDate: "2026-12-09", monthlyHousingCost: -1 },
-        patch: { monthlyHousingCost: 1_500 },
+        patch: { monthlyHousingCost: null },
       },
     ];
     for (const item of cases) {
@@ -1744,6 +1750,61 @@ describe.sequential("finance action service", () => {
       .update(financeAutomationSettings)
       .set({ reviewBypassEnabled: false, updatedAt: now })
       .where(eq(financeAutomationSettings.userId, userId));
+  });
+
+  it("marks every nullable profile correction and rejects null for effective date", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile: vi.fn(async () => ({ id: "nullable-profile" })) } as never,
+      now: () => now,
+    });
+    const nullableCases: Array<[string, Record<string, unknown>]> = [
+      ["dependents", { dependents: 21 }],
+      ["employer", { employer: "x".repeat(161) }],
+      ["employmentType", { employmentType: "invalid" }],
+      ["expectedNetPay", { expectedNetPay: -1 }],
+      ["grossAnnualIncome", { grossAnnualIncome: "invalid" }],
+      ["householdSize", { householdSize: 0 }],
+      ["housingStatus", { housingStatus: "invalid" }],
+      ["investmentRiskCapacity", { investmentRiskCapacity: "invalid" }],
+      ["investmentRiskWillingness", { investmentRiskWillingness: "invalid" }],
+      ["monthlyHousingCost", { monthlyHousingCost: -1 }],
+      ["nextPayday", { nextPayday: "tomorrow" }],
+      ["payAccountId", { payAccountId: "not-an-id" }],
+      ["payFrequency", { payFrequency: "sometimes" }],
+      ["reserveTargetMonths", { reserveTargetMonths: 0 }],
+      ["role", { role: "x".repeat(161) }],
+    ];
+
+    for (const [index, [field, invalid]] of nullableCases.entries()) {
+      const asked = await service.performDirect(
+        "profile",
+        { effectiveDate: `2026-11-${String(index + 1).padStart(2, "0")}`, ...invalid },
+        { principal: agent(userId), requestId: `profile-nullable-descriptor-${field}` },
+      );
+      if (asked.status !== "needs_input")
+        throw new Error("Expected a profile correction question.");
+      expect(asked.question.expectedAnswer).toEqual([
+        expect.objectContaining({ name: field, nullable: true, required: true }),
+      ]);
+    }
+
+    const nonNullable = await service.performDirect(
+      "profile",
+      { effectiveDate: null },
+      { principal: agent(userId), requestId: "profile-non-nullable-effective-date" },
+    );
+    if (nonNullable.status !== "needs_input")
+      throw new Error("Expected an effective date question.");
+    expect(nonNullable.question.expectedAnswer).toEqual([
+      expect.objectContaining({ name: "effectiveDate", nullable: false, required: true }),
+    ]);
+    await expect(
+      service.answerQuestion(nonNullable.question.id, JSON.stringify({ effectiveDate: null }), {
+        principal: agent(userId),
+        requestId: "profile-non-nullable-effective-date-answer",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
   });
 
   it("labels merchant merge source and target by their requested IDs", async () => {

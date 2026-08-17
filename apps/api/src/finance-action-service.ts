@@ -242,44 +242,59 @@ type ExpectedAnswer = FinanceQuestion["expectedAnswer"][number];
 function expectedAnswer(
   name: string,
   type: ExpectedAnswer["type"],
-  options: Pick<ExpectedAnswer, "choices" | "example"> = {},
+  options: Partial<Pick<ExpectedAnswer, "choices" | "example" | "nullable">> = {},
 ): ExpectedAnswer {
-  return { name, required: true, type, ...options };
+  const { nullable = false, ...metadata } = options;
+  return { name, nullable, required: true, type, ...metadata };
 }
 
 const profileValidationAnswers: Record<string, ExpectedAnswer> = {
-  dependents: expectedAnswer("dependents", "number", { example: "0 to 20" }),
+  dependents: expectedAnswer("dependents", "number", { example: "0 to 20", nullable: true }),
   effectiveDate: expectedAnswer("effectiveDate", "string", { example: "YYYY-MM-DD" }),
-  employer: expectedAnswer("employer", "string", { example: "Up to 160 characters" }),
+  employer: expectedAnswer("employer", "string", {
+    example: "Up to 160 characters",
+    nullable: true,
+  }),
   employmentType: expectedAnswer("employmentType", "string", {
     choices: ["contract", "full_time", "part_time", "self_employed", "unemployed"],
+    nullable: true,
   }),
-  expectedNetPay: expectedAnswer("expectedNetPay", "number", { example: "0 to 100000000" }),
+  expectedNetPay: expectedAnswer("expectedNetPay", "number", {
+    example: "0 to 100000000",
+    nullable: true,
+  }),
   grossAnnualIncome: expectedAnswer("grossAnnualIncome", "number", {
     example: "0 to 100000000",
+    nullable: true,
   }),
-  householdSize: expectedAnswer("householdSize", "number", { example: "1 to 50" }),
+  householdSize: expectedAnswer("householdSize", "number", { example: "1 to 50", nullable: true }),
   housingStatus: expectedAnswer("housingStatus", "string", {
     choices: ["owning", "renting", "shared", "other"],
+    nullable: true,
   }),
   investmentRiskCapacity: expectedAnswer("investmentRiskCapacity", "string", {
     choices: ["low", "moderate", "high"],
+    nullable: true,
   }),
   investmentRiskWillingness: expectedAnswer("investmentRiskWillingness", "string", {
     choices: ["conservative", "balanced", "growth"],
+    nullable: true,
   }),
   monthlyHousingCost: expectedAnswer("monthlyHousingCost", "number", {
     example: "0 to 100000000",
+    nullable: true,
   }),
-  nextPayday: expectedAnswer("nextPayday", "string", { example: "YYYY-MM-DD" }),
-  payAccountId: expectedAnswer("payAccountId", "string", { example: "Account ID" }),
+  nextPayday: expectedAnswer("nextPayday", "string", { example: "YYYY-MM-DD", nullable: true }),
+  payAccountId: expectedAnswer("payAccountId", "string", { example: "Account ID", nullable: true }),
   payFrequency: expectedAnswer("payFrequency", "string", {
     choices: ["biweekly", "irregular", "monthly", "semimonthly", "weekly"],
+    nullable: true,
   }),
   reserveTargetMonths: expectedAnswer("reserveTargetMonths", "number", {
     example: "More than 0 to 60",
+    nullable: true,
   }),
-  role: expectedAnswer("role", "string", { example: "Up to 160 characters" }),
+  role: expectedAnswer("role", "string", { example: "Up to 160 characters", nullable: true }),
 };
 
 function profileValidationAnswer(input: Record<string, unknown>): ExpectedAnswer {
@@ -293,6 +308,7 @@ function profileValidationAnswer(input: Record<string, unknown>): ExpectedAnswer
 }
 
 function isExpectedAnswerValue(field: ExpectedAnswer, value: unknown): boolean {
+  if (value === null) return field.nullable;
   const valid = (() => {
     switch (field.type) {
       case "boolean":

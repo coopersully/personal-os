@@ -97,3 +97,17 @@ Status: DONE
 - `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts` — 72 tests passed.
 - `pnpm --filter @personal-os/api typecheck`, `pnpm --filter @personal-os/domain typecheck`, and `pnpm --filter @personal-os/database typecheck` — passed.
 - Scoped Biome, formatter, and `git diff --check` — passed.
+
+## Fix round 5 — nullable profile answer recovery
+
+Status: DONE
+
+- Public Finance question descriptors now expose bounded `nullable` metadata, defaulting false for legacy descriptors and rejecting non-boolean metadata or private payload fields.
+- Answer validation accepts JSON `null` only when that descriptor is nullable. Profile recovery merges nullable nulls back into the stored request and re-prepares it; null remains invalid for effective date.
+- Every Zod-nullable Finance profile field now produces a nullable correction descriptor, including money, employment, household, pay, housing, reserve, and investment-risk fields.
+
+### Verification
+
+- `pnpm exec vitest run packages/domain/src/domain.test.ts apps/api/src/finance-action-service.integration.test.ts` — 73 tests passed.
+- `pnpm --filter @personal-os/api typecheck`, `pnpm --filter @personal-os/domain typecheck`, and `pnpm --filter @personal-os/database typecheck` — passed.
+- Scoped Biome, formatter, and `git diff --check` — passed.

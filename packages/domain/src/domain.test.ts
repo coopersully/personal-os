@@ -1509,8 +1509,16 @@ describe("finance agent contracts", () => {
     };
 
     expect(financeQuestionSchema.parse(question)).toMatchObject({
-      expectedAnswer: [{ choices: ["active", "paused"], name: "status", type: "string" }],
+      expectedAnswer: [
+        { choices: ["active", "paused"], name: "status", nullable: false, type: "string" },
+      ],
     });
+    expect(
+      financeQuestionSchema.parse({
+        ...question,
+        expectedAnswer: [{ ...question.expectedAnswer[0], nullable: true }],
+      }).expectedAnswer,
+    ).toEqual([expect.objectContaining({ name: "status", nullable: true })]);
     expect(
       financeQuestionSchema.safeParse({ ...question, privatePayload: { payAccountId: id } })
         .success,
@@ -1525,6 +1533,12 @@ describe("finance agent contracts", () => {
       financeQuestionSchema.safeParse({
         ...question,
         expectedAnswer: [{ ...question.expectedAnswer[0], type: "object" }],
+      }).success,
+    ).toBe(false);
+    expect(
+      financeQuestionSchema.safeParse({
+        ...question,
+        expectedAnswer: [{ ...question.expectedAnswer[0], nullable: "yes" }],
       }).success,
     ).toBe(false);
   });

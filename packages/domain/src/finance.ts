@@ -134,6 +134,7 @@ export const financeQuestionSchema = z
             choices: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
             example: z.string().trim().max(240).optional(),
             name: z.string().trim().min(1).max(80),
+            nullable: z.boolean().default(false),
             required: z.boolean(),
             type: z.enum(["boolean", "number", "object_array", "string", "string_array"]),
           })

@@ -35,7 +35,9 @@ function normalizeScenarioInput(input: FinanceScenarioInput): FinanceScenarioInp
   const parsed = financeScenarioInputSchema.parse(input);
   return {
     ...parsed,
-    alternatives: parsed.alternatives.map(normalizePlan),
+    alternatives: parsed.alternatives
+      .map(normalizePlan)
+      .toSorted((left, right) => left.label.localeCompare(right.label)),
     baseline: normalizePlan(parsed.baseline),
   };
 }
@@ -68,7 +70,7 @@ function projectScenario(plan: ScenarioPlan, horizonMonths: number): FinanceScen
       horizonMonths,
     ),
     reserveRunwayMonths:
-      essentialMonthlyOutflow > 0 ? plan.startingCash / essentialMonthlyOutflow : null,
+      essentialMonthlyOutflow > 0 ? Math.max(0, plan.startingCash / essentialMonthlyOutflow) : null,
   };
 }
 

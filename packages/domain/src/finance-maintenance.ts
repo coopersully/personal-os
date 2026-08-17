@@ -98,6 +98,8 @@ export const financeStatusDetailsSchema = z.object({
     missingProvenance: z.int().nonnegative(),
     possibleDuplicates: z.int().nonnegative(),
     ready: z.boolean(),
+    reconciledThrough: z.iso.date().nullable(),
+    unansweredExceptions: z.int().nonnegative(),
     uncategorized: z.int().nonnegative(),
     unmatchedTransfers: z.int().nonnegative(),
   }),

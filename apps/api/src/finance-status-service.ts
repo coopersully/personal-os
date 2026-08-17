@@ -834,11 +834,20 @@ export function createFinanceStatusService({ db, now }: Options) {
                   .length,
                 ready:
                   scopedReviews.length === 0 &&
+                  [...possibleDuplicateKeys.values()].every((count) => count <= 1) &&
+                  scopedTransactions.every(
+                    (row) => row.category === null || row.categorySource !== null,
+                  ) &&
                   scopedTransactions.filter(
                     (row) => !row.pending && row.direction !== "transfer" && row.category === null,
                   ).length === 0 &&
                   scopedTransactions.filter((row) => row.reconciliationStatus === "candidate")
                     .length === 0,
+                reconciledThrough:
+                  scopedTransactions
+                    .filter((row) => row.reconciliationStatus !== "candidate")
+                    .at(-1)?.transactionDate ?? null,
+                unansweredExceptions: scopedReviews.length,
                 uncategorized: scopedTransactions.filter(
                   (row) => !row.pending && row.direction !== "transfer" && row.category === null,
                 ).length,

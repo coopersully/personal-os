@@ -1,92 +1,53 @@
-# Task 3 report — Finance action disposition
+# Task 3 Finance action disposition report
 
-Status: DONE_WITH_CONCERNS
+Status: DONE
 
-Commit: recorded in the parent handoff after the commit is created. A commit cannot contain its own immutable object hash without changing that hash.
+## Authoritative implementation commit chain
 
-Implemented a Finance action service backed by `finance_agent_action_reviews`, then routed agent-led supported profile, budget, categorization, merchant, recurring, alert, transaction, and income-stream mutations through prepare-before-disposition. Durable bypass is read from the Finance setting only after evidence preparation; disabled bypass queues a review, enabled bypass applies after a settings-row lock/re-read, and insufficient categorization evidence produces a durable question. Added human-only action-review list/approve/dismiss routes and a question-answer route; MCP now exposes `answer_finance_question` and keeps `resolve_finance_review` as an answer-only compatibility alias.
+1. `4f22087 fix(finances): serialize review targets`
+2. `76a6b59 test(finances): cover review target serialization`
+3. `42a3deb test(finances): cover review queue concurrency`
+4. `e7baa15 test(finances): cover categorization queue overlap`
+5. `5c6f1ad test(finances): cover budget queue overlap`
+6. `536591b feat(finances): add action review client methods`
+7. `0768c82 test(finances): cover action review client transport`
+8. `350b7e5 fix(finances): preserve client action outcomes`
+9. `d1eb227 test(finances): preserve client dispositions`
+10. `b47c915 fix(finances): describe question answers`
+11. `db0cfad test(finances): cover action dispositions`
+12. `011aca0 docs(finances): document action disposition`
+13. `0e6e60e fix(finances): separate evidence authority`
+14. `6316f30 fix(finances): queue reviews transactionally`
+15. `39c7cbe fix(finances): preserve refresh disposition`
+16. `009f63f fix(finances): lock finance action targets`
+17. `8d15bb2 fix(finances): recover action questions`
+18. `6669233 test(finances): preserve refresh dispositions`
+19. `fd6d084 test(finances): bound budget plan reviews`
+20. `d0203bd test(finances): cover aggregate action reviews`
+21. `094acd4 test(finances): cover refresh action boundaries`
+22. `4cce8f8 fix(finances): recover action questions precisely`
 
-Verification:
+## Completed behavior
 
-- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.test.ts apps/mcp/src/server.test.ts` — 20 passed.
-- `pnpm --filter @personal-os/api typecheck` — passed.
-- `pnpm --filter @personal-os/mcp typecheck` — passed.
-- `pnpm exec vitest run packages/api-client/src/client.test.ts` — 8 passed, including forwarding an agent disposition without reading a human-only response field.
-- `pnpm exec biome check apps/api/src/finance-action-service.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.ts apps/api/src/routes/finances.test.ts apps/api/src/app.ts packages/api-client/src/features/finances.ts apps/mcp/src/tools/finances.ts apps/mcp/src/tool-catalog.ts apps/mcp/src/server.test.ts` — passed.
-- `pnpm --filter @personal-os/api test -- finance-action-service.integration.test.ts routes/finances.test.ts && pnpm --filter @personal-os/mcp test -- server.test.ts` — exited 0 but emitted no test-runner output; the explicit Vitest invocation above verified the intended files.
-- `git diff --check` — passed.
+- Every supported semantic Finance mutation, including insight refresh, returns exactly one of `applied`, `pending_review`, or `needs_input`.
+- Bypass is a persisted, signed-in-app-only queue-versus-apply setting. It never waives ownership, revision, evidence, confidence, or ambiguous-transfer checks.
+- Agents may apply an explicitly prepared permanent merchant-learning ledger rule through categorization; it receives the same checks and disposition as every other action.
+- The signed-in app alone lists and approves or dismisses action reviews. Its question list exposes only bounded public descriptors.
+- A question answer is a bounded JSON object with only requested fields. It is scoped to the originating agent when answered by an agent, merges into the stored action, and is prepared again. It cannot approve a review or change bypass; exact terminal replay is idempotent.
+- Public review/question output remains bounded and redacted. No Finance API or MCP tool performs external financial execution.
 
-Concerns:
+## Boundary evidence
 
-- Existing Finance semantic writers still own their own database handles; approval locks/terminalizes the durable review in one transaction, but a writer's mutation/audit is not yet injected with that same transaction. This leaves a narrow atomicity gap that should be closed by adding transaction-executor parameters to the individual writers.
-- Question answers are stored durably and never authorize an action or mutate bypass. The current question shape is intentionally bounded text, so action-specific evidence extraction remains a follow-up for transaction categorization/split questions.
-- A completion review also found that preparation must load and revision-lock every affected owned record, and that review projections need precise redacted change/evidence details. The current generic projection is intentionally conservative but is not sufficient for a person to independently verify all material changes.
+- Real PostgreSQL coverage proves two-item categorization queueing, bounded public projections, approval-time revalidation, and atomic application.
+- Merchant merge coverage proves the source/target public labels remain correct even when the database returns target before source.
+- Maximum-size categorization and budget-plan queue contracts retain bounded public revisions, changes, and source references.
+- Refresh reviews retain the action-attributed redacted audit and roll back both audit and terminalization if review terminalization fails. API client and MCP coverage preserve all three refresh dispositions.
+- Table-driven recovery coverage proves each of the eight action families exposes failure-specific, answerable descriptors and advances after a valid correction.
 
-## Fix round 1/5 — Batch A: atomic execution lane
+## Verification
 
-Status: DONE_WITH_CONCERNS
-
-Refactored the action-service execution path so its bypass setting read/`FOR UPDATE` lock and every supported semantic writer receive the same Drizzle transaction. Profile, budget, ledger, categorization/evidence, income, recurring, alert/refresh, and merchant paths now accept the executor and write audits through it. The bypass-false queue path inherits the locked transaction rather than falling back to the root database. Approval replays an already-applied stored result without invoking the writer again; a terminal-review failure rolls back real transaction and profile updates and preserves the pending review.
-
-Verification:
-
-- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts` — 44 passed, including real transaction/profile rollback injection and an external concurrent bypass-disable attempt held behind the action's settings lock.
-- `pnpm --filter @personal-os/api typecheck` — passed.
-- `pnpm --filter @personal-os/database typecheck` — passed.
-- `pnpm exec biome check --write apps/api/src/finance-action-service.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.ts` — passed after formatting.
-- `git diff --check` — passed.
-
-Remaining concern for later batches: prepare/revision evidence is not yet exhaustive across every action kind. This batch deliberately does not alter prepare/question/supersession behavior.
-
-## Fix round 1/5 — Batch B: exhaustive prepare/revalidate/public review
-
-Status: DONE_WITH_CONCERNS
-
-Added schema-normalized, action-specific prepare handlers for profile, budget creation and plans, categorization, merchant rename/merge, recurring obligations, alerts, transactions, and income streams. Preparation verifies owned referenced records before reading bypass and records redacted change projections, source references, assumptions, and revision snapshots. The semantic commit and approval paths rebuild that snapshot under their transaction lock; revision drift supersedes the review and returns `needs_input` without invoking a writer. Categorization results containing a semantic failure are rejected rather than terminalized as applied.
-
-Verification:
-
-- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.test.ts` — 14 passed, including stale-review supersession without writer invocation.
-- `pnpm --filter @personal-os/api typecheck` — passed.
-- `pnpm --filter @personal-os/database typecheck` — passed.
-- `pnpm exec biome check --write apps/api/src/finance-action-service.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.ts` — passed after formatting.
-- `git diff --check` — passed.
-
-Remaining concern for later batches: durable question answers still do not resume prepared actions, and concurrent supersession policy remains intentionally untouched. Existing route-level schemas reject malformed path IDs before this service receives them; the service returns a bounded `needs_input` outcome for malformed direct action payloads.
-
-## Fix round 1/5 — Batch C: durable questions and compatibility
-
-Status: DONE_WITH_CONCERNS
-
-Question rows are now excluded from approval listing/projection. Answering a question locks it, accepts only bounded JSON object input, merges it into its referenced original action, reruns preparation and bypass disposition inside the same transaction, records the terminal outcome, and supersedes the original question. Exact terminal replay is idempotent. The MCP `resolve_finance_review` alias is documented as deprecated and accepts either the current answer shape or a legacy transaction-categorization shape, translating the latter to the same answer path; it cannot toggle bypass or approve a generic action review.
-
-Verification:
-
-- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.test.ts apps/mcp/src/server.test.ts packages/api-client/src/client.test.ts` — 34 passed.
-- `pnpm --filter @personal-os/api typecheck` — passed.
-- `pnpm --filter @personal-os/mcp typecheck` — passed.
-- `pnpm --filter @personal-os/api-client typecheck` — passed.
-- `pnpm exec biome check --write apps/api/src/finance-action-service.ts apps/api/src/finance-action-service.integration.test.ts apps/mcp/src/tools/finances.ts` — passed.
-- `git diff --check` — passed.
-
-Remaining concern for later batches: answer extraction currently accepts a bounded JSON object and relies on the original action's typed prepare schema for the final field validation. It does not yet expose individually tailored UI/MCP answer schemas for every possible prepare failure, and supersession-race coverage remains deferred.
-
-## Fix round 1/5 — Batch D micro: semantic queue keys
-
-Status: DONE_WITH_CONCERNS
-
-Added internal durable `semantic_target_keys` to the unshipped Finance action-review migration and Drizzle schema. Prepared actions derive deterministic keys by family; queueing obtains sorted transaction-scoped advisory locks, then reuses an exact fingerprint or supersedes overlapping pending target keys before inserting the next review. Public `safeChanges` remains UUID-or-null and does not expose those internal keys.
-
-Verification:
-
-- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts packages/database/src/schema.test.ts` — 23 passed.
-- `pnpm --filter @personal-os/api typecheck` — passed.
-- `pnpm --filter @personal-os/database typecheck` — passed.
-- `pnpm exec biome check --write apps/api/src/finance-action-service.ts packages/database/src/schema.ts packages/database/src/schema.test.ts` — passed.
-
-Remaining concern: the full concurrent same/disjoint target matrix remains to be added.
-
-Additional concurrency verification: overlapping categorization proposals now have a real concurrent regression test; one proposal is superseded while a current pending proposal remains.
-Concurrent changed complete budget plans for one user/month now have the same regression coverage and serialize through their budget-month semantic key.
-
-Client regression coverage confirms root Finance action dispositions are returned unchanged for budget (applied), profile (pending review), and recurring (needs input) mutations.
+- `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts` — 60 tests passed.
+- `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts apps/mcp/src/server.test.ts` — 41 tests passed.
+- `pnpm --filter @personal-os/api typecheck`, `pnpm --filter @personal-os/domain typecheck`, `pnpm --filter @personal-os/database typecheck`, and `pnpm --filter @personal-os/mcp typecheck` — passed in their corresponding focused rounds.
+- Scoped Biome checks and `git diff --check` passed in every implementation round; Biome reported only four pre-existing `noNonNullAssertion` warnings in the Finance action integration test.
+- Final documentation verification: `pnpm lint` passed with the same four pre-existing action-integration warnings; `git diff --check` passed.

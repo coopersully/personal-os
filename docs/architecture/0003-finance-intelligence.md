@@ -64,12 +64,19 @@ budgets are not human-only. Provider connection, import, account administration,
 and the Finance review-bypass setting remain human-only, as does any external
 financial activity such as moving money, trading, or paying bills. The MCP cannot
 enable its own bypass, approve, or dismiss action reviews. Each supported Finance
-mutation returns `applied`, `pending_review`, or `needs_input`, derived by the API
-from evidence, ownership, revisions, policy, and the signed-in user's persisted
-app-only bypass setting. The signed-in app's Finance review routes alone approve
-or dismiss queued actions. Agents can use `answer_finance_question` to supply
-bounded evidence; the deprecated `resolve_finance_review` alias only translates
-legacy categorization answers. A scoped agent may create or refresh shared attention for one owned transaction
+semantic mutation, including insight refresh, returns `applied`, `pending_review`,
+or `needs_input`, derived by the API from evidence, confidence and ambiguity
+checks, ownership, revisions, policy, and the signed-in user's persisted app-only
+bypass setting. Bypass controls only queue-versus-apply after preparation; it
+never overrides evidence, confidence, or ambiguous-transfer protections. The
+signed-in app's Finance review routes alone approve or dismiss queued actions.
+Agents may apply a permanent merchant-learning rule only through an explicitly
+prepared categorization action, under those same checks. The human-only question
+list exposes bounded public descriptors. `answer_finance_question` accepts only
+the requested bounded fields, is limited to the originating agent when an agent
+answers, merges a valid answer into the durable original action, and prepares it
+again without approval authority; the deprecated `resolve_finance_review` alias
+only translates legacy categorization answers. A scoped agent may create or refresh shared attention for one owned transaction
 through the Finance-owned endpoint. That endpoint locks the transaction,
 derives its material source from the account and current transaction revision,
 deduplicates the open transaction/kind pair, and audits atomically; generic
@@ -222,12 +229,16 @@ read-scoped proposal tool, and proposal pages use the ledger's opaque cursor;
 read paths never materialize merchant/category enrichment. Finance also exposes
 write-scoped tools for ledger, profile, income, and budget mutations. The API
 continues to enforce ownership, revisions, policy, transactions, and audit, and
-returns `applied`, `pending_review`, or `needs_input` for every supported mutation.
-MCP cannot enable the bypass, approve or dismiss action reviews, connect or
-disconnect providers, import transactions, administer accounts, or execute
-external financial activity. `answer_finance_question` can supply bounded
-evidence only; the deprecated `resolve_finance_review` alias safely translates
-legacy categorization answers.
+returns `applied`, `pending_review`, or `needs_input` for every supported semantic
+mutation, including insight refresh. MCP cannot enable bypass, approve or dismiss
+action reviews, connect or disconnect providers, import transactions, administer
+accounts, or execute external financial activity. Bypass never waives evidence,
+confidence, or ambiguity checks. Agents can apply an explicitly prepared permanent
+merchant-learning rule through categorization only after those checks. The
+human-only question list returns bounded public descriptors; an originating agent
+may answer a question with only its requested bounded fields, which are merged
+into the original action and prepared again. `resolve_finance_review` safely
+translates legacy categorization answers only.
 
 Every account-onboarding path, including Plaid exchange, provisions the stable
 default category taxonomy inside the account transaction. Category reads remain

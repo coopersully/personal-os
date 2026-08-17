@@ -38,12 +38,10 @@ describe("database schema contracts", () => {
         "status",
       ]),
     );
-    expect(reviews.indexes.map((index) => index.config.name)).toEqual(
-      expect.arrayContaining([
-        "finance_agent_action_reviews_user_status_idx",
-        "finance_agent_action_reviews_pending_fingerprint_idx",
-      ]),
-    );
+    expect(reviews.indexes.map((index) => index.config.name)).toEqual([
+      "finance_agent_action_reviews_user_status_idx",
+      "finance_agent_action_reviews_pending_fingerprint_idx",
+    ]);
     const userStatusIndex = reviews.indexes.find(
       (index) => index.config.name === "finance_agent_action_reviews_user_status_idx",
     );
@@ -58,7 +56,12 @@ describe("database schema contracts", () => {
     expect(
       pendingFingerprintIndex?.config.columns.map((column) => (column as { name?: string }).name),
     ).toEqual(["user_id", "fingerprint"]);
-    expect(pendingFingerprintIndex?.config.where).toBeDefined();
+    const pendingFingerprintPredicate = pendingFingerprintIndex?.config.where;
+    if (!pendingFingerprintPredicate)
+      throw new Error("Finance pending fingerprint index must be partial.");
+    expect(new PgDialect().sqlToQuery(pendingFingerprintPredicate).sql).toBe(
+      '"finance_agent_action_reviews"."status" = \'pending\'',
+    );
     expect(
       reviews.foreignKeys.map((foreignKey) => ({
         columns: foreignKey.reference().columns.map((column) => column.name),

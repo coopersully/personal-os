@@ -1400,6 +1400,23 @@ describe("ilo API client", () => {
     ]);
   });
 
+  it("lists public Finance questions through the dedicated recovery endpoint", async () => {
+    const question = {
+      id,
+      prompt: "Choose a replacement account.",
+      why: "The account is unavailable.",
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        expect(`${url.pathname}${url.search}`).toBe("/v1/finances/questions?limit=3");
+        return json({ questions: [question] });
+      },
+    });
+    await expect(api.listFinanceQuestions(3)).resolves.toEqual([question]);
+  });
+
   it("preserves Finance maintenance API errors with their request IDs", async () => {
     const api = createApiClient({
       baseUrl: "https://api.example.com",

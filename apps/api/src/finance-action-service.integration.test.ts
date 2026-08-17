@@ -1016,6 +1016,12 @@ describe.sequential("finance action service", () => {
                 required: true,
                 type: "string",
               },
+              {
+                choices: ["full_time"],
+                name: "employmentType",
+                required: true,
+                type: "string",
+              },
             ],
             id: "00000000-0000-4000-8000-000000000001",
             prompt: "Choose a pay account.",
@@ -1042,13 +1048,27 @@ describe.sequential("finance action service", () => {
     await expect(service.listReviews(userId)).resolves.not.toContainEqual(
       expect.objectContaining({ id: stored.id }),
     );
+    await expect(service.listQuestions(userId)).resolves.toContainEqual(
+      expect.objectContaining({
+        expectedAnswer: expect.arrayContaining([
+          expect.objectContaining({ name: "payAccountId", type: "string" }),
+        ]),
+        id: stored.id,
+      }),
+    );
+    const publicQuestion = (await service.listQuestions(userId)).find(
+      (question) => question.id === stored.id,
+    );
+    if (!publicQuestion) throw new Error("Question was not listed.");
+    expect(publicQuestion).not.toHaveProperty("privatePayload");
+    expect(publicQuestion).not.toHaveProperty("answer");
     await expect(
       service.answerQuestion(stored.id, "not JSON", {
         principal: agent(userId),
         requestId: "answer-question-malformed",
       }),
     ).resolves.toMatchObject({
-      question: { expectedAnswer: [{ name: "payAccountId", type: "string" }], id: stored.id },
+      question: { id: stored.id },
       status: "needs_input",
     });
     await expect(
@@ -1070,10 +1090,21 @@ describe.sequential("finance action service", () => {
         .where(eq(financeAgentActionReviews.id, stored.id)),
     ).resolves.toEqual([{ status: "pending" }]);
     await expect(
-      service.answerQuestion(stored.id, JSON.stringify({ payAccountId: account.id }), {
-        principal: agent(userId),
-        requestId: "answer-question",
-      }),
+      service.answerQuestion(
+        stored.id,
+        JSON.stringify({ payAccountId: account.id, employmentType: "full_time" }),
+        {
+          principal: agent(userId),
+          requestId: "answer-question",
+        },
+      ),
+    ).resolves.toMatchObject({ result: { id: "answered-profile" }, status: "applied" });
+    await expect(
+      service.answerQuestion(
+        stored.id,
+        JSON.stringify({ employmentType: "full_time", payAccountId: account.id }),
+        { principal: agent(userId), requestId: "answer-question-reordered" },
+      ),
     ).resolves.toMatchObject({ result: { id: "answered-profile" }, status: "applied" });
     await expect(
       database.db
@@ -1082,6 +1113,145 @@ describe.sequential("finance action service", () => {
         .where(eq(financeAgentActionReviews.id, stored.id)),
     ).resolves.toEqual([{ status: "superseded" }]);
     expect(updateProfile).toHaveBeenCalledOnce();
+  });
+
+  it("asks for a replacement pay account and resumes the original profile action", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [ownedAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Owned question bank",
+        name: "Owned question account",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [otherUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Other Finance owner",
+        email: `other-question-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!otherUser) throw new Error("Other Finance owner was not created.");
+    const [foreignAccount] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Foreign question bank",
+        name: "Foreign question account",
+        provider: "manual",
+        status: "manual",
+        userId: otherUser.id,
+      })
+      .returning();
+    if (!ownedAccount || !foreignAccount)
+      throw new Error("Question account fixtures were not created.");
+    const updateProfile = vi.fn(async () => ({ id: "resumed-profile" }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile } as never,
+      now: () => now,
+    });
+    const asked = await service.performDirect(
+      "profile",
+      {
+        effectiveDate: "2026-09-01",
+        employer: "Ilo",
+        payAccountId: foreignAccount.id,
+        payFrequency: "monthly",
+      },
+      { principal: agent(userId), requestId: "foreign-pay-account" },
+    );
+    if (asked.status !== "needs_input") throw new Error("Expected a Finance question.");
+    expect(asked.question.expectedAnswer).toEqual([
+      expect.objectContaining({ name: "payAccountId", required: true, type: "string" }),
+    ]);
+
+    await expect(
+      service.answerQuestion(asked.question.id, JSON.stringify({ payAccountId: ownedAccount.id }), {
+        principal: agent(userId),
+        requestId: "replace-pay-account",
+      }),
+    ).resolves.toMatchObject({ result: { id: "resumed-profile" }, status: "applied" });
+    expect(updateProfile).toHaveBeenCalledWith(
+      expect.objectContaining({ effectiveDate: "2026-09-01", payAccountId: ownedAccount.id }),
+      expect.anything(),
+      expect.anything(),
+    );
+  });
+
+  it("projects only bounded material profile changes into a pending review", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile: vi.fn() } as never,
+      now: () => now,
+    });
+    const outcome = await service.performDirect(
+      "profile",
+      {
+        effectiveDate: "2026-12-01",
+        employer: "Private employer text must not be projected",
+        expectedNetPay: 1234.56,
+        payFrequency: "monthly",
+      },
+      { principal: agent(userId), requestId: "profile-projection" },
+    );
+    if (outcome.status !== "pending_review") throw new Error("Expected a pending review.");
+    expect(outcome.review.changes[0]?.summary).toContain("net pay unset → $1234.56");
+    expect(outcome.review.changes[0]?.summary).toContain("pay frequency unset → monthly");
+    expect(outcome.review.changes[0]?.summary).not.toContain("Private employer text");
+  });
+
+  it("labels merchant merge source and target by their requested IDs", async () => {
+    const [source] = await database.db
+      .insert(financeMerchants)
+      .values({
+        displayName: "Source merchant",
+        normalizedName: `source-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    const [target] = await database.db
+      .insert(financeMerchants)
+      .values({
+        displayName: "Target merchant",
+        normalizedName: `target-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!source || !target) throw new Error("Merchant merge fixtures were not created.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { mergeMerchants: vi.fn() } as never,
+      now: () => now,
+    });
+    const outcome = await service.performDirect(
+      "merchant",
+      {
+        rationale: "Consolidate aliases.",
+        sourceMerchantId: source.id,
+        targetMerchantId: target.id,
+      },
+      { principal: agent(userId), requestId: "merchant-projection" },
+    );
+    if (outcome.status !== "pending_review") throw new Error("Expected a pending review.");
+    expect(outcome.review.changes[0]?.summary).toBe("Merge Source merchant into Target merchant.");
   });
 
   it("serializes concurrent changed profile proposals on their semantic target", async () => {

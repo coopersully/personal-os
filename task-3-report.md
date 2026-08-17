@@ -1,6 +1,6 @@
 # Task 3 Finance action disposition report
 
-Status: DONE
+Status: DONE_WITH_CONCERNS
 
 ## Authoritative commit chain
 
@@ -20,6 +20,7 @@ Status: DONE
 14. `6316f30 fix(finances): queue reviews transactionally`
 15. `39c7cbe fix(finances): preserve refresh disposition`
 16. `fix(finances): lock finance action targets` (this target-locking commit)
+17. `fix(finances): recover action questions` (this question-recovery commit)
 
 ## Delivered behavior
 
@@ -77,3 +78,21 @@ Status: DONE
 - `pnpm --filter @personal-os/database typecheck` — passed.
 - `pnpm biome check apps/api/src/finance-action-service.ts apps/api/src/finance-service.ts apps/api/src/finance-action-service.integration.test.ts` — passed with four pre-existing `noNonNullAssertion` warnings in the action integration test; no errors.
 - `git diff --check` — passed.
+
+## Recoverable questions and review clarity follow-up
+
+Status: DONE_WITH_CONCERNS
+
+- Foreign pay-account questions now request a replacement `payAccountId` specifically and resume the original action after a valid answer. JSON answers are canonicalized, so reordered object keys replay idempotently.
+- Pending Finance questions have a human-only list endpoint and typed client method that expose only public prompt, reason, answer descriptors, and source references. Agent answers remain scoped to the originating agent and user.
+- Public review summaries now present bounded material profile deltas, correctly map merchant merge source/target IDs, and preserve budget source evidence.
+- Finance routes parse every path ID with `idSchema`, while durable action kinds are schema-validated before resumption.
+- Concern: the foreign-account recovery branch now has an explicit descriptor, but other malformed prepare branches retain safe action-level fallback descriptors rather than bespoke descriptors at every individual failure site.
+
+## Question recovery verification
+
+- `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/routes/finances.test.ts packages/api-client/src/client.test.ts` — 41 tests passed.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/api-client typecheck` — passed.
+- `pnpm --filter @personal-os/domain typecheck` — passed.
+- Scoped Biome and `git diff --check` — passed with four pre-existing `noNonNullAssertion` warnings in the action integration test; no errors.

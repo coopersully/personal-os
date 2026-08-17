@@ -28,6 +28,7 @@ import type {
   FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
+  FinanceQuestion,
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
@@ -371,6 +372,12 @@ export function createFinanceApi(request: FinanceRequest) {
         `/v1/finances/action-reviews?limit=${encodeURIComponent(limit)}`,
       );
       return response.reviews;
+    },
+    async listFinanceQuestions(limit = 50): Promise<FinanceQuestion[]> {
+      const response = await request<{ questions: FinanceQuestion[] }>(
+        `/v1/finances/questions?limit=${encodeURIComponent(limit)}`,
+      );
+      return response.questions;
     },
     async approveFinanceActionReview(id: string): Promise<FinanceActionOutcome<unknown>> {
       const response = await request<{ outcome: FinanceActionOutcome<unknown> }>(

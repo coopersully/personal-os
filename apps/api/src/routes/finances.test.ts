@@ -383,4 +383,55 @@ describe("finance routes", () => {
     await expect(read.json()).resolves.toEqual({ run: { ...run, status: "completed" } });
     expect(financeMaintenance.getRun).toHaveBeenCalledWith(id, id);
   });
+
+  it("lists only public pending Finance questions and rejects malformed action IDs", async () => {
+    const app = new Hono<AppEnv>();
+    const questions = [
+      {
+        actionKind: "profile",
+        choices: [],
+        expectedAnswer: [{ name: "payAccountId", required: true, type: "string" }],
+        id,
+        prompt: "Choose a replacement account.",
+        sourceRefs: [],
+        why: "The selected account is unavailable.",
+      },
+    ];
+    const listQuestions = vi.fn(async () => questions);
+    const approve = vi.fn();
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "question-list");
+      await next();
+    });
+    app.onError((error, context) =>
+      context.json({ error: error instanceof Error ? error.message : "unknown" }, 400),
+    );
+    registerFinanceRoutes({
+      actions: { approve, listQuestions } as never,
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const listed = await app.request("/v1/finances/questions?limit=2");
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toEqual({ questions });
+    expect(listQuestions).toHaveBeenLastCalledWith(id, 2);
+    expect(
+      (await app.request("/v1/finances/action-reviews/not-an-id/approve", { method: "POST" }))
+        .status,
+    ).toBe(400);
+    expect(approve).not.toHaveBeenCalled();
+  });
 });

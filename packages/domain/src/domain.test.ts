@@ -10,6 +10,7 @@ import {
   agentMutationPolicies,
   apiErrorSchema,
   applyFinanceCategorizationsInputSchema,
+  archiveTaskListInputSchema,
   assistantSetupPlanQuerySchema,
   assistantSetupPlanSchema,
   bulkUpdateMailInputSchema,
@@ -18,6 +19,9 @@ import {
   calendarProfilePreferencesSchema,
   calendarProviderSchema,
   calendarSchema,
+  cancelTaskInputSchema,
+  completeTaskInputSchema,
+  completeTaskProjectInputSchema,
   connectedAccountHealthSchema,
   connectICloudInputSchema,
   connectorAuthorizationOutcomeSchema,
@@ -32,6 +36,8 @@ import {
   createMotiveInputSchema,
   createReminderInputSchema,
   createTaskInputSchema,
+  createTaskListInputSchema,
+  createTaskProjectInputSchema,
   dailyBriefSchema,
   eventListQuerySchema,
   featureAccessPolicies,
@@ -69,6 +75,8 @@ import {
   maintenanceScopeSchema,
   maintenanceSettlementStatusSchema,
   matchesMailRule,
+  materialSourceReferenceSchema,
+  normalizeTaskContainerName,
   paginationSchema,
   passwordRequirementState,
   passwordSchema,
@@ -80,13 +88,23 @@ import {
   reminderProfilePreferencesSchema,
   reminderSchema,
   reminderTimeZoneSchema,
+  reopenTaskInputSchema,
   resolveStoredMailRule,
   semanticVersionSchema,
   sendMailInputSchema,
   startGoogleAuthorizationInputSchema,
+  taskContainerAvailabilitySchema,
+  taskLifecycleSchema,
+  taskListArchiveConflictSchema,
   taskListQuerySchema,
+  taskListSchema,
+  taskMovePreviewSchema,
+  taskOrganizationConflictSchema,
+  taskProjectCompletionConflictSchema,
+  taskProjectCompletionResolutionSchema,
+  taskProjectSchema,
   taskSchema,
-  taskStatusSchema,
+  taskSystemViewSchema,
   timeZoneSchema,
   updateAccountSetupInputSchema,
   updateEventBlockInputSchema,
@@ -99,6 +117,8 @@ import {
   updateMotiveInputSchema,
   updateReminderInputSchema,
   updateTaskInputSchema,
+  updateTaskListInputSchema,
+  updateTaskProjectInputSchema,
   updateUserInputSchema,
   upsertDomainProfileInputSchema,
   upsertMailProfileInputSchema,
@@ -1186,40 +1206,345 @@ describe("domain schemas", () => {
       }).success,
     ).toBe(false);
 
-    expect(taskStatusSchema.parse("scheduled")).toBe("scheduled");
+    const listId = "33333333-3333-4333-8333-333333333333";
+    const projectId = "44444444-4444-4444-8444-444444444444";
+    const idempotencyKey = "55555555-5555-4555-8555-555555555555";
+
+    for (const [schema, allowed] of [
+      [taskLifecycleSchema, ["open", "completed", "cancelled"]],
+      [taskContainerAvailabilitySchema, ["active", "archived"]],
+      [taskSystemViewSchema, ["today", "upcoming", "scheduled", "completed", "cancelled", "trash"]],
+    ] as const) {
+      expect(schema.options).toEqual(allowed);
+      expect(schema.safeParse("not-a-value").success).toBe(false);
+    }
+
+    expect(normalizeTaskContainerName("  Caf\u00e9\t\uff37\uff4f\uff52\uff4b  ")).toBe(
+      "caf\u00e9 work",
+    );
+    const inboxCapture = createTaskInputSchema.parse({ idempotencyKey, title: " Inbox task " });
+    expect(inboxCapture).toMatchObject({
+      estimateMinutes: null,
+      lifecycle: "open",
+      title: "Inbox task",
+    });
+    expect(inboxCapture).not.toHaveProperty("listId");
+    expect(inboxCapture).not.toHaveProperty("projectId");
+    expect(
+      createTaskInputSchema.safeParse({
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: id,
+          revision: "1",
+          sourceType: "task",
+        },
+        title: "Local only",
+      }).success,
+    ).toBe(false);
     expect(
       createTaskInputSchema.parse({
-        title: " Plan task ",
         scheduledAt: "2026-07-14T13:00:00.000Z",
-        status: "scheduled",
+        title: "Scheduled independently",
       }),
-    ).toMatchObject({
-      estimateMinutes: null,
-      status: "scheduled",
-      title: "Plan task",
-    });
+    ).toMatchObject({ lifecycle: "open", scheduledAt: "2026-07-14T13:00:00.000Z" });
     expect(
-      createTaskInputSchema.safeParse({ title: "Missing schedule", status: "scheduled" }).success,
+      createTaskInputSchema.safeParse({
+        childProject: { id: projectId },
+        title: "Task cannot contain a Project",
+      }).success,
     ).toBe(false);
-    expect(updateTaskInputSchema.safeParse({}).success).toBe(false);
-    expect(updateTaskInputSchema.parse({ estimateMinutes: null })).toEqual({
+    expect(
+      createTaskListInputSchema.safeParse({
+        childList: { name: "Nested" },
+        name: "Personal",
+      }).success,
+    ).toBe(false);
+    expect(
+      createTaskListInputSchema.safeParse({
+        name: "Local only",
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: listId,
+          revision: "1",
+          sourceType: "task_list",
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      createTaskProjectInputSchema.safeParse({
+        childProject: { name: "Nested" },
+        listId,
+        name: "Launch",
+      }).success,
+    ).toBe(false);
+    expect(
+      createTaskProjectInputSchema.safeParse({
+        listId,
+        name: "Local only",
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: projectId,
+          revision: "1",
+          sourceType: "task_project",
+        },
+      }).success,
+    ).toBe(false);
+    expect(updateTaskInputSchema.safeParse({ expectedRevision: 1 }).success).toBe(false);
+    expect(updateTaskInputSchema.safeParse({ title: undefined }).success).toBe(false);
+    expect(updateTaskListInputSchema.safeParse({ description: undefined }).success).toBe(false);
+    expect(updateTaskProjectInputSchema.safeParse({ why: undefined }).success).toBe(false);
+    expect(
+      updateTaskInputSchema.safeParse({ expectedRevision: 0, title: "Invalid revision" }).success,
+    ).toBe(false);
+    expect(
+      updateTaskInputSchema.safeParse({ expectedRevision: 1.5, title: "Invalid revision" }).success,
+    ).toBe(false);
+    expect(updateTaskInputSchema.parse({ expectedRevision: 1, estimateMinutes: null })).toEqual({
       estimateMinutes: null,
+      expectedRevision: 1,
     });
     expect(createTaskInputSchema.parse({ tags: ["work", "work"], title: "Tag task" }).tags).toEqual(
       ["work"],
     );
+    expect(taskProjectCompletionResolutionSchema.options).toEqual([
+      "complete_open_tasks",
+      "cancel_open_tasks",
+      "move_open_tasks",
+      "keep_project_open",
+    ]);
     expect(
-      taskSchema.parse({
-        id,
-        title: "Task",
-        createdAt: start,
-        updatedAt: start,
-        completedAt: null,
-      }),
-    ).toMatchObject({ estimateMinutes: null, scheduledAt: null, status: "inbox" });
-    expect(taskListQuerySchema.parse({ completed: "false", status: "next" })).toMatchObject({
-      completed: false,
-      status: "next",
+      archiveTaskListInputSchema.safeParse({ resolution: "move_active_contents" }).success,
+    ).toBe(false);
+    expect(
+      completeTaskProjectInputSchema.safeParse({ resolution: "move_open_tasks" }).success,
+    ).toBe(false);
+    expect(
+      taskMovePreviewSchema.parse({
+        destinationListId: listId,
+        destinationListRevision: 3,
+        destinationProjectId: null,
+        destinationProjectRevision: null,
+        detachedProjectId: projectId,
+        previewToken: "task-move-preview",
+        sourceListId: listId,
+        sourceListRevision: 2,
+        sourceProjectId: projectId,
+        taskId: id,
+        taskRevision: 4,
+      }).detachedProjectId,
+    ).toBe(projectId);
+    expect(
+      materialSourceReferenceSchema.parse({
+        accountId: null,
+        provider: "local",
+        remoteId: listId,
+        revision: "1",
+        sourceType: "task_list",
+      }).sourceType,
+    ).toBe("task_list");
+    expect(
+      materialSourceReferenceSchema.parse({
+        accountId: null,
+        provider: "local",
+        remoteId: projectId,
+        revision: "1",
+        sourceType: "task_project",
+      }).sourceType,
+    ).toBe("task_project");
+    const taskList = taskListSchema.parse({
+      archivedAt: null,
+      availability: "active",
+      color: null,
+      createdAt: start,
+      deletedAt: null,
+      description: null,
+      id: listId,
+      kind: "inbox",
+      name: "Inbox",
+      revision: 1,
+      source: {
+        accountId: null,
+        provider: "local",
+        remoteId: listId,
+        revision: "1",
+        sourceType: "task_list",
+      },
+      updatedAt: start,
+    });
+    expect(taskList).toMatchObject({
+      deletedAt: null,
+      kind: "inbox",
+      source: { provider: "local", remoteId: listId, revision: "1" },
+    });
+    expect(taskListSchema.safeParse({ ...taskList, source: null }).success).toBe(false);
+    expect(
+      taskListSchema.safeParse({
+        ...taskList,
+        source: { ...taskList.source, accountId: id, provider: "google" },
+      }).success,
+    ).toBe(false);
+    const taskProject = taskProjectSchema.parse({
+      archivedAt: null,
+      availability: "active",
+      cancelledAt: null,
+      completedAt: null,
+      createdAt: start,
+      deletedAt: null,
+      id: projectId,
+      lifecycle: "open",
+      listId,
+      name: "Launch",
+      notes: null,
+      revision: 1,
+      source: {
+        accountId: null,
+        provider: "local",
+        remoteId: projectId,
+        revision: "1",
+        sourceType: "task_project",
+      },
+      targetDate: null,
+      updatedAt: start,
+      why: null,
+    });
+    expect(taskProject).toMatchObject({
+      deletedAt: null,
+      lifecycle: "open",
+      source: { provider: "local", remoteId: projectId, revision: "1" },
+    });
+    expect(taskProjectSchema.safeParse({ ...taskProject, source: null }).success).toBe(false);
+    const canonicalTask = taskSchema.parse({
+      cancelledAt: null,
+      completedAt: null,
+      createdAt: start,
+      deletedAt: null,
+      estimateMinutes: null,
+      id,
+      legacyStatus: "scheduled",
+      lifecycle: "open",
+      listId,
+      notes: null,
+      priority: "medium",
+      projectId: projectId,
+      revision: 1,
+      scheduledAt: "2026-07-14T13:00:00.000Z",
+      source: {
+        accountId: null,
+        provider: "local",
+        remoteId: id,
+        revision: "1",
+        sourceType: "task",
+      },
+      tags: [],
+      timezone: null,
+      title: "Task",
+      updatedAt: start,
+      why: null,
+      dueAt: null,
+    });
+    expect(canonicalTask).toMatchObject({
+      deletedAt: null,
+      lifecycle: "open",
+      source: { provider: "local", remoteId: id, revision: "1", sourceType: "task" },
+    });
+    expect(taskSchema.safeParse({ ...canonicalTask, source: null }).success).toBe(false);
+    expect(completeTaskInputSchema.safeParse({ completed: false }).success).toBe(false);
+    expect(cancelTaskInputSchema.safeParse({ cancelled: false }).success).toBe(false);
+    expect(completeTaskInputSchema.parse({ expectedRevision: 1 })).toEqual({ expectedRevision: 1 });
+    expect(cancelTaskInputSchema.parse({ expectedRevision: 1 })).toEqual({ expectedRevision: 1 });
+    expect(reopenTaskInputSchema.parse({ expectedRevision: 1 })).toEqual({ expectedRevision: 1 });
+    expect(reopenTaskInputSchema.safeParse({ completed: false }).success).toBe(false);
+    expect(
+      taskMovePreviewSchema.safeParse({
+        destinationListId: listId,
+        destinationListRevision: 3,
+        destinationProjectId: projectId,
+        destinationProjectRevision: null,
+        detachedProjectId: null,
+        previewToken: "task-move-preview",
+        sourceListId: listId,
+        sourceListRevision: 2,
+        sourceProjectId: null,
+        taskId: id,
+        taskRevision: 4,
+      }).success,
+    ).toBe(false);
+    expect(
+      taskMovePreviewSchema.safeParse({
+        destinationListId: listId,
+        destinationListRevision: 3,
+        destinationProjectId: null,
+        destinationProjectRevision: 5,
+        detachedProjectId: projectId,
+        previewToken: "task-move-preview",
+        sourceListId: listId,
+        sourceListRevision: 2,
+        sourceProjectId: projectId,
+        taskId: id,
+        taskRevision: 4,
+      }).success,
+    ).toBe(false);
+    const conflictDetails = {
+      currentRevisions: { destinationList: 3, project: null, sourceList: 2, task: null },
+      openContentCounts: { projects: 1, tasks: 2 },
+    };
+    expect(
+      taskListArchiveConflictSchema.parse({
+        ...conflictDetails,
+        code: "task_list_has_active_contents",
+        resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
+      }).resolutions,
+    ).toEqual(["move_active_contents", "archive_contents_together", "cancel"]);
+    expect(
+      taskListArchiveConflictSchema.safeParse({
+        ...conflictDetails,
+        code: "unexpected_conflict",
+        resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
+      }).success,
+    ).toBe(false);
+    expect(
+      taskOrganizationConflictSchema.safeParse({
+        ...conflictDetails,
+        code: "unexpected_conflict",
+        resolutions: ["move_active_contents"],
+      }).success,
+    ).toBe(false);
+    expect(
+      taskProjectCompletionConflictSchema.parse({
+        ...conflictDetails,
+        code: "task_project_has_open_tasks",
+        resolutions: [
+          "complete_open_tasks",
+          "cancel_open_tasks",
+          "move_open_tasks",
+          "keep_project_open",
+        ],
+      }).resolutions,
+    ).toEqual(["complete_open_tasks", "cancel_open_tasks", "move_open_tasks", "keep_project_open"]);
+    expect(
+      taskProjectCompletionConflictSchema.safeParse({
+        ...conflictDetails,
+        code: "task_project_has_open_tasks",
+        resolutions: ["complete_open_tasks", "complete_open_tasks"],
+      }).success,
+    ).toBe(false);
+    expect(
+      taskListArchiveConflictSchema.safeParse({
+        ...conflictDetails,
+        code: "task_list_has_active_contents",
+        resolutions: ["move_active_contents", "move_active_contents", "cancel"],
+      }).success,
+    ).toBe(false);
+    expect(
+      taskListQuerySchema.parse({ lifecycle: "open", listId, projectId, view: "today" }),
+    ).toMatchObject({
+      lifecycle: "open",
+      listId,
+      projectId,
+      view: "today",
     });
   });
 

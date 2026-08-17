@@ -5,6 +5,8 @@ import type {
   mailboxes,
   mailThreads,
   reminders,
+  taskLists,
+  taskProjects,
   users,
 } from "@personal-os/database";
 import type {
@@ -16,12 +18,16 @@ import type {
   MailThread,
   Reminder,
   Task,
+  TaskList,
+  TaskProject,
   User,
 } from "@personal-os/domain";
 
 type UserRow = typeof users.$inferSelect;
 type AttentionItemRow = typeof attentionItems.$inferSelect;
 type ReminderRow = typeof reminders.$inferSelect;
+type TaskListRow = typeof taskLists.$inferSelect;
+type TaskProjectRow = typeof taskProjects.$inferSelect;
 type CalendarEventRow = typeof calendarEvents.$inferSelect;
 type CalendarRow = typeof calendars.$inferSelect;
 type MailboxRow = typeof mailboxes.$inferSelect;
@@ -94,20 +100,87 @@ export function serializeReminder(row: ReminderRow): Reminder {
 }
 
 export function serializeTask(row: ReminderRow): Task {
+  if (row.taskLifecycle === null || row.taskListId === null || row.taskRevision === null) {
+    throw new Error("Cannot serialize a Task without canonical lifecycle, List, and revision.");
+  }
   return {
+    cancelledAt: row.taskCancelledAt?.toISOString() ?? null,
     completedAt: row.completedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    deletedAt: row.deletedAt?.toISOString() ?? null,
     dueAt: row.dueAt?.toISOString() ?? null,
     estimateMinutes: row.estimateMinutes,
     id: row.id,
+    legacyStatus: row.status,
+    lifecycle: row.taskLifecycle,
+    listId: row.taskListId,
     notes: row.notes,
     priority: row.priority,
+    projectId: row.taskProjectId,
+    revision: row.taskRevision,
     scheduledAt: row.scheduledAt?.toISOString() ?? null,
-    status: row.status,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: String(row.taskRevision),
+      sourceType: "task",
+    },
     tags: row.tags,
     timezone: row.timezone,
     title: row.title,
     updatedAt: row.updatedAt.toISOString(),
+    why: row.taskWhy,
+  };
+}
+
+export function serializeTaskList(row: TaskListRow): TaskList {
+  return {
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    availability: row.availability,
+    color: row.color,
+    createdAt: row.createdAt.toISOString(),
+    deletedAt: row.deletedAt?.toISOString() ?? null,
+    description: row.description,
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    revision: row.revision,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: String(row.revision),
+      sourceType: "task_list",
+    },
+    updatedAt: row.updatedAt.toISOString(),
+  };
+}
+
+export function serializeTaskProject(row: TaskProjectRow): TaskProject {
+  return {
+    archivedAt: row.archivedAt?.toISOString() ?? null,
+    availability: row.availability,
+    cancelledAt: row.cancelledAt?.toISOString() ?? null,
+    completedAt: row.completedAt?.toISOString() ?? null,
+    createdAt: row.createdAt.toISOString(),
+    deletedAt: row.deletedAt?.toISOString() ?? null,
+    id: row.id,
+    lifecycle: row.lifecycle,
+    listId: row.listId,
+    name: row.name,
+    notes: row.notes,
+    revision: row.revision,
+    source: {
+      accountId: null,
+      provider: "local",
+      remoteId: row.id,
+      revision: String(row.revision),
+      sourceType: "task_project",
+    },
+    targetDate: row.targetDate,
+    updatedAt: row.updatedAt.toISOString(),
+    why: row.why,
   };
 }
 
@@ -352,6 +425,7 @@ const sensitiveAuditFields = new Set([
   "from",
   "location",
   "merchant",
+  "name",
   "notes",
   "passwordHash",
   "raw",
@@ -362,6 +436,7 @@ const sensitiveAuditFields = new Set([
   "title",
   "to",
   "tokenHash",
+  "why",
 ]);
 
 function redactAuditValue(value: unknown): unknown {

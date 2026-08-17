@@ -29,10 +29,12 @@ import {
   motives,
   pinterestConnections,
   reminders,
+  taskLists,
+  taskProjects,
   users,
 } from "@personal-os/database";
 import { addLocalDays, localDateAt, localDateTimeToUtc, localDateToIso } from "@personal-os/domain";
-import { inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { hashPassword } from "./security.js";
 
 export const QA_PASSWORD = ["Testing", "12345", "!"].join("");
@@ -187,6 +189,8 @@ type FixtureData = {
   motives: Array<typeof motives.$inferInsert>;
   pinterestConnections: Array<typeof pinterestConnections.$inferInsert>;
   reminders: Array<typeof reminders.$inferInsert>;
+  taskLists: Array<typeof taskLists.$inferInsert>;
+  taskProjects: Array<typeof taskProjects.$inferInsert>;
   users: Array<typeof users.$inferInsert>;
 };
 
@@ -221,12 +225,18 @@ function emptyFixtureData(): FixtureData {
     motives: [],
     pinterestConnections: [],
     reminders: [],
+    taskLists: [],
+    taskProjects: [],
     users: [],
   };
 }
 
 function fixtureId(account: QaFixtureAccount, record: number): string {
   return `${account.id.slice(0, 8)}-0000-4000-8000-${record.toString(16).padStart(12, "0")}`;
+}
+
+function taskInboxPlaceholderId(account: QaFixtureAccount): string {
+  return fixtureId(account, 230);
 }
 
 function addBaseAccount(
@@ -346,6 +356,13 @@ function addLoadedWorkspace(
   const connectedAccountId = fixtureId(account, 11);
   const workCalendarId = fixtureId(account, 21);
   const familyCalendarId = fixtureId(account, 22);
+  const taskInboxId = taskInboxPlaceholderId(account);
+  const personalTaskListId = fixtureId(account, 231);
+  const workTaskListId = fixtureId(account, 232);
+  const shoppingTaskListId = fixtureId(account, 233);
+  const personalQuarterlyProjectId = fixtureId(account, 240);
+  const workQuarterlyProjectId = fixtureId(account, 241);
+  const workLaunchProjectId = fixtureId(account, 242);
   const inboxId = fixtureId(account, 300);
   const sentId = fixtureId(account, 301);
   const draftsId = fixtureId(account, 302);
@@ -365,6 +382,83 @@ function addLoadedWorkspace(
   const transaction = (record: number) => fixtureId(account, 440 + record);
   const at = (day: typeof today, minute: number) => localDateTimeToUtc(day, minute, timezone);
   const ago = (hours: number) => new Date(now.getTime() - hours * 3_600_000);
+
+  data.taskLists.push(
+    {
+      color: "slate",
+      createdAt: ago(24 * 30),
+      description: "Personal administration and home commitments.",
+      id: personalTaskListId,
+      kind: "standard",
+      name: "Personal",
+      normalizedName: "personal",
+      updatedAt: now,
+      userId: account.id,
+    },
+    {
+      color: "blue",
+      createdAt: ago(24 * 30),
+      description: "Work commitments and finite outcomes.",
+      id: workTaskListId,
+      kind: "standard",
+      name: "Work",
+      normalizedName: "work",
+      updatedAt: now,
+      userId: account.id,
+    },
+    {
+      color: "amber",
+      createdAt: ago(24 * 20),
+      description: "Things to compare or pick up.",
+      id: shoppingTaskListId,
+      kind: "standard",
+      name: "Shopping",
+      normalizedName: "shopping",
+      updatedAt: now,
+      userId: account.id,
+    },
+  );
+  data.taskProjects.push(
+    {
+      createdAt: ago(24 * 20),
+      id: personalQuarterlyProjectId,
+      lifecycle: "open",
+      listId: personalTaskListId,
+      name: "Quarterly reset",
+      normalizedName: "quarterly reset",
+      notes: "Close a small set of recurring personal loose ends.",
+      targetDate: localDateToIso(addLocalDays(today, 30)),
+      updatedAt: now,
+      userId: account.id,
+      why: "Keep routine administration from becoming background stress.",
+    },
+    {
+      createdAt: ago(24 * 20),
+      id: workQuarterlyProjectId,
+      lifecycle: "open",
+      listId: workTaskListId,
+      name: "Quarterly reset",
+      normalizedName: "quarterly reset",
+      notes: "Prepare the current work cycle for a clean close.",
+      targetDate: localDateToIso(addLocalDays(today, 21)),
+      updatedAt: now,
+      userId: account.id,
+      why: "Make the next planning cycle start from an explicit state.",
+    },
+    {
+      createdAt: ago(24 * 10),
+      id: workLaunchProjectId,
+      lifecycle: "open",
+      listId: workTaskListId,
+      name: "Launch follow-through",
+      normalizedName: "launch follow-through",
+      notes: "A same-List destination for Task Project moves.",
+      targetDate: localDateToIso(addLocalDays(today, 14)),
+      updatedAt: now,
+      userId: account.id,
+      why: "Keep post-launch work grouped without changing its List.",
+    },
+  );
 
   data.calendarAccounts.push({
     calendarEnabled: true,
@@ -578,8 +672,13 @@ function addLoadedWorkspace(
       kind: "task",
       notes: "Include activation, retention, and qualitative feedback.",
       priority: "high",
-      status: "next",
+      status: "inbox",
       tags: ["work", "writing"],
+      taskLifecycle: "open",
+      taskListId: workTaskListId,
+      taskProjectId: workQuarterlyProjectId,
+      taskRevision: 1,
+      taskWhy: "Give the team a concise record of the week.",
       timezone,
       title: "Draft weekly product update",
       updatedAt: now,
@@ -594,6 +693,10 @@ function addLoadedWorkspace(
       priority: "medium",
       status: "inbox",
       tags: ["home"],
+      taskLifecycle: "open",
+      taskListId: taskInboxId,
+      taskRevision: 1,
+      taskWhy: "Choose coverage before the current policy renews.",
       title: "Compare renters insurance renewals",
       updatedAt: now,
       userId: account.id,
@@ -608,6 +711,10 @@ function addLoadedWorkspace(
       scheduledAt: at(tomorrow, 14 * 60),
       status: "scheduled",
       tags: ["finance"],
+      taskLifecycle: "open",
+      taskListId: personalTaskListId,
+      taskRevision: 1,
+      taskWhy: "Remove subscriptions that are no longer useful.",
       timezone,
       title: "Review monthly subscriptions",
       updatedAt: now,
@@ -623,6 +730,11 @@ function addLoadedWorkspace(
       priority: "low",
       status: "completed",
       tags: ["admin"],
+      taskLifecycle: "completed",
+      taskListId: personalTaskListId,
+      taskProjectId: personalQuarterlyProjectId,
+      taskRevision: 1,
+      taskWhy: "Keep preventive care scheduled.",
       timezone,
       title: "Book dentist appointment",
       updatedAt: ago(20),
@@ -637,6 +749,55 @@ function addLoadedWorkspace(
       status: "inbox",
       tags: [],
       title: "Call Mom",
+      updatedAt: now,
+      userId: account.id,
+    },
+    {
+      createdAt: ago(18),
+      id: fixtureId(account, 206),
+      kind: "task",
+      priority: "low",
+      status: "cancelled",
+      tags: ["shopping"],
+      taskCancelledAt: ago(3),
+      taskLifecycle: "cancelled",
+      taskListId: shoppingTaskListId,
+      taskRevision: 1,
+      taskWhy: "Avoid buying a replacement that is no longer needed.",
+      title: "Replace spare charging cable",
+      updatedAt: ago(3),
+      userId: account.id,
+    },
+    {
+      createdAt: ago(12),
+      deletedAt: ago(2),
+      id: fixtureId(account, 207),
+      kind: "task",
+      priority: "medium",
+      status: "inbox",
+      tags: ["shopping"],
+      taskLifecycle: "open",
+      taskListId: shoppingTaskListId,
+      taskRevision: 1,
+      taskWhy: "Keep an intentionally recoverable Trash example.",
+      title: "Compare desk lamps",
+      updatedAt: ago(2),
+      userId: account.id,
+    },
+    {
+      createdAt: ago(8),
+      estimateMinutes: 25,
+      id: fixtureId(account, 208),
+      kind: "task",
+      priority: "medium",
+      status: "inbox",
+      tags: ["work"],
+      taskLifecycle: "open",
+      taskListId: workTaskListId,
+      taskProjectId: workQuarterlyProjectId,
+      taskRevision: 1,
+      taskWhy: "Exercise moving a Task between Projects without changing Lists.",
+      title: "Prepare launch follow-through",
       updatedAt: now,
       userId: account.id,
     },
@@ -1417,16 +1578,16 @@ function addLoadedWorkspace(
   });
   data.auditEvents.push(
     {
-      action: "reminder.created",
+      action: "task.created",
       actorId: account.id,
       actorType: "user",
       after: { title: "Draft weekly product update" },
       before: null,
       createdAt: ago(48),
       entityId: fixtureId(account, 201),
-      entityType: "reminder",
+      entityType: "task",
       id: fixtureId(account, 500),
-      requestId: `fixture-${account.key}-reminder`,
+      requestId: `fixture-${account.key}-task`,
       userId: account.id,
     },
     {
@@ -1481,6 +1642,24 @@ export async function loadQaFixtures(
     await transaction.insert(users).values(data.users);
     if (data.attentionItems.length)
       await transaction.insert(attentionItems).values(data.attentionItems);
+    const generatedInboxes = await transaction
+      .select({ id: taskLists.id, userId: taskLists.userId })
+      .from(taskLists)
+      .where(and(inArray(taskLists.userId, ids), eq(taskLists.kind, "inbox")));
+    const generatedInboxByUser = new Map(generatedInboxes.map((inbox) => [inbox.userId, inbox.id]));
+    for (const account of accounts) {
+      const generatedInboxId = generatedInboxByUser.get(account.id);
+      if (!generatedInboxId)
+        throw new Error(`The database did not create an Inbox for ${account.key}.`);
+      const inboxPlaceholder = taskInboxPlaceholderId(account);
+      for (const reminder of data.reminders) {
+        if (reminder.userId === account.id && reminder.taskListId === inboxPlaceholder) {
+          reminder.taskListId = generatedInboxId;
+        }
+      }
+    }
+    if (data.taskLists.length) await transaction.insert(taskLists).values(data.taskLists);
+    if (data.taskProjects.length) await transaction.insert(taskProjects).values(data.taskProjects);
     await transaction.insert(calendarAccounts).values(data.calendarAccounts);
     await transaction.insert(calendars).values(data.calendars);
     if (data.calendarEvents.length)

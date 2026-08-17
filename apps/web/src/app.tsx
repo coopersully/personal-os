@@ -11,6 +11,7 @@ import type {
   PinterestWallpaperSettings,
   Reminder,
   Task,
+  TaskListQuery,
   Theme,
   User,
   WeatherCoordinates,
@@ -193,14 +194,6 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-  Dialog as ShadcnDialog,
-  DialogContent as ShadcnDialogContent,
-  DialogDescription as ShadcnDialogDescription,
-  DialogFooter as ShadcnDialogFooter,
-  DialogHeader as ShadcnDialogHeader,
-  DialogTitle as ShadcnDialogTitle,
-} from "@/components/ui/dialog";
-import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuGroup,
@@ -334,6 +327,7 @@ import {
   TasksSidebar,
   TasksTopbarControls,
 } from "./features/tasks/page.js";
+import { TaskDialog } from "./features/tasks/task-dialog.js";
 import { formatMaterialDateTime, formatOrdinalDate } from "./lib/date-format.js";
 import { invalidateMaterial } from "./lib/material-queries.js";
 import { formatRelativeTime } from "./lib/time-format.js";
@@ -451,6 +445,55 @@ function workspaceDirection(
 }
 
 const ignorePreviewNavigation = () => undefined;
+
+const maximumTaskPagesPerSurface = 100;
+
+export async function loadAllTaskPages(
+  loadPage: (query: Partial<TaskListQuery>) => Promise<{
+    items: Task[];
+    nextCursor: string | null;
+  }>,
+  query: Partial<TaskListQuery>,
+): Promise<{ items: Task[]; nextCursor: null }> {
+  const items: Task[] = [];
+  const seenCursors = new Set<string>();
+  let cursor: string | undefined;
+  for (let pageNumber = 0; pageNumber < maximumTaskPagesPerSurface; pageNumber += 1) {
+    const page = await loadPage({ ...query, limit: 100, ...(cursor ? { cursor } : {}) });
+    items.push(...page.items);
+    if (page.nextCursor === null) return { items, nextCursor: null };
+    if (seenCursors.has(page.nextCursor)) {
+      throw new Error("Task pagination returned a repeated cursor.");
+    }
+    seenCursors.add(page.nextCursor);
+    cursor = page.nextCursor;
+  }
+  throw new Error(`Task pagination exceeded ${maximumTaskPagesPerSurface} pages.`);
+}
+
+export function selectTodayTasks(
+  tasks: Task[],
+  current: Date,
+  timeZone: string,
+): { overdue: Task[]; today: Task[] } {
+  const today = localDateAt(current, timeZone);
+  const overdue: Task[] = [];
+  const relevantToday: Task[] = [];
+  for (const task of tasks) {
+    if (task.lifecycle !== "open" || task.deletedAt !== null) continue;
+    if (task.dueAt !== null && new Date(task.dueAt).getTime() < current.getTime()) {
+      overdue.push(task);
+      continue;
+    }
+    const dueToday =
+      task.dueAt !== null && sameLocalDate(localDateAt(new Date(task.dueAt), timeZone), today);
+    const scheduledToday =
+      task.scheduledAt !== null &&
+      sameLocalDate(localDateAt(new Date(task.scheduledAt), timeZone), today);
+    if (dueToday || scheduledToday) relevantToday.push(task);
+  }
+  return { overdue, today: relevantToday };
+}
 
 export function App() {
   const me = useQuery({ queryFn: api.getMe, queryKey: ["me"] });
@@ -1123,6 +1166,13 @@ function AuthenticatedApp({ user }: { user: User }) {
             )}
             onLogout={mobileDockLogout}
             pathname={location.pathname}
+            {...(sidebarMode === "tasks"
+              ? {
+                  renderWorkspaceNavigation: (onNavigate: () => void) => (
+                    <TasksSidebar onNavigate={onNavigate} />
+                  ),
+                }
+              : {})}
             workspaceDefinitions={workspaceDefinitions}
           />
         ) : null}
@@ -1624,8 +1674,8 @@ function WorkspaceSwitcher({
   });
   const taskInbox = useQuery({
     enabled: menuOpen,
-    queryFn: () => api.listTasks({ completed: false, status: "inbox" }),
-    queryKey: ["tasks", "inbox"],
+    queryFn: () => loadAllTaskPages(api.listTasks, { lifecycle: "open" }),
+    queryKey: ["tasks", "open", "all"],
     staleTime: workspaceIntentStaleTime,
   });
   const mailThreads = useQuery({
@@ -1649,12 +1699,7 @@ function WorkspaceSwitcher({
       "unread",
       "Inbox clear",
     ),
-    "/tasks": workspaceCountSummary(
-      taskInbox.data?.items.length,
-      "in inbox",
-      "All done",
-      "in inbox",
-    ),
+    "/tasks": workspaceCountSummary(taskInbox.data?.items.length, "open", "All done", "open"),
     "/today": workspaceTodaySummary(currentWeather, user.homeLocation?.label),
   };
 
@@ -1951,21 +1996,13 @@ function TodayPage({
       reminder.completedAt !== null &&
       sameLocalDate(localDateAt(new Date(reminder.completedAt), user.planningTimezone), today),
   );
-  const openTasks = agenda.tasks.filter((task) => task.status !== "cancelled");
-  const overdueTasks = openTasks.filter(
-    (task) => task.dueAt !== null && new Date(task.dueAt).getTime() < currentTime.getTime(),
+  const openTasks = agenda.tasks.filter(
+    (task) => task.lifecycle === "open" && task.deletedAt === null,
   );
-  const todayTasks = openTasks.filter(
-    (task) =>
-      task.dueAt !== null &&
-      new Date(task.dueAt).getTime() >= currentTime.getTime() &&
-      sameLocalDate(localDateAt(new Date(task.dueAt), user.planningTimezone), today),
-  );
-  const nextTasks = openTasks.filter(
-    (task) =>
-      !overdueTasks.some((candidate) => candidate.id === task.id) &&
-      !todayTasks.some((candidate) => candidate.id === task.id) &&
-      (task.status === "next" || task.status === "scheduled"),
+  const { overdue: overdueTasks, today: todayTasks } = selectTodayTasks(
+    openTasks,
+    currentTime,
+    user.planningTimezone,
   );
   const recommendedTasks = new Map(
     (agenda.recommendedTasks ?? []).map((recommendation) => [
@@ -1973,16 +2010,17 @@ function TodayPage({
       recommendation,
     ]),
   );
-  nextTasks.sort(
-    (left, right) => Number(recommendedTasks.has(right.id)) - Number(recommendedTasks.has(left.id)),
-  );
   const doneTasksToday = agenda.completedTasks.filter(
     (task) =>
       task.completedAt !== null &&
       sameLocalDate(localDateAt(new Date(task.completedAt), user.planningTimezone), today),
   );
   const remainingCount =
-    overdueReminders.length + todayReminders.length + anytimeReminders.length + openTasks.length;
+    overdueReminders.length +
+    todayReminders.length +
+    anytimeReminders.length +
+    overdueTasks.length +
+    todayTasks.length;
   return (
     <div className="today-layout" data-page="today">
       <section className="day-column">
@@ -2108,8 +2146,7 @@ function TodayPage({
         ) : (
           overdueReminders.length === 0 &&
           overdueTasks.length === 0 &&
-          todayTasks.length === 0 &&
-          nextTasks.length === 0 && (
+          todayTasks.length === 0 && (
             <EmptyState icon={<CircleCheckIcon />} title="Nothing pulling at you">
               Add a reminder when something deserves your attention.
             </EmptyState>
@@ -2134,19 +2171,10 @@ function TodayPage({
         ) : null}
         {todayTasks.length > 0 ? (
           <TaskGroup
-            label="Due today"
+            label="Today tasks"
             recommendations={recommendedTasks}
             setEditor={setEditor}
             tasks={todayTasks}
-            timeZone={user.planningTimezone}
-          />
-        ) : null}
-        {nextTasks.length > 0 ? (
-          <TaskGroup
-            label="Next tasks"
-            recommendations={recommendedTasks}
-            setEditor={setEditor}
-            tasks={nextTasks}
             timeZone={user.planningTimezone}
           />
         ) : null}
@@ -6777,175 +6805,6 @@ function ReminderDialog({
         />
       </form>
     </Modal>
-  );
-}
-
-function TaskDialog({
-  close,
-  task,
-  user,
-}: {
-  close: () => void;
-  task: Task | undefined;
-  user: User;
-}) {
-  const queryClient = useQueryClient();
-  const mutation = useMutation({
-    mutationFn: (input: {
-      dueAt: string | null;
-      estimateMinutes: number | null;
-      notes: string | null;
-      priority: "low" | "medium" | "high";
-      scheduledAt: string | null;
-      status: "cancelled" | "completed" | "inbox" | "next" | "scheduled";
-      tags: string[];
-      timezone: string | null;
-      title: string;
-    }) => (task ? api.updateTask(task.id, input) : api.createTask(input)),
-    onSuccess: async () => {
-      await invalidateMaterial(queryClient);
-      close();
-    },
-  });
-  const submit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const dueAt = String(form.get("dueAt"));
-    const scheduledAt = String(form.get("scheduledAt"));
-    const estimate = String(form.get("estimateMinutes"));
-    mutation.mutate({
-      dueAt: dueAt ? dateTimeLocalToIso(dueAt, user.planningTimezone) : null,
-      estimateMinutes: estimate ? Number(estimate) : null,
-      notes: nullable(form.get("notes")),
-      priority: String(form.get("priority")) as "low" | "medium" | "high",
-      scheduledAt: scheduledAt ? dateTimeLocalToIso(scheduledAt, user.planningTimezone) : null,
-      status: String(form.get("status")) as
-        | "cancelled"
-        | "completed"
-        | "inbox"
-        | "next"
-        | "scheduled",
-      timezone: dueAt || scheduledAt ? user.planningTimezone : null,
-      tags: String(form.get("tags"))
-        .split(",")
-        .map((tag) => tag.trim())
-        .filter(Boolean),
-      title: String(form.get("title")),
-    });
-  };
-  return (
-    <ShadcnDialog open onOpenChange={(open) => !open && close()}>
-      <ShadcnDialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
-        <ShadcnDialogHeader>
-          <ShadcnDialogTitle>{task ? "Refine task" : "Capture a task"}</ShadcnDialogTitle>
-          <ShadcnDialogDescription>
-            Keep the commitment separate from its deadline and any time you reserve for it.
-          </ShadcnDialogDescription>
-        </ShadcnDialogHeader>
-        <form onSubmit={submit}>
-          <ShadcnFieldGroup>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="task-title">Task</ShadcnFieldLabel>
-              <ShadcnInput
-                autoFocus
-                defaultValue={task?.title}
-                id="task-title"
-                name="title"
-                required
-              />
-            </ShadcnField>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="task-notes">Notes</ShadcnFieldLabel>
-              <ShadcnTextarea
-                defaultValue={task?.notes ?? ""}
-                id="task-notes"
-                name="notes"
-                rows={4}
-              />
-            </ShadcnField>
-            <ShadcnFieldGroup className="grid gap-5 sm:grid-cols-2">
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="task-status">Status</ShadcnFieldLabel>
-                <ShadcnNativeSelect
-                  defaultValue={task?.status ?? "inbox"}
-                  id="task-status"
-                  name="status"
-                >
-                  <NativeSelectOption value="inbox">Inbox</NativeSelectOption>
-                  <NativeSelectOption value="next">Next</NativeSelectOption>
-                  <NativeSelectOption value="scheduled">Scheduled</NativeSelectOption>
-                  <NativeSelectOption value="completed">Completed</NativeSelectOption>
-                  <NativeSelectOption value="cancelled">Cancelled</NativeSelectOption>
-                </ShadcnNativeSelect>
-              </ShadcnField>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="task-priority">Priority</ShadcnFieldLabel>
-                <ShadcnNativeSelect
-                  defaultValue={task?.priority ?? "medium"}
-                  id="task-priority"
-                  name="priority"
-                >
-                  <NativeSelectOption value="low">Low</NativeSelectOption>
-                  <NativeSelectOption value="medium">Medium</NativeSelectOption>
-                  <NativeSelectOption value="high">High</NativeSelectOption>
-                </ShadcnNativeSelect>
-              </ShadcnField>
-            </ShadcnFieldGroup>
-            <ShadcnFieldGroup className="grid gap-5 sm:grid-cols-2">
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="task-due-at">Deadline</ShadcnFieldLabel>
-                <ShadcnInput
-                  defaultValue={toDateTimeLocal(task?.dueAt, user.planningTimezone)}
-                  id="task-due-at"
-                  name="dueAt"
-                  type="datetime-local"
-                />
-              </ShadcnField>
-              <ShadcnField>
-                <ShadcnFieldLabel htmlFor="task-scheduled-at">Reserved time</ShadcnFieldLabel>
-                <ShadcnInput
-                  defaultValue={toDateTimeLocal(task?.scheduledAt, user.planningTimezone)}
-                  id="task-scheduled-at"
-                  name="scheduledAt"
-                  type="datetime-local"
-                />
-              </ShadcnField>
-            </ShadcnFieldGroup>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="task-estimate">Estimate in minutes</ShadcnFieldLabel>
-              <ShadcnInput
-                defaultValue={task?.estimateMinutes ?? ""}
-                id="task-estimate"
-                max={24 * 60}
-                min={5}
-                name="estimateMinutes"
-                step={5}
-                type="number"
-              />
-            </ShadcnField>
-            <ShadcnField>
-              <ShadcnFieldLabel htmlFor="task-tags">Tags</ShadcnFieldLabel>
-              <ShadcnInput
-                defaultValue={task?.tags.join(", ") ?? ""}
-                id="task-tags"
-                name="tags"
-                placeholder="Planning, home"
-              />
-              <ShadcnFieldDescription>Separate tags with commas.</ShadcnFieldDescription>
-            </ShadcnField>
-          </ShadcnFieldGroup>
-          {mutation.isError ? <InlineError error={mutation.error} /> : null}
-          <ShadcnDialogFooter className="mt-5">
-            <ShadcnButton onClick={close} type="button" variant="outline">
-              Cancel
-            </ShadcnButton>
-            <ShadcnButton disabled={mutation.isPending} type="submit">
-              {mutation.isPending ? "Saving…" : task ? "Save changes" : "Create task"}
-            </ShadcnButton>
-          </ShadcnDialogFooter>
-        </form>
-      </ShadcnDialogContent>
-    </ShadcnDialog>
   );
 }
 

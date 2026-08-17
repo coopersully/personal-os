@@ -67,7 +67,11 @@ import {
   requireHuman,
   requireScope,
 } from "./routes/support.js";
+import { registerTaskListRoutes } from "./routes/task-lists.js";
+import { registerTaskProjectRoutes } from "./routes/task-projects.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
+import { createTaskListService } from "./task-list-service.js";
+import { createTaskProjectService } from "./task-project-service.js";
 import { createTaskService } from "./task-service.js";
 import type { AppDependencies, AppEnv, Principal } from "./types.js";
 import { createWeatherService } from "./weather-service.js";
@@ -243,7 +247,17 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
       resendApiKey: dependencies.config.resendApiKey,
     });
   const reminders = createReminderService({ db: dependencies.db, now });
-  const tasks = createTaskService({ db: dependencies.db, now });
+  const taskLists = createTaskListService({ db: dependencies.db, now });
+  const taskProjects = createTaskProjectService({
+    db: dependencies.db,
+    movePreviewSecret: dependencies.config.encryptionKey,
+    now,
+  });
+  const tasks = createTaskService({
+    db: dependencies.db,
+    movePreviewSecret: dependencies.config.encryptionKey,
+    now,
+  });
   const google =
     dependencies.google ??
     createGoogleConnector({
@@ -371,8 +385,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     listEvents: calendar.listEvents,
     listReminders: async (userId) =>
       (await reminders.list(userId, { completed: false, limit: 100 })).items,
-    listTasks: async (userId, completed) =>
-      (await tasks.list(userId, { completed, limit: 100 })).items,
+    listTasks: (userId, query) => tasks.list(userId, query),
     now,
   });
   const audit = createAuditService(dependencies.db);
@@ -850,6 +863,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   app.use("/v1/invitations", authenticate, requireHuman);
   app.use("/v1/reminders/*", authenticate);
   app.use("/v1/reminders", authenticate);
+  app.use("/v1/task-lists/*", authenticate);
+  app.use("/v1/task-lists", authenticate);
+  app.use("/v1/task-projects/*", authenticate);
+  app.use("/v1/task-projects", authenticate);
   app.use("/v1/tasks/*", authenticate);
   app.use("/v1/tasks", authenticate);
   app.use("/v1/calendars/*", authenticate);
@@ -1123,6 +1140,10 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   registerFinanceRoutes({ app, financeMaintenance, financeStatus, finances, mutationContext });
 
   registerReminderRoutes({ app, mutationContext, reminders });
+
+  registerTaskListRoutes({ app, mutationContext, taskLists });
+
+  registerTaskProjectRoutes({ app, mutationContext, taskProjects });
 
   registerTaskRoutes({ app, mutationContext, tasks });
 

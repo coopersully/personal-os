@@ -14,6 +14,10 @@ import type {
   Motive,
   Reminder,
   Task,
+  TaskList,
+  TaskMovePreview,
+  TaskProject,
+  TaskProjectMovePreview,
   User,
 } from "@personal-os/domain";
 import {
@@ -151,6 +155,8 @@ const reminder: Reminder = {
   updatedAt: now,
 };
 const task: Task = {
+  cancelledAt: null,
+  completedAt: null,
   id,
   title: "Plan task",
   notes: null,
@@ -160,10 +166,89 @@ const task: Task = {
   priority: "medium",
   estimateMinutes: 30,
   tags: ["planning"],
-  status: "scheduled",
-  completedAt: null,
+  why: null,
+  legacyStatus: "scheduled",
+  lifecycle: "open",
+  listId: id,
+  projectId: null,
+  revision: 1,
+  deletedAt: null,
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: "1",
+    sourceType: "task",
+  },
   createdAt: now,
   updatedAt: now,
+};
+const taskList: TaskList = {
+  archivedAt: null,
+  availability: "active",
+  color: null,
+  createdAt: now,
+  deletedAt: null,
+  description: null,
+  id,
+  kind: "standard",
+  name: "Personal",
+  revision: 1,
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: "1",
+    sourceType: "task_list",
+  },
+  updatedAt: now,
+};
+const taskProject: TaskProject = {
+  archivedAt: null,
+  availability: "active",
+  cancelledAt: null,
+  completedAt: null,
+  createdAt: now,
+  deletedAt: null,
+  id,
+  lifecycle: "open",
+  listId: id,
+  name: "Home refresh",
+  notes: null,
+  revision: 1,
+  source: {
+    accountId: null,
+    provider: "local",
+    remoteId: id,
+    revision: "1",
+    sourceType: "task_project",
+  },
+  targetDate: null,
+  updatedAt: now,
+  why: null,
+};
+const taskMovePreview: TaskMovePreview = {
+  destinationListId: accountId,
+  destinationListRevision: 2,
+  destinationProjectId: null,
+  destinationProjectRevision: null,
+  detachedProjectId: null,
+  previewToken: "task-move-preview",
+  sourceListId: id,
+  sourceListRevision: 1,
+  sourceProjectId: null,
+  taskId: id,
+  taskRevision: 1,
+};
+const taskProjectMovePreview: TaskProjectMovePreview = {
+  affectedTaskCount: 2,
+  destinationListId: accountId,
+  destinationListRevision: 2,
+  previewToken: "task-project-move-preview",
+  sourceListId: id,
+  sourceListRevision: 1,
+  taskProjectId: id,
+  taskProjectRevision: 1,
 };
 const calendar: Calendar = {
   id,
@@ -1115,6 +1200,7 @@ function apiFetch() {
       return json({ event });
     if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/trash"))
       return json({ reminder });
+    if (url.pathname.includes("/tasks/") && url.pathname.endsWith("/trash")) return json({ task });
     if (url.pathname.endsWith("/trash"))
       return json({ revision: { blockUpdatedAtById: {}, eventId: id, updatedAt: now } });
     if (url.pathname.endsWith("/attention") && url.pathname.includes("/events/"))
@@ -1145,14 +1231,170 @@ function apiFetch() {
     if (url.pathname.includes("/reminders/") && url.pathname.endsWith("/attention"))
       return json({ item: attentionItem });
     if (url.pathname.includes("/reminders/")) return json({ reminder });
+    if (url.pathname === "/v1/task-lists" && method === "POST") return json({ taskList }, 201);
+    if (url.pathname === "/v1/task-lists") return json({ items: [taskList], nextCursor: null });
+    if (url.pathname.includes("/task-lists/")) return json({ taskList });
+    if (url.pathname === "/v1/task-projects" && method === "POST")
+      return json({ taskProject }, 201);
+    if (url.pathname === "/v1/task-projects")
+      return json({ items: [taskProject], nextCursor: null });
+    if (url.pathname.includes("/task-projects/") && url.pathname.endsWith("/move/preview"))
+      return json({ preview: taskProjectMovePreview });
+    if (url.pathname.includes("/task-projects/")) return json({ taskProject });
     if (url.pathname === "/v1/tasks" && method === "POST") return json({ task }, 201);
     if (url.pathname === "/v1/tasks") return json({ items: [task], nextCursor: null });
+    if (url.pathname.includes("/tasks/") && url.pathname.endsWith("/move/preview"))
+      return json({ preview: taskMovePreview });
     if (url.pathname.includes("/tasks/")) return json({ task });
     throw new Error(`Unhandled ${method} ${url.pathname}`);
   });
 }
 
 describe("ilo API client", () => {
+  it("uses canonical task organization HTTP transport", async () => {
+    const fetch = apiFetch();
+    const api = createApiClient({ baseUrl: "https://api.example.com", fetch });
+    const createTaskInput = {
+      dueAt: null,
+      estimateMinutes: null,
+      idempotencyKey: "33333333-3333-4333-8333-333333333333",
+      lifecycle: "open" as const,
+      listId: id,
+      notes: null,
+      priority: "medium" as const,
+      scheduledAt: null,
+      tags: [],
+      timezone: null,
+      title: "Plan task",
+      why: null,
+    };
+    const createTaskListInput = {
+      color: null,
+      description: null,
+      idempotencyKey: "44444444-4444-4444-8444-444444444444",
+      name: "Personal",
+    };
+    const createTaskProjectInput = {
+      idempotencyKey: "55555555-5555-4555-8555-555555555555",
+      listId: id,
+      name: "Home refresh",
+      notes: null,
+      targetDate: null,
+      why: null,
+    };
+
+    await api.listTasks({ lifecycle: "open", limit: 2 });
+    await api.createTask(createTaskInput);
+    await api.getTask(id);
+    await api.updateTask(id, { expectedRevision: 1, title: "Plan today" });
+    await api.completeTask(id, { expectedRevision: 1 });
+    await api.cancelTask(id, { expectedRevision: 1 });
+    await api.reopenTask(id, { expectedRevision: 1 });
+    await api.trashTask(id, { expectedRevision: 1 });
+    await api.restoreTask(id, { expectedRevision: 1 });
+    await api.previewTaskMove(id, {
+      destinationListId: accountId,
+      destinationProjectId: null,
+      expectedRevision: 1,
+    });
+    await api.moveTask(id, {
+      destinationListId: accountId,
+      destinationProjectId: null,
+      expectedRevision: 1,
+      previewToken: "task-move-preview",
+    });
+    await api.listTaskLists({ cursor: "next", limit: 2 });
+    await api.createTaskList(createTaskListInput);
+    await api.getTaskList(id);
+    await api.updateTaskList(id, { expectedRevision: 1, name: "Home" });
+    await api.archiveTaskList(id, { expectedRevision: 1 });
+    await api.listTaskProjects({ cursor: "next", limit: 2 });
+    await api.createTaskProject(createTaskProjectInput);
+    await api.getTaskProject(id);
+    await api.updateTaskProject(id, { expectedRevision: 1, name: "Bedroom refresh" });
+    await api.completeTaskProject(id, { expectedRevision: 1 });
+    await api.cancelTaskProject(id, { expectedRevision: 1 });
+    await api.archiveTaskProject(id, { expectedRevision: 1 });
+    await api.previewTaskProjectMove(id, { destinationListId: accountId, expectedRevision: 1 });
+    await api.moveTaskProject(id, {
+      destinationListId: accountId,
+      expectedRevision: 1,
+      previewToken: "task-project-move-preview",
+    });
+
+    expect(
+      fetch.mock.calls.map(([url, init]) => ({
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+        method: init?.method ?? "GET",
+        path: `${new URL(String(url)).pathname}${new URL(String(url)).search}`,
+      })),
+    ).toEqual([
+      { method: "GET", path: "/v1/tasks?lifecycle=open&limit=2" },
+      { body: createTaskInput, method: "POST", path: "/v1/tasks" },
+      { method: "GET", path: `/v1/tasks/${id}` },
+      {
+        body: { expectedRevision: 1, title: "Plan today" },
+        method: "PATCH",
+        path: `/v1/tasks/${id}`,
+      },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/complete` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/cancel` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/reopen` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/trash` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/tasks/${id}/restore` },
+      {
+        body: { destinationListId: accountId, destinationProjectId: null, expectedRevision: 1 },
+        method: "POST",
+        path: `/v1/tasks/${id}/move/preview`,
+      },
+      {
+        body: {
+          destinationListId: accountId,
+          destinationProjectId: null,
+          expectedRevision: 1,
+          previewToken: "task-move-preview",
+        },
+        method: "POST",
+        path: `/v1/tasks/${id}/move`,
+      },
+      { method: "GET", path: "/v1/task-lists?cursor=next&limit=2" },
+      { body: createTaskListInput, method: "POST", path: "/v1/task-lists" },
+      { method: "GET", path: `/v1/task-lists/${id}` },
+      {
+        body: { expectedRevision: 1, name: "Home" },
+        method: "PATCH",
+        path: `/v1/task-lists/${id}`,
+      },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/task-lists/${id}/archive` },
+      { method: "GET", path: "/v1/task-projects?cursor=next&limit=2" },
+      { body: createTaskProjectInput, method: "POST", path: "/v1/task-projects" },
+      { method: "GET", path: `/v1/task-projects/${id}` },
+      {
+        body: { expectedRevision: 1, name: "Bedroom refresh" },
+        method: "PATCH",
+        path: `/v1/task-projects/${id}`,
+      },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/task-projects/${id}/complete` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/task-projects/${id}/cancel` },
+      { body: { expectedRevision: 1 }, method: "POST", path: `/v1/task-projects/${id}/archive` },
+      {
+        body: { destinationListId: accountId, expectedRevision: 1 },
+        method: "POST",
+        path: `/v1/task-projects/${id}/move/preview`,
+      },
+      {
+        body: {
+          destinationListId: accountId,
+          expectedRevision: 1,
+          previewToken: "task-project-move-preview",
+        },
+        method: "POST",
+        path: `/v1/task-projects/${id}/move`,
+      },
+    ]);
+    expect(fetch.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(false);
+  });
+
   it("uses typed Finance status and durable-maintenance routes", async () => {
     const requests: Array<{ body: string | null; method: string; path: string }> = [];
     const api = createApiClient({
@@ -1334,7 +1576,7 @@ describe("ilo API client", () => {
       }),
     ).resolves.toEqual(attentionItem);
     await api.deleteReminder(id);
-    await expect(api.listTasks({ status: "scheduled", limit: 10 })).resolves.toEqual({
+    await expect(api.listTasks({ lifecycle: "open", limit: 10 })).resolves.toEqual({
       items: [task],
       nextCursor: null,
     });
@@ -1347,14 +1589,79 @@ describe("ilo API client", () => {
         timezone: "UTC",
         priority: "medium",
         estimateMinutes: 30,
+        lifecycle: "open",
         tags: ["planning"],
-        status: "scheduled",
+        why: null,
       }),
     ).resolves.toEqual(task);
-    await expect(api.updateTask(id, { status: "next" })).resolves.toEqual(task);
-    await expect(api.completeTask(id, true)).resolves.toEqual(task);
-    await expect(api.restoreTask(id)).resolves.toEqual(task);
-    await api.deleteTask(id);
+    await expect(api.getTask(id)).resolves.toEqual(task);
+    await expect(api.updateTask(id, { expectedRevision: 1, title: "Plan today" })).resolves.toEqual(
+      task,
+    );
+    await expect(api.completeTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(api.cancelTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(api.reopenTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(api.trashTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(api.restoreTask(id, { expectedRevision: 1 })).resolves.toEqual(task);
+    await expect(
+      api.previewTaskMove(id, {
+        destinationListId: accountId,
+        destinationProjectId: null,
+        expectedRevision: 1,
+      }),
+    ).resolves.toEqual(taskMovePreview);
+    await expect(
+      api.moveTask(id, {
+        destinationListId: accountId,
+        destinationProjectId: null,
+        expectedRevision: 1,
+        previewToken: "task-move-preview",
+      }),
+    ).resolves.toEqual(task);
+    await expect(api.listTaskLists({ limit: 10 })).resolves.toEqual({
+      items: [taskList],
+      nextCursor: null,
+    });
+    await expect(
+      api.createTaskList({ color: null, description: null, name: "Personal" }),
+    ).resolves.toEqual(taskList);
+    await expect(api.getTaskList(id)).resolves.toEqual(taskList);
+    await expect(api.updateTaskList(id, { expectedRevision: 1, name: "Home" })).resolves.toEqual(
+      taskList,
+    );
+    await expect(api.archiveTaskList(id, { expectedRevision: 1 })).resolves.toEqual(taskList);
+    await expect(api.listTaskProjects({ limit: 10 })).resolves.toEqual({
+      items: [taskProject],
+      nextCursor: null,
+    });
+    await expect(
+      api.createTaskProject({
+        listId: id,
+        name: "Home refresh",
+        notes: null,
+        targetDate: null,
+        why: null,
+      }),
+    ).resolves.toEqual(taskProject);
+    await expect(api.getTaskProject(id)).resolves.toEqual(taskProject);
+    await expect(
+      api.updateTaskProject(id, { expectedRevision: 1, name: "Bedroom refresh" }),
+    ).resolves.toEqual(taskProject);
+    await expect(api.completeTaskProject(id, { expectedRevision: 1 })).resolves.toEqual(
+      taskProject,
+    );
+    await expect(api.cancelTaskProject(id, { expectedRevision: 1 })).resolves.toEqual(taskProject);
+    await expect(api.archiveTaskProject(id, { expectedRevision: 1 })).resolves.toEqual(taskProject);
+    await expect(
+      api.previewTaskProjectMove(id, { destinationListId: accountId, expectedRevision: 1 }),
+    ).resolves.toEqual(taskProjectMovePreview);
+    await expect(
+      api.moveTaskProject(id, {
+        destinationListId: accountId,
+        expectedRevision: 1,
+        previewToken: "task-project-move-preview",
+      }),
+    ).resolves.toEqual(taskProject);
     await expect(api.listActivity(25)).resolves.toHaveLength(1);
     await expect(api.getDailyBrief()).resolves.toEqual(brief);
     await expect(api.getWeather({ latitude: 40.7, longitude: -74 })).resolves.toEqual({

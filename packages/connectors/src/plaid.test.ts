@@ -121,7 +121,7 @@ describe("Plaid connector", () => {
                   merchant_name: null,
                   name: "Unknown currency",
                   pending: false,
-                  personal_finance_category: null,
+                  personal_finance_category: { primary: "TRANSFER_IN" },
                   transaction_id: "transaction-unknown-currency",
                 },
               ],
@@ -176,6 +176,11 @@ describe("Plaid connector", () => {
         expect.objectContaining({
           accountId: "account-unknown-currency",
           currencyCode: null,
+          personalFinanceCategory: {
+            confidenceLevel: null,
+            detailed: null,
+            primary: "TRANSFER_IN",
+          },
           transactionId: "transaction-unknown-currency",
         }),
       ]),
@@ -339,6 +344,31 @@ describe("Plaid connector", () => {
       status: 400,
     });
     assertRedactedMessage(error.message, [rawCanary, "opaque-cursor", "access-token"]);
+  });
+
+  it.each([
+    ["oversized", JSON.stringify({ error_code: "INVALID_CURSOR", padding: "x".repeat(4_096) })],
+    ["malformed", '{"error_code":"INVALID_CURSOR"'],
+  ])("bounds %s invalid-cursor evidence before classifying it", async (_case, body) => {
+    const plaid = createPlaidConnector({
+      clientId: "client",
+      environment: "production",
+      fetch: async () =>
+        new Response(body, {
+          headers: { "content-type": "application/json" },
+          status: 400,
+        }),
+      secret: "secret",
+    });
+
+    await expect(
+      plaid.syncTransactions({ accessToken: "access-token", cursor: "opaque-cursor" }),
+    ).rejects.toMatchObject({
+      category: "rejected",
+      code: "plaid_request_rejected",
+      disposition: "operator",
+      status: 400,
+    });
   });
 
   it("classifies an item that needs reauthentication as reconnect", async () => {

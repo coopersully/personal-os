@@ -19,10 +19,13 @@ import {
   mailThreads,
   migrateDatabase,
   reminders,
+  taskLists,
+  taskProjects,
   users,
 } from "@personal-os/database";
+import type { Task, TaskListQuery } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createApp, type PersonalOsApp } from "./app.js";
 import { createAuthService } from "./auth-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
@@ -195,6 +198,3774 @@ describe.sequential("ilo API", () => {
   async function payload(response: Response) {
     return response.status === 204 ? null : response.json();
   }
+
+  describe("task lists", () => {
+    let listAgentToken = "";
+    let listReadToken = "";
+    let listSessionToken = "";
+    let listUserId = "";
+    let listWriteToken = "";
+
+    async function listRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Session ${listSessionToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function createList(name: string) {
+      const response = await listRequest("/v1/task-lists", { body: { name } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskList as {
+        availability: "active" | "archived";
+        id: string;
+        name: string;
+        revision: number;
+        source: {
+          accountId: null;
+          provider: "local";
+          remoteId: string;
+          revision: string;
+          sourceType: "task_list";
+        };
+      };
+    }
+
+    async function agentListRequest(
+      token: string,
+      path: string,
+      options: Omit<RequestOptions, "auth"> = {},
+    ) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Bearer ${token}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function createListAgentToken(name: string, scopes: string[]) {
+      const response = await listRequest("/v1/access-tokens", { body: { name, scopes } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).token.token as string;
+    }
+
+    beforeAll(async () => {
+      const registration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Task Lists User",
+          email: "task-lists@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(registration.status).toBe(201);
+      const body = await payload(registration);
+      listSessionToken = body.sessionToken;
+      listUserId = body.user.id;
+      listAgentToken = await createListAgentToken("Task Lists agent", [
+        "tasks:read",
+        "tasks:write",
+      ]);
+      listReadToken = await createListAgentToken("Task Lists reader", ["tasks:read"]);
+      listWriteToken = await createListAgentToken("Task Lists writer", ["tasks:write"]);
+    });
+
+    it("task lists retrieve the protected Inbox only for its authenticated owner", async () => {
+      expect((await request("/v1/task-lists", { auth: "none" })).status).toBe(401);
+
+      const response = await listRequest("/v1/task-lists");
+      expect(response.status).toBe(200);
+      const result = await payload(response);
+      expect(result).toEqual({
+        items: [
+          expect.objectContaining({
+            archivedAt: null,
+            availability: "active",
+            deletedAt: null,
+            kind: "inbox",
+            name: "Inbox",
+            revision: 1,
+            source: {
+              accountId: null,
+              provider: "local",
+              remoteId: expect.any(String),
+              revision: "1",
+              sourceType: "task_list",
+            },
+          }),
+        ],
+        nextCursor: null,
+      });
+      expect(
+        (await payload(await listRequest(`/v1/task-lists/${result.items[0].id}`))).taskList,
+      ).toEqual(result.items[0]);
+    });
+
+    it("task lists reject reserved and colliding names while preserving user and idempotency boundaries", async () => {
+      const reserved = await listRequest("/v1/task-lists", {
+        body: { name: "  Ｔｏｄａｙ  " },
+      });
+      expect(reserved.status).toBe(409);
+      expect((await payload(reserved)).error).toMatchObject({ code: "conflict" });
+
+      const canonical = await createList("Ｆｏｃｕｓ　 Plan");
+      expect(canonical.source).toEqual({
+        accountId: null,
+        provider: "local",
+        remoteId: canonical.id,
+        revision: "1",
+        sourceType: "task_list",
+      });
+      expect(
+        (
+          await listRequest("/v1/task-lists", {
+            body: {
+              name: "Forged provenance",
+              source: {
+                accountId: null,
+                provider: "local",
+                remoteId: canonical.id,
+                revision: "1",
+                sourceType: "task_list",
+              },
+            },
+          })
+        ).status,
+      ).toBe(400);
+      const collision = await listRequest("/v1/task-lists", {
+        body: { name: "  focus   plan " },
+      });
+      expect(collision.status).toBe(409);
+      expect((await payload(collision)).error).toMatchObject({
+        code: "conflict",
+        details: { code: "task_list_name_conflict" },
+      });
+
+      const idempotencyKey = "11111111-1111-4111-8111-111111111111";
+      const createInput = {
+        color: "blue",
+        description: "Stable replay",
+        idempotencyKey,
+        name: "Replay List",
+      };
+      const created = await listRequest("/v1/task-lists", { body: createInput });
+      const replayed = await listRequest("/v1/task-lists", { body: createInput });
+      expect(created.status).toBe(201);
+      expect(replayed.status).toBe(201);
+      const createdList = (await payload(created)).taskList;
+      expect((await payload(replayed)).taskList).toEqual(createdList);
+      const renameCollision = await listRequest(`/v1/task-lists/${createdList.id}`, {
+        body: { expectedRevision: createdList.revision, name: " focus plan " },
+        method: "PATCH",
+      });
+      expect(renameCollision.status).toBe(409);
+      expect((await payload(renameCollision)).error).toMatchObject({
+        code: "conflict",
+        details: { code: "task_list_name_conflict" },
+      });
+      const mismatch = await listRequest("/v1/task-lists", {
+        body: { ...createInput, description: "Different material" },
+      });
+      expect(mismatch.status).toBe(409);
+      expect((await payload(mismatch)).error).toMatchObject({
+        code: "conflict",
+        details: { code: "task_list_idempotency_mismatch" },
+      });
+
+      await database.db
+        .update(taskLists)
+        .set({ deletedAt: new Date("2026-07-13T12:00:00.000Z") })
+        .where(eq(taskLists.id, createdList.id));
+      const deletedReplay = await listRequest("/v1/task-lists", { body: createInput });
+      expect(deletedReplay.status).toBe(201);
+      expect((await payload(deletedReplay)).taskList).toMatchObject({
+        deletedAt: "2026-07-13T12:00:00.000Z",
+        id: createdList.id,
+      });
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Other Task Lists User",
+          email: "task-lists-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(otherRegistration.status).toBe(201);
+      const otherSessionToken = (await payload(otherRegistration)).sessionToken as string;
+      expect(
+        (
+          await app.request(`/v1/task-lists/${canonical.id}`, {
+            headers: { authorization: `Session ${otherSessionToken}` },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await app.request("/v1/task-lists", {
+            body: JSON.stringify({ name: "focus plan" }),
+            headers: {
+              authorization: `Session ${otherSessionToken}`,
+              "content-type": "application/json",
+            },
+            method: "POST",
+          })
+        ).status,
+      ).toBe(201);
+
+      const firstPage = await payload(await listRequest("/v1/task-lists?limit=1"));
+      expect(firstPage.items).toHaveLength(1);
+      expect(firstPage.nextCursor).toEqual(expect.any(String));
+      expect(
+        (
+          await payload(
+            await listRequest(
+              `/v1/task-lists?limit=1&cursor=${encodeURIComponent(firstPage.nextCursor)}`,
+            ),
+          )
+        ).items,
+      ).toHaveLength(1);
+    });
+
+    it("task lists guard revisions and Inbox mutation choices and audit successful mutations", async () => {
+      const inbox = (await payload(await listRequest("/v1/task-lists"))).items.find(
+        (item: { kind: string }) => item.kind === "inbox",
+      );
+      const inboxRename = await listRequest(`/v1/task-lists/${inbox.id}`, {
+        body: { expectedRevision: inbox.revision, name: "Renamed Inbox" },
+        method: "PATCH",
+      });
+      expect(inboxRename.status).toBe(409);
+      expect((await payload(inboxRename)).error).toMatchObject({
+        code: "conflict",
+        details: {
+          code: "task_list_inbox_protected",
+          resolutions: ["keep_inbox", "choose_another_list"],
+        },
+      });
+      const inboxArchive = await listRequest(`/v1/task-lists/${inbox.id}/archive`, {
+        body: { expectedRevision: inbox.revision },
+      });
+      expect(inboxArchive.status).toBe(409);
+      expect((await payload(inboxArchive)).error.details).toEqual({
+        code: "task_list_inbox_protected",
+        currentRevision: 1,
+        resolutions: ["keep_inbox", "choose_another_list"],
+      });
+
+      const mutable = await createList("Revision Guard");
+      const updatedResponse = await listRequest(`/v1/task-lists/${mutable.id}`, {
+        body: {
+          color: "violet",
+          description: "Revised once",
+          expectedRevision: mutable.revision,
+        },
+        method: "PATCH",
+      });
+      expect(updatedResponse.status).toBe(200);
+      const updated = (await payload(updatedResponse)).taskList;
+      expect(updated).toMatchObject({
+        color: "violet",
+        description: "Revised once",
+        revision: 2,
+        source: {
+          provider: "local",
+          remoteId: mutable.id,
+          revision: "2",
+          sourceType: "task_list",
+        },
+      });
+      expect(
+        (await payload(await listRequest(`/v1/task-lists/${mutable.id}`))).taskList.source,
+      ).toEqual({
+        accountId: null,
+        provider: "local",
+        remoteId: mutable.id,
+        revision: "2",
+        sourceType: "task_list",
+      });
+      const stale = await listRequest(`/v1/task-lists/${mutable.id}`, {
+        body: { expectedRevision: mutable.revision, name: "Stale write" },
+        method: "PATCH",
+      });
+      expect(stale.status).toBe(409);
+      expect((await payload(stale)).error).toMatchObject({
+        code: "conflict",
+        details: { currentRevision: 2 },
+      });
+
+      const archivedResponse = await listRequest(`/v1/task-lists/${mutable.id}/archive`, {
+        body: { expectedRevision: updated.revision },
+      });
+      expect(archivedResponse.status).toBe(200);
+      const archived = (await payload(archivedResponse)).taskList;
+      expect(archived).toMatchObject({
+        archivedAt: "2026-07-13T12:00:00.000Z",
+        availability: "archived",
+        revision: 3,
+      });
+      expect(
+        (
+          await payload(
+            await listRequest(`/v1/task-lists/${mutable.id}/archive`, {
+              body: { expectedRevision: updated.revision },
+            }),
+          )
+        ).error,
+      ).toMatchObject({ code: "conflict", details: { currentRevision: 3 } });
+
+      const audit = await database.db
+        .select({
+          action: auditEvents.action,
+          after: auditEvents.after,
+          before: auditEvents.before,
+        })
+        .from(auditEvents)
+        .where(and(eq(auditEvents.userId, listUserId), eq(auditEvents.entityId, mutable.id)));
+      expect(audit.map(({ action }) => action)).toEqual([
+        "task_list.created",
+        "task_list.updated",
+        "task_list.archived",
+      ]);
+      expect(audit.find(({ action }) => action === "task_list.created")?.after).toMatchObject({
+        source: { provider: "local", remoteId: mutable.id, revision: "1" },
+      });
+      expect(audit.find(({ action }) => action === "task_list.updated")).toMatchObject({
+        after: { source: { provider: "local", remoteId: mutable.id, revision: "2" } },
+        before: { source: { provider: "local", remoteId: mutable.id, revision: "1" } },
+      });
+      expect(audit.find(({ action }) => action === "task_list.archived")).toMatchObject({
+        after: { source: { provider: "local", remoteId: mutable.id, revision: "3" } },
+        before: { source: { provider: "local", remoteId: mutable.id, revision: "2" } },
+      });
+    });
+
+    it("task lists enforce scoped-token permissions and agent mutation guards", async () => {
+      expect(
+        (
+          await agentListRequest(listReadToken, "/v1/task-lists", {
+            body: { name: "Read cannot create" },
+          })
+        ).status,
+      ).toBe(403);
+      expect((await agentListRequest(listWriteToken, "/v1/task-lists")).status).toBe(403);
+
+      const missingKey = await agentListRequest(listAgentToken, "/v1/task-lists", {
+        body: { name: "Agent missing key" },
+      });
+      expect(missingKey.status).toBe(400);
+      expect((await payload(missingKey)).error).toMatchObject({ code: "invalid_request" });
+
+      const agentInput = {
+        idempotencyKey: "22222222-2222-4222-8222-222222222222",
+        name: "Agent List",
+      };
+      const createdResponse = await agentListRequest(listAgentToken, "/v1/task-lists", {
+        body: agentInput,
+      });
+      expect(createdResponse.status).toBe(201);
+      const created = (await payload(createdResponse)).taskList;
+      const replayResponse = await agentListRequest(listAgentToken, "/v1/task-lists", {
+        body: agentInput,
+      });
+      expect(replayResponse.status).toBe(201);
+      expect((await payload(replayResponse)).taskList).toEqual(created);
+
+      const missingUpdateRevision = await agentListRequest(
+        listAgentToken,
+        `/v1/task-lists/${created.id}`,
+        { body: { name: "Agent update without revision" }, method: "PATCH" },
+      );
+      expect(missingUpdateRevision.status).toBe(400);
+      expect((await payload(missingUpdateRevision)).error).toMatchObject({
+        code: "invalid_request",
+      });
+      const missingArchiveRevision = await agentListRequest(
+        listAgentToken,
+        `/v1/task-lists/${created.id}/archive`,
+        { body: {} },
+      );
+      expect(missingArchiveRevision.status).toBe(400);
+      expect((await payload(missingArchiveRevision)).error).toMatchObject({
+        code: "invalid_request",
+      });
+    });
+
+    it("task lists resolve active-content archive conflicts without implicit mutation", async () => {
+      const source = await createList("Move Source");
+      const destination = await createList("Move Destination");
+      const [project] = await database.db
+        .insert(taskProjects)
+        .values({
+          listId: source.id,
+          name: "Move Project",
+          normalizedName: "move project",
+          userId: listUserId,
+        })
+        .returning();
+      if (!project) throw new Error("Project fixture was not created.");
+      const [task] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: source.id,
+          taskProjectId: project.id,
+          taskRevision: 1,
+          title: "Move Task",
+          userId: listUserId,
+        })
+        .returning();
+      if (!task) throw new Error("Task fixture was not created.");
+      const terminalAt = new Date("2026-07-13T11:00:00.000Z");
+      const [archivedProject, completedProject] = await database.db
+        .insert(taskProjects)
+        .values([
+          {
+            archivedAt: terminalAt,
+            availability: "archived",
+            listId: source.id,
+            name: "Archived Project Stays",
+            normalizedName: "archived project stays",
+            userId: listUserId,
+          },
+          {
+            completedAt: terminalAt,
+            lifecycle: "completed",
+            listId: source.id,
+            name: "Completed Project Stays",
+            normalizedName: "completed project stays",
+            userId: listUserId,
+          },
+        ])
+        .returning();
+      const [cancelledTask, deletedTask] = await database.db
+        .insert(reminders)
+        .values([
+          {
+            kind: "task",
+            status: "cancelled",
+            taskCancelledAt: terminalAt,
+            taskLifecycle: "cancelled",
+            taskListId: source.id,
+            taskRevision: 1,
+            title: "Cancelled Task Stays",
+            userId: listUserId,
+          },
+          {
+            deletedAt: terminalAt,
+            kind: "task",
+            status: "inbox",
+            taskLifecycle: "open",
+            taskListId: source.id,
+            taskRevision: 1,
+            title: "Trashed Task Stays",
+            userId: listUserId,
+          },
+        ])
+        .returning();
+      if (!archivedProject || !completedProject || !cancelledTask || !deletedTask) {
+        throw new Error("Inactive Task List contents were not created.");
+      }
+
+      const preview = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+        body: { expectedRevision: source.revision },
+      });
+      expect(preview.status).toBe(409);
+      expect((await payload(preview)).error).toMatchObject({
+        code: "conflict",
+        details: {
+          code: "task_list_has_active_contents",
+          currentRevisions: {
+            destinationList: null,
+            project: null,
+            sourceList: 1,
+            task: null,
+          },
+          openContentCounts: { projects: 1, tasks: 1 },
+          resolutions: ["move_active_contents", "archive_contents_together", "cancel"],
+        },
+      });
+      const destinationPreview = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+        body: { destinationListId: destination.id, expectedRevision: source.revision },
+      });
+      expect(destinationPreview.status).toBe(409);
+      expect((await payload(destinationPreview)).error.details.currentRevisions).toMatchObject({
+        destinationList: destination.revision,
+        sourceList: source.revision,
+      });
+
+      const cancelled = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+        body: { expectedRevision: source.revision, resolution: "cancel" },
+      });
+      expect(cancelled.status).toBe(200);
+      expect((await payload(cancelled)).taskList).toMatchObject({
+        availability: "active",
+        revision: 1,
+      });
+      expect(
+        await database.db.select().from(auditEvents).where(eq(auditEvents.entityId, source.id)),
+      ).toHaveLength(1);
+
+      const moved = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+        body: {
+          destinationListId: destination.id,
+          expectedRevision: source.revision,
+          resolution: "move_active_contents",
+        },
+      });
+      expect(moved.status).toBe(200);
+      expect((await payload(moved)).taskList).toMatchObject({
+        availability: "archived",
+        revision: 2,
+      });
+      expect(
+        await database.db.select().from(taskProjects).where(eq(taskProjects.id, project.id)),
+      ).toEqual([expect.objectContaining({ listId: destination.id, revision: 2 })]);
+      expect(await database.db.select().from(reminders).where(eq(reminders.id, task.id))).toEqual([
+        expect.objectContaining({ taskListId: destination.id, taskRevision: 2 }),
+      ]);
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(inArray(taskProjects.id, [archivedProject.id, completedProject.id])),
+      ).toEqual([
+        { listId: source.id, revision: 1 },
+        { listId: source.id, revision: 1 },
+      ]);
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId, revision: reminders.taskRevision })
+          .from(reminders)
+          .where(inArray(reminders.id, [cancelledTask.id, deletedTask.id])),
+      ).toEqual([
+        { listId: source.id, revision: 1 },
+        { listId: source.id, revision: 1 },
+      ]);
+      const moveAudits = await database.db
+        .select({
+          action: auditEvents.action,
+          actorId: auditEvents.actorId,
+          actorType: auditEvents.actorType,
+          after: auditEvents.after,
+          before: auditEvents.before,
+          entityId: auditEvents.entityId,
+          requestId: auditEvents.requestId,
+        })
+        .from(auditEvents)
+        .where(inArray(auditEvents.entityId, [source.id, project.id, task.id]));
+      expect(moveAudits.map(({ action }) => action).sort()).toEqual([
+        "task.moved_with_list",
+        "task_list.archived",
+        "task_list.created",
+        "task_project.moved_with_list",
+      ]);
+      expect(new Set(moveAudits.map(({ requestId }) => requestId)).size).toBe(2);
+      for (const childAudit of moveAudits.filter(({ entityId }) => entityId !== source.id)) {
+        expect(childAudit).toMatchObject({
+          actorId: listUserId,
+          actorType: "user",
+          after: {
+            authorization: { actorId: listUserId, kind: "interactive_user" },
+            listId: destination.id,
+            policy: "approve_each",
+            revision: 2,
+            source: { provider: "local", revision: "2" },
+          },
+          before: {
+            authorization: { actorId: listUserId, kind: "interactive_user" },
+            listId: source.id,
+            policy: "approve_each",
+            revision: 1,
+            source: { provider: "local", revision: "1" },
+          },
+        });
+      }
+      expect(
+        new Set(
+          moveAudits
+            .filter(({ action }) => action !== "task_list.created")
+            .map(({ requestId }) => requestId),
+        ).size,
+      ).toBe(1);
+
+      const together = await createList("Archive Together");
+      const [togetherProject] = await database.db
+        .insert(taskProjects)
+        .values({
+          listId: together.id,
+          name: "Stay Project",
+          normalizedName: "stay project",
+          userId: listUserId,
+        })
+        .returning();
+      if (!togetherProject) throw new Error("Together Project fixture was not created.");
+      const [togetherTask] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: together.id,
+          taskProjectId: togetherProject.id,
+          taskRevision: 1,
+          title: "Stay Task",
+          userId: listUserId,
+        })
+        .returning();
+      if (!togetherTask) throw new Error("Together Task fixture was not created.");
+      const archivedTogether = await listRequest(`/v1/task-lists/${together.id}/archive`, {
+        body: {
+          expectedRevision: together.revision,
+          resolution: "archive_contents_together",
+        },
+      });
+      expect(archivedTogether.status).toBe(200);
+      expect((await payload(archivedTogether)).taskList).toMatchObject({
+        availability: "archived",
+        revision: 2,
+      });
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, togetherProject.id)),
+      ).toEqual([{ listId: together.id, revision: 1 }]);
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId, revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, togetherTask.id)),
+      ).toEqual([{ listId: together.id, revision: 1 }]);
+
+      const projectOnlySource = await createList("Move Project-Only Source");
+      const projectOnlyDestination = await createList("Move Project-Only Destination");
+      const [projectOnly] = await database.db
+        .insert(taskProjects)
+        .values({
+          listId: projectOnlySource.id,
+          name: "Move Project Without Tasks",
+          normalizedName: "move project without tasks",
+          userId: listUserId,
+        })
+        .returning();
+      if (!projectOnly) throw new Error("Project-only move fixture was not created.");
+      const projectOnlyMove = await listRequest(`/v1/task-lists/${projectOnlySource.id}/archive`, {
+        body: {
+          destinationListId: projectOnlyDestination.id,
+          expectedRevision: projectOnlySource.revision,
+          resolution: "move_active_contents",
+        },
+      });
+      expect(projectOnlyMove.status).toBe(200);
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, projectOnly.id)),
+      ).toEqual([{ listId: projectOnlyDestination.id, revision: 2 }]);
+      expect(
+        await database.db
+          .select({ action: auditEvents.action })
+          .from(auditEvents)
+          .where(eq(auditEvents.entityId, projectOnly.id)),
+      ).toEqual([{ action: "task_project.moved_with_list" }]);
+
+      const taskOnlySource = await createList("Move Task-Only Source");
+      const taskOnlyDestination = await createList("Move Task-Only Destination");
+      const [taskOnly] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: taskOnlySource.id,
+          taskRevision: 1,
+          title: "Move Task Without Project",
+          userId: listUserId,
+        })
+        .returning();
+      if (!taskOnly) throw new Error("Task-only move fixture was not created.");
+      const taskOnlyMove = await agentListRequest(
+        listAgentToken,
+        `/v1/task-lists/${taskOnlySource.id}/archive`,
+        {
+          body: {
+            destinationListId: taskOnlyDestination.id,
+            expectedRevision: taskOnlySource.revision,
+            resolution: "move_active_contents",
+          },
+        },
+      );
+      expect(taskOnlyMove.status).toBe(200);
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId, revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, taskOnly.id)),
+      ).toEqual([{ listId: taskOnlyDestination.id, revision: 2 }]);
+      const [taskOnlyAudit] = await database.db
+        .select({
+          actorId: auditEvents.actorId,
+          actorType: auditEvents.actorType,
+          after: auditEvents.after,
+          before: auditEvents.before,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, taskOnly.id));
+      expect(taskOnlyAudit).toMatchObject({
+        actorType: "agent",
+        after: {
+          authorization: {
+            actorId: taskOnlyAudit?.actorId,
+            kind: "scoped_agent_permission",
+          },
+          listId: taskOnlyDestination.id,
+          policy: "approved_rule",
+          projectId: null,
+          revision: 2,
+        },
+        before: {
+          authorization: {
+            actorId: taskOnlyAudit?.actorId,
+            kind: "scoped_agent_permission",
+          },
+          listId: taskOnlySource.id,
+          policy: "approved_rule",
+          projectId: null,
+          revision: 1,
+        },
+      });
+    });
+
+    it("task lists reject missing, archived, and same-list archive destinations", async () => {
+      const missingId = "99999999-9999-4999-8999-999999999999";
+      expect(
+        (
+          await listRequest(`/v1/task-lists/${missingId}/archive`, {
+            body: { resolution: "archive_contents_together" },
+          })
+        ).status,
+      ).toBe(404);
+
+      const empty = await createList("Human Revision Default");
+      const humanUpdate = await listRequest(`/v1/task-lists/${empty.id}`, {
+        body: { description: "Updated without an explicit human revision" },
+        method: "PATCH",
+      });
+      expect(humanUpdate.status).toBe(200);
+      expect((await payload(humanUpdate)).taskList.revision).toBe(2);
+      const humanArchive = await listRequest(`/v1/task-lists/${empty.id}/archive`, { body: {} });
+      expect(humanArchive.status).toBe(200);
+      const archived = (await payload(humanArchive)).taskList;
+      expect(archived.revision).toBe(3);
+      expect(
+        (
+          await listRequest(`/v1/task-lists/${empty.id}/archive`, {
+            body: { expectedRevision: archived.revision },
+          })
+        ).status,
+      ).toBe(409);
+
+      const source = await createList("Unavailable Destination Source");
+      for (const destinationListId of [source.id, missingId, empty.id]) {
+        const response = await listRequest(`/v1/task-lists/${source.id}/archive`, {
+          body: {
+            destinationListId,
+            expectedRevision: source.revision,
+            resolution: "move_active_contents",
+          },
+        });
+        expect(response.status).toBe(destinationListId === missingId ? 404 : 409);
+      }
+    });
+  });
+
+  describe("task projects", () => {
+    let projectAgentToken = "";
+    let projectSessionToken = "";
+    let projectUserId = "";
+
+    type ProjectResponse = {
+      availability: "active" | "archived";
+      id: string;
+      lifecycle: "open" | "completed" | "cancelled";
+      listId: string;
+      name: string;
+      revision: number;
+      source: {
+        accountId: null;
+        provider: "local";
+        remoteId: string;
+        revision: string;
+        sourceType: "task_project";
+      };
+    };
+
+    async function projectRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Session ${projectSessionToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function agentProjectRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Bearer ${projectAgentToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function createProjectList(name: string) {
+      const response = await projectRequest("/v1/task-lists", { body: { name } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskList as { id: string; revision: number };
+    }
+
+    async function createProject(
+      listId: string,
+      name: string,
+      extra: Record<string, unknown> = {},
+    ) {
+      const response = await projectRequest("/v1/task-projects", {
+        body: { listId, name, ...extra },
+      });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskProject as ProjectResponse;
+    }
+
+    async function insertProjectTask(project: ProjectResponse, title: string) {
+      const [task] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: project.listId,
+          taskProjectId: project.id,
+          taskRevision: 1,
+          title,
+          userId: projectUserId,
+        })
+        .returning();
+      if (!task) throw new Error("Task Project Task fixture was not created.");
+      return task;
+    }
+
+    async function waitForTaskOrganizationLockWaiters(expected: number) {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const result = await database.pool.query<{ count: string }>(`
+          SELECT count(*)::text AS count
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND query LIKE '%task_lists%'
+            AND query NOT LIKE '%pg_stat_activity%'
+        `);
+        if (Number(result.rows[0]?.count ?? 0) >= expected) return;
+        await new Promise<void>((resolveWait) => setTimeout(resolveWait, 20));
+      }
+      throw new Error(`Expected at least ${expected} Task organization lock waiter(s).`);
+    }
+
+    beforeAll(async () => {
+      const registration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Task Projects User",
+          email: "task-projects@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(registration.status).toBe(201);
+      const body = await payload(registration);
+      projectSessionToken = body.sessionToken;
+      projectUserId = body.user.id;
+      const tokenResponse = await projectRequest("/v1/access-tokens", {
+        body: { name: "Task Projects agent", scopes: ["tasks:read", "tasks:write"] },
+      });
+      expect(tokenResponse.status).toBe(201);
+      projectAgentToken = (await payload(tokenResponse)).token.token;
+    });
+
+    it("task projects enforce List ownership, local provenance, scoped uniqueness, and idempotent empty creation", async () => {
+      expect((await request("/v1/task-projects", { auth: "none" })).status).toBe(401);
+      const firstList = await createProjectList("Project Alpha List");
+      const secondList = await createProjectList("Project Beta List");
+      const first = await createProject(firstList.id, "Ｆｏｃｕｓ　Project");
+      expect(first).toMatchObject({
+        availability: "active",
+        lifecycle: "open",
+        listId: firstList.id,
+        notes: null,
+        revision: 1,
+        source: {
+          accountId: null,
+          provider: "local",
+          remoteId: first.id,
+          revision: "1",
+          sourceType: "task_project",
+        },
+        targetDate: null,
+        why: null,
+      });
+      expect(
+        await database.db
+          .select()
+          .from(reminders)
+          .where(and(eq(reminders.taskProjectId, first.id), eq(reminders.kind, "task"))),
+      ).toHaveLength(0);
+      expect(
+        (
+          await projectRequest("/v1/task-projects", {
+            body: {
+              listId: firstList.id,
+              name: "Forged source",
+              source: first.source,
+            },
+          })
+        ).status,
+      ).toBe(400);
+
+      const collision = await projectRequest("/v1/task-projects", {
+        body: { listId: firstList.id, name: " focus project " },
+      });
+      expect(collision.status).toBe(409);
+      expect((await payload(collision)).error.details).toMatchObject({
+        code: "task_project_name_conflict",
+      });
+      expect((await createProject(secondList.id, "focus project")).listId).toBe(secondList.id);
+
+      const idempotencyKey = "66666666-6666-4666-8666-666666666666";
+      const input = { idempotencyKey, listId: firstList.id, name: "Replay Project" };
+      const created = await projectRequest("/v1/task-projects", { body: input });
+      const replayed = await projectRequest("/v1/task-projects", { body: input });
+      expect(created.status).toBe(201);
+      expect(replayed.status).toBe(201);
+      const createdProject = (await payload(created)).taskProject;
+      expect((await payload(replayed)).taskProject).toEqual(createdProject);
+      const mismatch = await projectRequest("/v1/task-projects", {
+        body: { ...input, notes: "Different material" },
+      });
+      expect(mismatch.status).toBe(409);
+      expect((await payload(mismatch)).error.details).toMatchObject({
+        code: "task_project_idempotency_mismatch",
+      });
+      await database.db
+        .update(taskProjects)
+        .set({ deletedAt: new Date("2026-07-13T12:00:00.000Z") })
+        .where(eq(taskProjects.id, createdProject.id));
+      const deletedReplay = await projectRequest("/v1/task-projects", { body: input });
+      expect(deletedReplay.status).toBe(201);
+      expect((await payload(deletedReplay)).taskProject).toMatchObject({
+        deletedAt: "2026-07-13T12:00:00.000Z",
+        id: createdProject.id,
+      });
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Other Task Projects User",
+          email: "task-projects-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(otherRegistration.status).toBe(201);
+      const other = await payload(otherRegistration);
+      const [otherInbox] = await database.db
+        .select({ id: taskLists.id })
+        .from(taskLists)
+        .where(and(eq(taskLists.userId, other.user.id), eq(taskLists.kind, "inbox")));
+      if (!otherInbox) throw new Error("Other Project Inbox fixture was not created.");
+      expect(
+        (
+          await projectRequest("/v1/task-projects", {
+            body: { listId: otherInbox.id, name: "Cross-owner Project" },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await app.request(`/v1/task-projects/${first.id}`, {
+            headers: { authorization: `Session ${other.sessionToken}` },
+          })
+        ).status,
+      ).toBe(404);
+
+      const listed = await payload(await projectRequest("/v1/task-projects?limit=1"));
+      expect(listed.items).toHaveLength(1);
+      expect(listed.nextCursor).toEqual(expect.any(String));
+      expect(
+        (
+          await payload(
+            await projectRequest(
+              `/v1/task-projects?limit=1&cursor=${encodeURIComponent(listed.nextCursor)}`,
+            ),
+          )
+        ).items,
+      ).toHaveLength(1);
+    });
+
+    it("task projects enforce agent idempotency and revision guards", async () => {
+      const list = await createProjectList("Agent Project List");
+      const missingKey = await agentProjectRequest("/v1/task-projects", {
+        body: { listId: list.id, name: "Agent missing key" },
+      });
+      expect(missingKey.status).toBe(400);
+      const createInput = {
+        idempotencyKey: "77777777-7777-4777-8777-777777777777",
+        listId: list.id,
+        name: "Agent Project",
+      };
+      const createdResponse = await agentProjectRequest("/v1/task-projects", {
+        body: createInput,
+      });
+      expect(createdResponse.status).toBe(201);
+      const created = (await payload(createdResponse)).taskProject as ProjectResponse;
+      for (const [path, body, method] of [
+        [`/v1/task-projects/${created.id}`, { name: "No revision" }, "PATCH"],
+        [`/v1/task-projects/${created.id}/cancel`, {}, "POST"],
+        [`/v1/task-projects/${created.id}/archive`, {}, "POST"],
+        [`/v1/task-projects/${created.id}/complete`, {}, "POST"],
+      ] as const) {
+        expect((await agentProjectRequest(path, { body, method })).status).toBe(400);
+      }
+    });
+
+    it("task projects use dedicated revision-safe update, cancel, and archive transitions", async () => {
+      const list = await createProjectList("Project Lifecycle List");
+      const mutable = await createProject(list.id, "Mutable Project");
+      const updatedResponse = await projectRequest(`/v1/task-projects/${mutable.id}`, {
+        body: {
+          expectedRevision: mutable.revision,
+          name: "Renamed Project",
+          notes: "Reviewed",
+          targetDate: "2026-07-31",
+          why: "Ship it",
+        },
+        method: "PATCH",
+      });
+      expect(updatedResponse.status).toBe(200);
+      const updated = (await payload(updatedResponse)).taskProject as ProjectResponse;
+      expect(updated).toMatchObject({
+        listId: list.id,
+        name: "Renamed Project",
+        revision: 2,
+        source: { remoteId: mutable.id, revision: "2", sourceType: "task_project" },
+      });
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${mutable.id}`, {
+            body: { expectedRevision: 2, listId: list.id },
+            method: "PATCH",
+          })
+        ).status,
+      ).toBe(400);
+      const stale = await projectRequest(`/v1/task-projects/${mutable.id}`, {
+        body: { expectedRevision: mutable.revision, name: "Stale Project" },
+        method: "PATCH",
+      });
+      expect(stale.status).toBe(409);
+      expect((await payload(stale)).error.details).toMatchObject({ currentRevision: 2 });
+
+      const cancellable = await createProject(list.id, "Cancellable Project");
+      const cancelledResponse = await projectRequest(`/v1/task-projects/${cancellable.id}/cancel`, {
+        body: { expectedRevision: cancellable.revision },
+      });
+      expect(cancelledResponse.status).toBe(200);
+      expect((await payload(cancelledResponse)).taskProject).toMatchObject({
+        cancelledAt: "2026-07-13T12:00:00.000Z",
+        lifecycle: "cancelled",
+        revision: 2,
+      });
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${cancellable.id}/cancel`, {
+            body: { expectedRevision: cancellable.revision },
+          })
+        ).status,
+      ).toBe(409);
+
+      const archivable = await createProject(list.id, "Archivable Project");
+      const archivedResponse = await projectRequest(`/v1/task-projects/${archivable.id}/archive`, {
+        body: { expectedRevision: archivable.revision },
+      });
+      expect(archivedResponse.status).toBe(200);
+      expect((await payload(archivedResponse)).taskProject).toMatchObject({
+        archivedAt: "2026-07-13T12:00:00.000Z",
+        availability: "archived",
+        revision: 2,
+      });
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${archivable.id}/archive`, {
+            body: { expectedRevision: archivable.revision },
+          })
+        ).status,
+      ).toBe(409);
+    });
+
+    it("task projects fail closed for terminal Projects and unavailable move destinations", async () => {
+      const missingId = "99999999-9999-4999-8999-999999999999";
+      const sourceList = await createProjectList("Project Safety Source");
+      const project = await createProject(sourceList.id, "Project Safety Subject");
+      expect((await projectRequest(`/v1/task-projects/${missingId}`)).status).toBe(404);
+      const notesOnly = await projectRequest(`/v1/task-projects/${project.id}`, {
+        body: { notes: "Human review without a supplied revision" },
+        method: "PATCH",
+      });
+      expect(notesOnly.status).toBe(200);
+      const revised = (await payload(notesOnly)).taskProject as ProjectResponse;
+      expect(revised).toMatchObject({
+        notes: "Human review without a supplied revision",
+        revision: 2,
+      });
+
+      const sameDestination = await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+        body: { destinationListId: sourceList.id, expectedRevision: revised.revision },
+      });
+      expect(sameDestination.status).toBe(409);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move`, {
+            body: {
+              destinationListId: sourceList.id,
+              expectedRevision: revised.revision,
+              previewToken: "same-destination-does-not-commit",
+            },
+          })
+        ).status,
+      ).toBe(409);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: { destinationListId: missingId, expectedRevision: revised.revision },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move`, {
+            body: {
+              destinationListId: missingId,
+              expectedRevision: revised.revision,
+              previewToken: "missing-destination-does-not-commit",
+            },
+          })
+        ).status,
+      ).toBe(404);
+
+      const archivedDestination = await createProjectList("Project Safety Archived Destination");
+      expect(
+        (
+          await projectRequest(`/v1/task-lists/${archivedDestination.id}/archive`, {
+            body: { expectedRevision: archivedDestination.revision },
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: {
+              destinationListId: archivedDestination.id,
+              expectedRevision: revised.revision,
+            },
+          })
+        ).status,
+      ).toBe(404);
+
+      const completed = await createProject(sourceList.id, "Project Safety Completed");
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${completed.id}/complete`, {
+            body: { expectedRevision: completed.revision },
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${completed.id}/cancel`, {
+            body: { expectedRevision: 2 },
+          })
+        ).status,
+      ).toBe(409);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${completed.id}/complete`, {
+            body: { expectedRevision: 2 },
+          })
+        ).status,
+      ).toBe(409);
+
+      const archivedProject = await createProject(sourceList.id, "Project Safety Archived");
+      const archiveResponse = await projectRequest(
+        `/v1/task-projects/${archivedProject.id}/archive`,
+        { body: { expectedRevision: archivedProject.revision } },
+      );
+      expect(archiveResponse.status).toBe(200);
+      for (const [path, body, method] of [
+        [
+          `/v1/task-projects/${archivedProject.id}`,
+          { expectedRevision: 2, notes: "Cannot edit an archived Project" },
+          "PATCH",
+        ],
+        [
+          `/v1/task-projects/${archivedProject.id}/move/preview`,
+          { destinationListId: sourceList.id, expectedRevision: 2 },
+          "POST",
+        ],
+      ] as const) {
+        expect((await projectRequest(path, { body, method })).status).toBe(409);
+      }
+
+      const destinationList = await createProjectList("Project Completion Safety Destination");
+      const movable = await createProject(sourceList.id, "Project Completion Safety Subject");
+      await insertProjectTask(movable, "Project Completion Safety Task");
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${movable.id}/complete`, {
+            body: {
+              destinationListId: missingId,
+              expectedRevision: movable.revision,
+              resolution: "move_open_tasks",
+            },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${movable.id}/complete`, {
+            body: {
+              destinationListId: destinationList.id,
+              destinationProjectId: missingId,
+              expectedRevision: movable.revision,
+              resolution: "move_open_tasks",
+            },
+          })
+        ).status,
+      ).toBe(404);
+      const movedWithoutProject = await projectRequest(`/v1/task-projects/${movable.id}/complete`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: movable.revision,
+          resolution: "move_open_tasks",
+        },
+      });
+      expect(movedWithoutProject.status).toBe(200);
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${missingId}/archive`, {
+            body: { expectedRevision: 1 },
+          })
+        ).status,
+      ).toBe(404);
+    });
+
+    it("task organization moves and renames preserve destination name uniqueness", async () => {
+      const sourceList = await createProjectList("Project Collision Source");
+      const destinationList = await createProjectList("Project Collision Destination");
+      const sourceProject = await createProject(sourceList.id, "Collision Project");
+      await createProject(destinationList.id, "collision project");
+
+      const preview = await payload(
+        await projectRequest(`/v1/task-projects/${sourceProject.id}/move/preview`, {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: sourceProject.revision,
+          },
+        }),
+      );
+      const collidingMove = await projectRequest(`/v1/task-projects/${sourceProject.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: sourceProject.revision,
+          previewToken: preview.preview.previewToken,
+        },
+      });
+      expect(collidingMove.status).toBe(409);
+      expect((await payload(collidingMove)).error.details).toMatchObject({
+        code: "task_project_move_name_conflict",
+      });
+
+      const renameSource = await createProject(sourceList.id, "Rename Source Project");
+      const collidingRename = await projectRequest(`/v1/task-projects/${renameSource.id}`, {
+        body: { expectedRevision: renameSource.revision, name: "Collision Project" },
+        method: "PATCH",
+      });
+      expect(collidingRename.status).toBe(409);
+      expect((await payload(collidingRename)).error.details).toMatchObject({
+        code: "task_project_name_conflict",
+      });
+
+      const listMove = await projectRequest(`/v1/task-lists/${sourceList.id}/archive`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: sourceList.revision,
+          resolution: "move_active_contents",
+        },
+      });
+      expect(listMove.status).toBe(409);
+      expect((await payload(listMove)).error.details).toMatchObject({
+        code: "task_list_move_name_conflict",
+      });
+    });
+
+    it("task projects require an explicit open-Task completion resolution and apply every choice atomically", async () => {
+      const sourceList = await createProjectList("Project Completion Source");
+      const destinationList = await createProjectList("Project Completion Destination");
+      const destinationProject = await createProject(destinationList.id, "Destination Project");
+
+      const kept = await createProject(sourceList.id, "Keep Project Open");
+      const keptTask = await insertProjectTask(kept, "Keep Task Open");
+      const conflict = await projectRequest(`/v1/task-projects/${kept.id}/complete`, {
+        body: { expectedRevision: kept.revision },
+      });
+      expect(conflict.status).toBe(409);
+      expect((await payload(conflict)).error.details).toEqual({
+        code: "task_project_has_open_tasks",
+        currentRevisions: {
+          destinationList: null,
+          project: 1,
+          sourceList: 1,
+          task: null,
+        },
+        openContentCounts: { projects: 0, tasks: 1 },
+        resolutions: [
+          "complete_open_tasks",
+          "cancel_open_tasks",
+          "move_open_tasks",
+          "keep_project_open",
+        ],
+      });
+      const destinationConflict = await projectRequest(`/v1/task-projects/${kept.id}/complete`, {
+        body: { destinationListId: destinationList.id, expectedRevision: kept.revision },
+      });
+      expect(destinationConflict.status).toBe(409);
+      expect((await payload(destinationConflict)).error.details.currentRevisions).toMatchObject({
+        destinationList: destinationList.revision,
+        project: kept.revision,
+      });
+      const keepResponse = await projectRequest(`/v1/task-projects/${kept.id}/complete`, {
+        body: { expectedRevision: kept.revision, resolution: "keep_project_open" },
+      });
+      expect(keepResponse.status).toBe(200);
+      expect((await payload(keepResponse)).taskProject).toMatchObject({
+        lifecycle: "open",
+        revision: 1,
+      });
+      expect(
+        await database.db.select().from(reminders).where(eq(reminders.id, keptTask.id)),
+      ).toEqual([expect.objectContaining({ taskLifecycle: "open", taskRevision: 1 })]);
+
+      const completed = await createProject(sourceList.id, "Complete Tasks Project");
+      const completeTasks = await Promise.all([
+        insertProjectTask(completed, "Complete First Task"),
+        insertProjectTask(completed, "Complete Second Task"),
+      ]);
+      const completedResponse = await projectRequest(`/v1/task-projects/${completed.id}/complete`, {
+        body: { expectedRevision: completed.revision, resolution: "complete_open_tasks" },
+      });
+      expect(completedResponse.status).toBe(200);
+      expect((await payload(completedResponse)).taskProject).toMatchObject({
+        completedAt: "2026-07-13T12:00:00.000Z",
+        lifecycle: "completed",
+        revision: 2,
+      });
+      expect(
+        await database.db
+          .select({ lifecycle: reminders.taskLifecycle, revision: reminders.taskRevision })
+          .from(reminders)
+          .where(
+            inArray(
+              reminders.id,
+              completeTasks.map(({ id }) => id),
+            ),
+          ),
+      ).toEqual([
+        { lifecycle: "completed", revision: 2 },
+        { lifecycle: "completed", revision: 2 },
+      ]);
+      const completionAudit = await database.db
+        .select({ entityId: auditEvents.entityId, requestId: auditEvents.requestId })
+        .from(auditEvents)
+        .where(
+          and(
+            inArray(auditEvents.entityId, [completed.id, ...completeTasks.map(({ id }) => id)]),
+            inArray(auditEvents.action, ["task_project.completed", "task.completed_with_project"]),
+          ),
+        );
+      expect(completionAudit).toHaveLength(3);
+      expect(new Set(completionAudit.map(({ requestId }) => requestId)).size).toBe(1);
+
+      const cancelled = await createProject(sourceList.id, "Cancel Tasks Project");
+      const cancelledTask = await insertProjectTask(cancelled, "Cancel This Task");
+      const cancelResponse = await projectRequest(`/v1/task-projects/${cancelled.id}/complete`, {
+        body: { expectedRevision: cancelled.revision, resolution: "cancel_open_tasks" },
+      });
+      expect(cancelResponse.status).toBe(200);
+      expect((await payload(cancelResponse)).taskProject.lifecycle).toBe("completed");
+      expect(
+        await database.db.select().from(reminders).where(eq(reminders.id, cancelledTask.id)),
+      ).toEqual([
+        expect.objectContaining({
+          completedAt: null,
+          taskCancelledAt: new Date("2026-07-13T12:00:00.000Z"),
+          taskLifecycle: "cancelled",
+          taskRevision: 2,
+        }),
+      ]);
+
+      const moved = await createProject(sourceList.id, "Move Tasks Project");
+      const movedTask = await insertProjectTask(moved, "Move This Task");
+      const selfMove = await projectRequest(`/v1/task-projects/${moved.id}/complete`, {
+        body: {
+          destinationListId: sourceList.id,
+          destinationProjectId: moved.id,
+          expectedRevision: moved.revision,
+          resolution: "move_open_tasks",
+        },
+      });
+      expect(selfMove.status).toBe(409);
+      expect((await payload(selfMove)).error.details).toMatchObject({
+        code: "task_project_destination_unavailable",
+      });
+      const moveResponse = await projectRequest(`/v1/task-projects/${moved.id}/complete`, {
+        body: {
+          destinationListId: destinationList.id,
+          destinationProjectId: destinationProject.id,
+          expectedRevision: moved.revision,
+          resolution: "move_open_tasks",
+        },
+      });
+      expect(moveResponse.status).toBe(200);
+      expect((await payload(moveResponse)).taskProject.lifecycle).toBe("completed");
+      expect(
+        await database.db.select().from(reminders).where(eq(reminders.id, movedTask.id)),
+      ).toEqual([
+        expect.objectContaining({
+          status: "inbox",
+          taskLifecycle: "open",
+          taskListId: destinationList.id,
+          taskProjectId: destinationProject.id,
+          taskRevision: 2,
+        }),
+      ]);
+    });
+
+    it("task projects preview and atomically commit Project-plus-Task moves while rejecting drift and cross-user destinations", async () => {
+      const sourceList = await createProjectList("Project Move Source");
+      const destinationList = await createProjectList("Project Move Destination");
+      const project = await createProject(sourceList.id, "Atomic Move Project");
+      const firstTask = await insertProjectTask(project, "Atomic Move First");
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Project Move Other",
+          email: "task-project-move-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      const other = await payload(otherRegistration);
+      const [otherInbox] = await database.db
+        .select({ id: taskLists.id })
+        .from(taskLists)
+        .where(and(eq(taskLists.userId, other.user.id), eq(taskLists.kind, "inbox")));
+      if (!otherInbox) throw new Error("Other Project Move Inbox fixture was not created.");
+      expect(
+        (
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: { destinationListId: otherInbox.id, expectedRevision: project.revision },
+          })
+        ).status,
+      ).toBe(404);
+
+      const previewResponse = await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+        body: { destinationListId: destinationList.id, expectedRevision: project.revision },
+      });
+      expect(previewResponse.status).toBe(200);
+      const preview = (await payload(previewResponse)).preview;
+      expect(preview).toEqual({
+        affectedTaskCount: 1,
+        destinationListId: destinationList.id,
+        destinationListRevision: destinationList.revision,
+        previewToken: expect.any(String),
+        sourceListId: sourceList.id,
+        sourceListRevision: sourceList.revision,
+        taskProjectId: project.id,
+        taskProjectRevision: project.revision,
+      });
+
+      const forgedToken = createHash("sha256")
+        .update(
+          JSON.stringify({
+            affectedTaskCount: 1,
+            affectedTasks: [
+              {
+                deletedAt: null,
+                id: firstTask.id,
+                lifecycle: "open",
+                listId: sourceList.id,
+                projectId: project.id,
+                revision: 1,
+              },
+            ],
+            destinationListId: destinationList.id,
+            destinationListRevision: destinationList.revision,
+            sourceListId: sourceList.id,
+            sourceListRevision: sourceList.revision,
+            taskProjectId: project.id,
+            taskProjectRevision: project.revision,
+          }),
+        )
+        .digest("hex");
+      const forgedMove = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: project.revision,
+          previewToken: forgedToken,
+        },
+      });
+      expect(forgedMove.status).toBe(409);
+      expect((await payload(forgedMove)).error.details).toMatchObject({
+        code: "task_project_move_preview_stale",
+      });
+
+      const secondTask = await insertProjectTask(project, "Atomic Move Drift");
+      const stale = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: project.revision,
+          previewToken: preview.previewToken,
+        },
+      });
+      expect(stale.status).toBe(409);
+      expect((await payload(stale)).error.details).toMatchObject({
+        code: "task_project_move_preview_stale",
+        currentRevision: project.revision,
+      });
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, project.id)),
+      ).toEqual([{ listId: sourceList.id }]);
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId })
+          .from(reminders)
+          .where(inArray(reminders.id, [firstTask.id, secondTask.id])),
+      ).toEqual([{ listId: sourceList.id }, { listId: sourceList.id }]);
+
+      const freshPreview = (
+        await payload(
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: { destinationListId: destinationList.id, expectedRevision: project.revision },
+          }),
+        )
+      ).preview;
+      const movedResponse = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: project.revision,
+          previewToken: freshPreview.previewToken,
+        },
+      });
+      expect(movedResponse.status).toBe(200);
+      expect((await payload(movedResponse)).taskProject).toMatchObject({
+        listId: destinationList.id,
+        revision: 2,
+        source: { remoteId: project.id, revision: "2", sourceType: "task_project" },
+      });
+      expect(
+        await database.db
+          .select({
+            legacyStatus: reminders.status,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(inArray(reminders.id, [firstTask.id, secondTask.id])),
+      ).toEqual([
+        {
+          legacyStatus: "inbox",
+          listId: destinationList.id,
+          projectId: project.id,
+          revision: 2,
+        },
+        {
+          legacyStatus: "inbox",
+          listId: destinationList.id,
+          projectId: project.id,
+          revision: 2,
+        },
+      ]);
+      const moveAudit = await database.db
+        .select({
+          action: auditEvents.action,
+          entityId: auditEvents.entityId,
+          requestId: auditEvents.requestId,
+        })
+        .from(auditEvents)
+        .where(
+          and(
+            inArray(auditEvents.entityId, [project.id, firstTask.id, secondTask.id]),
+            inArray(auditEvents.action, ["task_project.moved", "task.moved_with_project"]),
+          ),
+        );
+      expect(moveAudit).toHaveLength(3);
+      expect(moveAudit.map(({ action }) => action).sort()).toEqual([
+        "task.moved_with_project",
+        "task.moved_with_project",
+        "task_project.moved",
+      ]);
+      expect(new Set(moveAudit.map(({ requestId }) => requestId)).size).toBe(1);
+
+      const staleRevision = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: sourceList.id,
+          expectedRevision: project.revision,
+          previewToken: freshPreview.previewToken,
+        },
+      });
+      expect(staleRevision.status).toBe(409);
+      expect((await payload(staleRevision)).error.details).toMatchObject({ currentRevision: 2 });
+    });
+
+    it("task project move previews reject same-count Task replacement", async () => {
+      const sourceList = await createProjectList("Exact Preview Source");
+      const destinationList = await createProjectList("Exact Preview Destination");
+      const replacementProject = await createProject(sourceList.id, "Exact Set Project");
+      const originalTask = await insertProjectTask(replacementProject, "Original Exact Set Task");
+      const replacementPreview = (
+        await payload(
+          await projectRequest(`/v1/task-projects/${replacementProject.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              expectedRevision: replacementProject.revision,
+            },
+          }),
+        )
+      ).preview;
+      await database.db.delete(reminders).where(eq(reminders.id, originalTask.id));
+      const replacementTask = await insertProjectTask(
+        replacementProject,
+        "Replacement Exact Set Task",
+      );
+      const replaced = await projectRequest(`/v1/task-projects/${replacementProject.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: replacementProject.revision,
+          previewToken: replacementPreview.previewToken,
+        },
+      });
+      expect(replaced.status).toBe(409);
+      expect((await payload(replaced)).error.details).toMatchObject({
+        code: "task_project_move_preview_stale",
+      });
+      expect(
+        await database.db
+          .select({ listId: reminders.taskListId })
+          .from(reminders)
+          .where(eq(reminders.id, replacementTask.id)),
+      ).toEqual([{ listId: sourceList.id }]);
+    });
+
+    it("task project move previews reject Task revision drift without a count change", async () => {
+      const sourceList = await createProjectList("Revision Preview Source");
+      const destinationList = await createProjectList("Revision Preview Destination");
+      const revisionProject = await createProject(sourceList.id, "Revision Drift Project");
+      const revisionTask = await insertProjectTask(revisionProject, "Revision Drift Task");
+      const revisionPreview = (
+        await payload(
+          await projectRequest(`/v1/task-projects/${revisionProject.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              expectedRevision: revisionProject.revision,
+            },
+          }),
+        )
+      ).preview;
+      await database.db
+        .update(reminders)
+        .set({ taskRevision: 2 })
+        .where(eq(reminders.id, revisionTask.id));
+      const revised = await projectRequest(`/v1/task-projects/${revisionProject.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: revisionProject.revision,
+          previewToken: revisionPreview.previewToken,
+        },
+      });
+      expect(revised.status).toBe(409);
+      expect((await payload(revised)).error.details).toMatchObject({
+        code: "task_project_move_preview_stale",
+      });
+    });
+
+    it("task project moves include soft-deleted Tasks and preserve their deletion state", async () => {
+      const sourceList = await createProjectList("Trashed Task Move Source");
+      const destinationList = await createProjectList("Trashed Task Move Destination");
+      const project = await createProject(sourceList.id, "Trashed Task Project");
+      const task = await insertProjectTask(project, "Trashed Project Task");
+      const deletedAt = new Date("2026-07-12T12:00:00.000Z");
+      await database.db.update(reminders).set({ deletedAt }).where(eq(reminders.id, task.id));
+
+      const previewResponse = await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+        body: { destinationListId: destinationList.id, expectedRevision: project.revision },
+      });
+      expect(previewResponse.status).toBe(200);
+      const preview = (await payload(previewResponse)).preview;
+      expect(preview.affectedTaskCount).toBe(1);
+      const moved = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: project.revision,
+          previewToken: preview.previewToken,
+        },
+      });
+      expect(moved.status).toBe(200);
+      expect(
+        await database.db
+          .select({
+            deletedAt: reminders.deletedAt,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          deletedAt,
+          listId: destinationList.id,
+          projectId: project.id,
+          revision: 2,
+        },
+      ]);
+    });
+
+    it("task project move rollback restores every Task and audit after a post-detach failure", async () => {
+      const sourceList = await createProjectList("Rollback Move Source");
+      const destinationList = await createProjectList("Rollback Move Destination");
+      const project = await createProject(sourceList.id, "Rollback Move Project");
+      const tasks = await Promise.all([
+        insertProjectTask(project, "Rollback First Task"),
+        insertProjectTask(project, "Rollback Second Task"),
+      ]);
+      const preview = (
+        await payload(
+          await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+            body: { destinationListId: destinationList.id, expectedRevision: project.revision },
+          }),
+        )
+      ).preview;
+      const auditBefore = await database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(inArray(auditEvents.entityId, [project.id, ...tasks.map(({ id }) => id)]));
+
+      await database.pool.query(`
+        CREATE OR REPLACE FUNCTION fail_rollback_task_project_move()
+        RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF OLD.name = 'Rollback Move Project' AND NEW.list_id IS DISTINCT FROM OLD.list_id THEN
+            RAISE EXCEPTION 'forced post-detach Project move failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$;
+        CREATE TRIGGER fail_rollback_task_project_move_trigger
+        BEFORE UPDATE OF list_id ON task_projects
+        FOR EACH ROW EXECUTE FUNCTION fail_rollback_task_project_move();
+      `);
+      try {
+        const failed = await projectRequest(`/v1/task-projects/${project.id}/move`, {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: project.revision,
+            previewToken: preview.previewToken,
+          },
+        });
+        expect(failed.status).toBe(500);
+      } finally {
+        await database.pool.query(`
+          DROP TRIGGER IF EXISTS fail_rollback_task_project_move_trigger ON task_projects;
+          DROP FUNCTION IF EXISTS fail_rollback_task_project_move();
+        `);
+      }
+
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, project.id)),
+      ).toEqual([{ listId: sourceList.id, revision: 1 }]);
+      expect(
+        await database.db
+          .select({
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(
+            inArray(
+              reminders.id,
+              tasks.map(({ id }) => id),
+            ),
+          ),
+      ).toEqual([
+        { listId: sourceList.id, projectId: project.id, revision: 1 },
+        { listId: sourceList.id, projectId: project.id, revision: 1 },
+      ]);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(inArray(auditEvents.entityId, [project.id, ...tasks.map(({ id }) => id)])),
+      ).toHaveLength(auditBefore.length);
+    });
+
+    it.each([
+      "move",
+      "complete",
+    ] as const)("task project %s and List move-active-contents archive avoid deadlock and preserve location", async (operation) => {
+      const sourceList = await createProjectList(`Concurrent ${operation} Source`);
+      const destinationList = await createProjectList(`Concurrent ${operation} Destination`);
+      const project = await createProject(sourceList.id, `Concurrent ${operation} Project`);
+      const task = await insertProjectTask(project, `Concurrent ${operation} Task`);
+      const preview =
+        operation === "move"
+          ? (
+              await payload(
+                await projectRequest(`/v1/task-projects/${project.id}/move/preview`, {
+                  body: {
+                    destinationListId: destinationList.id,
+                    expectedRevision: project.revision,
+                  },
+                }),
+              )
+            ).preview
+          : null;
+      const blocker = await database.pool.connect();
+      let archiveRequest: Promise<Response> | undefined;
+      let projectOperation: Promise<Response> | undefined;
+      let projectOperationResult: number | undefined;
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query(
+          "SELECT id FROM task_lists WHERE id = ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+          [[sourceList.id, destinationList.id]],
+        );
+        archiveRequest = projectRequest(`/v1/task-lists/${sourceList.id}/archive`, {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: sourceList.revision,
+            resolution: "move_active_contents",
+          },
+        });
+        void archiveRequest.catch(() => undefined);
+        await waitForTaskOrganizationLockWaiters(1);
+        projectOperation =
+          operation === "move"
+            ? projectRequest(`/v1/task-projects/${project.id}/move`, {
+                body: {
+                  destinationListId: destinationList.id,
+                  expectedRevision: project.revision,
+                  previewToken: preview.previewToken,
+                },
+              })
+            : projectRequest(`/v1/task-projects/${project.id}/complete`, {
+                body: { expectedRevision: project.revision, resolution: "complete_open_tasks" },
+              });
+        void projectOperation.catch(() => undefined);
+        await waitForTaskOrganizationLockWaiters(2);
+        await blocker.query("COMMIT");
+        const [archiveResponse, operationResponse] = await Promise.all([
+          archiveRequest,
+          projectOperation,
+        ]);
+        expect(archiveResponse.status).toBe(200);
+        expect([200, 409]).toContain(operationResponse.status);
+        projectOperationResult = operationResponse.status;
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+        await Promise.allSettled(
+          [archiveRequest, projectOperation].filter(
+            (candidate): candidate is Promise<Response> => candidate !== undefined,
+          ),
+        );
+      }
+      expect(
+        await database.db
+          .select({
+            lifecycle: taskProjects.lifecycle,
+            listId: taskProjects.listId,
+            revision: taskProjects.revision,
+          })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, project.id)),
+      ).toEqual([
+        {
+          lifecycle:
+            operation === "complete" && projectOperationResult === 200 ? "completed" : "open",
+          listId:
+            operation === "complete" && projectOperationResult === 200
+              ? sourceList.id
+              : destinationList.id,
+          revision: 2,
+        },
+      ]);
+      expect(
+        await database.db
+          .select({
+            lifecycle: reminders.taskLifecycle,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          lifecycle:
+            operation === "complete" && projectOperationResult === 200 ? "completed" : "open",
+          listId:
+            operation === "complete" && projectOperationResult === 200
+              ? sourceList.id
+              : destinationList.id,
+          projectId: project.id,
+          revision: 2,
+        },
+      ]);
+      expect(
+        await database.db
+          .select({ availability: taskLists.availability })
+          .from(taskLists)
+          .where(eq(taskLists.id, sourceList.id)),
+      ).toEqual([{ availability: "archived" }]);
+    }, 20_000);
+  });
+
+  describe("tasks", () => {
+    let taskAgentToken = "";
+    let taskInboxId = "";
+    let taskSessionToken = "";
+    let taskUserId = "";
+
+    async function taskRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Session ${taskSessionToken}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function taskAgentRequest(path: string, options: Omit<RequestOptions, "auth"> = {}) {
+      return scopedTaskAgentRequest(taskAgentToken, path, options);
+    }
+
+    async function scopedTaskAgentRequest(
+      token: string,
+      path: string,
+      options: Omit<RequestOptions, "auth"> = {},
+    ) {
+      const headers = new Headers(options.headers);
+      headers.set("authorization", `Bearer ${token}`);
+      const hasBody = options.body !== undefined || options.rawBody !== undefined;
+      if (hasBody) headers.set("content-type", "application/json");
+      return app.request(path, {
+        ...(hasBody ? { body: options.rawBody ?? JSON.stringify(options.body) } : {}),
+        headers,
+        method: options.method ?? (hasBody ? "POST" : "GET"),
+      });
+    }
+
+    async function createTaskList(name: string) {
+      const response = await taskRequest("/v1/task-lists", { body: { name } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskList as { id: string; revision: number };
+    }
+
+    async function createTaskProject(listId: string, name: string) {
+      const response = await taskRequest("/v1/task-projects", { body: { listId, name } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).taskProject as {
+        id: string;
+        listId: string;
+        revision: number;
+      };
+    }
+
+    async function createTask(title: string, body: Record<string, unknown> = {}) {
+      const response = await taskRequest("/v1/tasks", { body: { ...body, title } });
+      expect(response.status).toBe(201);
+      return (await payload(response)).task as {
+        cancelledAt: string | null;
+        completedAt: string | null;
+        deletedAt: string | null;
+        id: string;
+        legacyStatus: string | null;
+        lifecycle: "open" | "completed" | "cancelled";
+        listId: string;
+        projectId: string | null;
+        revision: number;
+        source: { remoteId: string; revision: string; sourceType: "task" };
+      };
+    }
+
+    async function waitForTaskCreateLockWaiters(expected: number) {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const result = await database.pool.query<{ count: string }>(`
+          SELECT count(*)::text AS count
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND wait_event_type = 'Lock'
+            AND (
+              query LIKE '%task_lists%'
+              OR query LIKE '%pg_advisory_xact_lock%'
+            )
+            AND query NOT LIKE '%pg_stat_activity%'
+        `);
+        if (Number(result.rows[0]?.count ?? 0) >= expected) return;
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+      throw new Error(`Expected at least ${expected} Task create lock waiter(s).`);
+    }
+
+    beforeAll(async () => {
+      const registration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Canonical Tasks User",
+          email: "canonical-tasks@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "America/New_York",
+        },
+      });
+      expect(registration.status).toBe(201);
+      const body = await payload(registration);
+      taskSessionToken = body.sessionToken;
+      taskUserId = body.user.id;
+      const lists = await payload(await taskRequest("/v1/task-lists"));
+      taskInboxId = lists.items.find((item: { kind: string }) => item.kind === "inbox").id;
+      const tokenResponse = await taskRequest("/v1/access-tokens", {
+        body: { name: "Canonical Tasks agent", scopes: ["tasks:read", "tasks:write"] },
+      });
+      expect(tokenResponse.status).toBe(201);
+      taskAgentToken = (await payload(tokenResponse)).token.token;
+    });
+
+    it("tasks create in Inbox or an explicit same-List Project with local provenance and idempotency", async () => {
+      const missingIdempotency = await taskAgentRequest("/v1/tasks", {
+        body: { title: "Agent requires replay safety" },
+      });
+      expect(missingIdempotency.status).toBe(400);
+
+      expect(
+        (
+          await taskRequest("/v1/tasks", {
+            body: {
+              source: {
+                accountId: null,
+                provider: "local",
+                remoteId: taskInboxId,
+                revision: "99",
+                sourceType: "task",
+              },
+              title: "Reject forged Task provenance",
+            },
+          })
+        ).status,
+      ).toBe(400);
+
+      const inboxTask = await createTask("Default Inbox Task");
+      expect(inboxTask).toMatchObject({
+        cancelledAt: null,
+        completedAt: null,
+        deletedAt: null,
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        listId: taskInboxId,
+        projectId: null,
+        revision: 1,
+        source: { remoteId: inboxTask.id, revision: "1", sourceType: "task" },
+      });
+      expect(
+        await database.db
+          .select({
+            legacyStatus: reminders.status,
+            lifecycle: reminders.taskLifecycle,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, inboxTask.id)),
+      ).toEqual([
+        {
+          legacyStatus: "inbox",
+          lifecycle: "open",
+          listId: taskInboxId,
+          projectId: null,
+          revision: 1,
+        },
+      ]);
+
+      const projectList = await createTaskList("Canonical Task Project List");
+      const project = await createTaskProject(projectList.id, "Canonical Task Project");
+      const idempotencyKey = "60000000-0000-4000-8000-000000000001";
+      const input = {
+        idempotencyKey,
+        listId: projectList.id,
+        projectId: project.id,
+        scheduledAt: "2026-07-13T18:00:00.000Z",
+        title: "Reserved open Task",
+      };
+      const createdResponse = await taskAgentRequest("/v1/tasks", { body: input });
+      expect(createdResponse.status).toBe(201);
+      const explicitTask = (await payload(createdResponse)).task;
+      expect(explicitTask).toMatchObject({
+        legacyStatus: "scheduled",
+        lifecycle: "open",
+        listId: projectList.id,
+        projectId: project.id,
+        revision: 1,
+        scheduledAt: "2026-07-13T18:00:00.000Z",
+      });
+      const replay = await taskAgentRequest("/v1/tasks", { body: input });
+      expect(replay.status).toBe(201);
+      expect((await payload(replay)).task.id).toBe(explicitTask.id);
+      const mismatch = await taskAgentRequest("/v1/tasks", {
+        body: { ...input, title: "Different replay payload" },
+      });
+      expect(mismatch.status).toBe(409);
+      expect((await payload(mismatch)).error.details).toMatchObject({
+        code: "task_idempotency_mismatch",
+      });
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(
+            and(eq(auditEvents.entityId, explicitTask.id), eq(auditEvents.action, "task.created")),
+          ),
+      ).toHaveLength(1);
+
+      const anotherList = await createTaskList("Canonical Task Other List");
+      const wrongLocation = await taskRequest("/v1/tasks", {
+        body: { listId: anotherList.id, projectId: project.id, title: "Cross-List Project Task" },
+      });
+      expect(wrongLocation.status).toBe(404);
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Other Canonical Tasks User",
+          email: "other-canonical-tasks@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "UTC",
+        },
+      });
+      const otherBody = await payload(otherRegistration);
+      const otherInbox = (
+        await database.db
+          .select({ id: taskLists.id })
+          .from(taskLists)
+          .where(and(eq(taskLists.userId, otherBody.user.id), eq(taskLists.kind, "inbox")))
+      )[0];
+      expect(
+        (
+          await taskRequest("/v1/tasks", {
+            body: { listId: otherInbox?.id, title: "Cross-user Task" },
+          })
+        ).status,
+      ).toBe(404);
+      expect((await taskRequest(`/v1/tasks/${explicitTask.id}`)).status).toBe(200);
+      expect(
+        (
+          await app.request(`/v1/tasks/${explicitTask.id}`, {
+            headers: { authorization: `Session ${otherBody.sessionToken}` },
+          })
+        ).status,
+      ).toBe(404);
+    });
+
+    it("tasks resolve idempotency before validating changed List and Project destinations", async () => {
+      const archivedList = await createTaskList("Replay Archived List");
+      const archivedListInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000011",
+        listId: archivedList.id,
+        title: "Replay after List archive",
+      };
+      const archivedListCreate = await taskAgentRequest("/v1/tasks", {
+        body: archivedListInput,
+      });
+      expect(archivedListCreate.status).toBe(201);
+      const archivedListTask = (await payload(archivedListCreate)).task;
+      expect(
+        (
+          await taskRequest(`/v1/task-lists/${archivedList.id}/archive`, {
+            body: {
+              expectedRevision: archivedList.revision,
+              resolution: "archive_contents_together",
+            },
+          })
+        ).status,
+      ).toBe(200);
+      const archivedListReplay = await taskAgentRequest("/v1/tasks", {
+        body: archivedListInput,
+      });
+      expect(archivedListReplay.status).toBe(201);
+      expect((await payload(archivedListReplay)).task.id).toBe(archivedListTask.id);
+      const archivedListMismatch = await taskAgentRequest("/v1/tasks", {
+        body: { ...archivedListInput, title: "Mismatched archived destination retry" },
+      });
+      expect(archivedListMismatch.status).toBe(409);
+      expect((await payload(archivedListMismatch)).error.details).toEqual({
+        code: "task_idempotency_mismatch",
+      });
+
+      const projectList = await createTaskList("Replay Project States");
+
+      const completedProject = await createTaskProject(projectList.id, "Replay Completed Project");
+      const completedInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000012",
+        listId: projectList.id,
+        projectId: completedProject.id,
+        title: "Replay after Project completion",
+      };
+      const completedCreate = await taskAgentRequest("/v1/tasks", { body: completedInput });
+      expect(completedCreate.status).toBe(201);
+      const completedTask = (await payload(completedCreate)).task;
+      expect(
+        (
+          await taskRequest(`/v1/task-projects/${completedProject.id}/complete`, {
+            body: {
+              expectedRevision: completedProject.revision,
+              resolution: "complete_open_tasks",
+            },
+          })
+        ).status,
+      ).toBe(200);
+      const completedReplay = await taskAgentRequest("/v1/tasks", { body: completedInput });
+      expect(completedReplay.status).toBe(201);
+      expect((await payload(completedReplay)).task).toMatchObject({
+        id: completedTask.id,
+        lifecycle: "completed",
+        revision: 2,
+      });
+
+      const archivedProject = await createTaskProject(projectList.id, "Replay Archived Project");
+      const archivedProjectInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000013",
+        listId: projectList.id,
+        projectId: archivedProject.id,
+        title: "Replay after Project archive",
+      };
+      const archivedProjectCreate = await taskAgentRequest("/v1/tasks", {
+        body: archivedProjectInput,
+      });
+      expect(archivedProjectCreate.status).toBe(201);
+      const archivedProjectTask = (await payload(archivedProjectCreate)).task;
+      expect(
+        (
+          await taskRequest(`/v1/task-projects/${archivedProject.id}/archive`, {
+            body: { expectedRevision: archivedProject.revision },
+          })
+        ).status,
+      ).toBe(200);
+      const archivedProjectReplay = await taskAgentRequest("/v1/tasks", {
+        body: archivedProjectInput,
+      });
+      expect(archivedProjectReplay.status).toBe(201);
+      expect((await payload(archivedProjectReplay)).task.id).toBe(archivedProjectTask.id);
+
+      const moveSourceList = await createTaskList("Replay Project Move Source");
+      const moveDestinationList = await createTaskList("Replay Project Move Destination");
+      const movedProject = await createTaskProject(moveSourceList.id, "Replay Moved Project");
+      const movedInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000014",
+        projectId: movedProject.id,
+        title: "Replay after Project move",
+      };
+      const movedCreate = await taskAgentRequest("/v1/tasks", { body: movedInput });
+      expect(movedCreate.status).toBe(201);
+      const movedTask = (await payload(movedCreate)).task;
+      const movePreview = (
+        await payload(
+          await taskRequest(`/v1/task-projects/${movedProject.id}/move/preview`, {
+            body: {
+              destinationListId: moveDestinationList.id,
+              expectedRevision: movedProject.revision,
+            },
+          }),
+        )
+      ).preview;
+      expect(
+        (
+          await taskRequest(`/v1/task-projects/${movedProject.id}/move`, {
+            body: {
+              destinationListId: moveDestinationList.id,
+              expectedRevision: movedProject.revision,
+              previewToken: movePreview.previewToken,
+            },
+          })
+        ).status,
+      ).toBe(200);
+      const movedReplay = await taskAgentRequest("/v1/tasks", { body: movedInput });
+      expect(movedReplay.status).toBe(201);
+      expect((await payload(movedReplay)).task).toMatchObject({
+        id: movedTask.id,
+        listId: moveDestinationList.id,
+        revision: 2,
+      });
+
+      const deletedProject = await createTaskProject(projectList.id, "Replay Deleted Project");
+      const deletedProjectInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000015",
+        listId: projectList.id,
+        projectId: deletedProject.id,
+        title: "Replay after Project deletion",
+      };
+      const deletedProjectCreate = await taskAgentRequest("/v1/tasks", {
+        body: deletedProjectInput,
+      });
+      expect(deletedProjectCreate.status).toBe(201);
+      const deletedProjectTask = (await payload(deletedProjectCreate)).task;
+      await database.db
+        .update(taskProjects)
+        .set({ deletedAt: new Date("2026-07-13T12:00:00.000Z") })
+        .where(eq(taskProjects.id, deletedProject.id));
+      const deletedProjectReplay = await taskAgentRequest("/v1/tasks", {
+        body: deletedProjectInput,
+      });
+      expect(deletedProjectReplay.status).toBe(201);
+      expect((await payload(deletedProjectReplay)).task.id).toBe(deletedProjectTask.id);
+      const deletedProjectMismatch = await taskAgentRequest("/v1/tasks", {
+        body: { ...deletedProjectInput, title: "Mismatched deleted Project retry" },
+      });
+      expect(deletedProjectMismatch.status).toBe(409);
+      expect((await payload(deletedProjectMismatch)).error.details).toEqual({
+        code: "task_idempotency_mismatch",
+      });
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Task Replay Other User",
+          email: "task-replay-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "UTC",
+        },
+      });
+      expect(otherRegistration.status).toBe(201);
+      const otherSession = (await payload(otherRegistration)).sessionToken;
+      const crossUserKeyReuse = await app.request("/v1/tasks", {
+        body: JSON.stringify({
+          idempotencyKey: archivedListInput.idempotencyKey,
+          title: "Other user owns an independent key namespace",
+        }),
+        headers: {
+          authorization: `Session ${otherSession}`,
+          "content-type": "application/json",
+        },
+        method: "POST",
+      });
+      expect(crossUserKeyReuse.status).toBe(201);
+      expect((await payload(crossUserKeyReuse)).task.id).not.toBe(archivedListTask.id);
+    });
+
+    it("tasks serialize concurrent idempotency before destination archive or terminal changes", async () => {
+      const archivedList = await createTaskList("Concurrent Replay Archive List");
+      const exactInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000021",
+        listId: archivedList.id,
+        title: "Concurrent exact replay",
+      };
+      const archiveBlocker = await database.pool.connect();
+      let archiveRequest: Promise<Response> | undefined;
+      let firstExact: Promise<Response> | undefined;
+      let secondExact: Promise<Response> | undefined;
+      try {
+        await archiveBlocker.query("BEGIN");
+        await archiveBlocker.query("SELECT id FROM task_lists WHERE id = $1 FOR UPDATE", [
+          archivedList.id,
+        ]);
+        firstExact = taskAgentRequest("/v1/tasks", { body: exactInput });
+        void firstExact.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(1);
+        archiveRequest = taskRequest(`/v1/task-lists/${archivedList.id}/archive`, {
+          body: {
+            expectedRevision: archivedList.revision,
+            resolution: "archive_contents_together",
+          },
+        });
+        void archiveRequest.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(2);
+        secondExact = taskAgentRequest("/v1/tasks", { body: exactInput });
+        void secondExact.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(3);
+        await archiveBlocker.query("COMMIT");
+        const [firstResponse, archiveResponse, secondResponse] = await Promise.all([
+          firstExact,
+          archiveRequest,
+          secondExact,
+        ]);
+        expect(firstResponse.status).toBe(201);
+        expect(archiveResponse.status).toBe(200);
+        expect(secondResponse.status).toBe(201);
+        expect((await payload(secondResponse)).task.id).toBe(
+          (await payload(firstResponse)).task.id,
+        );
+      } finally {
+        await archiveBlocker.query("ROLLBACK");
+        archiveBlocker.release();
+        await Promise.allSettled(
+          [archiveRequest, firstExact, secondExact].filter(
+            (candidate): candidate is Promise<Response> => candidate !== undefined,
+          ),
+        );
+      }
+      const exactRows = await database.db
+        .select({ id: reminders.id })
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.userId, taskUserId),
+            eq(reminders.taskCreateIdempotencyKey, exactInput.idempotencyKey),
+          ),
+        );
+      expect(exactRows).toHaveLength(1);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(
+            and(
+              eq(auditEvents.entityId, exactRows[0]?.id as string),
+              eq(auditEvents.action, "task.created"),
+            ),
+          ),
+      ).toHaveLength(1);
+
+      const projectList = await createTaskList("Concurrent Replay Terminal List");
+      const project = await createTaskProject(projectList.id, "Concurrent Replay Terminal Project");
+      const firstInput = {
+        idempotencyKey: "60000000-0000-4000-8000-000000000022",
+        listId: projectList.id,
+        projectId: project.id,
+        title: "Concurrent original payload",
+      };
+      const mismatchedInput = { ...firstInput, title: "Concurrent mismatched payload" };
+      const terminalBlocker = await database.pool.connect();
+      let completeRequest: Promise<Response> | undefined;
+      let firstCreate: Promise<Response> | undefined;
+      let mismatchedCreate: Promise<Response> | undefined;
+      try {
+        await terminalBlocker.query("BEGIN");
+        await terminalBlocker.query("SELECT id FROM task_lists WHERE id = $1 FOR UPDATE", [
+          projectList.id,
+        ]);
+        firstCreate = taskAgentRequest("/v1/tasks", { body: firstInput });
+        void firstCreate.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(1);
+        completeRequest = taskRequest(`/v1/task-projects/${project.id}/complete`, {
+          body: { expectedRevision: project.revision, resolution: "complete_open_tasks" },
+        });
+        void completeRequest.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(2);
+        mismatchedCreate = taskAgentRequest("/v1/tasks", { body: mismatchedInput });
+        void mismatchedCreate.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(3);
+        await terminalBlocker.query("COMMIT");
+        const [firstResponse, completeResponse, mismatchResponse] = await Promise.all([
+          firstCreate,
+          completeRequest,
+          mismatchedCreate,
+        ]);
+        expect(firstResponse.status).toBe(201);
+        expect(completeResponse.status).toBe(200);
+        expect(mismatchResponse.status).toBe(409);
+        expect((await payload(mismatchResponse)).error.details).toEqual({
+          code: "task_idempotency_mismatch",
+        });
+      } finally {
+        await terminalBlocker.query("ROLLBACK");
+        terminalBlocker.release();
+        await Promise.allSettled(
+          [completeRequest, firstCreate, mismatchedCreate].filter(
+            (candidate): candidate is Promise<Response> => candidate !== undefined,
+          ),
+        );
+      }
+      const mismatchRows = await database.db
+        .select({ id: reminders.id })
+        .from(reminders)
+        .where(
+          and(
+            eq(reminders.userId, taskUserId),
+            eq(reminders.taskCreateIdempotencyKey, firstInput.idempotencyKey),
+          ),
+        );
+      expect(mismatchRows).toHaveLength(1);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(
+            and(
+              eq(auditEvents.entityId, mismatchRows[0]?.id as string),
+              eq(auditEvents.action, "task.created"),
+            ),
+          ),
+      ).toHaveLength(1);
+    }, 20_000);
+
+    it("tasks preserve legacy metadata until canonical timing changes and query canonical views", async () => {
+      const [legacyTask] = await database.db
+        .insert(reminders)
+        .values({
+          kind: "task",
+          status: "next",
+          taskLifecycle: "open",
+          taskListId: taskInboxId,
+          taskRevision: 1,
+          title: "Migrated next metadata",
+          userId: taskUserId,
+        })
+        .returning();
+      if (!legacyTask) throw new Error("Legacy Task fixture was not created.");
+
+      const contentOnly = await taskAgentRequest(`/v1/tasks/${legacyTask.id}`, {
+        body: { expectedRevision: 1, title: "Content-only edit" },
+        method: "PATCH",
+      });
+      expect(contentOnly.status).toBe(200);
+      expect((await payload(contentOnly)).task).toMatchObject({
+        legacyStatus: "next",
+        lifecycle: "open",
+        revision: 2,
+      });
+      const timingEdit = await taskAgentRequest(`/v1/tasks/${legacyTask.id}`, {
+        body: { expectedRevision: 2, scheduledAt: "2026-07-13T19:00:00.000Z" },
+        method: "PATCH",
+      });
+      expect(timingEdit.status).toBe(200);
+      expect((await payload(timingEdit)).task).toMatchObject({
+        dueAt: null,
+        legacyStatus: "scheduled",
+        lifecycle: "open",
+        revision: 3,
+        scheduledAt: "2026-07-13T19:00:00.000Z",
+      });
+      const dueEdit = await taskAgentRequest(`/v1/tasks/${legacyTask.id}`, {
+        body: { dueAt: "2026-07-15T16:00:00.000Z", expectedRevision: 3 },
+        method: "PATCH",
+      });
+      expect(dueEdit.status).toBe(200);
+      expect((await payload(dueEdit)).task).toMatchObject({
+        dueAt: "2026-07-15T16:00:00.000Z",
+        legacyStatus: "scheduled",
+        revision: 4,
+        scheduledAt: "2026-07-13T19:00:00.000Z",
+      });
+
+      const todayTask = await createTask("Today due Task", {
+        dueAt: "2026-07-13T16:00:00.000Z",
+      });
+      const upcomingTask = await createTask("Upcoming scheduled Task", {
+        scheduledAt: "2026-07-14T16:00:00.000Z",
+      });
+      const inboxView = await payload(await taskRequest(`/v1/tasks?listId=${taskInboxId}`));
+      expect(inboxView.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: todayTask.id, listId: taskInboxId }),
+        ]),
+      );
+      const todayView = await payload(await taskRequest("/v1/tasks?view=today"));
+      expect(todayView.items.map(({ id }: { id: string }) => id)).toContain(todayTask.id);
+      const upcomingView = await payload(await taskRequest("/v1/tasks?view=upcoming"));
+      expect(upcomingView.items.map(({ id }: { id: string }) => id)).toContain(upcomingTask.id);
+      const scheduledView = await payload(await taskRequest("/v1/tasks?view=scheduled"));
+      expect(scheduledView.items).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ id: legacyTask.id, lifecycle: "open" }),
+          expect.objectContaining({ id: upcomingTask.id, lifecycle: "open" }),
+        ]),
+      );
+
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${todayTask.id}`, {
+            body: { title: "Missing revision" },
+            method: "PATCH",
+          })
+        ).status,
+      ).toBe(400);
+      const auditBefore = await database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, todayTask.id));
+      const race = await Promise.all([
+        taskAgentRequest(`/v1/tasks/${todayTask.id}`, {
+          body: { expectedRevision: 1, title: "CAS winner A" },
+          method: "PATCH",
+        }),
+        taskAgentRequest(`/v1/tasks/${todayTask.id}`, {
+          body: { expectedRevision: 1, title: "CAS winner B" },
+          method: "PATCH",
+        }),
+      ]);
+      expect(race.map(({ status }) => status).sort()).toEqual([200, 409]);
+      expect(
+        await database.db
+          .select({ revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, todayTask.id)),
+      ).toEqual([{ revision: 2 }]);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(eq(auditEvents.entityId, todayTask.id)),
+      ).toHaveLength(auditBefore.length + 1);
+      const staleHuman = await taskRequest(`/v1/tasks/${todayTask.id}`, {
+        body: { expectedRevision: 1, title: "Stale human write" },
+        method: "PATCH",
+      });
+      expect(staleHuman.status).toBe(409);
+      expect((await payload(staleHuman)).error.details).toEqual({ currentRevision: 2 });
+      expect(
+        await database.db
+          .select({ revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, todayTask.id)),
+      ).toEqual([{ revision: 2 }]);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(eq(auditEvents.entityId, todayTask.id)),
+      ).toHaveLength(auditBefore.length + 1);
+    });
+
+    it("tasks combine canonical placement, timing, text, and cursor filters", async () => {
+      const list = await createTaskList("Filtered Task List");
+      const project = await createTaskProject(list.id, "Filtered Task Project");
+      const first = await createTask("Quarterly review alpha", {
+        dueAt: "2026-07-15T14:00:00.000Z",
+        listId: list.id,
+        notes: "Include the metrics packet",
+        projectId: project.id,
+        scheduledAt: "2026-07-14T14:00:00.000Z",
+      });
+      const second = await createTask("Quarterly review beta", {
+        dueAt: "2026-07-16T14:00:00.000Z",
+        listId: list.id,
+        projectId: project.id,
+        scheduledAt: "2026-07-15T14:00:00.000Z",
+        why: "Keep the quarterly review moving",
+      });
+      await createTask("Quarterly review outside range", {
+        dueAt: "2026-07-20T14:00:00.000Z",
+        listId: list.id,
+        projectId: project.id,
+        scheduledAt: "2026-07-19T14:00:00.000Z",
+      });
+
+      const query = new URLSearchParams({
+        dueAfter: "2026-07-14T00:00:00.000Z",
+        dueBefore: "2026-07-17T00:00:00.000Z",
+        limit: "1",
+        listId: list.id,
+        projectId: project.id,
+        query: "quarterly review",
+        scheduledAfter: "2026-07-13T00:00:00.000Z",
+        scheduledBefore: "2026-07-16T00:00:00.000Z",
+      });
+      const firstPage = await payload(await taskRequest(`/v1/tasks?${query.toString()}`));
+      expect(firstPage.items).toHaveLength(1);
+      expect(firstPage.nextCursor).toEqual(expect.any(String));
+
+      query.set("cursor", firstPage.nextCursor);
+      const secondPage = await payload(await taskRequest(`/v1/tasks?${query.toString()}`));
+      expect(secondPage.items).toHaveLength(1);
+      expect(secondPage.nextCursor).toBeNull();
+      expect(
+        new Set([...firstPage.items, ...secondPage.items].map(({ id }: { id: string }) => id)),
+      ).toEqual(new Set([first.id, second.id]));
+    });
+
+    it("tasks treat percent, underscore, and backslash as literal search characters", async () => {
+      const literalPercent = await createTask("Progress is 100% complete");
+      await createTask("Progress is 100 percent complete");
+      const literalUnderscore = await createTask("Release slot_a is ready");
+      await createTask("Release slotXa is ready");
+      const literalBackslash = await createTask("Archive path C:\\temp is ready");
+      await createTask("Archive path C:Xtemp is ready");
+
+      for (const [search, expectedId] of [
+        ["100%", literalPercent.id],
+        ["slot_a", literalUnderscore.id],
+        ["C:\\temp", literalBackslash.id],
+      ] as const) {
+        const query = new URLSearchParams({ query: search });
+        const result = await payload(await taskRequest(`/v1/tasks?${query.toString()}`));
+        expect(result.items.map(({ id }: { id: string }) => id)).toEqual([expectedId]);
+      }
+    });
+
+    it("tasks preserve safe placement and explicit optional-field updates", async () => {
+      const missingId = "99999999-9999-4999-8999-999999999999";
+      const list = await createTaskList("Task Placement Safety");
+      const task = await createTask("Task optional fields", {
+        dueAt: "2026-07-16T14:00:00.000Z",
+        listId: list.id,
+        scheduledAt: "2026-07-15T14:00:00.000Z",
+      });
+      const updatedResponse = await taskRequest(`/v1/tasks/${task.id}`, {
+        body: {
+          dueAt: null,
+          estimateMinutes: 30,
+          notes: "All optional material is deliberate",
+          priority: "high",
+          scheduledAt: null,
+          tags: ["review"],
+          timezone: "America/New_York",
+          why: "Protect the public update contract",
+        },
+        method: "PATCH",
+      });
+      expect(updatedResponse.status).toBe(200);
+      const updated = (await payload(updatedResponse)).task as Task;
+      expect(updated).toMatchObject({
+        dueAt: null,
+        estimateMinutes: 30,
+        notes: "All optional material is deliberate",
+        priority: "high",
+        revision: 2,
+        scheduledAt: null,
+        tags: ["review"],
+        timezone: "America/New_York",
+        why: "Protect the public update contract",
+      });
+
+      const samePreview = await payload(
+        await taskRequest(`/v1/tasks/${task.id}/move/preview`, {
+          body: { destinationListId: list.id, expectedRevision: updated.revision },
+        }),
+      );
+      const sameMove = await taskRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: list.id,
+          expectedRevision: updated.revision,
+          previewToken: samePreview.preview.previewToken,
+        },
+      });
+      expect(sameMove.status).toBe(409);
+      expect((await payload(sameMove)).error.details).toMatchObject({
+        code: "task_destination_unavailable",
+      });
+      expect(
+        (
+          await taskRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: { destinationListId: missingId, expectedRevision: updated.revision },
+          })
+        ).status,
+      ).toBe(404);
+
+      expect(
+        (
+          await taskRequest(`/v1/tasks/${missingId}/restore`, {
+            body: { expectedRevision: 1 },
+          })
+        ).status,
+      ).toBe(404);
+      const project = await createTaskProject(list.id, "Task Restore Placement Project");
+      const projectTask = await createTask("Task restored to its Project", {
+        listId: list.id,
+        projectId: project.id,
+      });
+      const trashedProjectTask = await payload(
+        await taskRequest(`/v1/tasks/${projectTask.id}/trash`, {
+          body: { expectedRevision: projectTask.revision },
+        }),
+      );
+      const restoredProjectTask = await taskRequest(`/v1/tasks/${projectTask.id}/restore`, {
+        body: { expectedRevision: trashedProjectTask.task.revision },
+      });
+      expect(restoredProjectTask.status).toBe(200);
+      expect((await payload(restoredProjectTask)).task.projectId).toBe(project.id);
+      expect(
+        (
+          await taskRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: {
+              destinationListId: list.id,
+              destinationProjectId: missingId,
+              expectedRevision: updated.revision,
+            },
+          })
+        ).status,
+      ).toBe(404);
+
+      expect(
+        (
+          await taskRequest("/v1/tasks", {
+            body: { listId: missingId, title: "Task cannot use a missing List" },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await taskRequest("/v1/tasks", {
+            body: {
+              listId: list.id,
+              projectId: missingId,
+              title: "Task cannot use a missing Project",
+            },
+          })
+        ).status,
+      ).toBe(404);
+      expect(
+        (
+          await taskRequest(`/v1/tasks/${task.id}/reopen`, {
+            body: { expectedRevision: updated.revision },
+          })
+        ).status,
+      ).toBe(409);
+    });
+
+    it("tasks hide archived-List contents from ordinary views but allow owned explicit List inspection", async () => {
+      const archivedList = await createTaskList("Archived View Management List");
+      const openTask = await createTask("Archived List open timing Task", {
+        dueAt: "2026-07-13T16:00:00.000Z",
+        listId: archivedList.id,
+        scheduledAt: "2026-07-14T16:00:00.000Z",
+      });
+      const completedTask = await createTask("Archived List completed Task", {
+        lifecycle: "completed",
+        listId: archivedList.id,
+      });
+      const cancelledTask = await createTask("Archived List cancelled Task", {
+        lifecycle: "cancelled",
+        listId: archivedList.id,
+      });
+      expect(
+        (
+          await taskRequest(`/v1/task-lists/${archivedList.id}/archive`, {
+            body: {
+              expectedRevision: archivedList.revision,
+              resolution: "archive_contents_together",
+            },
+          })
+        ).status,
+      ).toBe(200);
+
+      const archivedIds = [openTask.id, completedTask.id, cancelledTask.id];
+      for (const [path, hiddenIds] of [
+        ["/v1/tasks", archivedIds],
+        ["/v1/tasks?view=today", [openTask.id]],
+        ["/v1/tasks?view=upcoming", [openTask.id]],
+        ["/v1/tasks?view=scheduled", [openTask.id]],
+        ["/v1/tasks?view=completed", [completedTask.id]],
+        ["/v1/tasks?view=cancelled", [cancelledTask.id]],
+      ] as const) {
+        const result = await payload(await taskRequest(path));
+        const resultIds = result.items.map(({ id }: { id: string }) => id);
+        for (const hiddenId of hiddenIds) expect(resultIds).not.toContain(hiddenId);
+      }
+
+      const explicitList = await payload(await taskRequest(`/v1/tasks?listId=${archivedList.id}`));
+      expect(explicitList.items.map(({ id }: { id: string }) => id)).toEqual(
+        expect.arrayContaining(archivedIds),
+      );
+
+      const otherRegistration = await request("/v1/auth/register", {
+        auth: "none",
+        body: {
+          displayName: "Archived List Other User",
+          email: "archived-list-other@example.com",
+          password: "LocalTestOnly123!",
+          planningTimezone: "UTC",
+        },
+      });
+      expect(otherRegistration.status).toBe(201);
+      const otherSession = (await payload(otherRegistration)).sessionToken;
+      const crossUserInspection = await app.request(`/v1/tasks?listId=${archivedList.id}`, {
+        headers: { authorization: `Session ${otherSession}` },
+      });
+      expect(crossUserInspection.status).toBe(200);
+      expect((await payload(crossUserInspection)).items).toEqual([]);
+    });
+
+    it("tasks require an explicit Project and its parent List to remain active and open", async () => {
+      const archivedParent = await createTaskList("Explicit Project Archived Parent");
+      const archivedParentProject = await createTaskProject(
+        archivedParent.id,
+        "Explicit Project Under Archived Parent",
+      );
+      const archivedParentTask = await createTask("Task under archived Project parent", {
+        listId: archivedParent.id,
+        projectId: archivedParentProject.id,
+      });
+      expect(
+        (
+          await taskRequest(`/v1/task-lists/${archivedParent.id}/archive`, {
+            body: {
+              expectedRevision: archivedParent.revision,
+              resolution: "archive_contents_together",
+            },
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (await payload(await taskRequest(`/v1/tasks?projectId=${archivedParentProject.id}`))).items,
+      ).toEqual([]);
+      expect(
+        (await payload(await taskRequest(`/v1/tasks?listId=${archivedParent.id}`))).items.map(
+          ({ id }: { id: string }) => id,
+        ),
+      ).toContain(archivedParentTask.id);
+
+      for (const terminalAction of ["cancel", "archive"] as const) {
+        const list = await createTaskList(`Explicit ${terminalAction} Project List`);
+        const project = await createTaskProject(list.id, `Explicit ${terminalAction} Project`);
+        const task = await createTask(`Task under ${terminalAction} Project`, {
+          listId: list.id,
+          projectId: project.id,
+        });
+        expect(
+          (
+            await taskRequest(`/v1/task-projects/${project.id}/${terminalAction}`, {
+              body: { expectedRevision: project.revision },
+            })
+          ).status,
+        ).toBe(200);
+        expect(
+          (await payload(await taskRequest(`/v1/tasks?projectId=${project.id}`))).items,
+        ).toEqual([]);
+        expect(
+          (await payload(await taskRequest(`/v1/tasks?listId=${list.id}`))).items.map(
+            ({ id }: { id: string }) => id,
+          ),
+        ).toContain(task.id);
+      }
+    });
+
+    it("tasks use focused revision-safe complete, reopen, and cancel transitions with canonical audits", async () => {
+      const task = await createTask("Lifecycle Task");
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${task.id}/complete`, {
+            body: {},
+          })
+        ).status,
+      ).toBe(400);
+      const completed = await taskAgentRequest(`/v1/tasks/${task.id}/complete`, {
+        body: { expectedRevision: 1 },
+      });
+      expect(completed.status).toBe(200);
+      expect((await payload(completed)).task).toMatchObject({
+        cancelledAt: null,
+        completedAt: "2026-07-13T12:00:00.000Z",
+        legacyStatus: "completed",
+        lifecycle: "completed",
+        revision: 2,
+        source: { revision: "2" },
+      });
+      expect(
+        await database.db
+          .select({
+            cancelledAt: reminders.taskCancelledAt,
+            completedAt: reminders.completedAt,
+            legacyStatus: reminders.status,
+            lifecycle: reminders.taskLifecycle,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          cancelledAt: null,
+          completedAt: new Date("2026-07-13T12:00:00.000Z"),
+          legacyStatus: "completed",
+          lifecycle: "completed",
+          revision: 2,
+        },
+      ]);
+      expect(
+        (await payload(await taskRequest("/v1/tasks?view=completed"))).items.map(
+          ({ id }: { id: string }) => id,
+        ),
+      ).toContain(task.id);
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${task.id}/cancel`, {
+            body: { expectedRevision: 2 },
+          })
+        ).status,
+      ).toBe(409);
+      const reopened = await taskAgentRequest(`/v1/tasks/${task.id}/reopen`, {
+        body: { expectedRevision: 2 },
+      });
+      expect(reopened.status).toBe(200);
+      expect((await payload(reopened)).task).toMatchObject({
+        cancelledAt: null,
+        completedAt: null,
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        revision: 3,
+      });
+      expect(
+        await database.db
+          .select({
+            cancelledAt: reminders.taskCancelledAt,
+            completedAt: reminders.completedAt,
+            legacyStatus: reminders.status,
+            lifecycle: reminders.taskLifecycle,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          cancelledAt: null,
+          completedAt: null,
+          legacyStatus: "inbox",
+          lifecycle: "open",
+          revision: 3,
+        },
+      ]);
+      const cancelled = await taskAgentRequest(`/v1/tasks/${task.id}/cancel`, {
+        body: { expectedRevision: 3 },
+      });
+      expect(cancelled.status).toBe(200);
+      expect((await payload(cancelled)).task).toMatchObject({
+        cancelledAt: "2026-07-13T12:00:00.000Z",
+        completedAt: null,
+        legacyStatus: "cancelled",
+        lifecycle: "cancelled",
+        revision: 4,
+      });
+      expect(
+        await database.db
+          .select({
+            cancelledAt: reminders.taskCancelledAt,
+            completedAt: reminders.completedAt,
+            legacyStatus: reminders.status,
+            lifecycle: reminders.taskLifecycle,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          cancelledAt: new Date("2026-07-13T12:00:00.000Z"),
+          completedAt: null,
+          legacyStatus: "cancelled",
+          lifecycle: "cancelled",
+          revision: 4,
+        },
+      ]);
+      expect(
+        (await payload(await taskRequest("/v1/tasks?view=cancelled"))).items.map(
+          ({ id }: { id: string }) => id,
+        ),
+      ).toContain(task.id);
+      const reopenedCancelled = await taskAgentRequest(`/v1/tasks/${task.id}/reopen`, {
+        body: { expectedRevision: 4 },
+      });
+      expect(reopenedCancelled.status).toBe(200);
+      expect((await payload(reopenedCancelled)).task).toMatchObject({
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        revision: 5,
+      });
+      const audits = await database.db
+        .select({ action: auditEvents.action, after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, task.id));
+      expect(audits.map(({ action }) => action).sort()).toEqual([
+        "task.cancelled",
+        "task.completed",
+        "task.created",
+        "task.reopened",
+        "task.reopened",
+      ]);
+      const finalAudit = audits.find(
+        ({ after }) => (after as { revision?: number } | null)?.revision === 5,
+      );
+      expect(finalAudit?.after).toMatchObject({
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        revision: 5,
+        source: { remoteId: task.id, revision: "5", sourceType: "task" },
+      });
+    });
+
+    it("task audit snapshots do not disclose Task intent or container names to audit-only tokens", async () => {
+      const secretListName = "Private Client Planning";
+      const secretProjectName = "Sensitive Acquisition Outcome";
+      const secretTaskWhy = "Because this reveals a confidential motivation";
+      const list = await createTaskList(secretListName);
+      const project = await createTaskProject(list.id, secretProjectName);
+      const task = await createTask("Confidential executable action", {
+        listId: list.id,
+        projectId: project.id,
+        why: secretTaskWhy,
+      });
+      const auditTokenResponse = await taskRequest("/v1/access-tokens", {
+        body: { name: "Task audit metadata only", scopes: ["audit:read"] },
+      });
+      expect(auditTokenResponse.status).toBe(201);
+      const auditToken = (await payload(auditTokenResponse)).token.token as string;
+
+      const auditResponse = await scopedTaskAgentRequest(auditToken, "/v1/audit?limit=100");
+      expect(auditResponse.status).toBe(200);
+      const events = (await payload(auditResponse)).events.filter(
+        ({ entityId }: { entityId: string }) => [list.id, project.id, task.id].includes(entityId),
+      );
+      expect(events).toHaveLength(3);
+      expect(
+        events.find(({ entityId }: { entityId: string }) => entityId === list.id)?.after,
+      ).toMatchObject({
+        name: "[redacted]",
+      });
+      expect(
+        events.find(({ entityId }: { entityId: string }) => entityId === project.id)?.after,
+      ).toMatchObject({ name: "[redacted]" });
+      expect(
+        events.find(({ entityId }: { entityId: string }) => entityId === task.id)?.after,
+      ).toMatchObject({
+        title: "[redacted]",
+        why: "[redacted]",
+      });
+      expect(JSON.stringify(events)).not.toContain(secretListName);
+      expect(JSON.stringify(events)).not.toContain(secretProjectName);
+      expect(JSON.stringify(events)).not.toContain(secretTaskWhy);
+    });
+
+    it("tasks trash and restore without changing lifecycle and DELETE advertises its successor", async () => {
+      const list = await createTaskList("Task Restore Validation List");
+      const task = await createTask("Task in soon-archived List", { listId: list.id });
+      const trashed = await taskAgentRequest(`/v1/tasks/${task.id}/trash`, {
+        body: { expectedRevision: 1 },
+      });
+      expect(trashed.status).toBe(200);
+      expect((await payload(trashed)).task).toMatchObject({
+        deletedAt: "2026-07-13T12:00:00.000Z",
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        revision: 2,
+      });
+      expect((await taskRequest(`/v1/tasks/${task.id}`)).status).toBe(404);
+      const trashView = await payload(await taskRequest("/v1/tasks?view=trash"));
+      expect(trashView.items).toEqual(
+        expect.arrayContaining([expect.objectContaining({ id: task.id, revision: 2 })]),
+      );
+      const archived = await taskRequest(`/v1/task-lists/${list.id}/archive`, {
+        body: { expectedRevision: list.revision },
+      });
+      expect(archived.status).toBe(200);
+      const restoredToInbox = await taskAgentRequest(`/v1/tasks/${task.id}/restore`, {
+        body: { expectedRevision: 2 },
+      });
+      expect(restoredToInbox.status).toBe(200);
+      expect((await payload(restoredToInbox)).task).toMatchObject({
+        deletedAt: null,
+        lifecycle: "open",
+        listId: taskInboxId,
+        projectId: null,
+        revision: 3,
+      });
+      expect(
+        await database.db
+          .select({
+            deletedAt: reminders.deletedAt,
+            lifecycle: reminders.taskLifecycle,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          deletedAt: null,
+          lifecycle: "open",
+          listId: taskInboxId,
+          projectId: null,
+          revision: 3,
+        },
+      ]);
+
+      for (const terminalAction of ["complete", "archive"] as const) {
+        const projectList = await createTaskList(`Restore ${terminalAction} Project List`);
+        const project = await createTaskProject(
+          projectList.id,
+          `Restore ${terminalAction} Project`,
+        );
+        const projectTask = await createTask(`Restore from ${terminalAction} Project`, {
+          listId: projectList.id,
+          projectId: project.id,
+        });
+        const trashedProjectTask = await taskAgentRequest(`/v1/tasks/${projectTask.id}/trash`, {
+          body: { expectedRevision: projectTask.revision },
+        });
+        expect(trashedProjectTask.status).toBe(200);
+        const terminalProject = await taskRequest(
+          `/v1/task-projects/${project.id}/${terminalAction}`,
+          { body: { expectedRevision: project.revision } },
+        );
+        expect(terminalProject.status).toBe(200);
+        const staleRestore = await taskAgentRequest(`/v1/tasks/${projectTask.id}/restore`, {
+          body: { expectedRevision: projectTask.revision },
+        });
+        expect(staleRestore.status).toBe(409);
+        expect((await payload(staleRestore)).error.details).toMatchObject({ currentRevision: 2 });
+
+        const restoredDetached = await taskAgentRequest(`/v1/tasks/${projectTask.id}/restore`, {
+          body: { expectedRevision: 2 },
+        });
+        expect(restoredDetached.status).toBe(200);
+        expect((await payload(restoredDetached)).task).toMatchObject({
+          deletedAt: null,
+          listId: projectList.id,
+          projectId: null,
+          revision: 3,
+        });
+      }
+
+      const unavailableProjectList = await createTaskList("Unavailable Restore Project List");
+      const unavailableProject = await createTaskProject(
+        unavailableProjectList.id,
+        "Unavailable Restore Project",
+      );
+      const unavailableProjectTask = await createTask("Restore from unavailable Project", {
+        listId: unavailableProjectList.id,
+        projectId: unavailableProject.id,
+      });
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${unavailableProjectTask.id}/trash`, {
+            body: { expectedRevision: unavailableProjectTask.revision },
+          })
+        ).status,
+      ).toBe(200);
+      await database.db
+        .update(taskProjects)
+        .set({ deletedAt: new Date("2026-07-13T12:00:00.000Z") })
+        .where(eq(taskProjects.id, unavailableProject.id));
+      const restoredFromUnavailable = await taskAgentRequest(
+        `/v1/tasks/${unavailableProjectTask.id}/restore`,
+        { body: { expectedRevision: 2 } },
+      );
+      expect(restoredFromUnavailable.status).toBe(200);
+      expect((await payload(restoredFromUnavailable)).task).toMatchObject({
+        deletedAt: null,
+        listId: unavailableProjectList.id,
+        projectId: null,
+        revision: 3,
+      });
+
+      const agentAliasTask = await createTask("Revision-safe DELETE alias Task");
+      const agentAliasResponse = await taskAgentRequest(`/v1/tasks/${agentAliasTask.id}`, {
+        body: { expectedRevision: agentAliasTask.revision },
+        method: "DELETE",
+      });
+      expect(agentAliasResponse.status).toBe(204);
+      expect(agentAliasResponse.headers.get("deprecation")).toBe("@1786492800");
+
+      const aliasTask = await createTask("Deprecated DELETE alias Task");
+      const aliasResponse = await taskRequest(`/v1/tasks/${aliasTask.id}`, { method: "DELETE" });
+      expect(aliasResponse.status).toBe(204);
+      expect(aliasResponse.headers.get("deprecation")).toBe("@1786492800");
+      expect(aliasResponse.headers.get("link")).toBe(
+        `</v1/tasks/${aliasTask.id}/trash>; rel="successor-version"`,
+      );
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${aliasTask.id}/restore`, {
+            body: {},
+          })
+        ).status,
+      ).toBe(400);
+      const aliasRow = (
+        await database.db
+          .select({ revision: reminders.taskRevision })
+          .from(reminders)
+          .where(eq(reminders.id, aliasTask.id))
+      )[0];
+      const restored = await taskRequest(`/v1/tasks/${aliasTask.id}/restore`, {
+        body: { expectedRevision: aliasRow?.revision },
+      });
+      expect(restored.status).toBe(200);
+      expect((await payload(restored)).task).toMatchObject({
+        deletedAt: null,
+        lifecycle: "open",
+        revision: 3,
+      });
+      const actions = await database.db
+        .select({ action: auditEvents.action })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, aliasTask.id));
+      expect(actions.map(({ action }) => action)).toEqual([
+        "task.created",
+        "task.trashed",
+        "task.restored",
+      ]);
+    });
+
+    it("tasks restore from the locked current List state when archive wins concurrently", async () => {
+      const list = await createTaskList("Concurrent Restore Archive List");
+      const task = await createTask("Concurrent restore fallback Task", { listId: list.id });
+      const trashed = await taskAgentRequest(`/v1/tasks/${task.id}/trash`, {
+        body: { expectedRevision: task.revision },
+      });
+      expect(trashed.status).toBe(200);
+      const blocker = await database.pool.connect();
+      let archiveRequest: Promise<Response> | undefined;
+      let restoreRequest: Promise<Response> | undefined;
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query("SELECT id FROM task_lists WHERE id = $1 FOR UPDATE", [list.id]);
+        archiveRequest = taskRequest(`/v1/task-lists/${list.id}/archive`, {
+          body: { expectedRevision: list.revision },
+        });
+        void archiveRequest.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(1);
+        restoreRequest = taskAgentRequest(`/v1/tasks/${task.id}/restore`, {
+          body: { expectedRevision: 2 },
+        });
+        void restoreRequest.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(2);
+        await blocker.query("COMMIT");
+
+        const [archived, restored] = await Promise.all([archiveRequest, restoreRequest]);
+        expect(archived.status).toBe(200);
+        expect(restored.status).toBe(200);
+        expect((await payload(restored)).task).toMatchObject({
+          deletedAt: null,
+          listId: taskInboxId,
+          projectId: null,
+          revision: 3,
+        });
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+        await Promise.allSettled(
+          [archiveRequest, restoreRequest].filter(
+            (value): value is Promise<Response> => value !== undefined,
+          ),
+        );
+      }
+
+      const driftList = await createTaskList("Concurrent Restore Revision List");
+      const driftTask = await createTask("Concurrent restore revision Task", {
+        listId: driftList.id,
+      });
+      expect(
+        (
+          await taskAgentRequest(`/v1/tasks/${driftTask.id}/trash`, {
+            body: { expectedRevision: driftTask.revision },
+          })
+        ).status,
+      ).toBe(200);
+      const driftBlocker = await database.pool.connect();
+      let driftRestore: Promise<Response> | undefined;
+      try {
+        await driftBlocker.query("BEGIN");
+        await driftBlocker.query("SELECT id FROM task_lists WHERE id = $1 FOR UPDATE", [
+          driftList.id,
+        ]);
+        driftRestore = taskAgentRequest(`/v1/tasks/${driftTask.id}/restore`, {
+          body: { expectedRevision: 2 },
+        });
+        void driftRestore.catch(() => undefined);
+        await waitForTaskCreateLockWaiters(1);
+        await database.db
+          .update(reminders)
+          .set({ taskRevision: 3 })
+          .where(eq(reminders.id, driftTask.id));
+        await driftBlocker.query("COMMIT");
+
+        const driftResponse = await driftRestore;
+        expect(driftResponse.status).toBe(409);
+        expect((await payload(driftResponse)).error.details).toEqual({ currentRevision: 3 });
+        expect(
+          await database.db
+            .select({ deletedAt: reminders.deletedAt, revision: reminders.taskRevision })
+            .from(reminders)
+            .where(eq(reminders.id, driftTask.id)),
+        ).toEqual([{ deletedAt: new Date("2026-07-13T12:00:00.000Z"), revision: 3 }]);
+      } finally {
+        await driftBlocker.query("ROLLBACK");
+        driftBlocker.release();
+        await Promise.allSettled(
+          [driftRestore].filter((value): value is Promise<Response> => value !== undefined),
+        );
+      }
+    });
+
+    it("task and project move previews use tasks read scope without mutation while commits require write", async () => {
+      const sourceList = await createTaskList("Read-scoped Preview Source");
+      const destinationList = await createTaskList("Read-scoped Preview Destination");
+      const project = await createTaskProject(sourceList.id, "Read-scoped Preview Project");
+      const task = await createTask("Read-scoped Preview Task", { listId: sourceList.id });
+      const readTokenResponse = await taskRequest("/v1/access-tokens", {
+        body: { name: "Task preview reader", scopes: ["tasks:read"] },
+      });
+      const writeTokenResponse = await taskRequest("/v1/access-tokens", {
+        body: { name: "Task move writer", scopes: ["tasks:write"] },
+      });
+      expect(readTokenResponse.status).toBe(201);
+      expect(writeTokenResponse.status).toBe(201);
+      const readToken = (await payload(readTokenResponse)).token.token as string;
+      const writeToken = (await payload(writeTokenResponse)).token.token as string;
+      const projectBefore = await database.db
+        .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+        .from(taskProjects)
+        .where(eq(taskProjects.id, project.id));
+      const taskBefore = await database.db
+        .select({
+          listId: reminders.taskListId,
+          projectId: reminders.taskProjectId,
+          revision: reminders.taskRevision,
+        })
+        .from(reminders)
+        .where(eq(reminders.id, task.id));
+      const auditsBefore = await database.db
+        .select({ action: auditEvents.action, id: auditEvents.id })
+        .from(auditEvents)
+        .where(inArray(auditEvents.entityId, [project.id, task.id]));
+
+      const projectPreviewResponse = await scopedTaskAgentRequest(
+        readToken,
+        `/v1/task-projects/${project.id}/move/preview`,
+        {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: project.revision,
+          },
+        },
+      );
+      const taskPreviewResponse = await scopedTaskAgentRequest(
+        readToken,
+        `/v1/tasks/${task.id}/move/preview`,
+        {
+          body: {
+            destinationListId: destinationList.id,
+            expectedRevision: task.revision,
+          },
+        },
+      );
+      expect(projectPreviewResponse.status).toBe(200);
+      expect(taskPreviewResponse.status).toBe(200);
+      const projectPreview = (await payload(projectPreviewResponse)).preview;
+      const taskPreview = (await payload(taskPreviewResponse)).preview;
+      expect(projectPreview.previewToken).toEqual(expect.any(String));
+      expect(taskPreview.previewToken).toEqual(expect.any(String));
+      expect(
+        await database.db
+          .select({ listId: taskProjects.listId, revision: taskProjects.revision })
+          .from(taskProjects)
+          .where(eq(taskProjects.id, project.id)),
+      ).toEqual(projectBefore);
+      expect(
+        await database.db
+          .select({
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual(taskBefore);
+      expect(
+        await database.db
+          .select({ action: auditEvents.action, id: auditEvents.id })
+          .from(auditEvents)
+          .where(inArray(auditEvents.entityId, [project.id, task.id])),
+      ).toEqual(auditsBefore);
+
+      expect(
+        (
+          await scopedTaskAgentRequest(writeToken, `/v1/task-projects/${project.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              expectedRevision: project.revision,
+            },
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await scopedTaskAgentRequest(writeToken, `/v1/tasks/${task.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              expectedRevision: task.revision,
+            },
+          })
+        ).status,
+      ).toBe(403);
+
+      const projectMoveInput = {
+        destinationListId: destinationList.id,
+        expectedRevision: project.revision,
+        previewToken: projectPreview.previewToken,
+      };
+      const taskMoveInput = {
+        destinationListId: destinationList.id,
+        expectedRevision: task.revision,
+        previewToken: taskPreview.previewToken,
+      };
+      expect(
+        (
+          await scopedTaskAgentRequest(readToken, `/v1/task-projects/${project.id}/move`, {
+            body: projectMoveInput,
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await scopedTaskAgentRequest(readToken, `/v1/tasks/${task.id}/move`, {
+            body: taskMoveInput,
+          })
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await scopedTaskAgentRequest(writeToken, `/v1/task-projects/${project.id}/move`, {
+            body: projectMoveInput,
+          })
+        ).status,
+      ).toBe(200);
+      expect(
+        (
+          await scopedTaskAgentRequest(writeToken, `/v1/tasks/${task.id}/move`, {
+            body: taskMoveInput,
+          })
+        ).status,
+      ).toBe(200);
+    });
+
+    it("tasks bind move previews to Task, List, and destination Project revisions and audit detachment", async () => {
+      const sourceList = await createTaskList("Task Move Source");
+      const destinationList = await createTaskList("Task Move Destination");
+      const sourceProject = await createTaskProject(sourceList.id, "Task Move Source Project");
+      const destinationProject = await createTaskProject(
+        destinationList.id,
+        "Task Move Destination Project",
+      );
+      const task = await createTask("Move one Task", {
+        listId: sourceList.id,
+        projectId: sourceProject.id,
+      });
+
+      const detachmentPreviewResponse = await taskAgentRequest(
+        `/v1/tasks/${task.id}/move/preview`,
+        {
+          body: { destinationListId: destinationList.id, expectedRevision: task.revision },
+        },
+      );
+      expect(detachmentPreviewResponse.status).toBe(200);
+      const detachmentPreview = (await payload(detachmentPreviewResponse)).preview;
+      expect(detachmentPreview).toMatchObject({
+        destinationListId: destinationList.id,
+        destinationListRevision: destinationList.revision,
+        destinationProjectId: null,
+        destinationProjectRevision: null,
+        detachedProjectId: sourceProject.id,
+        sourceListId: sourceList.id,
+        sourceListRevision: sourceList.revision,
+        sourceProjectId: sourceProject.id,
+        taskId: task.id,
+        taskRevision: task.revision,
+      });
+
+      const listUpdate = await taskRequest(`/v1/task-lists/${destinationList.id}`, {
+        body: { expectedRevision: destinationList.revision, name: "Revised Task Move Destination" },
+        method: "PATCH",
+      });
+      expect(listUpdate.status).toBe(200);
+      const staleListPreview = await taskAgentRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: task.revision,
+          previewToken: detachmentPreview.previewToken,
+        },
+      });
+      expect(staleListPreview.status).toBe(409);
+      expect((await payload(staleListPreview)).error.details).toMatchObject({
+        code: "task_move_preview_stale",
+      });
+
+      const destinationProjectPreview = (
+        await payload(
+          await taskAgentRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              destinationProjectId: destinationProject.id,
+              expectedRevision: task.revision,
+            },
+          }),
+        )
+      ).preview;
+      const projectUpdate = await taskRequest(`/v1/task-projects/${destinationProject.id}`, {
+        body: {
+          expectedRevision: destinationProject.revision,
+          name: "Revised Destination Project",
+        },
+        method: "PATCH",
+      });
+      expect(projectUpdate.status).toBe(200);
+      const stale = await taskAgentRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          destinationProjectId: destinationProject.id,
+          expectedRevision: task.revision,
+          previewToken: destinationProjectPreview.previewToken,
+        },
+      });
+      expect(stale.status).toBe(409);
+      expect((await payload(stale)).error.details).toMatchObject({
+        code: "task_move_preview_stale",
+      });
+      expect(
+        await database.db
+          .select({
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([{ listId: sourceList.id, projectId: sourceProject.id, revision: task.revision }]);
+      expect(
+        await database.db
+          .select({ id: auditEvents.id })
+          .from(auditEvents)
+          .where(and(eq(auditEvents.entityId, task.id), eq(auditEvents.action, "task.moved"))),
+      ).toHaveLength(0);
+
+      const freshPreview = (
+        await payload(
+          await taskAgentRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: { destinationListId: destinationList.id, expectedRevision: task.revision },
+          }),
+        )
+      ).preview;
+      const moved = await taskAgentRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          expectedRevision: task.revision,
+          previewToken: freshPreview.previewToken,
+        },
+      });
+      expect(moved.status).toBe(200);
+      expect((await payload(moved)).task).toMatchObject({
+        legacyStatus: "inbox",
+        lifecycle: "open",
+        listId: destinationList.id,
+        projectId: null,
+        revision: 2,
+      });
+      const attachPreview = (
+        await payload(
+          await taskAgentRequest(`/v1/tasks/${task.id}/move/preview`, {
+            body: {
+              destinationListId: destinationList.id,
+              destinationProjectId: destinationProject.id,
+              expectedRevision: 2,
+            },
+          }),
+        )
+      ).preview;
+      const attached = await taskAgentRequest(`/v1/tasks/${task.id}/move`, {
+        body: {
+          destinationListId: destinationList.id,
+          destinationProjectId: destinationProject.id,
+          expectedRevision: 2,
+          previewToken: attachPreview.previewToken,
+        },
+      });
+      expect(attached.status).toBe(200);
+      expect((await payload(attached)).task).toMatchObject({
+        listId: destinationList.id,
+        projectId: destinationProject.id,
+        revision: 3,
+      });
+      expect(
+        await database.db
+          .select({
+            legacyStatus: reminders.status,
+            listId: reminders.taskListId,
+            projectId: reminders.taskProjectId,
+            revision: reminders.taskRevision,
+          })
+          .from(reminders)
+          .where(eq(reminders.id, task.id)),
+      ).toEqual([
+        {
+          legacyStatus: "inbox",
+          listId: destinationList.id,
+          projectId: destinationProject.id,
+          revision: 3,
+        },
+      ]);
+      const moveAudit = (
+        await database.db
+          .select({
+            action: auditEvents.action,
+            after: auditEvents.after,
+            before: auditEvents.before,
+          })
+          .from(auditEvents)
+          .where(and(eq(auditEvents.entityId, task.id), eq(auditEvents.action, "task.moved")))
+      )[0];
+      expect(moveAudit).toMatchObject({
+        action: "task.moved",
+        after: { listId: destinationList.id, projectId: null, revision: 2 },
+        before: { listId: sourceList.id, projectId: sourceProject.id, revision: 1 },
+      });
+    });
+  });
 
   it("exposes one bounded Finance Provider Item backfill pass through the app lifecycle", async () => {
     await expect(app.backfillFinanceProviderItems()).resolves.toEqual({
@@ -799,7 +4570,7 @@ describe.sequential("ilo API", () => {
     expect(limitedRecovery.headers.get("retry-after")).toBe("300");
   });
 
-  it("loads repeatable QA personas without touching ordinary accounts", async () => {
+  it("loads repeatable QA fixture personas without Task organization collisions", async () => {
     const fixtureNow = new Date("2026-07-28T14:00:00.000Z");
     await database.db.insert(users).values({
       displayName: "Unrelated account",
@@ -839,33 +4610,54 @@ describe.sequential("ilo API", () => {
     expect(degraded).toBeDefined();
     expect(await verifyPassword(DEMO_QA_PASSWORD, demo?.passwordHash ?? "")).toBe(true);
 
-    const [events, messages, transactions, profiles, emptyTasks, degradedAccounts] =
-      await Promise.all([
-        database.db
-          .select()
-          .from(calendarEvents)
-          .where(eq(calendarEvents.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(mailThreads)
-          .where(eq(mailThreads.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(financeTransactions)
-          .where(eq(financeTransactions.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(domainProfiles)
-          .where(eq(domainProfiles.userId, demo?.id ?? "")),
-        database.db
-          .select()
-          .from(reminders)
-          .where(eq(reminders.userId, empty?.id ?? "")),
-        database.db
-          .select()
-          .from(calendarAccounts)
-          .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
-      ]);
+    const [
+      events,
+      messages,
+      transactions,
+      profiles,
+      emptyTasks,
+      degradedAccounts,
+      demoTaskLists,
+      demoTaskProjects,
+      demoTasks,
+    ] = await Promise.all([
+      database.db
+        .select()
+        .from(calendarEvents)
+        .where(eq(calendarEvents.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(mailThreads)
+        .where(eq(mailThreads.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(financeTransactions)
+        .where(eq(financeTransactions.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(domainProfiles)
+        .where(eq(domainProfiles.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(reminders)
+        .where(eq(reminders.userId, empty?.id ?? "")),
+      database.db
+        .select()
+        .from(calendarAccounts)
+        .where(eq(calendarAccounts.userId, degraded?.id ?? "")),
+      database.db
+        .select()
+        .from(taskLists)
+        .where(eq(taskLists.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(taskProjects)
+        .where(eq(taskProjects.userId, demo?.id ?? "")),
+      database.db
+        .select()
+        .from(reminders)
+        .where(and(eq(reminders.userId, demo?.id ?? ""), eq(reminders.kind, "task"))),
+    ]);
     expect(events).toHaveLength(7);
     expect(messages).toHaveLength(5);
     expect(transactions).toHaveLength(9);
@@ -874,6 +4666,74 @@ describe.sequential("ilo API", () => {
     expect(degradedAccounts).toContainEqual(
       expect.objectContaining({ provider: "google", syncStatus: "error" }),
     );
+    expect(demoTaskLists.map(({ kind, name }) => ({ kind, name }))).toEqual(
+      expect.arrayContaining([
+        { kind: "inbox", name: "Inbox" },
+        { kind: "standard", name: "Personal" },
+        { kind: "standard", name: "Work" },
+        { kind: "standard", name: "Shopping" },
+      ]),
+    );
+    expect(demoTaskLists.filter((list) => list.kind === "inbox")).toHaveLength(1);
+    expect(demoTaskLists.filter((list) => list.kind === "standard")).toHaveLength(3);
+    const repeatedProjects = demoTaskProjects.filter(
+      (project) => project.name === "Quarterly reset",
+    );
+    expect(repeatedProjects).toHaveLength(2);
+    expect(new Set(repeatedProjects.map((project) => project.listId)).size).toBe(2);
+    expect(demoTasks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          deletedAt: null,
+          taskLifecycle: "open",
+          title: "Draft weekly product update",
+        }),
+        expect.objectContaining({
+          deletedAt: null,
+          scheduledAt: null,
+          taskLifecycle: "open",
+          title: "Compare renters insurance renewals",
+        }),
+        expect.objectContaining({
+          deletedAt: null,
+          scheduledAt: expect.any(Date),
+          taskLifecycle: "open",
+          title: "Review monthly subscriptions",
+        }),
+        expect.objectContaining({
+          completedAt: expect.any(Date),
+          taskLifecycle: "completed",
+          title: "Book dentist appointment",
+        }),
+        expect.objectContaining({ taskCancelledAt: expect.any(Date), taskLifecycle: "cancelled" }),
+        expect.objectContaining({ deletedAt: expect.any(Date), taskLifecycle: "open" }),
+      ]),
+    );
+    const draftTask = demoTasks.find((task) => task.title === "Draft weekly product update");
+    expect(
+      await database.db
+        .select({
+          action: auditEvents.action,
+          entityType: auditEvents.entityType,
+          requestId: auditEvents.requestId,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, draftTask?.id ?? "")),
+    ).toEqual([
+      {
+        action: "task.created",
+        entityType: "task",
+        requestId: "fixture-demo-full-task",
+      },
+    ]);
+    const sameListMoveTask = demoTasks.find(
+      (task) => task.title === "Prepare launch follow-through",
+    );
+    const sameListProjects = demoTaskProjects.filter(
+      (project) => project.listId === sameListMoveTask?.taskListId,
+    );
+    expect(sameListMoveTask?.taskProjectId).toEqual(expect.any(String));
+    expect(sameListProjects).toHaveLength(2);
 
     await loadQaFixtures(database.db, { now: new Date("2026-07-29T14:00:00.000Z") });
     expect(
@@ -882,6 +4742,132 @@ describe.sequential("ilo API", () => {
     expect(
       await database.db.select().from(users).where(eq(users.email, "qa-unrelated@example.com")),
     ).toHaveLength(1);
+    expect(
+      await database.db
+        .select()
+        .from(taskLists)
+        .where(eq(taskLists.userId, demo?.id ?? "")),
+    ).toHaveLength(4);
+    expect(
+      await database.db
+        .select()
+        .from(taskProjects)
+        .where(eq(taskProjects.userId, demo?.id ?? "")),
+    ).toHaveLength(3);
+  });
+
+  it("daily brief uses canonical lifecycle, deletion, and timing", async () => {
+    const baseTask: Task = {
+      cancelledAt: null,
+      completedAt: null,
+      createdAt: "2026-07-13T08:00:00.000Z",
+      deletedAt: null,
+      dueAt: null,
+      estimateMinutes: 30,
+      id: "a1000000-0000-4000-8000-000000000001",
+      legacyStatus: "completed",
+      lifecycle: "open",
+      listId: "a1000000-0000-4000-8000-000000000010",
+      notes: null,
+      priority: "medium",
+      projectId: null,
+      revision: 1,
+      scheduledAt: null,
+      source: {
+        accountId: null,
+        provider: "local",
+        remoteId: "a1000000-0000-4000-8000-000000000001",
+        revision: "1",
+        sourceType: "task",
+      },
+      tags: [],
+      timezone: "UTC",
+      title: "Open without timing",
+      updatedAt: "2026-07-13T08:00:00.000Z",
+      why: null,
+    };
+    const canonicalTasks: Task[] = [
+      baseTask,
+      {
+        ...baseTask,
+        dueAt: "2026-07-13T16:00:00.000Z",
+        id: "a1000000-0000-4000-8000-000000000002",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000002" },
+        title: "Open due today",
+      },
+      {
+        ...baseTask,
+        estimateMinutes: 45,
+        id: "a1000000-0000-4000-8000-000000000003",
+        legacyStatus: "cancelled",
+        scheduledAt: "2026-07-13T14:00:00.000Z",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000003" },
+        title: "Open reserved time",
+      },
+      {
+        ...baseTask,
+        completedAt: "2026-07-13T11:00:00.000Z",
+        id: "a1000000-0000-4000-8000-000000000004",
+        legacyStatus: "inbox",
+        lifecycle: "completed",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000004" },
+        title: "Completed summary",
+      },
+      {
+        ...baseTask,
+        cancelledAt: "2026-07-13T10:00:00.000Z",
+        id: "a1000000-0000-4000-8000-000000000005",
+        legacyStatus: "next",
+        lifecycle: "cancelled",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000005" },
+        title: "Cancelled Task",
+      },
+      {
+        ...baseTask,
+        deletedAt: "2026-07-13T09:00:00.000Z",
+        id: "a1000000-0000-4000-8000-000000000006",
+        legacyStatus: "next",
+        source: { ...baseTask.source, remoteId: "a1000000-0000-4000-8000-000000000006" },
+        title: "Trashed Task",
+      },
+    ];
+    const listQueries: TaskListQuery[] = [];
+    const dailyBrief = createDailyBriefService({
+      db: database.db,
+      listEvents: async () => [],
+      listReminders: async () => [],
+      listTasks: async (_userId, query) => {
+        listQueries.push(query);
+        return canonicalTasks.filter(
+          (task) => task.deletedAt === null && task.lifecycle === query.lifecycle,
+        );
+      },
+      now: () => new Date("2026-07-13T12:00:00.000Z"),
+    });
+
+    const brief = await dailyBrief.dailyBrief(crypto.randomUUID(), "UTC");
+
+    expect(brief.tasks.map((task) => task.title)).toEqual([
+      "Open without timing",
+      "Open due today",
+      "Open reserved time",
+    ]);
+    expect(brief.completedTasks.map((task) => task.title)).toEqual(["Completed summary"]);
+    expect(brief.tasks).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ title: "Cancelled Task" }),
+        expect.objectContaining({ title: "Trashed Task" }),
+      ]),
+    );
+    expect(brief.capacity).toMatchObject({ flexibleTaskMinutes: 60, scheduledTaskMinutes: 45 });
+    expect(brief.recommendedTasks.map(({ task, urgency }) => [task.title, urgency])).toEqual([
+      ["Open due today", "due_today"],
+      ["Open without timing", "inbox"],
+    ]);
+    expect(listQueries).toEqual([
+      { lifecycle: "open", limit: 100 },
+      { lifecycle: "completed", limit: 100 },
+    ]);
   });
 
   it("serves health, registration, sessions, tokens, reminders, calendars, events, and audit", async () => {
@@ -2452,229 +6438,30 @@ describe.sequential("ilo API", () => {
       auth: "session",
       method: "DELETE",
     });
-
-    expect(
-      (
-        await request("/v1/tasks", {
-          auth: "agent",
-          body: { title: "Invalid scheduled task", status: "scheduled" },
-        })
-      ).status,
-    ).toBe(400);
+    // The canonical Task contract has isolated PostgreSQL coverage in the dedicated tasks suite.
+    // These two canonical records remain as typed fixtures for the daily-brief compatibility cases
+    // later in this broad integration test.
     const task = (
       await payload(
         await request("/v1/tasks", {
-          auth: "agent",
+          auth: "session",
           body: {
             dueAt: "2026-07-14T16:00:00.000Z",
             estimateMinutes: 45,
-            notes: "Write a plan",
-            priority: "high",
-            tags: ["planning", "tomorrow"],
             scheduledAt: "2026-07-13T18:00:00.000Z",
-            status: "scheduled",
-            timezone: "America/New_York",
             title: "Plan tomorrow",
           },
         }),
       )
     ).task;
-    expect(task).toMatchObject({
-      estimateMinutes: 45,
-      scheduledAt: "2026-07-13T18:00:00.000Z",
-      status: "scheduled",
-      tags: ["planning", "tomorrow"],
-      title: "Plan tomorrow",
-    });
-    expect(
-      (await payload(await request("/v1/daily-brief", { auth: "agent" }))).brief.tasks,
-    ).toEqual([expect.objectContaining({ id: task.id })]);
-    expect((await request(`/v1/reminders/${task.id}`, { auth: "agent" })).status).toBe(404);
-    expect((await request(`/v1/tasks/${first.id}`, { auth: "agent" })).status).toBe(404);
-    expect(
-      (await payload(await request(`/v1/tasks/${task.id}`, { auth: "agent" }))).task,
-    ).toMatchObject({ id: task.id, title: "Plan tomorrow" });
     const inboxTask = (
       await payload(
         await request("/v1/tasks", {
-          auth: "agent",
+          auth: "session",
           body: { title: "Empty task" },
         }),
       )
     ).task;
-    expect(inboxTask).toMatchObject({
-      dueAt: null,
-      estimateMinutes: null,
-      scheduledAt: null,
-      status: "inbox",
-    });
-    const completedOnCreate = (
-      await payload(
-        await request("/v1/tasks", {
-          auth: "agent",
-          body: { status: "completed", title: "Complete on capture" },
-        }),
-      )
-    ).task;
-    expect(completedOnCreate).toMatchObject({
-      completedAt: expect.any(String),
-      status: "completed",
-      tags: [],
-    });
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${inboxTask.id}`, {
-            auth: "agent",
-            body: {
-              dueAt: "2026-07-15T14:00:00.000Z",
-              estimateMinutes: 30,
-              notes: "Full update",
-              priority: "low",
-              scheduledAt: "2026-07-15T13:00:00.000Z",
-              status: "scheduled",
-              tags: ["planning", "focus"],
-              timezone: "America/New_York",
-              title: "Scheduled task",
-            },
-            method: "PATCH",
-          }),
-        )
-      ).task,
-    ).toMatchObject({
-      dueAt: "2026-07-15T14:00:00.000Z",
-      estimateMinutes: 30,
-      notes: "Full update",
-      scheduledAt: "2026-07-15T13:00:00.000Z",
-      status: "scheduled",
-      tags: ["planning", "focus"],
-    });
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${inboxTask.id}`, {
-            auth: "agent",
-            body: { title: "Partially updated task" },
-            method: "PATCH",
-          }),
-        )
-      ).task,
-    ).toMatchObject({
-      estimateMinutes: 30,
-      status: "scheduled",
-      title: "Partially updated task",
-    });
-    const taskPage = await payload(
-      await request(
-        "/v1/tasks?completed=false&status=scheduled&scheduledAfter=2026-07-13T17%3A00%3A00.000Z&scheduledBefore=2026-07-13T19%3A00%3A00.000Z&query=tomorrow&limit=1",
-        { auth: "agent" },
-      ),
-    );
-    expect(taskPage).toMatchObject({ items: [expect.objectContaining({ id: task.id })] });
-    const dueTaskPage = await payload(
-      await request(
-        "/v1/tasks?completed=false&dueAfter=2026-07-14T15%3A00%3A00.000Z&dueBefore=2026-07-14T17%3A00%3A00.000Z",
-        { auth: "agent" },
-      ),
-    );
-    expect(dueTaskPage.items).toEqual([expect.objectContaining({ id: task.id })]);
-    const paginatedTasks = await payload(await request("/v1/tasks?limit=1", { auth: "agent" }));
-    expect(paginatedTasks.nextCursor).toEqual(expect.any(String));
-    expect(
-      (
-        await payload(
-          await request(
-            `/v1/tasks?limit=1&cursor=${encodeURIComponent(paginatedTasks.nextCursor)}`,
-            {
-              auth: "agent",
-            },
-          ),
-        )
-      ).items,
-    ).toHaveLength(1);
-    expect((await request("/v1/tasks?cursor=bad", { auth: "agent" })).status).toBe(400);
-    expect(
-      (
-        await request(`/v1/tasks/${task.id}`, {
-          auth: "agent",
-          body: { scheduledAt: null },
-          method: "PATCH",
-        })
-      ).status,
-    ).toBe(400);
-    const updatedTask = await payload(
-      await request(`/v1/tasks/${task.id}`, {
-        auth: "agent",
-        body: { estimateMinutes: null, status: "next", title: "Plan the next day" },
-        method: "PATCH",
-      }),
-    );
-    expect(updatedTask.task).toMatchObject({
-      estimateMinutes: null,
-      scheduledAt: "2026-07-13T18:00:00.000Z",
-      status: "next",
-      title: "Plan the next day",
-    });
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${task.id}`, {
-            auth: "agent",
-            body: { dueAt: null },
-            method: "PATCH",
-          }),
-        )
-      ).task.dueAt,
-    ).toBeNull();
-    const directlyCompletedTask = await payload(
-      await request(`/v1/tasks/${inboxTask.id}`, {
-        auth: "agent",
-        body: { status: "completed" },
-        method: "PATCH",
-      }),
-    );
-    expect(directlyCompletedTask.task).toMatchObject({
-      completedAt: expect.any(String),
-      status: "completed",
-    });
-    const completedTask = await payload(
-      await request(`/v1/tasks/${task.id}/complete`, {
-        auth: "agent",
-        body: { completed: true },
-      }),
-    );
-    expect(completedTask.task).toMatchObject({
-      completedAt: expect.any(String),
-      status: "completed",
-    });
-    expect(
-      (await payload(await request("/v1/tasks?completed=true", { auth: "agent" }))).items,
-    ).toEqual(expect.arrayContaining([expect.objectContaining({ id: task.id })]));
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${task.id}/complete`, {
-            auth: "agent",
-            body: { completed: false },
-          }),
-        )
-      ).task,
-    ).toMatchObject({ completedAt: null, status: "next" });
-    expect(
-      (await request(`/v1/tasks/${task.id}`, { auth: "agent", method: "DELETE" })).status,
-    ).toBe(204);
-    expect((await request(`/v1/tasks/${task.id}`, { auth: "agent" })).status).toBe(404);
-    expect(
-      (
-        await payload(
-          await request(`/v1/tasks/${task.id}/restore`, { auth: "agent", method: "POST" }),
-        )
-      ).task.id,
-    ).toBe(task.id);
-    expect(
-      (await request(`/v1/tasks/${task.id}/restore`, { auth: "agent", method: "POST" })).status,
-    ).toBe(404);
-
     const calendars = (await payload(await request("/v1/calendars", { auth: "agent" }))).calendars;
     expect(calendars).toHaveLength(1);
     const personal = calendars[0];
@@ -3198,26 +6985,27 @@ describe.sequential("ilo API", () => {
         {
           ...task,
           estimateMinutes: 90,
+          legacyStatus: "inbox" as const,
           scheduledAt: "2026-07-13T13:00:00.000Z",
-          status: "scheduled" as const,
         },
         {
           ...inboxTask,
+          dueAt: "2026-07-14T16:00:00.000Z",
           estimateMinutes: 25,
-          status: "next" as const,
+          legacyStatus: "completed" as const,
         },
         {
           ...inboxTask,
           estimateMinutes: null,
           id: crypto.randomUUID(),
+          legacyStatus: "cancelled" as const,
           scheduledAt: "2026-07-13T14:00:00.000Z",
-          status: "scheduled" as const,
         },
         {
           ...inboxTask,
           estimateMinutes: null,
           id: crypto.randomUUID(),
-          status: "inbox" as const,
+          legacyStatus: "next" as const,
         },
       ],
       now: () => new Date("2026-07-13T12:00:00.000Z"),
@@ -3251,15 +7039,15 @@ describe.sequential("ilo API", () => {
         {
           ...task,
           estimateMinutes: 60,
+          legacyStatus: "inbox" as const,
           scheduledAt: "2026-07-13T14:00:00.000Z",
-          status: "scheduled" as const,
         },
         {
           ...task,
           estimateMinutes: 90,
           id: crypto.randomUUID(),
+          legacyStatus: "cancelled" as const,
           scheduledAt: "2026-07-13T10:00:00.000Z",
-          status: "scheduled" as const,
         },
       ],
       now: () => new Date("2026-07-13T12:00:00.000Z"),
@@ -3285,40 +7073,45 @@ describe.sequential("ilo API", () => {
           dueAt: "2026-07-13T11:00:00.000Z",
           estimateMinutes: 15,
           id: crypto.randomUUID(),
+          legacyStatus: "inbox" as const,
           priority: "high" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
         {
           ...task,
           dueAt: "2026-07-13T16:00:00.000Z",
           estimateMinutes: 20,
           id: crypto.randomUUID(),
+          legacyStatus: "cancelled" as const,
           priority: "medium" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
         {
           ...task,
-          dueAt: null,
+          dueAt: "2026-07-14T15:00:00.000Z",
           estimateMinutes: 25,
           id: crypto.randomUUID(),
+          legacyStatus: "completed" as const,
           priority: "low" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
         {
           ...task,
-          dueAt: null,
+          dueAt: "2026-07-14T14:00:00.000Z",
           estimateMinutes: 30,
           id: crypto.randomUUID(),
+          legacyStatus: "inbox" as const,
           priority: "high" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
         {
           ...task,
-          dueAt: null,
+          dueAt: "2026-07-14T17:00:00.000Z",
           estimateMinutes: 35,
           id: crypto.randomUUID(),
+          legacyStatus: "cancelled" as const,
           priority: "low" as const,
-          status: "next" as const,
+          scheduledAt: null,
         },
       ],
       now: () => new Date("2026-07-13T12:00:00.000Z"),

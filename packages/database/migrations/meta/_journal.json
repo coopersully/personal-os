@@ -391,6 +391,13 @@
       "idx": 55,
       "version": "7",
       "when": 1786957200000,
+      "tag": "0055_task_organization",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1786957200000,
       "tag": "0055_finance_sync_health",
       "breakpoints": true
     },
@@ -413,6 +420,13 @@
       "version": "7",
       "when": 1786968000000,
       "tag": "0058_finance_provider_items",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1786971600000,
+      "tag": "0059_task_organization_reconciliation",
       "breakpoints": true
     }
   ]

@@ -273,7 +273,7 @@ function AgentAccessSettings({
   });
   const tasks = useQuery({
     enabled: view === "workspaces" && selectedDomain === "tasks" && selectedDomainEnabled,
-    queryFn: () => api.listTasks({ completed: false, limit: 100 }),
+    queryFn: () => api.listTasks({ lifecycle: "open", limit: 100 }),
     queryKey: ["tasks", "agent-access", "open"],
   });
   const financeSetup = useQuery({

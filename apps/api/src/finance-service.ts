@@ -9,8 +9,8 @@ import {
   financeAccounts,
   financeAlerts,
   financeAutomationSettings,
-  financeBudgets,
   financeBudgetPlans,
+  financeBudgets,
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
@@ -85,6 +85,7 @@ import {
   selectEffectiveRecord,
 } from "./finance-cashflow.js";
 import { parseFinanceCsv } from "./finance-csv.js";
+import { reliableMonthlyCapacity } from "./finance-planning.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import {
   createFinanceProviderItemSyncService,
@@ -4685,10 +4686,31 @@ export function createFinanceService({
             .limit(1)
             .for("update")
         )[0];
-        const capacity =
-          effectiveProfile?.grossAnnualIncome == null
-            ? null
-            : effectiveProfile.grossAnnualIncome / 1200;
+        const obligations = await tx
+          .select({
+            amount: financeRecurringObligations.expectedAmount,
+            cadence: financeRecurringObligations.cadence,
+          })
+          .from(financeRecurringObligations)
+          .where(
+            and(
+              eq(financeRecurringObligations.userId, context.principal.userId),
+              eq(financeRecurringObligations.status, "active"),
+            ),
+          );
+        const capacity = reliableMonthlyCapacity({
+          expectedNetPay:
+            effectiveProfile?.expectedNetPay == null ? null : effectiveProfile.expectedNetPay / 100,
+          grossAnnualIncome:
+            effectiveProfile?.grossAnnualIncome == null
+              ? null
+              : effectiveProfile.grossAnnualIncome / 100,
+          observedMonthlyIncome: null,
+          recurring: obligations.map((item) => ({
+            amount: item.amount / 100,
+            cadence: item.cadence,
+          })),
+        });
         const total = input.allocations.reduce((sum, allocation) => sum + allocation.limit, 0);
         if (capacity !== null && total > capacity && !input.acknowledgeOverAllocation) {
           throw new AppError(

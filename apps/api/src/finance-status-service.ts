@@ -29,6 +29,7 @@ import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import { forecastCashflow } from "./finance-cashflow.js";
 import { assessFinanceHealth } from "./finance-health.js";
+import { reliableMonthlyCapacity } from "./finance-planning.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { createGoalsService } from "./goals-service.js";
 import type { WorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -429,7 +430,11 @@ export function createFinanceStatusService({ db, now }: Options) {
               ? activeProfile.grossAnnualIncome / 1200
               : null;
           const observedIncome = incomeObserved > 0 ? incomeObserved : null;
-          const monthlyIncome = statedMonthlyIncome ?? observedIncome;
+          const monthlyIncome =
+            observedIncome ??
+            (activeProfile?.expectedNetPay == null
+              ? statedMonthlyIncome
+              : activeProfile.expectedNetPay / 100);
           const budgetTotal =
             budgets.length > 0 ? budgets.reduce((sum, row) => sum + row.limit, 0) / 100 : null;
           const selectedDay = asOfDate.getUTCDate();
@@ -771,8 +776,19 @@ export function createFinanceStatusService({ db, now }: Options) {
                   })),
             value: evidenceCurrent ? observedIncome : null,
           };
-          const budgetCapacity =
-            monthlyIncome === null ? null : monthlyIncome - recurringMonthlyTotal;
+          const budgetCapacity = reliableMonthlyCapacity({
+            expectedNetPay:
+              activeProfile?.expectedNetPay == null ? null : activeProfile.expectedNetPay / 100,
+            grossAnnualIncome:
+              activeProfile?.grossAnnualIncome == null
+                ? null
+                : activeProfile.grossAnnualIncome / 100,
+            observedMonthlyIncome: observedIncome,
+            recurring: recurringObligations.map((item) => ({
+              amount: item.expectedAmount / 100,
+              cadence: item.cadence,
+            })),
+          });
           const recommendedNextOperation =
             blockers.length > 0
               ? {

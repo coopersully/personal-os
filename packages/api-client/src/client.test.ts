@@ -1400,6 +1400,18 @@ describe("ilo API client", () => {
     ]);
   });
 
+  it.each([
+    { result: { refreshed: true }, status: "applied" },
+    { review: { id, status: "pending" }, status: "pending_review" },
+    { question: { id, prompt: "Need evidence." }, status: "needs_input" },
+  ])("preserves refresh Finance action disposition $status", async (outcome) => {
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(outcome),
+    });
+    await expect(api.refreshFinanceInsights()).resolves.toEqual(outcome);
+  });
+
   it("lists public Finance questions through the dedicated recovery endpoint", async () => {
     const question = {
       id,

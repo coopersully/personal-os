@@ -21,6 +21,7 @@ Status: DONE_WITH_CONCERNS
 15. `39c7cbe fix(finances): preserve refresh disposition`
 16. `fix(finances): lock finance action targets` (this target-locking commit)
 17. `fix(finances): recover action questions` (this question-recovery commit)
+18. `test(finances): preserve refresh dispositions` (this refresh-client test commit)
 
 ## Delivered behavior
 
@@ -96,3 +97,10 @@ Status: DONE_WITH_CONCERNS
 - `pnpm --filter @personal-os/api-client typecheck` — passed.
 - `pnpm --filter @personal-os/domain typecheck` — passed.
 - Scoped Biome and `git diff --check` — passed with four pre-existing `noNonNullAssertion` warnings in the action integration test; no errors.
+
+## Refresh disposition regression follow-up
+
+Status: DONE_WITH_CONCERNS
+
+- The API client now has a table-driven regression proving `refreshFinanceInsights` preserves `applied`, `pending_review`, and `needs_input` responses instead of coercing them to the legacy refresh result.
+- Concern: the requested maximum-size queue and API/MCP refresh audit/rollback matrices remain unimplemented in this bounded follow-up.

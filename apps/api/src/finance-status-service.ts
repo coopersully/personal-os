@@ -30,7 +30,7 @@ import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import { forecastCashflow } from "./finance-cashflow.js";
 import { assessFinanceHealth } from "./finance-health.js";
-import { reliableMonthlyCapacity } from "./finance-planning.js";
+import { reliableMonthlyCapacity, reliableMonthlyIncome } from "./finance-planning.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { createGoalsService } from "./goals-service.js";
 import type { WorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -443,17 +443,27 @@ export function createFinanceStatusService({ db, now }: Options) {
               ? activeProfile.grossAnnualIncome / 1200
               : null;
           const observedIncome = incomeObserved > 0 ? incomeObserved : null;
-          const monthlyIncome =
-            observedIncome ??
-            (activeProfile?.expectedNetPay == null
-              ? statedMonthlyIncome
-              : activeProfile.expectedNetPay / 100);
           const budgetTotal =
             budgets.length > 0 ? budgets.reduce((sum, row) => sum + row.limit, 0) / 100 : null;
           const selectedDay = asOfDate.getUTCDate();
           const daysInMonth = new Date(
             Date.UTC(Number(currentMonth.slice(0, 4)), Number(currentMonth.slice(5, 7)), 0),
           ).getUTCDate();
+          const reliableIncomeInput = {
+            expectedNetPay:
+              activeProfile?.expectedNetPay == null ? null : activeProfile.expectedNetPay / 100,
+            expectedNetPayFrequency: activeProfile?.payFrequency ?? null,
+            grossAnnualIncome:
+              activeProfile?.grossAnnualIncome == null
+                ? null
+                : activeProfile.grossAnnualIncome / 100,
+            observedMonthlyIncome: observedIncome,
+            observedIncomeWindow: {
+              complete: selectedDay === daysInMonth,
+              days: selectedDay,
+            },
+          };
+          const monthlyIncome = reliableMonthlyIncome(reliableIncomeInput);
           const forecast =
             postedExpenses.length > 0 && selectedDay > 0
               ? (spending / selectedDay) * daysInMonth
@@ -851,18 +861,7 @@ export function createFinanceStatusService({ db, now }: Options) {
             value: evidenceCurrent ? observedIncome : null,
           };
           const budgetCapacity = reliableMonthlyCapacity({
-            expectedNetPay:
-              activeProfile?.expectedNetPay == null ? null : activeProfile.expectedNetPay / 100,
-            expectedNetPayFrequency: activeProfile?.payFrequency ?? null,
-            grossAnnualIncome:
-              activeProfile?.grossAnnualIncome == null
-                ? null
-                : activeProfile.grossAnnualIncome / 100,
-            observedMonthlyIncome: observedIncome,
-            observedIncomeWindow: {
-              complete: selectedDay === daysInMonth,
-              days: selectedDay,
-            },
+            ...reliableIncomeInput,
             recurring: recurringObligations.map((item) => ({
               amount: item.expectedAmount / 100,
               cadence: item.cadence,

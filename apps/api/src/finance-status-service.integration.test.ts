@@ -227,6 +227,54 @@ describe.sequential("Finance status service", () => {
     expect(status.details.latestReview).toBeNull();
   });
 
+  it("keeps partial month-to-date income visible but missing as a reliable monthly baseline", async () => {
+    const userId = await makeUser("Partial income Finance");
+    const source = await account(userId, "current");
+    await database.db.insert(financeTransactions).values({
+      accountId: source.id,
+      amount: 500_00,
+      category: "Income",
+      categorySource: "user",
+      direction: "income",
+      merchant: "Partial payroll",
+      needsReview: false,
+      pending: false,
+      transactionDate: "2026-08-01",
+      userId,
+    });
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.income.observed).toMatchObject({ basis: "ledger_observed", value: 500 });
+    expect(status.details.income.monthly).toBeNull();
+    expect(status.details.missingFacts).toContain("reliable_monthly_income");
+    expect(status.details.questions).toContainEqual(
+      expect.objectContaining({
+        prompt: expect.stringContaining("reliable monthly take-home income"),
+      }),
+    );
+  });
+
+  it("reports biweekly expected take-home as the same normalized monthly income used for capacity", async () => {
+    const userId = await makeUser("Biweekly income Finance");
+    await account(userId, "current");
+    await database.db.insert(financeProfiles).values({
+      effectiveDate: "2026-08-01",
+      expectedNetPay: 2_000_00,
+      payFrequency: "biweekly",
+      userId,
+    });
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.income.monthly).toBeCloseTo(4_333.33, 2);
+    expect(status.details.plan.capacity).toBeCloseTo(
+      status.details.income.monthly ?? Number.NaN,
+      8,
+    );
+    expect(status.details.missingFacts).not.toContain("reliable_monthly_income");
+  });
+
   it("uses persisted manual-account current state without requiring a Plaid timestamp", async () => {
     const userId = await makeUser("Manual Current Finance");
     const [source] = await database.db

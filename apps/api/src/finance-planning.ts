@@ -46,21 +46,31 @@ function monthlyExpectedNetPay(
   }
 }
 
-export function reliableMonthlyCapacity(input: {
+type ReliableMonthlyIncomeInput = {
   expectedNetPay: number | null | undefined;
   expectedNetPayFrequency?: string | null;
   grossAnnualIncome: number | null | undefined;
   observedMonthlyIncome: number | null;
   observedIncomeWindow?: { complete: boolean; days: number } | null;
-  recurring: Array<{ amount: number; cadence: string }>;
-}) {
+};
+
+export function reliableMonthlyIncome(input: ReliableMonthlyIncomeInput) {
   const observedMonthlyIncome = input.observedIncomeWindow?.complete
     ? input.observedMonthlyIncome
     : null;
-  const income =
+  return (
     observedMonthlyIncome ??
     monthlyExpectedNetPay(input.expectedNetPay, input.expectedNetPayFrequency) ??
-    (input.grossAnnualIncome == null ? null : input.grossAnnualIncome / 12);
+    (input.grossAnnualIncome == null ? null : input.grossAnnualIncome / 12)
+  );
+}
+
+export function reliableMonthlyCapacity(
+  input: ReliableMonthlyIncomeInput & {
+    recurring: Array<{ amount: number; cadence: string }>;
+  },
+) {
+  const income = reliableMonthlyIncome(input);
   const obligations = input.recurring.reduce(
     (sum, item) => sum + (monthlyAmount(item.amount, item.cadence) ?? 0),
     0,

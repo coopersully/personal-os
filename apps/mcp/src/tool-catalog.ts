@@ -159,11 +159,14 @@ export const iloToolCatalog = {
   restore_reminder: write("reminders", ["reminders:write"]),
 
   get_finance_guided_setup: read("finances", ["finances:read"], "context", { ui: true }),
+  get_finance_automation_settings: read("finances", ["finances:read"]),
   get_finance_status: {
     ...read("finances", ["finances:read"]),
     idempotent: true,
     openWorld: false,
   },
+  compare_finance_scenarios: preview("finances", ["finances:read"]),
+  set_finance_budget_plan: write("finances", ["finances:write"], { policy: "approved_rule" }),
   maintain_finances: write("finances", ["finances:maintain"], {
     idempotent: false,
     openWorld: false,
@@ -179,6 +182,30 @@ export const iloToolCatalog = {
   list_finance_merchants: read("finances", ["finances:read"]),
   get_finance_review_queue: read("finances", ["finances:read"], "inspect", { ui: true }),
   propose_finance_categorizations: preview("finances", ["finances:read"]),
+  apply_finance_categorizations: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  resolve_finance_review: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  update_finance_recurring_obligation: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  resolve_finance_alert: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  update_finance_merchant: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  merge_finance_merchants: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  create_finance_budget: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  create_finance_transaction: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  update_finance_transaction: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  update_finance_income_stream: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
+  update_finance_profile: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  refresh_finance_insights: write("finances", ["finances:write"], {
+    policy: "approved_rule",
+  }),
   get_finance_overview: read("finances", ["finances:read"], "context", { ui: true }),
   create_finance_attention_item: write("finances", ["finances:write"]),
 

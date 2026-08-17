@@ -299,11 +299,30 @@ function mockApi() {
       },
       suggestedWorkflows: [],
     })),
+    getFinanceAutomationSettings: vi.fn(async () => ({ reviewBypassEnabled: true })),
     getFinanceStatus: vi.fn(async () => ({
       activeRun: null,
       domain: "finances",
       state: "needs_work",
     })),
+    compareFinanceScenarios: vi.fn(async () => ({
+      alternatives: [],
+      asOf: "2026-07-13",
+      assumptions: [],
+      baseline: {
+        debtPayoffMonths: null,
+        goalDateEffects: [],
+        label: "Baseline",
+        monthlyCashFlow: 0,
+        projectedLowestBalance: 0,
+        reserveRunwayMonths: null,
+      },
+      fingerprint: `sha256:${"a".repeat(64)}`,
+      goalConflicts: [],
+      missingInputs: [],
+      sensitivityWarnings: [],
+    })),
+    setFinanceBudgetPlan: vi.fn(async (input) => input),
     maintainFinances: vi.fn(async () => ({
       id,
       scope: { type: "all_outstanding" as const },
@@ -336,6 +355,12 @@ function mockApi() {
       needsReview: true,
       notes: null,
       updatedAt: now,
+    })),
+    createFinanceBudget: vi.fn(async () => ({
+      category: "Dining",
+      id,
+      limit: 250,
+      month: "2026-07",
     })),
     updateFinanceTransaction: vi.fn(async () => ({
       id,
@@ -385,7 +410,21 @@ function mockApi() {
       unresolvedReviews: 0,
     })),
     getFinanceProfile: vi.fn(async () => null),
+    updateFinanceProfile: vi.fn(async (input) => ({ ...input, updatedAt: now })),
     listFinanceIncomeStreams: vi.fn(async () => []),
+    updateFinanceIncomeStream: vi.fn(async () => ({
+      accountId: null,
+      cadence: "monthly",
+      confidence: 1,
+      displayName: "Pay",
+      expectedAmount: 1,
+      id,
+      lastObservedDate: null,
+      nextExpectedDate: null,
+      payer: "Employer",
+      source: "user",
+      status: "active",
+    })),
     listFinanceRecurringObligations: vi.fn(async () => []),
     listFinanceAlerts: vi.fn(async () => []),
     getFinanceForecast: vi.fn(async () => ({
@@ -422,6 +461,7 @@ function mockApi() {
       title: "Test",
       type: "income_missing",
     })),
+    refreshFinanceInsights: vi.fn(async () => ({ refreshed: true })),
     getFinanceCategories: vi.fn(async () => []),
     getFinanceBudgetStatus: vi.fn(async () => []),
     listFinanceMerchants: vi.fn(async () => []),
@@ -689,8 +729,7 @@ describe("ilo MCP server", () => {
     });
     for (const tool of tools.tools.filter(
       (candidate) =>
-        candidate.name.includes("finance") &&
-        !["create_finance_attention_item", "maintain_finances"].includes(candidate.name),
+        candidate.name.includes("finance") && candidate.annotations?.readOnlyHint === true,
     )) {
       expect(tool.annotations).toEqual({
         destructiveHint: false,
@@ -994,6 +1033,28 @@ describe("ilo MCP server", () => {
       },
     });
     await client.callTool({ name: "get_finance_overview", arguments: {} });
+    await client.callTool({ name: "get_finance_automation_settings", arguments: {} });
+    await client.callTool({
+      name: "compare_finance_scenarios",
+      arguments: {
+        alternatives: [],
+        asOf: "2026-07-13",
+        baseline: {
+          label: "Baseline",
+          monthlyIncome: 3_000,
+          startingCash: 1_000,
+        },
+        horizonMonths: 3,
+      },
+    });
+    await client.callTool({
+      name: "set_finance_budget_plan",
+      arguments: {
+        allocations: [{ categoryId: id, limit: 250 }],
+        month: "2026-07",
+        rationale: "Match current spending.",
+      },
+    });
     await client.callTool({ name: "get_finance_wealth_summary", arguments: {} });
     await client.callTool({ name: "get_finance_cashflow", arguments: {} });
     await client.callTool({ name: "get_finance_ledger_health", arguments: {} });
@@ -1006,6 +1067,91 @@ describe("ilo MCP server", () => {
       name: "propose_finance_categorizations",
       arguments: { cursor: "next-review-page" },
     });
+    await client.callTool({
+      name: "apply_finance_categorizations",
+      arguments: {
+        decisions: [
+          {
+            categoryId: id,
+            confidence: 0.99,
+            expectedTransactionUpdatedAt: now,
+            learnMerchant: "suggest",
+            rationale: "Known merchant history.",
+            transactionId: accountId,
+          },
+        ],
+      },
+    });
+    await client.callTool({
+      name: "resolve_finance_review",
+      arguments: {
+        action: "approve",
+        expectedTransactionUpdatedAt: now,
+        id,
+        learnMerchant: "never",
+        rationale: null,
+      },
+    });
+    await client.callTool({
+      name: "update_finance_recurring_obligation",
+      arguments: { id, status: "active" },
+    });
+    await client.callTool({
+      name: "resolve_finance_alert",
+      arguments: { action: "resolve", id, rationale: null },
+    });
+    await client.callTool({
+      name: "update_finance_merchant",
+      arguments: { displayName: "Corner Store", id },
+    });
+    await client.callTool({
+      name: "merge_finance_merchants",
+      arguments: {
+        rationale: "Same merchant.",
+        sourceMerchantId: accountId,
+        targetMerchantId: id,
+      },
+    });
+    await client.callTool({
+      name: "create_finance_budget",
+      arguments: { category: "Dining", limit: 250, month: "2026-07" },
+    });
+    await client.callTool({
+      name: "create_finance_transaction",
+      arguments: {
+        accountId,
+        amount: 12,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-13",
+        direction: "expense",
+        merchant: "Corner store",
+        notes: null,
+      },
+    });
+    await client.callTool({
+      name: "update_finance_transaction",
+      arguments: { category: "Dining", id: accountId },
+    });
+    await client.callTool({
+      name: "update_finance_income_stream",
+      arguments: { id, status: "active" },
+    });
+    await client.callTool({
+      name: "update_finance_profile",
+      arguments: {
+        effectiveDate: "2026-07-01",
+        employer: null,
+        employmentType: null,
+        expectedNetPay: null,
+        grossAnnualIncome: null,
+        nextPayday: null,
+        payAccountId: null,
+        payFrequency: null,
+        role: null,
+      },
+    });
+    await client.callTool({ name: "refresh_finance_insights", arguments: {} });
     await client.callTool({ name: "list_x_bookmarks", arguments: {} });
     await client.callTool({ name: "sync_x_bookmarks", arguments: {} });
     await client.callTool({
@@ -1334,6 +1480,19 @@ describe("ilo MCP server", () => {
     expect(api.upsertFinanceAttentionItem).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ importance: "high", kind: "important" }),
+    );
+    expect(api.applyFinanceCategorizations).toHaveBeenCalledTimes(1);
+    expect(api.resolveFinanceReview).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({ action: "approve", expectedTransactionUpdatedAt: now }),
+    );
+    expect(api.createFinanceBudget).toHaveBeenCalledWith({
+      category: "Dining",
+      limit: 250,
+      month: "2026-07",
+    });
+    expect(api.createFinanceTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId, merchant: "Corner store" }),
     );
     expect(api.listMailThreads).toHaveBeenCalledWith({
       accountIds: [accountId],

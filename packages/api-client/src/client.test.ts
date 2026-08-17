@@ -44,7 +44,20 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
     activeGoals: [],
     activeMotives: [],
     budget: { approved: false, month: "2026-07", total: null },
-    cashFlow: { net: null },
+    cashFlow: {
+      net: null,
+      projectedLowestBalance: null,
+      projectedLowestBalanceDate: null,
+      reserveRunwayMonths: null,
+    },
+    closeReadiness: {
+      missingProvenance: 0,
+      possibleDuplicates: 0,
+      ready: true,
+      uncategorized: 0,
+      unmatchedTransfers: 0,
+    },
+    evidence: { cutoff: null, current: false },
     health: {
       confidence: "insufficient",
       confidenceEvidence: [],
@@ -68,7 +81,12 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
         rating: "unknown",
       },
     },
-    income: { monthly: null },
+    income: {
+      monthly: null,
+      observed: { asOf: null, basis: "missing", confidence: null, sourceRefs: [], value: null },
+      stated: { asOf: null, basis: "missing", confidence: null, sourceRefs: [], value: null },
+    },
+    interview: [],
     ledger: {
       candidateTransfers: 0,
       missingProvenance: 0,
@@ -76,14 +94,21 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
       possibleDuplicates: 0,
     },
     month: { forecast: null, spending: null },
+    latestReview: null,
+    missingFacts: [],
+    plan: { budgetVariance: null, capacity: null, overAllocated: false },
+    prioritizedGoals: [],
     proposals: [],
     questions: [],
+    reimbursements: { open: 0, overdue: 0, unmatchedCredits: 0 },
+    reviewMode: { reviewBypassEnabled: false },
     review: { byReason: {}, total: 0 },
     rulebookVersion: `sha256:${"a".repeat(64)}`,
     wealth: { cash: null, debt: null, investments: null, netWorth: null },
   },
   domain: "finances",
   freshness: { blockers: [], observedAt: now, state: "current" },
+  recommendedNextOperation: null,
   state: "clean",
   validNextOperations: [],
   work: {
@@ -705,6 +730,10 @@ function apiFetch() {
         ],
       });
     if (url.pathname === "/v1/finances/plaid/status") return json({ available: true });
+    if (url.pathname === "/v1/finances/automation-settings")
+      return json({
+        settings: { reviewBypassEnabled: method === "PATCH" },
+      });
     if (url.pathname === "/v1/finances/guided-setup")
       return json({
         setup: {
@@ -1411,6 +1440,12 @@ describe("ilo API client", () => {
     });
     await expect(api.getFinanceBudgetPace("week")).resolves.toMatchObject({ period: "week" });
     await expect(api.getFinanceWealthSummary()).resolves.toMatchObject({ netWorth: 1000 });
+    await expect(api.getFinanceAutomationSettings()).resolves.toEqual({
+      reviewBypassEnabled: false,
+    });
+    await expect(
+      api.updateFinanceAutomationSettings({ reviewBypassEnabled: true }),
+    ).resolves.toEqual({ reviewBypassEnabled: true });
     await expect(api.getFinanceGuidedSetup()).resolves.toMatchObject({
       accountSources: [financeAccount],
       humanOnlyActions: expect.arrayContaining(["create_merchant_rule"]),

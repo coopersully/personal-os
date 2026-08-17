@@ -54,6 +54,7 @@ describe("finance routes", () => {
       createBudget: vi.fn(),
       createTransaction: vi.fn(),
       deleteAccount: vi.fn(),
+      getAutomationSettings: vi.fn(async () => ({ reviewBypassEnabled: false })),
       getGuidedSetupContext: vi.fn(async () => ({ ready: true })),
       mergeMerchants: vi.fn(),
       proposeCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
@@ -124,7 +125,7 @@ describe("finance routes", () => {
     for (const response of humanOnlyResponses) {
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
-        error: expect.stringContaining("interactive user session"),
+        error: expect.stringMatching(/interactive user session|waiting for review/),
       });
     }
     expect(finances.getGuidedSetupContext).toHaveBeenCalledWith(id);
@@ -147,6 +148,60 @@ describe("finance routes", () => {
     expect(finances.mergeMerchants).not.toHaveBeenCalled();
     expect(finances.resolveReview).not.toHaveBeenCalled();
     expect(finances.createTransaction).not.toHaveBeenCalled();
+  });
+
+  it("lets a scoped agent bypass Finance review when the user switch is enabled", async () => {
+    const app = new Hono<AppEnv>();
+    const budget = { category: "Housing", id, limit: 2_000, month: "2026-08" };
+    const finances = {
+      createBudget: vi.fn(async () => budget),
+      getAutomationSettings: vi.fn(async () => ({ reviewBypassEnabled: true })),
+      updateAutomationSettings: vi.fn(),
+    };
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "request-agent-budget");
+      await next();
+    });
+    app.onError((error, context) =>
+      context.json({ error: error instanceof Error ? error.message : "unknown" }, 403),
+    );
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: finances as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const created = await app.request("/v1/finances/budgets", {
+      body: JSON.stringify({ category: "Housing", limit: 2_000, month: "2026-08" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(created.status).toBe(201);
+    await expect(created.json()).resolves.toEqual({ budget });
+    expect(finances.getAutomationSettings).toHaveBeenCalledWith(id);
+    expect(finances.createBudget).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "Housing" }),
+      expect.objectContaining({ financeReviewBypass: true }),
+    );
+
+    const selfEnable = await app.request("/v1/finances/automation-settings", {
+      body: JSON.stringify({ reviewBypassEnabled: true }),
+      headers: { "content-type": "application/json" },
+      method: "PATCH",
+    });
+    expect(selfEnable.status).toBe(403);
+    expect(finances.updateAutomationSettings).not.toHaveBeenCalled();
   });
 
   it("keeps POST proposal compatibility on the Finance read scope", async () => {

@@ -10,9 +10,12 @@ import {
   domainProfiles,
   financeAccounts,
   financeAlerts,
+  financeAutomationSettings,
+  financeBudgets,
   financeCategories,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
   financeReviewCases,
@@ -348,6 +351,8 @@ describe.sequential("finance service", () => {
       "0056_workspace_maintenance_runs",
       "0057_finance_currency_evidence",
       "0058_finance_provider_items",
+      "0059_finance_automation_settings",
+      "0060_finance_agent_action_reviews",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -830,6 +835,101 @@ describe.sequential("finance service", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+  });
+
+  it("keeps review bypass off until a signed-in user explicitly enables it", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "finance-review-bypass" };
+
+    await expect(service.getAutomationSettings(userId)).resolves.toEqual({
+      reviewBypassEnabled: false,
+    });
+    await expect(
+      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true });
+    await expect(service.getAutomationSettings(userId)).resolves.toEqual({
+      reviewBypassEnabled: true,
+    });
+    await expect(service.getGuidedSetupContext(userId)).resolves.toMatchObject({
+      humanOnlyActions: [
+        "connect_or_disconnect_source",
+        "import_transactions",
+        "manage_accounts",
+        "refresh_provider_data",
+      ],
+    });
+    await expect(
+      database.db
+        .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
+        .from(financeAutomationSettings)
+        .where(eq(financeAutomationSettings.userId, userId)),
+    ).resolves.toEqual([{ reviewBypassEnabled: true }]);
+    await expect(
+      database.db
+        .select({ action: auditEvents.action, actorType: auditEvents.actorType })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, context.requestId)),
+    ).resolves.toEqual([{ action: "finance.review_bypass_updated", actorType: "user" }]);
+  });
+
+  it("atomically replaces an owned budget plan and records only a redacted audit summary", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Budget plan owner",
+        email: "budget-plan-owner@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Budget plan owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const categories = await service.listCategories(owner.id);
+    const category = categories[0];
+    if (!category) throw new Error("Default Finance categories were not seeded.");
+    await database.db.insert(financeProfiles).values({
+      effectiveDate: "2026-07-01",
+      grossAnnualIncome: 5_000_00,
+      userId: owner.id,
+    });
+    const context = { principal: financePrincipal(owner.id), requestId: "budget-plan" };
+    const input = {
+      allocations: [{ categoryId: category.id, limit: 400 }],
+      assumptions: ["Income stays stable."],
+      goalIds: [],
+      month: "2026-07",
+      rationale: "Fund essentials first.",
+      replace: true,
+      scenarioFingerprint: `sha256:${"a".repeat(64)}`,
+    };
+
+    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(eq(financeBudgets.userId, owner.id)),
+    ).resolves.toEqual([{ category: category.name, limit: 40_000 }]);
+    await expect(
+      database.db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, context.requestId)),
+    ).resolves.toEqual([
+      {
+        after: expect.objectContaining({
+          assumptionsCount: 1,
+          rationaleProvided: true,
+          scenarioFingerprint: input.scenarioFingerprint,
+        }),
+      },
+    ]);
+    await expect(
+      service.setBudgetPlan(
+        { ...input, allocations: [{ categoryId: category.id, limit: 6_000 }] },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
   });
 
   it("derives Finance attention provenance, deduplicates open items, and audits atomically", async () => {
@@ -2211,8 +2311,9 @@ describe.sequential("finance service", () => {
       await service.getGuidedSetupContext(userId)
     ).suggestedWorkflows.find((workflow) => workflow.key === "categorization_review");
     expect(categorizationWorkflow).toMatchObject({
-      available: false,
-      unavailableReason: expect.stringContaining("ambiguous transfers"),
+      available: true,
+      policy: "approved_rule",
+      unavailableReason: null,
     });
     const guidedSetupSnapshot = await service.getGuidedSetupContext(userId);
     expect(guidedSetupSnapshot.ledgerHealth.unresolvedReviews).toBe(

@@ -3,10 +3,13 @@ import {
   type Database,
   domainProfileApprovals,
   financeAccounts,
+  financeAutomationSettings,
   financeBudgets,
   financeCategoryRules,
+  financeIncomeStreams,
   financeProfiles,
   financeProviderItems,
+  financeRecurringObligations,
   financeReviewCases,
   financeTransactions,
   goals as goalRows,
@@ -24,6 +27,7 @@ import {
 import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
+import { forecastCashflow } from "./finance-cashflow.js";
 import { assessFinanceHealth } from "./finance-health.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { createGoalsService } from "./goals-service.js";
@@ -205,6 +209,22 @@ function serializeMotive(row: typeof motiveRows.$inferSelect) {
   };
 }
 
+function questionId(code: string) {
+  const hash = createHash("sha256").update(code).digest("hex");
+  return `00000000-0000-4000-8000-${hash.slice(0, 12)}`;
+}
+
+function planningQuestion(code: string, prompt: string, why: string) {
+  return {
+    actionKind: "budget_plan" as const,
+    choices: [],
+    id: questionId(code),
+    prompt,
+    sourceRefs: [],
+    why,
+  };
+}
+
 export function createFinanceStatusService({ db, now }: Options) {
   return {
     async getFinanceStatus(userId: string, scope: MaintenanceScope): Promise<FinanceStatus> {
@@ -231,6 +251,31 @@ export function createFinanceStatusService({ db, now }: Options) {
             .from(financeBudgets)
             .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, currentMonth)))
             .orderBy(financeBudgets.id);
+          const [automationSettings] = await tx
+            .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
+            .from(financeAutomationSettings)
+            .where(eq(financeAutomationSettings.userId, userId))
+            .limit(1);
+          const incomeStreams = await tx
+            .select()
+            .from(financeIncomeStreams)
+            .where(
+              and(
+                eq(financeIncomeStreams.userId, userId),
+                eq(financeIncomeStreams.status, "active"),
+              ),
+            )
+            .orderBy(financeIncomeStreams.id);
+          const recurringObligations = await tx
+            .select()
+            .from(financeRecurringObligations)
+            .where(
+              and(
+                eq(financeRecurringObligations.userId, userId),
+                eq(financeRecurringObligations.status, "active"),
+              ),
+            )
+            .orderBy(financeRecurringObligations.id);
           const reviews = await tx
             .select()
             .from(financeReviewCases)
@@ -379,12 +424,12 @@ export function createFinanceStatusService({ db, now }: Options) {
           const spending = postedExpenses.reduce((sum, row) => sum + row.amount, 0) / 100;
           const incomeObserved = postedIncome.reduce((sum, row) => sum + row.amount, 0) / 100;
           const activeProfile = latestProfile(profiles, asOf.slice(0, 10));
-          const monthlyIncome =
+          const statedMonthlyIncome =
             activeProfile?.grossAnnualIncome != null
               ? activeProfile.grossAnnualIncome / 1200
-              : incomeObserved > 0
-                ? incomeObserved
-                : null;
+              : null;
+          const observedIncome = incomeObserved > 0 ? incomeObserved : null;
+          const monthlyIncome = statedMonthlyIncome ?? observedIncome;
           const budgetTotal =
             budgets.length > 0 ? budgets.reduce((sum, row) => sum + row.limit, 0) / 100 : null;
           const selectedDay = asOfDate.getUTCDate();
@@ -523,12 +568,64 @@ export function createFinanceStatusService({ db, now }: Options) {
           const byReason: Record<string, number> = {};
           for (const review of scopedReviews)
             byReason[review.reason] = (byReason[review.reason] ?? 0) + 1;
-          const questions = health.missingInputs
-            .filter((missing) => missing !== "account_roles")
-            .map((missing) => ({
-              code: missing,
-              prompt: `Provide ${missing.replaceAll("_", " ")} evidence.`,
-            }));
+          const needsFirstBudgetFacts = budgets.length === 0;
+          const missingFacts = needsFirstBudgetFacts
+            ? [
+                ...(monthlyIncome === null ? ["reliable_monthly_income"] : []),
+                ...(activeProfile?.monthlyHousingCost == null ? ["monthly_housing_cost"] : []),
+                ...(activeProfile?.householdSize == null ? ["household_size"] : []),
+                ...(recurringObligations.length === 0 ? ["recurring_obligations"] : []),
+                ...(goals.length === 0 ? ["goal_priority"] : []),
+              ]
+            : [];
+          const planningQuestions = [
+            ...(needsFirstBudgetFacts && monthlyIncome === null
+              ? [
+                  planningQuestion(
+                    "reliable_monthly_income",
+                    "What reliable monthly take-home income should this plan use?",
+                    "A first budget needs a monthly income baseline.",
+                  ),
+                ]
+              : []),
+            ...(needsFirstBudgetFacts && activeProfile?.monthlyHousingCost == null
+              ? [
+                  planningQuestion(
+                    "monthly_housing_cost",
+                    "What is your monthly housing cost?",
+                    "Housing is needed to assess available budget capacity.",
+                  ),
+                ]
+              : []),
+            ...(needsFirstBudgetFacts && activeProfile?.householdSize == null
+              ? [
+                  planningQuestion(
+                    "household_size",
+                    "How many people does this budget support?",
+                    "Household size makes spending and goal recommendations comparable.",
+                  ),
+                ]
+              : []),
+            ...(needsFirstBudgetFacts && recurringObligations.length === 0
+              ? [
+                  planningQuestion(
+                    "recurring_obligations",
+                    "Which recurring bills or obligations should the plan reserve for?",
+                    "Recurring obligations are needed before allocating available income.",
+                  ),
+                ]
+              : []),
+            ...(needsFirstBudgetFacts && goals.length === 0
+              ? [
+                  planningQuestion(
+                    "goal_priority",
+                    "Which financial goal should this budget prioritize first?",
+                    "A first budget needs one goal priority to guide tradeoffs.",
+                  ),
+                ]
+              : []),
+          ];
+          const questions = planningQuestions;
           const latestRun = maintenanceRuns[0];
           const activeRun =
             latestRun &&
@@ -612,6 +709,88 @@ export function createFinanceStatusService({ db, now }: Options) {
                 .filter((row) => row.kind === "investment")
                 .reduce((sum, row) => sum + (row.balance ?? 0), 0) / 100
             : null;
+          const cashflowProjection =
+            evidenceCurrent && cash !== null
+              ? forecastCashflow({
+                  asOf,
+                  cash,
+                  horizon: null,
+                  income: incomeStreams.map((stream) => ({
+                    amount: stream.expectedAmount / 100,
+                    date: stream.nextExpectedDate,
+                    kind: "income" as const,
+                  })),
+                  obligations: recurringObligations.map((obligation) => ({
+                    amount: obligation.expectedAmount / 100,
+                    date: obligation.nextExpectedDate,
+                    kind: "obligation" as const,
+                  })),
+                })
+              : null;
+          const recurringMonthlyTotal = recurringObligations.reduce(
+            (sum, obligation) => sum + obligation.expectedAmount / 100,
+            0,
+          );
+          const reserveMonthlyOutflow =
+            recurringMonthlyTotal > 0
+              ? recurringMonthlyTotal
+              : activeProfile?.monthlyHousingCost != null
+                ? activeProfile.monthlyHousingCost / 100
+                : null;
+          const statedIncomeEvidence = {
+            asOf: activeProfile?.updatedAt.toISOString() ?? null,
+            basis: statedMonthlyIncome === null ? "missing" : "user_stated",
+            confidence: statedMonthlyIncome === null ? null : "high",
+            sourceRefs:
+              activeProfile === undefined
+                ? []
+                : [
+                    {
+                      accountId: null,
+                      provider: "local" as const,
+                      remoteId: activeProfile.id,
+                      revision: activeProfile.updatedAt.toISOString(),
+                      sourceType: "local" as const,
+                    },
+                  ],
+            value: statedMonthlyIncome,
+          };
+          const observedIncomeEvidence = {
+            asOf: evidenceCurrent && observedIncome !== null ? asOf : null,
+            basis: observedIncome === null ? "missing" : "ledger_observed",
+            confidence: observedIncome === null ? null : evidenceCurrent ? "medium" : "low",
+            sourceRefs:
+              observedIncome === null
+                ? []
+                : postedIncome.slice(0, 100).map((transaction) => ({
+                    accountId: transaction.accountId,
+                    provider: "local" as const,
+                    remoteId: transaction.id,
+                    revision: transaction.updatedAt.toISOString(),
+                    sourceType: "finance_transaction" as const,
+                  })),
+            value: evidenceCurrent ? observedIncome : null,
+          };
+          const budgetCapacity =
+            monthlyIncome === null ? null : monthlyIncome - recurringMonthlyTotal;
+          const recommendedNextOperation =
+            blockers.length > 0
+              ? {
+                  href: "/finances/accounts",
+                  label: "Reconnect Finance account",
+                  operation: "reconnect_finance",
+                }
+              : questions.length > 0
+                ? {
+                    href: "/finances",
+                    label: "Answer Finance question",
+                    operation: "answer_finance_question",
+                  }
+                : {
+                    href: "/finances",
+                    label: "Maintain finances",
+                    operation: "maintain_finances",
+                  };
           return financeStatusSchema.parse({
             activeRun,
             asOf,
@@ -638,9 +817,43 @@ export function createFinanceStatusService({ db, now }: Options) {
                 month: currentMonth,
                 total: evidenceCurrent ? budgetTotal : null,
               },
-              cashFlow: { net: evidenceCurrent ? incomeObserved - spending : null },
+              cashFlow: {
+                net: evidenceCurrent ? incomeObserved - spending : null,
+                projectedLowestBalance: cashflowProjection?.lowestBalance ?? null,
+                projectedLowestBalanceDate: cashflowProjection?.lowestDate ?? null,
+                reserveRunwayMonths:
+                  cash !== null && reserveMonthlyOutflow !== null && reserveMonthlyOutflow > 0
+                    ? cash / reserveMonthlyOutflow
+                    : null,
+              },
+              closeReadiness: {
+                missingProvenance: scopedTransactions.filter(
+                  (row) => row.category !== null && row.categorySource === null,
+                ).length,
+                possibleDuplicates: [...possibleDuplicateKeys.values()].filter((count) => count > 1)
+                  .length,
+                ready:
+                  scopedReviews.length === 0 &&
+                  scopedTransactions.filter(
+                    (row) => !row.pending && row.direction !== "transfer" && row.category === null,
+                  ).length === 0 &&
+                  scopedTransactions.filter((row) => row.reconciliationStatus === "candidate")
+                    .length === 0,
+                uncategorized: scopedTransactions.filter(
+                  (row) => !row.pending && row.direction !== "transfer" && row.category === null,
+                ).length,
+                unmatchedTransfers: scopedTransactions.filter(
+                  (row) => row.reconciliationStatus === "candidate",
+                ).length,
+              },
+              evidence: { cutoff: evidenceCurrent ? asOf : null, current: evidenceCurrent },
               health,
-              income: { monthly: evidenceCurrent ? monthlyIncome : null },
+              income: {
+                monthly: evidenceCurrent ? monthlyIncome : null,
+                observed: observedIncomeEvidence,
+                stated: statedIncomeEvidence,
+              },
+              interview: questions,
               ledger: {
                 candidateTransfers: scopedTransactions.filter(
                   (row) => row.reconciliationStatus === "candidate",
@@ -656,8 +869,36 @@ export function createFinanceStatusService({ db, now }: Options) {
                 forecast: evidenceCurrent ? forecast : null,
                 spending: evidenceCurrent ? spending : null,
               },
+              latestReview:
+                latestRun &&
+                !openRunStatuses.includes(latestRun.status as (typeof openRunStatuses)[number])
+                  ? {
+                      completedAt: latestRun.updatedAt.toISOString(),
+                      id: latestRun.id,
+                      status: latestRun.status,
+                    }
+                  : null,
+              missingFacts,
+              plan: {
+                budgetVariance:
+                  budgetCapacity === null || budgetTotal === null
+                    ? null
+                    : budgetCapacity - budgetTotal,
+                capacity: budgetCapacity,
+                overAllocated:
+                  budgetCapacity !== null && budgetTotal !== null && budgetTotal > budgetCapacity,
+              },
+              prioritizedGoals: goals
+                .toSorted((left, right) => {
+                  if (left.targetDate === null) return 1;
+                  if (right.targetDate === null) return -1;
+                  return left.targetDate.localeCompare(right.targetDate);
+                })
+                .map((goal, index) => ({ goal: serializeGoal(goal), priority: index + 1 })),
               proposals: [],
               questions,
+              reimbursements: { open: 0, overdue: 0, unmatchedCredits: 0 },
+              reviewMode: { reviewBypassEnabled: automationSettings?.reviewBypassEnabled ?? false },
               review: { byReason, total: scopedReviews.length },
               rulebookVersion,
               wealth: {
@@ -672,23 +913,9 @@ export function createFinanceStatusService({ db, now }: Options) {
             },
             domain: "finances",
             freshness: { blockers, observedAt: asOf, state: freshnessState },
+            recommendedNextOperation,
             state,
-            validNextOperations:
-              blockers.length > 0
-                ? [
-                    {
-                      operation: "reconnect_finance",
-                      label: "Reconnect Finance account",
-                      href: "/finances/accounts",
-                    },
-                  ]
-                : [
-                    {
-                      operation: "maintain_finances",
-                      label: "Maintain finances",
-                      href: "/finances",
-                    },
-                  ],
+            validNextOperations: [recommendedNextOperation],
             work,
           });
         },

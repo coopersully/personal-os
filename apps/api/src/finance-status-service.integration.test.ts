@@ -5,8 +5,12 @@ import {
   domainProfileApprovals,
   domainProfiles,
   financeAccounts,
+  financeAutomationSettings,
   financeBudgets,
+  financeIncomeStreams,
+  financeProfiles,
   financeProviderItems,
+  financeRecurringObligations,
   financeReviewCases,
   financeTransactions,
   migrateDatabase,
@@ -156,6 +160,69 @@ describe.sequential("Finance status service", () => {
     expect(status.details.month.spending).toBe(400);
     expect(status.details.health.confidence).toBe("reliable");
     expect(status.state).toBe("clean");
+  });
+
+  it("returns planning evidence before asking for a first budget", async () => {
+    const userId = await makeUser("Planning evidence Finance");
+    const source = await account(userId, "current");
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId });
+    await database.db.insert(financeProfiles).values({
+      effectiveDate: "2026-08-01",
+      grossAnnualIncome: 72_000_00,
+      householdSize: 2,
+      monthlyHousingCost: 1_800_00,
+      reserveTargetMonths: 3,
+      userId,
+    });
+    await database.db.insert(financeIncomeStreams).values({
+      accountId: source.id,
+      amountTolerance: 0,
+      cadence: "monthly",
+      confidence: 10_000,
+      displayName: "Salary",
+      expectedAmount: 6_000_00,
+      payer: "Employer",
+      source: "user",
+      status: "active",
+      userId,
+    });
+    await database.db.insert(financeRecurringObligations).values({
+      accountId: source.id,
+      amountTolerance: 0,
+      cadence: "monthly",
+      confidence: 10_000,
+      displayName: "Rent",
+      expectedAmount: 1_800_00,
+      kind: "bill",
+      merchant: "Landlord",
+      source: "user",
+      status: "active",
+      userId,
+    });
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.reviewMode).toEqual({ reviewBypassEnabled: false });
+    expect(status.details.income.stated).toMatchObject({
+      basis: "user_stated",
+      confidence: "high",
+      value: 6_000,
+    });
+    expect(status.details.closeReadiness).toMatchObject({ ready: true, uncategorized: 0 });
+    expect(status.details.cashFlow).toMatchObject({ projectedLowestBalance: 5_000 });
+    expect(status.details.cashFlow.reserveRunwayMonths).toBeCloseTo(2.78, 2);
+    expect(status.details.missingFacts).toContain("goal_priority");
+    expect(status.details.interview).toEqual([
+      expect.objectContaining({
+        prompt: expect.stringContaining("goal"),
+        why: expect.stringContaining("budget"),
+      }),
+    ]);
+    expect(status.recommendedNextOperation).toMatchObject({ operation: "answer_finance_question" });
+    expect(status.details.reimbursements).toEqual({ open: 0, overdue: 0, unmatchedCredits: 0 });
+    expect(status.details.latestReview).toBeNull();
   });
 
   it("uses persisted manual-account current state without requiring a Plaid timestamp", async () => {

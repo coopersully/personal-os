@@ -1,6 +1,22 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import type { PersonalOsApiClient } from "@personal-os/api-client";
-import { maintenanceScopeSchema, upsertFinanceAttentionItemInputSchema } from "@personal-os/domain";
+import {
+  applyFinanceCategorizationsInputSchema,
+  createFinanceBudgetInputSchema,
+  createFinanceTransactionInputSchema,
+  financeReviewDecisionInputSchema,
+  financeScenarioInputSchema,
+  maintenanceScopeSchema,
+  mergeFinanceMerchantsInputSchema,
+  resolveFinanceAlertInputSchema,
+  setFinanceBudgetPlanInputSchema,
+  updateFinanceIncomeStreamInputSchema,
+  updateFinanceMerchantInputSchema,
+  updateFinanceProfileInputSchema,
+  updateFinanceRecurringObligationInputSchema,
+  updateFinanceTransactionInputSchema,
+  upsertFinanceAttentionItemInputSchema,
+} from "@personal-os/domain";
 import { z } from "zod";
 import { apiResult } from "../tool-result.js";
 
@@ -11,9 +27,27 @@ const readAnnotations = {
   openWorldHint: false,
   readOnlyHint: true,
 } as const;
+const writeAnnotations = {
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+  readOnlyHint: false,
+} as const;
 
 /** Finance-owned MCP surface. Domain policy remains enforced by the API. */
 export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient) {
+  server.registerTool(
+    "get_finance_automation_settings",
+    {
+      annotations: readAnnotations,
+      description:
+        "Read whether the signed-in person has enabled Finance review bypass. When disabled, MCP may inspect and propose; when enabled, finances:write tools may commit ledger decisions on the person's behalf.",
+      inputSchema: z.object({}),
+      title: "Get Finance automation settings",
+    },
+    async () => apiResult(() => api.getFinanceAutomationSettings()),
+  );
+
   server.registerTool(
     "get_finance_status",
     {
@@ -26,6 +60,29 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Get Finance status",
     },
     async (input) => apiResult(() => api.getFinanceStatus(input.scope)),
+  );
+
+  server.registerTool(
+    "compare_finance_scenarios",
+    {
+      annotations: readAnnotations,
+      description:
+        "Preview deterministic cash-flow tradeoffs for a baseline and up to five alternatives.",
+      inputSchema: financeScenarioInputSchema,
+      title: "Compare Finance scenarios",
+    },
+    async (input) => apiResult(() => api.compareFinanceScenarios(input)),
+  );
+
+  server.registerTool(
+    "set_finance_budget_plan",
+    {
+      annotations: writeAnnotations,
+      description: "Set one complete monthly budget plan with its assumptions and rationale.",
+      inputSchema: setFinanceBudgetPlanInputSchema,
+      title: "Set Finance budget plan",
+    },
+    async (input) => apiResult(() => api.setFinanceBudgetPlan(input)),
   );
 
   server.registerTool(
@@ -217,6 +274,150 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async (input) =>
       apiResult(() => api.proposeFinanceCategorizations({ ...input, review: "needs_review" })),
+  );
+
+  server.registerTool(
+    "apply_finance_categorizations",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Apply revision-guarded categorization decisions when Finance review bypass is enabled. The API rejects the action when bypass is off and preserves per-transaction audit evidence.",
+      inputSchema: applyFinanceCategorizationsInputSchema,
+      title: "Apply finance categorizations",
+    },
+    async (input) => apiResult(() => api.applyFinanceCategorizations(input)),
+  );
+
+  server.registerTool(
+    "resolve_finance_review",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Resolve, defer, recategorize, or confirm a Finance review case using its displayed transaction revision when Finance review bypass is enabled.",
+      inputSchema: z.object({ id, ...financeReviewDecisionInputSchema.shape }),
+      title: "Resolve finance review",
+    },
+    async ({ id: reviewId, ...input }) =>
+      apiResult(() => api.resolveFinanceReview(reviewId, input)),
+  );
+
+  server.registerTool(
+    "update_finance_recurring_obligation",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Accept, pause, or cancel a recurring ledger obligation when Finance review bypass is enabled.",
+      inputSchema: z.object({ id, ...updateFinanceRecurringObligationInputSchema.shape }),
+      title: "Update finance recurring obligation",
+    },
+    async ({ id: obligationId, ...input }) =>
+      apiResult(() => api.updateFinanceRecurringObligation(obligationId, input)),
+  );
+
+  server.registerTool(
+    "resolve_finance_alert",
+    {
+      annotations: writeAnnotations,
+      description: "Resolve or dismiss a Finance ledger alert when review bypass is enabled.",
+      inputSchema: z.object({ id, ...resolveFinanceAlertInputSchema.shape }),
+      title: "Resolve finance alert",
+    },
+    async ({ id: alertId, ...input }) => apiResult(() => api.resolveFinanceAlert(alertId, input)),
+  );
+
+  server.registerTool(
+    "update_finance_merchant",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Confirm a canonical merchant display name when Finance review bypass is enabled.",
+      inputSchema: z.object({ id, ...updateFinanceMerchantInputSchema.shape }),
+      title: "Update finance merchant",
+    },
+    async ({ id: merchantId, ...input }) =>
+      apiResult(() => api.updateFinanceMerchant(merchantId, input)),
+  );
+
+  server.registerTool(
+    "merge_finance_merchants",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Merge duplicate canonical merchants with an explicit rationale when Finance review bypass is enabled.",
+      inputSchema: mergeFinanceMerchantsInputSchema,
+      title: "Merge finance merchants",
+    },
+    async (input) => apiResult(() => api.mergeFinanceMerchants(input)),
+  );
+
+  server.registerTool(
+    "create_finance_budget",
+    {
+      annotations: writeAnnotations,
+      description: "Create a monthly category budget when Finance review bypass is enabled.",
+      inputSchema: createFinanceBudgetInputSchema,
+      title: "Create finance budget",
+    },
+    async (input) => apiResult(() => api.createFinanceBudget(input)),
+  );
+
+  server.registerTool(
+    "create_finance_transaction",
+    {
+      annotations: writeAnnotations,
+      description: "Add a manual ledger transaction when Finance review bypass is enabled.",
+      inputSchema: createFinanceTransactionInputSchema,
+      title: "Create finance transaction",
+    },
+    async (input) => apiResult(() => api.createFinanceTransaction(input)),
+  );
+
+  server.registerTool(
+    "update_finance_transaction",
+    {
+      annotations: writeAnnotations,
+      description: "Update a transaction category or note when Finance review bypass is enabled.",
+      inputSchema: z.object({ id, ...updateFinanceTransactionInputSchema.shape }),
+      title: "Update finance transaction",
+    },
+    async ({ id: transactionId, ...input }) =>
+      apiResult(() => api.updateFinanceTransaction(transactionId, input)),
+  );
+
+  server.registerTool(
+    "update_finance_income_stream",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Accept or pause an inferred income stream when Finance review bypass is enabled.",
+      inputSchema: z.object({ id, ...updateFinanceIncomeStreamInputSchema.shape }),
+      title: "Update finance income stream",
+    },
+    async ({ id: incomeStreamId, ...input }) =>
+      apiResult(() => api.updateFinanceIncomeStream(incomeStreamId, input)),
+  );
+
+  server.registerTool(
+    "update_finance_profile",
+    {
+      annotations: writeAnnotations,
+      description: "Update the financial planning baseline when Finance review bypass is enabled.",
+      inputSchema: updateFinanceProfileInputSchema,
+      title: "Update finance profile",
+    },
+    async (input) => apiResult(() => api.updateFinanceProfile(input)),
+  );
+
+  server.registerTool(
+    "refresh_finance_insights",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Refresh recurring, income, and alert ledger insights when Finance review bypass is enabled.",
+      inputSchema: z.object({}),
+      title: "Refresh finance insights",
+    },
+    async () => apiResult(() => api.refreshFinanceInsights()),
   );
 
   server.registerTool(

@@ -7,9 +7,11 @@ import type {
   ExchangePlaidTokenInput,
   FinanceAccount,
   FinanceAlert,
+  FinanceAutomationSettings,
   FinanceBudget,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
+  FinanceBudgetPlan,
   FinanceBudgetStatus,
   FinanceCategorizationApplyResult,
   FinanceCategorizationProposal,
@@ -27,6 +29,8 @@ import type {
   FinanceRecurringObligation,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
+  FinanceScenarioInput,
+  FinanceScenarioResult,
   FinanceStatus,
   FinanceTransaction,
   FinanceTransactionQuery,
@@ -35,6 +39,8 @@ import type {
   MaintenanceScope,
   MergeFinanceMerchantsInput,
   ResolveFinanceAlertInput,
+  SetFinanceBudgetPlanInput,
+  UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
   UpdateFinanceProfileInput,
@@ -104,6 +110,21 @@ export function createFinanceApi(request: FinanceRequest) {
       const response = await request<{ overview: FinanceOverview }>("/v1/finances");
       return response.overview;
     },
+    async getFinanceAutomationSettings(): Promise<FinanceAutomationSettings> {
+      const response = await request<{ settings: FinanceAutomationSettings }>(
+        "/v1/finances/automation-settings",
+      );
+      return response.settings;
+    },
+    async updateFinanceAutomationSettings(
+      input: UpdateFinanceAutomationSettingsInput,
+    ): Promise<FinanceAutomationSettings> {
+      const response = await request<{ settings: FinanceAutomationSettings }>(
+        "/v1/finances/automation-settings",
+        { body: JSON.stringify(input), method: "PATCH" },
+      );
+      return response.settings;
+    },
     async getFinanceGuidedSetup(): Promise<FinanceGuidedSetupContext> {
       const response = await request<{ setup: FinanceGuidedSetupContext }>(
         "/v1/finances/guided-setup",
@@ -115,6 +136,20 @@ export function createFinanceApi(request: FinanceRequest) {
         `/v1/finances/status${financeMaintenanceScopeQuery(scope)}`,
       );
       return financeStatusSchema.parse(response.status);
+    },
+    async compareFinanceScenarios(input: FinanceScenarioInput): Promise<FinanceScenarioResult> {
+      const response = await request<{ scenario: FinanceScenarioResult }>(
+        "/v1/finances/scenarios/compare",
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return response.scenario;
+    },
+    async setFinanceBudgetPlan(input: SetFinanceBudgetPlanInput): Promise<FinanceBudgetPlan> {
+      const response = await request<{ plan: FinanceBudgetPlan }>("/v1/finances/budget-plan", {
+        body: JSON.stringify(input),
+        method: "PUT",
+      });
+      return response.plan;
     },
     async maintainFinances(
       scope: MaintenanceScope = { type: "all_outstanding" },

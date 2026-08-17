@@ -1,7 +1,12 @@
 import { z } from "zod";
-import { financeAccountSchema, financeProviderItemHealthSchema } from "./finance.js";
+import {
+  financeAccountSchema,
+  financeFactEvidenceSchema,
+  financeProviderItemHealthSchema,
+  financeQuestionSchema,
+} from "./finance.js";
 import { goalSchema, motiveSchema } from "./goals.js";
-import { workspaceStatusSchema } from "./maintenance.js";
+import { maintenanceOperationSchema, workspaceStatusSchema } from "./maintenance.js";
 
 export const financeDataConfidenceSchema = z.enum(["insufficient", "provisional", "reliable"]);
 export type FinanceDataConfidence = z.infer<typeof financeDataConfidenceSchema>;
@@ -56,10 +61,6 @@ export const financeHealthSchema = z.object({
 export type FinanceHealth = z.infer<typeof financeHealthSchema>;
 
 const nullableMoneySchema = z.number().finite().nullable();
-const financeQuestionSchema = z.object({
-  code: z.string().trim().min(1).max(100),
-  prompt: z.string().trim().min(1).max(1_000),
-});
 const financeProposalSummarySchema = z.object({
   id: z.string().uuid(),
   kind: z.string().trim().min(1).max(100),
@@ -87,9 +88,30 @@ export const financeStatusDetailsSchema = z.object({
     month: z.string().regex(/^\d{4}-\d{2}$/u),
     total: nullableMoneySchema,
   }),
-  cashFlow: z.object({ net: nullableMoneySchema }),
+  cashFlow: z.object({
+    net: nullableMoneySchema,
+    projectedLowestBalance: nullableMoneySchema,
+    projectedLowestBalanceDate: z.iso.date().nullable(),
+    reserveRunwayMonths: nullableMoneySchema,
+  }),
+  closeReadiness: z.object({
+    missingProvenance: z.int().nonnegative(),
+    possibleDuplicates: z.int().nonnegative(),
+    ready: z.boolean(),
+    uncategorized: z.int().nonnegative(),
+    unmatchedTransfers: z.int().nonnegative(),
+  }),
+  evidence: z.object({
+    cutoff: z.iso.datetime().nullable(),
+    current: z.boolean(),
+  }),
   health: financeHealthSchema,
-  income: z.object({ monthly: nullableMoneySchema }),
+  income: z.object({
+    monthly: nullableMoneySchema,
+    observed: financeFactEvidenceSchema(z.number().finite()),
+    stated: financeFactEvidenceSchema(z.number().finite()),
+  }),
+  interview: z.array(financeQuestionSchema),
   ledger: z.object({
     candidateTransfers: z.int().nonnegative(),
     missingProvenance: z.int().nonnegative(),
@@ -97,8 +119,33 @@ export const financeStatusDetailsSchema = z.object({
     possibleDuplicates: z.int().nonnegative(),
   }),
   month: z.object({ forecast: nullableMoneySchema, spending: nullableMoneySchema }),
+  latestReview: z
+    .object({
+      completedAt: z.iso.datetime(),
+      id: z.uuid(),
+      status: z.string().trim().min(1).max(100),
+    })
+    .nullable(),
+  missingFacts: z.array(z.string().trim().min(1).max(160)),
+  plan: z.object({
+    budgetVariance: nullableMoneySchema,
+    capacity: nullableMoneySchema,
+    overAllocated: z.boolean(),
+  }),
+  prioritizedGoals: z.array(
+    z.object({
+      goal: goalSchema,
+      priority: z.int().positive(),
+    }),
+  ),
   proposals: z.array(financeProposalSummarySchema),
   questions: z.array(financeQuestionSchema),
+  reimbursements: z.object({
+    open: z.int().nonnegative(),
+    overdue: z.int().nonnegative(),
+    unmatchedCredits: z.int().nonnegative(),
+  }),
+  reviewMode: z.object({ reviewBypassEnabled: z.boolean() }),
   review: z.object({
     byReason: z.record(z.string(), z.int().nonnegative()),
     total: z.int().nonnegative(),
@@ -114,6 +161,7 @@ export const financeStatusDetailsSchema = z.object({
 
 export const financeStatusSchema = workspaceStatusSchema(financeStatusDetailsSchema).extend({
   domain: z.literal("finances"),
+  recommendedNextOperation: maintenanceOperationSchema.nullable(),
 });
 export type FinanceStatus = z.infer<typeof financeStatusSchema>;
 

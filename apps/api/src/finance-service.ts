@@ -8,6 +8,7 @@ import {
   domainProfiles,
   financeAccounts,
   financeAlerts,
+  financeAutomationSettings,
   financeBudgets,
   financeCategories,
   financeCategoryRules,
@@ -21,6 +22,7 @@ import {
   financeReviewCases,
   financeSetupBackfillState,
   financeTransactions,
+  goals,
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
@@ -33,9 +35,11 @@ import type {
   ExchangePlaidTokenInput,
   FinanceAccount,
   FinanceAlert,
+  FinanceAutomationSettings,
   FinanceBudget,
   FinanceBudgetPace,
   FinanceBudgetPacePeriod,
+  FinanceBudgetPlan,
   FinanceCategorizationApplyResult,
   FinanceCategorizationProposal,
   FinanceCategorizationProposalPage,
@@ -59,6 +63,8 @@ import type {
   MaterialSourceReference,
   MergeFinanceMerchantsInput,
   ResolveFinanceAlertInput,
+  SetFinanceBudgetPlanInput,
+  UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
   UpdateFinanceProfileInput,
@@ -93,6 +99,7 @@ type MaintenanceMutationAttribution = {
   runId: string;
 };
 type MutationContext = {
+  financeReviewBypass?: boolean;
   maintenance?: MaintenanceMutationAttribution;
   maintenanceClaim?: { claimId: string; runId: string };
   principal: Principal;
@@ -1745,7 +1752,8 @@ export function createFinanceService({
       confidence = proposal.confidence;
       threshold = proposal.threshold;
     }
-    const canApply = source !== "agent" || confidence >= threshold;
+    const canApply =
+      source !== "agent" || context.financeReviewBypass === true || confidence >= threshold;
     if (!canApply) {
       const replayed = await db.transaction(async (tx) => {
         await assertMaintenanceClaim(tx, context);
@@ -1807,7 +1815,7 @@ export function createFinanceService({
           threshold = currentProposal.threshold;
         }
         const [protectedReview] =
-          source === "agent"
+          source === "agent" && context.financeReviewBypass !== true
             ? await tx
                 .select({ id: financeReviewCases.id })
                 .from(financeReviewCases)
@@ -1823,6 +1831,7 @@ export function createFinanceService({
             : [];
         if (
           source === "agent" &&
+          context.financeReviewBypass !== true &&
           (current.reconciliationStatus === "candidate" || protectedReview)
         ) {
           throw new AppError(
@@ -1996,23 +2005,24 @@ export function createFinanceService({
         confidence = currentProposal.confidence;
         threshold = currentProposal.threshold;
       }
-      const [protectedReview] =
-        source === "agent" || source === "rule"
-          ? await tx
-              .select({ id: financeReviewCases.id })
-              .from(financeReviewCases)
-              .where(
-                and(
-                  eq(financeReviewCases.transactionId, before.id),
-                  eq(financeReviewCases.userId, context.principal.userId),
-                  eq(financeReviewCases.reason, "possible_transfer"),
-                  inArray(financeReviewCases.status, ["deferred", "open"]),
-                ),
-              )
-              .limit(1)
-          : [];
+      const mustProtectAmbiguousTransfer =
+        source === "rule" || (source === "agent" && context.financeReviewBypass !== true);
+      const [protectedReview] = mustProtectAmbiguousTransfer
+        ? await tx
+            .select({ id: financeReviewCases.id })
+            .from(financeReviewCases)
+            .where(
+              and(
+                eq(financeReviewCases.transactionId, before.id),
+                eq(financeReviewCases.userId, context.principal.userId),
+                eq(financeReviewCases.reason, "possible_transfer"),
+                inArray(financeReviewCases.status, ["deferred", "open"]),
+              ),
+            )
+            .limit(1)
+        : [];
       if (
-        (source === "agent" || source === "rule") &&
+        mustProtectAmbiguousTransfer &&
         (current.reconciliationStatus === "candidate" || protectedReview)
       ) {
         throw new AppError(
@@ -2106,15 +2116,22 @@ export function createFinanceService({
   }
 
   const profileValue = (row: typeof financeProfiles.$inferSelect): FinanceProfile => ({
+    dependents: row.dependents,
     effectiveDate: row.effectiveDate,
     employer: row.employer,
     employmentType: row.employmentType,
     expectedNetPay: row.expectedNetPay === null ? null : row.expectedNetPay / 100,
     grossAnnualIncome: row.grossAnnualIncome === null ? null : row.grossAnnualIncome / 100,
+    householdSize: row.householdSize,
+    housingStatus: row.housingStatus,
+    investmentRiskCapacity: row.investmentRiskCapacity,
+    investmentRiskWillingness: row.investmentRiskWillingness,
+    monthlyHousingCost: row.monthlyHousingCost === null ? null : row.monthlyHousingCost / 100,
     nextPayday: row.nextPayday,
     payAccountId: row.payAccountId,
     payFrequency: row.payFrequency,
     role: row.role,
+    reserveTargetMonths: row.reserveTargetMonths,
     updatedAt: row.updatedAt.toISOString(),
   });
   const incomeStreamValue = (
@@ -2673,6 +2690,56 @@ export function createFinanceService({
     resolveScopeAccountId: maintenanceScopeAccountId,
   });
   return {
+    async getAutomationSettings(userId: string): Promise<FinanceAutomationSettings> {
+      const [settings] = await db
+        .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
+        .from(financeAutomationSettings)
+        .where(eq(financeAutomationSettings.userId, userId))
+        .limit(1);
+      return settings ?? { reviewBypassEnabled: false };
+    },
+    async updateAutomationSettings(
+      input: UpdateFinanceAutomationSettingsInput,
+      context: MutationContext,
+    ): Promise<FinanceAutomationSettings> {
+      return db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
+          .from(financeAutomationSettings)
+          .where(eq(financeAutomationSettings.userId, context.principal.userId))
+          .for("update")
+          .limit(1);
+        const before = existing ?? { reviewBypassEnabled: false };
+        if (before.reviewBypassEnabled === input.reviewBypassEnabled) return before;
+        const [saved] = await tx
+          .insert(financeAutomationSettings)
+          .values({
+            reviewBypassEnabled: input.reviewBypassEnabled,
+            userId: context.principal.userId,
+          })
+          .onConflictDoUpdate({
+            set: { reviewBypassEnabled: input.reviewBypassEnabled, updatedAt: now() },
+            target: financeAutomationSettings.userId,
+          })
+          .returning({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled });
+        const settings = requireDatabaseRecord(
+          saved,
+          "Finance automation settings were not saved.",
+        );
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.review_bypass_updated",
+            after: settings,
+            before,
+            entityId: context.principal.userId,
+            entityType: "finance_automation_settings",
+            principal: context.principal,
+            requestId: context.requestId,
+          }),
+        );
+        return settings;
+      });
+    },
     async upsertAttentionItem(
       transactionId: string,
       input: UpsertFinanceAttentionItemInput,
@@ -2834,6 +2901,7 @@ export function createFinanceService({
         ledgerHealth,
         budgets,
         reviews,
+        automationSettings,
         [guidance],
       ] = await Promise.all([
         db
@@ -2856,6 +2924,7 @@ export function createFinanceService({
               inArray(financeReviewCases.status, ["deferred", "open"]),
             ),
           ),
+        this.getAutomationSettings(userId),
         db
           .select({
             approvedGuidance: domainProfileApprovals,
@@ -2893,6 +2962,29 @@ export function createFinanceService({
       const categorizableReviews = reviews.filter(
         (review) => review.reason !== "possible_transfer",
       ).length;
+      const humanOnlyActions: FinanceGuidedSetupContext["humanOnlyActions"] =
+        automationSettings.reviewBypassEnabled
+          ? [
+              "connect_or_disconnect_source",
+              "import_transactions",
+              "manage_accounts",
+              "refresh_provider_data",
+            ]
+          : [
+              "connect_or_disconnect_source",
+              "import_transactions",
+              "manage_accounts",
+              "manage_budgets",
+              "manage_financial_profile",
+              "refresh_provider_data",
+              "confirm_ambiguous_transfer",
+              "create_merchant_rule",
+              "apply_categorization",
+              "review_recurring_obligation",
+              "resolve_alert",
+              "manage_merchants",
+              "add_manual_transaction",
+            ];
       const draftProposal =
         guidanceProfile && !approvedProfile
           ? guidedDomainProfile(guidanceProfile, "draft")
@@ -2937,21 +3029,7 @@ export function createFinanceService({
             : null,
           draftProposal,
         },
-        humanOnlyActions: [
-          "connect_or_disconnect_source",
-          "import_transactions",
-          "manage_accounts",
-          "manage_budgets",
-          "manage_financial_profile",
-          "refresh_provider_data",
-          "confirm_ambiguous_transfer",
-          "create_merchant_rule",
-          "apply_categorization",
-          "review_recurring_obligation",
-          "resolve_alert",
-          "manage_merchants",
-          "add_manual_transaction",
-        ],
+        humanOnlyActions,
         ledgerHealth: {
           ...ledgerHealth,
           asOf: snapshotTime.toISOString(),
@@ -2968,24 +3046,30 @@ export function createFinanceService({
           ),
           workflow(
             "categorization_review",
-            "preview",
-            "Inspect ledger evidence and prepare category proposals for a signed-in person to apply in Finance.",
-            categorizableReviews > 0,
+            automationSettings.reviewBypassEnabled ? "approved_rule" : "preview",
+            automationSettings.reviewBypassEnabled
+              ? "Inspect ledger evidence and apply category or transfer decisions through the Finance review bypass."
+              : "Inspect ledger evidence and prepare category proposals for a signed-in person to apply in Finance.",
+            automationSettings.reviewBypassEnabled ? reviews.length > 0 : categorizableReviews > 0,
             reviews.length > 0
               ? "Only ambiguous transfers currently need review; those require Finance."
               : "No categorization cases currently need review.",
           ),
           workflow(
             "recurring_review",
-            "read_only",
-            "Review inferred bills and subscriptions, then direct a signed-in person to Finance for status changes.",
+            automationSettings.reviewBypassEnabled ? "approved_rule" : "read_only",
+            automationSettings.reviewBypassEnabled
+              ? "Review inferred bills and subscriptions and apply status decisions through the Finance review bypass."
+              : "Review inferred bills and subscriptions, then direct a signed-in person to Finance for status changes.",
             recurringNeedsReview > 0,
             "No inferred recurring obligations currently need review.",
           ),
           workflow(
             "alert_review",
-            "read_only",
-            "Inspect alert evidence, then direct a signed-in person to Finance to resolve or dismiss it.",
+            automationSettings.reviewBypassEnabled ? "approved_rule" : "read_only",
+            automationSettings.reviewBypassEnabled
+              ? "Inspect alert evidence and resolve or dismiss it through the Finance review bypass."
+              : "Inspect alert evidence, then direct a signed-in person to Finance to resolve or dismiss it.",
             alerts.length > 0,
             "No Finance alerts are currently open.",
           ),
@@ -3014,16 +3098,26 @@ export function createFinanceService({
         .insert(financeProfiles)
         .values({
           effectiveDate: input.effectiveDate,
+          dependents: input.dependents ?? null,
           employer: input.employer,
           employmentType: input.employmentType,
           expectedNetPay:
             input.expectedNetPay === null ? null : Math.round(input.expectedNetPay * 100),
           grossAnnualIncome:
             input.grossAnnualIncome === null ? null : Math.round(input.grossAnnualIncome * 100),
+          householdSize: input.householdSize ?? null,
+          housingStatus: input.housingStatus ?? null,
+          investmentRiskCapacity: input.investmentRiskCapacity ?? null,
+          investmentRiskWillingness: input.investmentRiskWillingness ?? null,
+          monthlyHousingCost:
+            input.monthlyHousingCost === null || input.monthlyHousingCost === undefined
+              ? null
+              : Math.round(input.monthlyHousingCost * 100),
           nextPayday: input.nextPayday,
           payAccountId: input.payAccountId,
           payFrequency: input.payFrequency,
           role: input.role,
+          reserveTargetMonths: input.reserveTargetMonths ?? null,
           userId: context.principal.userId,
         })
         .onConflictDoUpdate({
@@ -3034,10 +3128,20 @@ export function createFinanceService({
               input.expectedNetPay === null ? null : Math.round(input.expectedNetPay * 100),
             grossAnnualIncome:
               input.grossAnnualIncome === null ? null : Math.round(input.grossAnnualIncome * 100),
+            dependents: input.dependents ?? null,
+            householdSize: input.householdSize ?? null,
+            housingStatus: input.housingStatus ?? null,
+            investmentRiskCapacity: input.investmentRiskCapacity ?? null,
+            investmentRiskWillingness: input.investmentRiskWillingness ?? null,
+            monthlyHousingCost:
+              input.monthlyHousingCost === null || input.monthlyHousingCost === undefined
+                ? null
+                : Math.round(input.monthlyHousingCost * 100),
             nextPayday: input.nextPayday,
             payAccountId: input.payAccountId,
             payFrequency: input.payFrequency,
             role: input.role,
+            reserveTargetMonths: input.reserveTargetMonths ?? null,
             updatedAt: now(),
           },
           target: [financeProfiles.userId, financeProfiles.effectiveDate],
@@ -3992,6 +4096,7 @@ export function createFinanceService({
     ): Promise<FinanceCategorizationApplyResult[]> {
       if (
         context.principal.actorType === "agent" &&
+        context.financeReviewBypass !== true &&
         input.decisions.some((decision) => decision.learnMerchant === "always")
       ) {
         throw new AppError(
@@ -4275,13 +4380,21 @@ export function createFinanceService({
         )
         .limit(1);
       if (!review) throw new AppError("not_found", "The finance review case was not found.");
-      if (context.principal.actorType === "agent" && input.learnMerchant === "always") {
+      if (
+        context.principal.actorType === "agent" &&
+        context.financeReviewBypass !== true &&
+        input.learnMerchant === "always"
+      ) {
         throw new AppError(
           "forbidden",
           "Permanent merchant rules require review in an interactive user session.",
         );
       }
-      if (context.principal.actorType === "agent" && input.action === "confirm_transfer") {
+      if (
+        context.principal.actorType === "agent" &&
+        context.financeReviewBypass !== true &&
+        input.action === "confirm_transfer"
+      ) {
         throw new AppError(
           "forbidden",
           "Confirming an ambiguous transfer requires an interactive user session.",
@@ -4513,6 +4626,131 @@ export function createFinanceService({
         return created;
       });
       return budget(row);
+    },
+    async setBudgetPlan(
+      input: SetFinanceBudgetPlanInput,
+      context: MutationContext,
+    ): Promise<FinanceBudgetPlan> {
+      await db.transaction(async (tx) => {
+        await ensureCategories(context.principal.userId, tx);
+        const categoryIds = input.allocations.map((allocation) => allocation.categoryId);
+        const categoryRows = await tx
+          .select()
+          .from(financeCategories)
+          .where(
+            and(
+              eq(financeCategories.userId, context.principal.userId),
+              inArray(financeCategories.id, categoryIds),
+            ),
+          )
+          .orderBy(financeCategories.id)
+          .for("update");
+        if (categoryRows.length !== categoryIds.length)
+          throw new AppError("not_found", "A Finance budget category was not found.");
+        if (input.goalIds.length > 0) {
+          const goalRows = await tx
+            .select({ id: goals.id })
+            .from(goals)
+            .where(
+              and(eq(goals.userId, context.principal.userId), inArray(goals.id, input.goalIds)),
+            )
+            .orderBy(goals.id)
+            .for("update");
+          if (goalRows.length !== input.goalIds.length)
+            throw new AppError("not_found", "A referenced Finance goal was not found.");
+        }
+        const currentBudgets = await tx
+          .select()
+          .from(financeBudgets)
+          .where(
+            and(
+              eq(financeBudgets.userId, context.principal.userId),
+              eq(financeBudgets.month, input.month),
+            ),
+          )
+          .orderBy(financeBudgets.id)
+          .for("update");
+        const effectiveProfile = (
+          await tx
+            .select()
+            .from(financeProfiles)
+            .where(
+              and(
+                eq(financeProfiles.userId, context.principal.userId),
+                lte(financeProfiles.effectiveDate, `${input.month}-31`),
+              ),
+            )
+            .orderBy(desc(financeProfiles.effectiveDate))
+            .limit(1)
+            .for("update")
+        )[0];
+        const capacity =
+          effectiveProfile?.grossAnnualIncome == null
+            ? null
+            : effectiveProfile.grossAnnualIncome / 1200;
+        const total = input.allocations.reduce((sum, allocation) => sum + allocation.limit, 0);
+        const explicitlyExplained = /over[- ]?allocat|temporary deficit|intentional deficit/i.test(
+          input.rationale,
+        );
+        if (capacity !== null && total > capacity && !explicitlyExplained) {
+          throw new AppError(
+            "invalid_request",
+            "Budget allocations exceed reliable monthly income. Explain the intentional over-allocation in the rationale to continue.",
+          );
+        }
+        if (input.replace) {
+          await tx
+            .delete(financeBudgets)
+            .where(
+              and(
+                eq(financeBudgets.userId, context.principal.userId),
+                eq(financeBudgets.month, input.month),
+              ),
+            );
+        }
+        const categoryById = new Map(categoryRows.map((category) => [category.id, category]));
+        for (const allocation of input.allocations) {
+          const category = categoryById.get(allocation.categoryId);
+          if (!category)
+            throw new AppError("not_found", "A Finance budget category was not found.");
+          await tx
+            .insert(financeBudgets)
+            .values({
+              category: category.name,
+              limit: Math.round(allocation.limit * 100),
+              month: input.month,
+              userId: context.principal.userId,
+            })
+            .onConflictDoUpdate({
+              set: { limit: Math.round(allocation.limit * 100), updatedAt: now() },
+              target: [financeBudgets.userId, financeBudgets.category, financeBudgets.month],
+            });
+        }
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.budget_plan_set",
+            after: {
+              allocationCount: input.allocations.length,
+              assumptionsCount: input.assumptions.length,
+              goalCount: input.goalIds.length,
+              month: input.month,
+              rationaleProvided: true,
+              scenarioFingerprint: input.scenarioFingerprint,
+              total,
+            },
+            before: {
+              allocationCount: currentBudgets.length,
+              month: input.month,
+              total: currentBudgets.reduce((sum, budget) => sum + budget.limit / 100, 0),
+            },
+            entityId: context.principal.userId,
+            entityType: "finance_budget_plan",
+            principal: context.principal,
+            requestId: context.requestId,
+          }),
+        );
+      });
+      return input;
     },
     async createTransaction(input: CreateFinanceTransactionInput, context: MutationContext) {
       await ownedAccount(context.principal.userId, input.accountId);
@@ -5197,7 +5435,7 @@ export function createFinanceService({
       context: MutationContext,
     ) {
       const before = await ownedTransaction(context.principal.userId, id);
-      if (context.principal.actorType === "agent") {
+      if (context.principal.actorType === "agent" && context.financeReviewBypass !== true) {
         throw new AppError(
           "forbidden",
           "Finance transaction edits require an interactive user session.",

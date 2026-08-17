@@ -51,3 +51,18 @@ Status: DONE
 - `pnpm --filter @personal-os/api typecheck`, `pnpm --filter @personal-os/domain typecheck`, `pnpm --filter @personal-os/database typecheck`, and `pnpm --filter @personal-os/mcp typecheck` — passed in their corresponding focused rounds.
 - Scoped Biome checks and `git diff --check` passed in every implementation round; Biome reported only four pre-existing `noNonNullAssertion` warnings in the Finance action integration test.
 - Final documentation verification: `pnpm lint` passed with the same four pre-existing action-integration warnings; `git diff --check` passed.
+
+## Fix round 3 — authority semantics and client outcomes
+
+Status: DONE
+
+- Agent transaction category changes now carry categorization confidence, evidence revision, and rationale through preparation. Low-confidence, stale, candidate-transfer, and ambiguous-transfer proposals return `needs_input` before bypass can apply them.
+- A prepared agent category change uses the categorization writer, so transaction provenance and classification evidence remain `agent`; a permanent merchant rule is available only through that prepared, evidence-backed path.
+- A human answer supplies evidence only. Resumption uses the stored requesting agent identity and current durable bypass, yielding a review when bypass is off or an agent-attributed apply when it is on. The human responder is recorded separately as `finance.question_answered` audit history.
+- Every agent-capable semantic Finance API-client mutation now returns `FinanceActionOutcome<T> | T` rather than claiming the human-only result type; MCP forwards that honest union unchanged.
+
+### Verification
+
+- `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts packages/api-client/src/client.test.ts apps/mcp/src/server.test.ts` — 89 tests passed.
+- API, Domain, API-client, MCP, and Web type checks passed.
+- Scoped Biome and `git diff --check` passed with the four existing `noNonNullAssertion` warnings in the Finance action integration test.

@@ -936,8 +936,11 @@ export type CreateFinanceTransactionInput = z.infer<typeof createFinanceTransact
 export const updateFinanceTransactionInputSchema = z
   .object({
     category: categorySchema.nullable().optional(),
+    confidence: z.number().min(0).max(1).optional(),
+    expectedTransactionUpdatedAt: isoDateTimeSchema.optional(),
     learnMerchant: z.boolean().optional(),
     notes: z.string().trim().max(4_000).nullable().optional(),
+    rationale: z.string().trim().min(1).max(1_000).optional(),
   })
   .refine(
     (value) => value.category !== undefined || value.notes !== undefined,

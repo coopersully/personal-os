@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  auditEvents,
   type Database,
   financeAccounts,
   financeAgentActionReviews,
@@ -39,6 +40,7 @@ import {
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { reliableMonthlyCapacity } from "./finance-planning.js";
 import type { createFinanceService } from "./finance-service.js";
@@ -309,6 +311,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     userId: string,
     executor: Pick<Database, "select"> = db,
     lockTargets = false,
+    actorType: Principal["actorType"] = "agent",
   ): Promise<PreparedAction | { status: "needs_input"; question: FinanceQuestion }> {
     const missing = (
       why: string,
@@ -955,6 +958,72 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           return missing("The transaction account is unavailable.", [
             expectedAnswer("id", "string"),
           ]);
+        if (actorType === "agent" && input.category !== undefined) {
+          const categoryName = typeof input.category === "string" ? input.category : null;
+          const confidence = typeof input.confidence === "number" ? input.confidence : null;
+          const expectedTransactionUpdatedAt =
+            typeof input.expectedTransactionUpdatedAt === "string"
+              ? input.expectedTransactionUpdatedAt
+              : null;
+          const rationale = typeof input.rationale === "string" ? input.rationale : null;
+          if (
+            categoryName === null ||
+            confidence === null ||
+            expectedTransactionUpdatedAt === null ||
+            rationale === null
+          )
+            return missing(
+              "Agent transaction categorization needs a category, evidence confidence, displayed revision, and rationale.",
+              [
+                expectedAnswer("category", "string"),
+                expectedAnswer("confidence", "number"),
+                expectedAnswer("expectedTransactionUpdatedAt", "string"),
+                expectedAnswer("rationale", "string"),
+              ],
+              [transactionSource(item, account)],
+            );
+          const [category] = await lockRead(
+            executor
+              .select()
+              .from(financeCategories)
+              .where(
+                and(eq(financeCategories.userId, userId), eq(financeCategories.name, categoryName)),
+              )
+              .orderBy(financeCategories.id)
+              .limit(1),
+          );
+          if (!category)
+            return missing("Choose one of your Finance categories.", [
+              expectedAnswer("category", "string"),
+            ]);
+          const learnMerchant: "always" | "suggest" =
+            input.learnMerchant === true ? "always" : "suggest";
+          const decision = {
+            categoryId: category.id,
+            confidence,
+            expectedTransactionUpdatedAt,
+            learnMerchant,
+            rationale,
+            transactionId: item.id,
+          };
+          if (
+            !(await finances.validatePreparedCategorizations(
+              { decisions: [decision] },
+              userId,
+              executor,
+            ))
+          )
+            return missing(
+              "The transaction categorization evidence is incomplete, low-confidence, stale, or protected as an ambiguous transfer.",
+              [
+                expectedAnswer("category", "string"),
+                expectedAnswer("confidence", "number"),
+                expectedAnswer("expectedTransactionUpdatedAt", "string"),
+                expectedAnswer("rationale", "string"),
+              ],
+              [transactionSource(item, account)],
+            );
+        }
         return prepared(
           { ...input, id },
           item.updatedAt.toISOString(),
@@ -1142,7 +1211,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     return result;
   }
 
-  async function revalidate(prepared: PreparedAction, userId: string, executor: FinanceExecutor) {
+  async function revalidate(
+    prepared: PreparedAction,
+    userId: string,
+    executor: FinanceExecutor,
+    actorType: Principal["actorType"] = "agent",
+  ) {
     // There is no row lock for an absent target. The target-key advisory lock
     // covers that case and gives queueing, approval, and bypass commits the
     // same deterministic serialization point.
@@ -1154,7 +1228,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${userId}:${String(prepared.input.month)}`}, 0))`,
       );
     }
-    const current = await prepare(prepared.actionKind, prepared.input, userId, executor, true);
+    const current = await prepare(
+      prepared.actionKind,
+      prepared.input,
+      userId,
+      executor,
+      true,
+      actorType,
+    );
     if ("status" in current) return current;
     if (current.expectedRevision !== prepared.expectedRevision) {
       return {
@@ -1247,6 +1328,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     }
   }
 
+  function requestingAgentContext(
+    context: MutationContext,
+    requestingAgentId: string,
+  ): MutationContext {
+    return {
+      ...context,
+      principal: { ...context.principal, actorId: requestingAgentId, actorType: "agent" },
+    };
+  }
+
   return {
     prepare,
     async performDirect<T>(
@@ -1254,7 +1345,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       input: Record<string, unknown>,
       context: MutationContext,
     ): Promise<FinanceActionOutcome<T>> {
-      const prepared = await prepare(actionKind, input, context.principal.userId);
+      const prepared = await prepare(
+        actionKind,
+        input,
+        context.principal.userId,
+        db,
+        false,
+        context.principal.actorType,
+      );
       if ("status" in prepared) {
         const [stored] = await db
           .insert(financeAgentActionReviews)
@@ -1303,14 +1401,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       if (context.principal.actorType === "agent") {
         return db.transaction(async (tx) => {
           if (!(await readBypass(tx, context.principal.userId, true))) {
-            const current = await revalidate(prepared, context.principal.userId, tx);
+            const current = await revalidate(prepared, context.principal.userId, tx, "agent");
             if ("status" in current) return current;
             return {
               review: (await queue(current, context, tx)) as FinancePendingActionReview,
               status: "pending_review",
             };
           }
-          const current = await revalidate(prepared, context.principal.userId, tx);
+          const current = await revalidate(prepared, context.principal.userId, tx, "agent");
           if ("status" in current) return current;
           return {
             result: (await applyPrepared(current, context, tx)) as T,
@@ -1387,7 +1485,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           sourceRefs: review.sourceRefs as MaterialSourceReference[],
           semanticTargetKeys: review.semanticTargetKeys as string[],
         };
-        const current = await revalidate(prepared, context.principal.userId, tx);
+        const actionContext =
+          review.actionKind === "transaction"
+            ? requestingAgentContext(context, review.requestingAgentId)
+            : context;
+        const current = await revalidate(
+          prepared,
+          context.principal.userId,
+          tx,
+          actionContext.principal.actorType,
+        );
         if ("status" in current) {
           await tx
             .update(financeAgentActionReviews)
@@ -1395,7 +1502,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .where(eq(financeAgentActionReviews.id, review.id));
           return current;
         }
-        const result = await applyPrepared(current, context, tx);
+        const result = await applyPrepared(current, actionContext, tx);
         await tx
           .update(financeAgentActionReviews)
           .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })
@@ -1490,6 +1597,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           throw new AppError("conflict", "This Finance question has already been answered.");
         }
         const originalActionKind = supportedActionKind(payload.original.actionKind);
+        const actionContext = requestingAgentContext(context, review.requestingAgentId);
         const expected = payload.question.expectedAnswer;
         const retryQuestion = { ...payload.question, expectedAnswer: expected, id: review.id };
         if (!suppliedAnswer) {
@@ -1511,6 +1619,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           { ...payload.original.input, ...supplied },
           context.principal.userId,
           tx,
+          false,
+          "agent",
         );
         let outcome: FinanceActionOutcome<unknown>;
         if ("status" in prepared) {
@@ -1529,21 +1639,28 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               updatedAt: now(),
             })
             .where(eq(financeAgentActionReviews.id, review.id));
+          await tx.insert(auditEvents).values(
+            auditValues({
+              action: "finance.question_answered",
+              after: { requestingAgentId: review.requestingAgentId, status: "needs_input" },
+              before: null,
+              entityId: review.id,
+              entityType: "finance_agent_action_question",
+              ...context,
+            }),
+          );
           return { question: nextQuestion, status: "needs_input" };
-        } else if (
-          context.principal.actorType === "agent" &&
-          !(await readBypass(tx, context.principal.userId, true))
-        ) {
+        } else if (!(await readBypass(tx, context.principal.userId, true))) {
           outcome = {
-            review: (await queue(prepared, context, tx)) as FinancePendingActionReview,
+            review: (await queue(prepared, actionContext, tx)) as FinancePendingActionReview,
             status: "pending_review",
           };
         } else {
-          const current = await revalidate(prepared, context.principal.userId, tx);
+          const current = await revalidate(prepared, context.principal.userId, tx, "agent");
           outcome =
             "status" in current
               ? current
-              : { result: await applyPrepared(current, context, tx), status: "applied" };
+              : { result: await applyPrepared(current, actionContext, tx), status: "applied" };
         }
         await tx
           .update(financeAgentActionReviews)
@@ -1553,6 +1670,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             updatedAt: now(),
           })
           .where(eq(financeAgentActionReviews.id, review.id));
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.question_answered",
+            after: { requestingAgentId: review.requestingAgentId, status: outcome.status },
+            before: null,
+            entityId: review.id,
+            entityType: "finance_agent_action_question",
+            ...context,
+          }),
+        );
         return outcome;
       });
     },

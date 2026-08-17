@@ -2223,4 +2223,230 @@ describe.sequential("finance action service", () => {
       ),
     ).resolves.toMatchObject({ status: "applied" });
   });
+
+  it("requires agent transaction categories to satisfy categorization evidence before applying", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Transaction authority bank",
+        name: "Transaction authority checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Test",
+        name: "Transaction authority category",
+        slug: `transaction-authority-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    const [merchant] = await database.db
+      .insert(financeMerchants)
+      .values({
+        displayName: "Authority Grocer",
+        normalizedName: `authority-grocer-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category || !merchant) throw new Error("Authority fixtures were not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 600,
+        direction: "expense",
+        merchant: "Authority Grocer",
+        merchantId: merchant.id,
+        transactionDate: "2026-08-17",
+        userId,
+      })
+      .returning();
+    if (!transaction) throw new Error("Authority transaction was not created.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+
+    await expect(
+      service.performDirect(
+        "transaction",
+        {
+          category: category.name,
+          confidence: 0.1,
+          expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+          id: transaction.id,
+          rationale: "One weak observation is not enough evidence.",
+        },
+        { principal: agent(userId), requestId: "agent-transaction-low-confidence" },
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await database.db
+      .update(financeTransactions)
+      .set({ reconciliationStatus: "candidate" })
+      .where(eq(financeTransactions.id, transaction.id));
+    await expect(
+      service.performDirect(
+        "transaction",
+        {
+          category: category.name,
+          confidence: 0.965,
+          expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+          id: transaction.id,
+          rationale: "Evidence cannot override an ambiguous transfer.",
+        },
+        { principal: agent(userId), requestId: "agent-transaction-candidate-transfer" },
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await database.db
+      .update(financeTransactions)
+      .set({ reconciliationStatus: "not_applicable", updatedAt: transaction.updatedAt })
+      .where(eq(financeTransactions.id, transaction.id));
+    await database.db.insert(financeClassificationDecisions).values([
+      {
+        categoryId: category.id,
+        categoryName: category.name,
+        confidence: 10_000,
+        merchantId: merchant.id,
+        outcome: "confirmed",
+        rationale: "Person-confirmed authority evidence.",
+        source: "user",
+        transactionId: transaction.id,
+        userId,
+      },
+      {
+        categoryId: category.id,
+        categoryName: category.name,
+        confidence: 10_000,
+        merchantId: merchant.id,
+        outcome: "confirmed",
+        rationale: "Second person-confirmed authority evidence.",
+        source: "user",
+        transactionId: transaction.id,
+        userId,
+      },
+    ]);
+    const rationale = "Two confirmed observations support a permanent rule.";
+    await expect(
+      service.performDirect(
+        "transaction",
+        {
+          category: category.name,
+          confidence: 0.965,
+          expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+          id: transaction.id,
+          learnMerchant: true,
+          rationale,
+        },
+        { principal: agent(userId), requestId: "agent-transaction-permanent-rule" },
+      ),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({
+          categoryRationale: financeTransactions.categoryRationale,
+          categorySource: financeTransactions.categorySource,
+        })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ categoryRationale: rationale, categorySource: "agent" }]);
+  });
+
+  it("resumes a human answer with the requesting agent authority and audits the responder", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Responder bank",
+        name: "Responder checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Responder account was not created.");
+    const asked = await createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    }).performDirect(
+      "profile",
+      {
+        effectiveDate: "2026-08-17",
+        employer: "Responder employer",
+        payAccountId: "00000000-0000-4000-8000-000000000000",
+      },
+      { principal: agent(userId), requestId: "agent-asks-question" },
+    );
+    if (asked.status !== "needs_input") throw new Error("Expected an agent question.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    await expect(
+      service.answerQuestion(asked.question.id, JSON.stringify({ payAccountId: account.id }), {
+        principal: user(userId),
+        requestId: "human-supplies-evidence",
+      }),
+    ).resolves.toMatchObject({ status: "pending_review" });
+    await expect(
+      database.db
+        .select({
+          action: auditEvents.action,
+          actorId: auditEvents.actorId,
+          actorType: auditEvents.actorType,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.entityId, asked.question.id)),
+    ).resolves.toContainEqual(
+      expect.objectContaining({
+        action: "finance.question_answered",
+        actorId: userId,
+        actorType: "user",
+      }),
+    );
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const secondQuestion = await service.performDirect(
+      "profile",
+      {
+        effectiveDate: "2026-08-18",
+        employer: "Responder employer",
+        payAccountId: "00000000-0000-4000-8000-000000000000",
+      },
+      { principal: agent(userId), requestId: "agent-asks-question-bypass-on" },
+    );
+    if (secondQuestion.status !== "needs_input")
+      throw new Error("Expected a second agent question.");
+    await expect(
+      service.answerQuestion(
+        secondQuestion.question.id,
+        JSON.stringify({ payAccountId: account.id }),
+        {
+          principal: user(userId),
+          requestId: "human-supplies-evidence-bypass-on",
+        },
+      ),
+    ).resolves.toMatchObject({ status: "applied" });
+  });
 });

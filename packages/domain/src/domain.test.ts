@@ -1066,6 +1066,20 @@ describe("domain schemas", () => {
       notes: "Receipt saved",
     });
     expect(
+      updateFinanceTransactionInputSchema.parse({
+        category: "Dining",
+        confidence: 0.965,
+        expectedTransactionUpdatedAt: start,
+        learnMerchant: true,
+        rationale: "Two confirmed merchant observations.",
+      }),
+    ).toMatchObject({
+      category: "Dining",
+      confidence: 0.965,
+      expectedTransactionUpdatedAt: start,
+      learnMerchant: true,
+    });
+    expect(
       financeReviewDecisionInputSchema.parse({
         action: "recategorize",
         categoryId: "00000000-0000-4000-8000-000000000000",

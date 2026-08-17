@@ -146,6 +146,9 @@ export function FinanceSettings() {
         role: form.role.trim() || null,
       }),
     onSuccess: (profile) => {
+      if ("status" in profile) {
+        return queryClient.invalidateQueries({ queryKey: ["finance-profile"] });
+      }
       queryClient.setQueryData(["finance-profile"], profile);
       setForm(financeProfileForm(profile));
       setFormDirty(false);

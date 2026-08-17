@@ -5670,6 +5670,46 @@ export function createFinanceService({
       }
       const write = async (tx: FinanceActionWriteExecutor) => {
         const before = await ownedTransaction(context.principal.userId, id, tx);
+        if (context.principal.actorType === "agent" && input.category !== undefined) {
+          if (
+            context.financePreparedAction !== true ||
+            input.category === null ||
+            input.confidence === undefined ||
+            input.expectedTransactionUpdatedAt === undefined ||
+            input.rationale === undefined
+          ) {
+            throw new AppError(
+              "forbidden",
+              "Agent transaction categorization requires an explicitly prepared Finance action.",
+            );
+          }
+          const category = await categoryForName(context.principal.userId, input.category, tx);
+          if (!category) throw new AppError("not_found", "The Finance category was not found.");
+          const categorized = await applyCategorization(
+            {
+              categoryId: category.id,
+              confidence: input.confidence,
+              expectedTransactionUpdatedAt: input.expectedTransactionUpdatedAt,
+              learnMerchant: input.learnMerchant ? "always" : "suggest",
+              rationale: input.rationale,
+              transactionId: before.id,
+            },
+            context,
+            "agent",
+            "confirmed",
+            {},
+            tx,
+          );
+          if (input.notes === undefined) return categorized;
+          const [noted] = await tx
+            .update(financeTransactions)
+            .set({ notes: input.notes, updatedAt: now() })
+            .where(eq(financeTransactions.id, before.id))
+            .returning();
+          if (!noted)
+            throw new AppError("conflict", "The transaction changed while updating its note.");
+          return transaction(noted);
+        }
         const categoryRecord =
           input.category === undefined || input.category === null
             ? null

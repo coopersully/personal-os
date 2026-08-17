@@ -632,4 +632,42 @@ describe.sequential("finance action service", () => {
     expect(rows.filter((row) => row.status === "pending").length).toBeGreaterThan(0);
     expect(rows.some((row) => row.status === "superseded")).toBe(true);
   });
+
+  it("supersedes concurrent changed budget plans for the same month", async () => {
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Custom",
+        name: "Budget overlap",
+        slug: `budget-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!category) throw new Error("Budget category was not created.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { setBudgetPlan: vi.fn() } as never,
+      now: () => now,
+    });
+    const context = { principal: agent(userId), requestId: "budget-overlap" };
+    const plan = (limit: number) => ({
+      allocations: [{ categoryId: category.id, limit }],
+      assumptions: [],
+      goalIds: [],
+      month: "2026-09",
+      rationale: `Plan ${limit}`,
+      replace: true,
+      scenarioFingerprint: null,
+    });
+    await Promise.all([
+      service.performDirect("budget_plan", plan(100), context),
+      service.performDirect("budget_plan", plan(200), context),
+    ]);
+    const rows = await database.db
+      .select({ status: financeAgentActionReviews.status })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.userId, userId));
+    expect(rows.some((row) => row.status === "pending")).toBe(true);
+    expect(rows.some((row) => row.status === "superseded")).toBe(true);
+  });
 });

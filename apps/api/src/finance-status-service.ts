@@ -773,13 +773,18 @@ export function createFinanceStatusService({ db, now }: Options) {
             sourceRefs:
               observedIncome === null
                 ? []
-                : postedIncome.slice(0, 100).map((transaction) => ({
-                    accountId: transaction.accountId,
-                    provider: "local" as const,
-                    remoteId: transaction.id,
-                    revision: transaction.updatedAt.toISOString(),
-                    sourceType: "finance_transaction" as const,
-                  })),
+                : postedIncome.slice(0, 100).map((transaction) => {
+                    const account = accounts.find((item) => item.id === transaction.accountId);
+                    const provider =
+                      account?.provider === "manual" ? "local" : (account?.provider ?? "local");
+                    return {
+                      accountId: transaction.accountId,
+                      provider,
+                      remoteId: transaction.providerTransactionId ?? transaction.id,
+                      revision: transaction.updatedAt.toISOString(),
+                      sourceType: "finance_transaction" as const,
+                    };
+                  }),
             value: evidenceCurrent ? observedIncome : null,
           };
           const budgetCapacity = reliableMonthlyCapacity({

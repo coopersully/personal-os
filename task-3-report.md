@@ -8,3 +8,11 @@ Status: DONE
 - Verified with focused domain and Finance action-service integration tests, both domain/API type checks, Biome formatting, and a diff check.
 
 Biome reports four pre-existing non-null assertion warnings in `apps/api/src/finance-action-service.integration.test.ts`; it exits successfully and reports no errors.
+
+## Disposition matrix follow-up
+
+Status: DONE
+
+- Added table-driven API coverage for all eight supported action families across bypass-on apply, bypass-off review, missing evidence, and foreign-target denial.
+- Asserted public reviews retain action-specific changes and source references without private payloads.
+- Added MCP coverage that `set_finance_budget_plan` preserves `applied`, `pending_review`, and `needs_input` outcomes unchanged.

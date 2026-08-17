@@ -659,6 +659,62 @@ function mockApi() {
 }
 
 describe("ilo MCP server", () => {
+  it("preserves every Finance budget-plan disposition through the MCP tool", async () => {
+    const api = mockApi();
+    const outcomes = [
+      { result: { allocations: [], month: "2026-08", rationale: "Applied." }, status: "applied" },
+      {
+        review: {
+          actionKind: "budget_plan",
+          changes: [{ entityType: "finance_budget", summary: "Set August budget." }],
+          fingerprint: "budget:pending",
+          id,
+          rationale: "Review this budget.",
+          requestedAt: now,
+          requestingAgentId: "finance-agent",
+          sourceRefs: [],
+          status: "pending",
+        },
+        status: "pending_review",
+      },
+      {
+        question: {
+          actionKind: "budget_plan",
+          choices: [],
+          expectedAnswer: [{ name: "category", required: true, type: "string" }],
+          id,
+          prompt: "Provide the missing budget evidence.",
+          sourceRefs: [],
+          why: "The category was unavailable.",
+        },
+        status: "needs_input",
+      },
+    ] as const;
+    for (const outcome of outcomes) api.setFinanceBudgetPlan.mockResolvedValueOnce(outcome);
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    for (const outcome of outcomes) {
+      const result = await client.callTool({
+        arguments: {
+          allocations: [{ categoryId: id, limit: 250 }],
+          month: "2026-08",
+          rationale: "Match current spending.",
+        },
+        name: "set_finance_budget_plan",
+      });
+      expect(result.structuredContent).toMatchObject({ result: outcome });
+    }
+    expect(api.setFinanceBudgetPlan).toHaveBeenCalledTimes(3);
+    await client.close();
+    await server.close();
+  });
+
   it("exposes and executes the complete agent surface and today resource", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({

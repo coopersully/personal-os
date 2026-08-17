@@ -3,15 +3,20 @@ import {
   createDatabaseClient,
   financeAccounts,
   financeAgentActionReviews,
+  financeAlerts,
   financeAutomationSettings,
   financeCategories,
+  financeIncomeStreams,
+  financeMerchants,
   financeProfiles,
+  financeRecurringObligations,
   financeTransactions,
   migrateDatabase,
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { eq } from "drizzle-orm";
+import type { SupportedActionKind } from "./finance-action-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
@@ -34,6 +39,185 @@ function user(userId: string): Principal {
     scopes: new Set(["finances:read", "finances:write"]),
     userId,
   };
+}
+
+type ActionCase = {
+  actionKind: SupportedActionKind;
+  foreignInput: Record<string, unknown>;
+  input: Record<string, unknown>;
+  missingInput: Record<string, unknown>;
+};
+
+async function seedActionCases(
+  database: ReturnType<typeof createDatabaseClient>,
+  ownerId: string,
+  label: string,
+): Promise<ActionCase[]> {
+  const [account] = await database.db
+    .insert(financeAccounts)
+    .values({
+      institution: label,
+      name: `${label} checking`,
+      provider: "manual",
+      status: "manual",
+      userId: ownerId,
+    })
+    .returning();
+  const [category] = await database.db
+    .insert(financeCategories)
+    .values({
+      group: "Test",
+      name: `${label} category`,
+      slug: `${label.toLowerCase()}-${crypto.randomUUID()}`,
+      userId: ownerId,
+    })
+    .returning();
+  const [merchant] = await database.db
+    .insert(financeMerchants)
+    .values({
+      displayName: `${label} merchant`,
+      normalizedName: `${label.toLowerCase()} merchant`,
+      userId: ownerId,
+    })
+    .returning();
+  if (!account || !category || !merchant)
+    throw new Error("Finance action targets were not created.");
+  const [transaction] = await database.db
+    .insert(financeTransactions)
+    .values({
+      accountId: account.id,
+      amount: 1234,
+      direction: "expense",
+      merchant: merchant.displayName,
+      merchantId: merchant.id,
+      transactionDate: "2026-08-17",
+      userId: ownerId,
+    })
+    .returning();
+  const [income] = await database.db
+    .insert(financeIncomeStreams)
+    .values({
+      cadence: "monthly",
+      confidence: 9000,
+      displayName: `${label} income`,
+      expectedAmount: 100_000,
+      amountTolerance: 0,
+      payer: `${label} payer`,
+      source: "user",
+      status: "active",
+      userId: ownerId,
+    })
+    .returning();
+  const [recurring] = await database.db
+    .insert(financeRecurringObligations)
+    .values({
+      cadence: "monthly",
+      confidence: 9000,
+      displayName: `${label} bill`,
+      expectedAmount: 1000,
+      amountTolerance: 0,
+      kind: "bill",
+      merchant: `${label} bill`,
+      source: "user",
+      status: "active",
+      userId: ownerId,
+    })
+    .returning();
+  if (!transaction || !income || !recurring)
+    throw new Error("Finance action records were not created.");
+  const [alert] = await database.db
+    .insert(financeAlerts)
+    .values({
+      body: `${label} alert`,
+      evidence: {},
+      severity: "warning",
+      title: `${label} alert`,
+      type: "income_missing",
+      userId: ownerId,
+    })
+    .returning();
+  if (!alert) throw new Error("Finance alert was not created.");
+
+  return [
+    {
+      actionKind: "profile",
+      foreignInput: { payAccountId: account.id },
+      input: { effectiveDate: "2026-08-17", employer: label, payAccountId: account.id },
+      missingInput: { effectiveDate: 1 },
+    },
+    {
+      actionKind: "budget_plan",
+      foreignInput: {
+        allocations: [{ categoryId: category.id, limit: 10 }],
+        month: "2026-10",
+        rationale: label,
+      },
+      input: {
+        allocations: [{ categoryId: category.id, limit: 10 }],
+        month: "2026-09",
+        rationale: label,
+      },
+      missingInput: {},
+    },
+    {
+      actionKind: "categorization",
+      foreignInput: {
+        decisions: [
+          {
+            categoryId: category.id,
+            confidence: 1,
+            expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+            learnMerchant: "suggest",
+            rationale: label,
+            transactionId: transaction.id,
+          },
+        ],
+      },
+      input: {
+        decisions: [
+          {
+            categoryId: category.id,
+            confidence: 1,
+            expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+            learnMerchant: "suggest",
+            rationale: label,
+            transactionId: transaction.id,
+          },
+        ],
+      },
+      missingInput: { decisions: [] },
+    },
+    {
+      actionKind: "merchant",
+      foreignInput: { displayName: `${label} renamed`, id: merchant.id },
+      input: { displayName: `${label} renamed`, id: merchant.id },
+      missingInput: {},
+    },
+    {
+      actionKind: "recurring_obligation",
+      foreignInput: { id: recurring.id, status: "paused" },
+      input: { id: recurring.id, status: "paused" },
+      missingInput: {},
+    },
+    {
+      actionKind: "alert",
+      foreignInput: { action: "resolve", id: alert.id },
+      input: { action: "resolve", id: alert.id },
+      missingInput: {},
+    },
+    {
+      actionKind: "transaction",
+      foreignInput: { id: transaction.id, notes: label },
+      input: { id: transaction.id, notes: label },
+      missingInput: {},
+    },
+    {
+      actionKind: "income_stream",
+      foreignInput: { id: income.id, status: "paused" },
+      input: { id: income.id, status: "paused" },
+      missingInput: {},
+    },
+  ];
 }
 
 describe.sequential("finance action service", () => {
@@ -473,6 +657,95 @@ describe.sequential("finance action service", () => {
         expect.objectContaining({ name: expectedField, required: true }),
       );
       expect(outcome.question).not.toHaveProperty("privatePayload");
+    }
+  });
+
+  it("disposes every Finance action family safely across bypass, evidence, and ownership states", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: {
+        applyCategorizations: vi.fn(async () => []),
+        resolveAlert: vi.fn(async () => ({})),
+        setBudgetPlan: vi.fn(async () => ({})),
+        updateIncomeStream: vi.fn(async () => ({})),
+        updateMerchant: vi.fn(async () => ({})),
+        updateProfile: vi.fn(async () => ({})),
+        updateRecurringObligation: vi.fn(async () => ({})),
+        updateTransaction: vi.fn(async () => ({})),
+      } as never,
+      now: () => now,
+    });
+    const context = { principal: agent(userId), requestId: "action-disposition-matrix" };
+    const updateBypass = async (enabled: boolean) => {
+      await database.db
+        .insert(financeAutomationSettings)
+        .values({ reviewBypassEnabled: enabled, userId })
+        .onConflictDoUpdate({
+          set: { reviewBypassEnabled: enabled, updatedAt: now },
+          target: financeAutomationSettings.userId,
+        });
+    };
+
+    await updateBypass(true);
+    for (const item of await seedActionCases(database, userId, `Applied ${crypto.randomUUID()}`)) {
+      const outcome = await service.performDirect(item.actionKind, item.input, context);
+      expect(outcome.status).toBe("applied");
+    }
+
+    await updateBypass(false);
+    for (const item of await seedActionCases(database, userId, `Queued ${crypto.randomUUID()}`)) {
+      const outcome = await service.performDirect(item.actionKind, item.input, context);
+      if (outcome.status !== "pending_review")
+        throw new Error("Expected a pending Finance review.");
+      expect(outcome.review.actionKind).toBe(item.actionKind);
+      expect(outcome.review.status).toBe("pending");
+      expect(outcome.review.changes).toContainEqual(
+        expect.objectContaining({ entityType: expect.stringContaining("finance_") }),
+      );
+      expect(outcome.review.sourceRefs).toContainEqual(
+        expect.objectContaining({ provider: expect.any(String) }),
+      );
+      expect(outcome.review).not.toHaveProperty("privatePayload");
+    }
+
+    for (const bypass of [false, true]) {
+      await updateBypass(bypass);
+      for (const item of await seedActionCases(
+        database,
+        userId,
+        `Missing ${bypass} ${crypto.randomUUID()}`,
+      )) {
+        await expect(
+          service.performDirect(item.actionKind, item.missingInput, context),
+        ).resolves.toMatchObject({
+          question: { actionKind: item.actionKind },
+          status: "needs_input",
+        });
+      }
+    }
+
+    const [foreignUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Foreign Finance",
+        email: `foreign-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!foreignUser) throw new Error("Foreign Finance user was not created.");
+    await updateBypass(true);
+    for (const item of await seedActionCases(
+      database,
+      foreignUser.id,
+      `Foreign ${crypto.randomUUID()}`,
+    )) {
+      await expect(
+        service.performDirect(item.actionKind, item.foreignInput, context),
+      ).resolves.toMatchObject({
+        question: { actionKind: item.actionKind },
+        status: "needs_input",
+      });
     }
   });
 

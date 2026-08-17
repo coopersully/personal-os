@@ -4,6 +4,7 @@ import {
   domainProfileApprovals,
   financeAccounts,
   financeAutomationSettings,
+  financeBudgetPlans,
   financeBudgets,
   financeCategoryRules,
   financeIncomeStreams,
@@ -252,6 +253,12 @@ export function createFinanceStatusService({ db, now }: Options) {
             .from(financeBudgets)
             .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, currentMonth)))
             .orderBy(financeBudgets.id);
+          const [latestBudgetPlan] = await tx
+            .select()
+            .from(financeBudgetPlans)
+            .where(eq(financeBudgetPlans.userId, userId))
+            .orderBy(desc(financeBudgetPlans.updatedAt), desc(financeBudgetPlans.version))
+            .limit(1);
           const [automationSettings] = await tx
             .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
             .from(financeAutomationSettings)
@@ -360,6 +367,12 @@ export function createFinanceStatusService({ db, now }: Options) {
             )
             .orderBy(desc(workspaceMaintenanceRuns.createdAt))
             .limit(1);
+          const goalsById = new Map(goals.map((goal) => [goal.id, goal]));
+          const prioritizedGoals = (latestBudgetPlan?.goalIds ?? []).flatMap((goalId, index) => {
+            const goal = goalsById.get(goalId);
+            return goal ? [{ goal: serializeGoal(goal), priority: index + 1 }] : [];
+          });
+          const hasStatedGoalPriority = prioritizedGoals.length > 0;
 
           const approvedProfile = approvals
             .toSorted((left, right) => right.approvedAt.getTime() - left.approvedAt.getTime())
@@ -508,10 +521,26 @@ export function createFinanceStatusService({ db, now }: Options) {
           ];
           const evidenceCutoff =
             sourceSynchronizations
-              .map((source) => source.synchronization.lastSuccessAt)
+              .filter((source) => source.synchronization.state === "current")
+              .map((source) => {
+                if (source.synchronization.lastSuccessAt !== null)
+                  return source.synchronization.lastSuccessAt;
+                // Manual sources have no provider success timestamp. Their local record revision is
+                // the only honest cutoff, and the oldest account revision remains conservative.
+                return (
+                  source.accountIds
+                    .map(
+                      (accountId) =>
+                        accounts.find((account) => account.id === accountId)?.updatedAt,
+                    )
+                    .filter((value): value is Date => value !== undefined)
+                    .toSorted((left, right) => left.getTime() - right.getTime())[0]
+                    ?.toISOString() ?? null
+                );
+              })
               .filter((value): value is string => value !== null)
               .toSorted()
-              .at(-1) ?? null;
+              .at(0) ?? null;
           const health = assessFinanceHealth(
             {
               accounts: serializedAccounts.map((account) => ({
@@ -586,7 +615,7 @@ export function createFinanceStatusService({ db, now }: Options) {
                 ...(activeProfile?.monthlyHousingCost == null ? ["monthly_housing_cost"] : []),
                 ...(activeProfile?.householdSize == null ? ["household_size"] : []),
                 ...(recurringObligations.length === 0 ? ["recurring_obligations"] : []),
-                ...(goals.length === 0 ? ["goal_priority"] : []),
+                ...(!hasStatedGoalPriority ? ["goal_priority"] : []),
               ]
             : [];
           const planningQuestions = [
@@ -626,7 +655,7 @@ export function createFinanceStatusService({ db, now }: Options) {
                   ),
                 ]
               : []),
-            ...(needsFirstBudgetFacts && goals.length === 0
+            ...(needsFirstBudgetFacts && !hasStatedGoalPriority
               ? [
                   planningQuestion(
                     "goal_priority",
@@ -685,6 +714,36 @@ export function createFinanceStatusService({ db, now }: Options) {
             ].join(":");
             possibleDuplicateKeys.set(key, (possibleDuplicateKeys.get(key) ?? 0) + 1);
           }
+          const reviewTransactionIds = new Set(scopedReviews.map((review) => review.transactionId));
+          const unresolvedTransactions = scopedTransactions.filter((row) => {
+            const duplicateKey = [
+              row.accountId,
+              row.transactionDate,
+              row.merchant.toLowerCase(),
+              row.amount,
+              row.direction,
+            ].join(":");
+            return (
+              row.pending ||
+              row.reconciliationStatus === "candidate" ||
+              (possibleDuplicateKeys.get(duplicateKey) ?? 0) > 1 ||
+              (row.category !== null && row.categorySource === null) ||
+              (row.direction !== "transfer" && row.category === null) ||
+              reviewTransactionIds.has(row.id)
+            );
+          });
+          const earliestUnresolvedDate = unresolvedTransactions
+            .map((row) => row.transactionDate)
+            .toSorted()[0];
+          const reconciledThrough =
+            scopedTransactions
+              .filter(
+                (row) =>
+                  !unresolvedTransactions.some((unresolved) => unresolved.id === row.id) &&
+                  (earliestUnresolvedDate === undefined ||
+                    row.transactionDate < earliestUnresolvedDate),
+              )
+              .at(-1)?.transactionDate ?? null;
           const oldestOutstandingAt = outstandingReviews[0]?.createdAt.toISOString() ?? null;
           const work = {
             actionable: scopedReviews.length,
@@ -773,17 +832,21 @@ export function createFinanceStatusService({ db, now }: Options) {
             sourceRefs:
               observedIncome === null
                 ? []
-                : postedIncome.slice(0, 100).map((transaction) => {
+                : postedIncome.slice(0, 100).flatMap((transaction) => {
                     const account = accounts.find((item) => item.id === transaction.accountId);
                     const provider =
                       account?.provider === "manual" ? "local" : (account?.provider ?? "local");
-                    return {
-                      accountId: transaction.accountId,
-                      provider,
-                      remoteId: transaction.providerTransactionId ?? transaction.id,
-                      revision: transaction.updatedAt.toISOString(),
-                      sourceType: "finance_transaction" as const,
-                    };
+                    if (provider !== "local" && transaction.providerTransactionId === null)
+                      return [];
+                    return [
+                      {
+                        accountId: transaction.accountId,
+                        provider,
+                        remoteId: transaction.providerTransactionId ?? transaction.id,
+                        revision: transaction.updatedAt.toISOString(),
+                        sourceType: "finance_transaction" as const,
+                      },
+                    ];
                   }),
             value: evidenceCurrent ? observedIncome : null,
           };
@@ -864,21 +927,8 @@ export function createFinanceStatusService({ db, now }: Options) {
                 ).length,
                 possibleDuplicates: [...possibleDuplicateKeys.values()].filter((count) => count > 1)
                   .length,
-                ready:
-                  scopedReviews.length === 0 &&
-                  [...possibleDuplicateKeys.values()].every((count) => count <= 1) &&
-                  scopedTransactions.every(
-                    (row) => row.category === null || row.categorySource !== null,
-                  ) &&
-                  scopedTransactions.filter(
-                    (row) => !row.pending && row.direction !== "transfer" && row.category === null,
-                  ).length === 0 &&
-                  scopedTransactions.filter((row) => row.reconciliationStatus === "candidate")
-                    .length === 0,
-                reconciledThrough:
-                  scopedTransactions
-                    .filter((row) => row.reconciliationStatus !== "candidate")
-                    .at(-1)?.transactionDate ?? null,
+                ready: scopedReviews.length === 0 && unresolvedTransactions.length === 0,
+                reconciledThrough,
                 unansweredExceptions: scopedReviews.length,
                 uncategorized: scopedTransactions.filter(
                   (row) => !row.pending && row.direction !== "transfer" && row.category === null,
@@ -925,16 +975,7 @@ export function createFinanceStatusService({ db, now }: Options) {
                 overAllocated:
                   budgetCapacity !== null && budgetTotal !== null && budgetTotal > budgetCapacity,
               },
-              prioritizedGoals: goals
-                .toSorted((left, right) => {
-                  if (left.targetDate === null && right.targetDate === null)
-                    return left.id.localeCompare(right.id);
-                  if (left.targetDate === null) return 1;
-                  if (right.targetDate === null) return -1;
-                  const byDate = left.targetDate.localeCompare(right.targetDate);
-                  return byDate !== 0 ? byDate : left.id.localeCompare(right.id);
-                })
-                .map((goal, index) => ({ goal: serializeGoal(goal), priority: index + 1 })),
+              prioritizedGoals,
               proposals: [],
               questions,
               reimbursements: { open: 0, overdue: 0, unmatchedCredits: 0 },

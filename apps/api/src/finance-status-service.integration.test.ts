@@ -6,6 +6,7 @@ import {
   domainProfiles,
   financeAccounts,
   financeAutomationSettings,
+  financeBudgetPlans,
   financeBudgets,
   financeIncomeStreams,
   financeProfiles,
@@ -13,6 +14,7 @@ import {
   financeRecurringObligations,
   financeReviewCases,
   financeTransactions,
+  goals,
   migrateDatabase,
   users,
   workspaceMaintenanceRuns,
@@ -246,6 +248,127 @@ describe.sequential("Finance status service", () => {
 
     expect(status.freshness.state).toBe("current");
     expect(status.details.health.confidence).toBe("reliable");
+    expect(status.details.evidence.cutoff).toBe(source.updatedAt.toISOString());
+  });
+
+  it("uses the oldest current source cutoff and never invents provider transaction references", async () => {
+    const userId = await makeUser("Conservative evidence Finance");
+    const manual = await account(userId, "current");
+    const plaid = await account(userId, "current", "plaid");
+    const [item] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        encryptedCredentials: { ciphertext: "fixture", iv: "fixture", tag: "fixture", version: 1 },
+        lastSyncedAt: new Date("2026-08-15T10:00:00.000Z"),
+        provider: "plaid",
+        providerItemId: `item-${crypto.randomUUID()}`,
+        syncState: "current",
+        userId,
+      })
+      .returning();
+    if (!item) throw new Error("Provider item was not created.");
+    await database.db
+      .update(financeAccounts)
+      .set({ providerItemRecordId: item.id })
+      .where(eq(financeAccounts.id, plaid.id));
+    await database.db.insert(financeTransactions).values([
+      {
+        accountId: manual.id,
+        amount: 100,
+        category: "Food",
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Resolved before exception",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-01",
+        userId,
+      },
+      {
+        accountId: manual.id,
+        amount: 200,
+        category: "Food",
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Pending exception",
+        needsReview: false,
+        pending: true,
+        transactionDate: "2026-08-05",
+        userId,
+      },
+      {
+        accountId: manual.id,
+        amount: 300,
+        category: "Food",
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Resolved after exception",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-10",
+        userId,
+      },
+      {
+        accountId: plaid.id,
+        amount: 2_000,
+        category: "Income",
+        categorySource: "provider",
+        direction: "income",
+        merchant: "Provider income without remote id",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-02",
+        userId,
+      },
+    ]);
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.evidence).toEqual({
+      current: true,
+      cutoff: "2026-08-15T10:00:00.000Z",
+    });
+    expect(status.details.income.observed.sourceRefs).toEqual([]);
+    expect(status.details.closeReadiness).toMatchObject({
+      ready: false,
+      reconciledThrough: "2026-08-02",
+    });
+  });
+
+  it("uses durable budget-plan goal order and asks when no stated priority exists", async () => {
+    const userId = await makeUser("Durable goal priority Finance");
+    const [firstGoal, secondGoal] = await database.db
+      .insert(goals)
+      .values([
+        { targetDate: "2026-12-01", title: "First by date", userId },
+        { targetDate: "2026-09-01", title: "Second by date", userId },
+      ])
+      .returning();
+    if (!firstGoal || !secondGoal) throw new Error("Finance goals were not created.");
+
+    const unprioritized = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(unprioritized.details.prioritizedGoals).toEqual([]);
+    expect(unprioritized.details.missingFacts).toContain("goal_priority");
+    expect(unprioritized.details.questions).toContainEqual(
+      expect.objectContaining({ prompt: expect.stringContaining("goal") }),
+    );
+
+    await database.db.insert(financeBudgetPlans).values({
+      goalIds: [secondGoal.id, firstGoal.id],
+      month: "2026-08",
+      rationale: "Use the stated goal order.",
+      userId,
+    });
+    const prioritized = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(prioritized.details.prioritizedGoals).toEqual([
+      expect.objectContaining({
+        goal: expect.objectContaining({ id: secondGoal.id }),
+        priority: 1,
+      }),
+      expect.objectContaining({ goal: expect.objectContaining({ id: firstGoal.id }), priority: 2 }),
+    ]);
+    expect(prioritized.details.missingFacts).not.toContain("goal_priority");
   });
 
   it("projects one authoritative Provider Item across sibling accounts without trusting account shadows", async () => {

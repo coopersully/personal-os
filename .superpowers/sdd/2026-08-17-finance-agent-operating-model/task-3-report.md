@@ -88,3 +88,5 @@ Remaining concern: the full concurrent same/disjoint target matrix remains to be
 
 Additional concurrency verification: overlapping categorization proposals now have a real concurrent regression test; one proposal is superseded while a current pending proposal remains.
 Concurrent changed complete budget plans for one user/month now have the same regression coverage and serialize through their budget-month semantic key.
+
+Client regression coverage confirms root Finance action dispositions are returned unchanged for budget (applied), profile (pending review), and recurring (needs input) mutations.

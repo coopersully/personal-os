@@ -1321,6 +1321,53 @@ describe("ilo API client", () => {
     ).resolves.toEqual(pending);
   });
 
+  it("preserves root Finance dispositions for budget, profile, and recurring mutations", async () => {
+    const applied = { result: { month: "2026-08" }, status: "applied" };
+    const pending = { review: { id, status: "pending" }, status: "pending_review" };
+    const needsInput = { question: { id, prompt: "Choose status." }, status: "needs_input" };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const path = new URL(String(input)).pathname;
+        return json(
+          path === "/v1/finances/budget-plan"
+            ? applied
+            : path === "/v1/finances/profile"
+              ? pending
+              : needsInput,
+        );
+      },
+    });
+    await expect(
+      api.setFinanceBudgetPlan({
+        acknowledgeOverAllocation: false,
+        allocations: [{ categoryId: id, limit: 1 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-08",
+        rationale: "Test",
+        replace: true,
+        scenarioFingerprint: null,
+      }),
+    ).resolves.toEqual(applied);
+    await expect(
+      api.updateFinanceProfile({
+        effectiveDate: "2026-08-01",
+        employer: null,
+        employmentType: null,
+        expectedNetPay: null,
+        grossAnnualIncome: null,
+        nextPayday: null,
+        payAccountId: null,
+        payFrequency: null,
+        role: null,
+      }),
+    ).resolves.toEqual(pending);
+    await expect(api.updateFinanceRecurringObligation(id, { status: "active" })).resolves.toEqual(
+      needsInput,
+    );
+  });
+
   it("uses exact action-review transport paths and result envelopes", async () => {
     const requests: Array<{ body: string | null; method: string; path: string }> = [];
     const review = { id, status: "dismissed" };

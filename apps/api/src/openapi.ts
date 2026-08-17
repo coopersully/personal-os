@@ -617,7 +617,7 @@ export function createOpenApiDocument(apiBaseUrl: string) {
               enum: ["today", "upcoming", "scheduled", "completed", "cancelled", "trash"],
               type: "string",
             }),
-            queryParameter("search", { maxLength: 240, minLength: 1, type: "string" }),
+            queryParameter("query", { maxLength: 200, minLength: 1, type: "string" }),
             queryParameter("dueAfter", { format: "date-time", type: "string" }),
             queryParameter("dueBefore", { format: "date-time", type: "string" }),
             queryParameter("scheduledAfter", { format: "date-time", type: "string" }),

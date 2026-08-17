@@ -157,11 +157,14 @@ describe("canonical Tasks OpenAPI surface", () => {
       "listId",
       "projectId",
       "view",
-      "search",
+      "query",
       "dueAfter",
       "dueBefore",
       "scheduledAfter",
       "scheduledBefore",
     ]);
+    expect(
+      taskOperation("/v1/tasks", "get").parameters?.find(({ name }) => name === "query")?.schema,
+    ).toMatchObject({ maxLength: 200, minLength: 1, type: "string" });
   });
 });

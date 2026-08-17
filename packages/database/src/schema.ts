@@ -1788,11 +1788,63 @@ export const financeProfiles = pgTable(
       onDelete: "set null",
     }),
     effectiveDate: text("effective_date").notNull(),
+    householdSize: integer("household_size"),
+    dependents: integer("dependents"),
+    housingStatus: text("housing_status").$type<"owning" | "renting" | "shared" | "other">(),
+    monthlyHousingCost: integer("monthly_housing_cost_cents"),
+    reserveTargetMonths: integer("reserve_target_months"),
+    investmentRiskWillingness: text("investment_risk_willingness").$type<
+      "conservative" | "balanced" | "growth"
+    >(),
+    investmentRiskCapacity: text("investment_risk_capacity").$type<"low" | "moderate" | "high">(),
     ...timestamps,
   },
   (table) => [
     index("finance_profiles_user_effective_idx").on(table.userId, table.effectiveDate),
     uniqueIndex("finance_profiles_user_effective_idx_unique").on(table.userId, table.effectiveDate),
+  ],
+);
+
+/**
+ * Durable, user-owned approval records for prepared Finance actions. The
+ * private payload stays in this Finance-only record; review surfaces receive
+ * only the bounded `safeChanges` projection.
+ */
+export const financeAgentActionReviews = pgTable(
+  "finance_agent_action_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    requestingAgentId: text("requesting_agent_id").notNull(),
+    sourceRefs: jsonb("source_refs").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    actionKind: text("action_kind").notNull(),
+    privatePayload: jsonb("private_payload").$type<Record<string, unknown>>().notNull(),
+    safeChanges: jsonb("safe_changes")
+      .$type<Array<Record<string, unknown>>>()
+      .notNull()
+      .default([]),
+    maintenanceRunId: uuid("maintenance_run_id").references(() => workspaceMaintenanceRuns.id, {
+      onDelete: "set null",
+    }),
+    expectedRevision: text("expected_revision"),
+    fingerprint: text("fingerprint").notNull(),
+    status: text("status")
+      .$type<"pending" | "applied" | "dismissed" | "superseded">()
+      .notNull()
+      .default("pending"),
+    ...timestamps,
+  },
+  (table) => [
+    index("finance_agent_action_reviews_user_status_idx").on(
+      table.userId,
+      table.status,
+      table.createdAt,
+    ),
+    uniqueIndex("finance_agent_action_reviews_pending_fingerprint_idx")
+      .on(table.userId, table.fingerprint)
+      .where(sql`${table.status} = 'pending'`),
   ],
 );
 

@@ -7,6 +7,8 @@ import {
   connectorSyncTriggers,
   domainProfileApprovals,
   financeAccounts,
+  financeAgentActionReviews,
+  financeProfiles,
   financeProviderItems,
   financeTransactions,
   mailCalendarCommitmentIntakes,
@@ -17,6 +19,59 @@ import {
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("stores bounded Finance action reviews without exposing their private payload", async () => {
+    const reviews = getTableConfig(financeAgentActionReviews);
+    const profiles = getTableConfig(financeProfiles);
+
+    expect(reviews.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "user_id",
+        "requesting_agent_id",
+        "source_refs",
+        "action_kind",
+        "private_payload",
+        "safe_changes",
+        "maintenance_run_id",
+        "expected_revision",
+        "fingerprint",
+        "status",
+      ]),
+    );
+    expect(reviews.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_agent_action_reviews_user_status_idx",
+        "finance_agent_action_reviews_pending_fingerprint_idx",
+      ]),
+    );
+    expect(profiles.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "household_size",
+        "dependents",
+        "housing_status",
+        "monthly_housing_cost_cents",
+        "reserve_target_months",
+        "investment_risk_willingness",
+        "investment_risk_capacity",
+      ]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0060_finance_agent_action_reviews.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_agent_action_reviews"');
+    expect(migrationSql).toContain('"private_payload" jsonb NOT NULL');
+    expect(migrationSql).toContain("\"safe_changes\" jsonb DEFAULT '[]'::jsonb NOT NULL");
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_agent_action_reviews_pending_fingerprint_idx" ON "finance_agent_action_reviews" USING btree ("user_id", "fingerprint") WHERE "status" = \'pending\'',
+    );
+    expect(migrationSql).toContain('CREATE INDEX "finance_agent_action_reviews_user_status_idx"');
+    expect(migrationSql).toContain('ADD COLUMN "household_size" integer');
+    expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
+    expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
   it("keeps workspace maintenance runs durable, exclusive, and claimable", async () => {
     const runs = getTableConfig(workspaceMaintenanceRuns);
     const steps = getTableConfig(workspaceMaintenanceSteps);

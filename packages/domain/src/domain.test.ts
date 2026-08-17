@@ -37,10 +37,13 @@ import {
   featureAccessPolicies,
   featureIds,
   financeAccountSchema,
+  financeActionOutcomeSchema,
+  financeBudgetPlanSchema,
   financeGuidedPreferencesSchema,
   financeMaintenanceResultSchema,
   financeProviderItemHealthSchema,
   financeReviewDecisionInputSchema,
+  financeScenarioInputSchema,
   financeStatusDetailsSchema,
   financeTransactionQuerySchema,
   formatDateOnly,
@@ -91,6 +94,7 @@ import {
   updateAccountSetupInputSchema,
   updateEventBlockInputSchema,
   updateEventInputSchema,
+  updateFinanceProfileInputSchema,
   updateFinanceTransactionInputSchema,
   updateGoalInputSchema,
   updateLocalCalendarInputSchema,
@@ -1469,6 +1473,80 @@ describe("domain schemas", () => {
 });
 
 describe("finance agent contracts", () => {
+  it("keeps Finance agent outcomes exclusive and planning inputs bounded", () => {
+    const budgetPlan = {
+      allocations: [{ categoryId: id, limit: 1_200 }],
+      month: "2026-08",
+      rationale: "Fund essential spending before discretionary categories.",
+    };
+    const question = {
+      actionKind: "budget_plan" as const,
+      id,
+      prompt: "What is your monthly housing cost?",
+      why: "Housing is required to make a reliable first budget.",
+    };
+    const review = {
+      actionKind: "budget_plan" as const,
+      changes: [{ entityType: "finance_budget", summary: "Set August essentials budget." }],
+      fingerprint: "budget:2026-08:abc",
+      id,
+      rationale: "The plan uses the stated income and obligations.",
+      requestedAt: start,
+      requestingAgentId: "agent_finance",
+      sourceRefs: [],
+      status: "pending" as const,
+    };
+    const outcome = financeActionOutcomeSchema(financeBudgetPlanSchema);
+
+    expect(outcome.parse({ status: "applied", result: budgetPlan })).toMatchObject({
+      status: "applied",
+    });
+    expect(outcome.parse({ status: "pending_review", review })).toMatchObject({
+      status: "pending_review",
+    });
+    expect(outcome.parse({ status: "needs_input", question })).toMatchObject({
+      status: "needs_input",
+    });
+    expect(() => outcome.parse({ status: "applied", result: budgetPlan, review })).toThrow();
+    expect(
+      updateFinanceProfileInputSchema.parse({
+        dependents: 1,
+        householdSize: 3,
+        housingStatus: "renting",
+        investmentRiskCapacity: "moderate",
+        investmentRiskWillingness: "growth",
+        monthlyHousingCost: 2_450,
+        reserveTargetMonths: 6,
+      }),
+    ).toMatchObject({ householdSize: 3, reserveTargetMonths: 6 });
+    expect(
+      financeBudgetPlanSchema.safeParse({
+        ...budgetPlan,
+        allocations: [budgetPlan.allocations[0], budgetPlan.allocations[0]],
+      }).success,
+    ).toBe(false);
+    expect(
+      financeScenarioInputSchema.safeParse({
+        alternatives: Array.from({ length: 6 }, (_, index) => ({
+          label: `Alternative ${index + 1}`,
+          monthlyIncome: 6_000,
+          startingCash: 1_000,
+        })),
+        asOf: "2026-08-01",
+        baseline: { label: "Baseline", monthlyIncome: 6_000, startingCash: 1_000 },
+        horizonMonths: 12,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeScenarioInputSchema.safeParse({
+        alternatives: [],
+        asOf: "2026-08-01",
+        baseline: { label: "Baseline", monthlyIncome: 6_000, startingCash: 1_000 },
+        horizonMonths: 121,
+      }).success,
+    ).toBe(false);
+  });
+
   it("validates Finance health policy preferences", () => {
     expect(
       financeGuidedPreferencesSchema.parse({

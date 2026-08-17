@@ -414,6 +414,13 @@
       "when": 1786968000000,
       "tag": "0058_finance_provider_items",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1786975200000,
+      "tag": "0060_finance_agent_action_reviews",
+      "breakpoints": true
     }
   ]
 }

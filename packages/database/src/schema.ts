@@ -1452,6 +1452,14 @@ export const financeProviderItems = pgTable(
   ],
 );
 
+export const financeAutomationSettings = pgTable("finance_automation_settings", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  reviewBypassEnabled: boolean("review_bypass_enabled").notNull().default(false),
+  ...timestamps,
+});
+
 export const financeAccounts = pgTable(
   "finance_accounts",
   {
@@ -1846,6 +1854,26 @@ export const financeAgentActionReviews = pgTable(
       .on(table.userId, table.fingerprint)
       .where(sql`${table.status} = 'pending'`),
   ],
+);
+
+/** Durable semantic budget-plan metadata; individual budget rows remain the monthly projection. */
+export const financeBudgetPlans = pgTable(
+  "finance_budget_plans",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    month: text("month").notNull(),
+    goalIds: jsonb("goal_ids").$type<string[]>().notNull().default([]),
+    assumptions: jsonb("assumptions").$type<string[]>().notNull().default([]),
+    rationale: text("rationale").notNull(),
+    replace: boolean("replace_existing").notNull().default(true),
+    scenarioFingerprint: text("scenario_fingerprint"),
+    version: integer("version").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("finance_budget_plans_user_month_idx").on(table.userId, table.month)],
 );
 
 export const financeIncomeStreams = pgTable(

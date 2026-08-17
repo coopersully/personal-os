@@ -40,6 +40,18 @@ export const financeProviderItemHealthSchema = z.object({
 });
 export type FinanceProviderItemHealth = z.infer<typeof financeProviderItemHealthSchema>;
 
+export const financeAutomationSettingsSchema = z.object({
+  reviewBypassEnabled: z.boolean().default(false),
+});
+export type FinanceAutomationSettings = z.infer<typeof financeAutomationSettingsSchema>;
+
+export const updateFinanceAutomationSettingsInputSchema = z
+  .object({ reviewBypassEnabled: z.boolean() })
+  .strict();
+export type UpdateFinanceAutomationSettingsInput = z.infer<
+  typeof updateFinanceAutomationSettingsInputSchema
+>;
+
 const moneySchema = z.number().finite().nonnegative().max(100_000_000);
 const categorySchema = z.string().trim().min(1).max(80);
 const financeMonthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u);
@@ -358,6 +370,7 @@ export const setFinanceBudgetPlanInputSchema = z
     assumptions: z.array(z.string().trim().min(1).max(500)).max(25).default([]),
     goalIds: z.array(idSchema).max(25).default([]),
     month: financeMonthSchema,
+    acknowledgeOverAllocation: z.boolean().default(false),
     rationale: z.string().trim().min(1).max(4_000),
     replace: z.boolean().default(true),
     scenarioFingerprint: z.string().max(128).nullable().default(null),

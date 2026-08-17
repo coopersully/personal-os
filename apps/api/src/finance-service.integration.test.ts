@@ -895,6 +895,7 @@ describe.sequential("finance service", () => {
     const context = { principal: financePrincipal(owner.id), requestId: "budget-plan" };
     const input = {
       allocations: [{ categoryId: category.id, limit: 400 }],
+      acknowledgeOverAllocation: false,
       assumptions: ["Income stays stable."],
       goalIds: [],
       month: "2026-07",

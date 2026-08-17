@@ -8,6 +8,7 @@ import {
   domainProfileApprovals,
   financeAccounts,
   financeAgentActionReviews,
+  financeAutomationSettings,
   financeProfiles,
   financeProviderItems,
   financeTransactions,
@@ -111,6 +112,23 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('ADD COLUMN "household_size" integer');
     expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
     expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
+  it("persists one default-off Finance review bypass setting per user", async () => {
+    const settings = getTableConfig(financeAutomationSettings);
+
+    expect(settings.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["user_id", "review_bypass_enabled", "created_at", "updated_at"]),
+    );
+    expect(settings.columns.find((column) => column.name === "user_id")?.primary).toBe(true);
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0059_finance_automation_settings.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_automation_settings"');
+    expect(migrationSql).toContain('"review_bypass_enabled" boolean DEFAULT false NOT NULL');
+    expect(migrationSql).not.toMatch(/^\s*(?:UPDATE|DELETE\s+FROM)\b/mu);
   });
 
   it("keeps workspace maintenance runs durable, exclusive, and claimable", async () => {

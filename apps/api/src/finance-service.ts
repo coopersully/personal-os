@@ -10,6 +10,7 @@ import {
   financeAlerts,
   financeAutomationSettings,
   financeBudgets,
+  financeBudgetPlans,
   financeCategories,
   financeCategoryRules,
   financeClassificationDecisions,
@@ -4689,10 +4690,7 @@ export function createFinanceService({
             ? null
             : effectiveProfile.grossAnnualIncome / 1200;
         const total = input.allocations.reduce((sum, allocation) => sum + allocation.limit, 0);
-        const explicitlyExplained = /over[- ]?allocat|temporary deficit|intentional deficit/i.test(
-          input.rationale,
-        );
-        if (capacity !== null && total > capacity && !explicitlyExplained) {
+        if (capacity !== null && total > capacity && !input.acknowledgeOverAllocation) {
           throw new AppError(
             "invalid_request",
             "Budget allocations exceed reliable monthly income. Explain the intentional over-allocation in the rationale to continue.",
@@ -4708,6 +4706,31 @@ export function createFinanceService({
               ),
             );
         }
+        const [storedPlan] = await tx
+          .insert(financeBudgetPlans)
+          .values({
+            assumptions: input.assumptions,
+            goalIds: input.goalIds,
+            month: input.month,
+            rationale: input.rationale,
+            replace: input.replace,
+            scenarioFingerprint: input.scenarioFingerprint,
+            userId: context.principal.userId,
+          })
+          .onConflictDoUpdate({
+            set: {
+              assumptions: input.assumptions,
+              goalIds: input.goalIds,
+              rationale: input.rationale,
+              replace: input.replace,
+              scenarioFingerprint: input.scenarioFingerprint,
+              updatedAt: now(),
+              version: sql`${financeBudgetPlans.version} + 1`,
+            },
+            target: [financeBudgetPlans.userId, financeBudgetPlans.month],
+          })
+          .returning();
+        if (!storedPlan) throw new AppError("conflict", "The Finance budget plan was not saved.");
         const categoryById = new Map(categoryRows.map((category) => [category.id, category]));
         for (const allocation of input.allocations) {
           const category = categoryById.get(allocation.categoryId);
@@ -4736,12 +4759,12 @@ export function createFinanceService({
               month: input.month,
               rationaleProvided: true,
               scenarioFingerprint: input.scenarioFingerprint,
-              total,
+              planVersion: storedPlan.version,
             },
             before: {
               allocationCount: currentBudgets.length,
               month: input.month,
-              total: currentBudgets.reduce((sum, budget) => sum + budget.limit / 100, 0),
+              priorAllocationCount: currentBudgets.length,
             },
             entityId: context.principal.userId,
             entityType: "finance_budget_plan",

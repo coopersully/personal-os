@@ -35,3 +35,20 @@ ALTER TABLE "finance_profiles" ADD COLUMN "investment_risk_capacity" text;
 CREATE INDEX "finance_agent_action_reviews_user_status_idx" ON "finance_agent_action_reviews" USING btree ("user_id", "status", "created_at");
 --> statement-breakpoint
 CREATE UNIQUE INDEX "finance_agent_action_reviews_pending_fingerprint_idx" ON "finance_agent_action_reviews" USING btree ("user_id", "fingerprint") WHERE "status" = 'pending';
+--> statement-breakpoint
+CREATE TABLE "finance_budget_plans" (
+  "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "user_id" uuid NOT NULL,
+  "month" text NOT NULL,
+  "goal_ids" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "assumptions" jsonb DEFAULT '[]'::jsonb NOT NULL,
+  "rationale" text NOT NULL,
+  "replace_existing" boolean DEFAULT true NOT NULL,
+  "scenario_fingerprint" text,
+  "version" integer DEFAULT 1 NOT NULL,
+  "created_at" timestamptz DEFAULT now() NOT NULL,
+  "updated_at" timestamptz DEFAULT now() NOT NULL,
+  CONSTRAINT "finance_budget_plans_user_month_idx" UNIQUE("user_id", "month")
+);
+--> statement-breakpoint
+ALTER TABLE "finance_budget_plans" ADD CONSTRAINT "finance_budget_plans_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;

@@ -514,4 +514,28 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([{ status: "superseded" }]);
     expect(updateProfile).toHaveBeenCalledOnce();
   });
+
+  it("serializes concurrent changed profile proposals on their semantic target", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile: vi.fn() } as never,
+      now: () => now,
+    });
+    const context = { principal: agent(userId), requestId: "concurrent-profile" };
+    const [left, right] = await Promise.all([
+      service.performDirect("profile", { effectiveDate: "2026-09-01", employer: "Left" }, context),
+      service.performDirect("profile", { effectiveDate: "2026-09-01", employer: "Right" }, context),
+    ]);
+    expect([left.status, right.status]).toEqual(["pending_review", "pending_review"]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.userId, userId)),
+    ).resolves.toEqual(expect.arrayContaining([{ status: "superseded" }, { status: "pending" }]));
+  });
 });

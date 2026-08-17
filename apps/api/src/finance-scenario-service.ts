@@ -37,7 +37,11 @@ function normalizeScenarioInput(input: FinanceScenarioInput): FinanceScenarioInp
     ...parsed,
     alternatives: parsed.alternatives
       .map(normalizePlan)
-      .toSorted((left, right) => left.label.localeCompare(right.label)),
+      .toSorted(
+        (left, right) =>
+          left.label.localeCompare(right.label) ||
+          stableJson(left).localeCompare(stableJson(right)),
+      ),
     baseline: normalizePlan(parsed.baseline),
   };
 }
@@ -61,7 +65,7 @@ function projectScenario(plan: ScenarioPlan, horizonMonths: number): FinanceScen
   const essentialMonthlyOutflow = plan.monthlyHousingCost + plan.monthlyDebtPayment;
   return {
     debtPayoffMonths:
-      plan.debtBalance !== undefined && plan.monthlyDebtPayment > 0
+      plan.debtBalance !== undefined && plan.debtBalance > 0 && plan.monthlyDebtPayment > 0
         ? Math.ceil(plan.debtBalance / plan.monthlyDebtPayment)
         : null,
     goalDateEffects:
@@ -102,12 +106,14 @@ export function compareFinanceScenarios(input: FinanceScenarioInput): FinanceSce
       plan.monthlyReserveContribution - normalized.baseline.monthlyReserveContribution;
     return {
       ...projection,
-      goalDateEffects:
-        reserveDifference === 0
+      goalDateEffects: [
+        ...projection.goalDateEffects,
+        ...(reserveDifference === 0
           ? []
           : [
               `Reserve contribution is ${Math.abs(reserveDifference)}/month ${reserveDifference > 0 ? "higher" : "lower"} than ${normalized.baseline.label}.`,
-            ],
+            ]),
+      ],
     };
   });
   const allPlans = [baseline, ...alternatives];
@@ -125,10 +131,14 @@ export function compareFinanceScenarios(input: FinanceScenarioInput): FinanceSce
     goalConflicts: allPlans
       .filter((plan) => plan.monthlyCashFlow < 0)
       .map((plan) => `${plan.label} spends more than its stated monthly income.`),
-    missingInputs:
-      normalized.baseline.monthlyDebtPayment > 0 && normalized.baseline.debtBalance === undefined
-        ? ["Debt balance is needed to estimate payoff timing."]
-        : [],
+    missingInputs: [normalized.baseline, ...normalized.alternatives].flatMap((plan, index) => {
+      const prefix = index === 0 ? "" : `${plan.label}: `;
+      if (plan.monthlyDebtPayment > 0 && plan.debtBalance === undefined)
+        return [`${prefix}Debt balance is needed to estimate payoff timing.`];
+      if (plan.debtBalance !== undefined && plan.debtBalance > 0 && plan.monthlyDebtPayment === 0)
+        return [`${prefix}Monthly debt payment is needed to estimate payoff timing.`];
+      return [];
+    }),
     sensitivityWarnings: [
       "Scenarios use fixed income and expenses; returns and irregular costs are not modeled.",
       ...(allPlans.some((plan) => plan.monthlyCashFlow < 0)

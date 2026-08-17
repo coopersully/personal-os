@@ -101,6 +101,118 @@ describe("Finance scenarios", () => {
     expect(result.missingInputs).toEqual([]);
   });
 
+  it("represents a zero debt balance as already paid without an invalid zero-month payoff", () => {
+    const result = compareFinanceScenarios({
+      alternatives: [],
+      asOf: "2026-08-15",
+      baseline: {
+        assumptions: [],
+        budgetAllocations: [],
+        debtBalance: 0,
+        label: "Paid debt",
+        monthlyDebtPayment: 250,
+        monthlyHousingCost: 500,
+        monthlyIncome: 2_000,
+        monthlyReserveContribution: 100,
+        startingCash: 500,
+      },
+      horizonMonths: 3,
+    });
+
+    expect(result.baseline.debtPayoffMonths).toBeNull();
+    expect(result.missingInputs).toEqual([]);
+  });
+
+  it("keeps every alternative's own goal projection while adding the relative reserve effect", () => {
+    const result = compareFinanceScenarios({
+      alternatives: [
+        {
+          assumptions: [],
+          budgetAllocations: [],
+          goalCurrent: 100,
+          goalTarget: 500,
+          label: "Accelerate goal",
+          monthlyDebtPayment: 0,
+          monthlyHousingCost: 500,
+          monthlyIncome: 2_000,
+          monthlyReserveContribution: 200,
+          startingCash: 500,
+        },
+      ],
+      asOf: "2026-08-15",
+      baseline: {
+        assumptions: [],
+        budgetAllocations: [],
+        label: "Baseline",
+        monthlyDebtPayment: 0,
+        monthlyHousingCost: 500,
+        monthlyIncome: 2_000,
+        monthlyReserveContribution: 100,
+        startingCash: 500,
+      },
+      horizonMonths: 3,
+    });
+
+    expect(result.alternatives[0]?.goalDateEffects).toEqual([
+      "Goal reaches its target in 2 months.",
+      "Reserve contribution is 100/month higher than Baseline.",
+    ]);
+  });
+
+  it("reports missing debt balances for alternatives as well as the baseline", () => {
+    const result = compareFinanceScenarios({
+      alternatives: [
+        {
+          assumptions: [],
+          budgetAllocations: [],
+          label: "Alternative debt",
+          monthlyDebtPayment: 200,
+          monthlyHousingCost: 500,
+          monthlyIncome: 2_000,
+          monthlyReserveContribution: 0,
+          startingCash: 500,
+        },
+      ],
+      asOf: "2026-08-15",
+      baseline: {
+        assumptions: [],
+        budgetAllocations: [],
+        label: "Baseline debt",
+        monthlyDebtPayment: 100,
+        monthlyHousingCost: 500,
+        monthlyIncome: 2_000,
+        monthlyReserveContribution: 0,
+        startingCash: 500,
+      },
+      horizonMonths: 3,
+    });
+
+    expect(result.missingInputs).toEqual([
+      "Debt balance is needed to estimate payoff timing.",
+      "Alternative debt: Debt balance is needed to estimate payoff timing.",
+    ]);
+  });
+
+  it("uses a stable fingerprint for reordered alternatives with duplicate labels", () => {
+    const baseline = {
+      assumptions: [],
+      budgetAllocations: [],
+      label: "Baseline",
+      monthlyDebtPayment: 0,
+      monthlyHousingCost: 1_000,
+      monthlyIncome: 3_000,
+      monthlyReserveContribution: 500,
+      startingCash: 1_000,
+    };
+    const first = { ...baseline, label: "Duplicate", monthlyHousingCost: 700 };
+    const second = { ...baseline, label: "Duplicate", monthlyHousingCost: 800 };
+    const baseInput = { asOf: "2026-08-15", baseline, horizonMonths: 12 };
+
+    expect(
+      compareFinanceScenarios({ ...baseInput, alternatives: [first, second] }).fingerprint,
+    ).toBe(compareFinanceScenarios({ ...baseInput, alternatives: [second, first] }).fingerprint);
+  });
+
   it("accepts maximum valid assumptions without producing an invalid result", () => {
     const assumptions = Array.from({ length: 25 }, (_, index) => `Assumption ${index}`);
     expect(

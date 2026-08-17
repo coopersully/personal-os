@@ -45,6 +45,7 @@ import {
   financeProviderItemHealthSchema,
   financeReviewDecisionInputSchema,
   financeScenarioInputSchema,
+  financeScenarioProjectionSchema,
   financeStatusDetailsSchema,
   financeTransactionQuerySchema,
   formatDateOnly,
@@ -1581,6 +1582,26 @@ describe("finance agent contracts", () => {
         asOf: "2026-08-01",
         baseline: { label: "Baseline", monthlyIncome: 6_000, startingCash: 1_000 },
         horizonMonths: 121,
+      }).success,
+    ).toBe(false);
+    expect(
+      financeScenarioProjectionSchema.safeParse({
+        debtPayoffMonths: null,
+        goalDateEffects: [],
+        label: "Already paid",
+        monthlyCashFlow: 1,
+        projectedLowestBalance: 0,
+        reserveRunwayMonths: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      financeScenarioProjectionSchema.safeParse({
+        debtPayoffMonths: 0,
+        goalDateEffects: [],
+        label: "Invalid payoff",
+        monthlyCashFlow: 1,
+        projectedLowestBalance: 0,
+        reserveRunwayMonths: null,
       }).success,
     ).toBe(false);
   });

@@ -25,6 +25,19 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 1 — C4 Pass 2 (client transport tests)
+
+Status: DONE_WITH_CONCERNS
+
+Commit `7e8458b2f62e9ed6e351829c8b89a7947b57c3e5` adds API-client coverage for scenario comparisons and budget-plan writes. The test asserts each method's exact HTTP method, path, serialized body, and unwrapped result.
+
+Verification passed:
+
+- `pnpm exec biome check --write packages/api-client/src/client.test.ts` (exited 0)
+- `pnpm exec vitest run packages/api-client/src/client.test.ts --reporter=dot` (1 file, 7 tests passed)
+- `pnpm --filter @personal-os/api-client typecheck` (exited 0)
+- `git diff --check` (exited 0 before commit)
+
 ## Fix round 1 — C4 Pass 2 (route transport tests)
 
 Status: DONE_WITH_CONCERNS

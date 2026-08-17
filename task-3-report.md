@@ -22,6 +22,7 @@ Status: DONE_WITH_CONCERNS
 16. `fix(finances): lock finance action targets` (this target-locking commit)
 17. `fix(finances): recover action questions` (this question-recovery commit)
 18. `test(finances): preserve refresh dispositions` (this refresh-client test commit)
+19. `test(finances): bound budget plan reviews` (this maximum-plan regression commit)
 
 ## Delivered behavior
 
@@ -104,3 +105,9 @@ Status: DONE_WITH_CONCERNS
 
 - The API client now has a table-driven regression proving `refreshFinanceInsights` preserves `applied`, `pending_review`, and `needs_input` responses instead of coercing them to the legacy refresh result.
 - Concern: the requested maximum-size queue and API/MCP refresh audit/rollback matrices remain unimplemented in this bounded follow-up.
+
+## Maximum budget-plan review follow-up
+
+Status: DONE
+
+- A 100-allocation, 25-assumption, 25-goal plan now queues and approves with a 64-character revision digest. Public source references are capped at the domain maximum while the private input continues to drive transactional revalidation.

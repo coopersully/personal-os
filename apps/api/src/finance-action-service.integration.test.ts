@@ -12,6 +12,7 @@ import {
   financeProfiles,
   financeRecurringObligations,
   financeTransactions,
+  goals,
   migrateDatabase,
   users,
 } from "@personal-os/database";
@@ -1529,5 +1530,63 @@ describe.sequential("finance action service", () => {
       }),
     ).resolves.toMatchObject({ status: "needs_input" });
     expect(setBudgetPlan).not.toHaveBeenCalled();
+  });
+
+  it("queues and revalidates a maximum-size budget plan with a bounded public revision", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const categories = await database.db
+      .insert(financeCategories)
+      .values(
+        Array.from({ length: 100 }, (_, index) => ({
+          group: "Maximum plan",
+          name: `Maximum category ${index}`,
+          slug: `maximum-plan-${crypto.randomUUID()}`,
+          userId,
+        })),
+      )
+      .returning();
+    const goalsForPlan = await database.db
+      .insert(goals)
+      .values(
+        Array.from({ length: 25 }, (_, index) => ({ title: `Maximum goal ${index}`, userId })),
+      )
+      .returning();
+    const setBudgetPlan = vi.fn(async () => ({ id: "maximum-plan" }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { setBudgetPlan } as never,
+      now: () => now,
+    });
+    const queued = await service.performDirect(
+      "budget_plan",
+      {
+        allocations: categories.map((category) => ({ categoryId: category.id, limit: 1 })),
+        assumptions: Array.from({ length: 25 }, (_, index) => `Maximum assumption ${index}`),
+        goalIds: goalsForPlan.map((goal) => goal.id),
+        month: "2026-12",
+        rationale: "Exercise the bounded plan-review envelope.",
+        replace: true,
+        scenarioFingerprint: null,
+      },
+      { principal: agent(userId), requestId: "maximum-budget-plan" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending Finance review.");
+    const revision = queued.review.expectedRevision;
+    if (!revision) throw new Error("Expected a bounded revision.");
+    expect(revision).toHaveLength(64);
+    expect(revision.length).toBeLessThanOrEqual(128);
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "maximum-budget-plan-approve",
+      }),
+    ).resolves.toMatchObject({ result: { id: "maximum-plan" }, status: "applied" });
+    expect(setBudgetPlan).toHaveBeenCalledOnce();
   });
 });

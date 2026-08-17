@@ -417,7 +417,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           : `Requested ${actionKind.replaceAll("_", " ")} change.`,
       safeChanges,
       semanticTargetKeys: semanticTargetKeys(actionKind, input),
-      sourceRefs,
+      // Public review projections are capped by the domain contract; the
+      // complete private input remains available for transactional revalidation.
+      sourceRefs: sourceRefs.slice(0, 100),
     });
 
     switch (actionKind) {

@@ -43,6 +43,7 @@ import {
   financeGuidedPreferencesSchema,
   financeMaintenanceResultSchema,
   financeProviderItemHealthSchema,
+  financeQuestionSchema,
   financeReviewDecisionInputSchema,
   financeScenarioInputSchema,
   financeScenarioProjectionSchema,
@@ -1476,6 +1477,44 @@ describe("domain schemas", () => {
 });
 
 describe("finance agent contracts", () => {
+  it("keeps public Finance question answer descriptors bounded and private-payload free", () => {
+    const question = {
+      actionKind: "profile" as const,
+      expectedAnswer: [
+        {
+          choices: ["active", "paused"],
+          example: "active",
+          name: "status",
+          required: true,
+          type: "string",
+        },
+      ],
+      id,
+      prompt: "Which status should this income stream use?",
+      why: "The proposed status was not valid.",
+    };
+
+    expect(financeQuestionSchema.parse(question)).toMatchObject({
+      expectedAnswer: [{ choices: ["active", "paused"], name: "status", type: "string" }],
+    });
+    expect(
+      financeQuestionSchema.safeParse({ ...question, privatePayload: { payAccountId: id } })
+        .success,
+    ).toBe(false);
+    expect(
+      financeQuestionSchema.safeParse({
+        ...question,
+        expectedAnswer: [{ name: "decisions", required: true, type: "object_array" }],
+      }).success,
+    ).toBe(true);
+    expect(
+      financeQuestionSchema.safeParse({
+        ...question,
+        expectedAnswer: [{ ...question.expectedAnswer[0], type: "object" }],
+      }).success,
+    ).toBe(false);
+  });
+
   it("keeps Finance agent outcomes exclusive and planning inputs bounded", () => {
     const budgetPlan = {
       allocations: [{ categoryId: id, limit: 1_200 }],

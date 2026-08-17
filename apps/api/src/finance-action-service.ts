@@ -160,10 +160,149 @@ function semanticTargetKeys(actionKind: SupportedActionKind, input: Record<strin
   }
 }
 
-function question(actionKind: FinanceActionKind, why: string): FinanceQuestion {
+type ExpectedAnswer = FinanceQuestion["expectedAnswer"][number];
+
+function expectedAnswer(
+  name: string,
+  type: ExpectedAnswer["type"],
+  options: Pick<ExpectedAnswer, "choices" | "example"> = {},
+): ExpectedAnswer {
+  return { name, required: true, type, ...options };
+}
+
+function expectedAnswerFor(
+  actionKind: SupportedActionKind,
+  rawInput: Record<string, unknown>,
+): ExpectedAnswer[] {
+  switch (actionKind) {
+    case "profile": {
+      const profileFields: Record<string, Pick<ExpectedAnswer, "choices" | "example" | "type">> = {
+        dependents: { type: "number" },
+        effectiveDate: { example: "2026-08-17", type: "string" },
+        employer: { type: "string" },
+        employmentType: {
+          choices: ["contract", "full_time", "part_time", "self_employed", "unemployed"],
+          type: "string",
+        },
+        expectedNetPay: { type: "number" },
+        grossAnnualIncome: { type: "number" },
+        householdSize: { type: "number" },
+        housingStatus: { choices: ["owning", "renting", "shared", "other"], type: "string" },
+        investmentRiskCapacity: { choices: ["low", "moderate", "high"], type: "string" },
+        investmentRiskWillingness: {
+          choices: ["conservative", "balanced", "growth"],
+          type: "string",
+        },
+        monthlyHousingCost: { type: "number" },
+        nextPayday: { example: "2026-08-17", type: "string" },
+        payAccountId: { type: "string" },
+        payFrequency: {
+          choices: ["biweekly", "irregular", "monthly", "semimonthly", "weekly"],
+          type: "string",
+        },
+        reserveTargetMonths: { type: "number" },
+        role: { type: "string" },
+      };
+      const name = Object.keys(rawInput).find((key) => key in profileFields) ?? "effectiveDate";
+      const field = profileFields[name] ?? profileFields.effectiveDate;
+      if (!field) throw new Error("The effective-date Finance answer descriptor is missing.");
+      return [expectedAnswer(name, field.type, field)];
+    }
+    case "budget_plan":
+      return "allocations" in rawInput
+        ? [
+            expectedAnswer("allocations", "object_array", { example: "[...]" }),
+            expectedAnswer("month", "string", { example: "2026-08" }),
+            expectedAnswer("rationale", "string"),
+          ]
+        : [
+            expectedAnswer("category", "string"),
+            expectedAnswer("limit", "number"),
+            expectedAnswer("month", "string", { example: "2026-08" }),
+          ];
+    case "categorization":
+      return [expectedAnswer("decisions", "object_array", { example: "[...]" })];
+    case "merchant":
+      return "sourceMerchantId" in rawInput
+        ? [
+            expectedAnswer("rationale", "string"),
+            expectedAnswer("sourceMerchantId", "string"),
+            expectedAnswer("targetMerchantId", "string"),
+          ]
+        : [expectedAnswer("displayName", "string"), expectedAnswer("id", "string")];
+    case "recurring_obligation":
+      return [
+        expectedAnswer("id", "string"),
+        expectedAnswer("status", "string", { choices: ["active", "cancelled", "paused"] }),
+      ];
+    case "alert":
+      return [
+        expectedAnswer("action", "string", { choices: ["dismiss", "resolve"] }),
+        expectedAnswer("id", "string"),
+      ];
+    case "transaction":
+      return "accountId" in rawInput
+        ? [
+            expectedAnswer("accountId", "string"),
+            expectedAnswer("amount", "number"),
+            expectedAnswer("date", "string", { example: "2026-08-17" }),
+            expectedAnswer("direction", "string", { choices: ["expense", "income", "transfer"] }),
+            expectedAnswer("merchant", "string"),
+          ]
+        : [
+            expectedAnswer("id", "string"),
+            expectedAnswer("category" in rawInput ? "category" : "notes", "string"),
+          ];
+    case "income_stream":
+      return [
+        expectedAnswer("id", "string"),
+        expectedAnswer("status", "string", { choices: ["active", "paused"] }),
+      ];
+    default:
+      return assertNever(actionKind);
+  }
+}
+
+function isExpectedAnswerValue(field: ExpectedAnswer, value: unknown): boolean {
+  const valid = (() => {
+    switch (field.type) {
+      case "boolean":
+        return typeof value === "boolean";
+      case "number":
+        return typeof value === "number" && Number.isFinite(value);
+      case "object_array":
+        return (
+          Array.isArray(value) &&
+          value.every((item) => item !== null && typeof item === "object" && !Array.isArray(item))
+        );
+      case "string":
+        return typeof value === "string" && value.trim().length > 0;
+      case "string_array":
+        return (
+          Array.isArray(value) &&
+          value.every((item) => typeof item === "string" && item.trim().length > 0)
+        );
+    }
+  })();
+  if (!valid) return false;
+  if (!field.choices) return true;
+  if (field.type === "string") return typeof value === "string" && field.choices.includes(value);
+  return (
+    field.type === "string_array" &&
+    Array.isArray(value) &&
+    value.every((item) => typeof item === "string" && field.choices?.includes(item))
+  );
+}
+
+function question(
+  actionKind: SupportedActionKind,
+  rawInput: Record<string, unknown>,
+  why: string,
+): FinanceQuestion {
   return {
     actionKind,
     choices: [],
+    expectedAnswer: expectedAnswerFor(actionKind, rawInput),
     id: randomUUID(),
     prompt: "Please provide the missing Finance evidence before this change is applied.",
     sourceRefs: [],
@@ -201,7 +340,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     executor: Pick<Database, "select"> = db,
   ): Promise<PreparedAction | { status: "needs_input"; question: FinanceQuestion }> {
     const missing = (why: string, sourceRefs: MaterialSourceReference[] = []) => ({
-      question: { ...question(actionKind, why), sourceRefs },
+      question: { ...question(actionKind, rawInput, why), sourceRefs },
       status: "needs_input" as const,
     });
     const parse = <T>(schema: {
@@ -779,6 +918,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       return {
         question: question(
           prepared.actionKind,
+          prepared.input,
           "The Finance records changed after this action was prepared. Refresh the evidence and submit a new action.",
         ),
         status: "needs_input" as const,
@@ -1074,32 +1214,29 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           if (payload.answer === answerValue && payload.outcome) return payload.outcome;
           throw new AppError("conflict", "This Finance question has already been answered.");
         }
+        const expected =
+          payload.question.expectedAnswer.length > 0
+            ? payload.question.expectedAnswer
+            : expectedAnswerFor(payload.original.actionKind, payload.original.input);
+        const retryQuestion = { ...payload.question, expectedAnswer: expected, id: review.id };
         let supplied: Record<string, unknown>;
         try {
           const parsed = JSON.parse(answerValue);
           if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
           supplied = parsed as Record<string, unknown>;
         } catch {
-          const outcome: FinanceActionOutcome<unknown> = {
-            question: {
-              ...question(
-                payload.original.actionKind,
-                "Answer with the bounded fields requested for this Finance action.",
-              ),
-              id: review.id,
-            },
-            status: "needs_input",
-          };
-          await tx
-            .update(financeAgentActionReviews)
-            .set({
-              privatePayload: { ...payload, answer: answerValue, outcome },
-              status: "superseded",
-              updatedAt: now(),
-            })
-            .where(eq(financeAgentActionReviews.id, review.id));
-          return outcome;
+          return { question: retryQuestion, status: "needs_input" as const };
         }
+        if (
+          expected.some(
+            (field) =>
+              (field.required && supplied[field.name] === undefined) ||
+              (supplied[field.name] !== undefined &&
+                !isExpectedAnswerValue(field, supplied[field.name])),
+          ) ||
+          Object.keys(supplied).some((key) => !expected.some((field) => field.name === key))
+        )
+          return { question: retryQuestion, status: "needs_input" as const };
         const prepared = await prepare(
           payload.original.actionKind,
           { ...payload.original.input, ...supplied },
@@ -1108,7 +1245,22 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
         let outcome: FinanceActionOutcome<unknown>;
         if ("status" in prepared) {
-          outcome = prepared;
+          const nextQuestion = { ...prepared.question, id: review.id };
+          await tx
+            .update(financeAgentActionReviews)
+            .set({
+              privatePayload: {
+                ...payload,
+                original: {
+                  ...payload.original,
+                  input: { ...payload.original.input, ...supplied },
+                },
+                question: nextQuestion,
+              },
+              updatedAt: now(),
+            })
+            .where(eq(financeAgentActionReviews.id, review.id));
+          return { question: nextQuestion, status: "needs_input" };
         } else if (
           context.principal.actorType === "agent" &&
           !(await readBypass(tx, context.principal.userId, true))

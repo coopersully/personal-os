@@ -447,6 +447,35 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([{ status: "superseded" }]);
   });
 
+  it("describes the public answer fields for every supported action family", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: {} as never,
+      now: () => now,
+    });
+    const context = { principal: agent(userId), requestId: "action-question-descriptors" };
+    const cases = [
+      ["profile", { effectiveDate: 42 }, "effectiveDate"],
+      ["budget_plan", {}, "category"],
+      ["categorization", {}, "decisions"],
+      ["merchant", {}, "displayName"],
+      ["recurring_obligation", {}, "id"],
+      ["alert", {}, "action"],
+      ["transaction", {}, "id"],
+      ["income_stream", {}, "id"],
+    ] as const;
+
+    for (const [actionKind, input, expectedField] of cases) {
+      const outcome = await service.performDirect(actionKind, input, context);
+      if (outcome.status !== "needs_input") throw new Error("Expected a Finance question.");
+      expect(outcome.question.actionKind).toBe(actionKind);
+      expect(outcome.question.expectedAnswer).toContainEqual(
+        expect.objectContaining({ name: expectedField, required: true }),
+      );
+      expect(outcome.question).not.toHaveProperty("privatePayload");
+    }
+  });
+
   it("excludes question rows from approvals and terminalizes a valid answer", async () => {
     await database.db
       .update(financeAutomationSettings)
@@ -476,6 +505,14 @@ describe.sequential("finance action service", () => {
           question: {
             actionKind: "profile",
             choices: [],
+            expectedAnswer: [
+              {
+                example: "00000000-0000-4000-8000-000000000000",
+                name: "payAccountId",
+                required: true,
+                type: "string",
+              },
+            ],
             id: "00000000-0000-4000-8000-000000000001",
             prompt: "Choose a pay account.",
             sourceRefs: [],
@@ -501,6 +538,33 @@ describe.sequential("finance action service", () => {
     await expect(service.listReviews(userId)).resolves.not.toContainEqual(
       expect.objectContaining({ id: stored.id }),
     );
+    await expect(
+      service.answerQuestion(stored.id, "not JSON", {
+        principal: agent(userId),
+        requestId: "answer-question-malformed",
+      }),
+    ).resolves.toMatchObject({
+      question: { expectedAnswer: [{ name: "payAccountId", type: "string" }], id: stored.id },
+      status: "needs_input",
+    });
+    await expect(
+      service.answerQuestion(stored.id, JSON.stringify({ unrelated: account.id }), {
+        principal: agent(userId),
+        requestId: "answer-question-unexpected-key",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await expect(
+      service.answerQuestion(stored.id, JSON.stringify({ payAccountId: 42 }), {
+        principal: agent(userId),
+        requestId: "answer-question-invalid-type",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, stored.id)),
+    ).resolves.toEqual([{ status: "pending" }]);
     await expect(
       service.answerQuestion(stored.id, JSON.stringify({ payAccountId: account.id }), {
         principal: agent(userId),

@@ -127,6 +127,20 @@ export const financeQuestionSchema = z
       .max(10)
       .default([]),
     id: idSchema,
+    expectedAnswer: z
+      .array(
+        z
+          .object({
+            choices: z.array(z.string().trim().min(1).max(120)).max(10).optional(),
+            example: z.string().trim().max(240).optional(),
+            name: z.string().trim().min(1).max(80),
+            required: z.boolean(),
+            type: z.enum(["boolean", "number", "object_array", "string", "string_array"]),
+          })
+          .strict(),
+      )
+      .max(20)
+      .default([]),
     prompt: z.string().trim().min(1).max(1_000),
     sourceRefs: z.array(materialSourceReferenceSchema).max(100).default([]),
     why: z.string().trim().min(1).max(1_000),

@@ -506,6 +506,12 @@ export function createFinanceStatusService({ db, now }: Options) {
                 synchronization: migrationBlockedSynchronization,
               })),
           ];
+          const evidenceCutoff =
+            sourceSynchronizations
+              .map((source) => source.synchronization.lastSuccessAt)
+              .filter((value): value is string => value !== null)
+              .toSorted()
+              .at(-1) ?? null;
           const health = assessFinanceHealth(
             {
               accounts: serializedAccounts.map((account) => ({
@@ -573,7 +579,7 @@ export function createFinanceStatusService({ db, now }: Options) {
           const byReason: Record<string, number> = {};
           for (const review of scopedReviews)
             byReason[review.reason] = (byReason[review.reason] ?? 0) + 1;
-          const needsFirstBudgetFacts = budgets.length === 0;
+          const needsFirstBudgetFacts = true;
           const missingFacts = needsFirstBudgetFacts
             ? [
                 ...(monthlyIncome === null ? ["reliable_monthly_income"] : []),
@@ -871,7 +877,10 @@ export function createFinanceStatusService({ db, now }: Options) {
                   (row) => row.reconciliationStatus === "candidate",
                 ).length,
               },
-              evidence: { cutoff: evidenceCurrent ? asOf : null, current: evidenceCurrent },
+              evidence: {
+                cutoff: evidenceCurrent ? evidenceCutoff : null,
+                current: evidenceCurrent,
+              },
               health,
               income: {
                 monthly: evidenceCurrent ? monthlyIncome : null,
@@ -894,15 +903,8 @@ export function createFinanceStatusService({ db, now }: Options) {
                 forecast: evidenceCurrent ? forecast : null,
                 spending: evidenceCurrent ? spending : null,
               },
-              latestReview:
-                latestRun &&
-                !openRunStatuses.includes(latestRun.status as (typeof openRunStatuses)[number])
-                  ? {
-                      completedAt: latestRun.updatedAt.toISOString(),
-                      id: latestRun.id,
-                      status: latestRun.status,
-                    }
-                  : null,
+              // Period reviews are durable Task 8 records, not maintenance-run projections.
+              latestReview: null,
               missingFacts,
               plan: {
                 budgetVariance:

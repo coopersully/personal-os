@@ -159,7 +159,7 @@ describe.sequential("Finance status service", () => {
     expect(status.details.accounts.items[0]?.synchronization.nextRetryAt).toBeNull();
     expect(status.details.month.spending).toBe(400);
     expect(status.details.health.confidence).toBe("reliable");
-    expect(status.state).toBe("clean");
+    expect(status.state).toBe("needs_work");
   });
 
   it("returns planning evidence before asking for a first budget", async () => {

@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import {
+  auditEvents,
   createDatabaseClient,
   financeAccounts,
   financeAgentActionReviews,
@@ -572,6 +573,104 @@ describe.sequential("finance action service", () => {
         .select({ status: financeAgentActionReviews.status })
         .from(financeAgentActionReviews)
         .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "pending" }]);
+  });
+
+  it("audits approved refreshes redactively and rolls the audit back when review terminalization fails", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    const queued = await service.performDirect(
+      "alert",
+      { operation: "refresh" },
+      { principal: agent(userId), requestId: "refresh-audit-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending refresh review.");
+
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "refresh-audit-approve",
+      }),
+    ).resolves.toMatchObject({ result: { refreshed: true }, status: "applied" });
+    await expect(
+      database.db
+        .select({
+          action: auditEvents.action,
+          actorId: auditEvents.actorId,
+          actorType: auditEvents.actorType,
+          after: auditEvents.after,
+          before: auditEvents.before,
+          entityId: auditEvents.entityId,
+          entityType: auditEvents.entityType,
+          requestId: auditEvents.requestId,
+        })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, "refresh-audit-approve")),
+    ).resolves.toEqual([
+      {
+        action: "finance.insights_refreshed",
+        actorId: userId,
+        actorType: "user",
+        after: { refreshed: true },
+        before: null,
+        entityId: userId,
+        entityType: "finance_alert",
+        requestId: "refresh-audit-approve",
+      },
+    ]);
+
+    const queuedForRollback = await service.performDirect(
+      "alert",
+      { operation: "refresh" },
+      { principal: agent(userId), requestId: "refresh-terminal-rollback-queue" },
+    );
+    if (queuedForRollback.status !== "pending_review")
+      throw new Error("Expected a pending refresh review.");
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_finance_refresh_terminalization() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'applied' THEN RAISE EXCEPTION 'forced refresh terminal failure'; END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_finance_refresh_terminalization
+      BEFORE UPDATE ON finance_agent_action_reviews
+      FOR EACH ROW EXECUTE FUNCTION fail_finance_refresh_terminalization();
+    `);
+    try {
+      await expect(
+        service.approve(queuedForRollback.review.id, {
+          principal: user(userId),
+          requestId: "refresh-terminal-rollback-approve",
+        }),
+      ).rejects.toThrow(/finance_agent_action_reviews/);
+    } finally {
+      await database.pool.query(
+        "DROP TRIGGER fail_finance_refresh_terminalization ON finance_agent_action_reviews",
+      );
+      await database.pool.query("DROP FUNCTION fail_finance_refresh_terminalization()");
+    }
+    await expect(
+      database.db
+        .select({ id: auditEvents.id })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, "refresh-terminal-rollback-approve")),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queuedForRollback.review.id)),
     ).resolves.toEqual([{ status: "pending" }]);
   });
 

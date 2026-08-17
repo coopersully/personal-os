@@ -127,3 +127,18 @@ Status: DONE
 - `pnpm --filter @personal-os/database typecheck` — passed.
 - `pnpm biome check apps/api/src/finance-action-service.integration.test.ts` — passed with four pre-existing `noNonNullAssertion` warnings; no errors.
 - `git diff --check` — passed.
+
+## Refresh action-review boundary follow-up
+
+Status: DONE
+
+- An approved refresh records only `{ refreshed: true }`, with the approving user and request ID as the durable Finance audit attribution.
+- If review terminalization fails, the refresh audit remains uncommitted and the review remains pending.
+- MCP preserves all three refresh dispositions—`applied`, `pending_review`, and `needs_input`—without reshaping the API outcome.
+
+## Refresh action-review verification
+
+- `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts apps/mcp/src/server.test.ts` — 41 tests passed.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/mcp typecheck` — passed.
+- Scoped Biome and `git diff --check` — passed with four pre-existing `noNonNullAssertion` warnings in the action integration test; no errors.

@@ -715,6 +715,61 @@ describe("ilo MCP server", () => {
     await server.close();
   });
 
+  it("preserves every Finance refresh disposition through the MCP tool", async () => {
+    const api = mockApi();
+    const outcomes = [
+      { result: { refreshed: true }, status: "applied" },
+      {
+        review: {
+          actionKind: "alert",
+          changes: [
+            { entityType: "finance_alert", summary: "Refresh Finance cash-flow insights." },
+          ],
+          fingerprint: "refresh:pending",
+          id,
+          rationale: "Review this refresh.",
+          requestedAt: now,
+          requestingAgentId: "finance-agent",
+          sourceRefs: [],
+          status: "pending",
+        },
+        status: "pending_review",
+      },
+      {
+        question: {
+          actionKind: "alert",
+          choices: [],
+          expectedAnswer: [],
+          id,
+          prompt: "Provide the missing refresh evidence.",
+          sourceRefs: [],
+          why: "The refresh evidence changed.",
+        },
+        status: "needs_input",
+      },
+    ] as const;
+    for (const outcome of outcomes)
+      api.refreshFinanceInsights.mockResolvedValueOnce(outcome as never);
+    const server = createPersonalOsMcpServer({
+      api: api as unknown as PersonalOsApiClient,
+      timeZone: "UTC",
+    });
+    const client = new Client({ name: "test", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    for (const outcome of outcomes) {
+      const result = await client.callTool({
+        arguments: {},
+        name: "refresh_finance_insights",
+      });
+      expect(result.structuredContent).toMatchObject({ result: outcome });
+    }
+    expect(api.refreshFinanceInsights).toHaveBeenCalledTimes(3);
+    await client.close();
+    await server.close();
+  });
+
   it("exposes and executes the complete agent surface and today resource", async () => {
     const api = mockApi();
     const server = createPersonalOsMcpServer({

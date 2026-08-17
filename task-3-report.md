@@ -15,7 +15,11 @@ Status: DONE
 9. `d1eb227 test(finances): preserve client dispositions`
 10. `b47c915 fix(finances): describe question answers`
 11. `db0cfad test(finances): cover action dispositions`
-12. `docs(finances): document action disposition` (this documentation commit)
+12. `011aca0 docs(finances): document action disposition`
+13. `0e6e60e fix(finances): separate evidence authority`
+14. `6316f30 fix(finances): queue reviews transactionally`
+15. `39c7cbe fix(finances): preserve refresh disposition`
+16. `fix(finances): lock finance action targets` (this target-locking commit)
 
 ## Delivered behavior
 
@@ -56,3 +60,20 @@ Status: DONE
 
 - Finance insight refresh now carries mutation context and records a redacted, action-attributed audit in its transaction.
 - Refresh preparation snapshots alert evidence with a bounded revision digest, and the API client preserves action outcomes while retaining the human legacy result.
+
+## Target locking and budget revalidation follow-up
+
+Status: DONE
+
+- Approval and bypass-on commits take sorted semantic advisory locks, then `FOR UPDATE` locks for every prepared owned target before comparing the revision; locks remain held through writer, audit, and review terminalization.
+- Complete budget plans now snapshot and lock the current month projection, durable plan parent, effective profile/pay account, active recurring obligations, referenced categories, and referenced goals. The bounded revision digest includes all of those capacity and replacement inputs.
+- Single-category budgets and complete plans share `budget-month:<month>` review targets and the Finance writer's monthly advisory lock, so cross-variant proposals supersede safely.
+- The integration coverage includes a barrier-based human-edit-versus-approval regression, a stale capacity-input plan regression, and cross-variant monthly review supersession.
+
+## Target locking verification
+
+- `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts` — 57 tests passed.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/database typecheck` — passed.
+- `pnpm biome check apps/api/src/finance-action-service.ts apps/api/src/finance-service.ts apps/api/src/finance-action-service.integration.test.ts` — passed with four pre-existing `noNonNullAssertion` warnings in the action integration test; no errors.
+- `git diff --check` — passed.

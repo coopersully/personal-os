@@ -4760,6 +4760,12 @@ export function createFinanceService({
       executor?: FinanceActionWriteExecutor,
     ) {
       const write = async (tx: FinanceActionWriteExecutor) => {
+        // A single category budget shares the monthly replacement/capacity
+        // surface with a complete plan. Use the same transaction-scoped lock
+        // so an approved plan cannot race a direct human budget edit.
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
+        );
         const created = requireDatabaseRecord(
           (
             await tx

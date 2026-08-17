@@ -632,6 +632,87 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([{ status: "superseded" }]);
   });
 
+  it("holds prepared target locks so a concurrent human edit cannot be overwritten by approval", async () => {
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Approval lock bank",
+        name: "Approval lock checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Approval-lock account was not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 500,
+        direction: "expense",
+        merchant: "Approval lock merchant",
+        notes: "before",
+        transactionDate: "2026-08-23",
+        userId,
+      })
+      .returning();
+    if (!transaction) throw new Error("Approval-lock transaction was not created.");
+
+    let startWriter!: () => void;
+    const writerStarted = new Promise<void>((resolve) => {
+      startWriter = resolve;
+    });
+    let releaseWriter!: () => void;
+    const writerReleased = new Promise<void>((resolve) => {
+      releaseWriter = resolve;
+    });
+    const updateTransaction = vi.fn(async (_id, _input, _context, executor) => {
+      startWriter();
+      await writerReleased;
+      await executor
+        .update(financeTransactions)
+        .set({ notes: "approved change" })
+        .where(eq(financeTransactions.id, transaction.id));
+      return { id: transaction.id };
+    });
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateTransaction } as never,
+      now: () => now,
+    });
+    const queued = await service.performDirect(
+      "transaction",
+      { id: transaction.id, notes: "approved change" },
+      { principal: agent(userId), requestId: "approval-lock-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending Finance review.");
+
+    const approval = service.approve(queued.review.id, {
+      principal: user(userId),
+      requestId: "approval-lock",
+    });
+    await writerStarted;
+    const humanEdit = database.db
+      .update(financeTransactions)
+      .set({ notes: "human edit" })
+      .where(eq(financeTransactions.id, transaction.id));
+    const humanEditFinishedDuringApproval = await Promise.race([
+      humanEdit.then(() => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 100)),
+    ]);
+    expect(humanEditFinishedDuringApproval).toBe(false);
+
+    releaseWriter();
+    await approval;
+    await humanEdit;
+    await expect(
+      database.db
+        .select({ notes: financeTransactions.notes })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ notes: "human edit" }]);
+  });
+
   it("describes the public answer fields for every supported action family", async () => {
     const service = createFinanceActionService({
       db: database.db,
@@ -1159,5 +1240,124 @@ describe.sequential("finance action service", () => {
       .where(eq(financeAgentActionReviews.userId, userId));
     expect(rows.some((row) => row.status === "pending")).toBe(true);
     expect(rows.some((row) => row.status === "superseded")).toBe(true);
+  });
+
+  it("supersedes a single-category budget review with a complete plan for the same month", async () => {
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Custom",
+        name: "Cross variant budget",
+        slug: `cross-budget-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!category) throw new Error("Budget category was not created.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { createBudget: vi.fn(), setBudgetPlan: vi.fn() } as never,
+      now: () => now,
+    });
+    const context = { principal: agent(userId), requestId: "budget-cross-variant" };
+    const month = "2026-10";
+
+    await service.performDirect(
+      "budget_plan",
+      { category: category.name, limit: 100, month },
+      context,
+    );
+    await service.performDirect(
+      "budget_plan",
+      {
+        allocations: [{ categoryId: category.id, limit: 200 }],
+        assumptions: [],
+        goalIds: [],
+        month,
+        rationale: "Replace the single allocation.",
+        replace: true,
+        scenarioFingerprint: null,
+      },
+      context,
+    );
+
+    const rows = await database.db
+      .select({
+        semanticTargetKeys: financeAgentActionReviews.semanticTargetKeys,
+        status: financeAgentActionReviews.status,
+      })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.userId, userId));
+    const monthRows = rows.filter((row) =>
+      (row.semanticTargetKeys as string[]).some((key) => key.includes(month)),
+    );
+    expect(monthRows.filter((row) => row.status === "pending").length).toBe(1);
+    expect(monthRows.some((row) => row.status === "superseded")).toBe(true);
+  });
+
+  it("supersedes a complete budget plan when a capacity input changes before approval", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Custom",
+        name: "Capacity budget",
+        slug: `capacity-budget-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    const [obligation] = await database.db
+      .insert(financeRecurringObligations)
+      .values({
+        cadence: "monthly",
+        confidence: 10_000,
+        displayName: "Capacity obligation",
+        expectedAmount: 10_000,
+        amountTolerance: 0,
+        kind: "bill",
+        merchant: `capacity-${crypto.randomUUID()}`,
+        source: "user",
+        status: "active",
+        userId,
+      })
+      .returning();
+    if (!category || !obligation) throw new Error("Budget capacity fixtures were not created.");
+    const setBudgetPlan = vi.fn(async () => ({ id: "capacity-plan" }));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { setBudgetPlan } as never,
+      now: () => now,
+    });
+    const queued = await service.performDirect(
+      "budget_plan",
+      {
+        allocations: [{ categoryId: category.id, limit: 100 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-11",
+        rationale: "Use the current capacity evidence.",
+        replace: true,
+        scenarioFingerprint: null,
+      },
+      { principal: agent(userId), requestId: "capacity-budget-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending Finance review.");
+    await database.db
+      .update(financeRecurringObligations)
+      .set({ status: "paused", updatedAt: new Date("2026-08-17T12:02:00.000Z") })
+      .where(eq(financeRecurringObligations.id, obligation.id));
+
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "capacity-budget-approve",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    expect(setBudgetPlan).not.toHaveBeenCalled();
   });
 });

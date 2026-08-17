@@ -134,11 +134,10 @@ function semanticTargetKeys(actionKind: SupportedActionKind, input: Record<strin
     case "profile":
       return [`profile:${String(input.effectiveDate)}`];
     case "budget_plan":
-      return [
-        "allocations" in input
-          ? `budget-plan:${String(input.month)}`
-          : `budget:${String(input.month)}:${String(input.category)}`,
-      ];
+      // A one-category budget changes the same monthly capacity and replacement
+      // set as a complete plan. Keeping one key prevents cross-variant reviews
+      // from being approved against stale budget-month state.
+      return [`budget-month:${String(input.month)}`];
     case "categorization":
       return ids(
         (input.decisions as Array<Record<string, unknown>> | undefined)?.map(
@@ -342,6 +341,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     rawInput: Record<string, unknown>,
     userId: string,
     executor: Pick<Database, "select"> = db,
+    lockTargets = false,
   ): Promise<PreparedAction | { status: "needs_input"; question: FinanceQuestion }> {
     const missing = (why: string, sourceRefs: MaterialSourceReference[] = []) => ({
       question: { ...question(actionKind, rawInput, why), sourceRefs },
@@ -353,7 +353,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       const parsed = schema.safeParse(rawInput);
       return parsed.success ? parsed.data : null;
     };
-    const row = async <T>(query: Promise<T[]>, why: string) => {
+    // Revalidation runs in the terminal transaction. Lock every owned record
+    // that contributes to the prepared decision before its revision is
+    // compared, and retain those locks through the writer and review update.
+    // The cast keeps preparation usable with the root read executor, where a
+    // lock is deliberately never requested.
+    const lockRead = <T>(query: T): T =>
+      lockTargets ? (query as { for: (strength: "update") => T }).for("update") : query;
+    const row = async <T>(query: PromiseLike<T[]>, why: string) => {
       const item = (await query)[0];
       return item ?? missing(why);
     };
@@ -384,30 +391,36 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         if (!input) return missing("Provide a complete valid Finance profile.");
         const account = input.payAccountId
           ? await row(
-              executor
-                .select()
-                .from(financeAccounts)
-                .where(
-                  and(
-                    eq(financeAccounts.id, String(input.payAccountId)),
-                    eq(financeAccounts.userId, userId),
-                  ),
-                )
-                .limit(1),
+              lockRead(
+                executor
+                  .select()
+                  .from(financeAccounts)
+                  .where(
+                    and(
+                      eq(financeAccounts.id, String(input.payAccountId)),
+                      eq(financeAccounts.userId, userId),
+                    ),
+                  )
+                  .orderBy(financeAccounts.id)
+                  .limit(1),
+              ),
               "Choose one of your Finance accounts for pay deposits.",
             )
           : null;
         if (account && "question" in account) return account;
-        const existing = await executor
-          .select()
-          .from(financeProfiles)
-          .where(
-            and(
-              eq(financeProfiles.userId, userId),
-              eq(financeProfiles.effectiveDate, String(input.effectiveDate)),
-            ),
-          )
-          .limit(1);
+        const existing = await lockRead(
+          executor
+            .select()
+            .from(financeProfiles)
+            .where(
+              and(
+                eq(financeProfiles.userId, userId),
+                eq(financeProfiles.effectiveDate, String(input.effectiveDate)),
+              ),
+            )
+            .orderBy(financeProfiles.id)
+            .limit(1),
+        );
         const revision = existing[0]?.updatedAt.toISOString() ?? "absent";
         return prepared(
           input,
@@ -430,37 +443,116 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         if (plan) {
           const allocations = plan.allocations as Array<{ categoryId: string; limit: number }>;
           const categoryIds = allocations.map((item) => item.categoryId);
-          const categories = await executor
-            .select()
-            .from(financeCategories)
-            .where(
-              and(eq(financeCategories.userId, userId), inArray(financeCategories.id, categoryIds)),
-            );
+          const categories = await lockRead(
+            executor
+              .select()
+              .from(financeCategories)
+              .where(
+                and(
+                  eq(financeCategories.userId, userId),
+                  inArray(financeCategories.id, categoryIds),
+                ),
+              )
+              .orderBy(financeCategories.id),
+          );
           if (categories.length !== categoryIds.length)
             return missing("Every budget allocation must reference one of your categories.");
           const goalIds = plan.goalIds as string[];
           const ownedGoals = goalIds.length
-            ? await executor
-                .select()
-                .from(goals)
-                .where(and(eq(goals.userId, userId), inArray(goals.id, goalIds)))
+            ? await lockRead(
+                executor
+                  .select()
+                  .from(goals)
+                  .where(and(eq(goals.userId, userId), inArray(goals.id, goalIds)))
+                  .orderBy(goals.id),
+              )
             : [];
           if (ownedGoals.length !== goalIds.length)
             return missing("Every budget-plan goal must belong to you.");
-          const planRows = await executor
-            .select()
-            .from(financeBudgetPlans)
-            .where(
-              and(
-                eq(financeBudgetPlans.userId, userId),
-                eq(financeBudgetPlans.month, String(plan.month)),
-              ),
-            )
-            .limit(1);
+          const planRows = await lockRead(
+            executor
+              .select()
+              .from(financeBudgetPlans)
+              .where(
+                and(
+                  eq(financeBudgetPlans.userId, userId),
+                  eq(financeBudgetPlans.month, String(plan.month)),
+                ),
+              )
+              .orderBy(financeBudgetPlans.id)
+              .limit(1),
+          );
+          const currentBudgets = await lockRead(
+            executor
+              .select()
+              .from(financeBudgets)
+              .where(
+                and(
+                  eq(financeBudgets.userId, userId),
+                  eq(financeBudgets.month, String(plan.month)),
+                ),
+              )
+              .orderBy(financeBudgets.id),
+          );
+          const [effectiveProfile] = await lockRead(
+            executor
+              .select()
+              .from(financeProfiles)
+              .where(
+                and(
+                  eq(financeProfiles.userId, userId),
+                  sql`${financeProfiles.effectiveDate} <= ${`${String(plan.month)}-31`}`,
+                ),
+              )
+              .orderBy(desc(financeProfiles.effectiveDate), financeProfiles.id)
+              .limit(1),
+          );
+          const payAccount = effectiveProfile?.payAccountId
+            ? await row(
+                lockRead(
+                  executor
+                    .select()
+                    .from(financeAccounts)
+                    .where(
+                      and(
+                        eq(financeAccounts.id, effectiveProfile.payAccountId),
+                        eq(financeAccounts.userId, userId),
+                      ),
+                    )
+                    .orderBy(financeAccounts.id)
+                    .limit(1),
+                ),
+                "The effective Finance profile pay account is unavailable.",
+              )
+            : null;
+          if (payAccount && "question" in payAccount) return payAccount;
+          const obligations = await lockRead(
+            executor
+              .select()
+              .from(financeRecurringObligations)
+              .where(
+                and(
+                  eq(financeRecurringObligations.userId, userId),
+                  eq(financeRecurringObligations.status, "active"),
+                ),
+              )
+              .orderBy(financeRecurringObligations.id),
+          );
           const revision = snapshotRevision({
-            plan: planRows[0]?.version ?? 0,
+            plan: planRows.map((item) => [item.id, item.version, item.updatedAt.toISOString()]),
+            budgets: currentBudgets.map((item) => [
+              item.id,
+              item.category,
+              item.limit,
+              item.updatedAt.toISOString(),
+            ]),
             categories: categories.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
             goals: ownedGoals.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
+            profile: effectiveProfile
+              ? [effectiveProfile.id, effectiveProfile.updatedAt.toISOString()]
+              : null,
+            payAccount: payAccount ? [payAccount.id, payAccount.updatedAt.toISOString()] : null,
+            obligations: obligations.map((item) => [item.id, item.updatedAt.toISOString()]),
           });
           return prepared(
             plan,
@@ -473,6 +565,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             [
               ...categories.map((item) => localSource(item.id, item.updatedAt.toISOString())),
               ...ownedGoals.map((item) => localSource(item.id, item.updatedAt.toISOString())),
+              ...currentBudgets.map((item) => localSource(item.id, item.updatedAt.toISOString())),
+              ...(effectiveProfile
+                ? [localSource(effectiveProfile.id, effectiveProfile.updatedAt.toISOString())]
+                : []),
+              ...(payAccount
+                ? [localSource(payAccount.id, payAccount.updatedAt.toISOString())]
+                : []),
+              ...obligations.map((item) => localSource(item.id, item.updatedAt.toISOString())),
             ],
             (plan.assumptions as string[]) ?? [],
           );
@@ -480,17 +580,20 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const input = parse<Record<string, unknown>>(createFinanceBudgetInputSchema);
         if (!input)
           return missing("Provide a complete Finance budget or complete monthly budget plan.");
-        const existing = await executor
-          .select()
-          .from(financeBudgets)
-          .where(
-            and(
-              eq(financeBudgets.userId, userId),
-              eq(financeBudgets.month, String(input.month)),
-              eq(financeBudgets.category, String(input.category)),
-            ),
-          )
-          .limit(1);
+        const existing = await lockRead(
+          executor
+            .select()
+            .from(financeBudgets)
+            .where(
+              and(
+                eq(financeBudgets.userId, userId),
+                eq(financeBudgets.month, String(input.month)),
+                eq(financeBudgets.category, String(input.category)),
+              ),
+            )
+            .orderBy(financeBudgets.id)
+            .limit(1),
+        );
         const revision = existing[0]?.updatedAt.toISOString() ?? "absent";
         return prepared(
           input,
@@ -517,18 +620,21 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           expectedTransactionUpdatedAt: string;
           rationale: string;
         }>;
-        const transactions = await executor
-          .select()
-          .from(financeTransactions)
-          .where(
-            and(
-              eq(financeTransactions.userId, userId),
-              inArray(
-                financeTransactions.id,
-                decisions.map((item) => item.transactionId),
+        const transactions = await lockRead(
+          executor
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                inArray(
+                  financeTransactions.id,
+                  decisions.map((item) => item.transactionId),
+                ),
               ),
-            ),
-          );
+            )
+            .orderBy(financeTransactions.id),
+        );
         if (transactions.length !== decisions.length)
           return missing("Every categorization must target one of your transactions.");
         if (
@@ -542,32 +648,38 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           return missing(
             "A transaction changed; refresh the categorization evidence before applying it.",
           );
-        const categories = await executor
-          .select()
-          .from(financeCategories)
-          .where(
-            and(
-              eq(financeCategories.userId, userId),
-              inArray(
-                financeCategories.id,
-                decisions.map((item) => item.categoryId),
+        const categories = await lockRead(
+          executor
+            .select()
+            .from(financeCategories)
+            .where(
+              and(
+                eq(financeCategories.userId, userId),
+                inArray(
+                  financeCategories.id,
+                  decisions.map((item) => item.categoryId),
+                ),
               ),
-            ),
-          );
+            )
+            .orderBy(financeCategories.id),
+        );
         if (categories.length !== new Set(decisions.map((item) => item.categoryId)).size)
           return missing("Every categorization must use one of your categories.");
-        const accounts = await executor
-          .select()
-          .from(financeAccounts)
-          .where(
-            and(
-              eq(financeAccounts.userId, userId),
-              inArray(
-                financeAccounts.id,
-                transactions.map((item) => item.accountId),
+        const accounts = await lockRead(
+          executor
+            .select()
+            .from(financeAccounts)
+            .where(
+              and(
+                eq(financeAccounts.userId, userId),
+                inArray(
+                  financeAccounts.id,
+                  transactions.map((item) => item.accountId),
+                ),
               ),
-            ),
-          );
+            )
+            .orderBy(financeAccounts.id),
+        );
         const sourceRefs: MaterialSourceReference[] = [];
         for (const item of transactions) {
           const account = accounts.find((candidate) => candidate.id === item.accountId);
@@ -599,10 +711,13 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           : [String(rawInput.id ?? "")];
         if (!input || ids.some((id) => !id))
           return missing("Provide a valid merchant change and merchant ID.");
-        const merchants = await executor
-          .select()
-          .from(financeMerchants)
-          .where(and(eq(financeMerchants.userId, userId), inArray(financeMerchants.id, ids)));
+        const merchants = await lockRead(
+          executor
+            .select()
+            .from(financeMerchants)
+            .where(and(eq(financeMerchants.userId, userId), inArray(financeMerchants.id, ids)))
+            .orderBy(financeMerchants.id),
+        );
         if (merchants.length !== ids.length)
           return missing("Choose only merchants that belong to you.");
         const revision = snapshotRevision(
@@ -634,16 +749,19 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
         if (!input || !id) return missing("Provide a valid recurring-obligation ID and status.");
         const item = await row(
-          executor
-            .select()
-            .from(financeRecurringObligations)
-            .where(
-              and(
-                eq(financeRecurringObligations.id, id),
-                eq(financeRecurringObligations.userId, userId),
-              ),
-            )
-            .limit(1),
+          lockRead(
+            executor
+              .select()
+              .from(financeRecurringObligations)
+              .where(
+                and(
+                  eq(financeRecurringObligations.id, id),
+                  eq(financeRecurringObligations.userId, userId),
+                ),
+              )
+              .orderBy(financeRecurringObligations.id)
+              .limit(1),
+          ),
           "Choose one of your recurring obligations.",
         );
         if ("question" in item) return item;
@@ -662,10 +780,13 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       }
       case "alert": {
         if (rawInput.operation === "refresh") {
-          const alerts = await executor
-            .select()
-            .from(financeAlerts)
-            .where(eq(financeAlerts.userId, userId));
+          const alerts = await lockRead(
+            executor
+              .select()
+              .from(financeAlerts)
+              .where(eq(financeAlerts.userId, userId))
+              .orderBy(financeAlerts.id),
+          );
           return prepared(
             { operation: "refresh" },
             snapshotRevision(alerts.map((item) => [item.id, item.updatedAt.toISOString()]).sort()),
@@ -683,11 +804,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
         if (!input || !id) return missing("Provide a valid Finance alert ID and resolution.");
         const item = await row(
-          executor
-            .select()
-            .from(financeAlerts)
-            .where(and(eq(financeAlerts.id, id), eq(financeAlerts.userId, userId)))
-            .limit(1),
+          lockRead(
+            executor
+              .select()
+              .from(financeAlerts)
+              .where(and(eq(financeAlerts.id, id), eq(financeAlerts.userId, userId)))
+              .orderBy(financeAlerts.id)
+              .limit(1),
+          ),
           "Choose one of your Finance alerts.",
         );
         if ("question" in item) return item;
@@ -708,16 +832,19 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const create = parse<Record<string, unknown>>(createFinanceTransactionInputSchema);
         if (create) {
           const account = await row(
-            executor
-              .select()
-              .from(financeAccounts)
-              .where(
-                and(
-                  eq(financeAccounts.id, String(create.accountId)),
-                  eq(financeAccounts.userId, userId),
-                ),
-              )
-              .limit(1),
+            lockRead(
+              executor
+                .select()
+                .from(financeAccounts)
+                .where(
+                  and(
+                    eq(financeAccounts.id, String(create.accountId)),
+                    eq(financeAccounts.userId, userId),
+                  ),
+                )
+                .orderBy(financeAccounts.id)
+                .limit(1),
+            ),
             "Choose one of your Finance accounts.",
           );
           if ("question" in account) return account;
@@ -739,19 +866,25 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         if (!input || !id)
           return missing("Provide a valid transaction ID and a category or note change.");
         const item = await row(
-          executor
-            .select()
-            .from(financeTransactions)
-            .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
-            .limit(1),
+          lockRead(
+            executor
+              .select()
+              .from(financeTransactions)
+              .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
+              .orderBy(financeTransactions.id)
+              .limit(1),
+          ),
           "Choose one of your Finance transactions.",
         );
         if ("question" in item) return item;
-        const [account] = await executor
-          .select()
-          .from(financeAccounts)
-          .where(eq(financeAccounts.id, item.accountId))
-          .limit(1);
+        const [account] = await lockRead(
+          executor
+            .select()
+            .from(financeAccounts)
+            .where(and(eq(financeAccounts.id, item.accountId), eq(financeAccounts.userId, userId)))
+            .orderBy(financeAccounts.id)
+            .limit(1),
+        );
         if (!account) return missing("The transaction account is unavailable.");
         return prepared(
           { ...input, id },
@@ -774,11 +907,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
         if (!input || !id) return missing("Provide a valid income-stream ID and status.");
         const item = await row(
-          executor
-            .select()
-            .from(financeIncomeStreams)
-            .where(and(eq(financeIncomeStreams.id, id), eq(financeIncomeStreams.userId, userId)))
-            .limit(1),
+          lockRead(
+            executor
+              .select()
+              .from(financeIncomeStreams)
+              .where(and(eq(financeIncomeStreams.id, id), eq(financeIncomeStreams.userId, userId)))
+              .orderBy(financeIncomeStreams.id)
+              .limit(1),
+          ),
           "Choose one of your income streams.",
         );
         if ("question" in item) return item;
@@ -927,12 +1063,19 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     return result;
   }
 
-  async function revalidate(
-    prepared: PreparedAction,
-    userId: string,
-    executor: Pick<Database, "select">,
-  ) {
-    const current = await prepare(prepared.actionKind, prepared.input, userId, executor);
+  async function revalidate(prepared: PreparedAction, userId: string, executor: FinanceExecutor) {
+    // There is no row lock for an absent target. The target-key advisory lock
+    // covers that case and gives queueing, approval, and bypass commits the
+    // same deterministic serialization point.
+    for (const key of [...prepared.semanticTargetKeys].sort()) {
+      await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
+    }
+    if (prepared.actionKind === "budget_plan") {
+      await executor.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${userId}:${String(prepared.input.month)}`}, 0))`,
+      );
+    }
+    const current = await prepare(prepared.actionKind, prepared.input, userId, executor, true);
     if ("status" in current) return current;
     if (current.expectedRevision !== prepared.expectedRevision) {
       return {
@@ -952,7 +1095,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     context: MutationContext,
     executor: FinanceExecutor,
   ) {
-    for (const key of prepared.semanticTargetKeys) {
+    for (const key of [...prepared.semanticTargetKeys].sort()) {
       await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
     }
     const pending = await executor

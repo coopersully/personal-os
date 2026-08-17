@@ -1321,6 +1321,38 @@ describe("ilo API client", () => {
     ).resolves.toEqual(pending);
   });
 
+  it("uses exact action-review transport paths and result envelopes", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const review = { id, status: "dismissed" };
+    const outcome = { result: { id }, status: "applied" };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        return json(
+          url.pathname.endsWith("/approve")
+            ? { outcome }
+            : url.pathname.endsWith("/dismiss")
+              ? { review }
+              : { reviews: [review] },
+        );
+      },
+    });
+    await expect(api.listFinanceActionReviews(7)).resolves.toEqual([review]);
+    await expect(api.approveFinanceActionReview(id)).resolves.toEqual(outcome);
+    await expect(api.dismissFinanceActionReview(id)).resolves.toEqual(review);
+    expect(requests).toEqual([
+      { body: null, method: "GET", path: "/v1/finances/action-reviews?limit=7" },
+      { body: null, method: "POST", path: `/v1/finances/action-reviews/${id}/approve` },
+      { body: null, method: "POST", path: `/v1/finances/action-reviews/${id}/dismiss` },
+    ]);
+  });
+
   it("preserves Finance maintenance API errors with their request IDs", async () => {
     const api = createApiClient({
       baseUrl: "https://api.example.com",

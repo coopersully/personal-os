@@ -74,4 +74,60 @@ describe("Finance scenarios", () => {
       compareFinanceScenarios(input).fingerprint,
     );
   });
+
+  it("only reports debt inputs when debt exists and projects supplied debt and goals", () => {
+    const plan = {
+      assumptions: [],
+      budgetAllocations: [],
+      debtBalance: 1_000,
+      goalCurrent: 100,
+      goalTarget: 400,
+      label: "Plan",
+      monthlyDebtPayment: 250,
+      monthlyHousingCost: 500,
+      monthlyIncome: 2_000,
+      monthlyReserveContribution: 100,
+      startingCash: -20,
+    };
+    const result = compareFinanceScenarios({
+      alternatives: [],
+      asOf: "2026-08-15",
+      baseline: plan,
+      horizonMonths: 3,
+    });
+    expect(result.baseline.debtPayoffMonths).toBe(4);
+    expect(result.baseline.goalDateEffects).toContain("Goal reaches its target in 3 months.");
+    expect(result.baseline.reserveRunwayMonths).toBe(0);
+    expect(result.missingInputs).toEqual([]);
+  });
+
+  it("accepts maximum valid assumptions without producing an invalid result", () => {
+    const assumptions = Array.from({ length: 25 }, (_, index) => `Assumption ${index}`);
+    expect(
+      compareFinanceScenarios({
+        alternatives: Array.from({ length: 5 }, (_, index) => ({
+          assumptions,
+          budgetAllocations: [],
+          label: `Alt ${index}`,
+          monthlyDebtPayment: 0,
+          monthlyHousingCost: 0,
+          monthlyIncome: 1,
+          monthlyReserveContribution: 0,
+          startingCash: 0,
+        })),
+        asOf: "2026-08-15",
+        baseline: {
+          assumptions,
+          budgetAllocations: [],
+          label: "Base",
+          monthlyDebtPayment: 0,
+          monthlyHousingCost: 0,
+          monthlyIncome: 1,
+          monthlyReserveContribution: 0,
+          startingCash: 0,
+        },
+        horizonMonths: 1,
+      }).assumptions,
+    ).toHaveLength(25);
+  });
 });

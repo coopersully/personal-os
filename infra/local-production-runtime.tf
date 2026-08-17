@@ -58,11 +58,11 @@ resource "aws_security_group" "local_production_tunnel" {
   }
 
   egress {
-    description     = "PostgreSQL to the private production database"
-    from_port       = 5432
-    to_port         = 5432
-    protocol        = "tcp"
-    security_groups = [aws_security_group.database.id]
+    description = "PostgreSQL to the private production database subnets"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = aws_subnet.database[*].cidr_block
   }
 
   egress {
@@ -88,16 +88,6 @@ resource "aws_security_group" "local_production_tunnel" {
     protocol    = "tcp"
     cidr_blocks = [aws_vpc.main.cidr_block]
   }
-}
-
-resource "aws_security_group_rule" "database_from_local_production_tunnel" {
-  description              = "PostgreSQL from explicitly started local production tunnel sessions"
-  type                     = "ingress"
-  from_port                = 5432
-  to_port                  = 5432
-  protocol                 = "tcp"
-  security_group_id        = aws_security_group.database.id
-  source_security_group_id = aws_security_group.local_production_tunnel.id
 }
 
 resource "aws_instance" "local_production_tunnel" {
@@ -157,6 +147,7 @@ data "aws_iam_policy_document" "local_production_runtime" {
       "ecs:DescribeTaskDefinition",
       "rds:DescribeDBInstances",
       "ssm:DescribeInstanceInformation",
+      "ssm:DescribeSessions",
     ]
     resources = ["*"]
   }
@@ -185,7 +176,7 @@ data "aws_iam_policy_document" "local_production_runtime" {
       "ssm:ResumeSession",
       "ssm:TerminateSession",
     ]
-    resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:session/$${aws:userid}-*"]
+    resources = ["arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:session/ilo-local-*"]
   }
 
   statement {

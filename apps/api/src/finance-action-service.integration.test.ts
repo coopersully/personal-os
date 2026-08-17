@@ -4,6 +4,7 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAutomationSettings,
+  financeCategories,
   financeProfiles,
   financeTransactions,
   migrateDatabase,
@@ -574,5 +575,61 @@ describe.sequential("finance action service", () => {
     if (left.status !== "pending_review" || right.status !== "pending_review")
       throw new Error("Expected pending reviews.");
     expect(left.review.id).not.toBe(right.review.id);
+  });
+
+  it("supersedes concurrent overlapping categorization proposals", async () => {
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Overlap",
+        name: "Overlap",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({ group: "Custom", name: "Overlap", slug: `overlap-${crypto.randomUUID()}`, userId })
+      .returning();
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account!.id,
+        amount: 100,
+        direction: "expense",
+        merchant: "Overlap",
+        transactionDate: "2026-09-05",
+        userId,
+      })
+      .returning();
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { applyCategorizations: vi.fn() } as never,
+      now: () => now,
+    });
+    const decision = (rationale: string) => ({
+      decisions: [
+        {
+          categoryId: category!.id,
+          confidence: 1,
+          expectedTransactionUpdatedAt: transaction!.updatedAt.toISOString(),
+          learnMerchant: "suggest",
+          rationale,
+          transactionId: transaction!.id,
+        },
+      ],
+    });
+    const context = { principal: agent(userId), requestId: "categorization-overlap" };
+    await Promise.all([
+      service.performDirect("categorization", decision("first"), context),
+      service.performDirect("categorization", decision("second"), context),
+    ]);
+    const rows = await database.db
+      .select({ status: financeAgentActionReviews.status })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.userId, userId));
+    expect(rows.filter((row) => row.status === "pending").length).toBeGreaterThan(0);
+    expect(rows.some((row) => row.status === "superseded")).toBe(true);
   });
 });

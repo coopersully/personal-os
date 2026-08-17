@@ -85,3 +85,5 @@ Verification:
 - `pnpm exec biome check --write apps/api/src/finance-action-service.ts packages/database/src/schema.ts packages/database/src/schema.test.ts` — passed.
 
 Remaining concern: the full concurrent same/disjoint target matrix remains to be added.
+
+Additional concurrency verification: overlapping categorization proposals now have a real concurrent regression test; one proposal is superseded while a current pending proposal remains.

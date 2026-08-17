@@ -25,6 +25,22 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 2 — Batch A (planning capacity correctness)
+
+Status: DONE_WITH_CONCERNS
+
+Commit `af83529ad8eaa719668e252e9032691f341296ad` normalizes explicit expected take-home pay by profile cadence before calculating monthly capacity, ignores partial month-to-date ledger income for reliable planning capacity, and reserves the full stated amount for irregular obligations instead of treating them as zero. Both Finance status and budget-plan writes now pass the profile cadence into the shared resolver. The focused resolver tests cover biweekly pay, partial income, irregular obligations, and equivalent status/writer inputs. The new MCP forwarding assertion is Biome-formatted.
+
+Verification passed:
+
+- `pnpm exec vitest run apps/api/src/finance-planning.test.ts --reporter=dot` (1 file, 5 tests passed; red phase first demonstrated 4 expected failures)
+- `pnpm exec vitest run apps/api/src/finance-planning.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts apps/mcp/src/server.test.ts --reporter=dot` (4 files, 67 tests passed)
+- `pnpm --filter @personal-os/api typecheck` (exited 0)
+- `pnpm --filter @personal-os/mcp typecheck` (exited 0)
+- `pnpm exec biome check --write apps/mcp/src/server.test.ts apps/api/src/finance-planning.ts apps/api/src/finance-planning.test.ts apps/api/src/finance-status-service.ts apps/api/src/finance-service.ts` (exited 0)
+- `pnpm exec biome check apps/mcp/src/server.test.ts` (exited 0)
+- `git diff --check` (exited 0)
+
 ## Fix round 1 — final budget-plan durability coverage
 
 Status: DONE_WITH_CONCERNS

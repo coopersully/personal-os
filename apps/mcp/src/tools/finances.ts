@@ -4,7 +4,6 @@ import {
   applyFinanceCategorizationsInputSchema,
   createFinanceBudgetInputSchema,
   createFinanceTransactionInputSchema,
-  financeReviewDecisionInputSchema,
   financeScenarioInputSchema,
   maintenanceScopeSchema,
   mergeFinanceMerchantsInputSchema,
@@ -41,7 +40,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: readAnnotations,
       description:
-        "Read whether the signed-in person has enabled Finance review bypass. When disabled, MCP may inspect and propose; when enabled, finances:write tools may commit ledger decisions on the person's behalf.",
+        "Read whether the signed-in person has enabled Finance review bypass. The setting is informational only: Ilo decides whether justified Finance work applies, queues for review, or needs more input.",
       inputSchema: z.object({}),
       title: "Get Finance automation settings",
     },
@@ -78,7 +77,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     "set_finance_budget_plan",
     {
       annotations: writeAnnotations,
-      description: "Set one complete monthly budget plan with its assumptions and rationale.",
+      description:
+        "Set one complete monthly budget plan with its assumptions and rationale. Ilo returns applied, pending_review, or needs_input.",
       inputSchema: setFinanceBudgetPlanInputSchema,
       title: "Set Finance budget plan",
     },
@@ -281,24 +281,42 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: writeAnnotations,
       description:
-        "Apply revision-guarded categorization decisions when Finance review bypass is enabled. The API rejects the action when bypass is off and preserves per-transaction audit evidence.",
+        "Apply revision-guarded categorization decisions. Ilo requires evidence first, then either applies, queues one review, or asks a bounded question.",
       inputSchema: applyFinanceCategorizationsInputSchema,
       title: "Apply finance categorizations",
     },
     async (input) => apiResult(() => api.applyFinanceCategorizations(input)),
   );
 
+  const answerFinanceQuestionInput = z
+    .object({ answer: z.string().trim().min(1).max(4_000), id })
+    .strict();
+  const answerFinanceQuestion = async ({
+    id: questionId,
+    answer,
+  }: z.infer<typeof answerFinanceQuestionInput>) =>
+    apiResult(() => api.answerFinanceQuestion(questionId, answer));
+  server.registerTool(
+    "answer_finance_question",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Answer a bounded Finance question with evidence from the person. This never changes Finance review bypass and never approves or dismisses a queued action.",
+      inputSchema: answerFinanceQuestionInput,
+      title: "Answer Finance question",
+    },
+    answerFinanceQuestion,
+  );
   server.registerTool(
     "resolve_finance_review",
     {
       annotations: writeAnnotations,
       description:
-        "Resolve, defer, recategorize, or confirm a Finance review case using its displayed transaction revision when Finance review bypass is enabled.",
-      inputSchema: z.object({ id, ...financeReviewDecisionInputSchema.shape }),
-      title: "Resolve finance review",
+        "Compatibility alias for answer_finance_question. It answers bounded questions only; it cannot approve an action review or change review bypass.",
+      inputSchema: answerFinanceQuestionInput,
+      title: "Answer Finance question (compatibility)",
     },
-    async ({ id: reviewId, ...input }) =>
-      apiResult(() => api.resolveFinanceReview(reviewId, input)),
+    answerFinanceQuestion,
   );
 
   server.registerTool(
@@ -306,7 +324,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: writeAnnotations,
       description:
-        "Accept, pause, or cancel a recurring ledger obligation when Finance review bypass is enabled.",
+        "Accept, pause, or cancel a recurring ledger obligation; Ilo returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...updateFinanceRecurringObligationInputSchema.shape }),
       title: "Update finance recurring obligation",
     },
@@ -318,7 +336,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     "resolve_finance_alert",
     {
       annotations: writeAnnotations,
-      description: "Resolve or dismiss a Finance ledger alert when review bypass is enabled.",
+      description:
+        "Resolve or dismiss a Finance ledger alert; Ilo returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...resolveFinanceAlertInputSchema.shape }),
       title: "Resolve finance alert",
     },
@@ -330,7 +349,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: writeAnnotations,
       description:
-        "Confirm a canonical merchant display name when Finance review bypass is enabled.",
+        "Confirm a canonical merchant display name; Ilo returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...updateFinanceMerchantInputSchema.shape }),
       title: "Update finance merchant",
     },
@@ -343,7 +362,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: writeAnnotations,
       description:
-        "Merge duplicate canonical merchants with an explicit rationale when Finance review bypass is enabled.",
+        "Merge duplicate canonical merchants with an explicit rationale; Ilo returns its apply-or-review disposition.",
       inputSchema: mergeFinanceMerchantsInputSchema,
       title: "Merge finance merchants",
     },
@@ -354,7 +373,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     "create_finance_budget",
     {
       annotations: writeAnnotations,
-      description: "Create a monthly category budget when Finance review bypass is enabled.",
+      description: "Create a monthly category budget; Ilo returns its apply-or-review disposition.",
       inputSchema: createFinanceBudgetInputSchema,
       title: "Create finance budget",
     },
@@ -365,7 +384,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     "create_finance_transaction",
     {
       annotations: writeAnnotations,
-      description: "Add a manual ledger transaction when Finance review bypass is enabled.",
+      description: "Add a manual ledger transaction; Ilo returns its apply-or-review disposition.",
       inputSchema: createFinanceTransactionInputSchema,
       title: "Create finance transaction",
     },
@@ -376,7 +395,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     "update_finance_transaction",
     {
       annotations: writeAnnotations,
-      description: "Update a transaction category or note when Finance review bypass is enabled.",
+      description:
+        "Update a transaction category or note; Ilo returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...updateFinanceTransactionInputSchema.shape }),
       title: "Update finance transaction",
     },
@@ -389,7 +409,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: writeAnnotations,
       description:
-        "Accept or pause an inferred income stream when Finance review bypass is enabled.",
+        "Accept or pause an inferred income stream; Ilo returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...updateFinanceIncomeStreamInputSchema.shape }),
       title: "Update finance income stream",
     },
@@ -401,7 +421,8 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     "update_finance_profile",
     {
       annotations: writeAnnotations,
-      description: "Update the financial planning baseline when Finance review bypass is enabled.",
+      description:
+        "Update the financial planning baseline; Ilo returns its apply-or-review disposition.",
       inputSchema: updateFinanceProfileInputSchema,
       title: "Update finance profile",
     },
@@ -413,7 +434,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: writeAnnotations,
       description:
-        "Refresh recurring, income, and alert ledger insights when Finance review bypass is enabled.",
+        "Refresh recurring, income, and alert ledger insights through Ilo's apply-or-review flow.",
       inputSchema: z.object({}),
       title: "Refresh finance insights",
     },

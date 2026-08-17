@@ -42,6 +42,7 @@ import { createConnectorService } from "./connector-service.js";
 import { createDailyBriefService } from "./daily-brief-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
+import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
@@ -405,6 +406,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     ...(plaid ? { plaid } : {}),
     providerItems: financeProviderItems,
   });
+  const financeActions = createFinanceActionService({ db: dependencies.db, finances, now });
   const assistant = createAssistantService({
     appBaseUrl: dependencies.config.appBaseUrl,
     db: dependencies.db,
@@ -1120,7 +1122,14 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
 
   registerGoalsRoutes({ app, goals: goalService, mutationContext });
 
-  registerFinanceRoutes({ app, financeMaintenance, financeStatus, finances, mutationContext });
+  registerFinanceRoutes({
+    actions: financeActions,
+    app,
+    financeMaintenance,
+    financeStatus,
+    finances,
+    mutationContext,
+  });
 
   registerReminderRoutes({ app, mutationContext, reminders });
 

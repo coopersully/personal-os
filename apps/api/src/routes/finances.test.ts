@@ -102,7 +102,7 @@ describe("finance routes", () => {
     );
   });
 
-  it("keeps setup and owned attention agent-accessible while consequential Finance mutations stay human-only", async () => {
+  it("keeps setup and owned attention agent-accessible while provider, account, and approval actions stay human-only", async () => {
     const app = new Hono<AppEnv>();
     const finances = {
       createAccount: vi.fn(),
@@ -120,6 +120,23 @@ describe("finance routes", () => {
       updateRecurringObligation: vi.fn(),
       upsertAttentionItem: vi.fn(async () => ({ id })),
     };
+    const performDirect = vi.fn(async () => ({
+      review: {
+        actionKind: "budget_plan",
+        assumptions: [],
+        changes: [{ entityId: null, entityType: "finance_budget_plan", summary: "Apply budget." }],
+        expectedRevision: null,
+        fingerprint: "pending-budget",
+        id,
+        rationale: "Requested budget.",
+        requestedAt: "2026-08-17T00:00:00.000Z",
+        requestingAgentId: id,
+        runId: null,
+        sourceRefs: [],
+        status: "pending" as const,
+      },
+      status: "pending_review" as const,
+    }));
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
@@ -134,6 +151,7 @@ describe("finance routes", () => {
       context.json({ error: error instanceof Error ? error.message : "unknown" }, 403),
     );
     registerFinanceRoutes({
+      actions: { performDirect } as never,
       app,
       financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
@@ -166,16 +184,8 @@ describe("finance routes", () => {
     const humanOnlyResponses = await Promise.all([
       app.request("/v1/finances/accounts", json),
       app.request(`/v1/finances/accounts/${id}`, { method: "DELETE" }),
-      app.request("/v1/finances/budgets", json),
       app.request(`/v1/finances/accounts/${id}/sync`, json),
-      app.request(`/v1/finances/recurring/${id}`, { ...json, method: "PATCH" }),
-      app.request(`/v1/finances/alerts/${id}`, json),
-      app.request(`/v1/finances/merchants/${id}`, { ...json, method: "PATCH" }),
-      app.request("/v1/finances/merchants/merge", json),
-      app.request("/v1/finances/categorizations/apply", json),
       app.request(`/v1/finances/review/${id}`, json),
-      app.request("/v1/finances/transactions", json),
-      app.request(`/v1/finances/transactions/${id}`, { ...json, method: "PATCH" }),
     ]);
     for (const response of humanOnlyResponses) {
       expect(response.status).toBe(403);
@@ -183,6 +193,18 @@ describe("finance routes", () => {
         error: expect.stringMatching(/interactive user session|waiting for review/),
       });
     }
+    const queued = await app.request("/v1/finances/budgets", {
+      body: JSON.stringify({ category: "Housing", limit: 2_000, month: "2026-08" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(queued.status).toBe(202);
+    await expect(queued.json()).resolves.toMatchObject({ status: "pending_review" });
+    expect(performDirect).toHaveBeenCalledWith(
+      "budget_plan",
+      expect.objectContaining({ category: "Housing" }),
+      expect.objectContaining({ requestId: "request-1" }),
+    );
     expect(finances.getGuidedSetupContext).toHaveBeenCalledWith(id);
     expect(finances.proposeCategorizations).toHaveBeenCalledWith(
       id,
@@ -205,7 +227,7 @@ describe("finance routes", () => {
     expect(finances.createTransaction).not.toHaveBeenCalled();
   });
 
-  it("lets a scoped agent bypass Finance review when the user switch is enabled", async () => {
+  it("returns the action service disposition and never accepts a bypass token or tool input", async () => {
     const app = new Hono<AppEnv>();
     const budget = { category: "Housing", id, limit: 2_000, month: "2026-08" };
     const finances = {
@@ -227,6 +249,9 @@ describe("finance routes", () => {
       context.json({ error: error instanceof Error ? error.message : "unknown" }, 403),
     );
     registerFinanceRoutes({
+      actions: {
+        performDirect: vi.fn(async () => ({ result: budget, status: "applied" as const })),
+      } as never,
       app,
       financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
@@ -242,13 +267,10 @@ describe("finance routes", () => {
       headers: { "content-type": "application/json" },
       method: "POST",
     });
-    expect(created.status).toBe(201);
-    await expect(created.json()).resolves.toEqual({ budget });
-    expect(finances.getAutomationSettings).toHaveBeenCalledWith(id);
-    expect(finances.createBudget).toHaveBeenCalledWith(
-      expect.objectContaining({ category: "Housing" }),
-      expect.objectContaining({ financeReviewBypass: true }),
-    );
+    expect(created.status).toBe(200);
+    await expect(created.json()).resolves.toEqual({ result: budget, status: "applied" });
+    expect(finances.getAutomationSettings).not.toHaveBeenCalled();
+    expect(finances.createBudget).not.toHaveBeenCalled();
 
     const selfEnable = await app.request("/v1/finances/automation-settings", {
       body: JSON.stringify({ reviewBypassEnabled: true }),

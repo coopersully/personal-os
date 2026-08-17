@@ -475,7 +475,7 @@ function mockApi() {
     listFinanceTransactions: vi.fn(async () => ({ items: [], nextCursor: null })),
     proposeFinanceCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
     applyFinanceCategorizations: vi.fn(async () => []),
-    resolveFinanceReview: vi.fn(async () => ({ deferred: true })),
+    answerFinanceQuestion: vi.fn(async () => ({ outcome: { status: "needs_input" } })),
     updateFinanceMerchant: vi.fn(async () => ({
       aliases: [],
       displayName: "Test",
@@ -1083,13 +1083,10 @@ describe("ilo MCP server", () => {
       },
     });
     await client.callTool({
-      name: "resolve_finance_review",
+      name: "answer_finance_question",
       arguments: {
-        action: "approve",
-        expectedTransactionUpdatedAt: now,
+        answer: "This charge was personal spending.",
         id,
-        learnMerchant: "never",
-        rationale: null,
       },
     });
     await client.callTool({
@@ -1501,9 +1498,9 @@ describe("ilo MCP server", () => {
       expect.objectContaining({ importance: "high", kind: "important" }),
     );
     expect(api.applyFinanceCategorizations).toHaveBeenCalledTimes(1);
-    expect(api.resolveFinanceReview).toHaveBeenCalledWith(
+    expect(api.answerFinanceQuestion).toHaveBeenCalledWith(
       id,
-      expect.objectContaining({ action: "approve", expectedTransactionUpdatedAt: now }),
+      "This charge was personal spending.",
     );
     expect(api.createFinanceBudget).toHaveBeenCalledWith({
       category: "Dining",

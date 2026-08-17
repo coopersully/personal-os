@@ -185,6 +185,7 @@ export const iloToolCatalog = {
   apply_finance_categorizations: write("finances", ["finances:write"], {
     policy: "approved_rule",
   }),
+  answer_finance_question: write("finances", ["finances:write"], { policy: "approved_rule" }),
   resolve_finance_review: write("finances", ["finances:write"], { policy: "approved_rule" }),
   update_finance_recurring_obligation: write("finances", ["finances:write"], {
     policy: "approved_rule",

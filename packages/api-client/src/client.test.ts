@@ -1299,6 +1299,28 @@ describe("ilo API client", () => {
     ]);
   });
 
+  it("forwards an agent Finance disposition instead of reading a human-only result field", async () => {
+    // Returning response.plan here would turn a valid pending review into undefined.
+    const pending = { status: "pending_review", review: { id, status: "pending" } };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(pending),
+    });
+
+    await expect(
+      api.setFinanceBudgetPlan({
+        acknowledgeOverAllocation: false,
+        allocations: [{ categoryId: id, limit: 250 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-08",
+        rationale: "Allocate within reliable monthly capacity.",
+        replace: true,
+        scenarioFingerprint: null,
+      }),
+    ).resolves.toEqual(pending);
+  });
+
   it("preserves Finance maintenance API errors with their request IDs", async () => {
     const api = createApiClient({
       baseUrl: "https://api.example.com",

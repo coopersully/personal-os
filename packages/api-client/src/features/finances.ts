@@ -52,6 +52,11 @@ import { financeStatusSchema, maintenanceRunSchema } from "@personal-os/domain";
 
 export type FinanceRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
+/** Preserve the human response shape while forwarding agent action dispositions intact. */
+function actionResult<T>(response: Record<string, unknown>, legacyKey: string): T {
+  return "status" in response ? (response as T) : (response[legacyKey] as T);
+}
+
 /** Typed Finance operations sharing the authenticated client transport. */
 export function createFinanceApi(request: FinanceRequest) {
   return {
@@ -65,7 +70,7 @@ export function createFinanceApi(request: FinanceRequest) {
           method: "POST",
         },
       );
-      return response.results;
+      return actionResult(response, "results");
     },
     async createFinanceAccount(input: CreateFinanceAccountInput): Promise<FinanceAccount> {
       const response = await request<{ account: FinanceAccount }>("/v1/finances/accounts", {
@@ -79,7 +84,7 @@ export function createFinanceApi(request: FinanceRequest) {
         body: JSON.stringify(input),
         method: "POST",
       });
-      return response.budget;
+      return actionResult(response, "budget");
     },
     async createFinanceTransaction(
       input: CreateFinanceTransactionInput,
@@ -91,7 +96,7 @@ export function createFinanceApi(request: FinanceRequest) {
           method: "POST",
         },
       );
-      return response.transaction;
+      return actionResult(response, "transaction");
     },
     async deleteFinanceAccount(id: string): Promise<void> {
       await request<void>(`/v1/finances/accounts/${id}`, { method: "DELETE" });
@@ -149,7 +154,7 @@ export function createFinanceApi(request: FinanceRequest) {
         body: JSON.stringify(input),
         method: "PUT",
       });
-      return response.plan;
+      return actionResult(response, "plan");
     },
     async maintainFinances(
       scope: MaintenanceScope = { type: "all_outstanding" },
@@ -192,7 +197,7 @@ export function createFinanceApi(request: FinanceRequest) {
     },
     async getFinanceProfile(): Promise<FinanceProfile | null> {
       const response = await request<{ profile: FinanceProfile | null }>("/v1/finances/profile");
-      return response.profile;
+      return actionResult(response, "profile");
     },
     async updateFinanceProfile(input: UpdateFinanceProfileInput): Promise<FinanceProfile> {
       const response = await request<{ profile: FinanceProfile }>("/v1/finances/profile", {
@@ -215,13 +220,13 @@ export function createFinanceApi(request: FinanceRequest) {
         `/v1/finances/income-streams/${id}`,
         { body: JSON.stringify(input), method: "PATCH" },
       );
-      return response.incomeStream;
+      return actionResult(response, "incomeStream");
     },
     async listFinanceRecurringObligations(): Promise<FinanceRecurringObligation[]> {
       const response = await request<{ recurring: FinanceRecurringObligation[] }>(
         "/v1/finances/recurring",
       );
-      return response.recurring;
+      return actionResult(response, "recurring");
     },
     async updateFinanceRecurringObligation(
       id: string,
@@ -246,7 +251,7 @@ export function createFinanceApi(request: FinanceRequest) {
         body: JSON.stringify(input),
         method: "POST",
       });
-      return response.alert;
+      return actionResult(response, "alert");
     },
     async refreshFinanceInsights(): Promise<{ refreshed: boolean }> {
       const response = await request<{ result: { refreshed: boolean } }>(
@@ -303,7 +308,7 @@ export function createFinanceApi(request: FinanceRequest) {
           method: "POST",
         },
       );
-      return response.merchant;
+      return actionResult(response, "merchant");
     },
     async proposeFinanceCategorizations(
       query: Partial<FinanceTransactionQuery> = {},
@@ -351,6 +356,13 @@ export function createFinanceApi(request: FinanceRequest) {
       }>(`/v1/finances/review/${id}`, { body: JSON.stringify(input), method: "POST" });
       return response.result;
     },
+    /** Answer a Finance question; this cannot change bypass or approve a queued action. */
+    async answerFinanceQuestion(id: string, answer: string) {
+      return request<{ outcome: unknown }>(`/v1/finances/questions/${id}/answer`, {
+        body: JSON.stringify({ answer }),
+        method: "POST",
+      });
+    },
     async updateFinanceTransaction(
       id: string,
       input: UpdateFinanceTransactionInput,
@@ -362,7 +374,7 @@ export function createFinanceApi(request: FinanceRequest) {
           method: "PATCH",
         },
       );
-      return response.transaction;
+      return actionResult(response, "transaction");
     },
     async upsertFinanceAttentionItem(
       transactionId: string,
@@ -385,7 +397,7 @@ export function createFinanceApi(request: FinanceRequest) {
           method: "PATCH",
         },
       );
-      return response.merchant;
+      return actionResult(response, "merchant");
     },
   };
 }

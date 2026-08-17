@@ -25,6 +25,20 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 2 — Batch B (concurrent complete-plan replacement)
+
+Status: DONE_WITH_CONCERNS
+
+Commit `ae550f326b12f7732e2da7d4788889927d9bc1ac` acquires a transaction-scoped PostgreSQL advisory lock keyed by Finance user and budget month before any category-specific work, deletion, parent upsert, or allocation write. This makes same-month `replace: true` plans serializable even when their category sets do not overlap. The focused integration race uses disjoint categories and a controlled parent-row barrier, then verifies the final allocations are exactly the second complete plan (never a hybrid) and the durable parent remains the version-2 upsert.
+
+Verification passed:
+
+- `pnpm exec biome check --write apps/api/src/finance-service.ts apps/api/src/finance-service.integration.test.ts` (exited 0)
+- `pnpm exec vitest run apps/api/src/finance-service.integration.test.ts --reporter=dot` (1 file, 37 tests passed)
+- `pnpm --filter @personal-os/api typecheck` (exited 0)
+- `pnpm --filter @personal-os/database typecheck` (exited 0)
+- `git diff --check` (exited 0)
+
 ## Fix round 2 — Batch A (planning capacity correctness)
 
 Status: DONE_WITH_CONCERNS

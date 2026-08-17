@@ -922,9 +922,12 @@ export function createFinanceStatusService({ db, now }: Options) {
               },
               prioritizedGoals: goals
                 .toSorted((left, right) => {
+                  if (left.targetDate === null && right.targetDate === null)
+                    return left.id.localeCompare(right.id);
                   if (left.targetDate === null) return 1;
                   if (right.targetDate === null) return -1;
-                  return left.targetDate.localeCompare(right.targetDate);
+                  const byDate = left.targetDate.localeCompare(right.targetDate);
+                  return byDate !== 0 ? byDate : left.id.localeCompare(right.id);
                 })
                 .map((goal, index) => ({ goal: serializeGoal(goal), priority: index + 1 })),
               proposals: [],

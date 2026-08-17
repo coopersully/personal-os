@@ -152,6 +152,14 @@ export const financeActionReviewSchema = z
   .strict();
 export type FinanceActionReview = z.infer<typeof financeActionReviewSchema>;
 
+/** Only an unresolved review may be returned as a pending action outcome. */
+export const financePendingActionReviewSchema = financeActionReviewSchema.extend({
+  status: z.literal("pending"),
+});
+export type FinancePendingActionReview = Omit<FinanceActionReview, "status"> & {
+  status: "pending";
+};
+
 /** Internal prepared action; unlike a review it intentionally contains the private payload. */
 export const financeAgentActionPayloadSchema = z
   .object({
@@ -171,12 +179,14 @@ export type FinanceAgentActionPayload = z.infer<typeof financeAgentActionPayload
 export const financeActionOutcomeSchema = <T extends z.ZodType>(resultSchema: T) =>
   z.discriminatedUnion("status", [
     z.object({ result: resultSchema, status: z.literal("applied") }).strict(),
-    z.object({ review: financeActionReviewSchema, status: z.literal("pending_review") }).strict(),
+    z
+      .object({ review: financePendingActionReviewSchema, status: z.literal("pending_review") })
+      .strict(),
     z.object({ question: financeQuestionSchema, status: z.literal("needs_input") }).strict(),
   ]);
 export type FinanceActionOutcome<T> =
   | { result: T; status: "applied" }
-  | { review: FinanceActionReview; status: "pending_review" }
+  | { review: FinancePendingActionReview; status: "pending_review" }
   | { question: FinanceQuestion; status: "needs_input" };
 
 /**

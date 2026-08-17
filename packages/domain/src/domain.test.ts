@@ -1508,6 +1508,39 @@ describe("finance agent contracts", () => {
       status: "needs_input",
     });
     expect(() => outcome.parse({ status: "applied", result: budgetPlan, review })).toThrow();
+    expect(() =>
+      outcome.parse({ status: "pending_review", review: { ...review, status: "applied" } }),
+    ).toThrow();
+    expect(() =>
+      outcome.parse({
+        status: "pending_review",
+        review: { ...review, privatePayload: { categoryId: id } },
+      }),
+    ).toThrow();
+    expect(
+      outcome.safeParse({
+        status: "pending_review",
+        review: {
+          ...review,
+          changes: Array.from({ length: 100 }, (_, index) => ({
+            entityType: "finance_budget",
+            summary: `Set budget allocation ${index + 1}.`,
+          })),
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      outcome.safeParse({
+        status: "pending_review",
+        review: {
+          ...review,
+          changes: Array.from({ length: 101 }, (_, index) => ({
+            entityType: "finance_budget",
+            summary: `Set budget allocation ${index + 1}.`,
+          })),
+        },
+      }).success,
+    ).toBe(false);
     expect(
       updateFinanceProfileInputSchema.parse({
         dependents: 1,
@@ -1525,6 +1558,9 @@ describe("finance agent contracts", () => {
         allocations: [budgetPlan.allocations[0], budgetPlan.allocations[0]],
       }).success,
     ).toBe(false);
+    expect(financeBudgetPlanSchema.safeParse({ ...budgetPlan, goalIds: [id, id] }).success).toBe(
+      false,
+    );
     expect(
       financeScenarioInputSchema.safeParse({
         alternatives: Array.from({ length: 6 }, (_, index) => ({

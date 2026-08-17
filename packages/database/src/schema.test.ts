@@ -44,6 +44,44 @@ describe("database schema contracts", () => {
         "finance_agent_action_reviews_pending_fingerprint_idx",
       ]),
     );
+    const userStatusIndex = reviews.indexes.find(
+      (index) => index.config.name === "finance_agent_action_reviews_user_status_idx",
+    );
+    const pendingFingerprintIndex = reviews.indexes.find(
+      (index) => index.config.name === "finance_agent_action_reviews_pending_fingerprint_idx",
+    );
+    expect(userStatusIndex).toMatchObject({ config: { unique: false } });
+    expect(
+      userStatusIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "status", "created_at"]);
+    expect(pendingFingerprintIndex).toMatchObject({ config: { unique: true } });
+    expect(
+      pendingFingerprintIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "fingerprint"]);
+    expect(pendingFingerprintIndex?.config.where).toBeDefined();
+    expect(
+      reviews.foreignKeys.map((foreignKey) => ({
+        columns: foreignKey.reference().columns.map((column) => column.name),
+        foreignColumns: foreignKey.reference().foreignColumns.map((column) => column.name),
+        name: foreignKey.getName(),
+        onDelete: foreignKey.onDelete,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          columns: ["user_id"],
+          foreignColumns: ["id"],
+          name: "finance_agent_action_reviews_user_id_users_id_fk",
+          onDelete: "cascade",
+        },
+        {
+          columns: ["maintenance_run_id"],
+          foreignColumns: ["id"],
+          name: "finance_agent_action_reviews_maintenance_run_id_workspace_maintenance_runs_id_fk",
+          onDelete: "set null",
+        },
+      ]),
+    );
     expect(profiles.columns.map((column) => column.name)).toEqual(
       expect.arrayContaining([
         "household_size",

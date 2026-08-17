@@ -538,4 +538,41 @@ describe.sequential("finance action service", () => {
         .where(eq(financeAgentActionReviews.userId, userId)),
     ).resolves.toEqual(expect.arrayContaining([{ status: "superseded" }, { status: "pending" }]));
   });
+
+  it("reuses one pending review for concurrent exact profile proposals", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile: vi.fn() } as never,
+      now: () => now,
+    });
+    const input = { effectiveDate: "2026-09-02", employer: "Exact" };
+    const context = { principal: agent(userId), requestId: "concurrent-exact" };
+    const [left, right] = await Promise.all([
+      service.performDirect("profile", input, context),
+      service.performDirect("profile", input, context),
+    ]);
+    if (left.status !== "pending_review" || right.status !== "pending_review")
+      throw new Error("Expected pending reviews.");
+    expect(left.review.id).toBe(right.review.id);
+  });
+
+  it("keeps concurrent disjoint profile targets pending independently", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile: vi.fn() } as never,
+      now: () => now,
+    });
+    const context = { principal: agent(userId), requestId: "concurrent-disjoint" };
+    const [left, right] = await Promise.all([
+      service.performDirect("profile", { effectiveDate: "2026-09-03", employer: "A" }, context),
+      service.performDirect("profile", { effectiveDate: "2026-09-04", employer: "B" }, context),
+    ]);
+    if (left.status !== "pending_review" || right.status !== "pending_review")
+      throw new Error("Expected pending reviews.");
+    expect(left.review.id).not.toBe(right.review.id);
+  });
 });

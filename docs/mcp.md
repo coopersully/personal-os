@@ -110,6 +110,13 @@ annotations are compatible-host UX hints only. Authorization, policy, source evi
 capability, structured errors, conflict handling, audit history, recoverable deletion, and
 partial-effect reporting remain deterministic API behavior.
 
+Finance includes read tools for ledger context and the current automation setting, plus
+`finances:write` tools that mutate the accounting ledger, profile and income data, and budget
+plans. Budgets are not human-only. Only a signed-in user can enable the single Finance review
+bypass; MCP cannot change that setting, connect institutions, import transactions, administer
+accounts, or execute external financial activity. Task 3 will return `applied`,
+`pending_review`, or `needs_input` for these mutation requests based on that app-only setting.
+
 The shared assistant tools give Claude, Codex, and other MCP hosts one consistent setup vocabulary:
 
 - `get_ilo_setup` is the authoritative setup entrypoint. Call it immediately after connection and
@@ -227,12 +234,12 @@ Categorization is intentionally proposal-first:
 `propose_finance_categorizations` uses the Finance read scope on both `GET` and
 the compatibility `POST` and does not mutate anything. Proposal pages return
 an opaque `nextCursor`, and hosts can continue without making read calls mutate
-the ledger. Direct transaction categorization is not an agent tool or
-agent-permitted raw API shortcut. Applying a proposal, resolving any review or
-alert, changing recurring state, adding a transaction, and renaming or merging
-merchants require a signed-in Ilo session. Provider administration,
-account/import/financial-profile/budget changes, permanent merchant rules, and
-ambiguous transfer confirmation are also human-only.
+the ledger. `finances:write` tools may submit the ledger, profile, and budget
+mutations described above; Task 3 will make their `applied`, `pending_review`,
+or `needs_input` disposition depend on the signed-in user's app-only review
+bypass. Provider administration, account connection and import, permanent
+merchant rules, ambiguous transfer confirmation, and every external financial
+activity remain human-only and unavailable to MCP.
 
 The signed-in categorization batch API predates this guided-setup work and
 commits each decision independently. Its bounded workers and per-item results

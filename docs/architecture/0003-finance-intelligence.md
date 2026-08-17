@@ -58,12 +58,13 @@ seams are:
 - `apps/web/src/features/finances` for the user interface.
 
 All finance endpoints require `finances:read` for reads and `finances:write`
-for mutations. Provider connection, import, account, budget, financial-profile,
-and income-stream administration remain human-only. Permanent merchant rules
-and ambiguous-transfer confirmation also require an interactive human session.
-Finance MCP is proposal/read-only for ledger and review work: categorization
-application, recurring and alert state, merchant changes, manual transactions,
-and review resolution all require a signed-in Ilo user at the API route. A
+for mutations. A Finance write token may mutate the accounting ledger, financial
+profile, income data, and budget plans through the same API and audit path;
+budgets are not human-only. Provider connection, import, account administration,
+and the Finance review-bypass setting remain human-only, as does any external
+financial activity such as moving money, trading, or paying bills. The MCP cannot
+enable its own bypass. Task 3 will add `applied`, `pending_review`, and
+`needs_input` dispositions for these requests based on that app-only setting. A
 scoped agent may create or refresh shared attention for one owned transaction
 through the Finance-owned endpoint. That endpoint locks the transaction,
 derives its material source from the account and current transaction revision,
@@ -212,14 +213,15 @@ destructive colors, while neutral activity is muted.
 Read tools expose guided-setup readiness, the durable shared profile, overview,
 ledger health, transactions, budgets, merchants, review queue, wealth, and cash
 flow. Agents should inspect guided context, ledger health, and relevant
-transactions before offering financial guidance. Categorization exposes only a
-read-scoped proposal tool; a signed-in person applies the current decision in
-Finance. Proposal pages use the ledger's opaque cursor and read paths never
-materialize merchant/category enrichment. Direct category edits, merchant
-changes, review decisions, recurring state, alerts, and manual transactions are
-absent from MCP and guarded as human-only API routes. Agents must not turn an
-ambiguous result into a category, transfer, subscription, or permanent rule on
-their own.
+transactions before offering financial guidance. Categorization retains a
+read-scoped proposal tool, and proposal pages use the ledger's opaque cursor;
+read paths never materialize merchant/category enrichment. Finance also exposes
+write-scoped tools for ledger, profile, income, and budget mutations. The API
+continues to enforce ownership, revisions, policy, transactions, and audit; Task
+3 will return `applied`, `pending_review`, or `needs_input` based on the
+signed-in user's app-only review-bypass setting. MCP cannot enable the bypass,
+connect or disconnect providers, import transactions, administer accounts, or
+execute external financial activity.
 
 Every account-onboarding path, including Plaid exchange, provisions the stable
 default category taxonomy inside the account transaction. Category reads remain

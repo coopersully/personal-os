@@ -25,6 +25,26 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 2 — Batch E (MCP authority documentation)
+
+Status: DONE_WITH_CONCERNS
+
+The architecture and MCP documents now state that `finances:write` may mutate the accounting ledger, financial profile/income data, and budget plans, while institution connection/import/account administration and external financial activity remain human-only. They also record that Task 3—not Task 2—will provide the `applied`, `pending_review`, and `needs_input` disposition based on the signed-in user's app-only review-bypass setting.
+
+Verification passed:
+
+- `pnpm lint` (exited 0; Biome and repository contract checks passed)
+- `pnpm exec biome check docs/mcp.md docs/architecture/0003-finance-intelligence.md` (exited 0; Markdown paths are intentionally ignored by Biome, so no separate document formatter is configured)
+- `git diff --check` (exited 0)
+
+## Fix round 2 — final chain and concerns
+
+Status: DONE_WITH_CONCERNS
+
+The full round-two implementation chain is `af83529` (cadence-aware capacity), `ae550f3` (same-month plan serialization), `c183825` (deterministic scenario projections), and `fdc84e6` (trustworthy status evidence, reconciliation, and durable goal ordering). The accompanying documentation update records that `finances:write` reaches ledger/profile/budget mutations while provider administration and external financial activity remain outside MCP authority.
+
+Current concerns are only the written Task 3 deferrals: it must introduce the `applied`, `pending_review`, and `needs_input` mutation dispositions governed by the signed-in user's app-only review-bypass setting, and durable bypass recheck/TOCTOU protection. No Task 3 behavior is implemented by Task 2.
+
 ## Fix round 2 — Batch D (status evidence, reconciliation, and goal priority)
 
 Status: DONE_WITH_CONCERNS

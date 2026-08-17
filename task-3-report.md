@@ -111,3 +111,19 @@ Status: DONE_WITH_CONCERNS
 Status: DONE
 
 - A 100-allocation, 25-assumption, 25-goal plan now queues and approves with a 64-character revision digest. Public source references are capped at the domain maximum while the private input continues to drive transactional revalidation.
+
+## Aggregate action-review boundary coverage follow-up
+
+Status: DONE
+
+- A real PostgreSQL two-item categorization batch with independent merchant evidence now proves bypass-off queueing, bounded public revisions/changes/source references, approval-time revalidation, and durable application of both transactions.
+- The maximum 100-decision categorization queue contract exercises owned transaction/category/account reads while stubbing only the evidence validator; its revision digest and public changes/source references remain bounded.
+- A real PostgreSQL merchant merge now proves public source/target labels and approval behavior remain correct when the database's ID-sorted read order is target then source.
+
+## Aggregate action-review boundary verification
+
+- `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts` — 27 tests passed.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/database typecheck` — passed.
+- `pnpm biome check apps/api/src/finance-action-service.integration.test.ts` — passed with four pre-existing `noNonNullAssertion` warnings; no errors.
+- `git diff --check` — passed.

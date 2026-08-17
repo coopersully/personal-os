@@ -1589,4 +1589,345 @@ describe.sequential("finance action service", () => {
     ).resolves.toMatchObject({ result: { id: "maximum-plan" }, status: "applied" });
     expect(setBudgetPlan).toHaveBeenCalledOnce();
   });
+
+  it("queues, revalidates, and atomically approves a two-item evidence-backed categorization batch", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Batch evidence bank",
+        name: "Batch evidence checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const categories = await database.db
+      .insert(financeCategories)
+      .values([
+        {
+          group: "Batch evidence",
+          name: "Batch groceries",
+          slug: `batch-groceries-${crypto.randomUUID()}`,
+          userId,
+        },
+        {
+          group: "Batch evidence",
+          name: "Batch transport",
+          slug: `batch-transport-${crypto.randomUUID()}`,
+          userId,
+        },
+      ])
+      .returning();
+    const merchants = await database.db
+      .insert(financeMerchants)
+      .values([
+        {
+          displayName: "Batch food vendor",
+          normalizedName: `batch-grocery-${crypto.randomUUID()}`,
+          userId,
+        },
+        {
+          displayName: "Batch city vendor",
+          normalizedName: `batch-transport-${crypto.randomUUID()}`,
+          userId,
+        },
+      ])
+      .returning();
+    if (!account || categories.length !== 2 || merchants.length !== 2)
+      throw new Error("Batch categorization fixtures were not created.");
+    const [groceryCategory, transportCategory] = categories;
+    const [foodMerchant, cityMerchant] = merchants;
+    if (!groceryCategory || !transportCategory || !foodMerchant || !cityMerchant)
+      throw new Error("Batch categorization fixtures were not created.");
+    const transactions = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 100,
+          direction: "expense",
+          merchant: foodMerchant.displayName,
+          merchantId: foodMerchant.id,
+          transactionDate: "2026-12-01",
+          userId,
+        },
+        {
+          accountId: account.id,
+          amount: 101,
+          direction: "expense",
+          merchant: cityMerchant.displayName,
+          merchantId: cityMerchant.id,
+          transactionDate: "2026-12-02",
+          userId,
+        },
+      ])
+      .returning();
+    if (transactions.length !== 2) throw new Error("Batch transactions were not created.");
+    const [groceryTransaction, transportTransaction] = transactions;
+    if (!groceryTransaction || !transportTransaction)
+      throw new Error("Batch transactions were not created.");
+    await database.db.insert(financeClassificationDecisions).values([
+      ...Array.from({ length: 2 }, () => ({
+        categoryId: groceryCategory.id,
+        categoryName: groceryCategory.name,
+        confidence: 10_000,
+        merchantId: foodMerchant.id,
+        outcome: "confirmed" as const,
+        source: "user" as const,
+        transactionId: groceryTransaction.id,
+        userId,
+      })),
+      ...Array.from({ length: 2 }, () => ({
+        categoryId: transportCategory.id,
+        categoryName: transportCategory.name,
+        confidence: 10_000,
+        merchantId: cityMerchant.id,
+        outcome: "confirmed" as const,
+        source: "user" as const,
+        transactionId: transportTransaction.id,
+        userId,
+      })),
+    ]);
+    const input = {
+      decisions: [
+        {
+          categoryId: groceryCategory.id,
+          confidence: 0.965,
+          expectedTransactionUpdatedAt: groceryTransaction.updatedAt.toISOString(),
+          learnMerchant: "suggest" as const,
+          rationale: "Two user confirmations support this categorization.",
+          transactionId: groceryTransaction.id,
+        },
+        {
+          categoryId: transportCategory.id,
+          confidence: 0.965,
+          expectedTransactionUpdatedAt: transportTransaction.updatedAt.toISOString(),
+          learnMerchant: "suggest" as const,
+          rationale: "Two user confirmations support this categorization.",
+          transactionId: transportTransaction.id,
+        },
+      ],
+    };
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+
+    const queued = await service.performDirect("categorization", input, {
+      principal: agent(userId),
+      requestId: "two-item-categorization-queue",
+    });
+    if (queued.status !== "pending_review") throw new Error("Expected a pending review.");
+    expect(queued.review.expectedRevision?.length ?? 0).toBeGreaterThan(0);
+    expect(queued.review.expectedRevision?.length ?? 0).toBeLessThanOrEqual(128);
+    expect(queued.review.changes).toHaveLength(2);
+    expect(queued.review.changes.length).toBeLessThanOrEqual(100);
+    expect(queued.review.sourceRefs).toHaveLength(2);
+    expect(queued.review.sourceRefs.length).toBeLessThanOrEqual(100);
+    expect(queued.review).not.toHaveProperty("privatePayload");
+
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "two-item-categorization-approve",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({
+          categoryId: financeTransactions.categoryId,
+          category: financeTransactions.category,
+        })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, groceryTransaction.id)),
+    ).resolves.toEqual([{ categoryId: groceryCategory.id, category: groceryCategory.name }]);
+    await expect(
+      database.db
+        .select({
+          categoryId: financeTransactions.categoryId,
+          category: financeTransactions.category,
+        })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transportTransaction.id)),
+    ).resolves.toEqual([{ categoryId: transportCategory.id, category: transportCategory.name }]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "applied" }]);
+  });
+
+  it("queues a maximum-size categorization review with bounded public evidence", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Maximum categorization bank",
+        name: "Maximum categorization checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Maximum categorization",
+        name: "Maximum categorization category",
+        slug: `maximum-categorization-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Maximum categorization fixtures were not created.");
+    const transactions = await database.db
+      .insert(financeTransactions)
+      .values(
+        Array.from({ length: 100 }, (_, index) => ({
+          accountId: account.id,
+          amount: index + 1,
+          direction: "expense" as const,
+          merchant: `Maximum vendor ${index}`,
+          transactionDate: "2026-12-04",
+          userId,
+        })),
+      )
+      .returning();
+    const validatePreparedCategorizations = vi.fn(async () => true);
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { validatePreparedCategorizations } as never,
+      now: () => now,
+    });
+
+    const queued = await service.performDirect(
+      "categorization",
+      {
+        decisions: transactions.map((transaction) => ({
+          categoryId: category.id,
+          confidence: 1,
+          expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+          learnMerchant: "suggest" as const,
+          rationale: "Exercise the bounded categorization review envelope.",
+          transactionId: transaction.id,
+        })),
+      },
+      { principal: agent(userId), requestId: "maximum-categorization-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending review.");
+    expect(validatePreparedCategorizations).toHaveBeenCalledTimes(2);
+    expect(queued.review.expectedRevision).toHaveLength(64);
+    expect(queued.review.expectedRevision?.length ?? 0).toBeLessThanOrEqual(128);
+    expect(queued.review.changes).toHaveLength(100);
+    expect(queued.review.sourceRefs).toHaveLength(100);
+    expect(queued.review).not.toHaveProperty("privatePayload");
+  });
+
+  it("queues and approves a merchant merge when selected rows sort target before source", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const merchants = await database.db
+      .insert(financeMerchants)
+      .values([
+        {
+          displayName: "Merge candidate A",
+          normalizedName: `merge-candidate-a-${crypto.randomUUID()}`,
+          userId,
+        },
+        {
+          displayName: "Merge candidate B",
+          normalizedName: `merge-candidate-b-${crypto.randomUUID()}`,
+          userId,
+        },
+      ])
+      .returning();
+    if (merchants.length !== 2) throw new Error("Merchant merge fixtures were not created.");
+    const [target, source] = [...merchants].sort((left, right) => left.id.localeCompare(right.id));
+    if (!source || !target) throw new Error("Merchant merge ordering fixtures were not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Merge test bank",
+        name: "Merge test checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Merchant merge account was not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 100,
+        direction: "expense",
+        merchant: source.displayName,
+        merchantId: source.id,
+        transactionDate: "2026-12-03",
+        userId,
+      })
+      .returning();
+    if (!transaction) throw new Error("Merchant merge transaction was not created.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+
+    const queued = await service.performDirect(
+      "merchant",
+      {
+        rationale: "Consolidate duplicate merchant records.",
+        sourceMerchantId: source.id,
+        targetMerchantId: target.id,
+      },
+      { principal: agent(userId), requestId: "merchant-merge-reversed-order" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending review.");
+    expect(source.id > target.id).toBe(true);
+    expect(queued.review.changes[0]?.summary).toBe(
+      `Merge ${source.displayName} into ${target.displayName}.`,
+    );
+    expect(queued.review.expectedRevision?.length ?? 0).toBeLessThanOrEqual(128);
+    expect(queued.review.sourceRefs).toHaveLength(2);
+    expect(queued.review.changes).toHaveLength(1);
+
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "merchant-merge-reversed-order-approve",
+      }),
+    ).resolves.toMatchObject({ result: { id: target.id }, status: "applied" });
+    await expect(
+      database.db
+        .select({ merchantId: financeTransactions.merchantId })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ merchantId: target.id }]);
+    await expect(
+      database.db
+        .select({ id: financeMerchants.id })
+        .from(financeMerchants)
+        .where(eq(financeMerchants.id, source.id)),
+    ).resolves.toEqual([]);
+  });
 });

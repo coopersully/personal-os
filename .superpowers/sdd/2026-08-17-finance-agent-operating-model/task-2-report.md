@@ -25,6 +25,21 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 2 — Batch C (scenario correctness)
+
+Status: DONE_WITH_CONCERNS
+
+Commit `c1838256dcd50d6c91a8f0c3eec4e1cf205f86a4` treats a zero debt balance as already paid (`debtPayoffMonths: null`), preserves an alternative's own goal timing alongside its relative reserve message, reports missing balance/payment facts for every scenario plan, and canonicalizes duplicate-label alternatives with full normalized-plan serialization before hashing. The domain contract test documents that zero payoff months remain invalid while the already-paid null value is valid.
+
+Verification passed:
+
+- `pnpm exec vitest run apps/api/src/finance-scenario-service.test.ts --reporter=dot` (1 file, 8 tests passed after the red phase showed 4 expected failures)
+- `pnpm exec vitest run apps/api/src/finance-scenario-service.test.ts packages/domain/src/domain.test.ts --reporter=dot` (2 files, 38 tests passed)
+- `pnpm --filter @personal-os/api typecheck` (exited 0)
+- `pnpm --filter @personal-os/domain typecheck` (exited 0)
+- `pnpm exec biome check --write apps/api/src/finance-scenario-service.ts apps/api/src/finance-scenario-service.test.ts packages/domain/src/domain.test.ts` (exited 0)
+- `git diff --check` (exited 0)
+
 ## Fix round 2 — Batch B (concurrent complete-plan replacement)
 
 Status: DONE_WITH_CONCERNS

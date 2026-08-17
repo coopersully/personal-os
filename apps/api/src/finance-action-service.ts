@@ -40,6 +40,7 @@ import {
 } from "@personal-os/domain";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { AppError } from "./errors.js";
+import { reliableMonthlyCapacity } from "./finance-planning.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
 
@@ -227,70 +228,6 @@ function expectedAnswer(
   return { name, required: true, type, ...options };
 }
 
-function expectedAnswerFor(
-  actionKind: SupportedActionKind,
-  rawInput: Record<string, unknown>,
-): ExpectedAnswer[] {
-  switch (actionKind) {
-    case "profile":
-      // Individual ownership failures provide their own descriptor at the
-      // callsite. This is only a recoverable legacy/default prompt.
-      return [expectedAnswer("effectiveDate", "string", { example: "2026-08-17" })];
-    case "budget_plan":
-      return "allocations" in rawInput
-        ? [
-            expectedAnswer("allocations", "object_array", { example: "[...]" }),
-            expectedAnswer("month", "string", { example: "2026-08" }),
-            expectedAnswer("rationale", "string"),
-          ]
-        : [
-            expectedAnswer("category", "string"),
-            expectedAnswer("limit", "number"),
-            expectedAnswer("month", "string", { example: "2026-08" }),
-          ];
-    case "categorization":
-      return [expectedAnswer("decisions", "object_array", { example: "[...]" })];
-    case "merchant":
-      return "sourceMerchantId" in rawInput
-        ? [
-            expectedAnswer("rationale", "string"),
-            expectedAnswer("sourceMerchantId", "string"),
-            expectedAnswer("targetMerchantId", "string"),
-          ]
-        : [expectedAnswer("displayName", "string"), expectedAnswer("id", "string")];
-    case "recurring_obligation":
-      return [
-        expectedAnswer("id", "string"),
-        expectedAnswer("status", "string", { choices: ["active", "cancelled", "paused"] }),
-      ];
-    case "alert":
-      return [
-        expectedAnswer("action", "string", { choices: ["dismiss", "resolve"] }),
-        expectedAnswer("id", "string"),
-      ];
-    case "transaction":
-      return "accountId" in rawInput
-        ? [
-            expectedAnswer("accountId", "string"),
-            expectedAnswer("amount", "number"),
-            expectedAnswer("date", "string", { example: "2026-08-17" }),
-            expectedAnswer("direction", "string", { choices: ["expense", "income", "transfer"] }),
-            expectedAnswer("merchant", "string"),
-          ]
-        : [
-            expectedAnswer("id", "string"),
-            expectedAnswer("category" in rawInput ? "category" : "notes", "string"),
-          ];
-    case "income_stream":
-      return [
-        expectedAnswer("id", "string"),
-        expectedAnswer("status", "string", { choices: ["active", "paused"] }),
-      ];
-    default:
-      return assertNever(actionKind);
-  }
-}
-
 function isExpectedAnswerValue(field: ExpectedAnswer, value: unknown): boolean {
   const valid = (() => {
     switch (field.type) {
@@ -324,9 +261,8 @@ function isExpectedAnswerValue(field: ExpectedAnswer, value: unknown): boolean {
 
 function question(
   actionKind: SupportedActionKind,
-  rawInput: Record<string, unknown>,
   why: string,
-  expectedAnswer: ExpectedAnswer[] = expectedAnswerFor(actionKind, rawInput),
+  expectedAnswer: ExpectedAnswer[],
 ): FinanceQuestion {
   return {
     actionKind,
@@ -376,10 +312,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
   ): Promise<PreparedAction | { status: "needs_input"; question: FinanceQuestion }> {
     const missing = (
       why: string,
+      expected: ExpectedAnswer[],
       sourceRefs: MaterialSourceReference[] = [],
-      expected: ExpectedAnswer[] = expectedAnswerFor(actionKind, rawInput),
     ) => ({
-      question: { ...question(actionKind, rawInput, why, expected), sourceRefs },
+      question: { ...question(actionKind, why, expected), sourceRefs },
       status: "needs_input" as const,
     });
     const parse = <T>(schema: {
@@ -395,9 +331,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     // lock is deliberately never requested.
     const lockRead = <T>(query: T): T =>
       lockTargets ? (query as { for: (strength: "update") => T }).for("update") : query;
-    const row = async <T>(query: PromiseLike<T[]>, why: string, expected?: ExpectedAnswer[]) => {
+    const row = async <T>(query: PromiseLike<T[]>, why: string, expected: ExpectedAnswer[]) => {
       const item = (await query)[0];
-      return item ?? missing(why, [], expected);
+      return item ?? missing(why, expected);
     };
     const prepared = (
       input: Record<string, unknown>,
@@ -425,7 +361,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     switch (actionKind) {
       case "profile": {
         const input = parse<Record<string, unknown>>(updateFinanceProfileInputSchema);
-        if (!input) return missing("Provide a complete valid Finance profile.");
+        if (!input)
+          return missing("Provide a complete valid Finance profile.", [
+            expectedAnswer("effectiveDate", "string", { example: "2026-08-17" }),
+          ]);
         const account = input.payAccountId
           ? await row(
               lockRead(
@@ -494,7 +433,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               .orderBy(financeCategories.id),
           );
           if (categories.length !== categoryIds.length)
-            return missing("Every budget allocation must reference one of your categories.");
+            return missing("Every budget allocation must reference one of your categories.", [
+              expectedAnswer("allocations", "object_array", { example: "[...]" }),
+            ]);
           const goalIds = plan.goalIds as string[];
           const ownedGoals = goalIds.length
             ? await lockRead(
@@ -506,7 +447,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               )
             : [];
           if (ownedGoals.length !== goalIds.length)
-            return missing("Every budget-plan goal must belong to you.");
+            return missing("Every budget-plan goal must belong to you.", [
+              expectedAnswer("goalIds", "string_array", { example: "[...]" }),
+            ]);
           const planRows = await lockRead(
             executor
               .select()
@@ -545,22 +488,24 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               .orderBy(desc(financeProfiles.effectiveDate), financeProfiles.id)
               .limit(1),
           );
-          const payAccount = effectiveProfile?.payAccountId
+          const payAccountId =
+            typeof rawInput.payAccountId === "string"
+              ? rawInput.payAccountId
+              : effectiveProfile?.payAccountId;
+          const payAccount = payAccountId
             ? await row(
                 lockRead(
                   executor
                     .select()
                     .from(financeAccounts)
                     .where(
-                      and(
-                        eq(financeAccounts.id, effectiveProfile.payAccountId),
-                        eq(financeAccounts.userId, userId),
-                      ),
+                      and(eq(financeAccounts.id, payAccountId), eq(financeAccounts.userId, userId)),
                     )
                     .orderBy(financeAccounts.id)
                     .limit(1),
                 ),
                 "The effective Finance profile pay account is unavailable.",
+                [expectedAnswer("payAccountId", "string")],
               )
             : null;
           if (payAccount && "question" in payAccount) return payAccount;
@@ -576,6 +521,28 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               )
               .orderBy(financeRecurringObligations.id),
           );
+          const capacity = reliableMonthlyCapacity({
+            expectedNetPay:
+              effectiveProfile?.expectedNetPay == null
+                ? null
+                : effectiveProfile.expectedNetPay / 100,
+            expectedNetPayFrequency: effectiveProfile?.payFrequency ?? null,
+            grossAnnualIncome:
+              effectiveProfile?.grossAnnualIncome == null
+                ? null
+                : effectiveProfile.grossAnnualIncome / 100,
+            observedMonthlyIncome: null,
+            recurring: obligations.map((item) => ({
+              amount: item.expectedAmount / 100,
+              cadence: item.cadence,
+            })),
+          });
+          const total = allocations.reduce((sum, allocation) => sum + allocation.limit, 0);
+          if (capacity !== null && total > capacity && !plan.acknowledgeOverAllocation)
+            return missing(
+              "Budget allocations exceed reliable monthly income. Acknowledge the intentional over-allocation to continue.",
+              [expectedAnswer("acknowledgeOverAllocation", "boolean")],
+            );
           const revision = snapshotRevision({
             plan: planRows.map((item) => [item.id, item.version, item.updatedAt.toISOString()]),
             budgets: currentBudgets.map((item) => [
@@ -593,7 +560,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             obligations: obligations.map((item) => [item.id, item.updatedAt.toISOString()]),
           });
           return prepared(
-            plan,
+            {
+              ...plan,
+              ...(typeof rawInput.payAccountId === "string"
+                ? { payAccountId: rawInput.payAccountId }
+                : {}),
+            },
             revision,
             allocations.map((item) => ({
               entityId: item.categoryId,
@@ -617,7 +589,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         }
         const input = parse<Record<string, unknown>>(createFinanceBudgetInputSchema);
         if (!input)
-          return missing("Provide a complete Finance budget or complete monthly budget plan.");
+          return missing("Provide a complete Finance budget or complete monthly budget plan.", [
+            expectedAnswer("category", "string"),
+            expectedAnswer("limit", "number"),
+            expectedAnswer("month", "string", { example: "2026-08" }),
+          ]);
         const existing = await lockRead(
           executor
             .select()
@@ -651,6 +627,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         if (!input)
           return missing(
             "Each categorization needs a valid transaction, category, rationale, confidence, and displayed revision.",
+            [expectedAnswer("decisions", "object_array", { example: "[...]" })],
           );
         const decisions = input.decisions as Array<{
           transactionId: string;
@@ -674,7 +651,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .orderBy(financeTransactions.id),
         );
         if (transactions.length !== decisions.length)
-          return missing("Every categorization must target one of your transactions.");
+          return missing("Every categorization must target one of your transactions.", [
+            expectedAnswer("decisions", "object_array", { example: "[...]" }),
+          ]);
         if (
           transactions.some(
             (item) =>
@@ -685,6 +664,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         )
           return missing(
             "A transaction changed; refresh the categorization evidence before applying it.",
+            [expectedAnswer("decisions", "object_array", { example: "[...]" })],
           );
         const categories = await lockRead(
           executor
@@ -702,7 +682,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .orderBy(financeCategories.id),
         );
         if (categories.length !== new Set(decisions.map((item) => item.categoryId)).size)
-          return missing("Every categorization must use one of your categories.");
+          return missing("Every categorization must use one of your categories.", [
+            expectedAnswer("decisions", "object_array", { example: "[...]" }),
+          ]);
         const accounts = await lockRead(
           executor
             .select()
@@ -721,12 +703,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const sourceRefs: MaterialSourceReference[] = [];
         for (const item of transactions) {
           const account = accounts.find((candidate) => candidate.id === item.accountId);
-          if (!account) return missing("A transaction account is unavailable.");
+          if (!account)
+            return missing("A transaction account is unavailable.", [
+              expectedAnswer("decisions", "object_array", { example: "[...]" }),
+            ]);
           sourceRefs.push(transactionSource(item, account));
         }
         if (!(await finances.validatePreparedCategorizations(input as never, userId, executor)))
           return missing(
             "The categorization evidence is incomplete, low-confidence, or protected as an ambiguous transfer.",
+            [expectedAnswer("decisions", "object_array", { example: "[...]" })],
           );
         return prepared(
           input,
@@ -748,7 +734,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           ? [String(merge.sourceMerchantId), String(merge.targetMerchantId)]
           : [String(rawInput.id ?? "")];
         if (!input || ids.some((id) => !id))
-          return missing("Provide a valid merchant change and merchant ID.");
+          return missing(
+            "Provide a valid merchant change and merchant ID.",
+            "sourceMerchantId" in rawInput || "targetMerchantId" in rawInput
+              ? [
+                  expectedAnswer("sourceMerchantId", "string"),
+                  expectedAnswer("targetMerchantId", "string"),
+                  expectedAnswer("rationale", "string"),
+                ]
+              : [expectedAnswer("id", "string"), expectedAnswer("displayName", "string")],
+          );
         const merchants = await lockRead(
           executor
             .select()
@@ -757,7 +752,15 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .orderBy(financeMerchants.id),
         );
         if (merchants.length !== ids.length)
-          return missing("Choose only merchants that belong to you.");
+          return missing(
+            "Choose only merchants that belong to you.",
+            merge
+              ? [
+                  expectedAnswer("sourceMerchantId", "string"),
+                  expectedAnswer("targetMerchantId", "string"),
+                ]
+              : [expectedAnswer("id", "string")],
+          );
         const revision = snapshotRevision(
           merchants.map((item) => [item.id, item.updatedAt.toISOString()]).sort(),
         );
@@ -791,7 +794,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       case "recurring_obligation": {
         const input = parse<Record<string, unknown>>(updateFinanceRecurringObligationInputSchema);
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
-        if (!input || !id) return missing("Provide a valid recurring-obligation ID and status.");
+        if (!input || !id)
+          return missing("Provide a valid recurring-obligation ID and status.", [
+            expectedAnswer("id", "string"),
+            expectedAnswer("status", "string", { choices: ["active", "cancelled", "paused"] }),
+          ]);
         const item = await row(
           lockRead(
             executor
@@ -807,6 +814,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               .limit(1),
           ),
           "Choose one of your recurring obligations.",
+          [expectedAnswer("id", "string")],
         );
         if ("question" in item) return item;
         return prepared(
@@ -846,7 +854,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         }
         const input = parse<Record<string, unknown>>(resolveFinanceAlertInputSchema);
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
-        if (!input || !id) return missing("Provide a valid Finance alert ID and resolution.");
+        if (!input || !id)
+          return missing("Provide a valid Finance alert ID and resolution.", [
+            expectedAnswer("id", "string"),
+            expectedAnswer("action", "string", { choices: ["dismiss", "resolve"] }),
+          ]);
         const item = await row(
           lockRead(
             executor
@@ -857,6 +869,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               .limit(1),
           ),
           "Choose one of your Finance alerts.",
+          [expectedAnswer("id", "string")],
         );
         if ("question" in item) return item;
         return prepared(
@@ -890,6 +903,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                 .limit(1),
             ),
             "Choose one of your Finance accounts.",
+            [expectedAnswer("accountId", "string")],
           );
           if ("question" in account) return account;
           return prepared(
@@ -907,8 +921,15 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         }
         const input = parse<Record<string, unknown>>(updateFinanceTransactionInputSchema);
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
-        if (!input || !id)
-          return missing("Provide a valid transaction ID and a category or note change.");
+        if (!id)
+          return missing("Provide the transaction ID to update.", [expectedAnswer("id", "string")]);
+        if (!input)
+          return missing(
+            "Provide a valid transaction category or note change.",
+            "category" in rawInput
+              ? [expectedAnswer("category", "string")]
+              : [expectedAnswer("notes", "string")],
+          );
         const item = await row(
           lockRead(
             executor
@@ -919,6 +940,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               .limit(1),
           ),
           "Choose one of your Finance transactions.",
+          [expectedAnswer("id", "string")],
         );
         if ("question" in item) return item;
         const [account] = await lockRead(
@@ -929,7 +951,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             .orderBy(financeAccounts.id)
             .limit(1),
         );
-        if (!account) return missing("The transaction account is unavailable.");
+        if (!account)
+          return missing("The transaction account is unavailable.", [
+            expectedAnswer("id", "string"),
+          ]);
         return prepared(
           { ...input, id },
           item.updatedAt.toISOString(),
@@ -949,7 +974,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       case "income_stream": {
         const input = parse<Record<string, unknown>>(updateFinanceIncomeStreamInputSchema);
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
-        if (!input || !id) return missing("Provide a valid income-stream ID and status.");
+        if (!input || !id)
+          return missing("Provide a valid income-stream ID and status.", [
+            expectedAnswer("id", "string"),
+            expectedAnswer("status", "string", { choices: ["active", "paused"] }),
+          ]);
         const item = await row(
           lockRead(
             executor
@@ -960,6 +989,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               .limit(1),
           ),
           "Choose one of your income streams.",
+          [expectedAnswer("id", "string")],
         );
         if ("question" in item) return item;
         return prepared(
@@ -1006,20 +1036,25 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           privilegedContext as never,
           executor as never,
         );
-      case "budget_plan":
+      case "budget_plan": {
+        // `payAccountId` is a recovery-only preparation override. It keeps a
+        // corrected owned account in the private revision snapshot without
+        // widening the public budget-plan writer contract or result.
+        const { payAccountId: _payAccountId, ...budgetInput } = input;
         return "allocations" in input
           ? invoke(
               finances.setBudgetPlan,
-              input as never,
+              budgetInput as never,
               privilegedContext as never,
               executor as never,
             )
           : invoke(
               finances.createBudget,
-              input as never,
+              budgetInput as never,
               privilegedContext as never,
               executor as never,
             );
+      }
       case "categorization":
         return ensureApplied(
           await invoke(
@@ -1125,8 +1160,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       return {
         question: question(
           prepared.actionKind,
-          prepared.input,
           "The Finance records changed after this action was prepared. Refresh the evidence and submit a new action.",
+          [],
         ),
         status: "needs_input" as const,
       };
@@ -1455,10 +1490,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           throw new AppError("conflict", "This Finance question has already been answered.");
         }
         const originalActionKind = supportedActionKind(payload.original.actionKind);
-        const expected =
-          payload.question.expectedAnswer.length > 0
-            ? payload.question.expectedAnswer
-            : expectedAnswerFor(originalActionKind, payload.original.input);
+        const expected = payload.question.expectedAnswer;
         const retryQuestion = { ...payload.question, expectedAnswer: expected, id: review.id };
         if (!suppliedAnswer) {
           return { question: retryQuestion, status: "needs_input" as const };

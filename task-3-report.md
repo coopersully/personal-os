@@ -142,3 +142,19 @@ Status: DONE
 - `pnpm --filter @personal-os/api typecheck` — passed.
 - `pnpm --filter @personal-os/mcp typecheck` — passed.
 - Scoped Biome and `git diff --check` — passed with four pre-existing `noNonNullAssertion` warnings in the action integration test; no errors.
+
+## Recoverable question-descriptor follow-up
+
+Status: DONE
+
+- Every Finance action-preparation `missing` branch now supplies an explicit, failure-specific descriptor; no descriptor is synthesized from the action kind or raw input fallback.
+- Ownership and reference failures request only a replacement owned ID (or the affected `allocations`, `goalIds`, or `decisions` collection), so answers merge into the original action and can resume it.
+- Budget capacity asks for the explicit over-allocation acknowledgement. A recovered pay account remains a private preparation override and is excluded from the budget writer/result contract.
+- The table-driven integration coverage proves corrected questions advance for all eight action families, with extra coverage for malformed transaction data, categories/goals/accounts, stale evidence, low-confidence/ambiguous categorization, and capacity.
+
+## Recoverable question-descriptor verification
+
+- `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts` — 60 tests passed.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/domain typecheck` — passed.
+- Scoped Biome and `git diff --check` — passed with four pre-existing `noNonNullAssertion` warnings in the action integration test; no errors.

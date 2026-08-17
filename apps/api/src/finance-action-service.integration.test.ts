@@ -998,9 +998,9 @@ describe.sequential("finance action service", () => {
     });
     const context = { principal: agent(userId), requestId: "evidence-bypass" };
 
-    await expect(
-      service.performDirect("categorization", decision(0.5), context),
-    ).resolves.toMatchObject({ status: "needs_input" });
+    const lowConfidence = await service.performDirect("categorization", decision(0.5), context);
+    if (lowConfidence.status !== "needs_input") throw new Error("Expected an evidence question.");
+    expect(lowConfidence.question.expectedAnswer.map((field) => field.name)).toEqual(["decisions"]);
     await expect(
       database.db
         .select({ categoryId: financeTransactions.categoryId })
@@ -1011,9 +1011,12 @@ describe.sequential("finance action service", () => {
       .update(financeTransactions)
       .set({ reconciliationStatus: "candidate" })
       .where(eq(financeTransactions.id, transaction.id));
-    await expect(
-      service.performDirect("categorization", decision(0.5), context),
-    ).resolves.toMatchObject({ status: "needs_input" });
+    const ambiguousTransfer = await service.performDirect("categorization", decision(0.5), context);
+    if (ambiguousTransfer.status !== "needs_input")
+      throw new Error("Expected an evidence question.");
+    expect(ambiguousTransfer.question.expectedAnswer.map((field) => field.name)).toEqual([
+      "decisions",
+    ]);
     await database.db
       .update(financeTransactions)
       .set({ reconciliationStatus: "not_applicable", updatedAt: transaction.updatedAt })
@@ -2028,5 +2031,196 @@ describe.sequential("finance action service", () => {
         .from(financeMerchants)
         .where(eq(financeMerchants.id, source.id)),
     ).resolves.toEqual([]);
+  });
+
+  it("asks only for the failed prerequisite and accepts its correction across every action family", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [foreignUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Question descriptor foreign owner",
+        email: `question-descriptor-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!foreignUser) throw new Error("Question descriptor foreign owner was not created.");
+    const owned = await seedActionCases(
+      database,
+      userId,
+      `Descriptor owned ${crypto.randomUUID()}`,
+    );
+    const foreign = await seedActionCases(
+      database,
+      foreignUser.id,
+      `Descriptor foreign ${crypto.randomUUID()}`,
+    );
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: {
+        applyCategorizations: vi.fn(async () => []),
+        createBudget: vi.fn(async () => ({})),
+        createTransaction: vi.fn(async () => ({})),
+        resolveAlert: vi.fn(async () => ({})),
+        setBudgetPlan: vi.fn(async () => ({})),
+        updateIncomeStream: vi.fn(async () => ({})),
+        updateMerchant: vi.fn(async () => ({})),
+        updateProfile: vi.fn(async () => ({})),
+        updateRecurringObligation: vi.fn(async () => ({})),
+        updateTransaction: vi.fn(async () => ({})),
+        validatePreparedCategorizations: vi.fn(async () => true),
+      } as never,
+      now: () => now,
+    });
+    const ownedByKind = new Map(owned.map((item) => [item.actionKind, item]));
+    const ownedProfile = ownedByKind.get("profile");
+    const ownedBudget = ownedByKind.get("budget_plan");
+    const ownedCategorization = ownedByKind.get("categorization");
+    const ownedMerchant = ownedByKind.get("merchant");
+    const ownedRecurring = ownedByKind.get("recurring_obligation");
+    const ownedAlert = ownedByKind.get("alert");
+    const ownedTransaction = ownedByKind.get("transaction");
+    const ownedIncome = ownedByKind.get("income_stream");
+    const foreignProfile = foreign.find((item) => item.actionKind === "profile");
+    if (
+      !ownedProfile ||
+      !ownedBudget ||
+      !ownedCategorization ||
+      !ownedMerchant ||
+      !ownedRecurring ||
+      !ownedAlert ||
+      !ownedTransaction ||
+      !ownedIncome ||
+      !foreignProfile
+    )
+      throw new Error("Question descriptor fixtures were not created.");
+    const descriptor = new Map<
+      SupportedActionKind,
+      { fields: string[]; patch: ActionCase["input"] }
+    >([
+      [
+        "profile",
+        { fields: ["payAccountId"], patch: { payAccountId: ownedProfile.input.payAccountId } },
+      ],
+      [
+        "budget_plan",
+        { fields: ["allocations"], patch: { allocations: ownedBudget.input.allocations } },
+      ],
+      [
+        "categorization",
+        { fields: ["decisions"], patch: { decisions: ownedCategorization.input.decisions } },
+      ],
+      ["merchant", { fields: ["id"], patch: { id: ownedMerchant.input.id } }],
+      ["recurring_obligation", { fields: ["id"], patch: { id: ownedRecurring.input.id } }],
+      ["alert", { fields: ["id"], patch: { id: ownedAlert.input.id } }],
+      ["transaction", { fields: ["id"], patch: { id: ownedTransaction.input.id } }],
+      ["income_stream", { fields: ["id"], patch: { id: ownedIncome.input.id } }],
+    ]);
+
+    for (const foreignCase of foreign) {
+      const expected = descriptor.get(foreignCase.actionKind);
+      if (!expected) throw new Error("Question descriptor case was not configured.");
+      const asked = await service.performDirect(foreignCase.actionKind, foreignCase.foreignInput, {
+        principal: agent(userId),
+        requestId: `question-descriptor-${foreignCase.actionKind}`,
+      });
+      if (asked.status !== "needs_input")
+        throw new Error("Expected a recoverable Finance question.");
+      expect(asked.question.expectedAnswer.map((field) => field.name)).toEqual(expected.fields);
+      await expect(
+        service.answerQuestion(asked.question.id, JSON.stringify(expected.patch), {
+          principal: agent(userId),
+          requestId: `question-descriptor-answer-${foreignCase.actionKind}`,
+        }),
+      ).resolves.toMatchObject({ status: "applied" });
+    }
+
+    const [foreignGoal] = await database.db
+      .insert(goals)
+      .values({ title: "Foreign descriptor goal", userId: foreignUser.id })
+      .returning();
+    if (!foreignGoal) throw new Error("Foreign descriptor goal was not created.");
+    const extraCases = [
+      {
+        actionKind: "budget_plan" as const,
+        fields: ["goalIds"],
+        input: { ...ownedBudget.input, goalIds: [foreignGoal.id] },
+        patch: { goalIds: [] },
+      },
+      {
+        actionKind: "categorization" as const,
+        fields: ["decisions"],
+        input: {
+          decisions: (ownedCategorization.input.decisions as Array<Record<string, unknown>>).map(
+            (decision) => ({
+              ...decision,
+              expectedTransactionUpdatedAt: "2020-01-01T00:00:00.000Z",
+            }),
+          ),
+        },
+        patch: { decisions: ownedCategorization.input.decisions },
+      },
+      {
+        actionKind: "transaction" as const,
+        fields: ["accountId"],
+        input: {
+          accountId: foreignProfile.input.payAccountId,
+          amount: 1,
+          date: "2026-09-01",
+          direction: "expense",
+          merchant: "Descriptor account correction",
+        },
+        patch: { accountId: ownedProfile.input.payAccountId },
+      },
+      {
+        actionKind: "transaction" as const,
+        fields: ["notes"],
+        input: { id: ownedTransaction.input.id, notes: 42 },
+        patch: { notes: "Corrected descriptor note." },
+      },
+    ];
+    for (const item of extraCases) {
+      const asked = await service.performDirect(item.actionKind, item.input, {
+        principal: agent(userId),
+        requestId: `question-descriptor-extra-${item.fields[0]}`,
+      });
+      if (asked.status !== "needs_input")
+        throw new Error("Expected a recoverable Finance question.");
+      expect(asked.question.expectedAnswer.map((field) => field.name)).toEqual(item.fields);
+      await expect(
+        service.answerQuestion(asked.question.id, JSON.stringify(item.patch), {
+          principal: agent(userId),
+          requestId: `question-descriptor-extra-answer-${item.fields[0]}`,
+        }),
+      ).resolves.toMatchObject({ status: "applied" });
+    }
+
+    await database.db.insert(financeProfiles).values({
+      effectiveDate: "2026-08-01",
+      expectedNetPay: 500,
+      payFrequency: "monthly",
+      userId,
+    });
+    const capacityAsked = await service.performDirect("budget_plan", ownedBudget.input, {
+      principal: agent(userId),
+      requestId: "question-descriptor-capacity",
+    });
+    if (capacityAsked.status !== "needs_input") throw new Error("Expected a capacity question.");
+    expect(capacityAsked.question.expectedAnswer.map((field) => field.name)).toEqual([
+      "acknowledgeOverAllocation",
+    ]);
+    await expect(
+      service.answerQuestion(
+        capacityAsked.question.id,
+        JSON.stringify({ acknowledgeOverAllocation: true }),
+        { principal: agent(userId), requestId: "question-descriptor-capacity-answer" },
+      ),
+    ).resolves.toMatchObject({ status: "applied" });
   });
 });

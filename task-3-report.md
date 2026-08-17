@@ -66,3 +66,19 @@ Status: DONE
 - `pnpm vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts packages/api-client/src/client.test.ts apps/mcp/src/server.test.ts` — 89 tests passed.
 - API, Domain, API-client, MCP, and Web type checks passed.
 - Scoped Biome and `git diff --check` passed with the four existing `noNonNullAssertion` warnings in the Finance action integration test.
+
+## Fix round 3B — actionable reviews and deterministic account locks
+
+Status: DONE
+
+- Revalidation now discovers referenced accounts without locking, then locks owned accounts in sorted ID order before locking sorted transactions and categories. Transaction updates use the same account-before-transaction order, matching account deletion and eliminating the crossed lock cycle.
+- A real PostgreSQL barrier regression holds account deletion after its account lock, starts pending transaction approval, and verifies both operations finish within the statement-timeout-bound test window without a deadlock; the deleted account and its transaction are absent afterward.
+- Profile reviews now describe every material non-sensitive field, redact employer and role values, and correctly render unset monetary and account values. Invalid gross income requests the specific recoverable field and a corrected answer advances the original action.
+- Budget-plan review rows now include the category label, formatted allocation amount, and allocation count. Merchant renames state both the current and replacement names.
+- Pending Finance questions reuse the same ID only for the same requesting agent; an identical request from another agent receives an independent question.
+
+### Verification
+
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts` — 67 tests passed.
+- `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/database typecheck` — passed.
+- Scoped Biome, formatter, and `git diff --check` — passed after removing the remaining action-integration non-null assertion warnings.

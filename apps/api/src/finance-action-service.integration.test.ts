@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import {
   auditEvents,
   createDatabaseClient,
+  domainProfiles,
   financeAccounts,
   financeAgentActionReviews,
   financeAlerts,
@@ -26,9 +27,9 @@ import type { Principal } from "./types.js";
 
 const now = new Date("2026-08-17T12:00:00.000Z");
 
-function agent(userId: string): Principal {
+function agent(userId: string, actorId = "finance-agent"): Principal {
   return {
-    actorId: "finance-agent",
+    actorId,
     actorType: "agent",
     scopes: new Set(["finances:read", "finances:write"]),
     userId,
@@ -42,6 +43,26 @@ function user(userId: string): Principal {
     scopes: new Set(["finances:read", "finances:write"]),
     userId,
   };
+}
+
+async function waitForLockWaiter(
+  pool: ReturnType<typeof createDatabaseClient>["pool"],
+  tableName: string,
+) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(
+      `SELECT count(*)::text AS count
+       FROM pg_stat_activity
+       WHERE datname = current_database()
+         AND wait_event_type = 'Lock'
+         AND query LIKE $1`,
+      [`%${tableName}%`],
+    );
+    if (Number(result.rows[0]?.count ?? 0) > 0) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error(`Expected a database lock waiter for ${tableName}.`);
 }
 
 type ActionCase = {
@@ -813,6 +834,108 @@ describe.sequential("finance action service", () => {
     ).resolves.toEqual([{ notes: "human edit" }]);
   });
 
+  it("orders account locks before pending transaction approval locks during account deletion", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Delete lock-order bank",
+        name: "Delete lock-order checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Delete lock-order account was not created.");
+    const [transaction] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 500,
+        direction: "expense",
+        merchant: "Delete lock-order merchant",
+        notes: "before",
+        transactionDate: "2026-08-24",
+        userId,
+      })
+      .returning();
+    const [profile] = await database.db
+      .insert(domainProfiles)
+      .values({
+        categories: [],
+        domain: "finances",
+        instructions: [],
+        objective: "Keep account deletion ordered.",
+        preferences: {},
+        sourceContexts: [],
+        summary: "A test-only deletion lock barrier.",
+        userId,
+      })
+      .returning();
+    if (!transaction || !profile) throw new Error("Delete lock-order fixtures were not created.");
+
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const queued = await actions.performDirect(
+      "transaction",
+      { id: transaction.id, notes: "approved change" },
+      { principal: agent(userId), requestId: "delete-lock-order-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a pending Finance review.");
+
+    const profileBlocker = await database.pool.connect();
+    try {
+      await profileBlocker.query("BEGIN");
+      await profileBlocker.query("SET LOCAL statement_timeout = '5s'");
+      await profileBlocker.query("SELECT id FROM domain_profiles WHERE id = $1 FOR UPDATE", [
+        profile.id,
+      ]);
+      const deletion = finances.deleteAccount(account.id, {
+        principal: user(userId),
+        requestId: "delete-lock-order-delete",
+      });
+      await waitForLockWaiter(database.pool, "domain_profiles");
+      const approval = actions.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "delete-lock-order-approve",
+      });
+      await waitForLockWaiter(database.pool, "finance_accounts");
+
+      await profileBlocker.query("COMMIT");
+      const outcomes = await Promise.race([
+        Promise.allSettled([deletion, approval]),
+        new Promise<"timed_out">((resolvePromise) =>
+          setTimeout(() => resolvePromise("timed_out"), 5_000),
+        ),
+      ]);
+      expect(outcomes).not.toBe("timed_out");
+      if (outcomes === "timed_out")
+        throw new Error("Account deletion and approval did not finish.");
+      expect(outcomes).toEqual([
+        expect.objectContaining({ status: "fulfilled" }),
+        expect.objectContaining({ status: "fulfilled" }),
+      ]);
+      await expect(
+        database.db
+          .select({ id: financeAccounts.id })
+          .from(financeAccounts)
+          .where(eq(financeAccounts.id, account.id)),
+      ).resolves.toEqual([]);
+      await expect(
+        database.db
+          .select({ id: financeTransactions.id })
+          .from(financeTransactions)
+          .where(eq(financeTransactions.id, transaction.id)),
+      ).resolves.toEqual([]);
+    } finally {
+      await profileBlocker.query("ROLLBACK").catch(() => undefined);
+      profileBlocker.release();
+    }
+  });
+
   it("describes the public answer fields for every supported action family", async () => {
     const service = createFinanceActionService({
       db: database.db,
@@ -1321,6 +1444,69 @@ describe.sequential("finance action service", () => {
     expect(outcome.review.changes[0]?.summary).not.toContain("Private employer text");
   });
 
+  it("summarizes every material profile field while redacting private employer and role values", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Profile summary bank",
+        name: "Profile summary checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    if (!account) throw new Error("Profile summary account was not created.");
+    const outcome = await createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile: vi.fn() } as never,
+      now: () => now,
+    }).performDirect(
+      "profile",
+      {
+        dependents: 2,
+        effectiveDate: "2026-12-02",
+        employer: "Private employer canary",
+        employmentType: "full_time",
+        expectedNetPay: 1234.56,
+        grossAnnualIncome: 98765.43,
+        householdSize: 4,
+        housingStatus: "renting",
+        investmentRiskCapacity: "moderate",
+        investmentRiskWillingness: "growth",
+        monthlyHousingCost: 2100,
+        nextPayday: "2026-12-06",
+        payAccountId: account.id,
+        payFrequency: "biweekly",
+        reserveTargetMonths: 6,
+        role: "Private role canary",
+      },
+      { principal: agent(userId), requestId: "profile-all-material-fields" },
+    );
+    if (outcome.status !== "pending_review") throw new Error("Expected a pending review.");
+    const summary = outcome.review.changes[0]?.summary ?? "";
+    expect(summary).toContain("employer updated.");
+    expect(summary).toContain("role updated.");
+    expect(summary).toContain("employment unset → full time");
+    expect(summary).toContain("net pay unset → $1234.56");
+    expect(summary).toContain("annual income unset → $98765.43");
+    expect(summary).toContain("next payday unset → 2026-12-06");
+    expect(summary).toContain("pay account unset → selected account");
+    expect(summary).toContain("housing status unset → renting");
+    expect(summary).toContain("housing cost unset → $2100.00");
+    expect(summary).toContain("risk capacity unset → moderate");
+    expect(summary).toContain("risk willingness unset → growth");
+    expect(summary).toContain("reserve target unset → 6 months");
+    expect(summary).toContain("household size unset → 4");
+    expect(summary).toContain("dependents unset → 2");
+    expect(summary).not.toContain("Private employer canary");
+    expect(summary).not.toContain("Private role canary");
+    expect(summary.length).toBeLessThanOrEqual(500);
+  });
+
   it("labels merchant merge source and target by their requested IDs", async () => {
     const [source] = await database.db
       .insert(financeMerchants)
@@ -1355,6 +1541,31 @@ describe.sequential("finance action service", () => {
     );
     if (outcome.status !== "pending_review") throw new Error("Expected a pending review.");
     expect(outcome.review.changes[0]?.summary).toBe("Merge Source merchant into Target merchant.");
+  });
+
+  it("names the existing and replacement merchant in a rename review", async () => {
+    const [merchant] = await database.db
+      .insert(financeMerchants)
+      .values({
+        displayName: "Merchant before rename",
+        normalizedName: `merchant-before-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!merchant) throw new Error("Merchant rename fixture was not created.");
+    const outcome = await createFinanceActionService({
+      db: database.db,
+      finances: { updateMerchant: vi.fn() } as never,
+      now: () => now,
+    }).performDirect(
+      "merchant",
+      { displayName: "Merchant after rename", id: merchant.id },
+      { principal: agent(userId), requestId: "merchant-rename-projection" },
+    );
+    if (outcome.status !== "pending_review") throw new Error("Expected a pending review.");
+    expect(outcome.review.changes[0]?.summary).toBe(
+      "Rename Merchant before rename to Merchant after rename.",
+    );
   });
 
   it("serializes concurrent changed profile proposals on their semantic target", async () => {
@@ -1433,10 +1644,11 @@ describe.sequential("finance action service", () => {
       .insert(financeCategories)
       .values({ group: "Custom", name: "Overlap", slug: `overlap-${crypto.randomUUID()}`, userId })
       .returning();
+    if (!account || !category) throw new Error("Overlap categorization fixtures were not created.");
     const [transaction] = await database.db
       .insert(financeTransactions)
       .values({
-        accountId: account!.id,
+        accountId: account.id,
         amount: 100,
         direction: "expense",
         merchant: "Overlap",
@@ -1444,6 +1656,7 @@ describe.sequential("finance action service", () => {
         userId,
       })
       .returning();
+    if (!transaction) throw new Error("Overlap categorization transaction was not created.");
     const service = createFinanceActionService({
       db: database.db,
       finances: {
@@ -1455,12 +1668,12 @@ describe.sequential("finance action service", () => {
     const decision = (rationale: string) => ({
       decisions: [
         {
-          categoryId: category!.id,
+          categoryId: category.id,
           confidence: 1,
-          expectedTransactionUpdatedAt: transaction!.updatedAt.toISOString(),
+          expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
           learnMerchant: "suggest",
           rationale,
-          transactionId: transaction!.id,
+          transactionId: transaction.id,
         },
       ],
     });
@@ -1632,6 +1845,55 @@ describe.sequential("finance action service", () => {
       }),
     ).resolves.toMatchObject({ status: "needs_input" });
     expect(setBudgetPlan).not.toHaveBeenCalled();
+  });
+
+  it("makes each budget-plan allocation independently reviewable by category, amount, and plan count", async () => {
+    const categories = await database.db
+      .insert(financeCategories)
+      .values([
+        {
+          group: "Budget review",
+          name: "Budget review groceries",
+          slug: `budget-review-groceries-${crypto.randomUUID()}`,
+          userId,
+        },
+        {
+          group: "Budget review",
+          name: "Budget review utilities",
+          slug: `budget-review-utilities-${crypto.randomUUID()}`,
+          userId,
+        },
+      ])
+      .returning();
+    if (categories.length !== 2) throw new Error("Budget review categories were not created.");
+    const outcome = await createFinanceActionService({
+      db: database.db,
+      finances: { setBudgetPlan: vi.fn() } as never,
+      now: () => now,
+    }).performDirect(
+      "budget_plan",
+      {
+        allocations: [
+          { categoryId: categories[0]?.id, limit: 123.45 },
+          { categoryId: categories[1]?.id, limit: 67.89 },
+        ],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-12",
+        rationale: "Make the plan review actionable.",
+        replace: true,
+        scenarioFingerprint: null,
+      },
+      { principal: agent(userId), requestId: "budget-plan-actionable-summary" },
+    );
+    if (outcome.status !== "pending_review") throw new Error("Expected a pending review.");
+    expect(outcome.review.changes).toHaveLength(2);
+    expect(outcome.review.changes.map((change) => change.summary)).toEqual(
+      expect.arrayContaining([
+        "Set 2026-12 Budget review groceries allocation to $123.45 (2 allocations).",
+        "Set 2026-12 Budget review utilities allocation to $67.89 (2 allocations).",
+      ]),
+    );
   });
 
   it("queues and revalidates a maximum-size budget plan with a bounded public revision", async () => {
@@ -2148,6 +2410,12 @@ describe.sequential("finance action service", () => {
     if (!foreignGoal) throw new Error("Foreign descriptor goal was not created.");
     const extraCases = [
       {
+        actionKind: "profile" as const,
+        fields: ["grossAnnualIncome"],
+        input: { effectiveDate: "2026-12-03", grossAnnualIncome: "invalid" },
+        patch: { grossAnnualIncome: 75_000 },
+      },
+      {
         actionKind: "budget_plan" as const,
         fields: ["goalIds"],
         input: { ...ownedBudget.input, goalIds: [foreignGoal.id] },
@@ -2222,6 +2490,35 @@ describe.sequential("finance action service", () => {
         { principal: agent(userId), requestId: "question-descriptor-capacity-answer" },
       ),
     ).resolves.toMatchObject({ status: "applied" });
+  });
+
+  it("reuses a pending question only for the same requesting agent", async () => {
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { updateProfile: vi.fn() } as never,
+      now: () => now,
+    });
+    const input = { effectiveDate: "2026-12-04", grossAnnualIncome: "invalid" };
+    const first = await service.performDirect("profile", input, {
+      principal: agent(userId, "question-agent-one"),
+      requestId: "question-fingerprint-first",
+    });
+    const repeated = await service.performDirect("profile", input, {
+      principal: agent(userId, "question-agent-one"),
+      requestId: "question-fingerprint-repeat",
+    });
+    const independent = await service.performDirect("profile", input, {
+      principal: agent(userId, "question-agent-two"),
+      requestId: "question-fingerprint-independent",
+    });
+    if (
+      first.status !== "needs_input" ||
+      repeated.status !== "needs_input" ||
+      independent.status !== "needs_input"
+    )
+      throw new Error("Expected recoverable Finance questions.");
+    expect(repeated.question.id).toBe(first.question.id);
+    expect(independent.question.id).not.toBe(first.question.id);
   });
 
   it("requires agent transaction categories to satisfy categorization evidence before applying", async () => {

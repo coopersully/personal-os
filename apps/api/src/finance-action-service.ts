@@ -137,12 +137,37 @@ function profileProjection(
   const before = existing ?? null;
   const changes: string[] = [];
   const field = (name: string, label: string, format = (value: unknown) => String(value)) => {
-    if (input[name] === undefined || input[name] === before?.[name as keyof typeof before]) return;
-    const oldValue = before?.[name as keyof typeof before] ?? "unset";
-    changes.push(`${label} ${format(oldValue)} → ${format(input[name])}`);
+    const oldValue = before?.[name as keyof typeof before];
+    const newValue = input[name];
+    if (newValue === undefined || (oldValue ?? null) === (newValue ?? null)) return;
+    changes.push(
+      `${label} ${oldValue == null ? "unset" : format(oldValue)} → ${newValue == null ? "unset" : format(newValue)}`,
+    );
   };
+  const privateField = (name: string, label: string) => {
+    if (
+      input[name] !== undefined &&
+      (input[name] ?? null) !== (before?.[name as keyof typeof before] ?? null)
+    )
+      changes.push(`${label} updated.`);
+  };
+  privateField("employer", "employer");
+  privateField("role", "role");
   field("employmentType", "employment", (value) => String(value).replaceAll("_", " "));
   field("payFrequency", "pay frequency", (value) => String(value));
+  field("nextPayday", "next payday");
+  field("payAccountId", "pay account", (value) => (value == null ? "unset" : "selected account"));
+  field("housingStatus", "housing status", (value) => String(value).replaceAll("_", " "));
+  field("monthlyHousingCost", "housing cost", (value) =>
+    value == null ? "unset" : `$${Number(value).toFixed(2)}`,
+  );
+  field("investmentRiskCapacity", "risk capacity", (value) => String(value).replaceAll("_", " "));
+  field("investmentRiskWillingness", "risk willingness", (value) =>
+    String(value).replaceAll("_", " "),
+  );
+  field("reserveTargetMonths", "reserve target", (value) =>
+    value == null ? "unset" : `${String(value)} months`,
+  );
   const beforeNetPay = before?.expectedNetPay == null ? null : before.expectedNetPay / 100;
   if (input.expectedNetPay !== undefined && input.expectedNetPay !== beforeNetPay) {
     changes.push(
@@ -334,6 +359,17 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     // lock is deliberately never requested.
     const lockRead = <T>(query: T): T =>
       lockTargets ? (query as { for: (strength: "update") => T }).for("update") : query;
+    const lockAccounts = async (accountIds: string[]) => {
+      const ids = [...new Set(accountIds)].sort();
+      if (!ids.length) return [] as Array<typeof financeAccounts.$inferSelect>;
+      return lockRead(
+        executor
+          .select()
+          .from(financeAccounts)
+          .where(and(eq(financeAccounts.userId, userId), inArray(financeAccounts.id, ids)))
+          .orderBy(financeAccounts.id),
+      );
+    };
     const row = async <T>(query: PromiseLike<T[]>, why: string, expected: ExpectedAnswer[]) => {
       const item = (await query)[0];
       return item ?? missing(why, expected);
@@ -365,9 +401,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       case "profile": {
         const input = parse<Record<string, unknown>>(updateFinanceProfileInputSchema);
         if (!input)
-          return missing("Provide a complete valid Finance profile.", [
-            expectedAnswer("effectiveDate", "string", { example: "2026-08-17" }),
-          ]);
+          return missing(
+            "Provide a complete valid Finance profile.",
+            "grossAnnualIncome" in rawInput &&
+              rawInput.grossAnnualIncome !== null &&
+              typeof rawInput.grossAnnualIncome !== "number"
+              ? [expectedAnswer("grossAnnualIncome", "number")]
+              : [expectedAnswer("effectiveDate", "string", { example: "2026-08-17" })],
+          );
         const account = input.payAccountId
           ? await row(
               lockRead(
@@ -573,7 +614,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
             allocations.map((item) => ({
               entityId: item.categoryId,
               entityType: "finance_budget",
-              summary: `Set ${String(plan.month)} allocation to $${item.limit.toFixed(2)}.`,
+              summary: `Set ${String(plan.month)} ${categories.find((category) => category.id === item.categoryId)?.name ?? "selected category"} allocation to $${item.limit.toFixed(2)} (${allocations.length} allocations).`,
             })),
             [
               ...categories.map((item) => localSource(item.id, item.updatedAt.toISOString())),
@@ -638,6 +679,32 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           expectedTransactionUpdatedAt: string;
           rationale: string;
         }>;
+        // Account deletion locks accounts before it locks their transactions.
+        // Read the account references without locks, then retain account locks
+        // in ID order before taking transaction locks. The second transaction
+        // read below is the locked, authoritative snapshot used to decide.
+        const transactionAccounts = await executor
+          .select({ accountId: financeTransactions.accountId, id: financeTransactions.id })
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              inArray(
+                financeTransactions.id,
+                decisions.map((item) => item.transactionId),
+              ),
+            ),
+          )
+          .orderBy(financeTransactions.id);
+        if (transactionAccounts.length !== decisions.length)
+          return missing("Every categorization must target one of your transactions.", [
+            expectedAnswer("decisions", "object_array", { example: "[...]" }),
+          ]);
+        const accounts = await lockAccounts(transactionAccounts.map((item) => item.accountId));
+        if (accounts.length !== new Set(transactionAccounts.map((item) => item.accountId)).size)
+          return missing("A transaction account is unavailable.", [
+            expectedAnswer("decisions", "object_array", { example: "[...]" }),
+          ]);
         const transactions = await lockRead(
           executor
             .select()
@@ -688,21 +755,6 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           return missing("Every categorization must use one of your categories.", [
             expectedAnswer("decisions", "object_array", { example: "[...]" }),
           ]);
-        const accounts = await lockRead(
-          executor
-            .select()
-            .from(financeAccounts)
-            .where(
-              and(
-                eq(financeAccounts.userId, userId),
-                inArray(
-                  financeAccounts.id,
-                  transactions.map((item) => item.accountId),
-                ),
-              ),
-            )
-            .orderBy(financeAccounts.id),
-        );
         const sourceRefs: MaterialSourceReference[] = [];
         for (const item of transactions) {
           const account = accounts.find((candidate) => candidate.id === item.accountId);
@@ -788,7 +840,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                 {
                   entityId: ids[0] ?? null,
                   entityType: "finance_merchant",
-                  summary: `Rename merchant to ${String(input.displayName)}.`,
+                  summary: `Rename ${merchants[0]?.displayName ?? "merchant"} to ${String(input.displayName)}.`,
                 },
               ],
           merchants.map((item) => localSource(item.id, item.updatedAt.toISOString())),
@@ -933,6 +985,25 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               ? [expectedAnswer("category", "string")]
               : [expectedAnswer("notes", "string")],
           );
+        // Keep the same account-before-transaction order as account deletion.
+        // This preliminary read never decides the action; it only determines
+        // which stable account rows must be locked first.
+        const transactionAccounts = await executor
+          .select({ accountId: financeTransactions.accountId, id: financeTransactions.id })
+          .from(financeTransactions)
+          .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
+          .orderBy(financeTransactions.id)
+          .limit(1);
+        if (!transactionAccounts[0])
+          return missing("Choose one of your Finance transactions.", [
+            expectedAnswer("id", "string"),
+          ]);
+        const accounts = await lockAccounts([transactionAccounts[0].accountId]);
+        const account = accounts[0];
+        if (!account)
+          return missing("The transaction account is unavailable.", [
+            expectedAnswer("id", "string"),
+          ]);
         const item = await row(
           lockRead(
             executor
@@ -946,15 +1017,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           [expectedAnswer("id", "string")],
         );
         if ("question" in item) return item;
-        const [account] = await lockRead(
-          executor
-            .select()
-            .from(financeAccounts)
-            .where(and(eq(financeAccounts.id, item.accountId), eq(financeAccounts.userId, userId)))
-            .orderBy(financeAccounts.id)
-            .limit(1),
-        );
-        if (!account)
+        if (item.accountId !== account.id)
           return missing("The transaction account is unavailable.", [
             expectedAnswer("id", "string"),
           ]);
@@ -1359,7 +1422,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .values({
             actionKind: "question",
             expectedRevision: null,
-            fingerprint: actionFingerprint("question", { actionKind, input }),
+            fingerprint: actionFingerprint("question", {
+              actionKind,
+              input,
+              requestingAgentId: context.principal.actorId,
+            }),
             maintenanceRunId: null,
             privatePayload: { original: { actionKind, input }, question: prepared.question },
             requestingAgentId: context.principal.actorId,
@@ -1385,7 +1452,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               eq(financeAgentActionReviews.userId, context.principal.userId),
               eq(
                 financeAgentActionReviews.fingerprint,
-                actionFingerprint("question", { actionKind, input }),
+                actionFingerprint("question", {
+                  actionKind,
+                  input,
+                  requestingAgentId: context.principal.actorId,
+                }),
               ),
               eq(financeAgentActionReviews.status, "pending"),
             ),

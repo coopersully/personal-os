@@ -47,6 +47,61 @@ describe("finance routes", () => {
     });
   });
 
+  it("compares scenarios on the read scope and forwards a complete budget plan", async () => {
+    const app = new Hono<AppEnv>();
+    const setBudgetPlan = vi.fn(async (input) => input);
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "finance-plan");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: { setBudgetPlan } as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+    const scenario = await app.request("/v1/finances/scenarios/compare", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        alternatives: [],
+        asOf: "2026-08-01",
+        baseline: { label: "Base", monthlyIncome: 1, startingCash: 0 },
+        horizonMonths: 1,
+      }),
+    });
+    expect(scenario.status).toBe(200);
+    await expect(scenario.json()).resolves.toMatchObject({
+      scenario: { baseline: { label: "Base" } },
+    });
+    const input = {
+      allocations: [{ categoryId: id, limit: 1 }],
+      month: "2026-08",
+      rationale: "Plan.",
+    };
+    const plan = await app.request("/v1/finances/budget-plan", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    expect(plan.status).toBe(200);
+    await expect(plan.json()).resolves.toMatchObject({ plan: input });
+    expect(setBudgetPlan).toHaveBeenCalledWith(
+      expect.objectContaining(input),
+      expect.objectContaining({ requestId: "finance-plan" }),
+    );
+  });
+
   it("keeps setup and owned attention agent-accessible while consequential Finance mutations stay human-only", async () => {
     const app = new Hono<AppEnv>();
     const finances = {

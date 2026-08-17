@@ -661,10 +661,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       }
       case "alert": {
-        if (rawInput.operation === "refresh")
+        if (rawInput.operation === "refresh") {
+          const alerts = await executor
+            .select()
+            .from(financeAlerts)
+            .where(eq(financeAlerts.userId, userId));
           return prepared(
             { operation: "refresh" },
-            null,
+            snapshotRevision(alerts.map((item) => [item.id, item.updatedAt.toISOString()]).sort()),
             [
               {
                 entityId: null,
@@ -672,8 +676,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                 summary: "Refresh Finance cash-flow insights.",
               },
             ],
-            [],
+            alerts.map((item) => localSource(item.id, item.updatedAt.toISOString())),
           );
+        }
         const input = parse<Record<string, unknown>>(resolveFinanceAlertInputSchema);
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
         if (!input || !id) return missing("Provide a valid Finance alert ID and resolution.");
@@ -854,7 +859,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       case "alert":
         return input.operation === "refresh"
-          ? invoke(finances.refreshCashflowInsights, context.principal.userId, executor as never)
+          ? invoke(
+              finances.refreshCashflowInsights,
+              context.principal.userId,
+              privilegedContext as never,
+              executor as never,
+            )
           : invoke(
               finances.resolveAlert,
               String(input.id),

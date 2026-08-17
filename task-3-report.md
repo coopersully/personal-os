@@ -49,3 +49,10 @@ Status: DONE
 
 - Bypass-off disposition now revalidates and queues only inside the locked database transaction.
 - Multi-item budget, categorization, and merchant revisions use bounded SHA-256 snapshot digests.
+
+## Refresh disposition follow-up
+
+Status: DONE
+
+- Finance insight refresh now carries mutation context and records a redacted, action-attributed audit in its transaction.
+- Refresh preparation snapshots alert evidence with a bounded revision digest, and the API client preserves action outcomes while retaining the human legacy result.

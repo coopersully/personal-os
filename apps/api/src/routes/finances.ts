@@ -243,7 +243,10 @@ export function registerFinanceRoutes({
   app.post("/v1/finances/insights/refresh", async (context) =>
     act(context, "alert", { operation: "refresh" }, async () =>
       context.json({
-        result: await finances.refreshCashflowInsights(context.get("principal").userId),
+        result: await finances.refreshCashflowInsights(
+          context.get("principal").userId,
+          financeMutationContext(context),
+        ),
       }),
     ),
   );

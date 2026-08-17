@@ -255,12 +255,13 @@ export function createFinanceApi(request: FinanceRequest) {
       });
       return actionResult(response, "alert");
     },
-    async refreshFinanceInsights(): Promise<{ refreshed: boolean }> {
-      const response = await request<{ result: { refreshed: boolean } }>(
-        "/v1/finances/insights/refresh",
-        { method: "POST" },
-      );
-      return response.result;
+    async refreshFinanceInsights(): Promise<
+      FinanceActionOutcome<{ refreshed: boolean }> | { refreshed: boolean }
+    > {
+      const response = await request<Record<string, unknown>>("/v1/finances/insights/refresh", {
+        method: "POST",
+      });
+      return actionResult(response, "result");
     },
     async getFinanceLedgerHealth(): Promise<FinanceLedgerHealth> {
       const response = await request<{ health: FinanceLedgerHealth }>("/v1/finances/health");

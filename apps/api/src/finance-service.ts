@@ -3451,8 +3451,24 @@ export function createFinanceService({
         upcomingObligations: forecast.upcomingObligations / 100,
       };
     },
-    async refreshCashflowInsights(userId: string, executor: FinanceWriteExecutor = db) {
+    async refreshCashflowInsights(
+      userId: string,
+      context?: MutationContext,
+      executor: FinanceWriteExecutor = db,
+    ) {
       await refreshCashflowIntelligence(userId, executor);
+      if (context) {
+        await executor.insert(auditEvents).values(
+          auditValues({
+            action: "finance.insights_refreshed",
+            after: { refreshed: true },
+            before: null,
+            entityId: userId,
+            entityType: "finance_alert",
+            ...context,
+          }),
+        );
+      }
       return { refreshed: true };
     },
     async backfillCashflowInsights() {

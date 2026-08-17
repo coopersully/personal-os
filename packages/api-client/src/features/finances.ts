@@ -6,6 +6,8 @@ import type {
   CreateFinanceTransactionInput,
   ExchangePlaidTokenInput,
   FinanceAccount,
+  FinanceActionOutcome,
+  FinanceActionReview,
   FinanceAlert,
   FinanceAutomationSettings,
   FinanceBudget,
@@ -362,6 +364,26 @@ export function createFinanceApi(request: FinanceRequest) {
         body: JSON.stringify({ answer }),
         method: "POST",
       });
+    },
+    async listFinanceActionReviews(limit = 50): Promise<FinanceActionReview[]> {
+      const response = await request<{ reviews: FinanceActionReview[] }>(
+        `/v1/finances/action-reviews?limit=${encodeURIComponent(limit)}`,
+      );
+      return response.reviews;
+    },
+    async approveFinanceActionReview(id: string): Promise<FinanceActionOutcome<unknown>> {
+      const response = await request<{ outcome: FinanceActionOutcome<unknown> }>(
+        `/v1/finances/action-reviews/${encodeURIComponent(id)}/approve`,
+        { method: "POST" },
+      );
+      return response.outcome;
+    },
+    async dismissFinanceActionReview(id: string): Promise<FinanceActionReview> {
+      const response = await request<{ review: FinanceActionReview }>(
+        `/v1/finances/action-reviews/${encodeURIComponent(id)}/dismiss`,
+        { method: "POST" },
+      );
+      return response.review;
     },
     async updateFinanceTransaction(
       id: string,

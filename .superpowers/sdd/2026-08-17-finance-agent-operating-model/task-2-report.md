@@ -25,6 +25,22 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 1 — final budget-plan durability coverage
+
+Status: DONE_WITH_CONCERNS
+
+Authoritative implementation HEAD at final verification: `e7847075b1680534274c25984bb30814f0fa99e3` (`test(finances): cover budget plan durability`). The added integration case proves that foreign categories and goals are rejected without partial writes; durable plan metadata (goal IDs, assumptions, rationale, replace flag, scenario fingerprint, version, and allocations) is stored and reloaded from the database; a forced failure on a later allocation rolls back the replacement/upsert; and budget-plan audit payloads contain only counts, month, fingerprint, and policy-safe metadata rather than monetary totals.
+
+Verification passed:
+
+- `pnpm exec biome check --write apps/api/src/finance-service.integration.test.ts` (exited 0)
+- `pnpm exec vitest run apps/api/src/finance-service.integration.test.ts --reporter=dot` (1 file, 36 tests passed)
+- `pnpm --filter @personal-os/api typecheck` (exited 0)
+- `pnpm --filter @personal-os/database typecheck` (exited 0)
+- `git diff --check` (exited 0)
+
+The sole remaining concern is intentionally deferred Task 3 behavior: applied versus pending-review/needs-input disposition and durable bypass recheck/TOCTOU protection. This Task 2 work does not implement or assert either behavior.
+
 ## Fix round 1 — C4 Pass 2 (client transport tests)
 
 Status: DONE_WITH_CONCERNS

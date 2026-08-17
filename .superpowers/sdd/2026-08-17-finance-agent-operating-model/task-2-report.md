@@ -25,6 +25,21 @@ Committed `e8e21756e5ce5a53633defcd36cb4c7ba8680e03` (`fix(finances): persist bu
 
 `pnpm --filter @personal-os/api typecheck` and `pnpm --filter @personal-os/domain typecheck` passed. Remaining batches: shared cadence-aware capacity, status/close-readiness evidence, scenario edge cases, OAuth consent copy, and expanded focused tests.
 
+## Fix round 3 — normalized status income
+
+Status: DONE_WITH_CONCERNS
+
+Commit `67919aea64a366d900143ce427d85e456ffa601b` extracts the shared normalized reliable-monthly-income resolver and uses the exact same input for Finance status health, `income.monthly`, planning questions/missing facts, and capacity. Partial month-to-date income remains separately visible as raw observed evidence but is not a reliable monthly baseline; biweekly expected take-home now reports the same normalized monthly amount as capacity.
+
+Verification passed:
+
+- `pnpm exec vitest run apps/api/src/finance-status-service.integration.test.ts --reporter=dot` (1 file, 19 tests passed after the red phase showed both raw-income regressions)
+- `pnpm exec vitest run apps/api/src/finance-planning.test.ts apps/api/src/finance-status-service.integration.test.ts --reporter=dot` (2 files, 24 tests passed)
+- `pnpm --filter @personal-os/api typecheck` (exited 0)
+- `pnpm --filter @personal-os/domain typecheck` (exited 0)
+- `pnpm exec biome check --write apps/api/src/finance-planning.ts apps/api/src/finance-status-service.ts apps/api/src/finance-status-service.integration.test.ts` (exited 0)
+- `git diff --check` (exited 0)
+
 ## Fix round 2 — Batch E (MCP authority documentation)
 
 Status: DONE_WITH_CONCERNS

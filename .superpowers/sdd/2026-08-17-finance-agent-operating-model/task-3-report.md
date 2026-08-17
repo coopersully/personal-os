@@ -21,3 +21,19 @@ Concerns:
 - Existing Finance semantic writers still own their own database handles; approval locks/terminalizes the durable review in one transaction, but a writer's mutation/audit is not yet injected with that same transaction. This leaves a narrow atomicity gap that should be closed by adding transaction-executor parameters to the individual writers.
 - Question answers are stored durably and never authorize an action or mutate bypass. The current question shape is intentionally bounded text, so action-specific evidence extraction remains a follow-up for transaction categorization/split questions.
 - A completion review also found that preparation must load and revision-lock every affected owned record, and that review projections need precise redacted change/evidence details. The current generic projection is intentionally conservative but is not sufficient for a person to independently verify all material changes.
+
+## Fix round 1/5 — Batch A: atomic execution lane
+
+Status: DONE_WITH_CONCERNS
+
+Refactored the action-service execution path so its bypass setting read/`FOR UPDATE` lock and every supported semantic writer receive the same Drizzle transaction. Profile, budget, ledger, categorization/evidence, income, recurring, alert/refresh, and merchant paths now accept the executor and write audits through it. The bypass-false queue path inherits the locked transaction rather than falling back to the root database. Approval replays an already-applied stored result without invoking the writer again; a terminal-review failure rolls back real transaction and profile updates and preserves the pending review.
+
+Verification:
+
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts` — 44 passed, including real transaction/profile rollback injection and an external concurrent bypass-disable attempt held behind the action's settings lock.
+- `pnpm --filter @personal-os/api typecheck` — passed.
+- `pnpm --filter @personal-os/database typecheck` — passed.
+- `pnpm exec biome check --write apps/api/src/finance-action-service.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.ts` — passed after formatting.
+- `git diff --check` — passed.
+
+Remaining concern for later batches: prepare/revision evidence is not yet exhaustive across every action kind. This batch deliberately does not alter prepare/question/supersession behavior.

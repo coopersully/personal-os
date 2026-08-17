@@ -120,6 +120,7 @@ type FinanceProfileSourceExecutor = Pick<Database, "select">;
 type FinanceReadExecutor = Pick<Database, "select">;
 type FinanceReviewExecutor = Pick<Database, "insert" | "select" | "update">;
 type FinanceWriteExecutor = Pick<Database, "insert" | "select" | "update">;
+type FinanceActionWriteExecutor = FinanceWriteExecutor & Pick<Database, "delete" | "execute">;
 type PlaidCategoryConfidence = NonNullable<
   PlaidTransactionSnapshot["personalFinanceCategory"]
 >["confidenceLevel"];
@@ -673,8 +674,13 @@ export function createFinanceService({
     };
   }
 
-  async function categoryForId(userId: string, categoryId: string, context?: MutationContext) {
-    let [row] = await db
+  async function categoryForId(
+    userId: string,
+    categoryId: string,
+    context?: MutationContext,
+    executor: FinanceWriteExecutor = db,
+  ) {
+    let [row] = await executor
       .select()
       .from(financeCategories)
       .where(and(eq(financeCategories.id, categoryId), eq(financeCategories.userId, userId)))
@@ -684,8 +690,8 @@ export function createFinanceService({
       !context?.maintenanceClaim &&
       defaultCategories.some(([, slug]) => defaultCategoryId(userId, slug) === categoryId)
     ) {
-      await ensureCategories(userId);
-      [row] = await db
+      await ensureCategories(userId, executor);
+      [row] = await executor
         .select()
         .from(financeCategories)
         .where(and(eq(financeCategories.id, categoryId), eq(financeCategories.userId, userId)))
@@ -718,10 +724,15 @@ export function createFinanceService({
   async function categoryForProposalName(
     userId: string,
     name: string,
+    executor: FinanceReadExecutor = db,
   ): Promise<FinanceCategory | null> {
-    const existing = (await existingCategories(userId)).find(
-      (item) => item.name.toLowerCase() === name.toLowerCase(),
-    );
+    const existing = (
+      await executor
+        .select()
+        .from(financeCategories)
+        .where(eq(financeCategories.userId, userId))
+        .orderBy(financeCategories.group, financeCategories.name)
+    ).find((item) => item.name.toLowerCase() === name.toLowerCase());
     if (existing) return categoryValue(existing);
     const defaultCategory = defaultCategories.find(
       ([defaultName]) => defaultName.toLowerCase() === name.toLowerCase(),
@@ -790,9 +801,10 @@ export function createFinanceService({
     userId: string,
     merchantId: string | null,
     categoryId: string,
+    executor: FinanceReadExecutor = db,
   ) {
     if (!merchantId) return initialAgentThreshold;
-    const decisions = await db
+    const decisions = await executor
       .select({
         categoryId: financeClassificationDecisions.categoryId,
         outcome: financeClassificationDecisions.outcome,
@@ -811,8 +823,12 @@ export function createFinanceService({
     return Math.max(0.9, initialAgentThreshold - confirmations * 0.0125 + corrections * 0.02);
   }
 
-  async function learnedCategory(userId: string, merchant: string) {
-    const [rule] = await db
+  async function learnedCategory(
+    userId: string,
+    merchant: string,
+    executor: FinanceReadExecutor = db,
+  ) {
+    const [rule] = await executor
       .select({ category: financeCategoryRules.category })
       .from(financeCategoryRules)
       .where(
@@ -824,9 +840,13 @@ export function createFinanceService({
       .limit(1);
     return rule?.category;
   }
-  async function merchantCategoryEvidence(userId: string, merchantId: string | null) {
+  async function merchantCategoryEvidence(
+    userId: string,
+    merchantId: string | null,
+    executor: FinanceReadExecutor = db,
+  ) {
     if (!merchantId) return null;
-    const decisions = await db
+    const decisions = await executor
       .select({
         categoryId: financeClassificationDecisions.categoryId,
         categoryName: financeClassificationDecisions.categoryName,
@@ -863,26 +883,36 @@ export function createFinanceService({
       confirmations: strongest.confirmations,
     };
   }
-  async function automaticCategorization(userId: string, merchant: string) {
-    return categorization(merchant, await learnedCategory(userId, merchant));
+  async function automaticCategorization(
+    userId: string,
+    merchant: string,
+    executor: FinanceReadExecutor = db,
+  ) {
+    return categorization(merchant, await learnedCategory(userId, merchant, executor));
   }
   async function categorizationProposal(
     userId: string,
     item: FinanceTransaction,
     source?: MaterialSourceReference,
+    executor: FinanceReadExecutor = db,
   ): Promise<FinanceCategorizationProposal> {
     const rawMerchant = item.rawMerchant ?? item.merchant;
-    const learned = await learnedCategory(userId, rawMerchant);
+    const learned = await learnedCategory(userId, rawMerchant, executor);
     const automatic = categorization(rawMerchant, learned);
     const evidence = automatic.category
       ? null
-      : await merchantCategoryEvidence(userId, item.merchantId ?? null);
+      : await merchantCategoryEvidence(userId, item.merchantId ?? null, executor);
     const categoryName = automatic.category ?? evidence?.category ?? null;
     const suggestedCategory = categoryName
-      ? await categoryForProposalName(userId, categoryName)
+      ? await categoryForProposalName(userId, categoryName, executor)
       : null;
     const threshold = suggestedCategory
-      ? await merchantConfidenceThreshold(userId, item.merchantId ?? null, suggestedCategory.id)
+      ? await merchantConfidenceThreshold(
+          userId,
+          item.merchantId ?? null,
+          suggestedCategory.id,
+          executor,
+        )
       : initialAgentThreshold;
     const confidence =
       automatic.confidence === null ? (evidence?.confidence ?? 0) : automatic.confidence / 10_000;
@@ -898,7 +928,12 @@ export function createFinanceService({
           ? `Matched ${item.merchant} to ${evidence.confirmations} user confirmation${evidence.confirmations === 1 ? "" : "s"}.`
           : "No durable merchant or category evidence is available yet.",
       source:
-        source ?? (await financeTransactionSource(userId, await ownedTransaction(userId, item.id))),
+        source ??
+        (await financeTransactionSource(
+          userId,
+          await ownedTransaction(userId, item.id, executor),
+          executor,
+        )),
       suggestionBasis: learned ? "merchant_rule" : evidence ? "transaction_evidence" : null,
       suggestedCategory,
       threshold,
@@ -1347,8 +1382,8 @@ export function createFinanceService({
     }
     return plaid;
   }
-  async function ownedAccount(userId: string, id: string) {
-    const [row] = await db
+  async function ownedAccount(userId: string, id: string, executor: FinanceReadExecutor = db) {
+    const [row] = await executor
       .select()
       .from(financeAccounts)
       .where(and(eq(financeAccounts.id, id), eq(financeAccounts.userId, userId)))
@@ -1356,8 +1391,8 @@ export function createFinanceService({
     if (!row) throw new AppError("not_found", "The financial account was not found.");
     return row;
   }
-  async function ownedTransaction(userId: string, id: string) {
-    const [row] = await db
+  async function ownedTransaction(userId: string, id: string, executor: FinanceReadExecutor = db) {
+    const [row] = await executor
       .select()
       .from(financeTransactions)
       .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
@@ -1470,8 +1505,8 @@ export function createFinanceService({
       sourceType: "finance_recurring_obligation",
     };
   }
-  async function ownedMerchant(userId: string, id: string) {
-    const [row] = await db
+  async function ownedMerchant(userId: string, id: string, executor: FinanceReadExecutor = db) {
+    const [row] = await executor
       .select()
       .from(financeMerchants)
       .where(and(eq(financeMerchants.id, id), eq(financeMerchants.userId, userId)))
@@ -1720,12 +1755,23 @@ export function createFinanceService({
       reconciliationStatus?: "confirmed" | "not_applicable";
       requiredReviewId?: string;
     } = {},
+    executor?: FinanceActionWriteExecutor,
   ) {
-    const before = await ownedTransaction(context.principal.userId, decision.transactionId);
+    const readExecutor = executor ?? db;
+    const before = await ownedTransaction(
+      context.principal.userId,
+      decision.transactionId,
+      readExecutor,
+    );
     const maintenanceSource = context.maintenance
-      ? await financeTransactionSource(context.principal.userId, before)
+      ? await financeTransactionSource(context.principal.userId, before, readExecutor)
       : null;
-    const category = await categoryForId(context.principal.userId, decision.categoryId, context);
+    const category = await categoryForId(
+      context.principal.userId,
+      decision.categoryId,
+      context,
+      readExecutor,
+    );
     const beforeValue = transaction(before);
     if (beforeValue.updatedAt !== decision.expectedTransactionUpdatedAt) {
       throw new AppError("conflict", "The transaction changed after the proposal was prepared.", {
@@ -1736,10 +1782,16 @@ export function createFinanceService({
       context.principal.userId,
       before.merchantId,
       category.id,
+      readExecutor,
     );
     let confidence = decision.confidence;
     if (source === "agent" || source === "rule") {
-      const proposal = await categorizationProposal(context.principal.userId, beforeValue);
+      const proposal = await categorizationProposal(
+        context.principal.userId,
+        beforeValue,
+        undefined,
+        readExecutor,
+      );
       const requiredBasis = source === "rule" ? "merchant_rule" : "transaction_evidence";
       if (
         proposal.suggestedCategory?.id !== category.id ||
@@ -1757,7 +1809,7 @@ export function createFinanceService({
     const canApply =
       source !== "agent" || context.financeReviewBypass === true || confidence >= threshold;
     if (!canApply) {
-      const replayed = await db.transaction(async (tx) => {
+      const defer = async (tx: FinanceActionWriteExecutor) => {
         await assertMaintenanceClaim(tx, context);
         const [current] = await tx
           .select()
@@ -1802,6 +1854,8 @@ export function createFinanceService({
           const currentProposal = await categorizationProposal(
             context.principal.userId,
             transaction(current),
+            undefined,
+            tx,
           );
           if (
             currentProposal.suggestedCategory?.id !== category.id ||
@@ -1943,10 +1997,11 @@ export function createFinanceService({
           }),
         );
         return false;
-      });
+      };
+      const replayed = executor ? await defer(executor) : await db.transaction(defer);
       return { applied: false, replayed, threshold, transaction: beforeValue };
     }
-    const value = await db.transaction(async (tx) => {
+    const apply = async (tx: FinanceActionWriteExecutor) => {
       await assertMaintenanceClaim(tx, context);
       const [current] = await tx
         .select()
@@ -1991,6 +2046,8 @@ export function createFinanceService({
         const currentProposal = await categorizationProposal(
           context.principal.userId,
           transaction(current),
+          undefined,
+          tx,
         );
         const requiredBasis = source === "rule" ? "merchant_rule" : "transaction_evidence";
         if (
@@ -2113,7 +2170,8 @@ export function createFinanceService({
         }),
       );
       return after;
-    });
+    };
+    const value = executor ? await apply(executor) : await db.transaction(apply);
     return { applied: true, replayed: false, threshold, transaction: value };
   }
 
@@ -3085,18 +3143,27 @@ export function createFinanceService({
         ],
       };
     },
-    async getProfile(userId: string, asOf = now().toISOString().slice(0, 10)) {
-      const rows = await db
+    async getProfile(
+      userId: string,
+      asOf = now().toISOString().slice(0, 10),
+      executor: FinanceReadExecutor = db,
+    ) {
+      const rows = await executor
         .select()
         .from(financeProfiles)
         .where(eq(financeProfiles.userId, userId));
       const row = selectEffectiveRecord(rows, asOf);
       return row ? profileValue(row) : null;
     },
-    async updateProfile(input: UpdateFinanceProfileInput, context: MutationContext) {
-      if (input.payAccountId) await ownedAccount(context.principal.userId, input.payAccountId);
-      const before = await this.getProfile(context.principal.userId);
-      const [row] = await db
+    async updateProfile(
+      input: UpdateFinanceProfileInput,
+      context: MutationContext,
+      executor: FinanceWriteExecutor = db,
+    ) {
+      if (input.payAccountId)
+        await ownedAccount(context.principal.userId, input.payAccountId, executor);
+      const before = await this.getProfile(context.principal.userId, undefined, executor);
+      const [row] = await executor
         .insert(financeProfiles)
         .values({
           effectiveDate: input.effectiveDate,
@@ -3151,7 +3218,7 @@ export function createFinanceService({
         .returning();
       const saved = requireDatabaseRecord(row, "The financial profile could not be saved.");
       const value = profileValue(saved);
-      await db.insert(auditEvents).values(
+      await executor.insert(auditEvents).values(
         auditValues({
           action: "finance.profile_updated",
           after: {
@@ -3179,8 +3246,9 @@ export function createFinanceService({
       id: string,
       input: UpdateFinanceIncomeStreamInput,
       context: MutationContext,
+      executor: FinanceWriteExecutor = db,
     ) {
-      const [before] = await db
+      const [before] = await executor
         .select()
         .from(financeIncomeStreams)
         .where(
@@ -3191,7 +3259,7 @@ export function createFinanceService({
         )
         .limit(1);
       if (!before) throw new AppError("not_found", "The income stream was not found.");
-      const [row] = await db
+      const [row] = await executor
         .update(financeIncomeStreams)
         .set({ source: "user", status: input.status, updatedAt: now() })
         .where(eq(financeIncomeStreams.id, id))
@@ -3199,7 +3267,7 @@ export function createFinanceService({
       const value = incomeStreamValue(
         requireDatabaseRecord(row, "The income stream could not be updated."),
       );
-      await db.insert(auditEvents).values(
+      await executor.insert(auditEvents).values(
         auditValues({
           action: "finance.income_stream_updated",
           after: { id: value.id, source: value.source, status: value.status },
@@ -3231,8 +3299,9 @@ export function createFinanceService({
       id: string,
       input: UpdateFinanceRecurringObligationInput,
       context: MutationContext,
+      executor: FinanceWriteExecutor = db,
     ) {
-      const [before] = await db
+      const [before] = await executor
         .select()
         .from(financeRecurringObligations)
         .where(
@@ -3244,7 +3313,7 @@ export function createFinanceService({
         .limit(1);
       if (!before) throw new AppError("not_found", "The recurring payment was not found.");
       if (before.status === input.status) return recurringValue(before);
-      const [row] = await db
+      const [row] = await executor
         .update(financeRecurringObligations)
         .set({
           source: context.principal.actorType === "user" ? "user" : before.source,
@@ -3256,7 +3325,7 @@ export function createFinanceService({
       const value = recurringValue(
         requireDatabaseRecord(row, "The recurring payment could not be updated."),
       );
-      await db.insert(auditEvents).values(
+      await executor.insert(auditEvents).values(
         auditValues({
           action: "finance.recurring_updated",
           after: { id: value.id, source: value.source, status: value.status },
@@ -3281,14 +3350,19 @@ export function createFinanceService({
           .orderBy(desc(financeAlerts.createdAt))
       ).map(alertValue);
     },
-    async resolveAlert(id: string, input: ResolveFinanceAlertInput, context: MutationContext) {
-      const [before] = await db
+    async resolveAlert(
+      id: string,
+      input: ResolveFinanceAlertInput,
+      context: MutationContext,
+      executor: FinanceWriteExecutor = db,
+    ) {
+      const [before] = await executor
         .select()
         .from(financeAlerts)
         .where(and(eq(financeAlerts.id, id), eq(financeAlerts.userId, context.principal.userId)))
         .limit(1);
       if (!before) throw new AppError("not_found", "The financial alert was not found.");
-      const [row] = await db
+      const [row] = await executor
         .update(financeAlerts)
         .set({
           status: input.action === "dismiss" ? "dismissed" : "resolved",
@@ -3300,7 +3374,7 @@ export function createFinanceService({
       const value = alertValue(
         requireDatabaseRecord(row, "The financial alert could not be resolved."),
       );
-      await db.insert(auditEvents).values(
+      await executor.insert(auditEvents).values(
         auditValues({
           action: "finance.alert_resolved",
           after: {
@@ -3379,8 +3453,8 @@ export function createFinanceService({
         upcomingObligations: forecast.upcomingObligations / 100,
       };
     },
-    async refreshCashflowInsights(userId: string) {
-      await refreshCashflowIntelligence(userId);
+    async refreshCashflowInsights(userId: string, executor: FinanceWriteExecutor = db) {
+      await refreshCashflowIntelligence(userId, executor);
       return { refreshed: true };
     },
     async backfillCashflowInsights() {
@@ -3846,11 +3920,16 @@ export function createFinanceService({
         ),
       );
     },
-    async updateMerchant(id: string, input: UpdateFinanceMerchantInput, context: MutationContext) {
-      const before = await ownedMerchant(context.principal.userId, id);
+    async updateMerchant(
+      id: string,
+      input: UpdateFinanceMerchantInput,
+      context: MutationContext,
+      executor: FinanceWriteExecutor = db,
+    ) {
+      const before = await ownedMerchant(context.principal.userId, id, executor);
       const updated = requireDatabaseRecord(
         (
-          await db
+          await executor
             .update(financeMerchants)
             .set({
               displayName: input.displayName,
@@ -3863,7 +3942,7 @@ export function createFinanceService({
         )[0],
         "The finance merchant could not be updated.",
       );
-      await db.insert(auditEvents).values(
+      await executor.insert(auditEvents).values(
         auditValues({
           action: "finance.merchant_renamed",
           after: {
@@ -3878,8 +3957,12 @@ export function createFinanceService({
       );
       return merchant(updated);
     },
-    async mergeMerchants(input: MergeFinanceMerchantsInput, context: MutationContext) {
-      return db.transaction(async (tx) => {
+    async mergeMerchants(
+      input: MergeFinanceMerchantsInput,
+      context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
+    ) {
+      const merge = async (tx: FinanceActionWriteExecutor) => {
         const locked = await tx
           .select()
           .from(financeMerchants)
@@ -3924,7 +4007,8 @@ export function createFinanceService({
           }),
         );
         return merchant(target);
-      });
+      };
+      return executor ? merge(executor) : db.transaction(merge);
     },
     async getBudgetStatus(userId: string, month = now().toISOString().slice(0, 7)) {
       const [budgets, transactions] = await Promise.all([
@@ -4095,6 +4179,7 @@ export function createFinanceService({
     async applyCategorizations(
       input: ApplyFinanceCategorizationsInput,
       context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
     ): Promise<FinanceCategorizationApplyResult[]> {
       if (
         context.principal.actorType === "agent" &&
@@ -4106,12 +4191,38 @@ export function createFinanceService({
           "Permanent merchant rules require review in an interactive user session.",
         );
       }
+      // An action-review approval is all-or-nothing: letting the legacy batch
+      // result wrapper convert one writer error into a returned `failed` item
+      // would terminalize the review after a partial ledger mutation.
+      if (executor) {
+        const results: FinanceCategorizationApplyResult[] = [];
+        for (const decision of input.decisions) {
+          const result = await applyCategorization(
+            decision,
+            context,
+            context.principal.actorType === "user" ? "user" : "agent",
+            "confirmed",
+            {},
+            executor,
+          );
+          results.push({
+            ...result,
+            error: null,
+            status: result.applied ? "applied" : "review_required",
+            transactionId: decision.transactionId,
+          });
+        }
+        return results;
+      }
       return mapWithConcurrency(input.decisions, 4, async (decision) => {
         try {
           const result = await applyCategorization(
             decision,
             context,
             context.principal.actorType === "user" ? "user" : "agent",
+            "confirmed",
+            {},
+            executor,
           );
           return {
             ...result,
@@ -4599,8 +4710,12 @@ export function createFinanceService({
       });
       return account(row);
     },
-    async createBudget(input: CreateFinanceBudgetInput, context: MutationContext) {
-      const row = await db.transaction(async (tx) => {
+    async createBudget(
+      input: CreateFinanceBudgetInput,
+      context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
+    ) {
+      const write = async (tx: FinanceActionWriteExecutor) => {
         const created = requireDatabaseRecord(
           (
             await tx
@@ -4626,14 +4741,16 @@ export function createFinanceService({
           }),
         );
         return created;
-      });
+      };
+      const row = executor ? await write(executor) : await db.transaction(write);
       return budget(row);
     },
     async setBudgetPlan(
       input: SetFinanceBudgetPlanInput,
       context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
     ): Promise<FinanceBudgetPlan> {
-      await db.transaction(async (tx) => {
+      const write = async (tx: FinanceActionWriteExecutor) => {
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-budget-plan:${context.principal.userId}:${input.month}`}, 0))`,
         );
@@ -4798,27 +4915,38 @@ export function createFinanceService({
             requestId: context.requestId,
           }),
         );
-      });
+      };
+      if (executor) await write(executor);
+      else await db.transaction(write);
       return input;
     },
-    async createTransaction(input: CreateFinanceTransactionInput, context: MutationContext) {
-      await ownedAccount(context.principal.userId, input.accountId);
-      const automatic =
-        input.category === null
-          ? await automaticCategorization(context.principal.userId, input.merchant)
-          : {
-              category: input.category,
-              confidence:
-                input.categoryConfidence === null
-                  ? 10_000
-                  : Math.round(input.categoryConfidence * 10_000),
-              needsReview: input.categoryConfidence !== null && input.categoryConfidence < 0.8,
-            };
-      const merchantRecord = await merchantFor(context.principal.userId, input.merchant, "user");
-      const categoryRecord = automatic.category
-        ? await categoryForName(context.principal.userId, automatic.category)
-        : null;
-      const row = await db.transaction(async (tx) => {
+    async createTransaction(
+      input: CreateFinanceTransactionInput,
+      context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
+    ) {
+      const write = async (tx: FinanceActionWriteExecutor) => {
+        await ownedAccount(context.principal.userId, input.accountId, tx);
+        const automatic =
+          input.category === null
+            ? await automaticCategorization(context.principal.userId, input.merchant, tx)
+            : {
+                category: input.category,
+                confidence:
+                  input.categoryConfidence === null
+                    ? 10_000
+                    : Math.round(input.categoryConfidence * 10_000),
+                needsReview: input.categoryConfidence !== null && input.categoryConfidence < 0.8,
+              };
+        const merchantRecord = await merchantFor(
+          context.principal.userId,
+          input.merchant,
+          "user",
+          tx,
+        );
+        const categoryRecord = automatic.category
+          ? await categoryForName(context.principal.userId, automatic.category, tx)
+          : null;
         if (input.category !== null && categoryRecord) {
           await tx
             .select({ id: financeCategories.id })
@@ -4875,10 +5003,10 @@ export function createFinanceService({
             userId: context.principal.userId,
           });
         }
-        return created;
-      });
-      await refreshCashflowIntelligence(context.principal.userId);
-      return transaction(row);
+        await refreshCashflowIntelligence(context.principal.userId, tx);
+        return transaction(created);
+      };
+      return executor ? write(executor) : db.transaction(write);
     },
     async importCsv(input: FinanceCsvImportInput, context: MutationContext) {
       const destination = await ownedAccount(context.principal.userId, input.accountId);
@@ -5482,19 +5610,20 @@ export function createFinanceService({
       id: string,
       input: UpdateFinanceTransactionInput,
       context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
     ) {
-      const before = await ownedTransaction(context.principal.userId, id);
       if (context.principal.actorType === "agent" && context.financeReviewBypass !== true) {
         throw new AppError(
           "forbidden",
           "Finance transaction edits require an interactive user session.",
         );
       }
-      const categoryRecord =
-        input.category === undefined || input.category === null
-          ? null
-          : await categoryForName(context.principal.userId, input.category);
-      const row = await db.transaction(async (tx) => {
+      const write = async (tx: FinanceActionWriteExecutor) => {
+        const before = await ownedTransaction(context.principal.userId, id, tx);
+        const categoryRecord =
+          input.category === undefined || input.category === null
+            ? null
+            : await categoryForName(context.principal.userId, input.category, tx);
         const [current] = await tx
           .select()
           .from(financeTransactions)
@@ -5621,9 +5750,9 @@ export function createFinanceService({
               });
           }
         }
-        return updated;
-      });
-      return transaction(row);
+        return transaction(updated);
+      };
+      return executor ? write(executor) : db.transaction(write);
     },
   };
 }

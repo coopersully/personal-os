@@ -44,6 +44,9 @@ type FinanceActionServiceOptions = {
   now: () => Date;
 };
 
+type FinanceExecutor = Pick<Database, "insert" | "select" | "update">;
+type TransactionalWriter = (...args: unknown[]) => Promise<unknown>;
+
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
   if (value && typeof value === "object") {
@@ -164,8 +167,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     };
   }
 
-  async function readBypass(userId: string, lock = false) {
-    const query = db
+  async function readBypass(executor: FinanceExecutor, userId: string, lock = false) {
+    const query = executor
       .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
       .from(financeAutomationSettings)
       .where(eq(financeAutomationSettings.userId, userId));
@@ -173,38 +176,100 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     return settings?.reviewBypassEnabled === true;
   }
 
-  async function applyPrepared(prepared: PreparedAction, context: MutationContext) {
+  async function applyPrepared(
+    prepared: PreparedAction,
+    context: MutationContext,
+    executor?: FinanceExecutor,
+  ) {
     const input = prepared.input;
     const privilegedContext = { ...context, financeReviewBypass: true };
+    const writer = (method: unknown) => method as TransactionalWriter;
+    const invoke = (method: unknown, ...args: unknown[]) => writer(method).call(finances, ...args);
     switch (prepared.actionKind) {
       case "profile":
-        return finances.updateProfile(input as never, privilegedContext);
+        return invoke(
+          finances.updateProfile,
+          input as never,
+          privilegedContext as never,
+          executor as never,
+        );
       case "budget_plan":
         return "allocations" in input
-          ? finances.setBudgetPlan(input as never, privilegedContext)
-          : finances.createBudget(input as never, privilegedContext);
+          ? invoke(
+              finances.setBudgetPlan,
+              input as never,
+              privilegedContext as never,
+              executor as never,
+            )
+          : invoke(
+              finances.createBudget,
+              input as never,
+              privilegedContext as never,
+              executor as never,
+            );
       case "categorization":
-        return finances.applyCategorizations(input as never, privilegedContext);
+        return invoke(
+          finances.applyCategorizations,
+          input as never,
+          privilegedContext as never,
+          executor as never,
+        );
       case "recurring_obligation":
-        return finances.updateRecurringObligation(
+        return invoke(
+          finances.updateRecurringObligation,
           String(input.id),
           input as never,
-          privilegedContext,
+          privilegedContext as never,
+          executor as never,
         );
       case "alert":
         return input.operation === "refresh"
-          ? finances.refreshCashflowInsights(context.principal.userId)
-          : finances.resolveAlert(String(input.id), input as never, privilegedContext);
+          ? invoke(finances.refreshCashflowInsights, context.principal.userId, executor as never)
+          : invoke(
+              finances.resolveAlert,
+              String(input.id),
+              input as never,
+              privilegedContext as never,
+              executor as never,
+            );
       case "income_stream":
-        return finances.updateIncomeStream(String(input.id), input as never, privilegedContext);
+        return invoke(
+          finances.updateIncomeStream,
+          String(input.id),
+          input as never,
+          privilegedContext as never,
+          executor as never,
+        );
       case "merchant":
         return "sourceMerchantId" in input
-          ? finances.mergeMerchants(input as never, privilegedContext)
-          : finances.updateMerchant(String(input.id), input as never, privilegedContext);
+          ? invoke(
+              finances.mergeMerchants,
+              input as never,
+              privilegedContext as never,
+              executor as never,
+            )
+          : invoke(
+              finances.updateMerchant,
+              String(input.id),
+              input as never,
+              privilegedContext as never,
+              executor as never,
+            );
       case "transaction":
         return "accountId" in input
-          ? finances.createTransaction(input as never, privilegedContext)
-          : finances.updateTransaction(String(input.id), input as never, privilegedContext);
+          ? invoke(
+              finances.createTransaction,
+              input as never,
+              privilegedContext as never,
+              executor as never,
+            )
+          : invoke(
+              finances.updateTransaction,
+              String(input.id),
+              input as never,
+              privilegedContext as never,
+              executor as never,
+            );
       default:
         throw new AppError(
           "invalid_request",
@@ -213,8 +278,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     }
   }
 
-  async function queue(prepared: PreparedAction, context: MutationContext) {
-    const pending = await db
+  async function queue(
+    prepared: PreparedAction,
+    context: MutationContext,
+    executor: FinanceExecutor = db,
+  ) {
+    const pending = await executor
       .select()
       .from(financeAgentActionReviews)
       .where(
@@ -237,7 +306,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         ),
     );
     if (stale.length) {
-      await db
+      await executor
         .update(financeAgentActionReviews)
         .set({ status: "superseded", updatedAt: now() })
         .where(
@@ -248,7 +317,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
     }
     try {
-      const [created] = await db
+      const [created] = await executor
         .insert(financeAgentActionReviews)
         .values({
           actionKind: prepared.actionKind,
@@ -267,7 +336,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     } catch (error) {
       // The partial unique fingerprint index is also the concurrent replay
       // fence. A competing request returns the exact same pending review.
-      const [replayed] = await db
+      const [replayed] = await executor
         .select()
         .from(financeAgentActionReviews)
         .where(
@@ -329,7 +398,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       }
       if (
         context.principal.actorType === "agent" &&
-        !(await readBypass(context.principal.userId))
+        !(await readBypass(db, context.principal.userId))
       ) {
         return {
           review: (await queue(prepared, context)) as FinancePendingActionReview,
@@ -340,14 +409,17 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       // the setting TOCTOU window for agent actions without accepting token or
       // request-body bypass authority.
       if (context.principal.actorType === "agent") {
-        return db.transaction(async () => {
-          if (!(await readBypass(context.principal.userId, true))) {
+        return db.transaction(async (tx) => {
+          if (!(await readBypass(tx, context.principal.userId, true))) {
             return {
-              review: (await queue(prepared, context)) as FinancePendingActionReview,
+              review: (await queue(prepared, context, tx)) as FinancePendingActionReview,
               status: "pending_review",
             };
           }
-          return { result: (await applyPrepared(prepared, context)) as T, status: "applied" };
+          return {
+            result: (await applyPrepared(prepared, context, tx)) as T,
+            status: "applied",
+          };
         });
       }
       return { result: (await applyPrepared(prepared, context)) as T, status: "applied" };
@@ -398,7 +470,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         };
         // Semantic writers validate their current records. The review lock
         // prevents two humans from replaying this prepared action.
-        const result = await applyPrepared(prepared, context);
+        const result = await applyPrepared(prepared, context, tx);
         await tx
           .update(financeAgentActionReviews)
           .set({ privatePayload: { ...payload, result }, status: "applied", updatedAt: now() })

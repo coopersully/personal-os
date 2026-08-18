@@ -7,6 +7,7 @@ import {
   domainProfileApprovals,
   domainProfiles,
   financeAccounts,
+  financeAgentActionReviews,
   financeAlerts,
   financeAutomationSettings,
   financeBudgetPlans,
@@ -1893,6 +1894,78 @@ export function createFinanceService({
       );
     }
     return saved;
+  }
+
+  async function putReimbursementQuestion(
+    transactionId: string,
+    userId: string,
+    kind: "credit_match" | "expense_reimbursement",
+    source: MaterialSourceReference,
+    why: string,
+    candidate: Record<string, unknown>,
+    context?: MutationContext,
+  ) {
+    const fingerprint = createHash("sha256")
+      .update(JSON.stringify({ candidate, kind, transactionId }))
+      .digest("hex");
+    const expectedAnswer =
+      kind === "expense_reimbursement"
+        ? [
+            {
+              choices: ["entirely_personal", "reimbursable", "not_sure"],
+              name: "kind",
+              required: true,
+              type: "string" as const,
+            },
+            { name: "amount", required: false, type: "number" as const },
+            { name: "payer", required: false, type: "string" as const },
+          ]
+        : [
+            {
+              choices: ["match", "not_reimbursement", "not_sure"],
+              name: "kind",
+              required: true,
+              type: "string" as const,
+            },
+            { name: "matches", required: false, type: "object_array" as const },
+          ];
+    const question = {
+      actionKind: "reimbursement" as const,
+      choices: [],
+      expectedAnswer,
+      id: "pending",
+      prompt:
+        kind === "expense_reimbursement"
+          ? "Is this expense personal or reimbursable?"
+          : "Does this incoming credit reimburse one or more recorded expenses?",
+      sourceRefs: [source],
+      why,
+    };
+    await db
+      .insert(financeAgentActionReviews)
+      .values({
+        actionKind: "question",
+        expectedRevision: fingerprint,
+        fingerprint,
+        maintenanceRunId: context?.maintenance?.runId ?? null,
+        privatePayload: {
+          candidate,
+          original: { actionKind: "reimbursement", input: { operation: "answer_question" } },
+          question,
+        },
+        requestingAgentId: context?.principal.actorId ?? "finance-maintenance",
+        safeChanges: [
+          {
+            entityId: transactionId,
+            entityType: "finance_transaction",
+            summary: "Answer reimbursement evidence without changing a categorization review.",
+          },
+        ],
+        semanticTargetKeys: [`transaction:${transactionId}`, `reimbursement-question:${kind}`],
+        sourceRefs: [source],
+        userId,
+      })
+      .onConflictDoNothing();
   }
 
   async function applyCategorization(
@@ -5038,22 +5111,18 @@ export function createFinanceService({
           },
         });
         if (!anomaly) continue;
-        const review = context?.maintenance
-          ? await db.transaction(async (tx) => {
-              await assertMaintenanceClaim(tx, context);
-              return putInReview(
-                row.id,
-                userId,
-                "possible_reimbursement",
-                null,
-                anomaly.rationale,
-                tx,
-                context,
-                source,
-              );
-            })
-          : await putInReview(row.id, userId, "possible_reimbursement", null, anomaly.rationale);
-        openByTransaction.set(row.id, review);
+        await putReimbursementQuestion(
+          row.id,
+          userId,
+          "expense_reimbursement",
+          source,
+          anomaly.rationale,
+          {
+            allocationIds: (allocationsByTransaction.get(row.id) ?? []).map((item) => item.id),
+            transactionId: row.id,
+          },
+          context,
+        );
       }
       const matchedByCredit = matchedReimbursementCentsByCredit(reimbursementMatches);
       const outstanding = reimbursementRows.filter(
@@ -5116,28 +5185,19 @@ export function createFinanceService({
         if (plausible.length === 0) continue;
         const source = sourceFor(credit);
         if (!source) continue;
-        const review = context?.maintenance
-          ? await db.transaction(async (tx) => {
-              await assertMaintenanceClaim(tx, context);
-              return putInReview(
-                credit.id,
-                userId,
-                "possible_reimbursement",
-                null,
-                `This ${credit.merchant} credit has $${(unmatchedAmount / 100).toFixed(2)} unmatched and is close to ${plausible.length} outstanding reimbursement${plausible.length === 1 ? "" : "s"}. Match only supported cents; combined credits may settle more than one case.`,
-                tx,
-                context,
-                source,
-              );
-            })
-          : await putInReview(
-              credit.id,
-              userId,
-              "possible_reimbursement",
-              null,
-              `This ${credit.merchant} credit may reimburse one or more outstanding cases; combined credits may settle more than one case, so match only supported cents.`,
-            );
-        openByTransaction.set(credit.id, review);
+        await putReimbursementQuestion(
+          credit.id,
+          userId,
+          "credit_match",
+          source,
+          `This incoming payment has ${plausible.length} plausible outstanding reimbursement candidate${plausible.length === 1 ? "" : "s"}. Match only supported cents; combined credits may settle more than one case.`,
+          {
+            reimbursementIds: plausible.map((item) => item.id),
+            transactionId: credit.id,
+            unmatchedAmount,
+          },
+          context,
+        );
       }
       const scopedReviews = [...openByTransaction.values()].filter((review) => {
         const row = rows.find((item) => item.id === review.transactionId);

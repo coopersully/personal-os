@@ -716,6 +716,36 @@ export const reconcileFinanceReimbursementInputSchema = z.discriminatedUnion("op
 export type ReconcileFinanceReimbursementInput = z.infer<
   typeof reconcileFinanceReimbursementInputSchema
 >;
+export const financeReimbursementQuestionAnswerSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("entirely_personal"),
+      rationale: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+  z
+    .object({
+      amount: moneyInputSchema.positive(),
+      dueDate: z.iso.date().nullable(),
+      kind: z.literal("reimbursable"),
+      payer: z.string().trim().min(1).max(240).nullable(),
+      rationale: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+  z.object({ kind: z.literal("not_sure") }).strict(),
+  z.object({ kind: z.literal("not_reimbursement") }).strict(),
+  z
+    .object({
+      kind: z.literal("match"),
+      matches: z
+        .array(
+          z.object({ amount: moneyInputSchema.positive(), reimbursementId: idSchema }).strict(),
+        )
+        .min(1)
+        .max(20),
+    })
+    .strict(),
+]);
 
 export const financeCategorySchema = z.object({
   color: z.string().nullable(),

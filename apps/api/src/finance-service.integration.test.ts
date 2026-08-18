@@ -10,6 +10,7 @@ import {
   domainProfileApprovals,
   domainProfiles,
   financeAccounts,
+  financeAgentActionReviews,
   financeAlerts,
   financeAutomationSettings,
   financeBudgetPlans,
@@ -8943,32 +8944,30 @@ describe.sequential("finance service", () => {
     const service = createFinanceService({ db: database.db, now: () => now });
     await expect(
       service.refreshMaintenanceQuestionsForUser(anomalyUser.id, { type: "all_outstanding" }),
-    ).resolves.toMatchObject({ created: 2 });
-    const questions = await database.db
-      .select({
-        rationale: financeReviewCases.rationale,
-        reason: financeReviewCases.reason,
-        transactionId: financeReviewCases.transactionId,
-      })
-      .from(financeReviewCases)
-      .where(
-        and(eq(financeReviewCases.userId, anomalyUser.id), eq(financeReviewCases.status, "open")),
-      );
-    expect(questions).toEqual(
+    ).resolves.toMatchObject({ created: 0 });
+    await expect(
+      database.db
+        .select({
+          actionKind: financeAgentActionReviews.actionKind,
+          privatePayload: financeAgentActionReviews.privatePayload,
+        })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.userId, anomalyUser.id)),
+    ).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          reason: "possible_reimbursement",
-          transactionId: largeDinner.id,
-          rationale: expect.stringContaining("robust merchant baseline"),
-        }),
-        expect.objectContaining({
-          reason: "possible_reimbursement",
-          transactionId: venmo.id,
-          rationale: expect.stringContaining("combined credits"),
+          actionKind: "question",
+          privatePayload: expect.objectContaining({ candidate: expect.any(Object) }),
         }),
       ]),
     );
-    expect(questions.some((question) => question.transactionId === normalDinner.id)).toBe(false);
-    expect(questions.some((question) => question.transactionId === salary.id)).toBe(false);
+    await expect(
+      database.db
+        .select({ id: financeReviewCases.id })
+        .from(financeReviewCases)
+        .where(
+          and(eq(financeReviewCases.userId, anomalyUser.id), eq(financeReviewCases.status, "open")),
+        ),
+    ).resolves.toEqual([]);
   });
 });

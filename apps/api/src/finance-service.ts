@@ -2908,6 +2908,7 @@ export function createFinanceService({
     async reconcileReimbursement(
       input: ReconcileFinanceReimbursementInput,
       context: MutationContext,
+      executor?: Pick<Database, "insert" | "select" | "update">,
     ) {
       if (context.principal.actorType === "agent" && context.financePreparedAction !== true) {
         throw new AppError(
@@ -2915,7 +2916,7 @@ export function createFinanceService({
           "Finance reimbursements require an explicitly prepared Finance action.",
         );
       }
-      return reimbursements.reconcile(input, context);
+      return reimbursements.reconcile(input, context, executor);
     },
     async getAutomationSettings(userId: string): Promise<FinanceAutomationSettings> {
       const [settings] = await db

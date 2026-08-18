@@ -13,6 +13,7 @@ import {
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
+  financeReimbursements,
   financeReviewCases,
   financeTransactionAllocations,
   financeTransactions,
@@ -195,6 +196,62 @@ describe.sequential("Finance status service", () => {
     expect(status.details.cashFlow.net).toBe(600);
     expect(status.details.health.confidence).toBe("reliable");
     expect(status.state).toBe("needs_work");
+  });
+
+  it("restores only a cancelled reimbursement remainder to personal spending without changing gross cash", async () => {
+    const userId = await makeUser("Cancelled reimbursement");
+    const source = await account(userId, "current");
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({ group: "Spending", name: "Dining", slug: `dining-${userId}`, userId })
+      .returning();
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: source.id,
+        amount: 31_000,
+        direction: "expense",
+        merchant: "Dinner",
+        transactionDate: "2026-08-15",
+        userId,
+      })
+      .returning();
+    if (!category || !expense) throw new Error("Cancelled reimbursement fixture failed.");
+    const [personal, reimbursable] = await database.db
+      .insert(financeTransactionAllocations)
+      .values([
+        {
+          allocationOrder: 0,
+          amount: 9_000,
+          categoryId: category.id,
+          transactionId: expense.id,
+          treatment: "personal",
+          userId,
+        },
+        {
+          allocationOrder: 1,
+          amount: 22_000,
+          categoryId: category.id,
+          transactionId: expense.id,
+          treatment: "reimbursable",
+          userId,
+        },
+      ])
+      .returning();
+    if (!personal || !reimbursable) throw new Error("Cancelled reimbursement allocations failed.");
+    await database.db.insert(financeReimbursements).values({
+      allocationId: reimbursable.id,
+      cancelledAt: now,
+      expectedAmount: 22_000,
+      receivedAmount: 10_000,
+      status: "cancelled",
+      userId,
+    });
+    await expect(
+      service().getFinanceStatus(userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      details: { month: { spending: 210 }, reimbursements: { open: 0, overdue: 0 } },
+    });
   });
 
   it("returns planning evidence before asking for a first budget", async () => {

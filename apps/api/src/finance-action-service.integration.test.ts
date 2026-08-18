@@ -15,6 +15,8 @@ import {
   financeMerchants,
   financeProfiles,
   financeRecurringObligations,
+  financeReimbursements,
+  financeTransactionAllocations,
   financeTransactions,
   goals,
   migrateDatabase,
@@ -332,6 +334,149 @@ describe.sequential("finance action service", () => {
       status: "applied",
     });
     expect(updateProfile).toHaveBeenCalledOnce();
+  });
+
+  it("prepares reimbursement evidence before bypass and keeps its semantic write in the action transaction", async () => {
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Reimbursement",
+        name: "checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Test",
+        name: "Reimbursement dining",
+        slug: `reimbursement-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Reimbursement action fixture failed.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 22_000,
+        direction: "expense",
+        merchant: "Dinner",
+        transactionDate: "2026-08-17",
+        userId,
+      })
+      .returning();
+    if (!expense) throw new Error("Reimbursement expense fixture failed.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 22_000,
+        categoryId: category.id,
+        rationale: "split",
+        transactionId: expense.id,
+        treatment: "reimbursable",
+        userId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Reimbursement allocation fixture failed.");
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const input = {
+      allocationId: allocation.id,
+      dueDate: "2026-08-20",
+      evidence: { receipt: "attached" },
+      expectedAmount: 220,
+      operation: "create",
+      payer: "Alex",
+    } as const;
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const queued = await actions.performDirect("reimbursement", input, {
+      principal: agent(userId),
+      requestId: "reimbursement-queue",
+    });
+    if (queued.status !== "pending_review") throw new Error("Expected reimbursement review.");
+    await expect(
+      database.db
+        .select()
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.allocationId, allocation.id)),
+    ).resolves.toHaveLength(0);
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_reimbursement_review_terminalization() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.status = 'applied' THEN RAISE EXCEPTION 'forced reimbursement terminalization failure'; END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_reimbursement_review_terminalization
+      BEFORE UPDATE ON finance_agent_action_reviews
+      FOR EACH ROW EXECUTE FUNCTION fail_reimbursement_review_terminalization();
+    `);
+    try {
+      await expect(
+        actions.approve(queued.review.id, {
+          principal: user(userId),
+          requestId: "reimbursement-fail",
+        }),
+      ).rejects.toThrow(/finance_agent_action_reviews/);
+    } finally {
+      await database.pool.query(
+        "DROP TRIGGER fail_reimbursement_review_terminalization ON finance_agent_action_reviews",
+      );
+      await database.pool.query("DROP FUNCTION fail_reimbursement_review_terminalization()");
+    }
+    await expect(
+      database.db
+        .select()
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.allocationId, allocation.id)),
+    ).resolves.toHaveLength(0);
+    await expect(
+      actions.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "reimbursement-approve",
+      }),
+    ).resolves.toMatchObject({ result: { status: "expected" }, status: "applied" });
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const appliedReimbursement = await actions.performDirect("reimbursement", input, {
+      principal: agent(userId),
+      requestId: "reimbursement-apply",
+    });
+    expect(appliedReimbursement).toMatchObject({
+      result: { status: "expected" },
+      status: "applied",
+    });
+    await expect(
+      actions.performDirect("reimbursement", input, {
+        principal: agent(userId),
+        requestId: "reimbursement-replay",
+      }),
+    ).resolves.toMatchObject({ result: { status: "expected" }, status: "applied" });
+    await expect(
+      database.db
+        .select()
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.allocationId, allocation.id)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      actions.performDirect(
+        "reimbursement",
+        { ...input, evidence: {} },
+        { principal: agent(userId), requestId: "reimbursement-missing" },
+      ),
+    ).resolves.toMatchObject({ status: "needs_input" });
   });
 
   it("returns a question before consulting bypass when a categorization lacks evidence", async () => {

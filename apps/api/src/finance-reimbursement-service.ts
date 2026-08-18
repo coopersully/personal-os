@@ -37,6 +37,18 @@ export function deriveReimbursementStatus({
 }
 
 type Context = { principal: Principal; requestId: string };
+type ReimbursementWriter = Pick<Database, "insert" | "select" | "update">;
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
 
 function serialize(
   row: typeof financeReimbursements.$inferSelect,
@@ -149,8 +161,12 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
       };
     },
 
-    async reconcile(input: ReconcileFinanceReimbursementInput, context: Context) {
-      return db.transaction(async (tx) => {
+    async reconcile(
+      input: ReconcileFinanceReimbursementInput,
+      context: Context,
+      executor?: ReimbursementWriter,
+    ) {
+      const write = async (tx: ReimbursementWriter) => {
         const userId = context.principal.userId;
         if (input.operation === "create") {
           const [allocation] = await tx
@@ -170,7 +186,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
               "A reimbursement must use one of your active reimbursable allocations.",
             );
           const existing = await tx
-            .select({ amount: financeReimbursements.expectedAmount })
+            .select()
             .from(financeReimbursements)
             .where(
               and(
@@ -180,8 +196,22 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
             )
             .for("update");
           const expectedAmount = toCents(input.expectedAmount);
+          const replay = existing.find(
+            (item) =>
+              item.expectedAmount === expectedAmount &&
+              item.payer === input.payer &&
+              item.dueDate === input.dueDate &&
+              stableJson(item.evidence) === stableJson(input.evidence),
+          );
+          if (replay) {
+            const replayMatches = await tx
+              .select()
+              .from(financeReimbursementMatches)
+              .where(eq(financeReimbursementMatches.reimbursementId, replay.id));
+            return serialize(replay, replayMatches);
+          }
           if (
-            expectedAmount + existing.reduce((sum, item) => sum + item.amount, 0) >
+            expectedAmount + existing.reduce((sum, item) => sum + item.expectedAmount, 0) >
             allocation.amount
           )
             throw new AppError(
@@ -203,7 +233,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
           await tx.insert(auditEvents).values(
             auditValues({
               action: "finance.reimbursement_created",
-              after: { expectedAmount, payer: input.payer },
+              after: { matchCount: 0, revision: created.revision, status: created.status },
               before: null,
               entityId: created.id,
               entityType: "finance_reimbursement",
@@ -233,7 +263,11 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
           await tx.insert(auditEvents).values(
             auditValues({
               action: "finance.reimbursement_cancelled",
-              after: { unmatchedAmount: row.expectedAmount - row.receivedAmount },
+              after: {
+                matchCount: matches.length,
+                revision: cancelled.revision,
+                status: cancelled.status,
+              },
               before: { status: row.status },
               entityId: row.id,
               entityType: "finance_reimbursement",
@@ -319,15 +353,16 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.reimbursement_reconciled",
-            after: { amount, creditTransactionId: credit.id, status },
-            before: { receivedAmount: row.receivedAmount },
+            after: { matchCount: matches.length + 1, revision: updated.revision, status },
+            before: { status: row.status },
             entityId: row.id,
             entityType: "finance_reimbursement",
             ...context,
           }),
         );
         return serialize(updated, [...matches, match]);
-      });
+      };
+      return executor ? write(executor) : db.transaction(write);
     },
   };
 }

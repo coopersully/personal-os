@@ -15,6 +15,9 @@ import {
   financeMerchants,
   financeProfiles,
   financeRecurringObligations,
+  financeReimbursementMatches,
+  financeReimbursements,
+  financeTransactionAllocations,
   financeTransactions,
   goals,
 } from "@personal-os/database";
@@ -261,6 +264,9 @@ function semanticTargetKeys(actionKind: SupportedActionKind, input: Record<strin
         input.operation === "create"
           ? `allocation:${String(input.allocationId)}`
           : `reimbursement:${String(input.reimbursementId)}`,
+        ...(input.operation === "match_credit"
+          ? [`credit:${String(input.creditTransactionId)}`]
+          : []),
       ];
   }
 }
@@ -1431,13 +1437,241 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               choices: ["create", "match_credit", "cancel"],
             }),
           ]);
-        const target =
+        if (
+          input.data.operation === "create" &&
+          actorType === "agent" &&
+          Object.keys(input.data.evidence).length === 0
+        )
+          return missing(
+            "Provide bounded evidence for the expected reimbursement before proposing it.",
+            [expectedAnswer("evidence", "object_array", { example: "[{ source: 'receipt' }]" })],
+          );
+        const allocationId =
+          input.data.operation === "create" ? input.data.allocationId : undefined;
+        const preliminary = allocationId
+          ? (
+              await executor
+                .select()
+                .from(financeTransactionAllocations)
+                .where(
+                  and(
+                    eq(financeTransactionAllocations.id, allocationId),
+                    eq(financeTransactionAllocations.userId, userId),
+                  ),
+                )
+                .limit(1)
+            )[0]
+          : undefined;
+        const existing =
           input.data.operation === "create"
-            ? String(input.data.allocationId)
-            : input.data.reimbursementId;
-        return prepared(
+            ? []
+            : await executor
+                .select()
+                .from(financeReimbursements)
+                .where(
+                  and(
+                    eq(financeReimbursements.id, input.data.reimbursementId),
+                    eq(financeReimbursements.userId, userId),
+                  ),
+                )
+                .limit(1);
+        const reimbursement = existing[0];
+        const resolvedAllocationId = allocationId ?? reimbursement?.allocationId;
+        if (!resolvedAllocationId)
+          return missing("Choose one of your owned reimbursements or reimbursable allocations.", [
+            expectedAnswer("reimbursementId", "string"),
+          ]);
+        const allocation =
+          preliminary ??
+          (
+            await lockRead(
+              executor
+                .select()
+                .from(financeTransactionAllocations)
+                .where(
+                  and(
+                    eq(financeTransactionAllocations.id, resolvedAllocationId),
+                    eq(financeTransactionAllocations.userId, userId),
+                  ),
+                )
+                .limit(1),
+            )
+          )[0];
+        if (allocation?.state !== "active" || allocation.treatment !== "reimbursable")
+          return missing("Choose an active reimbursable allocation that belongs to you.", [
+            expectedAnswer("allocationId", "string"),
+          ]);
+        const [expense] = await executor
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.id, allocation.transactionId),
+              eq(financeTransactions.userId, userId),
+            ),
+          )
+          .limit(1);
+        let credit: typeof financeTransactions.$inferSelect | undefined;
+        if (input.data.operation === "match_credit") {
+          [credit] = await executor
+            .select()
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.id, input.data.creditTransactionId),
+                eq(financeTransactions.userId, userId),
+              ),
+            )
+            .limit(1);
+        }
+        if (!expense || (input.data.operation === "match_credit" && !credit))
+          return missing("Choose owned posted transaction evidence for this reimbursement.", [
+            expectedAnswer("creditTransactionId", "string"),
+          ]);
+        const accounts = await lockAccounts([
+          expense.accountId,
+          ...(credit ? [credit.accountId] : []),
+        ]);
+        const accountById = new Map(accounts.map((account) => [account.id, account]));
+        const expenseAccount = accountById.get(expense.accountId);
+        const creditAccount = credit ? accountById.get(credit.accountId) : undefined;
+        if (!expenseAccount || (credit && !creditAccount))
+          return missing("The reimbursement transaction account is unavailable.", []);
+        const lockedExpense = (
+          await lockRead(
+            executor
+              .select()
+              .from(financeTransactions)
+              .where(eq(financeTransactions.id, expense.id))
+              .limit(1),
+          )
+        )[0];
+        const lockedCredit = credit
+          ? (
+              await lockRead(
+                executor
+                  .select()
+                  .from(financeTransactions)
+                  .where(eq(financeTransactions.id, credit.id))
+                  .limit(1),
+              )
+            )[0]
+          : undefined;
+        const lockedAllocation = (
+          await lockRead(
+            executor
+              .select()
+              .from(financeTransactionAllocations)
+              .where(eq(financeTransactionAllocations.id, allocation.id))
+              .limit(1),
+          )
+        )[0];
+        if (!lockedExpense || !lockedAllocation || (credit && !lockedCredit))
+          return missing("The reimbursement evidence changed; refresh before continuing.", []);
+        const cases = await lockRead(
+          executor
+            .select()
+            .from(financeReimbursements)
+            .where(
+              and(
+                eq(financeReimbursements.userId, userId),
+                eq(financeReimbursements.allocationId, lockedAllocation.id),
+              ),
+            )
+            .orderBy(financeReimbursements.id),
+        );
+        const current =
+          input.data.operation === "create"
+            ? undefined
+            : cases.find((item) => item.id === reimbursement?.id);
+        const matches = current
+          ? await lockRead(
+              executor
+                .select()
+                .from(financeReimbursementMatches)
+                .where(eq(financeReimbursementMatches.reimbursementId, current.id))
+                .orderBy(financeReimbursementMatches.id),
+            )
+          : [];
+        const matchInput = input.data.operation === "match_credit" ? input.data : null;
+        const idempotentMatch =
+          matchInput !== null &&
+          matches.some(
+            (match) =>
+              match.creditTransactionId === matchInput.creditTransactionId &&
+              match.amount === toCents(matchInput.amount),
+          );
+        const idempotentCancel =
+          input.data.operation === "cancel" && current?.status === "cancelled";
+        if (
+          input.data.operation !== "create" &&
+          (!current ||
+            (current.revision !== input.data.expectedRevision &&
+              !idempotentMatch &&
+              !idempotentCancel))
+        )
+          return missing("The reimbursement changed; refresh its revision before continuing.", [
+            expectedAnswer("expectedRevision", "number"),
+          ]);
+        if (input.data.operation === "create") {
+          const createInput = input.data;
+          const expected = toCents(input.data.expectedAmount);
+          const replayedCreate = cases.some(
+            (item) =>
+              item.expectedAmount === expected &&
+              item.payer === createInput.payer &&
+              item.dueDate === createInput.dueDate &&
+              stableJson(item.evidence) === stableJson(createInput.evidence),
+          );
+          if (
+            !replayedCreate &&
+            expected + cases.reduce((sum, item) => sum + item.expectedAmount, 0) >
+              lockedAllocation.amount
+          )
+            return missing("The reimbursement exceeds the allocation's remaining capacity.", [
+              expectedAnswer("expectedAmount", "number"),
+            ]);
+        }
+        if (input.data.operation === "match_credit") {
+          if (!lockedCredit || lockedCredit.pending || lockedCredit.direction !== "income")
+            return missing("Choose a posted income credit to reconcile.", [
+              expectedAnswer("creditTransactionId", "string"),
+            ]);
+          const creditMatches = await lockRead(
+            executor
+              .select()
+              .from(financeReimbursementMatches)
+              .where(eq(financeReimbursementMatches.creditTransactionId, lockedCredit.id))
+              .orderBy(financeReimbursementMatches.id),
+          );
+          const amount = toCents(input.data.amount);
+          if (
+            !idempotentMatch &&
+            (!current ||
+              amount > current.expectedAmount - current.receivedAmount ||
+              amount + creditMatches.reduce((sum, match) => sum + match.amount, 0) >
+                lockedCredit.amount)
+          )
+            return missing(
+              "The credit or reimbursement no longer has the requested remaining amount.",
+              [expectedAnswer("amount", "number")],
+            );
+        }
+        const revision = snapshotRevision({
+          allocation: [
+            lockedAllocation.id,
+            lockedAllocation.revision,
+            lockedAllocation.updatedAt.toISOString(),
+          ],
+          case: current ? [current.id, current.revision, current.updatedAt.toISOString()] : null,
+          credit: lockedCredit ? [lockedCredit.id, lockedCredit.updatedAt.toISOString()] : null,
+          expense: [lockedExpense.id, lockedExpense.updatedAt.toISOString()],
+          matches: matches.map((match) => [match.id, match.amount, match.updatedAt.toISOString()]),
+        });
+        const target = current?.id ?? lockedAllocation.id;
+        const base = prepared(
           input.data,
-          input.data.operation === "create" ? null : String(input.data.expectedRevision),
+          revision,
           [
             {
               entityId: target,
@@ -1450,8 +1684,27 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                     : "Track an expected reimbursement against a reimbursable allocation.",
             },
           ],
-          [],
+          [
+            transactionSource(lockedExpense, expenseAccount),
+            ...(lockedCredit && creditAccount
+              ? [transactionSource(lockedCredit, creditAccount)]
+              : []),
+          ],
         );
+        return {
+          ...base,
+          semanticTargetKeys: [
+            ...new Set([
+              ...base.semanticTargetKeys,
+              `allocation:${lockedAllocation.id}`,
+              `transaction:${lockedExpense.id}`,
+              `account:${expenseAccount.id}`,
+              ...(lockedCredit && creditAccount
+                ? [`transaction:${lockedCredit.id}`, `account:${creditAccount.id}`]
+                : []),
+            ]),
+          ].sort(),
+        };
       }
       case "income_stream": {
         const input = parse<Record<string, unknown>>(updateFinanceIncomeStreamInputSchema);
@@ -1616,7 +1869,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           executor as never,
         );
       case "reimbursement":
-        return invoke(finances.reconcileReimbursement, input as never, privilegedContext as never);
+        return invoke(
+          finances.reconcileReimbursement,
+          input as never,
+          privilegedContext as never,
+          executor as never,
+        );
     }
     return assertNever(prepared.actionKind);
   }
@@ -1917,7 +2175,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           semanticTargetKeys: review.semanticTargetKeys as string[],
         };
         const actionContext =
-          review.actionKind === "transaction" || review.actionKind === "transaction_breakdown"
+          review.actionKind === "transaction" ||
+          review.actionKind === "transaction_breakdown" ||
+          review.actionKind === "reimbursement"
             ? requestingAgentContext(context, review.requestingAgentId)
             : context;
         const current = await revalidate(

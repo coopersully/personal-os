@@ -14,3 +14,11 @@ Validation completed:
 - Existing Finance service, action service, route, API-client, and MCP server suites.
 
 The integration suites emit an existing `pg` deprecation warning from concurrent test-client queries; no test failures resulted.
+
+## Batch A hardening
+
+**Status: DONE**
+
+Reimbursement mutation writers now inherit the supplied Task 3 transaction, so reimbursement records, matches, Finance evidence, broad redacted audit events, and review terminalization commit or roll back as one unit. Agent preparation now locks and revalidates the owned allocation, expense and credit transactions/accounts, reimbursement/matches, revisions, amount capacity, posted-credit state, and evidence before bypass or approval. It also locks semantic targets for the reimbursement, allocation, credit, transactions, and accounts.
+
+Broad `audit_events` reimbursement payloads now contain only status, revision, and match-count summaries; amounts, payer, rationale, credit details, and evidence remain in the Finance-scoped reimbursement records. Added migrated-PostgreSQL coverage for partial/cancelled/full and multi-payer combined-credit lifecycles, idempotent create/match/cancel replay, executor rollback, concurrent capacity enforcement, cancellation spending restoration, agent bypass/review behavior, terminalization failure rollback, and broad-audit privacy.

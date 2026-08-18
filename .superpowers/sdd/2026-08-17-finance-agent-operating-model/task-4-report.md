@@ -81,3 +81,8 @@ DONE_WITH_CONCERNS
 - Regression coverage verifies PostgreSQL rejects an allocation whose user does not own both referenced transaction and category, and verifies a category-name-only legacy transaction receives an exact personal allocation and a newly materialized owned category.
 - A high-cursor regression fixture verifies resume across one-row batches, idempotent completion, and two concurrent workers: one claims the skip-locked checkpoint and inserts the final allocation while the other reports unclaimed, leaving exactly one allocation per legacy transaction.
 - Breakdown audit regression coverage verifies active before/after allocation and reimbursable counts with a null future-rule state, omits private rationale text, and proves an injected audit write failure rolls allocation replacement back atomically.
+
+## Fix round 3 — Batch A (partial)
+
+- Future-rule preparation and terminal validation now require the proposed split itself to be single-category and to match the requested rule category. Mixed post-change splits stay one-off and cannot queue or bypass a reusable rule.
+- A saved multi-category split now conservatively sets merchant behavior to mixed regardless of actor outcome, and explicit mixed behavior remains mixed on later single-category replacements.

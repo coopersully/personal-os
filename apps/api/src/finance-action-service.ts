@@ -1286,6 +1286,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         const categoryById = new Map(categories.map((category) => [category.id, category]));
         const futureRule = input.data.futureRule;
         if (futureRule) {
+          const proposedCategoryIds = new Set(
+            input.data.allocations.map((allocation) => allocation.categoryId),
+          );
+          if (proposedCategoryIds.size !== 1 || !proposedCategoryIds.has(futureRule.categoryId)) {
+            return missing(
+              "A reusable merchant rule requires a single-category breakdown; keep this mixed split one-off.",
+              [expectedAnswer("futureRule", "string", { nullable: true })],
+              [transactionSource(item, account)],
+            );
+          }
           if (!item.merchantId)
             return missing(
               "A reusable merchant rule needs an identified merchant; save this as a one-off breakdown instead.",

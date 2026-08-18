@@ -5972,6 +5972,7 @@ export function createFinanceService({
         }
         const existingAllocations = await tx
           .select({
+            categoryId: financeTransactionAllocations.categoryId,
             state: financeTransactionAllocations.state,
             treatment: financeTransactionAllocations.treatment,
           })
@@ -5991,6 +5992,18 @@ export function createFinanceService({
         let priorFutureRule: typeof financeCategoryRules.$inferSelect | null = null;
         let futureRuleEvidence: Record<string, unknown> | null = null;
         if (input.futureRule) {
+          const proposedCategoryIds = new Set(
+            input.allocations.map((allocation) => allocation.categoryId),
+          );
+          if (
+            proposedCategoryIds.size !== 1 ||
+            !proposedCategoryIds.has(input.futureRule.categoryId)
+          ) {
+            throw new AppError(
+              "invalid_request",
+              "A reusable merchant rule requires a single-category breakdown; save this mixed split one-off instead.",
+            );
+          }
           if (!before.merchantId)
             throw new AppError(
               "invalid_request",
@@ -6203,9 +6216,18 @@ export function createFinanceService({
                 outcome: decision.outcome as "confirmed" | "corrected",
               })),
           });
+          const proposedCategoryIds = new Set(
+            input.allocations.map((allocation) => allocation.categoryId),
+          );
           await tx
             .update(financeMerchants)
-            .set({ behavior: evaluation.behavior, updatedAt: now() })
+            .set({
+              behavior:
+                proposedCategoryIds.size > 1 || merchant?.behavior === "mixed"
+                  ? "mixed"
+                  : evaluation.behavior,
+              updatedAt: now(),
+            })
             .where(
               and(
                 eq(financeMerchants.id, before.merchantId),

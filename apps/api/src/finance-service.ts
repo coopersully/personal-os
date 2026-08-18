@@ -4251,7 +4251,6 @@ export function createFinanceService({
           .where(
             and(
               eq(financeTransactionAllocations.userId, userId),
-              eq(financeTransactionAllocations.state, "active"),
               eq(financeTransactions.userId, userId),
               gte(financeTransactions.transactionDate, `${month}-01`),
               lt(financeTransactions.transactionDate, `${nextMonth(month)}-01`),
@@ -4268,12 +4267,14 @@ export function createFinanceService({
             ),
           ),
       ]);
-      const allocatedTransactionIds = new Set(allocations.map((item) => item.transaction.id));
+      const allocationTransactionIds = new Set(allocations.map((item) => item.transaction.id));
       return budgets.map((item) => {
         const allocationSpent = allocations
           .filter(
             ({ allocation, category }) =>
-              allocation.treatment === "personal" && category.name === item.category,
+              allocation.state === "active" &&
+              allocation.treatment === "personal" &&
+              category.name === item.category,
           )
           .reduce(
             (sum, { allocation, transaction }) =>
@@ -4288,7 +4289,7 @@ export function createFinanceService({
         const legacySpent = transactions
           .filter(
             (transaction) =>
-              !allocatedTransactionIds.has(transaction.id) &&
+              !allocationTransactionIds.has(transaction.id) &&
               transaction.category === item.category,
           )
           .reduce((sum, transaction) => sum + budgetImpact(transaction), 0);
@@ -5659,7 +5660,6 @@ export function createFinanceService({
             .where(
               and(
                 eq(financeTransactionAllocations.userId, userId),
-                eq(financeTransactionAllocations.state, "active"),
                 inArray(
                   financeTransactionAllocations.transactionId,
                   transactions.map((transaction) => transaction.id),
@@ -5770,7 +5770,6 @@ export function createFinanceService({
             .where(
               and(
                 eq(financeTransactionAllocations.userId, userId),
-                eq(financeTransactionAllocations.state, "active"),
                 inArray(
                   financeTransactionAllocations.transactionId,
                   monthlyTransactions.map((transaction) => transaction.id),

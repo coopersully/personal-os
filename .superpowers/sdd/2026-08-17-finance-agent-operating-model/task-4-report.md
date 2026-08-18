@@ -94,3 +94,16 @@ DONE_WITH_CONCERNS
 - `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-merchant-evidence.test.ts --reporter=dot` — 95 tests passed.
 - API and domain type checks passed; scoped Biome passed.
 - `pnpm verify` was not run; the focused Finance suites cover this bounded follow-up.
+
+## Fix round 3 — Batch B
+
+- Shared allocation projections now preserve the distinction between a transaction with no allocation history and one whose allocations are all invalidated after provider amount drift. The former retains the legacy gross/category fallback; the latter contributes zero personal spending until its review is resolved.
+- Budget status, overview, budget pace, and Finance status now query allocation existence across both active and invalidated rows. They consume active personal shares only, and an invalidated-only transaction cannot double count through the legacy transaction category fallback. Gross cash flow and export remain bank-amount/evidence based: the bank amount appears once in cashflow while archived invalidated allocations remain exported.
+- The provider-drift integration fixture now verifies active single allocation spending, invalidated mixed split exclusion from budget/overview/pace/status personal totals, an outstanding review, unchanged gross cashflow, and exported archived allocation state.
+
+### Fix round 3 Batch B verification
+
+- RED: the provider amount-drift overview assertion observed `$50` personal spending instead of the required `$19`; active-only allocation queries had erased the distinction between never-allocated and invalidated-only transactions.
+- `pnpm exec vitest run apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts --reporter=dot` — 64 tests passed.
+- API and domain type checks passed; scoped Biome and `git diff --check` passed.
+- `pnpm verify` was not run; focused service/status coverage was used for this bounded follow-up.

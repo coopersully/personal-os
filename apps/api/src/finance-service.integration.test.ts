@@ -33,6 +33,7 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testconta
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
+import { createFinanceStatusService } from "./finance-status-service.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
 
@@ -5622,6 +5623,28 @@ describe.sequential("finance service", () => {
         }),
       ]),
     );
+    await expect(service.listOverview(owner.id, "2026-07")).resolves.toMatchObject({
+      spendingThisMonth: 19,
+    });
+    await expect(service.getBudgetPace(owner.id, "month")).resolves.toMatchObject({
+      cells: expect.arrayContaining([expect.objectContaining({ date: "2026-07-19", spent: 19 })]),
+    });
+    await expect(
+      createFinanceStatusService({
+        assistant: {} as never,
+        db: database.db,
+        finances: service,
+        goals: {} as never,
+        maintenance: {} as never,
+        now: () => now,
+      }).getFinanceStatus(owner.id, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      details: {
+        cashFlow: { net: -50 },
+        closeReadiness: { unansweredExceptions: 1 },
+        month: { spending: 19 },
+      },
+    });
     await expect(service.exportData(owner.id)).resolves.toMatchObject({
       transactions: expect.arrayContaining([
         expect.objectContaining({

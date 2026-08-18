@@ -14,15 +14,20 @@ export function activeAllocationsByTransaction(
 ): Map<string, AllocationProjection[]> {
   const byTransaction = new Map<string, AllocationProjection[]>();
   for (const allocation of allocations) {
-    if (allocation.state !== "active") continue;
     const items = byTransaction.get(allocation.transactionId) ?? [];
+    // Preserve allocation existence even when every split has been invalidated.
+    // That state means the provider amount changed and personal spending must
+    // await review instead of falling back to the gross legacy category.
+    if (!byTransaction.has(allocation.transactionId)) {
+      byTransaction.set(allocation.transactionId, items);
+    }
+    if (allocation.state !== "active") continue;
     items.push(allocation);
-    byTransaction.set(allocation.transactionId, items);
   }
   return byTransaction;
 }
 
-/** Falls back to the gross amount only when the transaction has no active split. */
+/** Falls back to gross only when the transaction has never had an allocation. */
 export function personalAllocationCents(
   transactionId: string,
   grossAmount: number,

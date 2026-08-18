@@ -340,7 +340,6 @@ export function createFinanceStatusService({ db, now }: Options) {
                 .where(
                   and(
                     eq(financeTransactionAllocations.userId, userId),
-                    eq(financeTransactionAllocations.state, "active"),
                     inArray(
                       financeTransactionAllocations.transactionId,
                       transactions.map((transaction) => transaction.id),

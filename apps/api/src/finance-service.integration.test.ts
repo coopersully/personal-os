@@ -3433,6 +3433,90 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual([{ amount: 2_000 }, { amount: 3_000 }, { amount: 1_214 }]);
   });
 
+  it("enforces allocation ownership in PostgreSQL and backfills category-name legacy rows", async () => {
+    const [owner, other] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "Allocation FK owner",
+          email: `allocation-fk-owner-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Allocation FK other",
+          email: `allocation-fk-other-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+      ])
+      .returning();
+    if (!owner || !other) throw new Error("Allocation ownership users were not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const ownerContext = {
+      principal: financePrincipal(owner.id),
+      requestId: "allocation-fk-owner",
+    };
+    const ownerAccount = await service.createAccount(
+      { balance: 100, institution: "Owner", name: "Owner account", provider: "manual" },
+      ownerContext,
+    );
+    const ownerCategory = (await service.listCategories(owner.id))[0];
+    const otherCategory = (await service.listCategories(other.id))[0];
+    if (!ownerCategory || !otherCategory)
+      throw new Error("Allocation ownership categories were not seeded.");
+    const ownerTransaction = await service.createTransaction(
+      {
+        accountId: ownerAccount.id,
+        amount: 10,
+        category: ownerCategory.name,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Ownership fixture",
+        notes: null,
+      },
+      ownerContext,
+    );
+    await expect(
+      database.db.insert(financeTransactionAllocations).values({
+        allocationOrder: 99,
+        amount: 1000,
+        categoryId: otherCategory.id,
+        transactionId: ownerTransaction.id,
+        userId: other.id,
+      }),
+    ).rejects.toThrow();
+    await database.db
+      .delete(financeTransactionAllocations)
+      .where(eq(financeTransactionAllocations.transactionId, ownerTransaction.id));
+    await database.db
+      .update(financeTransactions)
+      .set({ category: "Legacy Only", categoryId: null })
+      .where(eq(financeTransactions.id, ownerTransaction.id));
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, "finance_transaction_allocation_backfill_v1"));
+    await expect(service.backfillTransactionAllocations(100)).resolves.toMatchObject({
+      inserted: expect.any(Number),
+    });
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactionAllocations.amount,
+          treatment: financeTransactionAllocations.treatment,
+        })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, ownerTransaction.id)),
+    ).resolves.toEqual([{ amount: 1000, treatment: "personal" }]);
+    await expect(
+      database.db
+        .select({ name: financeCategories.name, userId: financeCategories.userId })
+        .from(financeCategories)
+        .where(eq(financeCategories.name, "Legacy Only")),
+    ).resolves.toEqual([{ name: "Legacy Only", userId: owner.id }]);
+  });
+
   it("keeps allocation-based merchant evidence mixed without downgrading explicit mixed behavior", async () => {
     const [owner] = await database.db
       .insert(users)

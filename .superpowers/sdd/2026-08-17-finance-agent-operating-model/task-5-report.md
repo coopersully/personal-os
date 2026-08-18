@@ -65,3 +65,9 @@ Round 2A validation completed:
 
 - Focused reimbursement/action/service/MCP suites — 117 passing.
 - API, API-client, MCP, Database, and Domain typechecks.
+
+## Round 2B candidates and cadence
+
+**Status: DONE**
+
+Added one conservative shared plausible-credit selector for reimbursement list, Finance status, and maintenance. It reports matched and remaining cents, filters pending/transfer/payroll/refund/fully-matched income, and requires payment-app descriptor plus outstanding-case proximity before surfacing a candidate. Anomaly maintenance now reads a bounded trailing-year history outside the active scope, never future rows, and recurring suppression also requires the configured cadence window.

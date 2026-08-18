@@ -37,6 +37,7 @@ import {
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
   setFinanceTransactionBreakdownInputSchema,
+  toCents,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
@@ -1253,24 +1254,18 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           );
         }
         const allocationCents = input.data.allocations.map((allocation) =>
-          Math.round(allocation.amount * 100),
+          toCents(allocation.amount),
         );
-        if (
-          input.data.allocations.some(
-            (allocation, index) =>
-              Math.abs(allocation.amount * 100 - (allocationCents[index] ?? 0)) > 1e-8,
-          ) ||
-          allocationCents.reduce((sum, amount) => sum + amount, 0) !== item.amount
-        ) {
+        if (allocationCents.reduce((sum, amount) => sum + amount, 0) !== item.amount) {
           return missing(
             "Transaction allocation amounts must sum exactly to the transaction amount.",
             [expectedAnswer("allocations", "object_array", { example: "[...]" })],
             [transactionSource(item, account)],
           );
         }
-        const allocationCategoryIds = input.data.allocations.map(
-          (allocation) => allocation.categoryId,
-        );
+        const allocationCategoryIds = [
+          ...new Set(input.data.allocations.map((allocation) => allocation.categoryId)),
+        ];
         const categories = await lockRead(
           executor
             .select({ id: financeCategories.id, name: financeCategories.name })

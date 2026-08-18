@@ -12,6 +12,7 @@ import {
   financeProviderItems,
   financeRecurringObligations,
   financeReviewCases,
+  financeTransactionAllocations,
   financeTransactions,
   goals as goalRows,
   motives as motiveRows,
@@ -28,6 +29,10 @@ import {
 import { and, desc, eq, gte, inArray, or } from "drizzle-orm";
 import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
+import {
+  activeAllocationsByTransaction,
+  personalAllocationCents,
+} from "./finance-allocation-projections.js";
 import { forecastCashflow } from "./finance-cashflow.js";
 import { assessFinanceHealth } from "./finance-health.js";
 import { reliableMonthlyCapacity, reliableMonthlyIncome } from "./finance-planning.js";
@@ -328,6 +333,22 @@ export function createFinanceStatusService({ db, now }: Options) {
               ),
             )
             .orderBy(financeTransactions.transactionDate, financeTransactions.id);
+          const allocationRows = transactions.length
+            ? await tx
+                .select()
+                .from(financeTransactionAllocations)
+                .where(
+                  and(
+                    eq(financeTransactionAllocations.userId, userId),
+                    eq(financeTransactionAllocations.state, "active"),
+                    inArray(
+                      financeTransactionAllocations.transactionId,
+                      transactions.map((transaction) => transaction.id),
+                    ),
+                  ),
+                )
+            : [];
+          const activeAllocations = activeAllocationsByTransaction(allocationRows);
           const profiles = await tx
             .select()
             .from(financeProfiles)
@@ -435,7 +456,12 @@ export function createFinanceStatusService({ db, now }: Options) {
           const postedIncome = currentTransactions.filter(
             (row) => !row.pending && row.direction === "income",
           );
-          const spending = postedExpenses.reduce((sum, row) => sum + row.amount, 0) / 100;
+          const grossSpending = postedExpenses.reduce((sum, row) => sum + row.amount, 0) / 100;
+          const spending =
+            postedExpenses.reduce(
+              (sum, row) => sum + personalAllocationCents(row.id, row.amount, activeAllocations),
+              0,
+            ) / 100;
           const incomeObserved = postedIncome.reduce((sum, row) => sum + row.amount, 0) / 100;
           const activeProfile = latestProfile(profiles, asOf.slice(0, 10));
           const statedMonthlyIncome =
@@ -912,7 +938,7 @@ export function createFinanceStatusService({ db, now }: Options) {
                 total: evidenceCurrent ? budgetTotal : null,
               },
               cashFlow: {
-                net: evidenceCurrent ? incomeObserved - spending : null,
+                net: evidenceCurrent ? incomeObserved - grossSpending : null,
                 projectedLowestBalance: cashflowProjection?.lowestBalance ?? null,
                 projectedLowestBalanceDate: cashflowProjection?.lowestDate ?? null,
                 reserveRunwayMonths:

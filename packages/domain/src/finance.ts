@@ -52,7 +52,31 @@ export type UpdateFinanceAutomationSettingsInput = z.infer<
   typeof updateFinanceAutomationSettingsInputSchema
 >;
 
-const moneySchema = z.number().finite().nonnegative().max(100_000_000);
+const maxFinanceAmount = 100_000_000;
+
+/** Converts a user-facing USD amount to integer cents without floating-point drift. */
+export function toCents(value: number): number {
+  if (!Number.isFinite(value) || Math.abs(value) > maxFinanceAmount) {
+    throw new RangeError("Amount is outside the safe Finance range.");
+  }
+  const cents = Math.round(value * 100);
+  if (!Number.isSafeInteger(cents) || Math.abs(value - cents / 100) > 1e-9) {
+    throw new RangeError("Amounts must be expressed in exact cents.");
+  }
+  return cents;
+}
+
+const moneySchema = z.number().finite().nonnegative().max(maxFinanceAmount);
+const moneyInputSchema = moneySchema.superRefine((value, context) => {
+  try {
+    toCents(value);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "Amounts must be expressed in exact cents.",
+    });
+  }
+});
 const categorySchema = z.string().trim().min(1).max(80);
 const financeMonthSchema = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/u);
 
@@ -358,13 +382,13 @@ export const updateFinanceProfileInputSchema = z.object({
     .enum(["contract", "full_time", "part_time", "self_employed", "unemployed"])
     .nullable()
     .default(null),
-  expectedNetPay: moneySchema.nullable().default(null),
-  grossAnnualIncome: moneySchema.nullable().default(null),
+  expectedNetPay: moneyInputSchema.nullable().default(null),
+  grossAnnualIncome: moneyInputSchema.nullable().default(null),
   householdSize: z.number().int().min(1).max(50).nullable().optional(),
   housingStatus: financeHousingStatusSchema.nullable().optional(),
   investmentRiskCapacity: financeInvestmentRiskCapacitySchema.nullable().optional(),
   investmentRiskWillingness: financeInvestmentRiskWillingnessSchema.nullable().optional(),
-  monthlyHousingCost: moneySchema.nullable().optional(),
+  monthlyHousingCost: moneyInputSchema.nullable().optional(),
   nextPayday: z.iso.date().nullable().default(null),
   payAccountId: idSchema.nullable().default(null),
   payFrequency: financePayFrequencySchema.nullable().default(null),
@@ -375,7 +399,7 @@ export type UpdateFinanceProfileInput = z.infer<typeof updateFinanceProfileInput
 
 const financeBudgetPlanAllocationSchema = z.object({
   categoryId: idSchema,
-  limit: moneySchema.positive(),
+  limit: moneyInputSchema.positive(),
 });
 const noDuplicateIds = (values: string[]) => new Set(values).size === values.length;
 
@@ -550,7 +574,7 @@ export type UpdateFinanceRecurringObligationInput = z.infer<
 >;
 
 export const financeTransactionSchema = z.object({
-  amount: moneySchema,
+  amount: moneyInputSchema,
   category: categorySchema.nullable(),
   categoryConfidence: z.number().min(0).max(1).nullable(),
   categoryId: idSchema.nullable().optional(),
@@ -623,21 +647,12 @@ export type FinanceMerchant = z.infer<typeof financeMerchantSchema>;
 
 const financeAllocationInputSchema = z
   .object({
-    amount: moneySchema.positive(),
+    amount: moneyInputSchema.positive(),
     categoryId: idSchema,
     rationale: z.string().trim().min(1).max(1_000),
     treatment: z.enum(["personal", "reimbursable"]).default("personal"),
   })
-  .strict()
-  .superRefine((value, context) => {
-    if (!Number.isInteger(value.amount * 100)) {
-      context.addIssue({
-        code: "custom",
-        message: "Allocation amounts must be expressed in exact cents.",
-        path: ["amount"],
-      });
-    }
-  });
+  .strict();
 
 export const setFinanceTransactionBreakdownInputSchema = z
   .object({
@@ -655,15 +670,21 @@ export const setFinanceTransactionBreakdownInputSchema = z
   })
   .strict()
   .superRefine((value, context) => {
-    const categoryIds = value.allocations.map((item) => item.categoryId);
-    if (new Set(categoryIds).size !== categoryIds.length) {
+    const categoryTreatmentKeys = value.allocations.map(
+      (item) => `${item.categoryId}:${item.treatment}`,
+    );
+    if (new Set(categoryTreatmentKeys).size !== categoryTreatmentKeys.length) {
       context.addIssue({
         code: "custom",
-        message: "Use one allocation per category in a transaction breakdown.",
+        message: "Use one allocation per category and treatment in a transaction breakdown.",
         path: ["allocations"],
       });
     }
-    if (value.futureRule && !categoryIds.includes(value.futureRule.categoryId)) {
+    const futureRule = value.futureRule;
+    if (
+      futureRule &&
+      !value.allocations.some((item) => item.categoryId === futureRule.categoryId)
+    ) {
       context.addIssue({
         code: "custom",
         message: "A future merchant rule must be supported by an allocation in this breakdown.",
@@ -930,7 +951,7 @@ export const financeBudgetSchema = z.object({
   category: categorySchema,
   createdAt: isoDateTimeSchema,
   id: idSchema,
-  limit: moneySchema.positive(),
+  limit: moneyInputSchema.positive(),
   month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
   updatedAt: isoDateTimeSchema,
 });
@@ -989,7 +1010,23 @@ export const financeBudgetPaceSchema = z.object({
 export type FinanceBudgetPace = z.infer<typeof financeBudgetPaceSchema>;
 
 export const createFinanceAccountInputSchema = z.object({
-  balance: z.number().finite().nullable().default(null),
+  balance: z
+    .number()
+    .finite()
+    .nullable()
+    .default(null)
+    .superRefine((value, context) => {
+      if (value === null) return;
+      try {
+        toCents(value);
+      } catch (error) {
+        context.addIssue({
+          code: "custom",
+          message:
+            error instanceof Error ? error.message : "Amounts must be expressed in exact cents.",
+        });
+      }
+    }),
   institution: z.string().trim().min(1).max(160),
   kind: financeAccountKindSchema.optional(),
   name: z.string().trim().min(1).max(160),

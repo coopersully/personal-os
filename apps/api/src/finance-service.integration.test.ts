@@ -16,6 +16,7 @@ import {
   financeCategories,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeMerchants,
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
@@ -3394,14 +3395,31 @@ describe.sequential("finance service", () => {
       ),
     ).rejects.toMatchObject({ code: "conflict" });
     await service.createBudget({ category: "Health", limit: 100, month: "2026-07" }, context);
+    await service.createBudget(
+      { category: "Personal Care", limit: 100, month: "2026-07" },
+      context,
+    );
     await expect(service.getBudgetStatus(owner.id, "2026-07")).resolves.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           budget: expect.objectContaining({ category: "Health" }),
           spent: 20,
         }),
+        expect.objectContaining({
+          budget: expect.objectContaining({ category: "Personal Care" }),
+          spent: 0,
+        }),
       ]),
     );
+    await expect(service.listOverview(owner.id, "2026-07")).resolves.toMatchObject({
+      spendingThisMonth: 50,
+      transactions: expect.arrayContaining([
+        expect.objectContaining({ amount: 62.14, id: transaction.id }),
+      ]),
+    });
+    await expect(service.getBudgetPace(owner.id, "month")).resolves.toMatchObject({
+      cells: expect.arrayContaining([expect.objectContaining({ date: "2026-07-19", spent: 50 })]),
+    });
     await expect(service.exportData(owner.id)).resolves.toMatchObject({
       transactions: [
         expect.objectContaining({ id: transaction.id, allocations: expect.any(Array) }),
@@ -3413,6 +3431,150 @@ describe.sequential("finance service", () => {
         .from(financeTransactionAllocations)
         .where(eq(financeTransactionAllocations.transactionId, transaction.id)),
     ).resolves.toEqual([{ amount: 2_000 }, { amount: 3_000 }, { amount: 1_214 }]);
+  });
+
+  it("keeps allocation-based merchant evidence mixed without downgrading explicit mixed behavior", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Mixed allocation merchant",
+        email: `mixed-allocation-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Mixed allocation owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "mixed-allocation" };
+    const [firstCategory, secondCategory] = await service.listCategories(owner.id);
+    if (!firstCategory || !secondCategory)
+      throw new Error("Allocation categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 500, institution: "Local", name: "Local checking", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 310,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Neighborhood Dining",
+        notes: null,
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [
+          { amount: 90, categoryId: firstCategory.id, rationale: "Personal meal" },
+          {
+            amount: 220,
+            categoryId: secondCategory.id,
+            rationale: "Client meal",
+            treatment: "reimbursable",
+          },
+        ],
+        expectedTransactionUpdatedAt: transaction.updatedAt,
+        rationale: "Dining receipt split.",
+      },
+      context,
+    );
+    const [merchant] = await database.db
+      .select()
+      .from(financeMerchants)
+      .where(eq(financeMerchants.displayName, "Neighborhood Dining"));
+    expect(merchant?.behavior).toBe("mixed");
+    await database.db
+      .update(financeMerchants)
+      .set({ behavior: "mixed" })
+      .where(eq(financeMerchants.id, merchant?.id ?? ""));
+    const [updatedTransaction] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transaction.id));
+    if (!updatedTransaction) throw new Error("Mixed transaction was not updated.");
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [{ amount: 310, categoryId: firstCategory.id, rationale: "Final receipt" }],
+        expectedTransactionUpdatedAt: updatedTransaction.updatedAt.toISOString(),
+        rationale: "Corrected receipt.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({ behavior: financeMerchants.behavior })
+        .from(financeMerchants)
+        .where(eq(financeMerchants.id, merchant?.id ?? "")),
+    ).resolves.toEqual([{ behavior: "mixed" }]);
+  });
+
+  it("allows a Dining receipt to split personal and reimbursable shares in the same category", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Same category allocation",
+        email: `same-category-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Same-category allocation owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = {
+      principal: financePrincipal(owner.id),
+      requestId: "same-category-allocation",
+    };
+    const dining = (await service.listCategories(owner.id)).find(
+      (category) => category.name === "Dining",
+    );
+    if (!dining) throw new Error("Dining category was not seeded.");
+    const account = await service.createAccount(
+      { balance: 310, institution: "Local", name: "Dining card", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 310,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Dining receipt",
+        notes: null,
+      },
+      context,
+    );
+    await expect(
+      service.setTransactionBreakdown(
+        transaction.id,
+        {
+          allocations: [
+            { amount: 90, categoryId: dining.id, rationale: "Personal share" },
+            {
+              amount: 220,
+              categoryId: dining.id,
+              rationale: "Client share",
+              treatment: "reimbursable",
+            },
+          ],
+          expectedTransactionUpdatedAt: transaction.updatedAt,
+          rationale: "Dining reimbursement split.",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      allocations: expect.arrayContaining([
+        expect.objectContaining({ amount: 90, categoryId: dining.id, treatment: "personal" }),
+        expect.objectContaining({ amount: 220, categoryId: dining.id, treatment: "reimbursable" }),
+      ]),
+    });
   });
 
   it("questions unpaired vault moves, matches card payments, and preserves rent spending", async () => {

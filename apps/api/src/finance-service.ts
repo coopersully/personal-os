@@ -76,11 +76,16 @@ import type {
   UpdateFinanceTransactionInput,
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
-import { financeDomainProfileSchema, idSchema, localDateAt } from "@personal-os/domain";
+import { financeDomainProfileSchema, idSchema, localDateAt, toCents } from "@personal-os/domain";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import {
+  type AllocationProjection,
+  activeAllocationsByTransaction,
+  personalAllocationCents,
+} from "./finance-allocation-projections.js";
 import {
   cadenceFromDates,
   forecastCashflow,
@@ -362,6 +367,16 @@ function budgetImpact(row: typeof financeTransactions.$inferSelect, includePendi
   if (row.pending && !includePending) return 0;
   if (row.direction === "expense") return row.amount;
   return isRefundOrReversal(row) ? -row.amount : 0;
+}
+function personalBudgetImpact(
+  row: typeof financeTransactions.$inferSelect,
+  activeAllocations: ReadonlyMap<string, AllocationProjection[]>,
+  includePending = false,
+) {
+  const grossImpact = budgetImpact(row, includePending);
+  if (grossImpact === 0) return 0;
+  const personalAmount = personalAllocationCents(row.id, row.amount, activeAllocations);
+  return grossImpact < 0 ? -personalAmount : personalAmount;
 }
 export function financeCsvImportErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "The CSV could not be imported.";
@@ -3252,10 +3267,9 @@ export function createFinanceService({
           dependents: input.dependents ?? null,
           employer: input.employer,
           employmentType: input.employmentType,
-          expectedNetPay:
-            input.expectedNetPay === null ? null : Math.round(input.expectedNetPay * 100),
+          expectedNetPay: input.expectedNetPay === null ? null : toCents(input.expectedNetPay),
           grossAnnualIncome:
-            input.grossAnnualIncome === null ? null : Math.round(input.grossAnnualIncome * 100),
+            input.grossAnnualIncome === null ? null : toCents(input.grossAnnualIncome),
           householdSize: input.householdSize ?? null,
           housingStatus: input.housingStatus ?? null,
           investmentRiskCapacity: input.investmentRiskCapacity ?? null,
@@ -3263,7 +3277,7 @@ export function createFinanceService({
           monthlyHousingCost:
             input.monthlyHousingCost === null || input.monthlyHousingCost === undefined
               ? null
-              : Math.round(input.monthlyHousingCost * 100),
+              : toCents(input.monthlyHousingCost),
           nextPayday: input.nextPayday,
           payAccountId: input.payAccountId,
           payFrequency: input.payFrequency,
@@ -3275,10 +3289,9 @@ export function createFinanceService({
           set: {
             employer: input.employer,
             employmentType: input.employmentType,
-            expectedNetPay:
-              input.expectedNetPay === null ? null : Math.round(input.expectedNetPay * 100),
+            expectedNetPay: input.expectedNetPay === null ? null : toCents(input.expectedNetPay),
             grossAnnualIncome:
-              input.grossAnnualIncome === null ? null : Math.round(input.grossAnnualIncome * 100),
+              input.grossAnnualIncome === null ? null : toCents(input.grossAnnualIncome),
             dependents: input.dependents ?? null,
             householdSize: input.householdSize ?? null,
             housingStatus: input.housingStatus ?? null,
@@ -3287,7 +3300,7 @@ export function createFinanceService({
             monthlyHousingCost:
               input.monthlyHousingCost === null || input.monthlyHousingCost === undefined
                 ? null
-                : Math.round(input.monthlyHousingCost * 100),
+                : toCents(input.monthlyHousingCost),
             nextPayday: input.nextPayday,
             payAccountId: input.payAccountId,
             payFrequency: input.payFrequency,
@@ -4153,7 +4166,10 @@ export function createFinanceService({
       const allocatedTransactionIds = new Set(allocations.map((item) => item.transaction.id));
       return budgets.map((item) => {
         const allocationSpent = allocations
-          .filter(({ category }) => category.name === item.category)
+          .filter(
+            ({ allocation, category }) =>
+              allocation.treatment === "personal" && category.name === item.category,
+          )
           .reduce(
             (sum, { allocation, transaction }) =>
               sum +
@@ -4856,7 +4872,7 @@ export function createFinanceService({
             await tx
               .insert(financeAccounts)
               .values({
-                balance: input.balance === null ? null : Math.round(input.balance * 100),
+                balance: input.balance === null ? null : toCents(input.balance),
                 institution: input.institution,
                 kind: input.kind ?? "cash",
                 name: input.name,
@@ -4901,7 +4917,7 @@ export function createFinanceService({
               .insert(financeBudgets)
               .values({
                 category: input.category,
-                limit: Math.round(input.limit * 100),
+                limit: toCents(input.limit),
                 month: input.month,
                 userId: context.principal.userId,
               })
@@ -5062,12 +5078,12 @@ export function createFinanceService({
             .insert(financeBudgets)
             .values({
               category: category.name,
-              limit: Math.round(allocation.limit * 100),
+              limit: toCents(allocation.limit),
               month: input.month,
               userId: context.principal.userId,
             })
             .onConflictDoUpdate({
-              set: { limit: Math.round(allocation.limit * 100), updatedAt: now() },
+              set: { limit: toCents(allocation.limit), updatedAt: now() },
               target: [financeBudgets.userId, financeBudgets.category, financeBudgets.month],
             });
         }
@@ -5140,7 +5156,7 @@ export function createFinanceService({
               .insert(financeTransactions)
               .values({
                 accountId: input.accountId,
-                amount: Math.round(input.amount * 100),
+                amount: toCents(input.amount),
                 category: automatic.category,
                 categoryId: categoryRecord?.id ?? null,
                 categoryConfidence: automatic.confidence,
@@ -5234,7 +5250,7 @@ export function createFinanceService({
             .insert(financeTransactions)
             .values({
               accountId: destination.id,
-              amount: Math.round(record.amount * 100),
+              amount: toCents(record.amount),
               category: automatic.category,
               categoryId: categoryRecord?.id ?? null,
               categoryConfidence: automatic.confidence,
@@ -5531,6 +5547,22 @@ export function createFinanceService({
             ),
           ),
       ]);
+      const allocationRows = transactions.length
+        ? await db
+            .select()
+            .from(financeTransactionAllocations)
+            .where(
+              and(
+                eq(financeTransactionAllocations.userId, userId),
+                eq(financeTransactionAllocations.state, "active"),
+                inArray(
+                  financeTransactionAllocations.transactionId,
+                  transactions.map((transaction) => transaction.id),
+                ),
+              ),
+            )
+        : [];
+      const activeAllocations = activeAllocationsByTransaction(allocationRows);
       const budgetByMonth = new Map<string, number>();
       for (const item of budgets) {
         if (!months.has(item.month)) continue;
@@ -5538,7 +5570,7 @@ export function createFinanceService({
       }
       const spendingByDate = new Map<string, number>();
       for (const item of transactions) {
-        const impact = budgetImpact(item);
+        const impact = personalBudgetImpact(item, activeAllocations);
         if (impact === 0) continue;
         spendingByDate.set(
           item.transactionDate,
@@ -5626,12 +5658,34 @@ export function createFinanceService({
             ),
           ),
       ]);
+      const allocationRows = monthlyTransactions.length
+        ? await db
+            .select()
+            .from(financeTransactionAllocations)
+            .where(
+              and(
+                eq(financeTransactionAllocations.userId, userId),
+                eq(financeTransactionAllocations.state, "active"),
+                inArray(
+                  financeTransactionAllocations.transactionId,
+                  monthlyTransactions.map((transaction) => transaction.id),
+                ),
+              ),
+            )
+        : [];
+      const activeAllocations = activeAllocationsByTransaction(allocationRows);
       const scopedTransactions = accountIds
         ? monthlyTransactions.filter((item) => accountIds.includes(item.accountId))
         : monthlyTransactions;
-      const spending = scopedTransactions.reduce((sum, item) => sum + budgetImpact(item), 0);
+      const spending = scopedTransactions.reduce(
+        (sum, item) => sum + personalBudgetImpact(item, activeAllocations),
+        0,
+      );
       const pendingSpend = scopedTransactions.reduce(
-        (sum, item) => (item.pending ? sum + Math.max(0, budgetImpact(item, true)) : sum),
+        (sum, item) =>
+          item.pending
+            ? sum + Math.max(0, personalBudgetImpact(item, activeAllocations, true))
+            : sum,
         0,
       );
       const refunds = scopedTransactions.reduce(
@@ -5786,7 +5840,7 @@ export function createFinanceService({
             "Pending transactions cannot receive a final breakdown.",
           );
         }
-        const categoryIds = input.allocations.map((item) => item.categoryId);
+        const categoryIds = [...new Set(input.allocations.map((item) => item.categoryId))];
         const categories = await tx
           .select()
           .from(financeCategories)
@@ -5804,7 +5858,7 @@ export function createFinanceService({
             "Every transaction allocation category must belong to you.",
           );
         }
-        const amounts = input.allocations.map((item) => Math.round(item.amount * 100));
+        const amounts = input.allocations.map((item) => toCents(item.amount));
         if (amounts.reduce((sum, amount) => sum + amount, 0) !== before.amount) {
           throw new AppError(
             "invalid_request",
@@ -5961,6 +6015,67 @@ export function createFinanceService({
             });
         }
         if (before.merchantId) {
+          const allocationEvidence: Array<typeof financeClassificationDecisions.$inferInsert> = [
+            ...new Map(
+              input.allocations.map((allocation) => [
+                allocation.categoryId,
+                categoryById.get(allocation.categoryId),
+              ]),
+            ).entries(),
+          ].flatMap(([categoryId, category]) =>
+            category
+              ? [
+                  {
+                    categoryId,
+                    categoryName: category.name,
+                    confidence: 10_000,
+                    merchantId: before.merchantId,
+                    outcome:
+                      context.principal.actorType === "user"
+                        ? ("confirmed" as const)
+                        : ("applied" as const),
+                    rationale: input.rationale,
+                    source:
+                      context.principal.actorType === "user"
+                        ? ("user" as const)
+                        : ("agent" as const),
+                    transactionId: before.id,
+                    userId: context.principal.userId,
+                  },
+                ]
+              : [],
+          );
+          if (
+            before.categoryId &&
+            before.category &&
+            !input.allocations.some((allocation) => allocation.categoryId === before.categoryId)
+          ) {
+            allocationEvidence.push({
+              categoryId: before.categoryId,
+              categoryName: before.category,
+              confidence: 10_000,
+              merchantId: before.merchantId,
+              outcome: "corrected",
+              rationale: input.rationale,
+              source: context.principal.actorType === "user" ? "user" : "agent",
+              transactionId: before.id,
+              userId: context.principal.userId,
+            });
+          }
+          if (allocationEvidence.length > 0) {
+            await tx.insert(financeClassificationDecisions).values(allocationEvidence);
+          }
+          const [merchant] = await tx
+            .select()
+            .from(financeMerchants)
+            .where(
+              and(
+                eq(financeMerchants.id, before.merchantId),
+                eq(financeMerchants.userId, context.principal.userId),
+              ),
+            )
+            .for("update")
+            .limit(1);
           const decisions = await tx
             .select({
               categoryName: financeClassificationDecisions.categoryName,
@@ -5969,6 +6084,7 @@ export function createFinanceService({
             .from(financeClassificationDecisions)
             .where(eq(financeClassificationDecisions.merchantId, before.merchantId));
           const evaluation = evaluateMerchantEvidence({
+            ...(merchant ? { behavior: merchant.behavior } : {}),
             merchantName: before.merchant,
             observations: decisions
               .filter(

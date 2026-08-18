@@ -1492,7 +1492,7 @@ describe("domain schemas", () => {
 
 describe("finance agent contracts", () => {
   it("requires an exact-cent, one-off transaction breakdown by default", async () => {
-    const { setFinanceTransactionBreakdownInputSchema } = await import("./finance.js");
+    const { setFinanceTransactionBreakdownInputSchema, toCents } = await import("./finance.js");
     const input = {
       allocations: [
         { amount: 20, categoryId: id, rationale: "Medication" },
@@ -1519,6 +1519,25 @@ describe("finance agent contracts", () => {
         ],
       }).success,
     ).toBe(false);
+    expect(
+      setFinanceTransactionBreakdownInputSchema.parse({
+        ...input,
+        allocations: [
+          { amount: 90, categoryId: id, rationale: "Personal dining", treatment: "personal" },
+          {
+            amount: 220,
+            categoryId: id,
+            rationale: "Client dining",
+            treatment: "reimbursable",
+          },
+        ],
+      }).allocations,
+    ).toHaveLength(2);
+    expect(toCents(19.99)).toBe(1999);
+    expect(toCents(1.15)).toBe(115);
+    expect(toCents(0.29)).toBe(29);
+    expect(() => toCents(0.291)).toThrow("exact cents");
+    expect(() => toCents(Number.MAX_SAFE_INTEGER)).toThrow("safe Finance range");
   });
   it("keeps public Finance question answer descriptors bounded and private-payload free", () => {
     const question = {

@@ -8,11 +8,13 @@ import {
   financeAutomationSettings,
   financeBudgetPlans,
   financeBudgets,
+  financeCategories,
   financeIncomeStreams,
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
   financeReviewCases,
+  financeTransactionAllocations,
   financeTransactions,
   goals,
   migrateDatabase,
@@ -122,19 +124,49 @@ describe.sequential("Finance status service", () => {
     await database.db
       .insert(financeBudgets)
       .values({ category: "Food", limit: 100_000, month: "2026-08", userId });
-    await database.db.insert(financeTransactions).values({
-      accountId: source.id,
-      amount: 40_000,
-      category: "Food",
-      categoryConfidence: 10000,
-      categorySource: "user",
-      direction: "expense",
-      merchant: "Market",
-      needsReview: false,
-      pending: false,
-      transactionDate: "2026-08-10",
-      userId,
-    });
+    const [food, reimbursement] = await database.db
+      .insert(financeCategories)
+      .values([
+        { group: "Spending", name: "Food", slug: `food-${userId}`, userId },
+        { group: "Spending", name: "Reimbursement", slug: `reimbursement-${userId}`, userId },
+      ])
+      .returning();
+    if (!food || !reimbursement) throw new Error("Status allocation categories were not created.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: source.id,
+        amount: 40_000,
+        category: "Food",
+        categoryConfidence: 10000,
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Market",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-10",
+        userId,
+      })
+      .returning();
+    if (!expense) throw new Error("Status allocation expense was not created.");
+    await database.db.insert(financeTransactionAllocations).values([
+      {
+        allocationOrder: 0,
+        amount: 15_000,
+        categoryId: food.id,
+        transactionId: expense.id,
+        treatment: "personal",
+        userId,
+      },
+      {
+        allocationOrder: 1,
+        amount: 25_000,
+        categoryId: reimbursement.id,
+        transactionId: expense.id,
+        treatment: "reimbursable",
+        userId,
+      },
+    ]);
     await database.db.insert(financeTransactions).values({
       accountId: source.id,
       amount: 100_000,
@@ -159,7 +191,8 @@ describe.sequential("Finance status service", () => {
       state: "unavailable",
     });
     expect(status.details.accounts.items[0]?.synchronization.nextRetryAt).toBeNull();
-    expect(status.details.month.spending).toBe(400);
+    expect(status.details.month.spending).toBe(150);
+    expect(status.details.cashFlow.net).toBe(600);
     expect(status.details.health.confidence).toBe("reliable");
     expect(status.state).toBe("needs_work");
   });

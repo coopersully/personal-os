@@ -59,3 +59,17 @@ DONE_WITH_CONCERNS
 
 - `0061` is still the branch-local, unshipped final migration, so it was extended rather than adding a fourth migration; the checked migration journal remains ordered through `0061`.
 - `pnpm verify` was not run; focused integration tests, type checks, scoped formatting, and diff validation were run instead.
+
+## Fix round 2 — Batch A
+
+- Shared active-allocation projections now distinguish gross cash from personal spending. Gross bank transactions remain intact for cash-flow netting and exports, while overview, budget pace, budget categories, and Finance status personal spending consume only active `personal` shares. A legacy transaction category is used only when no active allocations exist; reimbursable shares are excluded pending Task 5 receivable tracking.
+- `toCents` provides one tolerant shared conversion path for normal decimal values such as `19.99`, `1.15`, and `0.29`, rejects fractions of a cent and unsafe magnitudes, and replaces Finance mutation-path multiplication/rounding. Signed account balances remain supported; money inputs remain nonnegative through their domain schemas.
+- Breakdowns permit a category once per treatment, allowing a $310 Dining receipt to record $90 personal and $220 reimbursable under the same category. Category ownership validation now deduplicates category IDs before querying.
+- Saving a breakdown records durable category evidence, records a correction when it replaces an existing category, and recalculates merchant behavior from the current locked merchant state plus the new evidence. A multi-category split therefore marks a non-broad merchant mixed, and explicit mixed behavior cannot be downgraded by a later single-category correction.
+
+### Fix round 2 Batch A verification
+
+- RED: the same-category/different-treatment input was rejected by the old category-only uniqueness constraint; personal-care budget spending incorrectly included the reimbursable allocation; a non-broad multi-category split left merchant behavior `unknown`.
+- `pnpm exec vitest run packages/domain/src/domain.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts apps/api/src/finance-action-service.integration.test.ts --reporter=dot` — 136 tests passed.
+- Domain, database, API, API-client, and MCP type checks passed.
+- Scoped Biome and `git diff --check` passed.

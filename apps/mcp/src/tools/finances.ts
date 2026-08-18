@@ -7,6 +7,7 @@ import {
   financeScenarioInputSchema,
   maintenanceScopeSchema,
   mergeFinanceMerchantsInputSchema,
+  reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
   setFinanceTransactionBreakdownInputSchema,
@@ -436,6 +437,30 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async ({ id: transactionId, ...input }) =>
       apiResult(() => api.updateFinanceTransaction(transactionId, input)),
+  );
+
+  server.registerTool(
+    "list_finance_reimbursements",
+    {
+      annotations: readAnnotations,
+      description:
+        "List expected, received, overdue, cancelled, and unmatched reimbursement credits.",
+      inputSchema: z.object({}),
+      title: "List finance reimbursements",
+    },
+    async () => apiResult(() => api.listFinanceReimbursements()),
+  );
+
+  server.registerTool(
+    "reconcile_finance_reimbursement",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Create, match a ledger credit to, or cancel a reimbursement. Ilo returns applied, pending_review, or needs_input; it never executes an external payment.",
+      inputSchema: reconcileFinanceReimbursementInputSchema,
+      title: "Reconcile finance reimbursement",
+    },
+    async (input) => apiResult(() => api.reconcileFinanceReimbursement(input)),
   );
 
   server.registerTool(

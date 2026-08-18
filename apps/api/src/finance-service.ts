@@ -20,6 +20,7 @@ import {
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
+  financeReimbursements,
   financeReviewCases,
   financeSetupBackfillState,
   financeTransactionAllocations,
@@ -65,6 +66,7 @@ import type {
   MaintenanceScope,
   MaterialSourceReference,
   MergeFinanceMerchantsInput,
+  ReconcileFinanceReimbursementInput,
   ResolveFinanceAlertInput,
   SetFinanceBudgetPlanInput,
   SetFinanceTransactionBreakdownInput,
@@ -100,6 +102,7 @@ import {
   createFinanceProviderItemSyncService,
   type FinanceSyncBatchResult,
 } from "./finance-provider-item-sync-service.js";
+import { createFinanceReimbursementService } from "./finance-reimbursement-service.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
 
@@ -382,10 +385,24 @@ function personalBudgetImpact(
   row: typeof financeTransactions.$inferSelect,
   activeAllocations: ReadonlyMap<string, AllocationProjection[]>,
   includePending = false,
+  cancelledRemainderByAllocation: ReadonlyMap<string, number> = new Map(),
+  reimbursementCreditIds: ReadonlySet<string> = new Set(),
 ) {
+  if (row.direction === "income" && reimbursementCreditIds.has(row.id)) return 0;
   const grossImpact = budgetImpact(row, includePending);
   if (grossImpact === 0) return 0;
-  const personalAmount = personalAllocationCents(row.id, row.amount, activeAllocations);
+  const cancelledPersonalAmount = (activeAllocations.get(row.id) ?? []).reduce(
+    (sum, allocation) =>
+      sum +
+      (allocation.treatment === "reimbursable"
+        ? (cancelledRemainderByAllocation.get(
+            (allocation as AllocationProjection & { id?: string }).id ?? "",
+          ) ?? 0)
+        : 0),
+    0,
+  );
+  const personalAmount =
+    personalAllocationCents(row.id, row.amount, activeAllocations) + cancelledPersonalAmount;
   return grossImpact < 0 ? -personalAmount : personalAmount;
 }
 export function financeCsvImportErrorMessage(error: unknown) {
@@ -605,6 +622,7 @@ export function createFinanceService({
   plaid,
   providerItems: configuredProviderItems,
 }: Options) {
+  const reimbursements = createFinanceReimbursementService({ db, now });
   const providerItems =
     configuredProviderItems ??
     createFinanceProviderItemService({
@@ -670,6 +688,34 @@ export function createFinanceService({
     return rows.map((row) =>
       account(row, row.providerItemRecordId ? itemById.get(row.providerItemRecordId) : undefined),
     );
+  }
+  async function cancelledReimbursementRemainders(
+    userId: string,
+    allocationIds: string[],
+  ): Promise<Map<string, number>> {
+    if (allocationIds.length === 0) return new Map();
+    const rows = await db
+      .select({
+        allocationId: financeReimbursements.allocationId,
+        expectedAmount: financeReimbursements.expectedAmount,
+        receivedAmount: financeReimbursements.receivedAmount,
+      })
+      .from(financeReimbursements)
+      .where(
+        and(
+          eq(financeReimbursements.userId, userId),
+          eq(financeReimbursements.status, "cancelled"),
+          inArray(financeReimbursements.allocationId, allocationIds),
+        ),
+      );
+    const totals = new Map<string, number>();
+    for (const row of rows) {
+      totals.set(
+        row.allocationId,
+        (totals.get(row.allocationId) ?? 0) + row.expectedAmount - row.receivedAmount,
+      );
+    }
+    return totals;
   }
 
   async function seedCategories(
@@ -2856,6 +2902,21 @@ export function createFinanceService({
     resolveScopeAccountId: maintenanceScopeAccountId,
   });
   return {
+    async listReimbursements(userId: string) {
+      return reimbursements.list(userId);
+    },
+    async reconcileReimbursement(
+      input: ReconcileFinanceReimbursementInput,
+      context: MutationContext,
+    ) {
+      if (context.principal.actorType === "agent" && context.financePreparedAction !== true) {
+        throw new AppError(
+          "forbidden",
+          "Finance reimbursements require an explicitly prepared Finance action.",
+        );
+      }
+      return reimbursements.reconcile(input, context);
+    },
     async getAutomationSettings(userId: string): Promise<FinanceAutomationSettings> {
       const [settings] = await db
         .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
@@ -5699,6 +5760,10 @@ export function createFinanceService({
             )
         : [];
       const activeAllocations = activeAllocationsByTransaction(allocationRows);
+      const cancelledRemainders = await cancelledReimbursementRemainders(
+        userId,
+        allocationRows.map((item) => item.id),
+      );
       const budgetByMonth = new Map<string, number>();
       for (const item of budgets) {
         if (!months.has(item.month)) continue;
@@ -5706,7 +5771,7 @@ export function createFinanceService({
       }
       const spendingByDate = new Map<string, number>();
       for (const item of transactions) {
-        const impact = personalBudgetImpact(item, activeAllocations);
+        const impact = personalBudgetImpact(item, activeAllocations, false, cancelledRemainders);
         if (impact === 0) continue;
         spendingByDate.set(
           item.transactionDate,
@@ -5809,17 +5874,23 @@ export function createFinanceService({
             )
         : [];
       const activeAllocations = activeAllocationsByTransaction(allocationRows);
+      const cancelledRemainders = await cancelledReimbursementRemainders(
+        userId,
+        allocationRows.map((item) => item.id),
+      );
       const scopedTransactions = accountIds
         ? monthlyTransactions.filter((item) => accountIds.includes(item.accountId))
         : monthlyTransactions;
       const spending = scopedTransactions.reduce(
-        (sum, item) => sum + personalBudgetImpact(item, activeAllocations),
+        (sum, item) =>
+          sum + personalBudgetImpact(item, activeAllocations, false, cancelledRemainders),
         0,
       );
       const pendingSpend = scopedTransactions.reduce(
         (sum, item) =>
           item.pending
-            ? sum + Math.max(0, personalBudgetImpact(item, activeAllocations, true))
+            ? sum +
+              Math.max(0, personalBudgetImpact(item, activeAllocations, true, cancelledRemainders))
             : sum,
         0,
       );

@@ -15,6 +15,7 @@ import {
   maintenanceRequestSchema,
   maintenanceScopeQuerySchema,
   mergeFinanceMerchantsInputSchema,
+  reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
   setFinanceTransactionBreakdownInputSchema,
@@ -438,6 +439,40 @@ export function registerFinanceRoutes({
         transaction: await finances.setTransactionBreakdown(
           input.id,
           body,
+          financeMutationContext(context),
+        ),
+      }),
+    );
+  });
+  app.get("/v1/finances/reimbursements", async (context) =>
+    context.json({
+      reimbursements: await finances.listReimbursements(context.get("principal").userId),
+    }),
+  );
+  app.post("/v1/finances/reimbursements/reconcile", async (context) => {
+    const input = await parseBody(context, reconcileFinanceReimbursementInputSchema);
+    return act(context, "reimbursement", input, async () =>
+      context.json({
+        reimbursement: await finances.reconcileReimbursement(
+          input,
+          financeMutationContext(context),
+        ),
+      }),
+    );
+  });
+  app.post("/v1/finances/reimbursements/:id/cancel", async (context) => {
+    const body = await parseBody(
+      context,
+      reconcileFinanceReimbursementInputSchema.options[2].omit({
+        reimbursementId: true,
+        operation: true,
+      }),
+    );
+    const input = { ...body, operation: "cancel" as const, reimbursementId: routeId(context) };
+    return act(context, "reimbursement", input, async () =>
+      context.json({
+        reimbursement: await finances.reconcileReimbursement(
+          input,
           financeMutationContext(context),
         ),
       }),

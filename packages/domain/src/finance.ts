@@ -626,6 +626,80 @@ export type FinanceTransaction = z.infer<typeof financeTransactionSchema>;
 
 export type FinanceTransactionAllocation = NonNullable<FinanceTransaction["allocations"]>[number];
 
+export const financeReimbursementStatusSchema = z.enum([
+  "expected",
+  "partially_received",
+  "received",
+  "overdue",
+  "cancelled",
+  "needs_input",
+]);
+export type FinanceReimbursementStatus = z.infer<typeof financeReimbursementStatusSchema>;
+
+export const financeReimbursementMatchSchema = z
+  .object({
+    amount: moneySchema.positive(),
+    creditTransactionId: idSchema,
+    createdAt: isoDateTimeSchema,
+    id: idSchema,
+    reimbursementId: idSchema,
+  })
+  .strict();
+export type FinanceReimbursementMatch = z.infer<typeof financeReimbursementMatchSchema>;
+
+export const financeReimbursementSchema = z
+  .object({
+    allocationId: idSchema,
+    cancelledAt: isoDateTimeSchema.nullable(),
+    createdAt: isoDateTimeSchema,
+    dueDate: z.iso.date().nullable(),
+    evidence: z.record(z.string(), z.unknown()),
+    expectedAmount: moneySchema.positive(),
+    id: idSchema,
+    matches: z.array(financeReimbursementMatchSchema),
+    payer: z.string().trim().min(1).max(240).nullable(),
+    receivedAmount: moneySchema,
+    revision: z.number().int().positive(),
+    status: financeReimbursementStatusSchema,
+    updatedAt: isoDateTimeSchema,
+  })
+  .strict();
+export type FinanceReimbursement = z.infer<typeof financeReimbursementSchema>;
+
+const reimbursementExpectedInputSchema = z
+  .object({
+    allocationId: idSchema,
+    dueDate: z.iso.date().nullable().default(null),
+    evidence: z.record(z.string(), z.unknown()).default({}),
+    expectedAmount: moneyInputSchema.positive(),
+    payer: z.string().trim().min(1).max(240).nullable().default(null),
+  })
+  .strict();
+
+export const reconcileFinanceReimbursementInputSchema = z.discriminatedUnion("operation", [
+  z.object({ operation: z.literal("create"), ...reimbursementExpectedInputSchema.shape }).strict(),
+  z
+    .object({
+      amount: moneyInputSchema.positive(),
+      creditTransactionId: idSchema,
+      expectedRevision: z.number().int().positive(),
+      operation: z.literal("match_credit"),
+      reimbursementId: idSchema,
+    })
+    .strict(),
+  z
+    .object({
+      expectedRevision: z.number().int().positive(),
+      operation: z.literal("cancel"),
+      rationale: z.string().trim().min(1).max(1_000),
+      reimbursementId: idSchema,
+    })
+    .strict(),
+]);
+export type ReconcileFinanceReimbursementInput = z.infer<
+  typeof reconcileFinanceReimbursementInputSchema
+>;
+
 export const financeCategorySchema = z.object({
   color: z.string().nullable(),
   group: z.string().min(1).max(80),

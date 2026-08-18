@@ -79,6 +79,7 @@ import {
   passwordRequirementState,
   passwordSchema,
   previewCalendarCommitmentInputSchema,
+  reconcileFinanceReimbursementInputSchema,
   registerInputSchema,
   reminderDeferralPreviewInputSchema,
   reminderListQuerySchema,
@@ -1941,5 +1942,19 @@ describe("connector notification contracts", () => {
       "retry",
       "recovery",
     ]);
+  });
+});
+
+describe("Finance reimbursement contracts", () => {
+  it("requires exact positive cents and optimistic revisions for a credit match", () => {
+    expect(
+      reconcileFinanceReimbursementInputSchema.safeParse({
+        operation: "match_credit",
+        reimbursementId: "00000000-0000-4000-8000-000000000001",
+        creditTransactionId: "00000000-0000-4000-8000-000000000002",
+        amount: 22.005,
+        expectedRevision: 1,
+      }).success,
+    ).toBe(false);
   });
 });

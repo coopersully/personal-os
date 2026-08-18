@@ -30,6 +30,7 @@ import type {
   FinanceProfile,
   FinanceQuestion,
   FinanceRecurringObligation,
+  FinanceReimbursement,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
   FinanceScenarioInput,
@@ -41,6 +42,7 @@ import type {
   MaintenanceRun,
   MaintenanceScope,
   MergeFinanceMerchantsInput,
+  ReconcileFinanceReimbursementInput,
   ResolveFinanceAlertInput,
   SetFinanceBudgetPlanInput,
   SetFinanceTransactionBreakdownInput,
@@ -187,6 +189,29 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "PUT",
       });
       return actionResult(response, "transaction");
+    },
+    async listFinanceReimbursements(): Promise<{
+      reimbursements: FinanceReimbursement[];
+      unmatchedCredits: Array<{ amount: number; date: string; transactionId: string }>;
+    }> {
+      const response = await request<{
+        reimbursements: {
+          reimbursements: FinanceReimbursement[];
+          unmatchedCredits: Array<{ amount: number; date: string; transactionId: string }>;
+        };
+      }>("/v1/finances/reimbursements");
+      return response.reimbursements;
+    },
+    async reconcileFinanceReimbursement(
+      input: ReconcileFinanceReimbursementInput,
+    ): Promise<FinanceActionOutcome<FinanceReimbursement> | FinanceReimbursement> {
+      const response = await request<
+        FinanceActionResponse<FinanceReimbursement> | { reimbursement: FinanceReimbursement }
+      >("/v1/finances/reimbursements/reconcile", {
+        body: JSON.stringify(input),
+        method: "POST",
+      });
+      return actionResult(response, "reimbursement");
     },
     async maintainFinances(
       scope: MaintenanceScope = { type: "all_outstanding" },

@@ -34,6 +34,7 @@ import {
   idSchema,
   type MaterialSourceReference,
   mergeFinanceMerchantsInputSchema,
+  reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
   setFinanceTransactionBreakdownInputSchema,
@@ -66,6 +67,7 @@ export type SupportedActionKind = Extract<
   | "merchant"
   | "profile"
   | "recurring_obligation"
+  | "reimbursement"
   | "transaction"
   | "transaction_breakdown"
 >;
@@ -211,6 +213,7 @@ function supportedActionKind(value: unknown): SupportedActionKind {
       "merchant",
       "profile",
       "recurring_obligation",
+      "reimbursement",
       "transaction",
       "transaction_breakdown",
     ].includes(actionKind)
@@ -253,6 +256,12 @@ function semanticTargetKeys(actionKind: SupportedActionKind, input: Record<strin
       return [`transaction:${String(input.id)}`];
     case "income_stream":
       return [`income:${String(input.id)}`];
+    case "reimbursement":
+      return [
+        input.operation === "create"
+          ? `allocation:${String(input.allocationId)}`
+          : `reimbursement:${String(input.reimbursementId)}`,
+      ];
   }
 }
 
@@ -1414,6 +1423,36 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           [transactionSource(item, account)],
         );
       }
+      case "reimbursement": {
+        const input = reconcileFinanceReimbursementInputSchema.safeParse(rawInput);
+        if (!input.success)
+          return missing("Provide a valid reimbursement operation and its current revision.", [
+            expectedAnswer("operation", "string", {
+              choices: ["create", "match_credit", "cancel"],
+            }),
+          ]);
+        const target =
+          input.data.operation === "create"
+            ? String(input.data.allocationId)
+            : input.data.reimbursementId;
+        return prepared(
+          input.data,
+          input.data.operation === "create" ? null : String(input.data.expectedRevision),
+          [
+            {
+              entityId: target,
+              entityType: "finance_reimbursement",
+              summary:
+                input.data.operation === "cancel"
+                  ? "Cancel the reimbursement and restore its unmatched share to personal spending."
+                  : input.data.operation === "match_credit"
+                    ? "Match an observed credit to a reimbursement."
+                    : "Track an expected reimbursement against a reimbursable allocation.",
+            },
+          ],
+          [],
+        );
+      }
       case "income_stream": {
         const input = parse<Record<string, unknown>>(updateFinanceIncomeStreamInputSchema);
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
@@ -1576,6 +1615,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           privilegedContext as never,
           executor as never,
         );
+      case "reimbursement":
+        return invoke(finances.reconcileReimbursement, input as never, privilegedContext as never);
     }
     return assertNever(prepared.actionKind);
   }

@@ -11,6 +11,8 @@ import {
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
+  financeReimbursementMatches,
+  financeReimbursements,
   financeReviewCases,
   financeTransactionAllocations,
   financeTransactions,
@@ -36,6 +38,7 @@ import {
 import { forecastCashflow } from "./finance-cashflow.js";
 import { assessFinanceHealth } from "./finance-health.js";
 import { reliableMonthlyCapacity, reliableMonthlyIncome } from "./finance-planning.js";
+import { deriveReimbursementStatus } from "./finance-reimbursement-service.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { createGoalsService } from "./goals-service.js";
 import type { WorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -348,6 +351,50 @@ export function createFinanceStatusService({ db, now }: Options) {
                 )
             : [];
           const activeAllocations = activeAllocationsByTransaction(allocationRows);
+          const [reimbursementRows, reimbursementMatches, incomeCredits] = await Promise.all([
+            tx.select().from(financeReimbursements).where(eq(financeReimbursements.userId, userId)),
+            tx
+              .select()
+              .from(financeReimbursementMatches)
+              .where(eq(financeReimbursementMatches.userId, userId)),
+            tx
+              .select({ amount: financeTransactions.amount, id: financeTransactions.id })
+              .from(financeTransactions)
+              .where(
+                and(
+                  eq(financeTransactions.userId, userId),
+                  eq(financeTransactions.direction, "income"),
+                ),
+              ),
+          ]);
+          const reimbursementStatus = reimbursementRows.map((row) =>
+            deriveReimbursementStatus({
+              cancelledAt: row.cancelledAt,
+              dueDate: row.dueDate,
+              expectedCents: row.expectedAmount,
+              receivedCents: row.receivedAmount,
+              now: new Date(asOf),
+            }),
+          );
+          const cancelledRemainders = new Map<string, number>();
+          for (const row of reimbursementRows.filter((item) => item.status === "cancelled")) {
+            cancelledRemainders.set(
+              row.allocationId,
+              (cancelledRemainders.get(row.allocationId) ?? 0) +
+                row.expectedAmount -
+                row.receivedAmount,
+            );
+          }
+          const matchedCreditAmounts = new Map<string, number>();
+          for (const match of reimbursementMatches) {
+            matchedCreditAmounts.set(
+              match.creditTransactionId,
+              (matchedCreditAmounts.get(match.creditTransactionId) ?? 0) + match.amount,
+            );
+          }
+          const unmatchedCredits = incomeCredits.filter(
+            (credit) => credit.amount > (matchedCreditAmounts.get(credit.id) ?? 0),
+          ).length;
           const profiles = await tx
             .select()
             .from(financeProfiles)
@@ -458,7 +505,19 @@ export function createFinanceStatusService({ db, now }: Options) {
           const grossSpending = postedExpenses.reduce((sum, row) => sum + row.amount, 0) / 100;
           const spending =
             postedExpenses.reduce(
-              (sum, row) => sum + personalAllocationCents(row.id, row.amount, activeAllocations),
+              (sum, row) =>
+                sum +
+                personalAllocationCents(row.id, row.amount, activeAllocations) +
+                (activeAllocations.get(row.id) ?? []).reduce(
+                  (cancelled, allocation) =>
+                    cancelled +
+                    (allocation.treatment === "reimbursable"
+                      ? (cancelledRemainders.get(
+                          (allocation as typeof allocation & { id?: string }).id ?? "",
+                        ) ?? 0)
+                      : 0),
+                  0,
+                ),
               0,
             ) / 100;
           const incomeObserved = postedIncome.reduce((sum, row) => sum + row.amount, 0) / 100;
@@ -1002,7 +1061,16 @@ export function createFinanceStatusService({ db, now }: Options) {
               prioritizedGoals,
               proposals: [],
               questions,
-              reimbursements: { open: 0, overdue: 0, unmatchedCredits: 0 },
+              reimbursements: {
+                open: reimbursementStatus.filter(
+                  (status) =>
+                    status === "expected" ||
+                    status === "partially_received" ||
+                    status === "needs_input",
+                ).length,
+                overdue: reimbursementStatus.filter((status) => status === "overdue").length,
+                unmatchedCredits,
+              },
               reviewMode: { reviewBypassEnabled: automationSettings?.reviewBypassEnabled ?? false },
               review: { byReason, total: scopedReviews.length },
               rulebookVersion,

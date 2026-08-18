@@ -1,0 +1,63 @@
+import type { MaterialSourceReference } from "@personal-os/domain";
+
+type Observation = {
+  amountCents: number;
+  category: string | null;
+  date: string;
+  id: string;
+  merchant: string;
+};
+type Input = {
+  budgetMaterialityCents: number;
+  expectedRecurring?: boolean;
+  history: Observation[];
+  reimbursementExpectedCents?: number;
+  transaction: Observation;
+};
+export type FinanceAnomaly = {
+  baselineCents: number;
+  baselineSource: "category" | "merchant";
+  rationale: string;
+  severity: "warning";
+  sourceRefs: MaterialSourceReference[];
+};
+
+function median(values: number[]) {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+    : (sorted[middle] ?? 0);
+}
+
+/** Uses robust median absolute deviation rather than a universal dollar cutoff. */
+export function detectFinanceAnomalies(input: Input): FinanceAnomaly | null {
+  if (input.expectedRecurring) return null;
+  const merchant = input.history.filter((item) => item.merchant === input.transaction.merchant);
+  const category = input.history.filter((item) => item.category === input.transaction.category);
+  const sample = merchant.length >= 5 ? merchant : category;
+  if (sample.length < 5) return null;
+  const baseline = median(sample.map((item) => item.amountCents));
+  const mad = median(sample.map((item) => Math.abs(item.amountCents - baseline)));
+  const materialDifference = input.transaction.amountCents - baseline;
+  // MAD can be zero for stable rent; retain a relative robust floor rather than a global amount.
+  const robustBand = Math.max(mad * 3, Math.max(100, baseline * 0.2));
+  if (materialDifference <= Math.max(robustBand, input.budgetMaterialityCents)) return null;
+  const reimbursement = input.reimbursementExpectedCents
+    ? ` It includes $${(input.reimbursementExpectedCents / 100).toFixed(2)} expected reimbursement.`
+    : "";
+  return {
+    baselineCents: baseline,
+    baselineSource: merchant.length >= 5 ? "merchant" : "category",
+    rationale: `Amount is materially above its robust ${merchant.length >= 5 ? "merchant" : "category"} baseline of $${(baseline / 100).toFixed(2)}.${reimbursement}`,
+    severity: "warning",
+    sourceRefs: sample.map((item) => ({
+      accountId: null,
+      provider: "local",
+      remoteId: item.id,
+      revision: item.date,
+      sourceType: "finance_transaction",
+    })),
+  };
+}

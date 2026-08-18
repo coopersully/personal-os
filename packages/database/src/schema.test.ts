@@ -12,6 +12,8 @@ import {
   financeMerchants,
   financeProfiles,
   financeProviderItems,
+  financeReimbursementMatches,
+  financeReimbursements,
   financeTransactionAllocations,
   financeTransactions,
   mailCalendarCommitmentIntakes,
@@ -94,11 +96,44 @@ describe("database schema contracts", () => {
         "utf8",
       ),
     ) as { entries: Array<{ tag: string }> };
-    expect(journal.entries.slice(-3).map((entry) => entry.tag)).toEqual([
+    expect(journal.entries.slice(-4).map((entry) => entry.tag)).toEqual([
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
       "0061_finance_transaction_allocations",
+      "0062_finance_reimbursements",
     ]);
+  });
+
+  it("keeps reimbursement ownership, many-to-many credit matching, and migration 0062 aligned", async () => {
+    const reimbursements = getTableConfig(financeReimbursements);
+    const matches = getTableConfig(financeReimbursementMatches);
+    expect(reimbursements.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "user_id",
+        "allocation_id",
+        "expected_amount_cents",
+        "received_amount_cents",
+        "payer",
+        "due_date",
+        "evidence",
+        "status",
+        "revision",
+      ]),
+    );
+    expect(matches.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_reimbursement_matches_reimbursement_credit_idx",
+        "finance_reimbursement_matches_user_credit_idx",
+      ]),
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0062_finance_reimbursements.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_reimbursements"');
+    expect(migrationSql).toContain('CREATE TABLE "finance_reimbursement_matches"');
+    expect(migrationSql).toContain("finance_reimbursements_allocation_user_fk");
+    expect(migrationSql).toContain("finance_reimbursement_matches_credit_user_fk");
   });
 
   it("stores bounded Finance action reviews without exposing their private payload", async () => {

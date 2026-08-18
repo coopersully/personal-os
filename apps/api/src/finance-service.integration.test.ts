@@ -374,6 +374,9 @@ describe.sequential("finance service", () => {
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
       "0061_finance_transaction_allocations",
+      // 0062 has a deliberate FK dependency on the allocation table and is
+      // applied with the current chain during this legacy-upgrade test.
+      "0062_finance_reimbursements",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

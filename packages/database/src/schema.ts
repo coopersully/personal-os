@@ -1715,6 +1715,7 @@ export const financeTransactionAllocations = pgTable(
       sql`${table.state} IN ('active', 'invalidated')`,
     ),
     index("finance_transaction_allocations_user_category_idx").on(table.userId, table.categoryId),
+    uniqueIndex("finance_transaction_allocations_id_user_id_unique").on(table.id, table.userId),
     uniqueIndex("finance_transaction_allocations_transaction_order_idx")
       .on(table.transactionId, table.allocationOrder)
       .where(sql`${table.state} = 'active'`),
@@ -1728,6 +1729,97 @@ export const financeTransactionAllocations = pgTable(
       foreignColumns: [financeCategories.id, financeCategories.userId],
       name: "finance_transaction_allocations_category_user_fk",
     }).onDelete("restrict"),
+  ],
+);
+
+/** Money owed for a reimbursable allocation; bank cash remains on its transaction. */
+export const financeReimbursements = pgTable(
+  "finance_reimbursements",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    allocationId: uuid("allocation_id")
+      .notNull()
+      .references(() => financeTransactionAllocations.id, { onDelete: "restrict" }),
+    expectedAmount: integer("expected_amount_cents").notNull(),
+    receivedAmount: integer("received_amount_cents").notNull().default(0),
+    payer: text("payer"),
+    dueDate: text("due_date"),
+    evidence: jsonb("evidence").notNull().default({}),
+    status: text("status")
+      .$type<
+        "expected" | "partially_received" | "received" | "overdue" | "cancelled" | "needs_input"
+      >()
+      .notNull()
+      .default("expected"),
+    cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    revision: integer("revision").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    check("finance_reimbursements_expected_amount_check", sql`${table.expectedAmount} > 0`),
+    check(
+      "finance_reimbursements_received_amount_check",
+      sql`${table.receivedAmount} >= 0 AND ${table.receivedAmount} <= ${table.expectedAmount}`,
+    ),
+    check(
+      "finance_reimbursements_status_check",
+      sql`${table.status} IN ('expected', 'partially_received', 'received', 'overdue', 'cancelled', 'needs_input')`,
+    ),
+    foreignKey({
+      columns: [table.allocationId, table.userId],
+      foreignColumns: [financeTransactionAllocations.id, financeTransactionAllocations.userId],
+      name: "finance_reimbursements_allocation_user_fk",
+    }).onDelete("restrict"),
+    uniqueIndex("finance_reimbursements_id_user_id_unique").on(table.id, table.userId),
+    index("finance_reimbursements_user_status_due_idx").on(
+      table.userId,
+      table.status,
+      table.dueDate,
+    ),
+    index("finance_reimbursements_user_allocation_idx").on(table.userId, table.allocationId),
+  ],
+);
+
+/** A credit may settle several reimbursements and a reimbursement may receive several credits. */
+export const financeReimbursementMatches = pgTable(
+  "finance_reimbursement_matches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    reimbursementId: uuid("reimbursement_id")
+      .notNull()
+      .references(() => financeReimbursements.id, { onDelete: "cascade" }),
+    creditTransactionId: uuid("credit_transaction_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "restrict" }),
+    amount: integer("amount_cents").notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    check("finance_reimbursement_matches_amount_check", sql`${table.amount} > 0`),
+    foreignKey({
+      columns: [table.reimbursementId, table.userId],
+      foreignColumns: [financeReimbursements.id, financeReimbursements.userId],
+      name: "finance_reimbursement_matches_reimbursement_user_fk",
+    }).onDelete("cascade"),
+    foreignKey({
+      columns: [table.creditTransactionId, table.userId],
+      foreignColumns: [financeTransactions.id, financeTransactions.userId],
+      name: "finance_reimbursement_matches_credit_user_fk",
+    }).onDelete("restrict"),
+    uniqueIndex("finance_reimbursement_matches_reimbursement_credit_idx").on(
+      table.reimbursementId,
+      table.creditTransactionId,
+    ),
+    index("finance_reimbursement_matches_user_credit_idx").on(
+      table.userId,
+      table.creditTransactionId,
+    ),
   ],
 );
 

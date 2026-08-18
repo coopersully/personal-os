@@ -168,6 +168,8 @@ export const iloToolCatalog = {
   compare_finance_scenarios: preview("finances", ["finances:read"]),
   set_finance_budget_plan: write("finances", ["finances:write"], { policy: "approved_rule" }),
   set_finance_transaction_breakdown: write("finances", ["finances:write"]),
+  list_finance_reimbursements: read("finances", ["finances:read"]),
+  reconcile_finance_reimbursement: write("finances", ["finances:write"]),
   maintain_finances: write("finances", ["finances:maintain"], {
     idempotent: false,
     openWorld: false,

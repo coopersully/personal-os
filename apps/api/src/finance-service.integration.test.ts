@@ -3517,6 +3517,111 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual([{ name: "Legacy Only", userId: owner.id }]);
   });
 
+  it("resumes bounded allocation backfill without duplicating concurrent worker allocations", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation cursor owner",
+        email: `allocation-cursor-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation cursor owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-cursor" };
+    const account = await service.createAccount(
+      { balance: 50, institution: "Cursor", name: "Cursor account", provider: "manual" },
+      context,
+    );
+    const category = (await service.listCategories(owner.id))[0];
+    if (!category) throw new Error("Allocation cursor category was not seeded.");
+    const stateKey = "finance_transaction_allocation_backfill_v1";
+    const cursor = "ffffffff-ffff-4fff-8fff-ffffffffff00";
+    const firstId = "ffffffff-ffff-4fff-8fff-ffffffffff01";
+    const secondId = "ffffffff-ffff-4fff-8fff-ffffffffff02";
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, stateKey));
+    await database.db.insert(financeSetupBackfillState).values({
+      allocationCursor: cursor,
+      key: stateKey,
+    });
+    await database.db.insert(financeTransactions).values([
+      {
+        accountId: account.id,
+        amount: 111,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        id: firstId,
+        merchant: "Cursor first",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      },
+      {
+        accountId: account.id,
+        amount: 222,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        id: secondId,
+        merchant: "Cursor second",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      },
+    ]);
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      complete: false,
+      inserted: 1,
+      processed: 1,
+    });
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      complete: false,
+      inserted: 1,
+      processed: 1,
+    });
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      complete: true,
+      inserted: 0,
+      processed: 0,
+    });
+    const thirdId = "ffffffff-ffff-4fff-8fff-ffffffffff03";
+    await database.db.insert(financeTransactions).values({
+      accountId: account.id,
+      amount: 333,
+      category: category.name,
+      categoryId: category.id,
+      direction: "expense",
+      id: thirdId,
+      merchant: "Cursor concurrent",
+      needsReview: false,
+      pending: false,
+      transactionDate: "2026-07-19",
+      userId: owner.id,
+    });
+    await database.db
+      .update(financeSetupBackfillState)
+      .set({ allocationCursor: secondId, allocationsComplete: false })
+      .where(eq(financeSetupBackfillState.key, stateKey));
+    const concurrent = await Promise.all([
+      service.backfillTransactionAllocations(1),
+      service.backfillTransactionAllocations(1),
+    ]);
+    expect(concurrent.filter((result) => result.claimed)).toHaveLength(1);
+    expect(concurrent.reduce((sum, result) => sum + result.inserted, 0)).toBe(1);
+    await expect(
+      database.db
+        .select({ transactionId: financeTransactionAllocations.transactionId })
+        .from(financeTransactionAllocations)
+        .where(inArray(financeTransactionAllocations.transactionId, [firstId, secondId, thirdId])),
+    ).resolves.toHaveLength(3);
+  });
+
   it("keeps allocation-based merchant evidence mixed without downgrading explicit mixed behavior", async () => {
     const [owner] = await database.db
       .insert(users)

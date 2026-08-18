@@ -34,6 +34,7 @@ import {
   financeActionKindSchema,
   financeActionReviewSchema,
   financeQuestionSchema,
+  financeReimbursementQuestionAnswerSchema,
   idSchema,
   type MaterialSourceReference,
   mergeFinanceMerchantsInputSchema,
@@ -53,6 +54,7 @@ import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
 import { reliableMonthlyCapacity } from "./finance-planning.js";
+import { deriveReimbursementStatus } from "./finance-reimbursement-service.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
 
@@ -349,6 +351,8 @@ function isExpectedAnswerValue(field: ExpectedAnswer, value: unknown): boolean {
         return typeof value === "boolean";
       case "number":
         return typeof value === "number" && Number.isFinite(value);
+      case "object":
+        return value !== null && typeof value === "object" && !Array.isArray(value);
       case "object_array":
         return (
           Array.isArray(value) &&
@@ -1430,6 +1434,337 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       }
       case "reimbursement": {
+        // Maintenance reimbursement questions are deliberately not a loose
+        // continuation of the generic action input.  The only caller-supplied
+        // value is the bounded typed answer; candidate identity and source
+        // provenance remain in the private question payload.
+        if (rawInput.operation === "answer_question") {
+          const answer = financeReimbursementQuestionAnswerSchema.safeParse(rawInput.answer);
+          const candidate = rawInput.candidate;
+          const sourceRefs = rawInput.sourceRefs;
+          if (
+            !answer.success ||
+            !candidate ||
+            typeof candidate !== "object" ||
+            Array.isArray(candidate) ||
+            !Array.isArray(sourceRefs)
+          )
+            return missing("Provide one complete reimbursement answer.", [
+              expectedAnswer("answer", "object"),
+            ]);
+          const privateCandidate = candidate as Record<string, unknown>;
+          const transactionId =
+            typeof privateCandidate.transactionId === "string"
+              ? privateCandidate.transactionId
+              : null;
+          if (!transactionId)
+            return missing("The reimbursement question no longer has a valid transaction.", []);
+          const [unlockedTransaction] = await executor
+            .select({ accountId: financeTransactions.accountId })
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.id, transactionId),
+                eq(financeTransactions.userId, userId),
+              ),
+            )
+            .limit(1);
+          if (!unlockedTransaction)
+            return missing("The reimbursement transaction is no longer available.", []);
+          const [account] = await lockAccounts([unlockedTransaction.accountId]);
+          const [transaction] = await lockRead(
+            executor
+              .select()
+              .from(financeTransactions)
+              .where(
+                and(
+                  eq(financeTransactions.id, transactionId),
+                  eq(financeTransactions.userId, userId),
+                  eq(financeTransactions.accountId, unlockedTransaction.accountId),
+                ),
+              )
+              .limit(1),
+          );
+          if (!transaction || !account)
+            return missing("The reimbursement transaction account is no longer available.", []);
+          const source = (sourceRefs as MaterialSourceReference[]).find(
+            (item) => item.remoteId === transaction.id && item.sourceType === "finance_transaction",
+          );
+          if (!source || source.revision !== transaction.updatedAt.toISOString())
+            return missing(
+              "The reimbursement evidence changed after this question was created. Refresh the evidence before answering.",
+              [expectedAnswer("answer", "object")],
+              [transactionSource(transaction, account)],
+            );
+          const commonInput = {
+            answer: answer.data,
+            candidate: privateCandidate,
+            operation: "answer_question" as const,
+            sourceRefs: [transactionSource(transaction, account)],
+          };
+          const allocationIds = Array.isArray(privateCandidate.allocationIds)
+            ? privateCandidate.allocationIds.filter((id): id is string => typeof id === "string")
+            : [];
+          const reimbursementIds = Array.isArray(privateCandidate.reimbursementIds)
+            ? privateCandidate.reimbursementIds.filter((id): id is string => typeof id === "string")
+            : [];
+          if (allocationIds.length > 0) {
+            if (answer.data.kind === "not_sure")
+              return missing(
+                "The expense still needs a personal or reimbursement decision.",
+                [expectedAnswer("answer", "object")],
+                [transactionSource(transaction, account)],
+              );
+            if (answer.data.kind !== "entirely_personal" && answer.data.kind !== "reimbursable")
+              return missing("Choose an expense reimbursement answer for this expense.", [
+                expectedAnswer("answer", "object"),
+              ]);
+            const allocations = await lockRead(
+              executor
+                .select()
+                .from(financeTransactionAllocations)
+                .where(
+                  and(
+                    eq(financeTransactionAllocations.userId, userId),
+                    eq(financeTransactionAllocations.transactionId, transaction.id),
+                    eq(financeTransactionAllocations.state, "active"),
+                    inArray(financeTransactionAllocations.id, [...new Set(allocationIds)].sort()),
+                  ),
+                )
+                .orderBy(
+                  financeTransactionAllocations.allocationOrder,
+                  financeTransactionAllocations.id,
+                ),
+            );
+            if (
+              allocations.length !== new Set(allocationIds).size ||
+              allocations.some((item) => item.amount <= 0) ||
+              allocations.reduce((sum, item) => sum + item.amount, 0) !== transaction.amount
+            )
+              return missing(
+                "The original expense allocations changed; refresh before recording reimbursement evidence.",
+                [expectedAnswer("answer", "object")],
+                [transactionSource(transaction, account)],
+              );
+            const categories = await lockRead(
+              executor
+                .select()
+                .from(financeCategories)
+                .where(
+                  and(
+                    eq(financeCategories.userId, userId),
+                    inArray(
+                      financeCategories.id,
+                      [...new Set(allocations.map((item) => item.categoryId))].sort(),
+                    ),
+                  ),
+                )
+                .orderBy(financeCategories.id),
+            );
+            if (categories.length !== new Set(allocations.map((item) => item.categoryId)).size)
+              return missing("The expense allocation category is no longer available.", [
+                expectedAnswer("answer", "object"),
+              ]);
+            if (allocations.length !== 1)
+              return missing(
+                "This expense has a multi-allocation breakdown. Confirm its reimbursement share with a fresh, explicit allocation breakdown.",
+                [expectedAnswer("answer", "object")],
+                [transactionSource(transaction, account)],
+              );
+            const amount = answer.data.kind === "reimbursable" ? toCents(answer.data.amount) : 0;
+            if (amount > transaction.amount)
+              return missing("The reimbursement cannot exceed the posted expense amount.", [
+                expectedAnswer("answer", "object"),
+              ]);
+            const revision = snapshotRevision({
+              allocations: allocations.map((item) => [
+                item.id,
+                item.revision,
+                item.updatedAt.toISOString(),
+              ]),
+              categories: categories.map((item) => [item.id, item.name]),
+              transaction: [transaction.id, transaction.updatedAt.toISOString()],
+            });
+            const plan = {
+              allocationIds: allocations.map((item) => item.id),
+              allocations: allocations.map((item) => ({
+                allocationOrder: item.allocationOrder,
+                categoryId: item.categoryId,
+                rationale: item.rationale,
+                treatment: item.treatment,
+              })),
+              amount,
+              categoryId: allocations[0]?.categoryId,
+              kind: answer.data.kind,
+              transactionId: transaction.id,
+            };
+            const base = prepared(
+              { ...commonInput, plan },
+              revision,
+              [
+                {
+                  entityId: transaction.id,
+                  entityType: "finance_transaction",
+                  summary:
+                    answer.data.kind === "entirely_personal"
+                      ? "Record that the expense is entirely personal."
+                      : "Record the expense reimbursement and retain only its personal remainder.",
+                },
+              ],
+              [transactionSource(transaction, account)],
+              ["The answer is recorded as person-provided reimbursement evidence."],
+            );
+            return {
+              ...base,
+              semanticTargetKeys: [
+                `account:${account.id}`,
+                `transaction:${transaction.id}`,
+                ...allocations.map((item) => `allocation:${item.id}`),
+              ].sort(),
+            };
+          }
+          if (reimbursementIds.length > 0) {
+            if (answer.data.kind === "not_sure")
+              return missing("The incoming credit still needs a reimbursement decision.", [
+                expectedAnswer("answer", "object"),
+              ]);
+            if (answer.data.kind !== "not_reimbursement" && answer.data.kind !== "match")
+              return missing("Choose a credit reimbursement answer for this incoming credit.", [
+                expectedAnswer("answer", "object"),
+              ]);
+            if (transaction.pending || transaction.direction !== "income")
+              return missing("The reimbursement credit must remain a posted income transaction.", [
+                expectedAnswer("answer", "object"),
+              ]);
+            const cases = await lockRead(
+              executor
+                .select()
+                .from(financeReimbursements)
+                .where(
+                  and(
+                    eq(financeReimbursements.userId, userId),
+                    inArray(financeReimbursements.id, [...new Set(reimbursementIds)].sort()),
+                  ),
+                )
+                .orderBy(financeReimbursements.id),
+            );
+            if (cases.length !== new Set(reimbursementIds).size)
+              return missing("One of the reimbursement cases is no longer available.", [
+                expectedAnswer("answer", "object"),
+              ]);
+            const matches = await lockRead(
+              executor
+                .select()
+                .from(financeReimbursementMatches)
+                .where(
+                  and(
+                    eq(financeReimbursementMatches.userId, userId),
+                    inArray(
+                      financeReimbursementMatches.reimbursementId,
+                      cases.map((item) => item.id),
+                    ),
+                  ),
+                )
+                .orderBy(financeReimbursementMatches.id),
+            );
+            const creditMatches = await lockRead(
+              executor
+                .select()
+                .from(financeReimbursementMatches)
+                .where(
+                  and(
+                    eq(financeReimbursementMatches.userId, userId),
+                    eq(financeReimbursementMatches.creditTransactionId, transaction.id),
+                  ),
+                )
+                .orderBy(financeReimbursementMatches.id),
+            );
+            if (answer.data.kind === "match") {
+              const requested = answer.data.matches;
+              const uniqueIds = new Set(requested.map((item) => item.reimbursementId));
+              if (
+                uniqueIds.size !== requested.length ||
+                requested.some(
+                  (item) =>
+                    !uniqueIds.has(item.reimbursementId) ||
+                    !reimbursementIds.includes(item.reimbursementId),
+                )
+              )
+                return missing(
+                  "Match only the reimbursement cases named in this question, once each.",
+                  [expectedAnswer("answer", "object")],
+                );
+              const caseById = new Map(cases.map((item) => [item.id, item]));
+              const receivedByCase = new Map<string, number>();
+              for (const match of matches)
+                receivedByCase.set(
+                  match.reimbursementId,
+                  (receivedByCase.get(match.reimbursementId) ?? 0) + match.amount,
+                );
+              const requestedCents = requested.reduce((sum, item) => sum + toCents(item.amount), 0);
+              const usedCredit = creditMatches.reduce((sum, item) => sum + item.amount, 0);
+              if (
+                requestedCents + usedCredit > transaction.amount ||
+                requested.some((item) => {
+                  const current = caseById.get(item.reimbursementId);
+                  return (
+                    !current ||
+                    current.status === "cancelled" ||
+                    toCents(item.amount) >
+                      current.expectedAmount - (receivedByCase.get(current.id) ?? 0)
+                  );
+                })
+              )
+                return missing(
+                  "The credit or reimbursement case no longer has the requested remaining amount.",
+                  [expectedAnswer("answer", "object")],
+                );
+            }
+            const revision = snapshotRevision({
+              cases: cases.map((item) => [item.id, item.revision, item.updatedAt.toISOString()]),
+              credit: [transaction.id, transaction.updatedAt.toISOString()],
+              matches: [...matches, ...creditMatches].map((item) => [
+                item.id,
+                item.reimbursementId,
+                item.creditTransactionId,
+                item.amount,
+              ]),
+            });
+            const base = prepared(
+              {
+                ...commonInput,
+                plan: {
+                  creditTransactionId: transaction.id,
+                  kind: answer.data.kind,
+                  matches: answer.data.kind === "match" ? answer.data.matches : [],
+                  reimbursementIds: cases.map((item) => item.id),
+                },
+              },
+              revision,
+              [
+                {
+                  entityId: transaction.id,
+                  entityType: "finance_transaction",
+                  summary:
+                    answer.data.kind === "not_reimbursement"
+                      ? "Record that this income credit is not a reimbursement."
+                      : "Match this credit to the selected reimbursement cases.",
+                },
+              ],
+              [transactionSource(transaction, account)],
+              ["The answer is recorded as person-provided reimbursement evidence."],
+            );
+            return {
+              ...base,
+              semanticTargetKeys: [
+                `account:${account.id}`,
+                `transaction:${transaction.id}`,
+                ...cases.map((item) => `reimbursement:${item.id}`),
+              ].sort(),
+            };
+          }
+          return missing("The reimbursement question no longer has a supported candidate.", []);
+        }
         const input = reconcileFinanceReimbursementInputSchema.safeParse(rawInput);
         if (!input.success)
           return missing("Provide a valid reimbursement operation and its current revision.", [
@@ -1776,6 +2111,266 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     return settings?.reviewBypassEnabled === true;
   }
 
+  async function applyReimbursementQuestion(
+    input: Record<string, unknown>,
+    context: MutationContext,
+    executor: FinanceExecutor,
+  ) {
+    const answer = financeReimbursementQuestionAnswerSchema.parse(input.answer);
+    const plan = input.plan as Record<string, unknown>;
+    const sourceRefs = input.sourceRefs as MaterialSourceReference[];
+    const evidence = {
+      sourceRefs,
+      summary:
+        answer.kind === "entirely_personal" || answer.kind === "reimbursable"
+          ? answer.rationale
+          : answer.kind === "not_reimbursement"
+            ? "Person confirmed this credit is not a reimbursement."
+            : "Person confirmed the reimbursement credit match.",
+    };
+    const userId = context.principal.userId;
+    const recordedAt = now();
+    if (typeof plan.transactionId === "string") {
+      const transactionId = plan.transactionId;
+      if (answer.kind === "entirely_personal") {
+        const [transaction] = await executor
+          .update(financeTransactions)
+          .set({ needsReview: false, updatedAt: recordedAt })
+          .where(
+            and(eq(financeTransactions.id, transactionId), eq(financeTransactions.userId, userId)),
+          )
+          .returning();
+        if (!transaction) throw new AppError("conflict", "The expense could not be classified.");
+        const categoryId = typeof plan.categoryId === "string" ? plan.categoryId : null;
+        const [category] = categoryId
+          ? await executor
+              .select()
+              .from(financeCategories)
+              .where(
+                and(eq(financeCategories.id, categoryId), eq(financeCategories.userId, userId)),
+              )
+              .limit(1)
+          : [];
+        await executor.insert(financeClassificationDecisions).values({
+          categoryId: category?.id ?? null,
+          categoryName: category?.name ?? transaction.category ?? "Uncategorized",
+          confidence: 10_000,
+          merchantId: transaction.merchantId,
+          outcome: "confirmed",
+          rationale: answer.rationale,
+          source: "user",
+          transactionId: transaction.id,
+          userId,
+        });
+        await executor.insert(auditEvents).values(
+          auditValues({
+            action: "finance.reimbursement_question_resolved",
+            after: { disposition: "entirely_personal" },
+            before: null,
+            entityId: transaction.id,
+            entityType: "finance_transaction",
+            ...context,
+          }),
+        );
+        return { disposition: "entirely_personal", transactionId: transaction.id };
+      }
+      if (answer.kind !== "reimbursable")
+        throw new AppError(
+          "invalid_request",
+          "The stored reimbursement expense answer is invalid.",
+        );
+      const allocationPlan = Array.isArray(plan.allocations)
+        ? (plan.allocations as Array<Record<string, unknown>>)
+        : [];
+      const oldAllocationIds = Array.isArray(plan.allocationIds)
+        ? plan.allocationIds.filter((id): id is string => typeof id === "string")
+        : [];
+      const categoryId = typeof plan.categoryId === "string" ? plan.categoryId : null;
+      const reimbursementCents = typeof plan.amount === "number" ? plan.amount : NaN;
+      if (!categoryId || !Number.isSafeInteger(reimbursementCents) || reimbursementCents <= 0)
+        throw new AppError("conflict", "The prepared reimbursement plan is invalid.");
+      const [transaction] = await executor
+        .update(financeTransactions)
+        .set({ needsReview: false, updatedAt: recordedAt })
+        .where(
+          and(eq(financeTransactions.id, transactionId), eq(financeTransactions.userId, userId)),
+        )
+        .returning();
+      if (!transaction) throw new AppError("conflict", "The expense could not be updated.");
+      await executor
+        .update(financeTransactionAllocations)
+        .set({ invalidatedAt: recordedAt, state: "invalidated", updatedAt: recordedAt })
+        .where(
+          and(
+            eq(financeTransactionAllocations.userId, userId),
+            inArray(financeTransactionAllocations.id, oldAllocationIds),
+            eq(financeTransactionAllocations.state, "active"),
+          ),
+        );
+      const first = allocationPlan[0];
+      const order = typeof first?.allocationOrder === "number" ? first.allocationOrder : 0;
+      const rationale = typeof first?.rationale === "string" ? first.rationale : answer.rationale;
+      const personalCents = transaction.amount - reimbursementCents;
+      const allocationValues = [
+        ...(personalCents > 0
+          ? [
+              {
+                allocationOrder: order,
+                amount: personalCents,
+                categoryId,
+                rationale,
+                transactionId: transaction.id,
+                treatment: "personal" as const,
+                userId,
+              },
+            ]
+          : []),
+        {
+          allocationOrder: personalCents > 0 ? order + 1 : order,
+          amount: reimbursementCents,
+          categoryId,
+          rationale: answer.rationale,
+          transactionId: transaction.id,
+          treatment: "reimbursable" as const,
+          userId,
+        },
+      ];
+      const createdAllocations = await executor
+        .insert(financeTransactionAllocations)
+        .values(allocationValues)
+        .returning();
+      const reimbursable = createdAllocations.find((item) => item.treatment === "reimbursable");
+      if (!reimbursable)
+        throw new AppError("conflict", "The reimbursement allocation could not be created.");
+      const [reimbursement] = await executor
+        .insert(financeReimbursements)
+        .values({
+          allocationId: reimbursable.id,
+          dueDate: answer.dueDate,
+          evidence,
+          expectedAmount: reimbursementCents,
+          payer: answer.payer,
+          rationale: answer.rationale,
+          userId,
+        })
+        .returning();
+      if (!reimbursement)
+        throw new AppError("conflict", "The reimbursement case could not be created.");
+      await executor.insert(auditEvents).values(
+        auditValues({
+          action: "finance.reimbursement_question_resolved",
+          after: { disposition: "reimbursable", reimbursementId: reimbursement.id },
+          before: null,
+          entityId: reimbursement.id,
+          entityType: "finance_reimbursement",
+          ...context,
+        }),
+      );
+      return {
+        disposition: "reimbursable",
+        personalAmount: personalCents / 100,
+        reimbursementId: reimbursement.id,
+        reimbursementAmount: reimbursementCents / 100,
+      };
+    }
+    const creditTransactionId =
+      typeof plan.creditTransactionId === "string" ? plan.creditTransactionId : null;
+    if (!creditTransactionId)
+      throw new AppError("conflict", "The prepared reimbursement credit plan is invalid.");
+    if (answer.kind === "not_reimbursement") {
+      const [credit] = await executor
+        .update(financeTransactions)
+        .set({ needsReview: false, updatedAt: recordedAt })
+        .where(
+          and(
+            eq(financeTransactions.id, creditTransactionId),
+            eq(financeTransactions.userId, userId),
+          ),
+        )
+        .returning();
+      if (!credit) throw new AppError("conflict", "The credit could not be classified.");
+      await executor.insert(auditEvents).values(
+        auditValues({
+          action: "finance.reimbursement_question_resolved",
+          after: { disposition: "not_reimbursement" },
+          before: null,
+          entityId: credit.id,
+          entityType: "finance_transaction",
+          ...context,
+        }),
+      );
+      return { disposition: "not_reimbursement", transactionId: credit.id };
+    }
+    if (answer.kind !== "match")
+      throw new AppError("invalid_request", "The stored reimbursement credit answer is invalid.");
+    const updated = [] as string[];
+    for (const requested of answer.matches) {
+      const [current] = await executor
+        .select()
+        .from(financeReimbursements)
+        .where(
+          and(
+            eq(financeReimbursements.id, requested.reimbursementId),
+            eq(financeReimbursements.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!current) throw new AppError("conflict", "The reimbursement case no longer exists.");
+      const amount = toCents(requested.amount);
+      const receivedAmount = current.receivedAmount + amount;
+      const [match] = await executor
+        .insert(financeReimbursementMatches)
+        .values({
+          amount,
+          creditTransactionId,
+          evidence,
+          rationale: "Person confirmed this reimbursement credit match.",
+          reimbursementId: current.id,
+          userId,
+        })
+        .returning();
+      const [next] = await executor
+        .update(financeReimbursements)
+        .set({
+          receivedAmount,
+          revision: current.revision + 1,
+          status: deriveReimbursementStatus({
+            cancelledAt: current.cancelledAt,
+            dueDate: current.dueDate,
+            expectedCents: current.expectedAmount,
+            now: recordedAt,
+            receivedCents: receivedAmount,
+          }),
+          updatedAt: recordedAt,
+        })
+        .where(eq(financeReimbursements.id, current.id))
+        .returning();
+      if (!match || !next)
+        throw new AppError("conflict", "The reimbursement match could not be saved.");
+      updated.push(next.id);
+    }
+    await executor
+      .update(financeTransactions)
+      .set({ needsReview: false, updatedAt: recordedAt })
+      .where(
+        and(
+          eq(financeTransactions.id, creditTransactionId),
+          eq(financeTransactions.userId, userId),
+        ),
+      );
+    await executor.insert(auditEvents).values(
+      auditValues({
+        action: "finance.reimbursement_question_resolved",
+        after: { disposition: "match", reimbursementCount: updated.length },
+        before: null,
+        entityId: creditTransactionId,
+        entityType: "finance_transaction",
+        ...context,
+      }),
+    );
+    return { disposition: "match", reimbursementIds: updated };
+  }
+
   async function applyPrepared(
     prepared: PreparedAction,
     context: MutationContext,
@@ -1891,6 +2486,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           executor as never,
         );
       case "reimbursement":
+        if (input.operation === "answer_question")
+          return applyReimbursementQuestion(input, context, executor ?? (db as FinanceExecutor));
         return invoke(
           finances.reconcileReimbursement,
           input as never,
@@ -2297,21 +2894,27 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .for("update")
           .limit(1);
         if (!review) throw new AppError("not_found", "The Finance question was not found.");
+        const payload = review.privatePayload as {
+          answer?: string;
+          candidate?: Record<string, unknown>;
+          maintenanceAnswerAuthority?: "same_user_finances_write";
+          original: { actionKind: unknown; input: Record<string, unknown> };
+          outcome?: FinanceActionOutcome<unknown>;
+          question: FinanceQuestion;
+        };
         if (
           context.principal.actorType === "agent" &&
-          review.requestingAgentId !== context.principal.actorId
+          review.requestingAgentId !== context.principal.actorId &&
+          !(
+            payload.maintenanceAnswerAuthority === "same_user_finances_write" &&
+            context.principal.scopes.has("finances:write")
+          )
         ) {
           throw new AppError(
             "forbidden",
             "Agents can answer only their own referenced Finance questions.",
           );
         }
-        const payload = review.privatePayload as {
-          answer?: string;
-          original: { actionKind: unknown; input: Record<string, unknown> };
-          outcome?: FinanceActionOutcome<unknown>;
-          question: FinanceQuestion;
-        };
         if (review.status !== "pending") {
           if (payload.answer && payload.outcome) {
             try {
@@ -2341,9 +2944,20 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           Object.keys(supplied).some((key) => !expected.some((field) => field.name === key))
         )
           return { question: retryQuestion, status: "needs_input" as const };
+        const reimbursementQuestion =
+          originalActionKind === "reimbursement" &&
+          payload.original.input.operation === "answer_question";
+        const resumeInput = reimbursementQuestion
+          ? {
+              ...payload.original.input,
+              answer: supplied.answer,
+              candidate: payload.candidate,
+              sourceRefs: review.sourceRefs,
+            }
+          : { ...payload.original.input, ...supplied };
         const prepared = await prepare(
           originalActionKind,
-          { ...payload.original.input, ...supplied },
+          resumeInput,
           context.principal.userId,
           tx,
           false,
@@ -2359,7 +2973,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                 ...payload,
                 original: {
                   ...payload.original,
-                  input: { ...payload.original.input, ...supplied },
+                  input: resumeInput,
                 },
                 question: nextQuestion,
               },

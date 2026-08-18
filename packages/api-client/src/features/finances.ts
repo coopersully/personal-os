@@ -31,6 +31,7 @@ import type {
   FinanceQuestion,
   FinanceRecurringObligation,
   FinanceReimbursement,
+  FinanceReimbursementQuestionAnswer,
   FinanceReviewCase,
   FinanceReviewDecisionInput,
   FinanceScenarioInput,
@@ -431,12 +432,17 @@ export function createFinanceApi(request: FinanceRequest) {
     /** Answer a Finance question; this cannot change bypass or approve a queued action. */
     async answerFinanceQuestion(
       id: string,
-      answer: string,
+      answer: string | FinanceReimbursementQuestionAnswer,
     ): Promise<FinanceActionOutcome<unknown>> {
       const response = await request<{ outcome: FinanceActionOutcome<unknown> }>(
         `/v1/finances/questions/${id}/answer`,
         {
-          body: JSON.stringify({ answer }),
+          // Existing question types use their established JSON string. Typed
+          // reimbursement answers are nested under the generic bounded
+          // `answer` field rather than flattened into a prior action input.
+          body: JSON.stringify({
+            answer: typeof answer === "string" ? answer : JSON.stringify({ answer }),
+          }),
           method: "POST",
         },
       );

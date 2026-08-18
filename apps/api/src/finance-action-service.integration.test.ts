@@ -15,6 +15,7 @@ import {
   financeMerchants,
   financeProfiles,
   financeRecurringObligations,
+  financeReimbursementMatches,
   financeReimbursements,
   financeTransactionAllocations,
   financeTransactions,
@@ -3847,5 +3848,158 @@ describe.sequential("finance action service", () => {
         },
       ),
     ).resolves.toMatchObject({ status: "applied" });
+  });
+
+  it("resolves a maintenance expense reimbursement answer through the bounded answer object", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Question reimbursement bank",
+        name: "Question reimbursement checking",
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: "Dining",
+        slug: `question-reimbursement-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Question reimbursement fixture failed.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 31_000,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        merchant: "Dinner House",
+        transactionDate: "2026-08-17",
+        userId,
+      })
+      .returning();
+    if (!expense) throw new Error("Question reimbursement expense failed.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 31_000,
+        categoryId: category.id,
+        rationale: "Original dinner allocation",
+        transactionId: expense.id,
+        treatment: "personal",
+        userId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Question reimbursement allocation failed.");
+    const source = {
+      accountId: account.id,
+      provider: "local" as const,
+      remoteId: expense.id,
+      revision: expense.updatedAt.toISOString(),
+      sourceType: "finance_transaction" as const,
+    };
+    const [stored] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        actionKind: "question",
+        expectedRevision: "maintenance-question",
+        fingerprint: `maintenance-reimbursement-${crypto.randomUUID()}`,
+        privatePayload: {
+          candidate: { allocationIds: [allocation.id], transactionId: expense.id },
+          maintenanceAnswerAuthority: "same_user_finances_write",
+          original: { actionKind: "reimbursement", input: { operation: "answer_question" } },
+          question: {
+            actionKind: "reimbursement",
+            choices: [],
+            expectedAnswer: [{ name: "answer", required: true, type: "object" }],
+            id: "pending",
+            prompt: "Is this expense personal or reimbursable?",
+            sourceRefs: [source],
+            why: "Large dinner needs confirmation.",
+          },
+        },
+        requestingAgentId: "finance-maintenance",
+        safeChanges: [
+          { entityId: expense.id, entityType: "finance_transaction", summary: "Classify expense." },
+        ],
+        semanticTargetKeys: [`transaction:${expense.id}`],
+        sourceRefs: [source],
+        userId,
+      })
+      .returning();
+    if (!stored) throw new Error("Question reimbursement row failed.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+
+    await expect(
+      service.answerQuestion(
+        stored.id,
+        JSON.stringify({
+          answer: {
+            amount: 220,
+            dueDate: null,
+            kind: "reimbursable",
+            payer: "Alex",
+            rationale: "Alex agreed to pay their share.",
+          },
+        }),
+        { principal: agent(userId, "maintenance-answerer"), requestId: "maintenance-answer" },
+      ),
+    ).resolves.toMatchObject({
+      result: { personalAmount: 90, reimbursementAmount: 220 },
+      status: "applied",
+    });
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactionAllocations.amount,
+          treatment: financeTransactionAllocations.treatment,
+        })
+        .from(financeTransactionAllocations)
+        .where(
+          and(
+            eq(financeTransactionAllocations.transactionId, expense.id),
+            eq(financeTransactionAllocations.state, "active"),
+          ),
+        )
+        .orderBy(financeTransactionAllocations.allocationOrder),
+    ).resolves.toEqual([
+      { amount: 9_000, treatment: "personal" },
+      { amount: 22_000, treatment: "reimbursable" },
+    ]);
+    const cases = await database.db
+      .select({
+        expectedAmount: financeReimbursements.expectedAmount,
+        payer: financeReimbursements.payer,
+      })
+      .from(financeReimbursements)
+      .where(eq(financeReimbursements.userId, userId));
+    expect(cases).toContainEqual({ expectedAmount: 22_000, payer: "Alex" });
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, stored.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+    await expect(
+      database.db
+        .select({ id: financeReimbursementMatches.id })
+        .from(financeReimbursementMatches)
+        .where(eq(financeReimbursementMatches.userId, userId)),
+    ).resolves.toEqual([]);
   });
 });

@@ -160,7 +160,7 @@ export const financeQuestionSchema = z
             name: z.string().trim().min(1).max(80),
             nullable: z.boolean().default(false),
             required: z.boolean(),
-            type: z.enum(["boolean", "number", "object_array", "string", "string_array"]),
+            type: z.enum(["boolean", "number", "object", "object_array", "string", "string_array"]),
           })
           .strict(),
       )
@@ -746,6 +746,9 @@ export const financeReimbursementQuestionAnswerSchema = z.discriminatedUnion("ki
     })
     .strict(),
 ]);
+export type FinanceReimbursementQuestionAnswer = z.infer<
+  typeof financeReimbursementQuestionAnswerSchema
+>;
 
 export const financeCategorySchema = z.object({
   color: z.string().nullable(),

@@ -354,7 +354,7 @@ export function registerFinanceRoutes({
       ),
     }),
   );
-  app.get("/v1/finances/questions", requireHuman, async (context) =>
+  app.get("/v1/finances/questions", async (context) =>
     context.json({
       questions: await requireActions().listQuestions(
         context.get("principal").userId,

@@ -4,6 +4,7 @@ import {
   applyFinanceCategorizationsInputSchema,
   createFinanceBudgetInputSchema,
   createFinanceTransactionInputSchema,
+  financeReimbursementQuestionAnswerSchema,
   financeScenarioInputSchema,
   maintenanceScopeSchema,
   mergeFinanceMerchantsInputSchema,
@@ -291,7 +292,13 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   const answerFinanceQuestionInput = z
-    .object({ answer: z.string().trim().min(1).max(4_000), id })
+    .object({
+      answer: z.union([
+        z.string().trim().min(1).max(4_000),
+        financeReimbursementQuestionAnswerSchema,
+      ]),
+      id,
+    })
     .strict();
   const answerFinanceQuestion = async ({
     id: questionId,

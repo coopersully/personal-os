@@ -1908,27 +1908,17 @@ export function createFinanceService({
     const fingerprint = createHash("sha256")
       .update(JSON.stringify({ candidate, kind, transactionId }))
       .digest("hex");
-    const expectedAnswer =
-      kind === "expense_reimbursement"
-        ? [
-            {
-              choices: ["entirely_personal", "reimbursable", "not_sure"],
-              name: "kind",
-              required: true,
-              type: "string" as const,
-            },
-            { name: "amount", required: false, type: "number" as const },
-            { name: "payer", required: false, type: "string" as const },
-          ]
-        : [
-            {
-              choices: ["match", "not_reimbursement", "not_sure"],
-              name: "kind",
-              required: true,
-              type: "string" as const,
-            },
-            { name: "matches", required: false, type: "object_array" as const },
-          ];
+    const expectedAnswer = [
+      {
+        example:
+          kind === "expense_reimbursement"
+            ? '{"kind":"reimbursable","amount":220,"payer":"Alex","dueDate":null,"rationale":"Alex owes their share."}'
+            : '{"kind":"match","matches":[{"reimbursementId":"…","amount":220}]}',
+        name: "answer",
+        required: true,
+        type: "object" as const,
+      },
+    ];
     const question = {
       actionKind: "reimbursement" as const,
       choices: [],
@@ -1950,6 +1940,7 @@ export function createFinanceService({
         maintenanceRunId: context?.maintenance?.runId ?? null,
         privatePayload: {
           candidate,
+          maintenanceAnswerAuthority: "same_user_finances_write",
           original: { actionKind: "reimbursement", input: { operation: "answer_question" } },
           question,
         },

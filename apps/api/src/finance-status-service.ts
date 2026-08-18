@@ -3,6 +3,7 @@ import {
   type Database,
   domainProfileApprovals,
   financeAccounts,
+  financeAgentActionReviews,
   financeAutomationSettings,
   financeBudgetPlans,
   financeBudgets,
@@ -25,6 +26,7 @@ import {
   type FinanceStatus,
   financeDomainProfileSchema,
   financeGuidedPreferencesSchema,
+  financeQuestionSchema,
   financeStatusSchema,
   type MaintenanceScope,
 } from "@personal-os/domain";
@@ -310,6 +312,17 @@ export function createFinanceStatusService({ db, now }: Options) {
               ),
             )
             .orderBy(financeReviewCases.createdAt);
+          const actionQuestions = await tx
+            .select()
+            .from(financeAgentActionReviews)
+            .where(
+              and(
+                eq(financeAgentActionReviews.userId, userId),
+                eq(financeAgentActionReviews.actionKind, "question"),
+                eq(financeAgentActionReviews.status, "pending"),
+              ),
+            )
+            .orderBy(financeAgentActionReviews.createdAt);
           const targetReview =
             scope.type === "target" && scope.entityType === "finance_review_case"
               ? reviews.find((review) => review.id === scope.id)
@@ -757,7 +770,16 @@ export function createFinanceStatusService({ db, now }: Options) {
                 ]
               : []),
           ];
-          const questions = planningQuestions;
+          const questions = [
+            ...planningQuestions,
+            ...actionQuestions.map((row) => {
+              const payload = row.privatePayload as { question: unknown };
+              return financeQuestionSchema.parse({
+                ...(payload.question as Record<string, unknown>),
+                id: row.id,
+              });
+            }),
+          ];
           const latestRun = maintenanceRuns[0];
           const activeRun =
             latestRun &&
@@ -1069,9 +1091,13 @@ export function createFinanceStatusService({ db, now }: Options) {
                 overdue: reimbursementStatus.filter((status) => status === "overdue").length,
                 expected: reimbursementStatus.filter((status) => status === "expected").length,
                 needsInput: reimbursementStatus.filter((status) => status === "needs_input").length,
-                anomalies: scopedReviews.filter(
-                  (review) => review.reason === "possible_reimbursement",
-                ).length,
+                anomalies:
+                  scopedReviews.filter((review) => review.reason === "possible_reimbursement")
+                    .length +
+                  actionQuestions.filter((row) => {
+                    const payload = row.privatePayload as { question?: { actionKind?: unknown } };
+                    return payload.question?.actionKind === "reimbursement";
+                  }).length,
                 outstanding:
                   reimbursementRows.reduce(
                     (sum, row) =>

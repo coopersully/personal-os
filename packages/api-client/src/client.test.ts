@@ -102,7 +102,17 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
     prioritizedGoals: [],
     proposals: [],
     questions: [],
-    reimbursements: { open: 0, overdue: 0, unmatchedCredits: 0 },
+    reimbursements: {
+      anomalies: 0,
+      expected: 0,
+      needsInput: 0,
+      open: 0,
+      outstanding: 0,
+      overdue: 0,
+      received: 0,
+      unresolved: 0,
+      unmatchedCredits: 0,
+    },
     reviewMode: { reviewBypassEnabled: false },
     review: { byReason: {}, total: 0 },
     rulebookVersion: `sha256:${"a".repeat(64)}`,
@@ -1444,6 +1454,37 @@ describe("ilo API client", () => {
       },
     });
     await expect(api.listFinanceQuestions(3)).resolves.toEqual([question]);
+  });
+
+  it("forwards typed reimbursement answers through the bounded question envelope", async () => {
+    let body: string | null = null;
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (_input, init) => {
+        body = String(init?.body ?? null);
+        return json({ outcome: { result: { reimbursementId: id }, status: "applied" } });
+      },
+    });
+    await expect(
+      api.answerFinanceQuestion(id, {
+        amount: 220,
+        dueDate: null,
+        kind: "reimbursable",
+        payer: "Alex",
+        rationale: "Alex owes their share.",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(JSON.parse(body ?? "{}")).toEqual({
+      answer: JSON.stringify({
+        answer: {
+          amount: 220,
+          dueDate: null,
+          kind: "reimbursable",
+          payer: "Alex",
+          rationale: "Alex owes their share.",
+        },
+      }),
+    });
   });
 
   it("preserves Finance maintenance API errors with their request IDs", async () => {

@@ -71,3 +71,29 @@ Round 2A validation completed:
 **Status: DONE**
 
 Added one conservative shared plausible-credit selector for reimbursement list, Finance status, and maintenance. It reports matched and remaining cents, filters pending/transfer/payroll/refund/fully-matched income, and requires payment-app descriptor plus outstanding-case proximity before surfacing a candidate. Anomaly maintenance now reads a bounded trailing-year history outside the active scope, never future rows, and recurring suppression also requires the configured cadence window.
+
+## Typed maintenance-question resolution
+
+**Status: DONE**
+
+Commit `f1d14ff` changed maintenance reimbursement findings from generic review cases into private, durable Finance questions. Commit `161ed72` resolves those questions through the Task 3 question pipeline without merging answer keys into arbitrary action inputs. Each maintenance question requests one bounded typed `answer` object while candidate IDs, source revisions, and maintenance authority stay private.
+
+The action service locks and revalidates owned accounts, transactions, allocations, categories, reimbursement cases, matches, credit capacity, and source revisions in the terminal transaction. It records entirely-personal expenses as durable person-provided classification evidence; converts a single-allocation $310 expense with a $220 reimbursement into a $90 personal allocation plus $220 reimbursable allocation and case; supports explicit non-reimbursement credits; and applies partial combined-credit matches atomically. Changed sources or revisions return a narrower recoverable question. Exact replay returns the stored outcome; a changed answer conflicts.
+
+Question terminalization, prepared-review disposition, semantic mutation, and redacted audit share one transaction. Bypass controls only whether the prepared answer applies or queues a review. A maintenance question has explicit stored `same_user_finances_write` authority so a same-user scoped agent may answer it, while ordinary agent ownership remains enforced. Public Finance question listing and Finance status expose only public descriptors and counts. The typed API client and `answer_finance_question` MCP tool forward reimbursement answers through the same bounded envelope.
+
+### Verification follow-up
+
+**Status: DONE**
+
+- Fixed the API-client Finance-status fixture to include current reimbursement summary fields.
+- Focused client, action-service, route, MCP, and Finance-status tests; API-client/API/MCP typechecks; Biome; and `git diff --check` were run.
+- No full `pnpm verify` was run in this follow-up by instruction. The earlier full run advanced through lifecycle and lint contracts but was not used as completion evidence.
+
+### Concerns
+
+- Multi-allocation expense reimbursement questions remain recoverable `needs_input`; the resolver intentionally does not flatten distinct category/order treatments into an unsafe split.
+
+### Blocked
+
+- None.

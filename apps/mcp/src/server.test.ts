@@ -1215,7 +1215,13 @@ describe("ilo MCP server", () => {
     await client.callTool({
       name: "answer_finance_question",
       arguments: {
-        answer: "This charge was personal spending.",
+        answer: {
+          amount: 220,
+          dueDate: null,
+          kind: "reimbursable",
+          payer: "Alex",
+          rationale: "Alex owes their share.",
+        },
         id,
       },
     });
@@ -1637,10 +1643,13 @@ describe("ilo MCP server", () => {
       expect.objectContaining({ importance: "high", kind: "important" }),
     );
     expect(api.applyFinanceCategorizations).toHaveBeenCalledTimes(1);
-    expect(api.answerFinanceQuestion).toHaveBeenCalledWith(
-      id,
-      "This charge was personal spending.",
-    );
+    expect(api.answerFinanceQuestion).toHaveBeenCalledWith(id, {
+      amount: 220,
+      dueDate: null,
+      kind: "reimbursable",
+      payer: "Alex",
+      rationale: "Alex owes their share.",
+    });
     expect(api.createFinanceBudget).toHaveBeenCalledWith({
       category: "Dining",
       limit: 250,

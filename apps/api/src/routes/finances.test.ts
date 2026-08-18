@@ -399,6 +399,10 @@ describe("finance routes", () => {
     ];
     const listQuestions = vi.fn(async () => questions);
     const approve = vi.fn();
+    const answerQuestion = vi.fn(async () => ({
+      result: { reimbursementId: id },
+      status: "applied",
+    }));
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
@@ -413,7 +417,7 @@ describe("finance routes", () => {
       context.json({ error: error instanceof Error ? error.message : "unknown" }, 400),
     );
     registerFinanceRoutes({
-      actions: { approve, listQuestions } as never,
+      actions: { answerQuestion, approve, listQuestions } as never,
       app,
       financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
@@ -428,6 +432,20 @@ describe("finance routes", () => {
     expect(listed.status).toBe(200);
     await expect(listed.json()).resolves.toEqual({ questions });
     expect(listQuestions).toHaveBeenLastCalledWith(id, 2);
+    const answered = await app.request(`/v1/finances/questions/${id}/answer`, {
+      body: JSON.stringify({ answer: JSON.stringify({ answer: { kind: "not_reimbursement" } }) }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(answered.status).toBe(200);
+    await expect(answered.json()).resolves.toEqual({
+      outcome: { result: { reimbursementId: id }, status: "applied" },
+    });
+    expect(answerQuestion).toHaveBeenCalledWith(
+      id,
+      JSON.stringify({ answer: { kind: "not_reimbursement" } }),
+      expect.objectContaining({ requestId: "question-list" }),
+    );
     expect(
       (await app.request("/v1/finances/action-reviews/not-an-id/approve", { method: "POST" }))
         .status,

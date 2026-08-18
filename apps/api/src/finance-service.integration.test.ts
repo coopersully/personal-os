@@ -30,7 +30,7 @@ import {
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
 import { migrationsWithout } from "./test-migrations.js";
@@ -3620,6 +3620,107 @@ describe.sequential("finance service", () => {
         .from(financeTransactionAllocations)
         .where(inArray(financeTransactionAllocations.transactionId, [firstId, secondId, thirdId])),
     ).resolves.toHaveLength(3);
+  });
+
+  it("audits breakdown replacement counts and rolls every write back when audit persistence fails", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Breakdown audit",
+        email: `breakdown-audit-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Breakdown audit owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "breakdown-audit" };
+    const [first, second] = await service.listCategories(owner.id);
+    if (!first || !second) throw new Error("Breakdown audit categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 100, institution: "Audit", name: "Audit", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 10,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Audit merchant",
+        notes: null,
+      },
+      context,
+    );
+    const initial = {
+      allocations: [
+        { amount: 4, categoryId: first.id, rationale: "Personal" },
+        {
+          amount: 6,
+          categoryId: second.id,
+          rationale: "Reimbursable",
+          treatment: "reimbursable" as const,
+        },
+      ],
+      expectedTransactionUpdatedAt: transaction.updatedAt,
+      rationale: "Initial split.",
+    };
+    const saved = await service.setTransactionBreakdown(transaction.id, initial, context);
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [{ amount: 10, categoryId: first.id, rationale: "Replacement" }],
+        expectedTransactionUpdatedAt: saved.updatedAt,
+        rationale: "Replacement split.",
+      },
+      context,
+    );
+    const [audit] = await database.db
+      .select({ after: auditEvents.after, before: auditEvents.before })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, context.requestId))
+      .orderBy(desc(auditEvents.createdAt))
+      .limit(1);
+    expect(audit).toMatchObject({
+      before: { allocationCount: 2, reimbursableAllocationCount: 1, futureRule: null },
+      after: { allocationCount: 1, reimbursableAllocationCount: 0, futureRule: null },
+    });
+    expect(JSON.stringify(audit)).not.toContain("Replacement split.");
+    const [latest] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transaction.id));
+    if (!latest) throw new Error("Breakdown audit transaction was not found.");
+    await expect(
+      database.db.transaction(async (tx) =>
+        service.setTransactionBreakdown(
+          transaction.id,
+          {
+            allocations: [{ amount: 10, categoryId: second.id, rationale: "Will fail" }],
+            expectedTransactionUpdatedAt: latest.updatedAt.toISOString(),
+            rationale: "Must roll back.",
+          },
+          context,
+          new Proxy(tx, {
+            get(target, property) {
+              if (property !== "insert") return Reflect.get(target, property);
+              return (table: unknown) => {
+                if (table === auditEvents) throw new Error("audit failure");
+                return target.insert(table as never);
+              };
+            },
+          }) as never,
+        ),
+      ),
+    ).rejects.toThrow("audit failure");
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactionAllocations.categoryId })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, transaction.id)),
+    ).resolves.toEqual([{ categoryId: first.id }]);
   });
 
   it("keeps allocation-based merchant evidence mixed without downgrading explicit mixed behavior", async () => {

@@ -152,3 +152,21 @@ Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integratio
 - None.
 
 Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts` (102 passing), API and database type checks, Biome, and `git diff --check`.
+
+## MCP metadata and handoff — Batch C
+
+### DONE
+
+- `answer_finance_question` now advertises `approve_each` and destructive conditional-mutation metadata: a typed answer can change allocations or create/match an internal reimbursement case, while the API remains the sole owner of the final apply-versus-review disposition.
+- MCP and Finance architecture documentation now describe same-user public question listings, authorized maintenance-question answers, bounded evidence, typed reimbursement handling, and the strict absence of external payments.
+- Task 5 implementation commits are `f1d14ff`, `161ed72`, `3c11b0d`, `478b0f4`, `03bbef1`, and `0e08c01`; this metadata/documentation completion follows them.
+
+### CONCERNS
+
+- The focused integration suite covers the shared row-lock and replay contracts, but does not include a separate artificial two-session barrier/statement-timeout test for each requested question-versus-direct and question-versus-lifecycle contention pair.
+
+### BLOCKED
+
+- None.
+
+Validation: `pnpm exec vitest run apps/mcp/src/tool-catalog.test.ts` (2 passing), MCP typecheck, Biome, and `git diff --check`.

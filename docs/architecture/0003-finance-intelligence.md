@@ -71,12 +71,16 @@ bypass setting. Bypass controls only queue-versus-apply after preparation; it
 never overrides evidence, confidence, or ambiguous-transfer protections. The
 signed-in app's Finance review routes alone approve or dismiss queued actions.
 Agents may apply a permanent merchant-learning rule only through an explicitly
-prepared categorization action, under those same checks. The human-only question
-list exposes bounded public descriptors. `answer_finance_question` accepts only
-the requested bounded fields, is limited to the originating agent when an agent
-answers, merges a valid answer into the durable original action, and prepares it
-again without approval authority; the deprecated `resolve_finance_review` alias
-only translates legacy categorization answers. A scoped agent may create or refresh shared attention for one owned transaction
+prepared categorization action, under those same checks. A scoped same-user
+agent may list pending questions through bounded public descriptors.
+`answer_finance_question` accepts only the requested bounded fields as evidence
+and prepares the durable original action again; Task 3 retains the server-owned
+apply-versus-review disposition. An authorized same-user `finances:write` agent
+may answer a maintenance-generated question, while an ordinary agent answer is
+limited to its originating agent. Typed reimbursement answers may conditionally
+classify allocations or create/match an internal reimbursement case, but never
+move money or initiate an external payment. The deprecated
+`resolve_finance_review` alias only translates legacy categorization answers. A scoped agent may create or refresh shared attention for one owned transaction
 through the Finance-owned endpoint. That endpoint locks the transaction,
 derives its material source from the account and current transaction revision,
 deduplicates the open transaction/kind pair, and audits atomically; generic

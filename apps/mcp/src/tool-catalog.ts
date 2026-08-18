@@ -191,7 +191,12 @@ export const iloToolCatalog = {
   apply_finance_categorizations: write("finances", ["finances:write"], {
     policy: "approved_rule",
   }),
-  answer_finance_question: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  // A bounded answer can conditionally replace allocations or create/match a
+  // reimbursement case. The API still chooses applied versus pending review.
+  answer_finance_question: write("finances", ["finances:write"], {
+    destructive: true,
+    policy: "approve_each",
+  }),
   resolve_finance_review: write("finances", ["finances:write"], { policy: "approved_rule" }),
   update_finance_recurring_obligation: write("finances", ["finances:write"], {
     policy: "approved_rule",

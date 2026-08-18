@@ -251,13 +251,19 @@ insight refresh mutation. Agents cannot toggle bypass or approve/dismiss action
 reviews. They may apply a permanent merchant-learning rule only as part of an
 explicitly prepared categorization action, and it remains subject to the same
 confidence, ambiguity, evidence, ownership, and revision checks; bypass never
-waives those checks. The human-only question list exposes public descriptors.
-`answer_finance_question` accepts only the requested bounded fields, merges a
-valid answer into the stored action, and prepares it again; the deprecated
-`resolve_finance_review` compatibility alias only translates legacy
-categorization answers. Provider administration, account connection and
-import, ambiguous transfer confirmation, action-review approval/dismissal, and
-every external financial activity remain human-only and unavailable to MCP.
+waives those checks. A scoped same-user agent may list pending Finance questions
+through their public descriptors only. `answer_finance_question` accepts only
+the requested bounded fields as person-provided evidence and prepares the
+stored action again; Task 3's server-owned disposition still decides whether it
+is applied or queued for individual review. An authorized same-user
+`finances:write` agent may answer a maintenance-generated question, while an
+ordinary agent answer remains limited to its originating agent. Reimbursement
+questions use a typed answer and may conditionally classify allocations or
+create/match an internal reimbursement case; they never initiate a payment or
+any other external financial activity. The deprecated `resolve_finance_review`
+compatibility alias only translates legacy categorization answers. Provider
+administration, account connection and import, ambiguous transfer confirmation,
+and action-review approval/dismissal remain human-only and unavailable to MCP.
 
 The signed-in categorization batch API predates this guided-setup work and
 commits each decision independently. Its bounded workers and per-item results

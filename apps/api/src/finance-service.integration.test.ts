@@ -3488,6 +3488,31 @@ describe.sequential("finance service", () => {
         userId: other.id,
       }),
     ).rejects.toThrow();
+    const cascadeTransaction = await service.createTransaction(
+      {
+        accountId: ownerAccount.id,
+        amount: 10,
+        category: ownerCategory.name,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Cascade fixture",
+        notes: null,
+      },
+      ownerContext,
+    );
+    await expect(
+      database.db.delete(financeCategories).where(eq(financeCategories.id, ownerCategory.id)),
+    ).rejects.toThrow();
+    await database.db
+      .delete(financeTransactions)
+      .where(eq(financeTransactions.id, cascadeTransaction.id));
+    await expect(
+      database.db
+        .select({ id: financeTransactionAllocations.id })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, cascadeTransaction.id)),
+    ).resolves.toEqual([]);
     await database.db
       .delete(financeTransactionAllocations)
       .where(eq(financeTransactionAllocations.transactionId, ownerTransaction.id));
@@ -3613,7 +3638,7 @@ describe.sequential("finance service", () => {
       service.backfillTransactionAllocations(1),
       service.backfillTransactionAllocations(1),
     ]);
-    expect(concurrent.filter((result) => result.claimed)).toHaveLength(1);
+    expect(concurrent.filter((result) => result.claimed)).toHaveLength(2);
     expect(concurrent.reduce((sum, result) => sum + result.inserted, 0)).toBe(1);
     await expect(
       database.db
@@ -3621,6 +3646,184 @@ describe.sequential("finance service", () => {
         .from(financeTransactionAllocations)
         .where(inArray(financeTransactionAllocations.transactionId, [firstId, secondId, thirdId])),
     ).resolves.toHaveLength(3);
+  });
+
+  it("waits for an earlier provider writer instead of advancing the allocation cursor past it", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation lock convergence",
+        email: `allocation-lock-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation lock owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-lock" };
+    const account = await service.createAccount(
+      { balance: 20, institution: "Lock", name: "Lock account", provider: "manual" },
+      context,
+    );
+    const category = (await service.listCategories(owner.id))[0];
+    if (!category) throw new Error("Allocation lock category was not seeded.");
+    const cursor = "ffffffff-ffff-4fff-8fff-ffffffffff10";
+    const firstId = "ffffffff-ffff-4fff-8fff-ffffffffff11";
+    const secondId = "ffffffff-ffff-4fff-8fff-ffffffffff12";
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, "finance_transaction_allocation_backfill_v1"));
+    await database.db.insert(financeSetupBackfillState).values({
+      allocationCursor: cursor,
+      key: "finance_transaction_allocation_backfill_v1",
+    });
+    await database.db.insert(financeTransactions).values(
+      [firstId, secondId].map((id, index) => ({
+        accountId: account.id,
+        amount: 100 + index,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense" as const,
+        id,
+        merchant: `Lock fixture ${index}`,
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      })),
+    );
+    let releaseWriter: (() => void) | undefined;
+    let writerLocked: (() => void) | undefined;
+    const writerReleased = new Promise<void>((resolvePromise) => {
+      releaseWriter = resolvePromise;
+    });
+    const writerReady = new Promise<void>((resolvePromise) => {
+      writerLocked = resolvePromise;
+    });
+    const writer = database.db.transaction(async (tx) => {
+      await tx
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, firstId))
+        .for("update");
+      writerLocked?.();
+      await writerReleased;
+    });
+    await writerReady;
+    const backfill = service.backfillTransactionAllocations(2);
+    let beforeRelease = "advanced";
+    try {
+      beforeRelease = await Promise.race([
+        backfill.then(() => "advanced"),
+        new Promise<string>((resolvePromise) => setTimeout(() => resolvePromise("waiting"), 100)),
+      ]);
+    } finally {
+      releaseWriter?.();
+      await writer;
+    }
+    expect(beforeRelease).toBe("waiting");
+    await expect(backfill).resolves.toMatchObject({ inserted: 2, processed: 2 });
+    await expect(
+      database.db
+        .select({ transactionId: financeTransactionAllocations.transactionId })
+        .from(financeTransactionAllocations)
+        .where(inArray(financeTransactionAllocations.transactionId, [firstId, secondId])),
+    ).resolves.toHaveLength(2);
+  });
+
+  it("advances zero-dollar legacy rows and materializes colliding legacy category names", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation zero and slug",
+        email: `allocation-zero-slug-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation zero/slug owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-zero-slug" };
+    const account = await service.createAccount(
+      { balance: 20, institution: "Slug", name: "Slug account", provider: "manual" },
+      context,
+    );
+    const cursor = "ffffffff-ffff-4fff-8fff-ffffffffff20";
+    const zeroId = "ffffffff-ffff-4fff-8fff-ffffffffff21";
+    const collisionId = "ffffffff-ffff-4fff-8fff-ffffffffff22";
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, "finance_transaction_allocation_backfill_v1"));
+    await database.db.insert(financeSetupBackfillState).values({
+      allocationCursor: cursor,
+      key: "finance_transaction_allocation_backfill_v1",
+    });
+    await database.db.insert(financeCategories).values({
+      group: "Spending",
+      name: "Foo Bar",
+      slug: "foo-bar",
+      userId: owner.id,
+    });
+    await database.db.insert(financeTransactions).values([
+      {
+        accountId: account.id,
+        amount: 0,
+        category: "Zero legacy",
+        direction: "expense",
+        id: zeroId,
+        merchant: "Zero fixture",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      },
+      {
+        accountId: account.id,
+        amount: 123,
+        category: "Foo/Bar",
+        direction: "expense",
+        id: collisionId,
+        merchant: "Slug fixture",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      },
+    ]);
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      inserted: 0,
+      processed: 1,
+    });
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      inserted: 1,
+      processed: 1,
+    });
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      complete: true,
+      inserted: 0,
+      processed: 0,
+    });
+    await expect(
+      database.db
+        .select({ id: financeTransactionAllocations.id })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, zeroId)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactionAllocations.amount,
+          treatment: financeTransactionAllocations.treatment,
+        })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, collisionId)),
+    ).resolves.toEqual([{ amount: 123, treatment: "personal" }]);
+    await expect(
+      database.db
+        .select({ name: financeCategories.name, slug: financeCategories.slug })
+        .from(financeCategories)
+        .where(and(eq(financeCategories.userId, owner.id), eq(financeCategories.name, "Foo/Bar"))),
+    ).resolves.toEqual([expect.objectContaining({ slug: expect.not.stringMatching(/^foo-bar$/) })]);
   });
 
   it("audits breakdown replacement counts and rolls every write back when audit persistence fails", async () => {

@@ -65,6 +65,29 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain("finance_transaction_allocations_transaction_user_fk");
     expect(migrationSql).toContain("finance_transaction_allocations_category_user_fk");
     expect(migrationSql).toContain("ADD COLUMN \"behavior\" text DEFAULT 'unknown' NOT NULL");
+    expect(
+      allocations.foreignKeys.map((foreignKey) => ({
+        columns: foreignKey.reference().columns.map((column) => column.name),
+        foreignColumns: foreignKey.reference().foreignColumns.map((column) => column.name),
+        name: foreignKey.getName(),
+        onDelete: foreignKey.onDelete,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          columns: ["transaction_id", "user_id"],
+          foreignColumns: ["id", "user_id"],
+          name: "finance_transaction_allocations_transaction_user_fk",
+          onDelete: "cascade",
+        },
+        {
+          columns: ["category_id", "user_id"],
+          foreignColumns: ["id", "user_id"],
+          name: "finance_transaction_allocations_category_user_fk",
+          onDelete: "restrict",
+        },
+      ]),
+    );
     const journal = JSON.parse(
       await readFile(
         resolve(process.cwd(), "packages/database/migrations/meta/_journal.json"),

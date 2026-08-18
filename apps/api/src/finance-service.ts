@@ -209,6 +209,15 @@ function categorySlug(name: string) {
     .replace(/(^-|-$)/g, "");
 }
 
+function legacyCategorySlug(userId: string, name: string) {
+  const normalized = categorySlug(name) || "legacy-category";
+  const digest = createHash("sha256")
+    .update(`finance-legacy-category:${userId}:${name.toLocaleLowerCase()}`)
+    .digest("hex")
+    .slice(0, 12);
+  return `${normalized}-${digest}`;
+}
+
 function defaultCategoryId(userId: string, slug: string) {
   const hex = createHash("sha256").update(`finance-category:${userId}:${slug}`).digest("hex");
   // UUIDv8 identifies this as a custom SHA-256 layout rather than implying
@@ -3853,7 +3862,7 @@ export function createFinanceService({
           .select()
           .from(financeSetupBackfillState)
           .where(eq(financeSetupBackfillState.key, stateKey))
-          .for("update", { skipLocked: true })
+          .for("update")
           .limit(1);
         if (!state) return { complete: false, inserted: 0, processed: 0, claimed: false };
         if (state.allocationsComplete)
@@ -3871,7 +3880,7 @@ export function createFinanceService({
           )
           .orderBy(financeTransactions.id)
           .limit(scanLimit)
-          .for("update", { skipLocked: true });
+          .for("update");
         let inserted = 0;
         for (const transaction of candidates) {
           const [active] = await tx
@@ -3885,8 +3894,13 @@ export function createFinanceService({
             )
             .limit(1);
           if (active || (!transaction.categoryId && !transaction.category)) continue;
+          // Allocations are intentionally positive-only. A categorized zero-dollar
+          // legacy row is processed by advancing the durable cursor without an
+          // allocation, so it cannot block every subsequent bounded batch.
+          if (transaction.amount <= 0) continue;
           let categoryId = transaction.categoryId;
           if (!categoryId && transaction.category) {
+            const slug = legacyCategorySlug(transaction.userId, transaction.category);
             let [category] = await tx
               .select({ id: financeCategories.id })
               .from(financeCategories)
@@ -3903,7 +3917,7 @@ export function createFinanceService({
                 .values({
                   group: categoryGroup(transaction.category),
                   name: transaction.category,
-                  slug: categorySlug(transaction.category),
+                  slug,
                   userId: transaction.userId,
                 })
                 .onConflictDoNothing({
@@ -3915,14 +3929,19 @@ export function createFinanceService({
                 .where(
                   and(
                     eq(financeCategories.userId, transaction.userId),
-                    sql`lower(${financeCategories.name}) = lower(${transaction.category})`,
+                    eq(financeCategories.slug, slug),
                   ),
                 )
                 .limit(1);
             }
             categoryId = category?.id ?? null;
           }
-          if (!categoryId) continue;
+          if (!categoryId) {
+            throw new AppError(
+              "conflict",
+              "The legacy transaction category could not be materialized; retry the allocation backfill.",
+            );
+          }
           await tx
             .insert(financeTransactionAllocations)
             .values({

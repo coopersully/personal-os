@@ -1721,11 +1721,13 @@ export const financeTransactionAllocations = pgTable(
     foreignKey({
       columns: [table.transactionId, table.userId],
       foreignColumns: [financeTransactions.id, financeTransactions.userId],
-    }),
+      name: "finance_transaction_allocations_transaction_user_fk",
+    }).onDelete("cascade"),
     foreignKey({
       columns: [table.categoryId, table.userId],
       foreignColumns: [financeCategories.id, financeCategories.userId],
-    }),
+      name: "finance_transaction_allocations_category_user_fk",
+    }).onDelete("restrict"),
   ],
 );
 

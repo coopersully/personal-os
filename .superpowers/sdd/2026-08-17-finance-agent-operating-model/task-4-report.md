@@ -107,3 +107,17 @@ DONE_WITH_CONCERNS
 - `pnpm exec vitest run apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts --reporter=dot` — 64 tests passed.
 - API and domain type checks passed; scoped Biome and `git diff --check` passed.
 - `pnpm verify` was not run; focused service/status coverage was used for this bounded follow-up.
+
+## Fix round 3 — Batch C
+
+- The allocation backfill now takes the global checkpoint and the bounded UUID-ordered candidate rows with ordinary row locks. It no longer skip-locks either boundary, so a provider writer holding an earlier row makes the batch wait rather than allowing the cursor to pass that row and strand it permanently. Sequential workers now each claim the checkpoint after the prior batch commits, preserving convergence without duplicates.
+- Categorized zero-dollar legacy rows are deliberately marked processed by cursor advancement without creating an allocation, because the allocation integrity check remains strictly positive. A later batch completes instead of retrying the zero row forever.
+- Category-name legacy materialization now uses a deterministic user/name-hashed canonical slug. It first resolves an owned case-insensitive name, otherwise inserts idempotently and re-reads the exact canonical slug after conflict. Failure to materialize a categorized positive row aborts the batch so the checkpoint cannot advance without its allocation. This avoids punctuation-derived slug collisions such as `Foo Bar` versus `Foo/Bar`.
+- Drizzle’s composite allocation ownership FKs now use the exact `0061` constraint names and delete actions: owned transactions cascade their allocations and owned categories are restricted while referenced. The unshipped `0061` SQL already had these actions, so this is schema parity rather than a migration rewrite.
+
+### Fix round 3 Batch C verification
+
+- RED: a locked first candidate allowed the old skip-locked scan to finish early; a categorized zero-dollar row violated the positive amount check; a punctuation slug collision skipped the allocation; and the schema contract showed composite FKs with generated names and `NO ACTION`.
+- `pnpm exec vitest run apps/api/src/finance-service.integration.test.ts packages/database/src/schema.test.ts --reporter=dot` — 62 tests passed.
+- API and database type checks passed; scoped Biome and `git diff --check` passed.
+- `pnpm verify` was not run; focused service/schema coverage was used for this bounded follow-up.

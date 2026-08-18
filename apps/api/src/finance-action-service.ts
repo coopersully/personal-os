@@ -1440,7 +1440,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         if (
           input.data.operation === "create" &&
           actorType === "agent" &&
-          Object.keys(input.data.evidence).length === 0
+          input.data.evidence.sourceRefs.length === 0
         )
           return missing(
             "Provide bounded evidence for the expected reimbursement before proposing it.",
@@ -1621,11 +1621,17 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               item.expectedAmount === expected &&
               item.payer === createInput.payer &&
               item.dueDate === createInput.dueDate &&
+              item.rationale === createInput.rationale &&
               stableJson(item.evidence) === stableJson(createInput.evidence),
           );
           if (
             !replayedCreate &&
-            expected + cases.reduce((sum, item) => sum + item.expectedAmount, 0) >
+            expected +
+              cases.reduce(
+                (sum, item) =>
+                  sum + (item.status === "cancelled" ? item.receivedAmount : item.expectedAmount),
+                0,
+              ) >
               lockedAllocation.amount
           )
             return missing("The reimbursement exceeds the allocation's remaining capacity.", [

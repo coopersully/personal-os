@@ -387,10 +387,22 @@ describe.sequential("finance action service", () => {
     const input = {
       allocationId: allocation.id,
       dueDate: "2026-08-20",
-      evidence: { receipt: "attached" },
+      evidence: {
+        sourceRefs: [
+          {
+            accountId: null,
+            provider: "local",
+            remoteId: "receipt",
+            revision: null,
+            sourceType: "local",
+          },
+        ],
+        summary: "Receipt attached",
+      },
       expectedAmount: 220,
       operation: "create",
       payer: "Alex",
+      rationale: "Alex agreed to repay this share",
     } as const;
     await database.db
       .insert(financeAutomationSettings)

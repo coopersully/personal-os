@@ -21,6 +21,18 @@ import {
 import type { Principal } from "./types.js";
 
 const now = new Date("2026-08-17T12:00:00.000Z");
+const evidence = (summary = "Receipt provided") => ({
+  sourceRefs: [
+    {
+      accountId: null,
+      provider: "local" as const,
+      remoteId: "receipt",
+      revision: null,
+      sourceType: "local" as const,
+    },
+  ],
+  summary,
+});
 
 describe.sequential("reimbursement lifecycle", () => {
   let container: StartedPostgreSqlContainer;
@@ -122,10 +134,11 @@ describe.sequential("reimbursement lifecycle", () => {
         {
           allocationId: allocation.id,
           dueDate: "2026-08-19",
-          evidence: { receipt: "provided" },
+          evidence: evidence(`Receipt from ${payer}`),
           expectedAmount,
           operation: "create",
           payer,
+          rationale: `Expected repayment from ${payer}`,
         },
         { principal, requestId: crypto.randomUUID() },
       );
@@ -136,8 +149,10 @@ describe.sequential("reimbursement lifecycle", () => {
       {
         amount: 100,
         creditTransactionId: credit.id,
+        evidence: evidence("Matched bank credit"),
         expectedRevision: first.revision,
         operation: "match_credit",
+        rationale: "Credit identifies the reimbursement payment",
         reimbursementId: first.id,
       },
       { principal, requestId: crypto.randomUUID() },
@@ -147,8 +162,10 @@ describe.sequential("reimbursement lifecycle", () => {
       {
         amount: 120,
         creditTransactionId: credit.id,
+        evidence: evidence("Matched bank credit"),
         expectedRevision: second.revision,
         operation: "match_credit",
+        rationale: "Credit identifies the reimbursement payment",
         reimbursementId: second.id,
       },
       { principal, requestId: crypto.randomUUID() },
@@ -158,8 +175,10 @@ describe.sequential("reimbursement lifecycle", () => {
       {
         amount: 120,
         creditTransactionId: credit.id,
+        evidence: evidence("Matched bank credit"),
         expectedRevision: second.revision,
         operation: "match_credit",
+        rationale: "Credit identifies the reimbursement payment",
         reimbursementId: second.id,
       },
       { principal, requestId: crypto.randomUUID() },
@@ -182,10 +201,11 @@ describe.sequential("reimbursement lifecycle", () => {
           {
             allocationId: allocation.id,
             dueDate: null,
-            evidence: { receipt: "provided" },
+            evidence: evidence(),
             expectedAmount: 220,
             operation: "create",
             payer: "Casey",
+            rationale: "Expected repayment from Casey",
           },
           { principal, requestId: crypto.randomUUID() },
           tx,
@@ -210,10 +230,11 @@ describe.sequential("reimbursement lifecycle", () => {
           {
             allocationId: allocation.id,
             dueDate: "2026-08-19",
-            evidence: { receipt: payer },
+            evidence: evidence(`Receipt from ${payer}`),
             expectedAmount: 220,
             operation: "create",
             payer,
+            rationale: `Expected repayment from ${payer}`,
           },
           { principal, requestId: crypto.randomUUID() },
         ),
@@ -235,10 +256,11 @@ describe.sequential("reimbursement lifecycle", () => {
       {
         allocationId: allocation.id,
         dueDate: "2026-08-19",
-        evidence: { receipt: "provided" },
+        evidence: evidence(),
         expectedAmount: 220,
         operation: "create",
         payer: "Casey",
+        rationale: "Expected repayment from Casey",
       },
       { principal, requestId: crypto.randomUUID() },
     );
@@ -246,8 +268,10 @@ describe.sequential("reimbursement lifecycle", () => {
       {
         amount: 100,
         creditTransactionId: credit.id,
+        evidence: evidence("Matched bank credit"),
         expectedRevision: created.revision,
         operation: "match_credit",
+        rationale: "Credit identifies the reimbursement payment",
         reimbursementId: created.id,
       },
       { principal, requestId: crypto.randomUUID() },
@@ -256,6 +280,7 @@ describe.sequential("reimbursement lifecycle", () => {
     const cancelled = await service.reconcile(
       {
         expectedRevision: partial.revision,
+        evidence: evidence("Cancellation confirmation"),
         operation: "cancel",
         rationale: "Payer cannot repay",
         reimbursementId: created.id,
@@ -267,6 +292,7 @@ describe.sequential("reimbursement lifecycle", () => {
       service.reconcile(
         {
           expectedRevision: partial.revision,
+          evidence: evidence("Cancellation confirmation"),
           operation: "cancel",
           rationale: "Payer cannot repay",
           reimbursementId: created.id,

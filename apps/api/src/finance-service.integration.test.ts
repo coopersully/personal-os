@@ -3412,18 +3412,20 @@ describe.sequential("finance service", () => {
         }),
         expect.objectContaining({
           budget: expect.objectContaining({ category: "Personal Care" }),
-          spent: 0,
+          spent: 12.14,
         }),
       ]),
     );
     await expect(service.listOverview(owner.id, "2026-07")).resolves.toMatchObject({
-      spendingThisMonth: 50,
+      spendingThisMonth: 62.14,
       transactions: expect.arrayContaining([
         expect.objectContaining({ amount: 62.14, id: transaction.id }),
       ]),
     });
     await expect(service.getBudgetPace(owner.id, "month")).resolves.toMatchObject({
-      cells: expect.arrayContaining([expect.objectContaining({ date: "2026-07-19", spent: 50 })]),
+      cells: expect.arrayContaining([
+        expect.objectContaining({ date: "2026-07-19", spent: 62.14 }),
+      ]),
     });
     await expect(service.exportData(owner.id)).resolves.toMatchObject({
       transactions: [

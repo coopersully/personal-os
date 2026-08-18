@@ -192,7 +192,9 @@ describe.sequential("Finance status service", () => {
       state: "unavailable",
     });
     expect(status.details.accounts.items[0]?.synchronization.nextRetryAt).toBeNull();
-    expect(status.details.month.spending).toBe(150);
+    // A reimbursable allocation becomes non-personal only once there is an
+    // active reimbursement expectation; a bare allocation still belongs to us.
+    expect(status.details.month.spending).toBe(400);
     expect(status.details.cashFlow.net).toBe(600);
     expect(status.details.health.confidence).toBe("reliable");
     expect(status.state).toBe("needs_work");
@@ -244,6 +246,7 @@ describe.sequential("Finance status service", () => {
       cancelledAt: now,
       expectedAmount: 22_000,
       receivedAmount: 10_000,
+      rationale: "Payer cannot repay",
       status: "cancelled",
       userId,
     });
@@ -313,7 +316,16 @@ describe.sequential("Finance status service", () => {
       }),
     ]);
     expect(status.recommendedNextOperation).toMatchObject({ operation: "answer_finance_question" });
-    expect(status.details.reimbursements).toEqual({ open: 0, overdue: 0, unmatchedCredits: 0 });
+    expect(status.details.reimbursements).toEqual({
+      expected: 0,
+      needsInput: 0,
+      open: 0,
+      overdue: 0,
+      outstanding: 0,
+      received: 0,
+      unmatchedCredits: 0,
+      unresolved: 0,
+    });
     expect(status.details.latestReview).toBeNull();
   });
 

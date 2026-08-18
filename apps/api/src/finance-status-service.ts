@@ -33,6 +33,8 @@ import type { createAssistantService } from "./assistant-service.js";
 import { AppError } from "./errors.js";
 import {
   activeAllocationsByTransaction,
+  excludedReimbursementCentsByAllocation,
+  matchedReimbursementCentsByCredit,
   personalAllocationCents,
 } from "./finance-allocation-projections.js";
 import { forecastCashflow } from "./finance-cashflow.js";
@@ -374,24 +376,11 @@ export function createFinanceStatusService({ db, now }: Options) {
               expectedCents: row.expectedAmount,
               receivedCents: row.receivedAmount,
               now: new Date(asOf),
+              status: row.status,
             }),
           );
-          const cancelledRemainders = new Map<string, number>();
-          for (const row of reimbursementRows.filter((item) => item.status === "cancelled")) {
-            cancelledRemainders.set(
-              row.allocationId,
-              (cancelledRemainders.get(row.allocationId) ?? 0) +
-                row.expectedAmount -
-                row.receivedAmount,
-            );
-          }
-          const matchedCreditAmounts = new Map<string, number>();
-          for (const match of reimbursementMatches) {
-            matchedCreditAmounts.set(
-              match.creditTransactionId,
-              (matchedCreditAmounts.get(match.creditTransactionId) ?? 0) + match.amount,
-            );
-          }
+          const excludedByAllocation = excludedReimbursementCentsByAllocation(reimbursementRows);
+          const matchedCreditAmounts = matchedReimbursementCentsByCredit(reimbursementMatches);
           const unmatchedCredits = incomeCredits.filter(
             (credit) => credit.amount > (matchedCreditAmounts.get(credit.id) ?? 0),
           ).length;
@@ -507,20 +496,19 @@ export function createFinanceStatusService({ db, now }: Options) {
             postedExpenses.reduce(
               (sum, row) =>
                 sum +
-                personalAllocationCents(row.id, row.amount, activeAllocations) +
-                (activeAllocations.get(row.id) ?? []).reduce(
-                  (cancelled, allocation) =>
-                    cancelled +
-                    (allocation.treatment === "reimbursable"
-                      ? (cancelledRemainders.get(
-                          (allocation as typeof allocation & { id?: string }).id ?? "",
-                        ) ?? 0)
-                      : 0),
-                  0,
+                personalAllocationCents(
+                  row.id,
+                  row.amount,
+                  activeAllocations,
+                  excludedByAllocation,
                 ),
               0,
             ) / 100;
-          const incomeObserved = postedIncome.reduce((sum, row) => sum + row.amount, 0) / 100;
+          const incomeObserved =
+            postedIncome.reduce(
+              (sum, row) => sum + Math.max(0, row.amount - (matchedCreditAmounts.get(row.id) ?? 0)),
+              0,
+            ) / 100;
           const activeProfile = latestProfile(profiles, asOf.slice(0, 10));
           const statedMonthlyIncome =
             activeProfile?.grossAnnualIncome != null
@@ -1069,6 +1057,24 @@ export function createFinanceStatusService({ db, now }: Options) {
                     status === "needs_input",
                 ).length,
                 overdue: reimbursementStatus.filter((status) => status === "overdue").length,
+                expected: reimbursementStatus.filter((status) => status === "expected").length,
+                needsInput: reimbursementStatus.filter((status) => status === "needs_input").length,
+                outstanding:
+                  reimbursementRows.reduce(
+                    (sum, row) =>
+                      row.status === "cancelled" || row.status === "received"
+                        ? sum
+                        : sum + Math.max(0, row.expectedAmount - row.receivedAmount),
+                    0,
+                  ) / 100,
+                received: reimbursementStatus.filter((status) => status === "received").length,
+                unresolved: reimbursementStatus.filter(
+                  (status) =>
+                    status === "expected" ||
+                    status === "partially_received" ||
+                    status === "overdue" ||
+                    status === "needs_input",
+                ).length,
                 unmatchedCredits,
               },
               reviewMode: { reviewBypassEnabled: automationSettings?.reviewBypassEnabled ?? false },

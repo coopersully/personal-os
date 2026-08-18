@@ -20,6 +20,7 @@ import {
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
+  financeReimbursementMatches,
   financeReimbursements,
   financeReviewCases,
   financeSetupBackfillState,
@@ -86,6 +87,8 @@ import { AppError } from "./errors.js";
 import {
   type AllocationProjection,
   activeAllocationsByTransaction,
+  excludedReimbursementCentsByAllocation,
+  matchedReimbursementCentsByCredit,
   personalAllocationCents,
 } from "./finance-allocation-projections.js";
 import {
@@ -385,24 +388,21 @@ function personalBudgetImpact(
   row: typeof financeTransactions.$inferSelect,
   activeAllocations: ReadonlyMap<string, AllocationProjection[]>,
   includePending = false,
-  cancelledRemainderByAllocation: ReadonlyMap<string, number> = new Map(),
-  reimbursementCreditIds: ReadonlySet<string> = new Set(),
+  excludedReimbursementByAllocation: ReadonlyMap<string, number> = new Map(),
+  matchedReimbursementByCredit: ReadonlyMap<string, number> = new Map(),
 ) {
-  if (row.direction === "income" && reimbursementCreditIds.has(row.id)) return 0;
   const grossImpact = budgetImpact(row, includePending);
   if (grossImpact === 0) return 0;
-  const cancelledPersonalAmount = (activeAllocations.get(row.id) ?? []).reduce(
-    (sum, allocation) =>
-      sum +
-      (allocation.treatment === "reimbursable"
-        ? (cancelledRemainderByAllocation.get(
-            (allocation as AllocationProjection & { id?: string }).id ?? "",
-          ) ?? 0)
-        : 0),
-    0,
-  );
+  const matchedCredit = matchedReimbursementByCredit.get(row.id) ?? 0;
   const personalAmount =
-    personalAllocationCents(row.id, row.amount, activeAllocations) + cancelledPersonalAmount;
+    row.direction === "income"
+      ? Math.max(0, personalAllocationCents(row.id, row.amount - matchedCredit, activeAllocations))
+      : personalAllocationCents(
+          row.id,
+          row.amount,
+          activeAllocations,
+          excludedReimbursementByAllocation,
+        );
   return grossImpact < 0 ? -personalAmount : personalAmount;
 }
 export function financeCsvImportErrorMessage(error: unknown) {
@@ -689,33 +689,49 @@ export function createFinanceService({
       account(row, row.providerItemRecordId ? itemById.get(row.providerItemRecordId) : undefined),
     );
   }
-  async function cancelledReimbursementRemainders(
+  async function reimbursementProjection(
     userId: string,
     allocationIds: string[],
-  ): Promise<Map<string, number>> {
-    if (allocationIds.length === 0) return new Map();
+  ): Promise<{ excludedByAllocation: Map<string, number>; matchedByCredit: Map<string, number> }> {
+    if (allocationIds.length === 0)
+      return { excludedByAllocation: new Map(), matchedByCredit: new Map() };
     const rows = await db
       .select({
+        id: financeReimbursements.id,
         allocationId: financeReimbursements.allocationId,
         expectedAmount: financeReimbursements.expectedAmount,
         receivedAmount: financeReimbursements.receivedAmount,
+        status: financeReimbursements.status,
       })
       .from(financeReimbursements)
       .where(
         and(
           eq(financeReimbursements.userId, userId),
-          eq(financeReimbursements.status, "cancelled"),
           inArray(financeReimbursements.allocationId, allocationIds),
         ),
       );
-    const totals = new Map<string, number>();
-    for (const row of rows) {
-      totals.set(
-        row.allocationId,
-        (totals.get(row.allocationId) ?? 0) + row.expectedAmount - row.receivedAmount,
-      );
-    }
-    return totals;
+    const matches =
+      rows.length === 0
+        ? []
+        : await db
+            .select({
+              amount: financeReimbursementMatches.amount,
+              creditTransactionId: financeReimbursementMatches.creditTransactionId,
+            })
+            .from(financeReimbursementMatches)
+            .where(
+              and(
+                eq(financeReimbursementMatches.userId, userId),
+                inArray(
+                  financeReimbursementMatches.reimbursementId,
+                  rows.map((row) => row.id),
+                ),
+              ),
+            );
+    return {
+      excludedByAllocation: excludedReimbursementCentsByAllocation(rows),
+      matchedByCredit: matchedReimbursementCentsByCredit(matches),
+    };
   }
 
   async function seedCategories(
@@ -3565,7 +3581,7 @@ export function createFinanceService({
     },
     async getForecast(userId: string): Promise<FinanceForecast> {
       const asOf = now();
-      const [profile, accounts, streams, obligations] = await Promise.all([
+      const [profile, accounts, streams, reimbursements, obligations] = await Promise.all([
         this.getProfile(userId, asOf.toISOString().slice(0, 10)),
         db.select().from(financeAccounts).where(eq(financeAccounts.userId, userId)),
         db
@@ -3574,6 +3590,14 @@ export function createFinanceService({
           .where(
             and(eq(financeIncomeStreams.userId, userId), eq(financeIncomeStreams.status, "active")),
           ),
+        db
+          .select({
+            expectedAmount: financeReimbursements.expectedAmount,
+            receivedAmount: financeReimbursements.receivedAmount,
+            status: financeReimbursements.status,
+          })
+          .from(financeReimbursements)
+          .where(eq(financeReimbursements.userId, userId)),
         db
           .select()
           .from(financeRecurringObligations)
@@ -3609,13 +3633,20 @@ export function createFinanceService({
           kind: "obligation" as const,
         })),
       });
+      const outstandingReimbursements = reimbursements.reduce(
+        (sum, reimbursement) =>
+          reimbursement.status === "cancelled" || reimbursement.status === "received"
+            ? sum
+            : sum + Math.max(0, reimbursement.expectedAmount - reimbursement.receivedAmount),
+        0,
+      );
       return {
         asOf: asOf.toISOString(),
         lowestProjectedBalance: forecast.lowestBalance / 100,
         lowestProjectedDate: forecast.lowestDate,
         projectedBalanceAtNextPayday:
           forecast.projectedBalance === null ? null : forecast.projectedBalance / 100,
-        safeToSpend: Math.max(0, forecast.lowestBalance) / 100,
+        safeToSpend: Math.max(0, forecast.lowestBalance - outstandingReimbursements) / 100,
         upcomingIncome: forecast.upcomingIncome / 100,
         upcomingObligations: forecast.upcomingObligations / 100,
       };
@@ -4361,24 +4392,34 @@ export function createFinanceService({
           ),
       ]);
       const allocationTransactionIds = new Set(allocations.map((item) => item.transaction.id));
+      const reimbursement = await reimbursementProjection(
+        userId,
+        allocations.map((item) => item.allocation.id),
+      );
       return budgets.map((item) => {
         const allocationSpent = allocations
           .filter(
             ({ allocation, category }) =>
-              allocation.state === "active" &&
-              allocation.treatment === "personal" &&
-              category.name === item.category,
+              allocation.state === "active" && category.name === item.category,
           )
-          .reduce(
-            (sum, { allocation, transaction }) =>
+          .reduce((sum, { allocation, transaction }) => {
+            const personalAmount =
+              allocation.treatment === "personal"
+                ? allocation.amount
+                : Math.max(
+                    0,
+                    allocation.amount -
+                      (reimbursement.excludedByAllocation.get(allocation.id) ?? 0),
+                  );
+            return (
               sum +
               (budgetImpact(transaction) < 0
-                ? -allocation.amount
+                ? -personalAmount
                 : budgetImpact(transaction) > 0
-                  ? allocation.amount
-                  : 0),
-            0,
-          );
+                  ? personalAmount
+                  : 0)
+            );
+          }, 0);
         const legacySpent = transactions
           .filter(
             (transaction) =>
@@ -5761,7 +5802,7 @@ export function createFinanceService({
             )
         : [];
       const activeAllocations = activeAllocationsByTransaction(allocationRows);
-      const cancelledRemainders = await cancelledReimbursementRemainders(
+      const reimbursement = await reimbursementProjection(
         userId,
         allocationRows.map((item) => item.id),
       );
@@ -5772,7 +5813,13 @@ export function createFinanceService({
       }
       const spendingByDate = new Map<string, number>();
       for (const item of transactions) {
-        const impact = personalBudgetImpact(item, activeAllocations, false, cancelledRemainders);
+        const impact = personalBudgetImpact(
+          item,
+          activeAllocations,
+          false,
+          reimbursement.excludedByAllocation,
+          reimbursement.matchedByCredit,
+        );
         if (impact === 0) continue;
         spendingByDate.set(
           item.transactionDate,
@@ -5875,7 +5922,7 @@ export function createFinanceService({
             )
         : [];
       const activeAllocations = activeAllocationsByTransaction(allocationRows);
-      const cancelledRemainders = await cancelledReimbursementRemainders(
+      const reimbursement = await reimbursementProjection(
         userId,
         allocationRows.map((item) => item.id),
       );
@@ -5884,19 +5931,38 @@ export function createFinanceService({
         : monthlyTransactions;
       const spending = scopedTransactions.reduce(
         (sum, item) =>
-          sum + personalBudgetImpact(item, activeAllocations, false, cancelledRemainders),
+          sum +
+          personalBudgetImpact(
+            item,
+            activeAllocations,
+            false,
+            reimbursement.excludedByAllocation,
+            reimbursement.matchedByCredit,
+          ),
         0,
       );
       const pendingSpend = scopedTransactions.reduce(
         (sum, item) =>
           item.pending
             ? sum +
-              Math.max(0, personalBudgetImpact(item, activeAllocations, true, cancelledRemainders))
+              Math.max(
+                0,
+                personalBudgetImpact(
+                  item,
+                  activeAllocations,
+                  true,
+                  reimbursement.excludedByAllocation,
+                  reimbursement.matchedByCredit,
+                ),
+              )
             : sum,
         0,
       );
       const refunds = scopedTransactions.reduce(
-        (sum, item) => (isRefundOrReversal(item) ? sum + item.amount : sum),
+        (sum, item) =>
+          isRefundOrReversal(item)
+            ? sum - (reimbursement.matchedByCredit.get(item.id) ?? 0) + item.amount
+            : sum,
         0,
       );
       return {
@@ -5913,7 +5979,7 @@ export function createFinanceService({
       const nowDate = now();
       const trailingStart = new Date(nowDate);
       trailingStart.setUTCFullYear(trailingStart.getUTCFullYear() - 1);
-      const [accounts, budgets, income, profile] = await Promise.all([
+      const [accounts, budgets, income, matches, profile] = await Promise.all([
         db.select().from(financeAccounts).where(eq(financeAccounts.userId, userId)),
         db
           .select()
@@ -5933,6 +5999,13 @@ export function createFinanceService({
               gte(financeTransactions.transactionDate, trailingStart.toISOString().slice(0, 10)),
             ),
           ),
+        db
+          .select({
+            amount: financeReimbursementMatches.amount,
+            creditTransactionId: financeReimbursementMatches.creditTransactionId,
+          })
+          .from(financeReimbursementMatches)
+          .where(eq(financeReimbursementMatches.userId, userId)),
         this.getProfile(userId, nowDate.toISOString().slice(0, 10)),
       ]);
       const totals = { cash: 0, debt: 0, investments: 0, otherAssets: 0 };
@@ -5943,10 +6016,14 @@ export function createFinanceService({
         else if (item.kind === "other") totals.otherAssets += value;
         else totals.cash += (item.balance ?? 0) / 100;
       }
+      const matchedCredit = matchedReimbursementCentsByCredit(matches);
       const observedAnnualIncome =
         income
           .filter((item) => item.direction === "income" && item.category === "INCOME")
-          .reduce((sum, item) => sum + item.amount, 0) / 100;
+          .reduce(
+            (sum, item) => sum + Math.max(0, item.amount - (matchedCredit.get(item.id) ?? 0)),
+            0,
+          ) / 100;
       const statedAnnualIncome = profile?.grossAnnualIncome ?? null;
       const annualIncome = statedAnnualIncome ?? observedAnnualIncome;
       const incomeBasis =

@@ -22,3 +22,19 @@ The integration suites emit an existing `pg` deprecation warning from concurrent
 Reimbursement mutation writers now inherit the supplied Task 3 transaction, so reimbursement records, matches, Finance evidence, broad redacted audit events, and review terminalization commit or roll back as one unit. Agent preparation now locks and revalidates the owned allocation, expense and credit transactions/accounts, reimbursement/matches, revisions, amount capacity, posted-credit state, and evidence before bypass or approval. It also locks semantic targets for the reimbursement, allocation, credit, transactions, and accounts.
 
 Broad `audit_events` reimbursement payloads now contain only status, revision, and match-count summaries; amounts, payer, rationale, credit details, and evidence remain in the Finance-scoped reimbursement records. Added migrated-PostgreSQL coverage for partial/cancelled/full and multi-payer combined-credit lifecycles, idempotent create/match/cancel replay, executor rollback, concurrent capacity enforcement, cancellation spending restoration, agent bypass/review behavior, terminalization failure rollback, and broad-audit privacy.
+
+## Batch B accounting and evidence completion
+
+**Status: DONE**
+
+Reimbursement accounting now has one per-allocation projection: active expected amounts are excluded from personal spending, while a cancelled case excludes only its actually received amount and restores the unmatched cents. This projection is used by budget status, Finance status, overview, budget pace, and pending personal-spending calculations. Allocation capacity uses that same lifecycle rule, so cancellation can restore capacity without allowing active expectations to overlap a reimbursable allocation.
+
+Matched reimbursement cents are also projected per credit. Combined credits retain their unmatched fraction in normal observed-income/refund calculations, while matched cents are excluded from Finance status income, overview refunds, personal-budget impact, and observed annual income. Safe-to-spend now reserves all open expected remainder immediately and releases it upon receipt or cancellation. Effective overdue status is derived consistently for lists and status while explicit `needs_input`, received, and cancelled states remain preserved.
+
+Migration 0062, Drizzle schema, and domain contracts now retain bounded rationale plus typed source-reference evidence for create, credit matching, and cancellation. Detailed evidence remains Finance-scoped; broad audit records stay redacted.
+
+Batch B validation completed:
+
+- `pnpm exec vitest run apps/api/src/finance-reimbursement-service.integration.test.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts apps/api/src/finance-service.integration.test.ts` — 120 passing.
+- API, API-client, MCP, Database, and Domain typechecks.
+- Biome checks for changed API, Domain, and Database implementation files.

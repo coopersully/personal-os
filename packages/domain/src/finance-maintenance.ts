@@ -143,8 +143,13 @@ export const financeStatusDetailsSchema = z.object({
   proposals: z.array(financeProposalSummarySchema),
   questions: z.array(financeQuestionSchema),
   reimbursements: z.object({
+    expected: z.int().nonnegative(),
+    needsInput: z.int().nonnegative(),
     open: z.int().nonnegative(),
     overdue: z.int().nonnegative(),
+    outstanding: z.number().finite().nonnegative(),
+    received: z.int().nonnegative(),
+    unresolved: z.int().nonnegative(),
     unmatchedCredits: z.int().nonnegative(),
   }),
   reviewMode: z.object({ reviewBypassEnabled: z.boolean() }),

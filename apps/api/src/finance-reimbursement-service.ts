@@ -23,13 +23,18 @@ export function deriveReimbursementStatus({
   expectedCents,
   receivedCents,
   now,
+  status,
 }: {
   cancelledAt: Date | null;
   dueDate: string | null;
   expectedCents: number;
   receivedCents: number;
   now: Date;
+  status?: FinanceReimbursementStatus;
 }): FinanceReimbursementStatus {
+  // An explicit evidence/ownership conflict must remain actionable rather
+  // than being hidden by a calendar-derived lifecycle state.
+  if (status === "needs_input") return "needs_input";
   if (cancelledAt) return "cancelled";
   if (receivedCents >= expectedCents) return "received";
   if (dueDate && dueDate < now.toISOString().slice(0, 10)) return "overdue";
@@ -53,26 +58,41 @@ function stableJson(value: unknown): string {
 function serialize(
   row: typeof financeReimbursements.$inferSelect,
   matches: Array<typeof financeReimbursementMatches.$inferSelect>,
+  now?: Date,
 ): FinanceReimbursement {
   return {
     allocationId: row.allocationId,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     dueDate: row.dueDate,
-    evidence: row.evidence as Record<string, unknown>,
+    cancelledEvidence: row.cancelledEvidence as FinanceReimbursement["cancelledEvidence"],
+    cancelledRationale: row.cancelledRationale,
+    evidence: row.evidence as FinanceReimbursement["evidence"],
     expectedAmount: row.expectedAmount / 100,
     id: row.id,
     matches: matches.map((match) => ({
       amount: match.amount / 100,
       creditTransactionId: match.creditTransactionId,
       createdAt: match.createdAt.toISOString(),
+      evidence: match.evidence as FinanceReimbursement["matches"][number]["evidence"],
       id: match.id,
+      rationale: match.rationale,
       reimbursementId: match.reimbursementId,
     })),
     payer: row.payer,
+    rationale: row.rationale,
     receivedAmount: row.receivedAmount / 100,
     revision: row.revision,
-    status: row.status,
+    status: now
+      ? deriveReimbursementStatus({
+          cancelledAt: row.cancelledAt,
+          dueDate: row.dueDate,
+          expectedCents: row.expectedAmount,
+          now,
+          receivedCents: row.receivedAmount,
+          status: row.status,
+        })
+      : row.status,
     updatedAt: row.updatedAt.toISOString(),
   };
 }
@@ -146,7 +166,9 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
         );
       }
       return {
-        reimbursements: rows.map((row) => serialize(row, matchesByReimbursement.get(row.id) ?? [])),
+        reimbursements: rows.map((row) =>
+          serialize(row, matchesByReimbursement.get(row.id) ?? [], now()),
+        ),
         unmatchedCredits: credits
           .map((credit) => ({
             ...credit,
@@ -201,6 +223,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
               item.expectedAmount === expectedAmount &&
               item.payer === input.payer &&
               item.dueDate === input.dueDate &&
+              item.rationale === input.rationale &&
               stableJson(item.evidence) === stableJson(input.evidence),
           );
           if (replay) {
@@ -211,7 +234,12 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
             return serialize(replay, replayMatches);
           }
           if (
-            expectedAmount + existing.reduce((sum, item) => sum + item.expectedAmount, 0) >
+            expectedAmount +
+              existing.reduce(
+                (sum, item) =>
+                  sum + (item.status === "cancelled" ? item.receivedAmount : item.expectedAmount),
+                0,
+              ) >
             allocation.amount
           )
             throw new AppError(
@@ -226,6 +254,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
               evidence: input.evidence,
               expectedAmount,
               payer: input.payer,
+              rationale: input.rationale,
               userId,
             })
             .returning();
@@ -252,6 +281,8 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
             .update(financeReimbursements)
             .set({
               cancelledAt: now(),
+              cancelledEvidence: input.evidence,
+              cancelledRationale: input.rationale,
               revision: row.revision + 1,
               status: "cancelled",
               updatedAt: now(),
@@ -334,6 +365,8 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
           .values({
             amount,
             creditTransactionId: credit.id,
+            evidence: input.evidence,
+            rationale: input.rationale,
             reimbursementId: row.id,
             userId,
           })

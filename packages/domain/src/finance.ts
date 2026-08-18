@@ -636,12 +636,22 @@ export const financeReimbursementStatusSchema = z.enum([
 ]);
 export type FinanceReimbursementStatus = z.infer<typeof financeReimbursementStatusSchema>;
 
+export const financeReimbursementEvidenceSchema = z
+  .object({
+    sourceRefs: z.array(materialSourceReferenceSchema).min(1).max(20),
+    summary: z.string().trim().min(1).max(1_000),
+  })
+  .strict();
+export type FinanceReimbursementEvidence = z.infer<typeof financeReimbursementEvidenceSchema>;
+
 export const financeReimbursementMatchSchema = z
   .object({
     amount: moneySchema.positive(),
     creditTransactionId: idSchema,
     createdAt: isoDateTimeSchema,
+    evidence: financeReimbursementEvidenceSchema,
     id: idSchema,
+    rationale: z.string().trim().min(1).max(1_000),
     reimbursementId: idSchema,
   })
   .strict();
@@ -651,13 +661,16 @@ export const financeReimbursementSchema = z
   .object({
     allocationId: idSchema,
     cancelledAt: isoDateTimeSchema.nullable(),
+    cancelledEvidence: financeReimbursementEvidenceSchema.nullable(),
+    cancelledRationale: z.string().trim().min(1).max(1_000).nullable(),
     createdAt: isoDateTimeSchema,
     dueDate: z.iso.date().nullable(),
-    evidence: z.record(z.string(), z.unknown()),
+    evidence: financeReimbursementEvidenceSchema,
     expectedAmount: moneySchema.positive(),
     id: idSchema,
     matches: z.array(financeReimbursementMatchSchema),
     payer: z.string().trim().min(1).max(240).nullable(),
+    rationale: z.string().trim().min(1).max(1_000),
     receivedAmount: moneySchema,
     revision: z.number().int().positive(),
     status: financeReimbursementStatusSchema,
@@ -670,9 +683,10 @@ const reimbursementExpectedInputSchema = z
   .object({
     allocationId: idSchema,
     dueDate: z.iso.date().nullable().default(null),
-    evidence: z.record(z.string(), z.unknown()).default({}),
+    evidence: financeReimbursementEvidenceSchema,
     expectedAmount: moneyInputSchema.positive(),
     payer: z.string().trim().min(1).max(240).nullable().default(null),
+    rationale: z.string().trim().min(1).max(1_000),
   })
   .strict();
 
@@ -682,14 +696,17 @@ export const reconcileFinanceReimbursementInputSchema = z.discriminatedUnion("op
     .object({
       amount: moneyInputSchema.positive(),
       creditTransactionId: idSchema,
+      evidence: financeReimbursementEvidenceSchema,
       expectedRevision: z.number().int().positive(),
       operation: z.literal("match_credit"),
+      rationale: z.string().trim().min(1).max(1_000),
       reimbursementId: idSchema,
     })
     .strict(),
   z
     .object({
       expectedRevision: z.number().int().positive(),
+      evidence: financeReimbursementEvidenceSchema,
       operation: z.literal("cancel"),
       rationale: z.string().trim().min(1).max(1_000),
       reimbursementId: idSchema,

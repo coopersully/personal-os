@@ -1748,6 +1748,7 @@ export const financeReimbursements = pgTable(
     payer: text("payer"),
     dueDate: text("due_date"),
     evidence: jsonb("evidence").notNull().default({}),
+    rationale: text("rationale").notNull(),
     status: text("status")
       .$type<
         "expected" | "partially_received" | "received" | "overdue" | "cancelled" | "needs_input"
@@ -1755,6 +1756,8 @@ export const financeReimbursements = pgTable(
       .notNull()
       .default("expected"),
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
+    cancelledEvidence: jsonb("cancelled_evidence"),
+    cancelledRationale: text("cancelled_rationale"),
     revision: integer("revision").notNull().default(1),
     ...timestamps,
   },
@@ -1798,6 +1801,8 @@ export const financeReimbursementMatches = pgTable(
       .notNull()
       .references(() => financeTransactions.id, { onDelete: "restrict" }),
     amount: integer("amount_cents").notNull(),
+    evidence: jsonb("evidence").notNull().default({}),
+    rationale: text("rationale").notNull(),
     ...timestamps,
   },
   (table) => [

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createPlaidConnector } from "@personal-os/connectors";
@@ -3826,6 +3827,81 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual([expect.objectContaining({ slug: expect.not.stringMatching(/^foo-bar$/) })]);
   });
 
+  it("materializes the intended legacy category after an occupied canonical slug under concurrent batches", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation canonical collision",
+        email: `allocation-canonical-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation canonical collision owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-canonical" };
+    const account = await service.createAccount(
+      { balance: 20, institution: "Canonical", name: "Canonical account", provider: "manual" },
+      context,
+    );
+    const name = "Canonical / Category";
+    const canonicalSlug = `canonical-category-${createHash("sha256")
+      .update(`finance-legacy-category:${owner.id}:${name.toLocaleLowerCase()}`)
+      .digest("hex")
+      .slice(0, 12)}`;
+    const cursor = "ffffffff-ffff-4fff-8fff-ffffffffff30";
+    const firstId = "ffffffff-ffff-4fff-8fff-ffffffffff31";
+    const secondId = "ffffffff-ffff-4fff-8fff-ffffffffff32";
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, "finance_transaction_allocation_backfill_v1"));
+    await database.db.insert(financeSetupBackfillState).values({
+      allocationCursor: cursor,
+      key: "finance_transaction_allocation_backfill_v1",
+    });
+    const [occupied] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: "Different canonical occupant",
+        slug: canonicalSlug,
+        userId: owner.id,
+      })
+      .returning();
+    if (!occupied) throw new Error("Canonical slug occupant was not created.");
+    await database.db.insert(financeTransactions).values(
+      [firstId, secondId].map((id, index) => ({
+        accountId: account.id,
+        amount: 123 + index,
+        category: name,
+        direction: "expense" as const,
+        id,
+        merchant: `Canonical fixture ${index}`,
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      })),
+    );
+    const results = await Promise.all([
+      service.backfillTransactionAllocations(1),
+      service.backfillTransactionAllocations(1),
+    ]);
+    expect(results.reduce((sum, result) => sum + result.inserted, 0)).toBe(2);
+    const [intended] = await database.db
+      .select({ id: financeCategories.id, slug: financeCategories.slug })
+      .from(financeCategories)
+      .where(and(eq(financeCategories.userId, owner.id), eq(financeCategories.name, name)));
+    if (!intended) throw new Error("Intended canonical category was not materialized.");
+    expect(intended.slug).not.toBe(canonicalSlug);
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactionAllocations.categoryId })
+        .from(financeTransactionAllocations)
+        .where(inArray(financeTransactionAllocations.transactionId, [firstId, secondId])),
+    ).resolves.toEqual([{ categoryId: intended.id }, { categoryId: intended.id }]);
+  });
+
   it("audits breakdown replacement counts and rolls every write back when audit persistence fails", async () => {
     const [owner] = await database.db
       .insert(users)
@@ -4136,6 +4212,105 @@ describe.sequential("finance service", () => {
         .where(
           and(
             eq(financeClassificationDecisions.transactionId, treatmentOnly.id),
+            eq(financeClassificationDecisions.outcome, "corrected"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+  });
+
+  it("uses a legacy category as replacement evidence only when no allocation history exists", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Legacy replacement evidence",
+        email: `legacy-replacement-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Legacy replacement owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "legacy-replacement" };
+    const [oldCategory, newCategory] = await service.listCategories(owner.id);
+    if (!oldCategory || !newCategory)
+      throw new Error("Legacy replacement categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 20, institution: "Legacy", name: "Legacy checking", provider: "manual" },
+      context,
+    );
+    const legacy = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 10,
+        category: oldCategory.name,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Legacy replacement merchant",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .delete(financeTransactionAllocations)
+      .where(eq(financeTransactionAllocations.transactionId, legacy.id));
+    await service.setTransactionBreakdown(
+      legacy.id,
+      {
+        allocations: [{ amount: 10, categoryId: newCategory.id, rationale: "Reclassified legacy" }],
+        expectedTransactionUpdatedAt: legacy.updatedAt,
+        rationale: "Replace unbackfilled legacy category.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({
+          categoryId: financeClassificationDecisions.categoryId,
+          outcome: financeClassificationDecisions.outcome,
+        })
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.transactionId, legacy.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([{ categoryId: oldCategory.id, outcome: "corrected" }]),
+    );
+
+    const invalidated = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 10,
+        category: oldCategory.name,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Invalidated replacement merchant",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactionAllocations)
+      .set({ invalidatedAt: now, state: "invalidated" })
+      .where(eq(financeTransactionAllocations.transactionId, invalidated.id));
+    await service.setTransactionBreakdown(
+      invalidated.id,
+      {
+        allocations: [
+          { amount: 10, categoryId: newCategory.id, rationale: "Reviewed replacement" },
+        ],
+        expectedTransactionUpdatedAt: invalidated.updatedAt,
+        rationale: "Do not reuse invalidated history as legacy evidence.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({ outcome: financeClassificationDecisions.outcome })
+        .from(financeClassificationDecisions)
+        .where(
+          and(
+            eq(financeClassificationDecisions.transactionId, invalidated.id),
+            eq(financeClassificationDecisions.categoryId, oldCategory.id),
             eq(financeClassificationDecisions.outcome, "corrected"),
           ),
         ),

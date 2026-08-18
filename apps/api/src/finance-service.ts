@@ -209,10 +209,11 @@ function categorySlug(name: string) {
     .replace(/(^-|-$)/g, "");
 }
 
-function legacyCategorySlug(userId: string, name: string) {
+function legacyCategorySlug(userId: string, name: string, retry = 0) {
   const normalized = categorySlug(name) || "legacy-category";
+  const retrySuffix = retry === 0 ? "" : `:${retry}`;
   const digest = createHash("sha256")
-    .update(`finance-legacy-category:${userId}:${name.toLocaleLowerCase()}`)
+    .update(`finance-legacy-category:${userId}:${name.toLocaleLowerCase()}${retrySuffix}`)
     .digest("hex")
     .slice(0, 12);
   return `${normalized}-${digest}`;
@@ -3900,9 +3901,8 @@ export function createFinanceService({
           if (transaction.amount <= 0) continue;
           let categoryId = transaction.categoryId;
           if (!categoryId && transaction.category) {
-            const slug = legacyCategorySlug(transaction.userId, transaction.category);
             let [category] = await tx
-              .select({ id: financeCategories.id })
+              .select({ id: financeCategories.id, name: financeCategories.name })
               .from(financeCategories)
               .where(
                 and(
@@ -3912,27 +3912,39 @@ export function createFinanceService({
               )
               .limit(1);
             if (!category) {
-              await tx
-                .insert(financeCategories)
-                .values({
-                  group: categoryGroup(transaction.category),
-                  name: transaction.category,
-                  slug,
-                  userId: transaction.userId,
-                })
-                .onConflictDoNothing({
-                  target: [financeCategories.userId, financeCategories.slug],
-                });
-              [category] = await tx
-                .select({ id: financeCategories.id })
-                .from(financeCategories)
-                .where(
-                  and(
-                    eq(financeCategories.userId, transaction.userId),
-                    eq(financeCategories.slug, slug),
-                  ),
-                )
-                .limit(1);
+              for (let retry = 0; retry < 8 && !category; retry += 1) {
+                const slug = legacyCategorySlug(transaction.userId, transaction.category, retry);
+                await tx
+                  .insert(financeCategories)
+                  .values({
+                    group: categoryGroup(transaction.category),
+                    name: transaction.category,
+                    slug,
+                    userId: transaction.userId,
+                  })
+                  .onConflictDoNothing({
+                    target: [financeCategories.userId, financeCategories.slug],
+                  });
+                const [candidate] = await tx
+                  .select({ id: financeCategories.id, name: financeCategories.name })
+                  .from(financeCategories)
+                  .where(
+                    and(
+                      eq(financeCategories.userId, transaction.userId),
+                      eq(financeCategories.slug, slug),
+                    ),
+                  )
+                  .limit(1);
+                if (
+                  candidate &&
+                  candidate.name.localeCompare(transaction.category, undefined, {
+                    sensitivity: "accent",
+                    usage: "search",
+                  }) === 0
+                ) {
+                  category = candidate;
+                }
+              }
             }
             categoryId = category?.id ?? null;
           }
@@ -6187,12 +6199,21 @@ export function createFinanceService({
           const replacementCategoryIds = new Set(
             input.allocations.map((allocation) => allocation.categoryId),
           );
+          const activeCategoryIds = existingAllocations
+            .filter((allocation) => allocation.state === "active")
+            .map((allocation) => allocation.categoryId);
+          // Invalidated rows are durable prior-breakdown evidence. Only a row
+          // with no allocation history at all may fall back to its legacy
+          // transaction category when recording a replacement correction.
+          const oldCategoryIds =
+            activeCategoryIds.length > 0
+              ? activeCategoryIds
+              : existingAllocations.length === 0 && before.categoryId
+                ? [before.categoryId]
+                : [];
           const removedCategoryIds = [
             ...new Set(
-              existingAllocations
-                .filter((allocation) => allocation.state === "active")
-                .map((allocation) => allocation.categoryId)
-                .filter((categoryId) => !replacementCategoryIds.has(categoryId)),
+              oldCategoryIds.filter((categoryId) => !replacementCategoryIds.has(categoryId)),
             ),
           ];
           if (removedCategoryIds.length > 0) {

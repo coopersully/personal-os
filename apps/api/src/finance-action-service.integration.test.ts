@@ -1534,6 +1534,85 @@ describe.sequential("finance action service", () => {
     ).resolves.toMatchObject({ status: "needs_input" });
   });
 
+  it("records a legacy category correction when an approved agent breakdown replaces an unbackfilled row", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const breakdown = (
+      await seedActionCases(database, userId, `Legacy agent ${crypto.randomUUID()}`)
+    ).find((item) => item.actionKind === "transaction_breakdown");
+    if (!breakdown) throw new Error("Legacy agent breakdown fixture was not created.");
+    const oldCategoryId = (breakdown.input.allocations as Array<{ categoryId: string }>)[0]
+      ?.categoryId;
+    const [oldCategory] = await database.db
+      .select()
+      .from(financeCategories)
+      .where(eq(financeCategories.id, oldCategoryId ?? ""));
+    const [replacementCategory] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Test",
+        name: `Legacy replacement ${crypto.randomUUID()}`,
+        slug: `legacy-replacement-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!oldCategory || !replacementCategory)
+      throw new Error("Legacy agent categories were not created.");
+    const transactionId = String(breakdown.input.id);
+    await database.db
+      .update(financeTransactions)
+      .set({ category: oldCategory.name, categoryId: oldCategory.id })
+      .where(eq(financeTransactions.id, transactionId));
+    const [legacyTransaction] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transactionId));
+    if (!legacyTransaction) throw new Error("Legacy agent transaction was not found.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    const queued = await service.performDirect(
+      "transaction_breakdown",
+      {
+        ...breakdown.input,
+        allocations: [
+          { amount: 12.34, categoryId: replacementCategory.id, rationale: "Approved replacement" },
+        ],
+        expectedTransactionUpdatedAt: legacyTransaction.updatedAt.toISOString(),
+      },
+      { principal: agent(userId), requestId: "legacy-agent-breakdown" },
+    );
+    if (queued.status !== "pending_review")
+      throw new Error("Expected the legacy agent breakdown to await approval.");
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "legacy-agent-breakdown-approve",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({
+          categoryId: financeClassificationDecisions.categoryId,
+          outcome: financeClassificationDecisions.outcome,
+        })
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.transactionId, transactionId)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { categoryId: oldCategory.id, outcome: "corrected" },
+        { categoryId: replacementCategory.id, outcome: "applied" },
+      ]),
+    );
+  });
+
   it("keeps bypass out of categorization evidence while allowing prepared permanent rules", async () => {
     await database.db
       .update(financeAutomationSettings)

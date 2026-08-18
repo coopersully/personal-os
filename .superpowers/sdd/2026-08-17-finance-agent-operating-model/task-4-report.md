@@ -121,3 +121,16 @@ DONE_WITH_CONCERNS
 - `pnpm exec vitest run apps/api/src/finance-service.integration.test.ts packages/database/src/schema.test.ts --reporter=dot` — 62 tests passed.
 - API and database type checks passed; scoped Biome and `git diff --check` passed.
 - `pnpm verify` was not run; focused service/schema coverage was used for this bounded follow-up.
+
+## Fix round 4 — Final rollout edges
+
+- Breakdown replacement evidence now uses the locked ACTIVE allocation category set whenever active allocations exist. Only a transaction with no allocation rows at all falls back to its locked legacy `categoryId`, so unbackfilled legacy rows record that old category as corrected when replaced. Invalidated allocation rows are treated as durable prior-breakdown history and explicitly suppress the legacy fallback, avoiding duplicate or misleading corrections.
+- Both the direct user path and the Task 3 review/approval path now cover legacy replacement evidence; the latter retains the requesting agent actor and records the new category as `applied` alongside the old category correction.
+- Legacy category materialization verifies the case-insensitive intended name after every slug conflict. A different-name occupant of the canonical hashed slug causes deterministic hash-suffixed retries; only a matching owned category can receive the backfill allocation. Failure to obtain one aborts the transaction before the global checkpoint advances. Concurrent backfill calls converge on one intended category and allocations for both rows.
+
+### Fix round 4 verification
+
+- RED: an unbackfilled transaction category was not corrected on replacement, and an occupied canonical slug supplied the wrong category name to the allocation.
+- `pnpm exec vitest run apps/api/src/finance-service.integration.test.ts apps/api/src/finance-action-service.integration.test.ts --reporter=dot` — 94 tests passed.
+- API and database type checks passed; scoped Biome and `git diff --check` passed.
+- `pnpm verify` was not run; focused service/action coverage was used for this bounded follow-up.

@@ -6166,22 +6166,41 @@ export function createFinanceService({
                 ]
               : [],
           );
-          if (
-            before.categoryId &&
-            before.category &&
-            !input.allocations.some((allocation) => allocation.categoryId === before.categoryId)
-          ) {
-            allocationEvidence.push({
-              categoryId: before.categoryId,
-              categoryName: before.category,
-              confidence: 10_000,
-              merchantId: before.merchantId,
-              outcome: "corrected",
-              rationale: input.rationale,
-              source: context.principal.actorType === "user" ? "user" : "agent",
-              transactionId: before.id,
-              userId: context.principal.userId,
-            });
+          const replacementCategoryIds = new Set(
+            input.allocations.map((allocation) => allocation.categoryId),
+          );
+          const removedCategoryIds = [
+            ...new Set(
+              existingAllocations
+                .filter((allocation) => allocation.state === "active")
+                .map((allocation) => allocation.categoryId)
+                .filter((categoryId) => !replacementCategoryIds.has(categoryId)),
+            ),
+          ];
+          if (removedCategoryIds.length > 0) {
+            const removedCategories = await tx
+              .select({ id: financeCategories.id, name: financeCategories.name })
+              .from(financeCategories)
+              .where(
+                and(
+                  eq(financeCategories.userId, context.principal.userId),
+                  inArray(financeCategories.id, removedCategoryIds),
+                ),
+              );
+            allocationEvidence.push(
+              ...removedCategories.map((category) => ({
+                categoryId: category.id,
+                categoryName: category.name,
+                confidence: 10_000,
+                merchantId: before.merchantId,
+                outcome: "corrected" as const,
+                rationale: input.rationale,
+                source:
+                  context.principal.actorType === "user" ? ("user" as const) : ("agent" as const),
+                transactionId: before.id,
+                userId: context.principal.userId,
+              })),
+            );
           }
           if (allocationEvidence.length > 0) {
             await tx.insert(financeClassificationDecisions).values(allocationEvidence);
@@ -6216,14 +6235,14 @@ export function createFinanceService({
                 outcome: decision.outcome as "confirmed" | "corrected",
               })),
           });
-          const proposedCategoryIds = new Set(
+          const splitCategoryIds = new Set(
             input.allocations.map((allocation) => allocation.categoryId),
           );
           await tx
             .update(financeMerchants)
             .set({
               behavior:
-                proposedCategoryIds.size > 1 || merchant?.behavior === "mixed"
+                splitCategoryIds.size > 1 || merchant?.behavior === "mixed"
                   ? "mixed"
                   : evaluation.behavior,
               updatedAt: now(),

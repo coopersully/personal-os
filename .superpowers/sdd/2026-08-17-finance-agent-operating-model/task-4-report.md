@@ -86,3 +86,11 @@ DONE_WITH_CONCERNS
 
 - Future-rule preparation and terminal validation now require the proposed split itself to be single-category and to match the requested rule category. Mixed post-change splits stay one-off and cannot queue or bypass a reusable rule.
 - A saved multi-category split now conservatively sets merchant behavior to mixed regardless of actor outcome, and explicit mixed behavior remains mixed on later single-category replacements.
+- Replacement evidence now compares the complete locked ACTIVE allocation category set with the proposed set. Every removed category is recorded as `corrected`; every proposed category is retained as the user-confirmed or agent-applied allocation evidence. Thus `{A,B} -> {B,C}` records `A` corrected and `C` applied/confirmed, while an `A` personal-to-personal/reimbursable treatment-only edit creates no category correction or artificial category diversity.
+- Coverage now proves an otherwise eligible future rule is rejected for a proposed mixed split in both bypass and review-disabled paths, and that an approved agent one-off mixed split leaves the merchant mixed. It also verifies active-set replacement and treatment-only behavior directly against durable classification evidence.
+
+### Fix round 3 Batch A verification
+
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-merchant-evidence.test.ts --reporter=dot` — 95 tests passed.
+- API and domain type checks passed; scoped Biome passed.
+- `pnpm verify` was not run; the focused Finance suites cover this bounded follow-up.

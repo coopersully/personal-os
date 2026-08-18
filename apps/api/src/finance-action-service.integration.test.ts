@@ -21,7 +21,7 @@ import {
   users,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { SupportedActionKind } from "./finance-action-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceService } from "./finance-service.js";
@@ -1457,6 +1457,65 @@ describe.sequential("finance action service", () => {
       })
       .returning();
     if (!otherCategory) throw new Error("Mixed future-rule category was not created.");
+    const [currentTransaction] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, row.id));
+    if (!currentTransaction) throw new Error("Future-rule transaction was not found.");
+    const proposedMixedRule = {
+      ...input,
+      allocations: [
+        { amount: 6, categoryId: category.id, rationale: "Personal share" },
+        { amount: 6.34, categoryId: otherCategory.id, rationale: "Reimbursable share" },
+      ],
+      expectedTransactionUpdatedAt: currentTransaction.updatedAt.toISOString(),
+    };
+    await expect(
+      service.performDirect("transaction_breakdown", proposedMixedRule, {
+        principal: agent(userId),
+        requestId: "future-rule-proposed-mixed-bypass",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: false, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    await expect(
+      service.performDirect("transaction_breakdown", proposedMixedRule, {
+        principal: agent(userId),
+        requestId: "future-rule-proposed-mixed-review",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+    const pendingMixedBreakdown = await service.performDirect(
+      "transaction_breakdown",
+      { ...proposedMixedRule, futureRule: undefined },
+      { principal: agent(userId), requestId: "mixed-breakdown-review" },
+    );
+    if (pendingMixedBreakdown.status !== "pending_review")
+      throw new Error("Expected the one-off mixed breakdown to be reviewable.");
+    await expect(
+      service.approve(pendingMixedBreakdown.review.id, {
+        principal: user(userId),
+        requestId: "mixed-breakdown-approve",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({ behavior: financeMerchants.behavior })
+        .from(financeMerchants)
+        .where(eq(financeMerchants.id, row.merchantId)),
+    ).resolves.toEqual([{ behavior: "mixed" }]);
+    await expect(
+      database.db
+        .select({ outcome: financeClassificationDecisions.outcome })
+        .from(financeClassificationDecisions)
+        .where(
+          and(
+            eq(financeClassificationDecisions.transactionId, row.id),
+            eq(financeClassificationDecisions.categoryId, otherCategory.id),
+          ),
+        ),
+    ).resolves.toEqual(expect.arrayContaining([{ outcome: "applied" }]));
     await database.db.insert(financeClassificationDecisions).values({
       categoryId: otherCategory.id,
       categoryName: otherCategory.name,

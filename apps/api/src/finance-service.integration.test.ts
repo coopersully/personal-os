@@ -3804,6 +3804,140 @@ describe.sequential("finance service", () => {
     ).resolves.toEqual([{ behavior: "mixed" }]);
   });
 
+  it("records active-category replacements as corrections without treating treatment-only changes as diversity", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation replacement evidence",
+        email: `allocation-replacement-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation replacement owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-replacement" };
+    const [firstCategory, secondCategory, thirdCategory] = await service.listCategories(owner.id);
+    if (!firstCategory || !secondCategory || !thirdCategory)
+      throw new Error("Replacement categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 200, institution: "Local", name: "Replacement checking", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 100,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Replacement merchant",
+        notes: null,
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [
+          { amount: 40, categoryId: firstCategory.id, rationale: "First share" },
+          { amount: 60, categoryId: secondCategory.id, rationale: "Second share" },
+        ],
+        expectedTransactionUpdatedAt: transaction.updatedAt,
+        rationale: "Initial mixed receipt.",
+      },
+      context,
+    );
+    const [replacedRevision] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transaction.id));
+    if (!replacedRevision) throw new Error("Replacement transaction was not found.");
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [
+          { amount: 50, categoryId: secondCategory.id, rationale: "Retained share" },
+          { amount: 50, categoryId: thirdCategory.id, rationale: "New share" },
+        ],
+        expectedTransactionUpdatedAt: replacedRevision.updatedAt.toISOString(),
+        rationale: "Corrected mixed receipt.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({
+          categoryId: financeClassificationDecisions.categoryId,
+          outcome: financeClassificationDecisions.outcome,
+        })
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.transactionId, transaction.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { categoryId: firstCategory.id, outcome: "corrected" },
+        { categoryId: thirdCategory.id, outcome: "confirmed" },
+      ]),
+    );
+
+    const treatmentOnly = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 100,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Treatment-only merchant",
+        notes: null,
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      treatmentOnly.id,
+      {
+        allocations: [{ amount: 100, categoryId: firstCategory.id, rationale: "Initial share" }],
+        expectedTransactionUpdatedAt: treatmentOnly.updatedAt,
+        rationale: "Initial receipt.",
+      },
+      context,
+    );
+    const [treatmentRevision] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, treatmentOnly.id));
+    if (!treatmentRevision) throw new Error("Treatment-only transaction was not found.");
+    await service.setTransactionBreakdown(
+      treatmentOnly.id,
+      {
+        allocations: [
+          { amount: 50, categoryId: firstCategory.id, rationale: "Personal share" },
+          {
+            amount: 50,
+            categoryId: firstCategory.id,
+            rationale: "Reimbursable share",
+            treatment: "reimbursable",
+          },
+        ],
+        expectedTransactionUpdatedAt: treatmentRevision.updatedAt.toISOString(),
+        rationale: "Treatment-only correction.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({ outcome: financeClassificationDecisions.outcome })
+        .from(financeClassificationDecisions)
+        .where(
+          and(
+            eq(financeClassificationDecisions.transactionId, treatmentOnly.id),
+            eq(financeClassificationDecisions.outcome, "corrected"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+  });
+
   it("allows a Dining receipt to split personal and reimbursable shares in the same category", async () => {
     const [owner] = await database.db
       .insert(users)

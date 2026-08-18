@@ -40,6 +40,7 @@ import {
 import { forecastCashflow } from "./finance-cashflow.js";
 import { assessFinanceHealth } from "./finance-health.js";
 import { reliableMonthlyCapacity, reliableMonthlyIncome } from "./finance-planning.js";
+import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
 import { deriveReimbursementStatus } from "./finance-reimbursement-service.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { createGoalsService } from "./goals-service.js";
@@ -363,6 +364,7 @@ export function createFinanceStatusService({ db, now }: Options) {
               .select({
                 amount: financeTransactions.amount,
                 category: financeTransactions.category,
+                date: financeTransactions.transactionDate,
                 id: financeTransactions.id,
                 merchant: financeTransactions.merchant,
                 pending: financeTransactions.pending,
@@ -387,24 +389,11 @@ export function createFinanceStatusService({ db, now }: Options) {
           );
           const excludedByAllocation = excludedReimbursementCentsByAllocation(reimbursementRows);
           const matchedCreditAmounts = matchedReimbursementCentsByCredit(reimbursementMatches);
-          const hasOutstandingReimbursement = reimbursementRows.some(
-            (row) =>
-              row.status !== "cancelled" &&
-              row.status !== "received" &&
-              row.expectedAmount > row.receivedAmount,
-          );
-          const unmatchedCredits = incomeCredits.filter(
-            (credit) =>
-              hasOutstandingReimbursement &&
-              !credit.pending &&
-              credit.amount > (matchedCreditAmounts.get(credit.id) ?? 0) &&
-              credit.category !== "TRANSFER_IN" &&
-              credit.category !== "TRANSFER_OUT" &&
-              credit.category !== "INCOME" &&
-              credit.category !== "OTHER" &&
-              !/\b(?:salary|payroll|paycheck)\b/i.test(credit.merchant) &&
-              /\b(?:venmo|paypal|zelle|cash ?app|reimburs|repay|split)\b/i.test(credit.merchant),
-          ).length;
+          const unmatchedCredits = selectPlausibleReimbursementCredits({
+            credits: incomeCredits,
+            matches: reimbursementMatches,
+            reimbursements: reimbursementRows,
+          }).length;
           const profiles = await tx
             .select()
             .from(financeProfiles)

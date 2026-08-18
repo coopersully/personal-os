@@ -15,6 +15,7 @@ import {
 import { and, eq, inArray } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
 import type { Principal } from "./types.js";
 
 export function deriveReimbursementStatus({
@@ -150,36 +151,39 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
       }
       const credits = await db
         .select({
+          category: financeTransactions.category,
           id: financeTransactions.id,
           amount: financeTransactions.amount,
           date: financeTransactions.transactionDate,
+          merchant: financeTransactions.merchant,
+          pending: financeTransactions.pending,
         })
         .from(financeTransactions)
         .where(
           and(eq(financeTransactions.userId, userId), eq(financeTransactions.direction, "income")),
         );
-      const matchedByCredit = new Map<string, number>();
-      for (const match of matches) {
-        matchedByCredit.set(
-          match.creditTransactionId,
-          (matchedByCredit.get(match.creditTransactionId) ?? 0) + match.amount,
-        );
-      }
+      const candidates = selectPlausibleReimbursementCredits({
+        credits,
+        matches,
+        reimbursements: rows,
+      });
+      const creditById = new Map(credits.map((credit) => [credit.id, credit]));
       return {
         reimbursements: rows.map((row) =>
           serialize(row, matchesByReimbursement.get(row.id) ?? [], now()),
         ),
-        unmatchedCredits: credits
-          .map((credit) => ({
-            ...credit,
-            unmatchedAmount: credit.amount - (matchedByCredit.get(credit.id) ?? 0),
-          }))
-          .filter((credit) => credit.unmatchedAmount > 0)
-          .map((credit) => ({
-            amount: credit.unmatchedAmount / 100,
-            date: credit.date,
-            transactionId: credit.id,
-          })),
+        unmatchedCredits: candidates.flatMap((candidate) => {
+          const credit = creditById.get(candidate.transactionId);
+          return credit
+            ? [
+                {
+                  amount: candidate.remainingAmount / 100,
+                  date: credit.date,
+                  transactionId: credit.id,
+                },
+              ]
+            : [];
+        }),
       };
     },
 

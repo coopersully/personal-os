@@ -10,7 +10,12 @@ type Observation = {
 };
 type Input = {
   budgetMaterialityCents: number;
-  expectedRecurring?: { expectedAmountCents: number; toleranceCents: number };
+  expectedRecurring?: {
+    expectedAmountCents: number;
+    expectedDate: string | null;
+    toleranceCents: number;
+    windowDays: number;
+  };
   history: Observation[];
   reimbursementExpectedCents?: number;
   transaction: Observation;
@@ -34,12 +39,29 @@ function median(values: number[]) {
 
 /** Uses robust median absolute deviation rather than a universal dollar cutoff. */
 export function detectFinanceAnomalies(input: Input): FinanceAnomaly | null {
-  if (
-    input.expectedRecurring &&
-    Math.abs(input.transaction.amountCents - input.expectedRecurring.expectedAmountCents) <=
-      input.expectedRecurring.toleranceCents
-  )
-    return null;
+  const expectedRecurring = input.expectedRecurring;
+  const withinRecurringAmount =
+    expectedRecurring !== undefined &&
+    Math.abs(input.transaction.amountCents - expectedRecurring.expectedAmountCents) <=
+      expectedRecurring.toleranceCents;
+  const withinRecurringWindow =
+    expectedRecurring?.expectedDate === null ||
+    (expectedRecurring !== undefined &&
+      Math.abs(
+        new Date(`${input.transaction.date}T00:00:00Z`).getTime() -
+          new Date(`${expectedRecurring.expectedDate}T00:00:00Z`).getTime(),
+      ) <=
+        expectedRecurring.windowDays * 86_400_000);
+  if (expectedRecurring && withinRecurringAmount && withinRecurringWindow) return null;
+  if (expectedRecurring && withinRecurringAmount && !withinRecurringWindow) {
+    return {
+      baselineCents: expectedRecurring.expectedAmountCents,
+      baselineSource: "merchant",
+      rationale: "A recurring charge arrived outside its expected cadence window.",
+      severity: "warning",
+      sourceRefs: [input.transaction.sourceRef],
+    };
+  }
   const merchant = input.history.filter((item) => item.merchant === input.transaction.merchant);
   const category = input.history.filter((item) => item.category === input.transaction.category);
   const sample = merchant.length >= 5 ? merchant : category;

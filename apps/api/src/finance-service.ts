@@ -106,6 +106,7 @@ import {
   createFinanceProviderItemSyncService,
   type FinanceSyncBatchResult,
 } from "./finance-provider-item-sync-service.js";
+import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
 import { createFinanceReimbursementService } from "./finance-reimbursement-service.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
@@ -4896,29 +4897,55 @@ export function createFinanceService({
             );
         openByTransaction.set(row.id, review);
       }
-      const [accounts, budgets, allocations, reimbursementRows, reimbursementMatches, obligations] =
-        await Promise.all([
-          db.select().from(financeAccounts).where(eq(financeAccounts.userId, userId)),
-          db.select().from(financeBudgets).where(eq(financeBudgets.userId, userId)),
-          db
-            .select()
-            .from(financeTransactionAllocations)
-            .where(eq(financeTransactionAllocations.userId, userId)),
-          db.select().from(financeReimbursements).where(eq(financeReimbursements.userId, userId)),
-          db
-            .select()
-            .from(financeReimbursementMatches)
-            .where(eq(financeReimbursementMatches.userId, userId)),
-          db
-            .select()
-            .from(financeRecurringObligations)
-            .where(
-              and(
-                eq(financeRecurringObligations.userId, userId),
-                eq(financeRecurringObligations.status, "active"),
-              ),
+      const trailingHistoryStart = new Date(now());
+      trailingHistoryStart.setUTCFullYear(trailingHistoryStart.getUTCFullYear() - 1);
+      const [
+        accounts,
+        budgets,
+        allocations,
+        reimbursementRows,
+        reimbursementMatches,
+        obligations,
+        trailingHistory,
+      ] = await Promise.all([
+        db.select().from(financeAccounts).where(eq(financeAccounts.userId, userId)),
+        db.select().from(financeBudgets).where(eq(financeBudgets.userId, userId)),
+        db
+          .select()
+          .from(financeTransactionAllocations)
+          .where(eq(financeTransactionAllocations.userId, userId)),
+        db.select().from(financeReimbursements).where(eq(financeReimbursements.userId, userId)),
+        db
+          .select()
+          .from(financeReimbursementMatches)
+          .where(eq(financeReimbursementMatches.userId, userId)),
+        db
+          .select()
+          .from(financeRecurringObligations)
+          .where(
+            and(
+              eq(financeRecurringObligations.userId, userId),
+              eq(financeRecurringObligations.status, "active"),
             ),
-        ]);
+          ),
+        db
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.userId, userId),
+              eq(financeTransactions.direction, "expense"),
+              eq(financeTransactions.pending, false),
+              gte(
+                financeTransactions.transactionDate,
+                trailingHistoryStart.toISOString().slice(0, 10),
+              ),
+              lte(financeTransactions.transactionDate, now().toISOString().slice(0, 10)),
+            ),
+          )
+          .orderBy(desc(financeTransactions.transactionDate), desc(financeTransactions.id))
+          .limit(500),
+      ]);
       const accountById = new Map(accounts.map((account) => [account.id, account]));
       const allocationsByTransaction = new Map<string, typeof allocations>();
       for (const allocation of allocations) {
@@ -4971,12 +4998,20 @@ export function createFinanceService({
             ? {
                 expectedRecurring: {
                   expectedAmountCents: recurring.expectedAmount,
+                  expectedDate: recurring.nextExpectedDate,
                   toleranceCents: recurring.amountTolerance,
+                  windowDays:
+                    recurring.cadence === "weekly" ? 2 : recurring.cadence === "biweekly" ? 3 : 5,
                 },
               }
             : {}),
-          history: postedExpenses
-            .filter((item) => item.id !== row.id && item.transactionDate < row.transactionDate)
+          history: trailingHistory
+            .filter(
+              (item) =>
+                item.accountId === row.accountId &&
+                item.id !== row.id &&
+                item.transactionDate < row.transactionDate,
+            )
             .flatMap((item) => {
               const historySource = sourceFor(item);
               return historySource
@@ -5027,8 +5062,27 @@ export function createFinanceService({
           reimbursement.status !== "received" &&
           reimbursement.expectedAmount > reimbursement.receivedAmount,
       );
+      const plausibleCreditIds = new Set(
+        selectPlausibleReimbursementCredits({
+          credits: rows
+            .filter((item) => item.direction === "income")
+            .map((item) => ({
+              amount: item.amount,
+              category: item.category,
+              date: item.transactionDate,
+              id: item.id,
+              merchant: item.merchant,
+              pending: item.pending,
+            })),
+          matches: reimbursementMatches,
+          reimbursements: reimbursementRows,
+        }).map((candidate) => candidate.transactionId),
+      );
       for (const credit of rows.filter(
-        (item) => !item.pending && item.direction === "income" && !openByTransaction.has(item.id),
+        (item) =>
+          item.direction === "income" &&
+          !openByTransaction.has(item.id) &&
+          plausibleCreditIds.has(item.id),
       )) {
         const unmatchedAmount = credit.amount - (matchedByCredit.get(credit.id) ?? 0);
         if (

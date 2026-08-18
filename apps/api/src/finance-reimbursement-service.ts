@@ -274,7 +274,18 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
 
         const { row, matches } = await readReimbursement(tx, userId, input.reimbursementId, true);
         if (input.operation === "cancel") {
-          if (row.status === "cancelled") return serialize(row, matches);
+          if (row.status === "cancelled") {
+            if (
+              input.expectedRevision === row.revision - 1 &&
+              input.rationale === row.cancelledRationale &&
+              stableJson(input.evidence) === stableJson(row.cancelledEvidence)
+            )
+              return serialize(row, matches);
+            throw new AppError(
+              "conflict",
+              "The cancellation replay differs from the recorded input.",
+            );
+          }
           if (row.revision !== input.expectedRevision)
             throw new AppError("conflict", "The reimbursement changed before cancellation.");
           const [cancelled] = await tx
@@ -314,7 +325,18 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
         const existingMatch = matches.find(
           (match) => match.creditTransactionId === input.creditTransactionId,
         );
-        if (existingMatch && existingMatch.amount === amount) return serialize(row, matches);
+        if (existingMatch && existingMatch.amount === amount) {
+          if (
+            input.expectedRevision === row.revision - 1 &&
+            input.rationale === existingMatch.rationale &&
+            stableJson(input.evidence) === stableJson(existingMatch.evidence)
+          )
+            return serialize(row, matches);
+          throw new AppError(
+            "conflict",
+            "The credit-match replay differs from the recorded input.",
+          );
+        }
         if (row.revision !== input.expectedRevision)
           throw new AppError("conflict", "The reimbursement changed before reconciliation.");
         if (existingMatch)
@@ -335,7 +357,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
           )
           .for("update")
           .limit(1);
-        if (credit?.direction !== "income")
+        if (credit?.direction !== "income" || credit.pending)
           throw new AppError("invalid_request", "Choose one of your income credits to match.");
         const creditMatches = await tx
           .select({ amount: financeReimbursementMatches.amount })

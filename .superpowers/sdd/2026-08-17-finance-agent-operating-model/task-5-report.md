@@ -52,3 +52,16 @@ Batch C validation completed:
 - `pnpm exec vitest run apps/api/src/finance-anomaly-service.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts apps/mcp/src/tool-catalog.test.ts apps/mcp/src/server.test.ts` — 88 passing.
 - API, API-client, MCP, Database, and Domain typechecks.
 - Biome and `git diff --check` for changed Task 5 files.
+
+## Round 2A privacy and lifecycle hardening
+
+**Status: DONE**
+
+Broad maintenance review audits now retain only review identity, reason, status, transaction identity, timestamp, and safe maintenance attribution; private rationale and review details remain solely on Finance review records. The reimbursement core writer rejects pending credits for every caller, not only agent preparation. Exact replay now requires the recorded canonical evidence, rationale, amount, and prior revision; changed cancellation or same-credit-match input returns a conflict.
+
+Safe-to-spend now uses the synchronized cash forecast directly: posted expense cash has already moved, and uncertain reimbursements are not forecast income, so outstanding reimbursement is not subtracted twice. Prepared reimbursement actions replace caller-provided source references with canonical references derived from the locked, owned expense and credit records. The MCP reconciliation operation remains destructive and now advertises per-operation approval rather than an incorrectly broad approved-rule policy.
+
+Round 2A validation completed:
+
+- Focused reimbursement/action/service/MCP suites — 117 passing.
+- API, API-client, MCP, Database, and Domain typechecks.

@@ -593,10 +593,8 @@ function transactionAuditSnapshot(value: FinanceTransaction) {
 function reviewAuditSnapshot(value: typeof financeReviewCases.$inferSelect) {
   return {
     id: value.id,
-    rationale: value.rationale,
     reason: value.reason,
     status: value.status,
-    suggestedCategoryId: value.suggestedCategoryId,
     transactionId: value.transactionId,
     updatedAt: value.updatedAt.toISOString(),
   };
@@ -3584,7 +3582,7 @@ export function createFinanceService({
     },
     async getForecast(userId: string): Promise<FinanceForecast> {
       const asOf = now();
-      const [profile, accounts, streams, reimbursements, obligations] = await Promise.all([
+      const [profile, accounts, streams, obligations] = await Promise.all([
         this.getProfile(userId, asOf.toISOString().slice(0, 10)),
         db.select().from(financeAccounts).where(eq(financeAccounts.userId, userId)),
         db
@@ -3593,14 +3591,6 @@ export function createFinanceService({
           .where(
             and(eq(financeIncomeStreams.userId, userId), eq(financeIncomeStreams.status, "active")),
           ),
-        db
-          .select({
-            expectedAmount: financeReimbursements.expectedAmount,
-            receivedAmount: financeReimbursements.receivedAmount,
-            status: financeReimbursements.status,
-          })
-          .from(financeReimbursements)
-          .where(eq(financeReimbursements.userId, userId)),
         db
           .select()
           .from(financeRecurringObligations)
@@ -3636,20 +3626,16 @@ export function createFinanceService({
           kind: "obligation" as const,
         })),
       });
-      const outstandingReimbursements = reimbursements.reduce(
-        (sum, reimbursement) =>
-          reimbursement.status === "cancelled" || reimbursement.status === "received"
-            ? sum
-            : sum + Math.max(0, reimbursement.expectedAmount - reimbursement.receivedAmount),
-        0,
-      );
       return {
         asOf: asOf.toISOString(),
         lowestProjectedBalance: forecast.lowestBalance / 100,
         lowestProjectedDate: forecast.lowestDate,
         projectedBalanceAtNextPayday:
           forecast.projectedBalance === null ? null : forecast.projectedBalance / 100,
-        safeToSpend: Math.max(0, forecast.lowestBalance - outstandingReimbursements) / 100,
+        // Posted expenses have already changed the synchronized cash balance;
+        // expected reimbursements are not forecast income, so subtracting their
+        // outstanding amount here would count the same outflow twice.
+        safeToSpend: Math.max(0, forecast.lowestBalance) / 100,
         upcomingIncome: forecast.upcomingIncome / 100,
         upcomingObligations: forecast.upcomingObligations / 100,
       };

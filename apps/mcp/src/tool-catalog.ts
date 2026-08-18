@@ -171,7 +171,7 @@ export const iloToolCatalog = {
   list_finance_reimbursements: read("finances", ["finances:read"]),
   reconcile_finance_reimbursement: write("finances", ["finances:write"], {
     destructive: true,
-    policy: "approved_rule",
+    policy: "approve_each",
   }),
   maintain_finances: write("finances", ["finances:maintain"], {
     idempotent: false,

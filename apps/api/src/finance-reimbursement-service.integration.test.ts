@@ -302,6 +302,41 @@ describe.sequential("reimbursement lifecycle", () => {
     ).resolves.toMatchObject({ revision: cancelled.revision, status: "cancelled" });
   });
 
+  it("rejects a pending reimbursement credit for direct callers", async () => {
+    const { allocation, credit, principal } = await fixture();
+    const service = createFinanceReimbursementService({ db: database.db, now: () => now });
+    const created = await service.reconcile(
+      {
+        allocationId: allocation.id,
+        dueDate: null,
+        evidence: evidence(),
+        expectedAmount: 100,
+        operation: "create",
+        payer: "Casey",
+        rationale: "Casey agreed to repay this share",
+      },
+      { principal, requestId: crypto.randomUUID() },
+    );
+    await database.db
+      .update(financeTransactions)
+      .set({ pending: true })
+      .where(eq(financeTransactions.id, credit.id));
+    await expect(
+      service.reconcile(
+        {
+          amount: 100,
+          creditTransactionId: credit.id,
+          evidence: evidence("Pending credit evidence"),
+          expectedRevision: created.revision,
+          operation: "match_credit",
+          rationale: "Credit should settle this reimbursement",
+          reimbursementId: created.id,
+        },
+        { principal, requestId: crypto.randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   it("marks overdue expected money without treating it as received", () => {
     expect(
       deriveReimbursementStatus({

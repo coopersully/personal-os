@@ -1568,6 +1568,15 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         )[0];
         if (!lockedExpense || !lockedAllocation || (credit && !lockedCredit))
           return missing("The reimbursement evidence changed; refresh before continuing.", []);
+        const canonicalEvidence = {
+          sourceRefs: [
+            transactionSource(lockedExpense, expenseAccount),
+            ...(lockedCredit && creditAccount
+              ? [transactionSource(lockedCredit, creditAccount)]
+              : []),
+          ],
+          summary: input.data.evidence.summary,
+        };
         const cases = await lockRead(
           executor
             .select()
@@ -1622,7 +1631,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               item.payer === createInput.payer &&
               item.dueDate === createInput.dueDate &&
               item.rationale === createInput.rationale &&
-              stableJson(item.evidence) === stableJson(createInput.evidence),
+              stableJson(item.evidence) === stableJson(canonicalEvidence),
           );
           if (
             !replayedCreate &&
@@ -1674,9 +1683,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           expense: [lockedExpense.id, lockedExpense.updatedAt.toISOString()],
           matches: matches.map((match) => [match.id, match.amount, match.updatedAt.toISOString()]),
         });
+        // Evidence references are capability-bearing provenance, never caller
+        // assertions. Retain the bounded human summary but replace every
+        // supplied reference with the owned records just locked above.
+        const canonicalInput = {
+          ...input.data,
+          evidence: canonicalEvidence,
+        };
         const target = current?.id ?? lockedAllocation.id;
         const base = prepared(
-          input.data,
+          canonicalInput,
           revision,
           [
             {

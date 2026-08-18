@@ -116,3 +116,22 @@ Question terminalization, prepared-review disposition, semantic mutation, and re
 - None.
 
 Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts packages/domain/src/domain.test.ts` (133 passing), workspace typecheck, Biome, and `git diff --check`.
+
+## Reimbursement lifecycle guards and cadence — Batch B
+
+### DONE
+
+- Replacing an allocation breakdown or categorizing a transaction now locks reimbursement cases and matches before it can remove referenced active allocations, returning a recoverable reconciliation-first conflict instead of a database foreign-key failure.
+- Account deletion now rejects expense accounts with reimbursement cases and credit accounts with reimbursement matches, while unrelated accounts remain deletable.
+- Exact direct credit-match replay now also requires the stored rationale and canonical evidence to match; a later case revision or another match does not invalidate the same request.
+- Recurring anomaly suppression now requires a non-null expected date; an undated recurring record no longer suppresses a material anomaly.
+
+### CONCERNS
+
+- The broader cross-operation lock-order barrier test remains to be added; existing reimbursement preparation/reconciliation locking is deterministic per operation but has not yet been consolidated behind one shared helper.
+
+### BLOCKED
+
+- None.
+
+Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-anomaly-service.test.ts` (106 passing), API and database type checks, Biome, and `git diff --check`.

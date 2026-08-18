@@ -69,6 +69,36 @@ describe("detectFinanceAnomalies", () => {
     ).toBeNull();
   });
 
+  it("does not suppress a recurring-looking charge without an expected date", () => {
+    expect(
+      detectFinanceAnomalies({
+        transaction: {
+          amountCents: 220_000,
+          category: "Housing",
+          date: "2026-08-01",
+          id: "00000000-0000-4000-8000-000000000001",
+          merchant: "Landlord",
+          sourceRef: sourceRef("undated-rent"),
+        },
+        history: [180_000, 180_000, 180_000, 180_000, 180_000].map((amountCents, index) => ({
+          amountCents,
+          category: "Housing",
+          date: `2026-0${index + 1}-01`,
+          id: `00000000-0000-4000-8000-00000000000${index + 2}`,
+          merchant: "Landlord",
+          sourceRef: sourceRef(`undated-rent-${index}`),
+        })),
+        budgetMaterialityCents: 1_000,
+        expectedRecurring: {
+          expectedAmountCents: 220_000,
+          expectedDate: null,
+          toleranceCents: 500,
+          windowDays: 3,
+        },
+      }),
+    ).toMatchObject({ severity: "warning" });
+  });
+
   it("flags a changed recurring charge instead of suppressing it wholesale", () => {
     const result = detectFinanceAnomalies({
       transaction: {

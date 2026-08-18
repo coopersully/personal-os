@@ -22,6 +22,7 @@ import {
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
+  financeReimbursementMatches,
   financeReimbursements,
   financeReviewCases,
   financeSetupBackfillState,
@@ -4008,6 +4009,129 @@ describe.sequential("finance service", () => {
         .from(financeTransactionAllocations)
         .where(eq(financeTransactionAllocations.transactionId, transaction.id)),
     ).resolves.toEqual([{ categoryId: first.id }]);
+  });
+
+  it("blocks allocation and account lifecycle changes while reimbursement evidence exists", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Reimbursement lifecycle",
+        email: `reimbursement-lifecycle-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Reimbursement lifecycle owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "reimbursement-lifecycle" };
+    const [first, second] = await service.listCategories(owner.id);
+    if (!first || !second) throw new Error("Reimbursement lifecycle categories were not seeded.");
+    const expenseAccount = await service.createAccount(
+      { balance: 500, institution: "Local", name: "Expense", provider: "manual" },
+      context,
+    );
+    const expense = await service.createTransaction(
+      {
+        accountId: expenseAccount.id,
+        amount: 100,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Shared dinner",
+        notes: null,
+      },
+      context,
+    );
+    const brokenDown = await service.setTransactionBreakdown(
+      expense.id,
+      {
+        allocations: [
+          {
+            amount: 100,
+            categoryId: second.id,
+            rationale: "Alex share",
+            treatment: "reimbursable",
+          },
+        ],
+        expectedTransactionUpdatedAt: expense.updatedAt,
+        rationale: "Shared dinner.",
+      },
+      context,
+    );
+    const [allocation] = await database.db
+      .select()
+      .from(financeTransactionAllocations)
+      .where(
+        and(
+          eq(financeTransactionAllocations.transactionId, expense.id),
+          eq(financeTransactionAllocations.state, "active"),
+        ),
+      );
+    if (!allocation) throw new Error("Reimbursement allocation was not created.");
+    const [reimbursement] = await database.db
+      .insert(financeReimbursements)
+      .values({
+        allocationId: allocation.id,
+        evidence: { sourceRefs: [], summary: "Receipt" },
+        expectedAmount: 10_000,
+        payer: "Alex",
+        rationale: "Shared dinner.",
+        userId: owner.id,
+      })
+      .returning();
+    if (!reimbursement) throw new Error("Reimbursement case was not created.");
+    await expect(
+      service.setTransactionBreakdown(
+        expense.id,
+        {
+          allocations: [{ amount: 100, categoryId: first.id, rationale: "Replace" }],
+          expectedTransactionUpdatedAt: brokenDown.updatedAt,
+          rationale: "Replace.",
+        },
+        context,
+      ),
+    ).rejects.toThrow("Cancel or adjust the reimbursement");
+    await expect(
+      service.updateTransaction(expense.id, { category: first.name }, context),
+    ).rejects.toThrow("Cancel or adjust the reimbursement");
+    await expect(service.deleteAccount(expenseAccount.id, context)).rejects.toThrow(
+      "reimbursement cases or matched credits",
+    );
+
+    const creditAccount = await service.createAccount(
+      { balance: 500, institution: "Local", name: "Credit", provider: "manual" },
+      context,
+    );
+    const credit = await service.createTransaction(
+      {
+        accountId: creditAccount.id,
+        amount: 100,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "income",
+        merchant: "Alex",
+        notes: null,
+      },
+      context,
+    );
+    await database.db.insert(financeReimbursementMatches).values({
+      amount: 10_000,
+      creditTransactionId: credit.id,
+      evidence: { sourceRefs: [], summary: "Payment" },
+      rationale: "Matched.",
+      reimbursementId: reimbursement.id,
+      userId: owner.id,
+    });
+    await expect(service.deleteAccount(creditAccount.id, context)).rejects.toThrow(
+      "reimbursement cases or matched credits",
+    );
+    const unrelated = await service.createAccount(
+      { balance: 0, institution: "Local", name: "Disposable", provider: "manual" },
+      context,
+    );
+    await expect(service.deleteAccount(unrelated.id, context)).resolves.toBeUndefined();
   });
 
   it("keeps allocation-based merchant evidence mixed without downgrading explicit mixed behavior", async () => {

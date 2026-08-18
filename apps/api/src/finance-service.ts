@@ -2309,6 +2309,9 @@ export function createFinanceService({
           "Pending transactions cannot create permanent categorization evidence.",
         );
       }
+      if (!current.pending) {
+        await assertAllocationsMayBeReplaced(tx, context.principal.userId, current.id);
+      }
       const [updated] = await tx
         .update(financeTransactions)
         .set({
@@ -2406,6 +2409,123 @@ export function createFinanceService({
     };
     const value = executor ? await apply(executor) : await db.transaction(apply);
     return { applied: true, replayed: false, threshold, transaction: value };
+  }
+
+  /**
+   * Allocation lifecycle changes use this guard before replacing an active
+   * breakdown. Reimbursements are locked before the dependent allocations and
+   * their matches, so callers never fall through to a raw foreign-key error.
+   * Reconciliation/cancellation remains the only way to retire that ledger
+   * evidence.
+   */
+  async function assertAllocationsMayBeReplaced(
+    tx: FinanceActionWriteExecutor,
+    userId: string,
+    transactionId: string,
+  ) {
+    const allocationRows = await tx
+      .select({ id: financeTransactionAllocations.id })
+      .from(financeTransactionAllocations)
+      .where(
+        and(
+          eq(financeTransactionAllocations.userId, userId),
+          eq(financeTransactionAllocations.transactionId, transactionId),
+          eq(financeTransactionAllocations.state, "active"),
+        ),
+      )
+      .orderBy(financeTransactionAllocations.id);
+    const allocationIds = allocationRows.map((item) => item.id);
+    if (!allocationIds.length) return;
+    const cases = await tx
+      .select({ id: financeReimbursements.id })
+      .from(financeReimbursements)
+      .where(
+        and(
+          eq(financeReimbursements.userId, userId),
+          inArray(financeReimbursements.allocationId, allocationIds),
+        ),
+      )
+      .orderBy(financeReimbursements.id)
+      .for("update");
+    if (!cases.length) return;
+    await tx
+      .select({ id: financeReimbursementMatches.id })
+      .from(financeReimbursementMatches)
+      .where(
+        and(
+          eq(financeReimbursementMatches.userId, userId),
+          inArray(
+            financeReimbursementMatches.reimbursementId,
+            cases.map((item) => item.id),
+          ),
+        ),
+      )
+      .orderBy(financeReimbursementMatches.id)
+      .for("update");
+    throw new AppError(
+      "conflict",
+      "This transaction has reimbursement evidence. Cancel or adjust the reimbursement before replacing its categorization or breakdown.",
+    );
+  }
+
+  async function assertAccountMayBeDeleted(
+    tx: FinanceActionWriteExecutor,
+    userId: string,
+    accountId: string,
+  ) {
+    const transactions = await tx
+      .select({ id: financeTransactions.id })
+      .from(financeTransactions)
+      .where(
+        and(eq(financeTransactions.userId, userId), eq(financeTransactions.accountId, accountId)),
+      )
+      .orderBy(financeTransactions.id)
+      .for("update");
+    const transactionIds = transactions.map((item) => item.id);
+    if (!transactionIds.length) return;
+    const allocations = await tx
+      .select({ id: financeTransactionAllocations.id })
+      .from(financeTransactionAllocations)
+      .where(
+        and(
+          eq(financeTransactionAllocations.userId, userId),
+          inArray(financeTransactionAllocations.transactionId, transactionIds),
+        ),
+      )
+      .orderBy(financeTransactionAllocations.id);
+    const cases = allocations.length
+      ? await tx
+          .select({ id: financeReimbursements.id })
+          .from(financeReimbursements)
+          .where(
+            and(
+              eq(financeReimbursements.userId, userId),
+              inArray(
+                financeReimbursements.allocationId,
+                allocations.map((item) => item.id),
+              ),
+            ),
+          )
+          .orderBy(financeReimbursements.id)
+          .for("update")
+      : [];
+    const matches = await tx
+      .select({ id: financeReimbursementMatches.id })
+      .from(financeReimbursementMatches)
+      .where(
+        and(
+          eq(financeReimbursementMatches.userId, userId),
+          inArray(financeReimbursementMatches.creditTransactionId, transactionIds),
+        ),
+      )
+      .orderBy(financeReimbursementMatches.id)
+      .for("update");
+    if (cases.length || matches.length) {
+      throw new AppError(
+        "conflict",
+        "This account has reimbursement cases or matched credits. Cancel or adjust the reimbursement before deleting the account.",
+      );
+    }
   }
 
   const profileValue = (row: typeof financeProfiles.$inferSelect): FinanceProfile => ({
@@ -5995,6 +6115,7 @@ export function createFinanceService({
           )
           .orderBy(financeTransactions.id)
           .for("update");
+        await assertAccountMayBeDeleted(tx, context.principal.userId, before.id);
         for (let offset = 0; offset < ownedTransactions.length; offset += 1_000) {
           const transactionIds = ownedTransactions
             .slice(offset, offset + 1_000)
@@ -6451,6 +6572,7 @@ export function createFinanceService({
             "Transaction allocation amounts must sum exactly to the transaction amount.",
           );
         }
+        await assertAllocationsMayBeReplaced(tx, context.principal.userId, before.id);
         const existingAllocations = await tx
           .select({
             categoryId: financeTransactionAllocations.categoryId,
@@ -6903,6 +7025,9 @@ export function createFinanceService({
             "invalid_request",
             "Pending transactions cannot create permanent categorization evidence.",
           );
+        }
+        if (input.category !== undefined && !current.pending) {
+          await assertAllocationsMayBeReplaced(tx, context.principal.userId, current.id);
         }
         if (input.category !== undefined) {
           await tx

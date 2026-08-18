@@ -45,15 +45,15 @@ export function detectFinanceAnomalies(input: Input): FinanceAnomaly | null {
     Math.abs(input.transaction.amountCents - expectedRecurring.expectedAmountCents) <=
       expectedRecurring.toleranceCents;
   const withinRecurringWindow =
-    expectedRecurring?.expectedDate === null ||
-    (expectedRecurring !== undefined &&
-      Math.abs(
-        new Date(`${input.transaction.date}T00:00:00Z`).getTime() -
-          new Date(`${expectedRecurring.expectedDate}T00:00:00Z`).getTime(),
-      ) <=
-        expectedRecurring.windowDays * 86_400_000);
+    expectedRecurring?.expectedDate !== null &&
+    expectedRecurring !== undefined &&
+    Math.abs(
+      new Date(`${input.transaction.date}T00:00:00Z`).getTime() -
+        new Date(`${expectedRecurring.expectedDate}T00:00:00Z`).getTime(),
+    ) <=
+      expectedRecurring.windowDays * 86_400_000;
   if (expectedRecurring && withinRecurringAmount && withinRecurringWindow) return null;
-  if (expectedRecurring && withinRecurringAmount && !withinRecurringWindow) {
+  if (expectedRecurring?.expectedDate && withinRecurringAmount && !withinRecurringWindow) {
     return {
       baselineCents: expectedRecurring.expectedAmountCents,
       baselineSource: "merchant",

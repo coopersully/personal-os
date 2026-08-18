@@ -1973,7 +1973,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           matches.some(
             (match) =>
               match.creditTransactionId === matchInput.creditTransactionId &&
-              match.amount === toCents(matchInput.amount),
+              match.amount === toCents(matchInput.amount) &&
+              match.rationale === matchInput.rationale &&
+              stableJson(match.evidence) === stableJson(canonicalEvidence),
           );
         const idempotentCancel =
           input.data.operation === "cancel" && current?.status === "cancelled";

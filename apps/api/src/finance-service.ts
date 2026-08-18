@@ -5018,7 +5018,14 @@ export function createFinanceService({
         allocationsByTransaction.set(allocation.transactionId, items);
       }
       const reimbursementByAllocation = new Map<string, number>();
+      const coveredReimbursementAllocationIds = new Set<string>();
       for (const reimbursement of reimbursementRows) {
+        if (
+          ["expected", "partially_received", "overdue", "needs_input"].includes(
+            reimbursement.status,
+          )
+        )
+          coveredReimbursementAllocationIds.add(reimbursement.allocationId);
         if (reimbursement.status === "cancelled" || reimbursement.status === "received") continue;
         reimbursementByAllocation.set(
           reimbursement.allocationId,
@@ -5044,6 +5051,18 @@ export function createFinanceService({
       );
       for (const row of postedExpenses) {
         if (openByTransaction.has(row.id)) continue;
+        const activeAllocations = (allocationsByTransaction.get(row.id) ?? []).filter(
+          (allocation) => allocation.state === "active",
+        );
+        // A recorded case already owns the reimbursement decision for its
+        // allocation. Its adjustment/cancellation is an explicit ledger
+        // operation, never another anomaly question that could duplicate it.
+        if (
+          activeAllocations.some((allocation) =>
+            coveredReimbursementAllocationIds.has(allocation.id),
+          )
+        )
+          continue;
         const source = sourceFor(row);
         if (!source) continue;
         const recurring = obligations.find(
@@ -5109,7 +5128,7 @@ export function createFinanceService({
           source,
           anomaly.rationale,
           {
-            allocationIds: (allocationsByTransaction.get(row.id) ?? []).map((item) => item.id),
+            allocationIds: activeAllocations.map((item) => item.id),
             transactionId: row.id,
           },
           context,

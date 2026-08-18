@@ -8961,6 +8961,22 @@ describe.sequential("finance service", () => {
         }),
       ]),
     );
+    const maintenanceQuestions = await database.db
+      .select({ privatePayload: financeAgentActionReviews.privatePayload })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.userId, anomalyUser.id));
+    expect(
+      maintenanceQuestions.some((row) => {
+        const payload = row.privatePayload as { candidate?: { transactionId?: unknown } };
+        return payload.candidate?.transactionId === largeDinner.id;
+      }),
+    ).toBe(false);
+    await expect(
+      database.db
+        .select({ id: financeReimbursements.id })
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.allocationId, allocation.id)),
+    ).resolves.toHaveLength(1);
     await expect(
       database.db
         .select({ id: financeReviewCases.id })

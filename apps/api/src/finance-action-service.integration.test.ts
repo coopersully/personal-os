@@ -23,6 +23,7 @@ import {
   migrateDatabase,
   users,
 } from "@personal-os/database";
+import type { MaterialSourceReference } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
 import type { SupportedActionKind } from "./finance-action-service.js";
@@ -272,11 +273,12 @@ async function storeReimbursementQuestion(
     candidate: Record<string, unknown>;
     maintenanceAnswerAuthority?: boolean;
     requestingAgentId?: string;
+    source?: MaterialSourceReference;
     transaction: typeof financeTransactions.$inferSelect;
     userId: string;
   },
 ) {
-  const source = {
+  const source = input.source ?? {
     accountId: input.accountId,
     provider: "local" as const,
     remoteId: input.transaction.id,
@@ -4054,6 +4056,46 @@ describe.sequential("finance action service", () => {
         .from(financeReimbursementMatches)
         .where(eq(financeReimbursementMatches.userId, userId)),
     ).resolves.toEqual([]);
+    const [currentExpense] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, expense.id));
+    const [activeReimbursableAllocation] = await database.db
+      .select()
+      .from(financeTransactionAllocations)
+      .where(
+        and(
+          eq(financeTransactionAllocations.transactionId, expense.id),
+          eq(financeTransactionAllocations.state, "active"),
+          eq(financeTransactionAllocations.treatment, "reimbursable"),
+        ),
+      );
+    if (!currentExpense || !activeReimbursableAllocation)
+      throw new Error("Expected the active reimbursement case fixture.");
+    const duplicateQuestion = await storeReimbursementQuestion(database, {
+      accountId: account.id,
+      candidate: {
+        allocationIds: [activeReimbursableAllocation.id],
+        transactionId: currentExpense.id,
+      },
+      transaction: currentExpense,
+      userId,
+    });
+    await expect(
+      service.answerQuestion(
+        duplicateQuestion.id,
+        JSON.stringify({
+          answer: { kind: "entirely_personal", rationale: "Changed my mind." },
+        }),
+        { principal: agent(userId, "maintenance-answerer"), requestId: "active-case-personal" },
+      ),
+    ).resolves.toMatchObject({ question: { id: duplicateQuestion.id }, status: "needs_input" });
+    await expect(
+      database.db
+        .select({ id: financeReimbursements.id })
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.allocationId, activeReimbursableAllocation.id)),
+    ).resolves.toHaveLength(1);
   });
 
   it("keeps uncertain answers recoverable, records personal evidence, and queues bypass-off answers", async () => {
@@ -4408,5 +4450,206 @@ describe.sequential("finance action service", () => {
         .from(financeReimbursementMatches)
         .where(eq(financeReimbursementMatches.creditTransactionId, unrelated.id)),
     ).resolves.toEqual([]);
+  });
+
+  it("accepts canonical provider-backed expense and credit evidence and rejects a stale provider revision", async () => {
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: `Provider evidence ${crypto.randomUUID()}`,
+        slug: `provider-evidence-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!category) throw new Error("Provider evidence category failed.");
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    for (const provider of ["plaid", "paypal", "venmo", "zelle"] as const) {
+      const [account] = await database.db
+        .insert(financeAccounts)
+        .values({
+          institution: `${provider} evidence`,
+          name: `${provider} account`,
+          provider,
+          status: "connected",
+          userId,
+        })
+        .returning();
+      if (!account) throw new Error("Provider evidence account failed.");
+      const [expense] = await database.db
+        .insert(financeTransactions)
+        .values({
+          accountId: account.id,
+          amount: 2_000,
+          category: category.name,
+          categoryId: category.id,
+          direction: "expense",
+          merchant: `${provider} expense`,
+          providerTransactionId: `${provider}-expense-${crypto.randomUUID()}`,
+          transactionDate: "2026-08-17",
+          userId,
+        })
+        .returning();
+      if (!expense?.providerTransactionId) throw new Error("Provider expense failed.");
+      const [expenseAllocation] = await database.db
+        .insert(financeTransactionAllocations)
+        .values({
+          allocationOrder: 0,
+          amount: expense.amount,
+          categoryId: category.id,
+          transactionId: expense.id,
+          treatment: "personal",
+          userId,
+        })
+        .returning();
+      if (!expenseAllocation) throw new Error("Provider expense allocation failed.");
+      const expenseSource: MaterialSourceReference = {
+        accountId: account.id,
+        provider,
+        remoteId: expense.providerTransactionId,
+        revision: expense.updatedAt.toISOString(),
+        sourceType: "finance_transaction",
+      };
+      const expenseQuestion = await storeReimbursementQuestion(database, {
+        accountId: account.id,
+        candidate: { allocationIds: [expenseAllocation.id], transactionId: expense.id },
+        source: expenseSource,
+        transaction: expense,
+        userId,
+      });
+      await expect(
+        service.answerQuestion(
+          expenseQuestion.id,
+          JSON.stringify({ answer: { kind: "entirely_personal", rationale: "Personal." } }),
+          { principal: agent(userId, "maintenance-answerer"), requestId: `${provider}-expense` },
+        ),
+      ).resolves.toMatchObject({ status: "applied" });
+      if (provider === "plaid") {
+        const [currentExpense] = await database.db
+          .select()
+          .from(financeTransactions)
+          .where(eq(financeTransactions.id, expense.id));
+        if (!currentExpense) throw new Error("Provider stale fixture was not refreshed.");
+        const staleQuestion = await storeReimbursementQuestion(database, {
+          accountId: account.id,
+          candidate: { allocationIds: [expenseAllocation.id], transactionId: currentExpense.id },
+          source: {
+            accountId: account.id,
+            provider,
+            remoteId: expense.providerTransactionId,
+            revision: currentExpense.updatedAt.toISOString(),
+            sourceType: "finance_transaction",
+          },
+          transaction: currentExpense,
+          userId,
+        });
+        await database.db
+          .update(financeTransactions)
+          .set({ notes: "Provider revision changed", updatedAt: new Date("2026-08-18T12:00:00Z") })
+          .where(eq(financeTransactions.id, currentExpense.id));
+        await expect(
+          service.answerQuestion(
+            staleQuestion.id,
+            JSON.stringify({ answer: { kind: "entirely_personal", rationale: "Personal." } }),
+            { principal: agent(userId, "maintenance-answerer"), requestId: "plaid-stale" },
+          ),
+        ).resolves.toMatchObject({ question: { id: staleQuestion.id }, status: "needs_input" });
+      }
+
+      const [caseExpense] = await database.db
+        .insert(financeTransactions)
+        .values({
+          accountId: account.id,
+          amount: 2_000,
+          category: category.name,
+          categoryId: category.id,
+          direction: "expense",
+          merchant: `${provider} shared expense`,
+          providerTransactionId: `${provider}-case-${crypto.randomUUID()}`,
+          transactionDate: "2026-08-17",
+          userId,
+        })
+        .returning();
+      if (!caseExpense?.providerTransactionId)
+        throw new Error("Provider reimbursement expense failed.");
+      const [caseAllocation] = await database.db
+        .insert(financeTransactionAllocations)
+        .values({
+          allocationOrder: 0,
+          amount: caseExpense.amount,
+          categoryId: category.id,
+          transactionId: caseExpense.id,
+          treatment: "reimbursable",
+          userId,
+        })
+        .returning();
+      if (!caseAllocation) throw new Error("Provider reimbursement allocation failed.");
+      const [reimbursement] = await database.db
+        .insert(financeReimbursements)
+        .values({
+          allocationId: caseAllocation.id,
+          evidence: {
+            sourceRefs: [
+              {
+                accountId: account.id,
+                provider,
+                remoteId: caseExpense.providerTransactionId,
+                revision: caseExpense.updatedAt.toISOString(),
+                sourceType: "finance_transaction",
+              },
+            ],
+            summary: "Provider receipt",
+          },
+          expectedAmount: 2_000,
+          payer: "Alex",
+          rationale: "Shared expense.",
+          userId,
+        })
+        .returning();
+      const [credit] = await database.db
+        .insert(financeTransactions)
+        .values({
+          accountId: account.id,
+          amount: 1_000,
+          direction: "income",
+          merchant: `${provider} repayment`,
+          providerTransactionId: `${provider}-credit-${crypto.randomUUID()}`,
+          transactionDate: "2026-08-18",
+          userId,
+        })
+        .returning();
+      if (!reimbursement || !credit?.providerTransactionId)
+        throw new Error("Provider credit fixture failed.");
+      const creditQuestion = await storeReimbursementQuestion(database, {
+        accountId: account.id,
+        candidate: { reimbursementIds: [reimbursement.id], transactionId: credit.id },
+        source: {
+          accountId: account.id,
+          provider,
+          remoteId: credit.providerTransactionId,
+          revision: credit.updatedAt.toISOString(),
+          sourceType: "finance_transaction",
+        },
+        transaction: credit,
+        userId,
+      });
+      await expect(
+        service.answerQuestion(
+          creditQuestion.id,
+          JSON.stringify({
+            answer: { kind: "match", matches: [{ amount: 10, reimbursementId: reimbursement.id }] },
+          }),
+          { principal: agent(userId, "maintenance-answerer"), requestId: `${provider}-credit` },
+        ),
+      ).resolves.toMatchObject({ status: "applied" });
+    }
   });
 });

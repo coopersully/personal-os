@@ -97,3 +97,22 @@ Question terminalization, prepared-review disposition, semantic mutation, and re
 ### Blocked
 
 - None.
+
+## Question correctness and provider provenance — Batch A
+
+### DONE
+
+- Maintenance anomaly triage skips any expense with an active expected, partially received, overdue, or needs-input reimbursement case on one of its active allocations. Existing cases remain editable only through explicit reconciliation/cancellation.
+- Reimbursement-answer preparation rejects a crafted expense question that points to an active case, including an `entirely_personal` answer, so it cannot silently strand or duplicate a case.
+- Revalidation now compares complete canonical transaction provenance (`provider`, account, remote transaction ID, revision, and source type). Plaid, PayPal, Venmo, and Zelle expense and credit questions resolve with their provider IDs; a stale Plaid revision returns `needs_input`.
+- The public Finance-question contract intentionally supports a bounded `object` answer descriptor while rejecting private candidate values and unknown descriptor fields.
+
+### CONCERNS
+
+- Multi-allocation expense reimbursement questions still return `needs_input`; preserving their independent category/order treatments requires an explicit breakdown rather than an inferred replacement.
+
+### BLOCKED
+
+- None.
+
+Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts packages/domain/src/domain.test.ts` (133 passing), workspace typecheck, Biome, and `git diff --check`.

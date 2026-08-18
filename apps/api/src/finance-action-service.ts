@@ -1487,10 +1487,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           );
           if (!transaction || !account)
             return missing("The reimbursement transaction account is no longer available.", []);
+          const canonicalSource = transactionSource(transaction, account);
           const source = (sourceRefs as MaterialSourceReference[]).find(
-            (item) => item.remoteId === transaction.id && item.sourceType === "finance_transaction",
+            (item) =>
+              item.accountId === canonicalSource.accountId &&
+              item.provider === canonicalSource.provider &&
+              item.remoteId === canonicalSource.remoteId &&
+              item.revision === canonicalSource.revision &&
+              item.sourceType === canonicalSource.sourceType,
           );
-          if (!source || source.revision !== transaction.updatedAt.toISOString())
+          if (!source)
             return missing(
               "The reimbursement evidence changed after this question was created. Refresh the evidence before answering.",
               [expectedAnswer("answer", "object")],
@@ -1536,6 +1542,30 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
                   financeTransactionAllocations.id,
                 ),
             );
+            const existingCases = await lockRead(
+              executor
+                .select({ allocationId: financeReimbursements.allocationId })
+                .from(financeReimbursements)
+                .where(
+                  and(
+                    eq(financeReimbursements.userId, userId),
+                    inArray(financeReimbursements.allocationId, [...new Set(allocationIds)].sort()),
+                    inArray(financeReimbursements.status, [
+                      "expected",
+                      "partially_received",
+                      "overdue",
+                      "needs_input",
+                    ]),
+                  ),
+                )
+                .orderBy(financeReimbursements.id),
+            );
+            if (existingCases.length)
+              return missing(
+                "This expense already has an active reimbursement case. Adjust or cancel that case through reimbursement reconciliation instead.",
+                [expectedAnswer("answer", "object")],
+                [canonicalSource],
+              );
             if (
               allocations.length !== new Set(allocationIds).size ||
               allocations.some((item) => item.amount <= 0) ||

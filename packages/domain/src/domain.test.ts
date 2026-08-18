@@ -1581,7 +1581,27 @@ describe("finance agent contracts", () => {
     expect(
       financeQuestionSchema.safeParse({
         ...question,
-        expectedAnswer: [{ ...question.expectedAnswer[0], type: "object" }],
+        expectedAnswer: [
+          {
+            example: '{"kind":"not_reimbursement"}',
+            name: "answer",
+            required: true,
+            type: "object",
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      financeQuestionSchema.safeParse({
+        ...question,
+        expectedAnswer: [
+          {
+            name: "answer",
+            privateCandidate: { reimbursementIds: [id] },
+            required: true,
+            type: "object",
+          },
+        ],
       }).success,
     ).toBe(false);
     expect(

@@ -73,3 +73,8 @@ DONE_WITH_CONCERNS
 - `pnpm exec vitest run packages/domain/src/domain.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts apps/api/src/finance-action-service.integration.test.ts --reporter=dot` — 136 tests passed.
 - Domain, database, API, API-client, and MCP type checks passed.
 - Scoped Biome and `git diff --check` passed.
+
+## Fix round 2 — Batch B (partial)
+
+- With explicit integration-owner confirmation that `0061` is unshipped and has no upstream or PR, its deploy-time bulk allocation `INSERT … SELECT` was removed. A durable bounded allocation backfill checkpoint and composite transaction/category ownership foreign keys were added instead. The initial service pass is checkpoint-locked, bounded to 500 rows, skip-locked, and idempotently materializes one personal allocation only for posted legacy transactions without an active allocation.
+- Breakdown audit now derives before and after allocation/treatment counts from locked active allocation rows, without exposing amounts or rationales.

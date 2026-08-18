@@ -60,13 +60,11 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain(
       'CREATE UNIQUE INDEX "finance_transaction_allocations_transaction_order_idx" ON "finance_transaction_allocations" USING btree ("transaction_id", "allocation_order") WHERE "state" = \'active\';',
     );
-    expect(migrationSql).toContain(
-      'ON CONFLICT ("transaction_id", "allocation_order") WHERE "state" = \'active\' DO NOTHING;',
-    );
+    expect(migrationSql).not.toContain('INSERT INTO "finance_transaction_allocations"');
+    expect(migrationSql).toContain("finance_merchants_behavior_check");
+    expect(migrationSql).toContain("finance_transaction_allocations_transaction_user_fk");
+    expect(migrationSql).toContain("finance_transaction_allocations_category_user_fk");
     expect(migrationSql).toContain("ADD COLUMN \"behavior\" text DEFAULT 'unknown' NOT NULL");
-    expect(migrationSql).toContain('INSERT INTO "finance_transaction_allocations"');
-    expect(migrationSql).toContain('"pending" = false');
-    expect(migrationSql).toContain('"category_id" IS NOT NULL');
     const journal = JSON.parse(
       await readFile(
         resolve(process.cwd(), "packages/database/migrations/meta/_journal.json"),

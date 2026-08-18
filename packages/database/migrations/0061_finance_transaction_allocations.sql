@@ -2,6 +2,10 @@ ALTER TABLE "finance_merchants" ADD COLUMN "behavior" text DEFAULT 'unknown' NOT
 --> statement-breakpoint
 ALTER TABLE "finance_merchants" ADD CONSTRAINT "finance_merchants_behavior_check" CHECK ("behavior" IN ('unknown', 'consistent', 'mixed'));
 --> statement-breakpoint
+ALTER TABLE "finance_setup_backfill_state" ADD COLUMN "allocation_cursor" uuid;
+--> statement-breakpoint
+ALTER TABLE "finance_setup_backfill_state" ADD COLUMN "allocations_complete" boolean DEFAULT false NOT NULL;
+--> statement-breakpoint
 CREATE TABLE "finance_transaction_allocations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" uuid NOT NULL,
@@ -28,6 +32,14 @@ ALTER TABLE "finance_transaction_allocations" ADD CONSTRAINT "finance_transactio
 --> statement-breakpoint
 ALTER TABLE "finance_transaction_allocations" ADD CONSTRAINT "finance_transaction_allocations_category_id_finance_categories_id_fk" FOREIGN KEY ("category_id") REFERENCES "public"."finance_categories"("id") ON DELETE restrict ON UPDATE no action;
 --> statement-breakpoint
+ALTER TABLE "finance_transactions" ADD CONSTRAINT "finance_transactions_id_user_id_unique" UNIQUE ("id", "user_id");
+--> statement-breakpoint
+ALTER TABLE "finance_categories" ADD CONSTRAINT "finance_categories_id_user_id_unique" UNIQUE ("id", "user_id");
+--> statement-breakpoint
+ALTER TABLE "finance_transaction_allocations" ADD CONSTRAINT "finance_transaction_allocations_transaction_user_fk" FOREIGN KEY ("transaction_id", "user_id") REFERENCES "public"."finance_transactions"("id", "user_id") ON DELETE cascade ON UPDATE no action;
+--> statement-breakpoint
+ALTER TABLE "finance_transaction_allocations" ADD CONSTRAINT "finance_transaction_allocations_category_user_fk" FOREIGN KEY ("category_id", "user_id") REFERENCES "public"."finance_categories"("id", "user_id") ON DELETE restrict ON UPDATE no action;
+--> statement-breakpoint
 CREATE INDEX "finance_transaction_allocations_user_category_idx" ON "finance_transaction_allocations" USING btree ("user_id", "category_id");
 --> statement-breakpoint
 CREATE UNIQUE INDEX "finance_transaction_allocations_transaction_order_idx" ON "finance_transaction_allocations" USING btree ("transaction_id", "allocation_order") WHERE "state" = 'active';
@@ -36,8 +48,3 @@ ALTER TABLE "finance_category_rules" ADD COLUMN "rationale" text;
 --> statement-breakpoint
 ALTER TABLE "finance_category_rules" ADD COLUMN "evidence" jsonb DEFAULT '{}'::jsonb NOT NULL;
 --> statement-breakpoint
-INSERT INTO "finance_transaction_allocations" ("user_id", "transaction_id", "category_id", "amount_cents", "allocation_order", "treatment", "rationale")
-SELECT "user_id", "id", "category_id", "amount_cents", 0, 'personal', 'Backfilled from the posted transaction category.'
-FROM "finance_transactions"
-WHERE "pending" = false AND "category_id" IS NOT NULL
-ON CONFLICT ("transaction_id", "allocation_order") WHERE "state" = 'active' DO NOTHING;

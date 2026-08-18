@@ -471,6 +471,8 @@ export const domainProfileApprovals = pgTable(
 );
 
 export const financeSetupBackfillState = pgTable("finance_setup_backfill_state", {
+  allocationCursor: uuid("allocation_cursor"),
+  allocationsComplete: boolean("allocations_complete").notNull().default(false),
   key: text("key").primaryKey(),
   categoriesComplete: boolean("categories_complete").notNull().default(false),
   profileCursor: uuid("profile_cursor"),
@@ -1565,6 +1567,7 @@ export const financeCategories = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_categories_id_user_id_unique").on(table.id, table.userId),
     index("finance_categories_user_idx").on(table.userId),
     uniqueIndex("finance_categories_user_slug_idx").on(table.userId, table.slug),
   ],
@@ -1658,6 +1661,7 @@ export const financeTransactions = pgTable(
     ...timestamps,
   },
   (table) => [
+    uniqueIndex("finance_transactions_id_user_id_unique").on(table.id, table.userId),
     index("finance_transactions_user_date_idx").on(table.userId, table.transactionDate),
     index("finance_transactions_review_idx").on(table.userId, table.needsReview),
     index("finance_transactions_merchant_idx").on(table.userId, table.merchantId),
@@ -1714,6 +1718,14 @@ export const financeTransactionAllocations = pgTable(
     uniqueIndex("finance_transaction_allocations_transaction_order_idx")
       .on(table.transactionId, table.allocationOrder)
       .where(sql`${table.state} = 'active'`),
+    foreignKey({
+      columns: [table.transactionId, table.userId],
+      foreignColumns: [financeTransactions.id, financeTransactions.userId],
+    }),
+    foreignKey({
+      columns: [table.categoryId, table.userId],
+      foreignColumns: [financeCategories.id, financeCategories.userId],
+    }),
   ],
 );
 

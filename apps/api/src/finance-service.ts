@@ -3841,6 +3841,88 @@ export function createFinanceService({
       }
       return { confirmedMovements, paired, processed: userIds.length };
     },
+    async backfillTransactionAllocations(limit = 100) {
+      const stateKey = "finance_transaction_allocation_backfill_v1";
+      const scanLimit = Math.max(1, Math.min(500, Math.trunc(limit) || 100));
+      await db
+        .insert(financeSetupBackfillState)
+        .values({ key: stateKey })
+        .onConflictDoNothing({ target: financeSetupBackfillState.key });
+      return db.transaction(async (tx) => {
+        const [state] = await tx
+          .select()
+          .from(financeSetupBackfillState)
+          .where(eq(financeSetupBackfillState.key, stateKey))
+          .for("update", { skipLocked: true })
+          .limit(1);
+        if (!state) return { complete: false, inserted: 0, processed: 0, claimed: false };
+        if (state.allocationsComplete)
+          return { complete: true, inserted: 0, processed: 0, claimed: true };
+        const candidates = await tx
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.pending, false),
+              state.allocationCursor
+                ? gt(financeTransactions.id, state.allocationCursor)
+                : undefined,
+            ),
+          )
+          .orderBy(financeTransactions.id)
+          .limit(scanLimit)
+          .for("update", { skipLocked: true });
+        let inserted = 0;
+        for (const transaction of candidates) {
+          const [active] = await tx
+            .select({ id: financeTransactionAllocations.id })
+            .from(financeTransactionAllocations)
+            .where(
+              and(
+                eq(financeTransactionAllocations.transactionId, transaction.id),
+                eq(financeTransactionAllocations.state, "active"),
+              ),
+            )
+            .limit(1);
+          if (active || (!transaction.categoryId && !transaction.category)) continue;
+          let categoryId = transaction.categoryId;
+          if (!categoryId && transaction.category) {
+            const [category] = await tx
+              .select({ id: financeCategories.id })
+              .from(financeCategories)
+              .where(
+                and(
+                  eq(financeCategories.userId, transaction.userId),
+                  eq(financeCategories.name, transaction.category),
+                ),
+              )
+              .limit(1);
+            categoryId = category?.id ?? null;
+          }
+          if (!categoryId) continue;
+          await tx
+            .insert(financeTransactionAllocations)
+            .values({
+              allocationOrder: 0,
+              amount: transaction.amount,
+              categoryId,
+              rationale: "Backfilled from legacy category.",
+              transactionId: transaction.id,
+              treatment: "personal",
+              userId: transaction.userId,
+            })
+            .onConflictDoNothing();
+          inserted += 1;
+        }
+        const cursor = candidates.at(-1)?.id ?? state.allocationCursor;
+        const complete = candidates.length < scanLimit;
+        await tx
+          .update(financeSetupBackfillState)
+          .set({ allocationCursor: cursor, allocationsComplete: complete, updatedAt: now() })
+          .where(eq(financeSetupBackfillState.key, stateKey));
+        return { complete, inserted, processed: candidates.length, claimed: true };
+      });
+    },
     async backfillSetupIntegrity(limit = 100) {
       const stateKey = "finance_setup_integrity_v1";
       const requestedLimit = Number.isFinite(limit) ? Math.trunc(limit) : 100;
@@ -5866,7 +5948,10 @@ export function createFinanceService({
           );
         }
         const existingAllocations = await tx
-          .select({ id: financeTransactionAllocations.id })
+          .select({
+            state: financeTransactionAllocations.state,
+            treatment: financeTransactionAllocations.treatment,
+          })
           .from(financeTransactionAllocations)
           .where(eq(financeTransactionAllocations.transactionId, before.id))
           .orderBy(financeTransactionAllocations.allocationOrder)
@@ -6106,7 +6191,9 @@ export function createFinanceService({
             );
         }
         const value = await enrichTransaction(saved, tx);
-        const savedAllocations = value.allocations ?? [];
+        const savedAllocations = (value.allocations ?? []).filter(
+          (item) => item.state === "active",
+        );
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.transaction_breakdown_set",
@@ -6125,7 +6212,10 @@ export function createFinanceService({
                 : null,
             },
             before: {
-              allocationCount: existingAllocations.length,
+              allocationCount: existingAllocations.filter((item) => item.state === "active").length,
+              reimbursableAllocationCount: existingAllocations.filter(
+                (item) => item.state === "active" && item.treatment === "reimbursable",
+              ).length,
               futureRule: priorFutureRule
                 ? { category: priorFutureRule.category, scope: "normalized_merchant" }
                 : null,

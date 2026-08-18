@@ -3887,16 +3887,39 @@ export function createFinanceService({
           if (active || (!transaction.categoryId && !transaction.category)) continue;
           let categoryId = transaction.categoryId;
           if (!categoryId && transaction.category) {
-            const [category] = await tx
+            let [category] = await tx
               .select({ id: financeCategories.id })
               .from(financeCategories)
               .where(
                 and(
                   eq(financeCategories.userId, transaction.userId),
-                  eq(financeCategories.name, transaction.category),
+                  sql`lower(${financeCategories.name}) = lower(${transaction.category})`,
                 ),
               )
               .limit(1);
+            if (!category) {
+              await tx
+                .insert(financeCategories)
+                .values({
+                  group: categoryGroup(transaction.category),
+                  name: transaction.category,
+                  slug: categorySlug(transaction.category),
+                  userId: transaction.userId,
+                })
+                .onConflictDoNothing({
+                  target: [financeCategories.userId, financeCategories.slug],
+                });
+              [category] = await tx
+                .select({ id: financeCategories.id })
+                .from(financeCategories)
+                .where(
+                  and(
+                    eq(financeCategories.userId, transaction.userId),
+                    sql`lower(${financeCategories.name}) = lower(${transaction.category})`,
+                  ),
+                )
+                .limit(1);
+            }
             categoryId = category?.id ?? null;
           }
           if (!categoryId) continue;

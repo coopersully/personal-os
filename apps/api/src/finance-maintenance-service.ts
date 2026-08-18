@@ -36,6 +36,12 @@ type MutationContext = {
 };
 
 export type FinanceMaintenanceOperations = {
+  backfillTransactionAllocations?: (limit?: number) => Promise<{
+    claimed: boolean;
+    complete: boolean;
+    inserted: number;
+    processed: number;
+  }>;
   applyApprovedRules: (
     input: ApplyFinanceCategorizationsInput,
     context: MutationContext,
@@ -340,11 +346,18 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
         if (!step) break;
         const idempotencyKey = `finances:${run.rulebookVersion}:${step}`;
         if (step === "preflight") {
+          const allocationBackfill = finances.backfillTransactionAllocations
+            ? await finances.backfillTransactionAllocations(100)
+            : null;
           const observed = await assertCurrentRulebook(run);
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
-            result: { asOf: observed.asOf, freshness: observed.freshness.state },
+            result: {
+              allocationBackfill,
+              asOf: observed.asOf,
+              freshness: observed.freshness.state,
+            },
             runId,
             step,
           });

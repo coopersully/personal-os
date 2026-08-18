@@ -579,9 +579,26 @@ export const financeTransactionSchema = z.object({
   rawMerchant: z.string().min(1).max(240).optional(),
   reconciliationStatus: z.enum(["candidate", "confirmed", "matched", "not_applicable"]).optional(),
   accountId: idSchema,
+  allocations: z
+    .array(
+      z
+        .object({
+          allocationOrder: z.number().int().nonnegative(),
+          amount: moneySchema.positive(),
+          categoryId: idSchema,
+          id: idSchema,
+          rationale: z.string().max(1_000).nullable(),
+          revision: z.number().int().positive(),
+          treatment: z.enum(["personal", "reimbursable"]),
+        })
+        .strict(),
+    )
+    .optional(),
   updatedAt: isoDateTimeSchema,
 });
 export type FinanceTransaction = z.infer<typeof financeTransactionSchema>;
+
+export type FinanceTransactionAllocation = NonNullable<FinanceTransaction["allocations"]>[number];
 
 export const financeCategorySchema = z.object({
   color: z.string().nullable(),
@@ -595,11 +612,66 @@ export type FinanceCategory = z.infer<typeof financeCategorySchema>;
 
 export const financeMerchantSchema = z.object({
   aliases: z.array(z.string().min(1).max(240)),
+  behavior: z.enum(["unknown", "consistent", "mixed"]).default("unknown"),
   displayName: z.string().min(1).max(240),
   id: idSchema,
   isUserConfirmed: z.boolean(),
 });
 export type FinanceMerchant = z.infer<typeof financeMerchantSchema>;
+
+const financeAllocationInputSchema = z
+  .object({
+    amount: moneySchema.positive(),
+    categoryId: idSchema,
+    rationale: z.string().trim().min(1).max(1_000),
+    treatment: z.enum(["personal", "reimbursable"]).default("personal"),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (!Number.isInteger(value.amount * 100)) {
+      context.addIssue({
+        code: "custom",
+        message: "Allocation amounts must be expressed in exact cents.",
+        path: ["amount"],
+      });
+    }
+  });
+
+export const setFinanceTransactionBreakdownInputSchema = z
+  .object({
+    allocations: z.array(financeAllocationInputSchema).min(1).max(100),
+    expectedTransactionUpdatedAt: isoDateTimeSchema,
+    futureRule: z
+      .object({
+        categoryId: idSchema,
+        rationale: z.string().trim().min(1).max(1_000),
+      })
+      .strict()
+      .nullable()
+      .default(null),
+    rationale: z.string().trim().min(1).max(1_000),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const categoryIds = value.allocations.map((item) => item.categoryId);
+    if (new Set(categoryIds).size !== categoryIds.length) {
+      context.addIssue({
+        code: "custom",
+        message: "Use one allocation per category in a transaction breakdown.",
+        path: ["allocations"],
+      });
+    }
+    if (value.futureRule && !categoryIds.includes(value.futureRule.categoryId)) {
+      context.addIssue({
+        code: "custom",
+        message: "A future merchant rule must be supported by an allocation in this breakdown.",
+        path: ["futureRule", "categoryId"],
+      });
+    }
+  });
+export type SetFinanceTransactionBreakdownInput = z.input<
+  typeof setFinanceTransactionBreakdownInputSchema
+>;
 
 export const financeMerchantQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),

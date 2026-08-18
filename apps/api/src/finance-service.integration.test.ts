@@ -21,6 +21,7 @@ import {
   financeRecurringObligations,
   financeReviewCases,
   financeSetupBackfillState,
+  financeTransactionAllocations,
   financeTransactions,
   goals,
   migrateDatabase,
@@ -369,6 +370,7 @@ describe.sequential("finance service", () => {
       "0058_finance_provider_items",
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
+      "0061_finance_transaction_allocations",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -3227,7 +3229,7 @@ describe.sequential("finance service", () => {
     expect(sourceDecisions[0]?.merchantId).toBe(target.id);
   });
 
-  it("keeps tied merchant evidence non-actionable until one category has more confirmations", async () => {
+  it("keeps mixed merchant evidence non-actionable even when one category has more confirmations", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "merchant-evidence-tie" };
     const account = await service.createAccount(
@@ -3272,9 +3274,9 @@ describe.sequential("finance service", () => {
       })
     ).items.find((proposal) => proposal.transaction.id === tiedCandidate.id);
     expect(tiedProposal).toMatchObject({
-      confidence: 0,
+      confidence: 0.95,
       meetsPolicyThreshold: false,
-      suggestedCategory: null,
+      suggestedCategory: expect.objectContaining({ name: "Shopping" }),
     });
 
     await confirm("Shopping");
@@ -3298,9 +3300,119 @@ describe.sequential("finance service", () => {
       })
     ).items.find((proposal) => proposal.transaction.id === winningCandidate.id);
     expect(winningProposal).toMatchObject({
-      meetsPolicyThreshold: true,
+      meetsPolicyThreshold: false,
       suggestedCategory: expect.objectContaining({ name: "Shopping" }),
     });
+  });
+
+  it("atomically stores an exact-cent CVS split and derives budgets and exports from allocations", async () => {
+    const [owner, other] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "Breakdown owner",
+          email: "breakdown-owner@example.com",
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Breakdown other",
+          email: "breakdown-other@example.com",
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+      ])
+      .returning();
+    if (!owner || !other) throw new Error("Breakdown users were not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "transaction-breakdown" };
+    const categories = await service.listCategories(owner.id);
+    const byName = new Map(categories.map((category) => [category.name, category]));
+    const health = byName.get("Health");
+    const groceries = byName.get("Groceries");
+    const personalCare = byName.get("Personal Care");
+    if (!health || !groceries || !personalCare)
+      throw new Error("Breakdown categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 100, institution: "Breakdown Bank", name: "Breakdown wallet", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 62.14,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "CVS Health",
+        notes: null,
+      },
+      context,
+    );
+    const input = {
+      allocations: [
+        { amount: 20, categoryId: health.id, rationale: "Prescription" },
+        { amount: 30, categoryId: groceries.id, rationale: "Groceries" },
+        {
+          amount: 12.14,
+          categoryId: personalCare.id,
+          rationale: "Toiletries",
+          treatment: "reimbursable" as const,
+        },
+      ],
+      expectedTransactionUpdatedAt: transaction.updatedAt,
+      rationale: "Receipt itemization.",
+    };
+    const breakdown = await service.setTransactionBreakdown(transaction.id, input, context);
+    expect(breakdown.allocations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: 20, categoryId: health.id, treatment: "personal" }),
+        expect.objectContaining({ amount: 30, categoryId: groceries.id, treatment: "personal" }),
+        expect.objectContaining({
+          amount: 12.14,
+          categoryId: personalCare.id,
+          treatment: "reimbursable",
+        }),
+      ]),
+    );
+    expect(
+      (breakdown.allocations ?? []).reduce((sum, allocation) => sum + allocation.amount, 0),
+    ).toBe(62.14);
+    await expect(
+      service.setTransactionBreakdown(
+        transaction.id,
+        { ...input, expectedTransactionUpdatedAt: transaction.updatedAt },
+        { principal: financePrincipal(other.id), requestId: "transaction-breakdown-other" },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.setTransactionBreakdown(
+        transaction.id,
+        { ...input, expectedTransactionUpdatedAt: transaction.updatedAt },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await service.createBudget({ category: "Health", limit: 100, month: "2026-07" }, context);
+    await expect(service.getBudgetStatus(owner.id, "2026-07")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          budget: expect.objectContaining({ category: "Health" }),
+          spent: 20,
+        }),
+      ]),
+    );
+    await expect(service.exportData(owner.id)).resolves.toMatchObject({
+      transactions: [
+        expect.objectContaining({ id: transaction.id, allocations: expect.any(Array) }),
+      ],
+    });
+    await expect(
+      database.db
+        .select({ amount: financeTransactionAllocations.amount })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, transaction.id)),
+    ).resolves.toEqual([{ amount: 2_000 }, { amount: 3_000 }, { amount: 1_214 }]);
   });
 
   it("questions unpaired vault moves, matches card payments, and preserves rent spending", async () => {

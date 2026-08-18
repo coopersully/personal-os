@@ -9,8 +9,10 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAutomationSettings,
+  financeMerchants,
   financeProfiles,
   financeProviderItems,
+  financeTransactionAllocations,
   financeTransactions,
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
@@ -20,6 +22,54 @@ import {
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps transaction allocations owned, ordered, and aligned with migration 0061", async () => {
+    const merchants = getTableConfig(financeMerchants);
+    const allocations = getTableConfig(financeTransactionAllocations);
+    expect(merchants.columns.map((column) => column.name)).toContain("behavior");
+    expect(allocations.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "user_id",
+        "transaction_id",
+        "category_id",
+        "amount_cents",
+        "allocation_order",
+        "treatment",
+        "rationale",
+        "revision",
+      ]),
+    );
+    expect(allocations.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_transaction_allocations_user_category_idx",
+        "finance_transaction_allocations_transaction_order_idx",
+      ]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0061_finance_transaction_allocations.sql",
+      ),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_transaction_allocations"');
+    expect(migrationSql).toContain("ADD COLUMN \"behavior\" text DEFAULT 'unknown' NOT NULL");
+    expect(migrationSql).toContain('INSERT INTO "finance_transaction_allocations"');
+    expect(migrationSql).toContain('"pending" = false');
+    expect(migrationSql).toContain('"category_id" IS NOT NULL');
+    const journal = JSON.parse(
+      await readFile(
+        resolve(process.cwd(), "packages/database/migrations/meta/_journal.json"),
+        "utf8",
+      ),
+    ) as { entries: Array<{ tag: string }> };
+    expect(journal.entries.slice(-3).map((entry) => entry.tag)).toEqual([
+      "0059_finance_automation_settings",
+      "0060_finance_agent_action_reviews",
+      "0061_finance_transaction_allocations",
+    ]);
+  });
+
   it("stores bounded Finance action reviews without exposing their private payload", async () => {
     const reviews = getTableConfig(financeAgentActionReviews);
     const profiles = getTableConfig(financeProfiles);

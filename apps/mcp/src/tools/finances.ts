@@ -9,6 +9,7 @@ import {
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
+  setFinanceTransactionBreakdownInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
@@ -435,6 +436,19 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     },
     async ({ id: transactionId, ...input }) =>
       apiResult(() => api.updateFinanceTransaction(transactionId, input)),
+  );
+
+  server.registerTool(
+    "set_finance_transaction_breakdown",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Set exact, one-off category allocations for one posted transaction; Ilo returns its apply-or-review disposition.",
+      inputSchema: z.object({ id, ...setFinanceTransactionBreakdownInputSchema.shape }),
+      title: "Set finance transaction breakdown",
+    },
+    async ({ id: transactionId, ...input }) =>
+      apiResult(() => api.setFinanceTransactionBreakdown(transactionId, input)),
   );
 
   server.registerTool(

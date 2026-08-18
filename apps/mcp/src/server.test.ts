@@ -323,6 +323,22 @@ function mockApi() {
       sensitivityWarnings: [],
     })),
     setFinanceBudgetPlan: vi.fn(async (input) => input),
+    setFinanceTransactionBreakdown: vi.fn(async () => ({
+      accountId,
+      allocations: [],
+      amount: 1,
+      category: null,
+      categoryConfidence: null,
+      createdAt: now,
+      currencyCode: null,
+      date: "2026-07-13",
+      direction: "expense",
+      id,
+      merchant: "Test",
+      needsReview: false,
+      notes: null,
+      updatedAt: now,
+    })),
     maintainFinances: vi.fn(async () => ({
       id,
       scope: { type: "all_outstanding" as const },
@@ -1240,6 +1256,15 @@ describe("ilo MCP server", () => {
     await client.callTool({
       name: "update_finance_transaction",
       arguments: { category: "Dining", id: accountId },
+    });
+    await client.callTool({
+      name: "set_finance_transaction_breakdown",
+      arguments: {
+        allocations: [{ amount: 12, categoryId: id, rationale: "Receipt." }],
+        expectedTransactionUpdatedAt: now,
+        id: accountId,
+        rationale: "One-off receipt breakdown.",
+      },
     });
     await client.callTool({
       name: "update_finance_income_stream",

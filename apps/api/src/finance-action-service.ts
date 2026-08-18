@@ -33,6 +33,7 @@ import {
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
+  setFinanceTransactionBreakdownInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
@@ -61,6 +62,7 @@ export type SupportedActionKind = Extract<
   | "profile"
   | "recurring_obligation"
   | "transaction"
+  | "transaction_breakdown"
 >;
 
 type PreparedAction = {
@@ -196,6 +198,7 @@ function supportedActionKind(value: unknown): SupportedActionKind {
       "profile",
       "recurring_obligation",
       "transaction",
+      "transaction_breakdown",
     ].includes(actionKind)
   ) {
     throw new AppError("invalid_request", "The stored Finance action kind cannot be resumed.");
@@ -232,6 +235,8 @@ function semanticTargetKeys(actionKind: SupportedActionKind, input: Record<strin
           ? `transaction-create:${String(input.accountId)}:${String(input.date)}:${String(input.merchant)}`
           : `transaction:${String(input.id)}`,
       ];
+    case "transaction_breakdown":
+      return [`transaction:${String(input.id)}`];
     case "income_stream":
       return [`income:${String(input.id)}`];
   }
@@ -1176,6 +1181,68 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           [transactionSource(item, account)],
         );
       }
+      case "transaction_breakdown": {
+        const input = parse<Record<string, unknown>>(setFinanceTransactionBreakdownInputSchema);
+        const id = typeof rawInput.id === "string" ? rawInput.id : "";
+        if (!id || !input)
+          return missing("Provide a transaction ID and exact transaction allocations.", [
+            expectedAnswer("id", "string"),
+            expectedAnswer("allocations", "object_array", { example: "[...]" }),
+            expectedAnswer("expectedTransactionUpdatedAt", "string"),
+            expectedAnswer("rationale", "string"),
+          ]);
+        const item = await row(
+          lockRead(
+            executor
+              .select()
+              .from(financeTransactions)
+              .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
+              .orderBy(financeTransactions.id)
+              .limit(1),
+          ),
+          "Choose one of your Finance transactions.",
+          [expectedAnswer("id", "string")],
+        );
+        if ("question" in item) return item;
+        if (item.updatedAt.toISOString() !== String(input.expectedTransactionUpdatedAt)) {
+          return missing(
+            "The displayed transaction revision is stale. Refresh it before setting a breakdown.",
+            [expectedAnswer("expectedTransactionUpdatedAt", "string")],
+          );
+        }
+        const allocationCategoryIds = (input.allocations as Array<{ categoryId: string }>).map(
+          (allocation) => allocation.categoryId,
+        );
+        const categories = await lockRead(
+          executor
+            .select({ id: financeCategories.id })
+            .from(financeCategories)
+            .where(
+              and(
+                eq(financeCategories.userId, userId),
+                inArray(financeCategories.id, allocationCategoryIds),
+              ),
+            )
+            .orderBy(financeCategories.id),
+        );
+        if (categories.length !== allocationCategoryIds.length) {
+          return missing("Every transaction allocation category must belong to you.", [
+            expectedAnswer("allocations", "object_array", { example: "[...]" }),
+          ]);
+        }
+        return prepared(
+          { ...input, id },
+          item.updatedAt.toISOString(),
+          [
+            {
+              entityId: item.id,
+              entityType: "finance_transaction",
+              summary: `Set ${item.merchant} transaction breakdown with ${(input.allocations as unknown[]).length} allocations.`,
+            },
+          ],
+          [localSource(item.id, item.updatedAt.toISOString())],
+        );
+      }
       case "income_stream": {
         const input = parse<Record<string, unknown>>(updateFinanceIncomeStreamInputSchema);
         const id = typeof rawInput.id === "string" ? rawInput.id : "";
@@ -1330,6 +1397,14 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               privilegedContext as never,
               executor as never,
             );
+      case "transaction_breakdown":
+        return invoke(
+          finances.setTransactionBreakdown,
+          String(input.id),
+          input as never,
+          privilegedContext as never,
+          executor as never,
+        );
     }
     return assertNever(prepared.actionKind);
   }
@@ -1630,7 +1705,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           semanticTargetKeys: review.semanticTargetKeys as string[],
         };
         const actionContext =
-          review.actionKind === "transaction"
+          review.actionKind === "transaction" || review.actionKind === "transaction_breakdown"
             ? requestingAgentContext(context, review.requestingAgentId)
             : context;
         const current = await revalidate(

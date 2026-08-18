@@ -1579,6 +1579,10 @@ export const financeMerchants = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     displayName: text("display_name").notNull(),
     normalizedName: text("normalized_name").notNull(),
+    behavior: text("behavior")
+      .$type<"unknown" | "consistent" | "mixed">()
+      .notNull()
+      .default("unknown"),
     isUserConfirmed: boolean("is_user_confirmed").notNull().default(false),
     ...timestamps,
   },
@@ -1669,6 +1673,41 @@ export const financeTransactions = pgTable(
     check(
       "finance_transactions_currency_code_check",
       sql`${table.currencyCode} IS NULL OR ${table.currencyCode} ~ '^[A-Z]{3}$'`,
+    ),
+  ],
+);
+
+export const financeTransactionAllocations = pgTable(
+  "finance_transaction_allocations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id")
+      .notNull()
+      .references(() => financeTransactions.id, { onDelete: "cascade" }),
+    categoryId: uuid("category_id")
+      .notNull()
+      .references(() => financeCategories.id, { onDelete: "restrict" }),
+    amount: integer("amount_cents").notNull(),
+    allocationOrder: integer("allocation_order").notNull(),
+    treatment: text("treatment").$type<"personal" | "reimbursable">().notNull().default("personal"),
+    rationale: text("rationale"),
+    revision: integer("revision").notNull().default(1),
+    ...timestamps,
+  },
+  (table) => [
+    check("finance_transaction_allocations_amount_check", sql`${table.amount} > 0`),
+    check("finance_transaction_allocations_order_check", sql`${table.allocationOrder} >= 0`),
+    check(
+      "finance_transaction_allocations_treatment_check",
+      sql`${table.treatment} IN ('personal', 'reimbursable')`,
+    ),
+    index("finance_transaction_allocations_user_category_idx").on(table.userId, table.categoryId),
+    uniqueIndex("finance_transaction_allocations_transaction_order_idx").on(
+      table.transactionId,
+      table.allocationOrder,
     ),
   ],
 );

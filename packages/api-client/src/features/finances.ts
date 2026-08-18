@@ -43,6 +43,7 @@ import type {
   MergeFinanceMerchantsInput,
   ResolveFinanceAlertInput,
   SetFinanceBudgetPlanInput,
+  SetFinanceTransactionBreakdownInput,
   UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
@@ -174,6 +175,18 @@ export function createFinanceApi(request: FinanceRequest) {
         method: "PUT",
       });
       return actionResult(response, "plan");
+    },
+    async setFinanceTransactionBreakdown(
+      id: string,
+      input: SetFinanceTransactionBreakdownInput,
+    ): Promise<FinanceActionOutcome<FinanceTransaction> | FinanceTransaction> {
+      const response = await request<
+        FinanceActionResponse<FinanceTransaction> | { transaction: FinanceTransaction }
+      >(`/v1/finances/transactions/${id}/breakdown`, {
+        body: JSON.stringify(input),
+        method: "PUT",
+      });
+      return actionResult(response, "transaction");
     },
     async maintainFinances(
       scope: MaintenanceScope = { type: "all_outstanding" },

@@ -17,6 +17,7 @@ import {
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
+  setFinanceTransactionBreakdownInputSchema,
   updateFinanceAutomationSettingsInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
@@ -422,6 +423,19 @@ export function registerFinanceRoutes({
     return act(context, "transaction", input, async () =>
       context.json({
         transaction: await finances.updateTransaction(
+          input.id,
+          body,
+          financeMutationContext(context),
+        ),
+      }),
+    );
+  });
+  app.put("/v1/finances/transactions/:id/breakdown", async (context) => {
+    const body = await parseBody(context, setFinanceTransactionBreakdownInputSchema);
+    const input = { id: routeId(context), ...body };
+    return act(context, "transaction_breakdown", input, async () =>
+      context.json({
+        transaction: await finances.setTransactionBreakdown(
           input.id,
           body,
           financeMutationContext(context),

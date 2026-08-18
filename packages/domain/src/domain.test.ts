@@ -1491,6 +1491,35 @@ describe("domain schemas", () => {
 });
 
 describe("finance agent contracts", () => {
+  it("requires an exact-cent, one-off transaction breakdown by default", async () => {
+    const { setFinanceTransactionBreakdownInputSchema } = await import("./finance.js");
+    const input = {
+      allocations: [
+        { amount: 20, categoryId: id, rationale: "Medication" },
+        { amount: 30, categoryId: "22222222-2222-4222-8222-222222222222", rationale: "Food" },
+        {
+          amount: 12.14,
+          categoryId: "33333333-3333-4333-8333-333333333333",
+          rationale: "Toiletries",
+        },
+      ],
+      expectedTransactionUpdatedAt: "2026-07-13T12:00:00.000Z",
+      rationale: "Split the receipt.",
+    };
+
+    expect(setFinanceTransactionBreakdownInputSchema.parse(input)).toMatchObject({
+      futureRule: null,
+    });
+    expect(
+      setFinanceTransactionBreakdownInputSchema.safeParse({
+        ...input,
+        allocations: [
+          ...input.allocations.slice(0, 2),
+          { ...input.allocations[2], amount: 12.141 },
+        ],
+      }).success,
+    ).toBe(false);
+  });
   it("keeps public Finance question answer descriptors bounded and private-payload free", () => {
     const question = {
       actionKind: "profile" as const,

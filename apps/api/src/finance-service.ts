@@ -22,6 +22,7 @@ import {
   financeRecurringObligations,
   financeReviewCases,
   financeSetupBackfillState,
+  financeTransactionAllocations,
   financeTransactions,
   goals,
   users,
@@ -58,6 +59,7 @@ import type {
   FinanceReviewCase,
   FinanceReviewDecisionInput,
   FinanceTransaction,
+  FinanceTransactionAllocation,
   FinanceTransactionQuery,
   FinanceWealthSummary,
   MaintenanceScope,
@@ -65,6 +67,7 @@ import type {
   MergeFinanceMerchantsInput,
   ResolveFinanceAlertInput,
   SetFinanceBudgetPlanInput,
+  SetFinanceTransactionBreakdownInput,
   UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
@@ -85,6 +88,7 @@ import {
   selectEffectiveRecord,
 } from "./finance-cashflow.js";
 import { parseFinanceCsv } from "./finance-csv.js";
+import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
 import { reliableMonthlyCapacity } from "./finance-planning.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import {
@@ -449,9 +453,11 @@ function guidedDomainProfile(
 function transaction(
   row: typeof financeTransactions.$inferSelect,
   displayMerchant = row.merchant,
+  allocations: FinanceTransactionAllocation[] = [],
 ): FinanceTransaction {
   return {
     accountId: row.accountId,
+    allocations,
     amount: row.amount / 100,
     category: row.category,
     categoryConfidence: row.categoryConfidence === null ? null : row.categoryConfidence / 10_000,
@@ -482,6 +488,19 @@ function transaction(
     updatedAt: row.updatedAt.toISOString(),
   };
 }
+function transactionAllocation(
+  row: typeof financeTransactionAllocations.$inferSelect,
+): FinanceTransactionAllocation {
+  return {
+    allocationOrder: row.allocationOrder,
+    amount: row.amount / 100,
+    categoryId: row.categoryId,
+    id: row.id,
+    rationale: row.rationale,
+    revision: row.revision,
+    treatment: row.treatment,
+  };
+}
 function budget(row: typeof financeBudgets.$inferSelect): FinanceBudget {
   return {
     category: row.category,
@@ -498,6 +517,7 @@ function merchant(
 ): FinanceMerchant {
   return {
     aliases,
+    behavior: row.behavior,
     displayName: row.displayName,
     id: row.id,
     isUserConfirmed: row.isUserConfirmed,
@@ -847,6 +867,12 @@ export function createFinanceService({
     executor: FinanceReadExecutor = db,
   ) {
     if (!merchantId) return null;
+    const [merchantRecord] = await executor
+      .select()
+      .from(financeMerchants)
+      .where(and(eq(financeMerchants.id, merchantId), eq(financeMerchants.userId, userId)))
+      .limit(1);
+    if (!merchantRecord) return null;
     const decisions = await executor
       .select({
         categoryId: financeClassificationDecisions.categoryId,
@@ -858,30 +884,31 @@ export function createFinanceService({
         and(
           eq(financeClassificationDecisions.userId, userId),
           eq(financeClassificationDecisions.merchantId, merchantId),
-          eq(financeClassificationDecisions.outcome, "confirmed"),
+          inArray(financeClassificationDecisions.outcome, ["confirmed", "corrected"]),
         ),
       );
-    const counts = new Map<string, { category: string; confirmations: number }>();
-    for (const decision of decisions) {
-      if (!decision.categoryId) continue;
-      const current = counts.get(decision.categoryId) ?? {
-        category: decision.categoryName,
-        confirmations: 0,
-      };
-      current.confirmations += 1;
-      counts.set(decision.categoryId, current);
-    }
-    const ranked = [...counts.values()].sort((a, b) => b.confirmations - a.confirmations);
-    const strongest = ranked[0];
-    if (!strongest) return null;
-    if (ranked[1]?.confirmations === strongest.confirmations) return null;
+    const evaluation = evaluateMerchantEvidence({
+      behavior: merchantRecord.behavior,
+      merchantName: merchantRecord.displayName,
+      observations: decisions
+        .filter(
+          (decision): decision is typeof decision & { categoryId: string } =>
+            decision.categoryId !== null,
+        )
+        .map((decision) => ({
+          category: decision.categoryName,
+          outcome: decision.outcome as "confirmed" | "corrected",
+        })),
+    });
+    if (!evaluation.category) return null;
     return {
-      category: strongest.category,
-      // Two independent confirmations are enough to pass the adjusted threshold;
-      // a single one remains a reviewable suggestion.
-      confidence:
-        Math.round(Math.min(0.99, 0.935 + strongest.confirmations * 0.015) * 10_000) / 10_000,
-      confirmations: strongest.confirmations,
+      behavior: evaluation.behavior,
+      category: evaluation.category,
+      confidence: evaluation.confidence,
+      confirmations: decisions.filter(
+        (decision) =>
+          decision.outcome === "confirmed" && decision.categoryName === evaluation.category,
+      ).length,
     };
   }
   async function automaticCategorization(
@@ -908,12 +935,14 @@ export function createFinanceService({
       ? await categoryForProposalName(userId, categoryName, executor)
       : null;
     const threshold = suggestedCategory
-      ? await merchantConfidenceThreshold(
-          userId,
-          item.merchantId ?? null,
-          suggestedCategory.id,
-          executor,
-        )
+      ? evidence?.behavior === "mixed"
+        ? initialAgentThreshold
+        : await merchantConfidenceThreshold(
+            userId,
+            item.merchantId ?? null,
+            suggestedCategory.id,
+            executor,
+          )
       : initialAgentThreshold;
     const confidence =
       automatic.confidence === null ? (evidence?.confidence ?? 0) : automatic.confidence / 10_000;
@@ -1529,9 +1558,15 @@ export function createFinanceService({
         )[0]
       : null;
     const normalizedDisplayName = normalizedMerchant(row.merchant).replaceAll("-", " ");
+    const allocations = await executor
+      .select()
+      .from(financeTransactionAllocations)
+      .where(eq(financeTransactionAllocations.transactionId, row.id))
+      .orderBy(financeTransactionAllocations.allocationOrder);
     return transaction(
       row,
       merchant?.displayName ?? titleCaseMerchant(normalizedDisplayName || row.merchant),
+      allocations.map(transactionAllocation),
     );
   }
 
@@ -1552,12 +1587,30 @@ export function createFinanceService({
       );
     }
     const merchantNames = new Map(merchants.map((item) => [item.id, item.displayName]));
+    const transactionIds = rows.map((item) => item.id);
+    const allocations = transactionIds.length
+      ? await executor
+          .select()
+          .from(financeTransactionAllocations)
+          .where(inArray(financeTransactionAllocations.transactionId, transactionIds))
+          .orderBy(
+            financeTransactionAllocations.transactionId,
+            financeTransactionAllocations.allocationOrder,
+          )
+      : [];
+    const allocationsByTransaction = new Map<string, FinanceTransactionAllocation[]>();
+    for (const allocation of allocations) {
+      const items = allocationsByTransaction.get(allocation.transactionId) ?? [];
+      items.push(transactionAllocation(allocation));
+      allocationsByTransaction.set(allocation.transactionId, items);
+    }
     return rows.map((item) => {
       const normalizedDisplayName = normalizedMerchant(item.merchant).replaceAll("-", " ");
       return transaction(
         item,
         (item.merchantId ? merchantNames.get(item.merchantId) : null) ??
           titleCaseMerchant(normalizedDisplayName || item.merchant),
+        allocationsByTransaction.get(item.id) ?? [],
       );
     });
   }
@@ -2118,6 +2171,20 @@ export function createFinanceService({
       if (!updated) {
         throw new AppError("conflict", "The transaction changed while it was being categorized.");
       }
+      if (!updated.pending) {
+        await tx
+          .delete(financeTransactionAllocations)
+          .where(eq(financeTransactionAllocations.transactionId, updated.id));
+        await tx.insert(financeTransactionAllocations).values({
+          allocationOrder: 0,
+          amount: updated.amount,
+          categoryId: category.id,
+          rationale: decision.rationale,
+          transactionId: updated.id,
+          treatment: "personal",
+          userId: context.principal.userId,
+        });
+      }
       if (!current.pending) {
         await tx.insert(financeClassificationDecisions).values({
           categoryId: category.id,
@@ -2153,7 +2220,7 @@ export function createFinanceService({
             target: [financeCategoryRules.userId, financeCategoryRules.merchantNormalized],
           });
       }
-      const after = transaction(updated);
+      const after = await enrichTransaction(updated, tx);
       await tx.insert(auditEvents).values(
         auditValues({
           action: options.auditAction ?? "finance.transaction_categorized",
@@ -4025,12 +4092,35 @@ export function createFinanceService({
       return executor ? merge(executor) : db.transaction(merge);
     },
     async getBudgetStatus(userId: string, month = now().toISOString().slice(0, 7)) {
-      const [budgets, transactions] = await Promise.all([
+      const [budgets, allocations, transactions] = await Promise.all([
         db
           .select()
           .from(financeBudgets)
           .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, month)))
           .orderBy(financeBudgets.category),
+        db
+          .select({
+            allocation: financeTransactionAllocations,
+            category: financeCategories,
+            transaction: financeTransactions,
+          })
+          .from(financeTransactionAllocations)
+          .innerJoin(
+            financeTransactions,
+            eq(financeTransactions.id, financeTransactionAllocations.transactionId),
+          )
+          .innerJoin(
+            financeCategories,
+            eq(financeCategories.id, financeTransactionAllocations.categoryId),
+          )
+          .where(
+            and(
+              eq(financeTransactionAllocations.userId, userId),
+              eq(financeTransactions.userId, userId),
+              gte(financeTransactions.transactionDate, `${month}-01`),
+              lt(financeTransactions.transactionDate, `${nextMonth(month)}-01`),
+            ),
+          ),
         db
           .select()
           .from(financeTransactions)
@@ -4042,10 +4132,28 @@ export function createFinanceService({
             ),
           ),
       ]);
+      const allocatedTransactionIds = new Set(allocations.map((item) => item.transaction.id));
       return budgets.map((item) => {
-        const spent = transactions
-          .filter((transaction) => transaction.category === item.category)
+        const allocationSpent = allocations
+          .filter(({ category }) => category.name === item.category)
+          .reduce(
+            (sum, { allocation, transaction }) =>
+              sum +
+              (budgetImpact(transaction) < 0
+                ? -allocation.amount
+                : budgetImpact(transaction) > 0
+                  ? allocation.amount
+                  : 0),
+            0,
+          );
+        const legacySpent = transactions
+          .filter(
+            (transaction) =>
+              !allocatedTransactionIds.has(transaction.id) &&
+              transaction.category === item.category,
+          )
           .reduce((sum, transaction) => sum + budgetImpact(transaction), 0);
+        const spent = allocationSpent + legacySpent;
         return {
           budget: budget(item),
           remaining: (item.limit - spent) / 100,
@@ -5033,6 +5141,17 @@ export function createFinanceService({
           )[0],
           "The transaction could not be created.",
         );
+        if (categoryRecord && !created.pending) {
+          await tx.insert(financeTransactionAllocations).values({
+            allocationOrder: 0,
+            amount: created.amount,
+            categoryId: categoryRecord.id,
+            rationale: "Initial transaction category.",
+            transactionId: created.id,
+            treatment: "personal",
+            userId: context.principal.userId,
+          });
+        }
         await tx.insert(auditEvents).values(
           auditValues({
             action: "finance.transaction_created",
@@ -5057,7 +5176,7 @@ export function createFinanceService({
           });
         }
         await refreshCashflowIntelligence(context.principal.userId, tx);
-        return transaction(created);
+        return enrichTransaction(created, tx);
       };
       return executor ? write(executor) : db.transaction(write);
     },
@@ -5615,6 +5734,171 @@ export function createFinanceService({
         unresolvedReviews: reviews.length,
       };
     },
+    async setTransactionBreakdown(
+      id: string,
+      input: SetFinanceTransactionBreakdownInput,
+      context: MutationContext,
+      executor?: FinanceActionWriteExecutor,
+    ) {
+      if (context.principal.actorType === "agent" && context.financePreparedAction !== true) {
+        throw new AppError(
+          "forbidden",
+          "Finance transaction breakdowns require an explicitly prepared Finance action.",
+        );
+      }
+      const write = async (tx: FinanceActionWriteExecutor) => {
+        const [before] = await tx
+          .select()
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.id, id),
+              eq(financeTransactions.userId, context.principal.userId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!before) throw new AppError("not_found", "The finance transaction was not found.");
+        if (before.updatedAt.toISOString() !== input.expectedTransactionUpdatedAt) {
+          throw new AppError("conflict", "The transaction changed before its breakdown was saved.");
+        }
+        if (before.pending) {
+          throw new AppError(
+            "invalid_request",
+            "Pending transactions cannot receive a final breakdown.",
+          );
+        }
+        const categoryIds = input.allocations.map((item) => item.categoryId);
+        const categories = await tx
+          .select()
+          .from(financeCategories)
+          .where(
+            and(
+              eq(financeCategories.userId, context.principal.userId),
+              inArray(financeCategories.id, categoryIds),
+            ),
+          )
+          .orderBy(financeCategories.id)
+          .for("update");
+        if (categories.length !== categoryIds.length) {
+          throw new AppError(
+            "not_found",
+            "Every transaction allocation category must belong to you.",
+          );
+        }
+        const amounts = input.allocations.map((item) => Math.round(item.amount * 100));
+        if (amounts.reduce((sum, amount) => sum + amount, 0) !== before.amount) {
+          throw new AppError(
+            "invalid_request",
+            "Transaction allocation amounts must sum exactly to the transaction amount.",
+          );
+        }
+        await tx
+          .select({ id: financeTransactionAllocations.id })
+          .from(financeTransactionAllocations)
+          .where(eq(financeTransactionAllocations.transactionId, before.id))
+          .orderBy(financeTransactionAllocations.allocationOrder)
+          .for("update");
+        await tx
+          .delete(financeTransactionAllocations)
+          .where(eq(financeTransactionAllocations.transactionId, before.id));
+        const categoryById = new Map(categories.map((category) => [category.id, category]));
+        await tx.insert(financeTransactionAllocations).values(
+          input.allocations.map((allocation, allocationOrder) => ({
+            allocationOrder,
+            amount: amounts[allocationOrder] ?? 0,
+            categoryId: allocation.categoryId,
+            rationale: allocation.rationale,
+            transactionId: before.id,
+            treatment: allocation.treatment ?? "personal",
+            userId: context.principal.userId,
+          })),
+        );
+        const single = input.allocations.length === 1 ? input.allocations[0] : undefined;
+        const [updated] = await tx
+          .update(financeTransactions)
+          .set({
+            category: single ? (categoryById.get(single.categoryId)?.name ?? null) : null,
+            categoryConfidence: 10_000,
+            categoryDecidedAt: now(),
+            categoryId: single?.categoryId ?? null,
+            categoryRationale: input.rationale,
+            categorySource: context.principal.actorType === "user" ? "user" : "agent",
+            needsReview: false,
+            updatedAt: now(),
+          })
+          .where(eq(financeTransactions.id, before.id))
+          .returning();
+        const saved = requireDatabaseRecord(
+          updated,
+          "The transaction breakdown could not be saved.",
+        );
+        if (input.futureRule) {
+          const category = categoryById.get(input.futureRule.categoryId);
+          if (!category) throw new AppError("not_found", "The future rule category was not found.");
+          await tx
+            .insert(financeCategoryRules)
+            .values({
+              category: category.name,
+              merchantNormalized: normalizedMerchant(before.merchant),
+              userId: context.principal.userId,
+            })
+            .onConflictDoUpdate({
+              set: { category: category.name, updatedAt: now() },
+              target: [financeCategoryRules.userId, financeCategoryRules.merchantNormalized],
+            });
+        }
+        if (before.merchantId) {
+          const decisions = await tx
+            .select({
+              categoryName: financeClassificationDecisions.categoryName,
+              outcome: financeClassificationDecisions.outcome,
+            })
+            .from(financeClassificationDecisions)
+            .where(eq(financeClassificationDecisions.merchantId, before.merchantId));
+          const evaluation = evaluateMerchantEvidence({
+            merchantName: before.merchant,
+            observations: decisions
+              .filter(
+                (decision) => decision.outcome === "confirmed" || decision.outcome === "corrected",
+              )
+              .map((decision) => ({
+                category: decision.categoryName,
+                outcome: decision.outcome as "confirmed" | "corrected",
+              })),
+          });
+          await tx
+            .update(financeMerchants)
+            .set({ behavior: evaluation.behavior, updatedAt: now() })
+            .where(
+              and(
+                eq(financeMerchants.id, before.merchantId),
+                eq(financeMerchants.userId, context.principal.userId),
+              ),
+            );
+        }
+        const value = await enrichTransaction(saved, tx);
+        const savedAllocations = value.allocations ?? [];
+        await tx.insert(auditEvents).values(
+          auditValues({
+            action: "finance.transaction_breakdown_set",
+            after: {
+              allocationCount: savedAllocations.length,
+              reimbursableAllocationCount: savedAllocations.filter(
+                (item) => item.treatment === "reimbursable",
+              ).length,
+              futureRuleCreated: input.futureRule != null,
+            },
+            before: { allocationCount: 0, transactionUpdatedAt: before.updatedAt.toISOString() },
+            entityId: before.id,
+            entityType: "finance_transaction",
+            ...context,
+          }),
+        );
+        return value;
+      };
+      return executor ? write(executor) : db.transaction(write);
+    },
     async exportData(userId: string): Promise<FinanceExport> {
       const [
         accounts,
@@ -5777,6 +6061,22 @@ export function createFinanceService({
           )[0],
           "The transaction could not be updated.",
         );
+        if (input.category !== undefined && !updated.pending) {
+          await tx
+            .delete(financeTransactionAllocations)
+            .where(eq(financeTransactionAllocations.transactionId, updated.id));
+          if (categoryRecord) {
+            await tx.insert(financeTransactionAllocations).values({
+              allocationOrder: 0,
+              amount: updated.amount,
+              categoryId: categoryRecord.id,
+              rationale: "Categorized directly by the user.",
+              transactionId: updated.id,
+              treatment: "personal",
+              userId: context.principal.userId,
+            });
+          }
+        }
         await tx.insert(auditEvents).values(
           auditValues({
             action:
@@ -5843,7 +6143,7 @@ export function createFinanceService({
               });
           }
         }
-        return transaction(updated);
+        return enrichTransaction(updated, tx);
       };
       return executor ? write(executor) : db.transaction(write);
     },

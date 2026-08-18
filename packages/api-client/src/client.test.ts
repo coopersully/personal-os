@@ -410,6 +410,7 @@ const financeBudget: FinanceBudget = {
 };
 const financeMerchant: FinanceMerchant = {
   aliases: ["CORNER STORE #102"],
+  behavior: "unknown",
   displayName: "Corner Store",
   id,
   isUserConfirmed: false,
@@ -1267,6 +1268,11 @@ describe("ilo API client", () => {
       replace: true,
       scenarioFingerprint: "scenario-fingerprint",
     };
+    const breakdown = {
+      allocations: [{ amount: 12, categoryId: id, rationale: "Receipt." }],
+      expectedTransactionUpdatedAt: now,
+      rationale: "One-off receipt breakdown.",
+    };
     const api = createApiClient({
       baseUrl: "https://api.example.com",
       fetch: async (input, init) => {
@@ -1278,12 +1284,18 @@ describe("ilo API client", () => {
         });
         if (url.pathname === "/v1/finances/scenarios/compare") return json({ scenario });
         if (url.pathname === "/v1/finances/budget-plan") return json({ plan: budgetPlan });
+        if (url.pathname === `/v1/finances/transactions/${id}/breakdown`)
+          return json({ transaction: { allocations: [], id } });
         return json({ error: { code: "not_found", message: "Not found" } }, 404);
       },
     });
 
     await expect(api.compareFinanceScenarios(scenarioInput)).resolves.toEqual(scenario);
     await expect(api.setFinanceBudgetPlan(budgetPlan)).resolves.toEqual(budgetPlan);
+    await expect(api.setFinanceTransactionBreakdown(id, breakdown)).resolves.toEqual({
+      allocations: [],
+      id,
+    });
 
     expect(requests).toEqual([
       {
@@ -1295,6 +1307,11 @@ describe("ilo API client", () => {
         body: JSON.stringify(budgetPlan),
         method: "PUT",
         path: "/v1/finances/budget-plan",
+      },
+      {
+        body: JSON.stringify(breakdown),
+        method: "PUT",
+        path: `/v1/finances/transactions/${id}/breakdown`,
       },
     ]);
   });

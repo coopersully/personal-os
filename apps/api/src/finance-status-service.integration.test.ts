@@ -250,10 +250,19 @@ describe.sequential("Finance status service", () => {
       status: "cancelled",
       userId,
     });
+    await database.db.insert(financeReviewCases).values({
+      rationale: "Dinner amount is materially above its robust merchant baseline.",
+      reason: "possible_reimbursement",
+      transactionId: expense.id,
+      userId,
+    });
     await expect(
       service().getFinanceStatus(userId, { type: "all_outstanding" }),
     ).resolves.toMatchObject({
-      details: { month: { spending: 210 }, reimbursements: { open: 0, overdue: 0 } },
+      details: {
+        month: { spending: 210 },
+        reimbursements: { anomalies: 1, open: 0, overdue: 0 },
+      },
     });
   });
 
@@ -317,6 +326,7 @@ describe.sequential("Finance status service", () => {
     ]);
     expect(status.recommendedNextOperation).toMatchObject({ operation: "answer_finance_question" });
     expect(status.details.reimbursements).toEqual({
+      anomalies: 0,
       expected: 0,
       needsInput: 0,
       open: 0,

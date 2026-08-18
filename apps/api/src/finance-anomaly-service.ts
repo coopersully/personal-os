@@ -6,10 +6,11 @@ type Observation = {
   date: string;
   id: string;
   merchant: string;
+  sourceRef: MaterialSourceReference;
 };
 type Input = {
   budgetMaterialityCents: number;
-  expectedRecurring?: boolean;
+  expectedRecurring?: { expectedAmountCents: number; toleranceCents: number };
   history: Observation[];
   reimbursementExpectedCents?: number;
   transaction: Observation;
@@ -33,7 +34,12 @@ function median(values: number[]) {
 
 /** Uses robust median absolute deviation rather than a universal dollar cutoff. */
 export function detectFinanceAnomalies(input: Input): FinanceAnomaly | null {
-  if (input.expectedRecurring) return null;
+  if (
+    input.expectedRecurring &&
+    Math.abs(input.transaction.amountCents - input.expectedRecurring.expectedAmountCents) <=
+      input.expectedRecurring.toleranceCents
+  )
+    return null;
   const merchant = input.history.filter((item) => item.merchant === input.transaction.merchant);
   const category = input.history.filter((item) => item.category === input.transaction.category);
   const sample = merchant.length >= 5 ? merchant : category;
@@ -52,12 +58,6 @@ export function detectFinanceAnomalies(input: Input): FinanceAnomaly | null {
     baselineSource: merchant.length >= 5 ? "merchant" : "category",
     rationale: `Amount is materially above its robust ${merchant.length >= 5 ? "merchant" : "category"} baseline of $${(baseline / 100).toFixed(2)}.${reimbursement}`,
     severity: "warning",
-    sourceRefs: sample.map((item) => ({
-      accountId: null,
-      provider: "local",
-      remoteId: item.id,
-      revision: item.date,
-      sourceType: "finance_transaction",
-    })),
+    sourceRefs: [input.transaction.sourceRef, ...sample.map((item) => item.sourceRef)],
   };
 }

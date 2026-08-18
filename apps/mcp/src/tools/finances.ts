@@ -454,9 +454,9 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   server.registerTool(
     "reconcile_finance_reimbursement",
     {
-      annotations: writeAnnotations,
+      annotations: { ...writeAnnotations, destructiveHint: true },
       description:
-        "Create, match a ledger credit to, or cancel a reimbursement. Ilo returns applied, pending_review, or needs_input; it never executes an external payment.",
+        "Create, evidence-match a ledger credit to, or cancel a reimbursement. This can change Finance projections and may require review; Ilo never executes an external payment.",
       inputSchema: reconcileFinanceReimbursementInputSchema,
       title: "Reconcile finance reimbursement",
     },

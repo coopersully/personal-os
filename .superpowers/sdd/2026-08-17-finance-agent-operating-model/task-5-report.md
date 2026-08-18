@@ -38,3 +38,17 @@ Batch B validation completed:
 - `pnpm exec vitest run apps/api/src/finance-reimbursement-service.integration.test.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts apps/api/src/finance-service.integration.test.ts` — 120 passing.
 - API, API-client, MCP, Database, and Domain typechecks.
 - Biome checks for changed API, Domain, and Database implementation files.
+
+## Batch C anomaly and ambiguous-credit intelligence
+
+**Status: DONE**
+
+The robust reimbursement anomaly detector now runs through Finance maintenance question refresh, so it produces durable, bounded `possible_reimbursement` review cases rather than isolated detector output. It uses merchant history only with five comparable observations, otherwise category history; combines median/MAD with category-budget materiality; and suppresses only recurring charges within their configured expected amount and tolerance. Changed recurring charges remain reviewable. Detector source references are now canonical transaction references with the real provider, account, remote ID, and revision.
+
+Maintenance also triages only plausible unmatched reimbursement credits. It excludes pending, transfer, payroll/salary, ordinary income, refund, and fully matched credits; then requires a reimbursement-oriented descriptor plus date/amount or payer evidence against an outstanding case. A plausible combined Venmo-style credit creates a `needs_input` review that explicitly permits partial matching across cases, never an automatic payment or brute-force match. Finance status reports these plausible unmatched credits and reimbursement-anomaly counts, while MCP marks the combined reconciliation/cancellation operation as a review-governed destructive Finance projection mutation.
+
+Batch C validation completed:
+
+- `pnpm exec vitest run apps/api/src/finance-anomaly-service.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts apps/mcp/src/tool-catalog.test.ts apps/mcp/src/server.test.ts` — 88 passing.
+- API, API-client, MCP, Database, and Domain typechecks.
+- Biome and `git diff --check` for changed Task 5 files.

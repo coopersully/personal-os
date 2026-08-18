@@ -817,6 +817,7 @@ export const financeReviewCaseSchema = z.object({
     "low_confidence",
     "one_time",
     "possible_duplicate",
+    "possible_reimbursement",
     "possible_transfer",
     "refund_or_reversal",
     "unknown_merchant",

@@ -91,6 +91,7 @@ import {
   matchedReimbursementCentsByCredit,
   personalAllocationCents,
 } from "./finance-allocation-projections.js";
+import { detectFinanceAnomalies } from "./finance-anomaly-service.js";
 import {
   cadenceFromDates,
   forecastCashflow,
@@ -1813,6 +1814,7 @@ export function createFinanceService({
       | "low_confidence"
       | "one_time"
       | "possible_duplicate"
+      | "possible_reimbursement"
       | "possible_transfer"
       | "unknown_merchant",
     suggestedCategoryId: string | null,
@@ -3196,6 +3198,7 @@ export function createFinanceService({
         low_confidence: 0,
         one_time: 0,
         possible_duplicate: 0,
+        possible_reimbursement: 0,
         possible_transfer: 0,
         refund_or_reversal: 0,
         unknown_merchant: 0,
@@ -4906,6 +4909,195 @@ export function createFinanceService({
               proposal.rationale,
             );
         openByTransaction.set(row.id, review);
+      }
+      const [accounts, budgets, allocations, reimbursementRows, reimbursementMatches, obligations] =
+        await Promise.all([
+          db.select().from(financeAccounts).where(eq(financeAccounts.userId, userId)),
+          db.select().from(financeBudgets).where(eq(financeBudgets.userId, userId)),
+          db
+            .select()
+            .from(financeTransactionAllocations)
+            .where(eq(financeTransactionAllocations.userId, userId)),
+          db.select().from(financeReimbursements).where(eq(financeReimbursements.userId, userId)),
+          db
+            .select()
+            .from(financeReimbursementMatches)
+            .where(eq(financeReimbursementMatches.userId, userId)),
+          db
+            .select()
+            .from(financeRecurringObligations)
+            .where(
+              and(
+                eq(financeRecurringObligations.userId, userId),
+                eq(financeRecurringObligations.status, "active"),
+              ),
+            ),
+        ]);
+      const accountById = new Map(accounts.map((account) => [account.id, account]));
+      const allocationsByTransaction = new Map<string, typeof allocations>();
+      for (const allocation of allocations) {
+        const items = allocationsByTransaction.get(allocation.transactionId) ?? [];
+        items.push(allocation);
+        allocationsByTransaction.set(allocation.transactionId, items);
+      }
+      const reimbursementByAllocation = new Map<string, number>();
+      for (const reimbursement of reimbursementRows) {
+        if (reimbursement.status === "cancelled" || reimbursement.status === "received") continue;
+        reimbursementByAllocation.set(
+          reimbursement.allocationId,
+          (reimbursementByAllocation.get(reimbursement.allocationId) ?? 0) +
+            Math.max(0, reimbursement.expectedAmount - reimbursement.receivedAmount),
+        );
+      }
+      const currentMonth = now().toISOString().slice(0, 7);
+      const budgetByCategory = new Map(
+        budgets
+          .filter((budget) => budget.month === currentMonth)
+          .map((budget) => [budget.category, budget]),
+      );
+      const sourceFor = (item: typeof financeTransactions.$inferSelect) => {
+        const account = accountById.get(item.accountId);
+        return account ? financeTransactionSourceValue(account, item) : null;
+      };
+      const postedExpenses = rows.filter(
+        (item) =>
+          !item.pending &&
+          item.direction === "expense" &&
+          item.transactionDate <= now().toISOString().slice(0, 10),
+      );
+      for (const row of postedExpenses) {
+        if (openByTransaction.has(row.id)) continue;
+        const source = sourceFor(row);
+        if (!source) continue;
+        const recurring = obligations.find(
+          (obligation) =>
+            normalizedMerchant(obligation.merchant) === normalizedMerchant(row.merchant),
+        );
+        const reimbursementExpectedCents = (allocationsByTransaction.get(row.id) ?? []).reduce(
+          (sum, allocation) => sum + (reimbursementByAllocation.get(allocation.id) ?? 0),
+          0,
+        );
+        const anomaly = detectFinanceAnomalies({
+          budgetMaterialityCents: Math.round(
+            (budgetByCategory.get(row.category ?? "")?.limit ?? 0) * 0.1,
+          ),
+          ...(recurring
+            ? {
+                expectedRecurring: {
+                  expectedAmountCents: recurring.expectedAmount,
+                  toleranceCents: recurring.amountTolerance,
+                },
+              }
+            : {}),
+          history: postedExpenses
+            .filter((item) => item.id !== row.id && item.transactionDate < row.transactionDate)
+            .flatMap((item) => {
+              const historySource = sourceFor(item);
+              return historySource
+                ? [
+                    {
+                      amountCents: item.amount,
+                      category: item.category,
+                      date: item.transactionDate,
+                      id: item.id,
+                      merchant: item.merchant,
+                      sourceRef: historySource,
+                    },
+                  ]
+                : [];
+            }),
+          reimbursementExpectedCents,
+          transaction: {
+            amountCents: row.amount,
+            category: row.category,
+            date: row.transactionDate,
+            id: row.id,
+            merchant: row.merchant,
+            sourceRef: source,
+          },
+        });
+        if (!anomaly) continue;
+        const review = context?.maintenance
+          ? await db.transaction(async (tx) => {
+              await assertMaintenanceClaim(tx, context);
+              return putInReview(
+                row.id,
+                userId,
+                "possible_reimbursement",
+                null,
+                anomaly.rationale,
+                tx,
+                context,
+                source,
+              );
+            })
+          : await putInReview(row.id, userId, "possible_reimbursement", null, anomaly.rationale);
+        openByTransaction.set(row.id, review);
+      }
+      const matchedByCredit = matchedReimbursementCentsByCredit(reimbursementMatches);
+      const outstanding = reimbursementRows.filter(
+        (reimbursement) =>
+          reimbursement.status !== "cancelled" &&
+          reimbursement.status !== "received" &&
+          reimbursement.expectedAmount > reimbursement.receivedAmount,
+      );
+      for (const credit of rows.filter(
+        (item) => !item.pending && item.direction === "income" && !openByTransaction.has(item.id),
+      )) {
+        const unmatchedAmount = credit.amount - (matchedByCredit.get(credit.id) ?? 0);
+        if (
+          unmatchedAmount <= 0 ||
+          isProviderTransfer(credit.category) ||
+          /\b(?:salary|payroll|paycheck)\b/i.test(credit.merchant) ||
+          credit.category === "INCOME" ||
+          isRefundOrReversal(credit)
+        )
+          continue;
+        const descriptor = /\b(?:venmo|paypal|zelle|cash ?app|reimburs|repay|split)\b/i.test(
+          credit.merchant,
+        );
+        if (!descriptor) continue;
+        const plausible = outstanding.filter((reimbursement) => {
+          const anchor =
+            reimbursement.dueDate ?? reimbursement.createdAt.toISOString().slice(0, 10);
+          const distance = Math.abs(
+            new Date(`${credit.transactionDate}T00:00:00Z`).getTime() -
+              new Date(`${anchor}T00:00:00Z`).getTime(),
+          );
+          const payerEvidence = reimbursement.payer
+            ? credit.merchant.toLocaleLowerCase().includes(reimbursement.payer.toLocaleLowerCase())
+            : false;
+          return (
+            distance <= 45 * 86_400_000 &&
+            (payerEvidence ||
+              unmatchedAmount <= reimbursement.expectedAmount - reimbursement.receivedAmount)
+          );
+        });
+        if (plausible.length === 0) continue;
+        const source = sourceFor(credit);
+        if (!source) continue;
+        const review = context?.maintenance
+          ? await db.transaction(async (tx) => {
+              await assertMaintenanceClaim(tx, context);
+              return putInReview(
+                credit.id,
+                userId,
+                "possible_reimbursement",
+                null,
+                `This ${credit.merchant} credit has $${(unmatchedAmount / 100).toFixed(2)} unmatched and is close to ${plausible.length} outstanding reimbursement${plausible.length === 1 ? "" : "s"}. Match only supported cents; combined credits may settle more than one case.`,
+                tx,
+                context,
+                source,
+              );
+            })
+          : await putInReview(
+              credit.id,
+              userId,
+              "possible_reimbursement",
+              null,
+              `This ${credit.merchant} credit may reimburse one or more outstanding cases; combined credits may settle more than one case, so match only supported cents.`,
+            );
+        openByTransaction.set(credit.id, review);
       }
       const scopedReviews = [...openByTransaction.values()].filter((review) => {
         const row = rows.find((item) => item.id === review.transactionId);

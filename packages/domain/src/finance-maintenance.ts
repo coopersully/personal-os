@@ -143,6 +143,7 @@ export const financeStatusDetailsSchema = z.object({
   proposals: z.array(financeProposalSummarySchema),
   questions: z.array(financeQuestionSchema),
   reimbursements: z.object({
+    anomalies: z.int().nonnegative(),
     expected: z.int().nonnegative(),
     needsInput: z.int().nonnegative(),
     open: z.int().nonnegative(),

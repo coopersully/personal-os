@@ -360,7 +360,13 @@ export function createFinanceStatusService({ db, now }: Options) {
               .from(financeReimbursementMatches)
               .where(eq(financeReimbursementMatches.userId, userId)),
             tx
-              .select({ amount: financeTransactions.amount, id: financeTransactions.id })
+              .select({
+                amount: financeTransactions.amount,
+                category: financeTransactions.category,
+                id: financeTransactions.id,
+                merchant: financeTransactions.merchant,
+                pending: financeTransactions.pending,
+              })
               .from(financeTransactions)
               .where(
                 and(
@@ -381,8 +387,23 @@ export function createFinanceStatusService({ db, now }: Options) {
           );
           const excludedByAllocation = excludedReimbursementCentsByAllocation(reimbursementRows);
           const matchedCreditAmounts = matchedReimbursementCentsByCredit(reimbursementMatches);
+          const hasOutstandingReimbursement = reimbursementRows.some(
+            (row) =>
+              row.status !== "cancelled" &&
+              row.status !== "received" &&
+              row.expectedAmount > row.receivedAmount,
+          );
           const unmatchedCredits = incomeCredits.filter(
-            (credit) => credit.amount > (matchedCreditAmounts.get(credit.id) ?? 0),
+            (credit) =>
+              hasOutstandingReimbursement &&
+              !credit.pending &&
+              credit.amount > (matchedCreditAmounts.get(credit.id) ?? 0) &&
+              credit.category !== "TRANSFER_IN" &&
+              credit.category !== "TRANSFER_OUT" &&
+              credit.category !== "INCOME" &&
+              credit.category !== "OTHER" &&
+              !/\b(?:salary|payroll|paycheck)\b/i.test(credit.merchant) &&
+              /\b(?:venmo|paypal|zelle|cash ?app|reimburs|repay|split)\b/i.test(credit.merchant),
           ).length;
           const profiles = await tx
             .select()
@@ -1059,6 +1080,9 @@ export function createFinanceStatusService({ db, now }: Options) {
                 overdue: reimbursementStatus.filter((status) => status === "overdue").length,
                 expected: reimbursementStatus.filter((status) => status === "expected").length,
                 needsInput: reimbursementStatus.filter((status) => status === "needs_input").length,
+                anomalies: scopedReviews.filter(
+                  (review) => review.reason === "possible_reimbursement",
+                ).length,
                 outstanding:
                   reimbursementRows.reduce(
                     (sum, row) =>

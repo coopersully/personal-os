@@ -21,6 +21,7 @@ import {
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
+  financeReimbursements,
   financeReviewCases,
   financeSetupBackfillState,
   financeTransactionAllocations,
@@ -8811,5 +8812,163 @@ describe.sequential("finance service", () => {
       questions: attributedQuestionCount,
       transfers: 2,
     });
+  });
+
+  it("queues only evidence-backed reimbursement anomalies and ambiguous credit questions", async () => {
+    const [anomalyUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Anomaly questions",
+        email: "anomaly-questions@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!anomalyUser) throw new Error("Anomaly user was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Test",
+        name: "Checking",
+        provider: "manual",
+        status: "manual",
+        userId: anomalyUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Anomaly account was not created.");
+    const dinnerRows = [42, 44, 45, 45, 46].map((amount, index) => ({
+      accountId: account.id,
+      amount: amount * 100,
+      category: "Dining",
+      direction: "expense" as const,
+      merchant: "Dinner House",
+      needsReview: false,
+      pending: false,
+      transactionDate: `2026-0${index + 1}-10`,
+      userId: anomalyUser.id,
+    }));
+    await database.db.insert(financeTransactions).values(dinnerRows);
+    const [largeDinner, normalDinner, salary, venmo] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 31_000,
+          category: "Dining",
+          direction: "expense",
+          merchant: "Dinner House",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-07-18",
+          userId: anomalyUser.id,
+        },
+        {
+          accountId: account.id,
+          amount: 4_500,
+          category: "Dining",
+          direction: "expense",
+          merchant: "Dinner House",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-07-19",
+          userId: anomalyUser.id,
+        },
+        {
+          accountId: account.id,
+          amount: 250_000,
+          category: "INCOME",
+          direction: "income",
+          merchant: "Payroll ACME",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-07-19",
+          userId: anomalyUser.id,
+        },
+        {
+          accountId: account.id,
+          amount: 22_000,
+          category: "OTHER",
+          direction: "income",
+          merchant: "Venmo repayment",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-07-19",
+          userId: anomalyUser.id,
+        },
+      ])
+      .returning();
+    if (!largeDinner || !normalDinner || !salary || !venmo)
+      throw new Error("Anomaly transactions failed.");
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: "Dining",
+        slug: `dining-${anomalyUser.id}`,
+        userId: anomalyUser.id,
+      })
+      .returning();
+    if (!category) throw new Error("Anomaly category was not created.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 22_000,
+        categoryId: category.id,
+        transactionId: largeDinner.id,
+        treatment: "reimbursable",
+        userId: anomalyUser.id,
+      })
+      .returning();
+    if (!allocation) throw new Error("Anomaly allocation was not created.");
+    await database.db.insert(financeReimbursements).values({
+      allocationId: allocation.id,
+      evidence: {
+        sourceRefs: [
+          {
+            accountId: account.id,
+            provider: "local",
+            remoteId: largeDinner.id,
+            revision: largeDinner.updatedAt.toISOString(),
+            sourceType: "finance_transaction",
+          },
+        ],
+        summary: "Dinner receipt",
+      },
+      expectedAmount: 22_000,
+      payer: "Alex",
+      rationale: "Alex owes their share",
+      userId: anomalyUser.id,
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(anomalyUser.id, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({ created: 2 });
+    const questions = await database.db
+      .select({
+        rationale: financeReviewCases.rationale,
+        reason: financeReviewCases.reason,
+        transactionId: financeReviewCases.transactionId,
+      })
+      .from(financeReviewCases)
+      .where(
+        and(eq(financeReviewCases.userId, anomalyUser.id), eq(financeReviewCases.status, "open")),
+      );
+    expect(questions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "possible_reimbursement",
+          transactionId: largeDinner.id,
+          rationale: expect.stringContaining("robust merchant baseline"),
+        }),
+        expect.objectContaining({
+          reason: "possible_reimbursement",
+          transactionId: venmo.id,
+          rationale: expect.stringContaining("combined credits"),
+        }),
+      ]),
+    );
+    expect(questions.some((question) => question.transactionId === normalDinner.id)).toBe(false);
+    expect(questions.some((question) => question.transactionId === salary.id)).toBe(false);
   });
 });

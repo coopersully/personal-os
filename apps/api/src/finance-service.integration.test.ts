@@ -9110,4 +9110,123 @@ describe.sequential("finance service", () => {
         ),
     ).resolves.toEqual([]);
   });
+
+  it("replays an earlier exact credit match after a later match advances the case revision", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Replay reimbursement",
+        email: `replay-reimbursement-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Replay owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "reimbursement-replay" };
+    const [category] = await service.listCategories(owner.id);
+    if (!category) throw new Error("Replay category was not created.");
+    const account = await service.createAccount(
+      { balance: 500, institution: "Local", name: "Replay", provider: "manual" },
+      context,
+    );
+    const expense = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 220,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Shared expense",
+        notes: null,
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      expense.id,
+      {
+        allocations: [
+          { amount: 220, categoryId: category.id, rationale: "Shared", treatment: "reimbursable" },
+        ],
+        expectedTransactionUpdatedAt: expense.updatedAt,
+        rationale: "Shared expense.",
+      },
+      context,
+    );
+    const [allocation] = await database.db
+      .select()
+      .from(financeTransactionAllocations)
+      .where(
+        and(
+          eq(financeTransactionAllocations.transactionId, expense.id),
+          eq(financeTransactionAllocations.state, "active"),
+        ),
+      );
+    if (!allocation) throw new Error("Replay allocation was not created.");
+    const reimbursement = await service.reconcileReimbursement(
+      {
+        allocationId: allocation.id,
+        dueDate: null,
+        evidence: { sourceRefs: [], summary: "Receipt" },
+        expectedAmount: 220,
+        operation: "create",
+        payer: "Alex",
+        rationale: "Shared expense.",
+      },
+      context,
+    );
+    const [firstCredit, secondCredit] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 10_000,
+          direction: "income",
+          merchant: "Alex first",
+          transactionDate: "2026-07-20",
+          userId: owner.id,
+        },
+        {
+          accountId: account.id,
+          amount: 12_000,
+          direction: "income",
+          merchant: "Alex second",
+          transactionDate: "2026-07-21",
+          userId: owner.id,
+        },
+      ])
+      .returning();
+    if (!firstCredit || !secondCredit) throw new Error("Replay credits were not created.");
+    const first = {
+      amount: 100,
+      creditTransactionId: firstCredit.id,
+      evidence: { sourceRefs: [], summary: "First transfer" },
+      expectedRevision: reimbursement.revision,
+      operation: "match_credit" as const,
+      rationale: "First transfer.",
+      reimbursementId: reimbursement.id,
+    };
+    await service.reconcileReimbursement(first, context);
+    const [afterFirst] = await database.db
+      .select()
+      .from(financeReimbursements)
+      .where(eq(financeReimbursements.id, reimbursement.id));
+    if (!afterFirst) throw new Error("First match was not persisted.");
+    await service.reconcileReimbursement(
+      {
+        ...first,
+        amount: 120,
+        creditTransactionId: secondCredit.id,
+        evidence: { sourceRefs: [], summary: "Second transfer" },
+        expectedRevision: afterFirst.revision,
+        rationale: "Second transfer.",
+      },
+      context,
+    );
+    await expect(service.reconcileReimbursement(first, context)).resolves.toMatchObject({
+      receivedAmount: 220,
+      status: "received",
+    });
+  });
 });

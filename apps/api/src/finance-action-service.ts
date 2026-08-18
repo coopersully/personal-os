@@ -54,6 +54,7 @@ import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
 import { reliableMonthlyCapacity } from "./finance-planning.js";
+import { lockReimbursementCases, lockReimbursementMatches } from "./finance-reimbursement-locks.js";
 import { deriveReimbursementStatus } from "./finance-reimbursement-service.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
@@ -1459,6 +1460,21 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               : null;
           if (!transactionId)
             return missing("The reimbursement question no longer has a valid transaction.", []);
+          const reimbursementIds = Array.isArray(privateCandidate.reimbursementIds)
+            ? privateCandidate.reimbursementIds.filter((id): id is string => typeof id === "string")
+            : [];
+          // Shared lock order starts with the named reimbursement cases before
+          // this question locks its account and transaction below.
+          const prelockedCases = await lockReimbursementCases(
+            executor,
+            userId,
+            reimbursementIds,
+            lockTargets,
+          );
+          if (reimbursementIds.length && prelockedCases.length !== new Set(reimbursementIds).size)
+            return missing("One of the reimbursement cases is no longer available.", [
+              expectedAnswer("answer", "object"),
+            ]);
           const [unlockedTransaction] = await executor
             .select({ accountId: financeTransactions.accountId })
             .from(financeTransactions)
@@ -1510,9 +1526,6 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           };
           const allocationIds = Array.isArray(privateCandidate.allocationIds)
             ? privateCandidate.allocationIds.filter((id): id is string => typeof id === "string")
-            : [];
-          const reimbursementIds = Array.isArray(privateCandidate.reimbursementIds)
-            ? privateCandidate.reimbursementIds.filter((id): id is string => typeof id === "string")
             : [];
           if (allocationIds.length > 0) {
             if (answer.data.kind === "not_sure")
@@ -1666,48 +1679,21 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               return missing("The reimbursement credit must remain a posted income transaction.", [
                 expectedAnswer("answer", "object"),
               ]);
-            const cases = await lockRead(
-              executor
-                .select()
-                .from(financeReimbursements)
-                .where(
-                  and(
-                    eq(financeReimbursements.userId, userId),
-                    inArray(financeReimbursements.id, [...new Set(reimbursementIds)].sort()),
-                  ),
-                )
-                .orderBy(financeReimbursements.id),
+            const cases = prelockedCases;
+            const allMatches = await lockReimbursementMatches(
+              executor,
+              userId,
+              {
+                creditTransactionIds: [transaction.id],
+                reimbursementIds: cases.map((item) => item.id),
+              },
+              lockTargets,
             );
-            if (cases.length !== new Set(reimbursementIds).size)
-              return missing("One of the reimbursement cases is no longer available.", [
-                expectedAnswer("answer", "object"),
-              ]);
-            const matches = await lockRead(
-              executor
-                .select()
-                .from(financeReimbursementMatches)
-                .where(
-                  and(
-                    eq(financeReimbursementMatches.userId, userId),
-                    inArray(
-                      financeReimbursementMatches.reimbursementId,
-                      cases.map((item) => item.id),
-                    ),
-                  ),
-                )
-                .orderBy(financeReimbursementMatches.id),
+            const matches = allMatches.filter((item) =>
+              cases.some((entry) => entry.id === item.reimbursementId),
             );
-            const creditMatches = await lockRead(
-              executor
-                .select()
-                .from(financeReimbursementMatches)
-                .where(
-                  and(
-                    eq(financeReimbursementMatches.userId, userId),
-                    eq(financeReimbursementMatches.creditTransactionId, transaction.id),
-                  ),
-                )
-                .orderBy(financeReimbursementMatches.id),
+            const creditMatches = allMatches.filter(
+              (item) => item.creditTransactionId === transaction.id,
             );
             if (answer.data.kind === "match") {
               const requested = answer.data.matches;

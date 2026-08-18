@@ -135,3 +135,20 @@ Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integratio
 - None.
 
 Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-anomaly-service.test.ts` (106 passing), API and database type checks, Biome, and `git diff --check`.
+
+## Reimbursement lock and replay follow-up
+
+### DONE
+
+- Typed credit-question preparation and direct reimbursement reconciliation share sorted reimbursement-case and match locking helpers. Typed questions lock named cases before account and transaction evidence, then lock the relevant match rows.
+- An exact credit-match replay remains idempotent after a later distinct match advances the reimbursement revision; altered rationale or evidence still conflicts.
+
+### CONCERNS
+
+- The focused integration suite verifies serialized database locking and replay, but does not yet include a separate artificial two-session barrier/statement-timeout scenario for each requested contention pair.
+
+### BLOCKED
+
+- None.
+
+Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts` (102 passing), API and database type checks, Biome, and `git diff --check`.

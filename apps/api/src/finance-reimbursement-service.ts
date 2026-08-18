@@ -16,6 +16,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
+import { lockReimbursementCases, lockReimbursementMatches } from "./finance-reimbursement-locks.js";
 import type { Principal } from "./types.js";
 
 export function deriveReimbursementStatus({
@@ -104,22 +105,9 @@ async function readReimbursement(
   id: string,
   lock = false,
 ) {
-  const selection = db
-    .select()
-    .from(financeReimbursements)
-    .where(and(eq(financeReimbursements.id, id), eq(financeReimbursements.userId, userId)));
-  const [row] = lock ? await selection.for("update").limit(1) : await selection.limit(1);
+  const [row] = await lockReimbursementCases(db, userId, [id], lock);
   if (!row) throw new AppError("not_found", "The reimbursement was not found.");
-  const matches = await db
-    .select()
-    .from(financeReimbursementMatches)
-    .where(
-      and(
-        eq(financeReimbursementMatches.userId, userId),
-        eq(financeReimbursementMatches.reimbursementId, row.id),
-      ),
-    )
-    .orderBy(financeReimbursementMatches.createdAt, financeReimbursementMatches.id);
+  const matches = await lockReimbursementMatches(db, userId, { reimbursementIds: [row.id] }, lock);
   return { matches, row };
 }
 
@@ -220,6 +208,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
                 eq(financeReimbursements.allocationId, allocation.id),
               ),
             )
+            .orderBy(financeReimbursements.id)
             .for("update");
           const expectedAmount = toCents(input.expectedAmount);
           const replay = existing.find(
@@ -331,7 +320,6 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
         );
         if (existingMatch && existingMatch.amount === amount) {
           if (
-            input.expectedRevision === row.revision - 1 &&
             input.rationale === existingMatch.rationale &&
             stableJson(input.evidence) === stableJson(existingMatch.evidence)
           )

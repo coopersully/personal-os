@@ -1695,6 +1695,8 @@ export const financeTransactionAllocations = pgTable(
     treatment: text("treatment").$type<"personal" | "reimbursable">().notNull().default("personal"),
     rationale: text("rationale"),
     revision: integer("revision").notNull().default(1),
+    state: text("state").$type<"active" | "invalidated">().notNull().default("active"),
+    invalidatedAt: timestamp("invalidated_at", { withTimezone: true }),
     ...timestamps,
   },
   (table) => [
@@ -1704,11 +1706,14 @@ export const financeTransactionAllocations = pgTable(
       "finance_transaction_allocations_treatment_check",
       sql`${table.treatment} IN ('personal', 'reimbursable')`,
     ),
-    index("finance_transaction_allocations_user_category_idx").on(table.userId, table.categoryId),
-    uniqueIndex("finance_transaction_allocations_transaction_order_idx").on(
-      table.transactionId,
-      table.allocationOrder,
+    check(
+      "finance_transaction_allocations_state_check",
+      sql`${table.state} IN ('active', 'invalidated')`,
     ),
+    index("finance_transaction_allocations_user_category_idx").on(table.userId, table.categoryId),
+    uniqueIndex("finance_transaction_allocations_transaction_order_idx")
+      .on(table.transactionId, table.allocationOrder)
+      .where(sql`${table.state} = 'active'`),
   ],
 );
 
@@ -1753,6 +1758,7 @@ export const financeReviewCases = pgTable(
     reason: text("reason")
       .$type<
         | "ambiguous_merchant"
+        | "amount_changed"
         | "low_confidence"
         | "one_time"
         | "possible_duplicate"
@@ -1783,6 +1789,8 @@ export const financeCategoryRules = pgTable(
       .references(() => users.id, { onDelete: "cascade" }),
     merchantNormalized: text("merchant_normalized").notNull(),
     category: text("category").notNull(),
+    rationale: text("rationale"),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
     ...timestamps,
   },
   (table) => [

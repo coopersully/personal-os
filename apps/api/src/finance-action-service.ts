@@ -9,6 +9,8 @@ import {
   financeBudgetPlans,
   financeBudgets,
   financeCategories,
+  financeCategoryRules,
+  financeClassificationDecisions,
   financeIncomeStreams,
   financeMerchants,
   financeProfiles,
@@ -44,6 +46,7 @@ import {
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
 import { reliableMonthlyCapacity } from "./finance-planning.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
@@ -117,6 +120,15 @@ function snapshotRevision(value: unknown): string {
 
 function localSource(id: string, revision: string | null): MaterialSourceReference {
   return { accountId: null, provider: "local", remoteId: id, revision, sourceType: "local" };
+}
+
+function normalizedMerchantRuleKey(merchant: string) {
+  return merchant
+    .toLowerCase()
+    .replace(/[*#]\d+\b/g, " ")
+    .replace(/\b\d{4,}\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function transactionSource(
@@ -1261,7 +1273,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
         const categories = await lockRead(
           executor
-            .select({ id: financeCategories.id })
+            .select({ id: financeCategories.id, name: financeCategories.name })
             .from(financeCategories)
             .where(
               and(
@@ -1275,6 +1287,114 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           return missing("Every transaction allocation category must belong to you.", [
             expectedAnswer("allocations", "object_array", { example: "[...]" }),
           ]);
+        }
+        const categoryById = new Map(categories.map((category) => [category.id, category]));
+        const futureRule = input.data.futureRule;
+        if (futureRule) {
+          if (!item.merchantId)
+            return missing(
+              "A reusable merchant rule needs an identified merchant; save this as a one-off breakdown instead.",
+              [expectedAnswer("futureRule", "string", { nullable: true })],
+              [transactionSource(item, account)],
+            );
+          const [merchant] = await lockRead(
+            executor
+              .select()
+              .from(financeMerchants)
+              .where(
+                and(eq(financeMerchants.id, item.merchantId), eq(financeMerchants.userId, userId)),
+              )
+              .limit(1),
+          );
+          if (!merchant)
+            return missing("The reusable-rule merchant is no longer available.", [
+              expectedAnswer("futureRule", "string", { nullable: true }),
+            ]);
+          const decisions = await lockRead(
+            executor
+              .select({
+                categoryName: financeClassificationDecisions.categoryName,
+                outcome: financeClassificationDecisions.outcome,
+              })
+              .from(financeClassificationDecisions)
+              .where(
+                and(
+                  eq(financeClassificationDecisions.userId, userId),
+                  eq(financeClassificationDecisions.merchantId, merchant.id),
+                  inArray(financeClassificationDecisions.outcome, ["confirmed", "corrected"]),
+                ),
+              )
+              .orderBy(financeClassificationDecisions.id),
+          );
+          const evaluation = evaluateMerchantEvidence({
+            behavior: merchant.behavior,
+            merchantName: merchant.displayName,
+            observations: decisions.map((decision) => ({
+              category: decision.categoryName,
+              outcome: decision.outcome as "confirmed" | "corrected",
+            })),
+          });
+          const category = categoryById.get(futureRule.categoryId);
+          if (
+            !category ||
+            !evaluation.merchantOnlyEligible ||
+            evaluation.category !== category.name
+          ) {
+            return missing(
+              "This merchant history is not eligible for a reusable rule. Keep the breakdown one-off or provide a separately reviewed merchant rule.",
+              [expectedAnswer("futureRule", "string", { nullable: true })],
+              [
+                transactionSource(item, account),
+                localSource(merchant.id, merchant.updatedAt.toISOString()),
+              ],
+            );
+          }
+          const merchantRuleKey = normalizedMerchantRuleKey(item.merchant);
+          const [existingRule] = await lockRead(
+            executor
+              .select()
+              .from(financeCategoryRules)
+              .where(
+                and(
+                  eq(financeCategoryRules.userId, userId),
+                  eq(financeCategoryRules.merchantNormalized, merchantRuleKey),
+                ),
+              )
+              .limit(1),
+          );
+          const base = prepared(
+            { ...input.data, id: id.data },
+            snapshotRevision({
+              merchant: [merchant.id, merchant.updatedAt.toISOString(), merchant.behavior],
+              rule: existingRule
+                ? [existingRule.id, existingRule.category, existingRule.updatedAt.toISOString()]
+                : null,
+              transaction: item.updatedAt.toISOString(),
+            }),
+            [
+              {
+                entityId: item.id,
+                entityType: "finance_transaction",
+                summary: `Set ${item.merchant} transaction breakdown with ${input.data.allocations.length} allocations.`,
+              },
+              {
+                entityId: existingRule?.id ?? null,
+                entityType: "finance_category_rule",
+                summary: existingRule
+                  ? `Replace reusable ${merchant.displayName} rule from ${existingRule.category} to ${category.name}; future merchant transactions only, with stated rationale.`
+                  : `Create reusable ${merchant.displayName} rule for ${category.name}; future merchant transactions only, with stated rationale.`,
+              },
+            ],
+            [
+              transactionSource(item, account),
+              localSource(merchant.id, merchant.updatedAt.toISOString()),
+            ],
+            ["Future rule is limited to this normalized merchant and is evidence-backed."],
+          );
+          return {
+            ...base,
+            semanticTargetKeys: [...base.semanticTargetKeys, `merchant-rule:${merchantRuleKey}`],
+          };
         }
         return prepared(
           { ...input.data, id: id.data },

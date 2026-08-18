@@ -496,8 +496,10 @@ function transactionAllocation(
     amount: row.amount / 100,
     categoryId: row.categoryId,
     id: row.id,
+    invalidatedAt: row.invalidatedAt?.toISOString() ?? null,
     rationale: row.rationale,
     revision: row.revision,
+    state: row.state,
     treatment: row.treatment,
   };
 }
@@ -2183,7 +2185,12 @@ export function createFinanceService({
       if (!updated.pending) {
         await tx
           .delete(financeTransactionAllocations)
-          .where(eq(financeTransactionAllocations.transactionId, updated.id));
+          .where(
+            and(
+              eq(financeTransactionAllocations.transactionId, updated.id),
+              eq(financeTransactionAllocations.state, "active"),
+            ),
+          );
         await tx.insert(financeTransactionAllocations).values({
           allocationOrder: 0,
           amount: updated.amount,
@@ -3082,6 +3089,7 @@ export function createFinanceService({
       const approvedProfile = approvedProfileFrom(approvedGuidance);
       const reviewReasons: FinanceGuidedSetupContext["reviewSummary"]["reasons"] = {
         ambiguous_merchant: 0,
+        amount_changed: 0,
         low_confidence: 0,
         one_time: 0,
         possible_duplicate: 0,
@@ -4125,6 +4133,7 @@ export function createFinanceService({
           .where(
             and(
               eq(financeTransactionAllocations.userId, userId),
+              eq(financeTransactionAllocations.state, "active"),
               eq(financeTransactions.userId, userId),
               gte(financeTransactions.transactionDate, `${month}-01`),
               lt(financeTransactions.transactionDate, `${nextMonth(month)}-01`),
@@ -5802,7 +5811,7 @@ export function createFinanceService({
             "Transaction allocation amounts must sum exactly to the transaction amount.",
           );
         }
-        await tx
+        const existingAllocations = await tx
           .select({ id: financeTransactionAllocations.id })
           .from(financeTransactionAllocations)
           .where(eq(financeTransactionAllocations.transactionId, before.id))
@@ -5810,8 +5819,95 @@ export function createFinanceService({
           .for("update");
         await tx
           .delete(financeTransactionAllocations)
-          .where(eq(financeTransactionAllocations.transactionId, before.id));
+          .where(
+            and(
+              eq(financeTransactionAllocations.transactionId, before.id),
+              eq(financeTransactionAllocations.state, "active"),
+            ),
+          );
         const categoryById = new Map(categories.map((category) => [category.id, category]));
+        let priorFutureRule: typeof financeCategoryRules.$inferSelect | null = null;
+        let futureRuleEvidence: Record<string, unknown> | null = null;
+        if (input.futureRule) {
+          if (!before.merchantId)
+            throw new AppError(
+              "invalid_request",
+              "A reusable merchant rule needs an identified merchant. Save this breakdown as one-off instead.",
+            );
+          const [merchant] = await tx
+            .select()
+            .from(financeMerchants)
+            .where(
+              and(
+                eq(financeMerchants.id, before.merchantId),
+                eq(financeMerchants.userId, context.principal.userId),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (!merchant)
+            throw new AppError("not_found", "The reusable-rule merchant was not found.");
+          const decisions = await tx
+            .select({
+              categoryName: financeClassificationDecisions.categoryName,
+              outcome: financeClassificationDecisions.outcome,
+            })
+            .from(financeClassificationDecisions)
+            .where(
+              and(
+                eq(financeClassificationDecisions.userId, context.principal.userId),
+                eq(financeClassificationDecisions.merchantId, merchant.id),
+                inArray(financeClassificationDecisions.outcome, ["confirmed", "corrected"]),
+              ),
+            )
+            .orderBy(financeClassificationDecisions.id)
+            .for("update");
+          const evaluation = evaluateMerchantEvidence({
+            behavior: merchant.behavior,
+            merchantName: merchant.displayName,
+            observations: decisions.map((decision) => ({
+              category: decision.categoryName,
+              outcome: decision.outcome as "confirmed" | "corrected",
+            })),
+          });
+          const futureCategory = categoryById.get(input.futureRule.categoryId);
+          if (
+            !futureCategory ||
+            !evaluation.merchantOnlyEligible ||
+            evaluation.category !== futureCategory.name
+          ) {
+            throw new AppError(
+              "invalid_request",
+              "This merchant history is not eligible for a reusable category rule. Save the breakdown as one-off instead.",
+            );
+          }
+          priorFutureRule =
+            (
+              await tx
+                .select()
+                .from(financeCategoryRules)
+                .where(
+                  and(
+                    eq(financeCategoryRules.userId, context.principal.userId),
+                    eq(
+                      financeCategoryRules.merchantNormalized,
+                      normalizedMerchant(before.merchant),
+                    ),
+                  ),
+                )
+                .for("update")
+                .limit(1)
+            )[0] ?? null;
+          futureRuleEvidence = {
+            behavior: evaluation.behavior,
+            category: evaluation.category,
+            confirmationCount: decisions.filter(
+              (decision) =>
+                decision.outcome === "confirmed" && decision.categoryName === evaluation.category,
+            ).length,
+            sourceTransactionId: before.id,
+          };
+        }
         await tx.insert(financeTransactionAllocations).values(
           input.allocations.map((allocation, allocationOrder) => ({
             allocationOrder,
@@ -5849,11 +5945,18 @@ export function createFinanceService({
             .insert(financeCategoryRules)
             .values({
               category: category.name,
+              evidence: futureRuleEvidence ?? {},
               merchantNormalized: normalizedMerchant(before.merchant),
+              rationale: input.futureRule.rationale,
               userId: context.principal.userId,
             })
             .onConflictDoUpdate({
-              set: { category: category.name, updatedAt: now() },
+              set: {
+                category: category.name,
+                evidence: futureRuleEvidence ?? {},
+                rationale: input.futureRule.rationale,
+                updatedAt: now(),
+              },
               target: [financeCategoryRules.userId, financeCategoryRules.merchantNormalized],
             });
         }
@@ -5896,9 +5999,22 @@ export function createFinanceService({
               reimbursableAllocationCount: savedAllocations.filter(
                 (item) => item.treatment === "reimbursable",
               ).length,
-              futureRuleCreated: input.futureRule != null,
+              futureRule: input.futureRule
+                ? {
+                    category: categoryById.get(input.futureRule.categoryId)?.name ?? null,
+                    evidence: futureRuleEvidence,
+                    rationaleProvided: true,
+                    scope: "normalized_merchant",
+                  }
+                : null,
             },
-            before: { allocationCount: 0, transactionUpdatedAt: before.updatedAt.toISOString() },
+            before: {
+              allocationCount: existingAllocations.length,
+              futureRule: priorFutureRule
+                ? { category: priorFutureRule.category, scope: "normalized_merchant" }
+                : null,
+              transactionUpdatedAt: before.updatedAt.toISOString(),
+            },
             entityId: before.id,
             entityType: "finance_transaction",
             ...context,
@@ -6073,7 +6189,12 @@ export function createFinanceService({
         if (input.category !== undefined && !updated.pending) {
           await tx
             .delete(financeTransactionAllocations)
-            .where(eq(financeTransactionAllocations.transactionId, updated.id));
+            .where(
+              and(
+                eq(financeTransactionAllocations.transactionId, updated.id),
+                eq(financeTransactionAllocations.state, "active"),
+              ),
+            );
           if (categoryRecord) {
             await tx.insert(financeTransactionAllocations).values({
               allocationOrder: 0,

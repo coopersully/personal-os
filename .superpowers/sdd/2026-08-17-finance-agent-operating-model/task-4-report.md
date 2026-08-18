@@ -40,3 +40,22 @@ DONE_WITH_CONCERNS
 - `pnpm exec vitest run apps/api/src/finance-merchant-evidence.test.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts packages/domain/src/domain.test.ts --reporter=verbose` — 119 tests passed.
 - Domain, database, API, API-client, and MCP type checks passed. (The attempted `@personal-os/client` filter matched no package; the repository package is `@personal-os/api-client`.)
 - Scoped Biome and `git diff --check` passed.
+
+## Fix round 1 — Batch B
+
+- `futureRule` remains null and one-off by default. When requested, the action preparation and terminal service transaction lock the transaction, merchant, supporting classification history, and existing normalized-merchant rule before accepting it. Only consistent, merchant-only-eligible history supporting the requested category can create or replace the rule; ambiguous, mixed, corrected, broad-retailer, or mismatched history returns recoverable `needs_input` before bypass or review queueing.
+- A reusable-rule review now separately describes the permanent normalized-merchant rule, its category and scope, sourced merchant evidence, and the rule's before-to-after state. The rule stores its stated rationale and a durable evidence snapshot; the transaction audit records a redacted rule summary. MCP documentation calls the optional future rule consequential rather than an ordinary one-off split.
+- `0061` now gives allocations an `active` or `invalidated` state and invalidation timestamp, retaining the `0059 -> 0060 -> 0061` journal chain. On a provider amount change, a single active allocation follows the exact new amount; a multi-allocation split is locked, invalidated in place, and given an `amount_changed` review case. Pending-to-posted replacements with the same amount remain active.
+- Budget status reads active allocations only, while transaction and export projections retain invalidated allocations as evidence. The allocation-order uniqueness constraint is active-only and ordinary recategorization/breakdown writes replace active rows only, so an explicit corrected breakdown can coexist with its archived provider-drift evidence without double counting.
+
+### Fix round 1 Batch B verification
+
+- RED: the initial new future-rule review disclosure test lacked the separate permanent-rule safe change; the allocation-state schema test and provider-drift integration test failed before state/invalidated handling was added.
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts packages/database/src/schema.test.ts packages/domain/src/domain.test.ts apps/mcp/src/server.test.ts --reporter=dot` — 143 tests passed.
+- Domain, database, API, API-client, and MCP type checks passed.
+- Scoped Biome and `git diff --check` passed.
+
+### Fix round 1 Batch B concerns
+
+- `0061` is still the branch-local, unshipped final migration, so it was extended rather than adding a fourth migration; the checked migration journal remains ordered through `0061`.
+- `pnpm verify` was not run; focused integration tests, type checks, scoped formatting, and diff validation were run instead.

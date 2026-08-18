@@ -4815,6 +4815,282 @@ describe.sequential("finance service", () => {
     }
   });
 
+  it("keeps provider amount drift from leaving active allocations out of balance", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Provider amount drift",
+        email: `provider-amount-drift-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Provider amount-drift owner was not created.");
+    let syncCall = 0;
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const path = new URL(requestUrl).pathname;
+      if (path === "/item/public_token/exchange")
+        return Response.json({ access_token: "amount-drift-token", item_id: "amount-drift-item" });
+      if (path === "/accounts/get") {
+        return Response.json({
+          accounts: [
+            {
+              account_id: "amount-drift-account",
+              balances: { current: 100 },
+              name: "Amount drift checking",
+              official_name: null,
+            },
+          ],
+        });
+      }
+      if (path === "/transactions/sync") {
+        syncCall += 1;
+        return Response.json(
+          syncCall === 1
+            ? {
+                added: [
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 10,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Single amount drift",
+                    personal_finance_category: null,
+                    transaction_id: "single-amount-drift",
+                  },
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 30,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Mixed amount drift",
+                    personal_finance_category: null,
+                    transaction_id: "mixed-amount-drift",
+                  },
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 7,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Pending to posted",
+                    pending: true,
+                    personal_finance_category: null,
+                    transaction_id: "pending-amount-drift",
+                  },
+                ],
+                has_more: false,
+                modified: [],
+                next_cursor: "amount-drift-1",
+                removed: [],
+              }
+            : {
+                added: [
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 7,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Pending to posted",
+                    pending: false,
+                    pending_transaction_id: "pending-amount-drift",
+                    personal_finance_category: null,
+                    transaction_id: "posted-amount-drift",
+                  },
+                ],
+                has_more: false,
+                modified: [
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 12,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Single amount drift",
+                    personal_finance_category: null,
+                    transaction_id: "single-amount-drift",
+                  },
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 31,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Mixed amount drift",
+                    personal_finance_category: null,
+                    transaction_id: "mixed-amount-drift",
+                  },
+                ],
+                next_cursor: "amount-drift-2",
+                removed: [],
+              },
+        );
+      }
+      return Response.json({ error_message: "Unexpected Plaid path" }, { status: 400 });
+    });
+    const context = { principal: financePrincipal(owner.id), requestId: "provider-amount-drift" };
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid: createPlaidConnector({
+        clientId: "client",
+        environment: "sandbox",
+        fetch,
+        secret: "secret",
+      }),
+    });
+    const [account] = await service.exchangePlaidToken(
+      { institution: "Amount Drift Bank", publicToken: "amount-drift-public" },
+      context,
+    );
+    if (!account) throw new Error("Amount-drift account was not created.");
+    await service.syncPlaidAccount(account.id, context);
+    const categories = await service.listCategories(owner.id);
+    const [firstCategory, secondCategory] = categories;
+    if (!firstCategory || !secondCategory)
+      throw new Error("Amount-drift categories were not seeded.");
+    const rows = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.userId, owner.id));
+    const single = rows.find((row) => row.providerTransactionId === "single-amount-drift");
+    const mixed = rows.find((row) => row.providerTransactionId === "mixed-amount-drift");
+    if (!single || !mixed) throw new Error("Amount-drift transactions were not projected.");
+    await service.setTransactionBreakdown(
+      single.id,
+      {
+        allocations: [{ amount: 10, categoryId: firstCategory.id, rationale: "One category" }],
+        expectedTransactionUpdatedAt: single.updatedAt.toISOString(),
+        rationale: "One-category provider drift fixture.",
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      mixed.id,
+      {
+        allocations: [
+          { amount: 12, categoryId: firstCategory.id, rationale: "First part" },
+          { amount: 18, categoryId: secondCategory.id, rationale: "Second part" },
+        ],
+        expectedTransactionUpdatedAt: mixed.updatedAt.toISOString(),
+        rationale: "Mixed provider drift fixture.",
+      },
+      context,
+    );
+    await service.createBudget(
+      { category: firstCategory.name, limit: 100, month: "2026-07" },
+      context,
+    );
+
+    await service.syncPlaidAccount(account.id, context);
+
+    const allocations = await database.db
+      .select({
+        amount: financeTransactionAllocations.amount,
+        invalidatedAt: financeTransactionAllocations.invalidatedAt,
+        state: financeTransactionAllocations.state,
+        transactionId: financeTransactionAllocations.transactionId,
+      })
+      .from(financeTransactionAllocations)
+      .where(inArray(financeTransactionAllocations.transactionId, [single.id, mixed.id]))
+      .orderBy(
+        financeTransactionAllocations.transactionId,
+        financeTransactionAllocations.allocationOrder,
+      );
+    expect(allocations.filter((allocation) => allocation.transactionId === single.id)).toEqual([
+      expect.objectContaining({ amount: 1200, invalidatedAt: null, state: "active" }),
+    ]);
+    expect(allocations.filter((allocation) => allocation.transactionId === mixed.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: 1200, state: "invalidated" }),
+        expect.objectContaining({ amount: 1800, state: "invalidated" }),
+      ]),
+    );
+    expect(
+      allocations
+        .filter((allocation) => allocation.transactionId === mixed.id)
+        .every((item) => item.invalidatedAt !== null),
+    ).toBe(true);
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactions.amount,
+          needsReview: financeTransactions.needsReview,
+        })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, mixed.id)),
+    ).resolves.toEqual([{ amount: 3100, needsReview: true }]);
+    await expect(service.listReviewQueue(owner.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "amount_changed",
+          transaction: expect.objectContaining({ id: mixed.id }),
+        }),
+      ]),
+    );
+    await expect(service.getBudgetStatus(owner.id, "2026-07")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          budget: expect.objectContaining({ category: firstCategory.name }),
+          spent: 12,
+        }),
+      ]),
+    );
+    await expect(service.exportData(owner.id)).resolves.toMatchObject({
+      transactions: expect.arrayContaining([
+        expect.objectContaining({
+          id: mixed.id,
+          allocations: expect.arrayContaining([expect.objectContaining({ state: "invalidated" })]),
+        }),
+      ]),
+    });
+    const [mixedAfterDrift] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, mixed.id));
+    if (!mixedAfterDrift) throw new Error("Amount-drift transaction was not updated.");
+    await service.setTransactionBreakdown(
+      mixed.id,
+      {
+        allocations: [{ amount: 31, categoryId: firstCategory.id, rationale: "Re-reviewed" }],
+        expectedTransactionUpdatedAt: mixedAfterDrift.updatedAt.toISOString(),
+        rationale: "Replace the invalidated split after reviewing the provider amount.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactionAllocations.amount,
+          state: financeTransactionAllocations.state,
+        })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, mixed.id))
+        .orderBy(
+          financeTransactionAllocations.state,
+          financeTransactionAllocations.allocationOrder,
+        ),
+    ).resolves.toEqual([
+      { amount: 3100, state: "active" },
+      { amount: 1200, state: "invalidated" },
+      { amount: 1800, state: "invalidated" },
+    ]);
+    await expect(service.getBudgetStatus(owner.id, "2026-07")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          budget: expect.objectContaining({ category: firstCategory.name }),
+          spent: 43,
+        }),
+      ]),
+    );
+    await expect(
+      database.db
+        .select({ amount: financeTransactions.amount, pending: financeTransactions.pending })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, "posted-amount-drift")),
+    ).resolves.toEqual([{ amount: 700, pending: false }]);
+  });
+
   it("fences Plaid claims and durably settles classified failures and recovery", async () => {
     const [healthUser] = await database.db
       .insert(users)

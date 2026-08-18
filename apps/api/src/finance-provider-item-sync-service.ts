@@ -12,6 +12,7 @@ import {
   financeAccounts,
   financeProviderItems,
   financeReviewCases,
+  financeTransactionAllocations,
   financeTransactions,
 } from "@personal-os/database";
 import type { MaintenanceScope } from "@personal-os/domain";
@@ -616,6 +617,23 @@ export function createFinanceProviderItemSyncService(options: Options) {
               .where(eq(financeTransactions.id, existing.id));
           }
         }
+        const projectedAmount = Math.round(Math.abs(remote.amount) * 100);
+        const activeAllocations = existing
+          ? await tx
+              .select()
+              .from(financeTransactionAllocations)
+              .where(
+                and(
+                  eq(financeTransactionAllocations.transactionId, existing.id),
+                  eq(financeTransactionAllocations.state, "active"),
+                ),
+              )
+              .orderBy(financeTransactionAllocations.allocationOrder)
+              .for("update")
+          : [];
+        const allocationAmountChanged =
+          existing !== undefined && existing.amount !== projectedAmount;
+        const invalidateBreakdown = allocationAmountChanged && activeAllocations.length > 1;
         const protectedTransaction =
           existing &&
           existing.categoryDecidedAt !== null &&
@@ -633,11 +651,11 @@ export function createFinanceProviderItemSyncService(options: Options) {
           protectedTransaction !== null &&
           previousDirection !== null &&
           previousDirection !== direction;
-        await tx
+        const [projected] = await tx
           .insert(financeTransactions)
           .values({
             accountId: localAccount.id,
-            amount: Math.round(Math.abs(remote.amount) * 100),
+            amount: projectedAmount,
             category: prepared.category,
             categoryConfidence: prepared.categoryConfidence,
             categoryId: lookups.categoryId,
@@ -660,7 +678,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
           })
           .onConflictDoUpdate({
             set: {
-              amount: Math.round(Math.abs(remote.amount) * 100),
+              amount: projectedAmount,
               category: protectedTransaction ? protectedTransaction.category : prepared.category,
               categoryConfidence: protectedTransaction
                 ? protectedTransaction.categoryConfidence
@@ -685,9 +703,11 @@ export function createFinanceProviderItemSyncService(options: Options) {
                 : direction,
               merchant: prepared.merchant,
               merchantId: lookups.merchantId,
-              needsReview: protectedTransaction
-                ? signChanged || protectedTransaction.needsReview
-                : prepared.isTransfer || prepared.needsReview,
+              needsReview:
+                invalidateBreakdown ||
+                (protectedTransaction
+                  ? signChanged || protectedTransaction.needsReview
+                  : prepared.isTransfer || prepared.needsReview),
               pending: remote.pending,
               pendingTransactionId: remote.pendingTransactionId,
               providerCategory: remote.personalFinanceCategory?.primary ?? null,
@@ -704,7 +724,50 @@ export function createFinanceProviderItemSyncService(options: Options) {
               updatedAt: now(),
             },
             target: [financeTransactions.accountId, financeTransactions.providerTransactionId],
-          });
+          })
+          .returning({ id: financeTransactions.id });
+        if (!projected) throw new AppError("conflict", "The provider transaction was not saved.");
+        if (allocationAmountChanged && activeAllocations.length === 1) {
+          await tx
+            .update(financeTransactionAllocations)
+            .set({
+              amount: projectedAmount,
+              revision: sql`${financeTransactionAllocations.revision} + 1`,
+              updatedAt: now(),
+            })
+            .where(eq(financeTransactionAllocations.id, activeAllocations[0]?.id ?? ""));
+        } else if (invalidateBreakdown) {
+          await tx
+            .update(financeTransactionAllocations)
+            .set({ invalidatedAt: now(), state: "invalidated", updatedAt: now() })
+            .where(
+              and(
+                eq(financeTransactionAllocations.transactionId, projected.id),
+                eq(financeTransactionAllocations.state, "active"),
+              ),
+            );
+          const [openReview] = await tx
+            .select({ id: financeReviewCases.id })
+            .from(financeReviewCases)
+            .where(
+              and(
+                eq(financeReviewCases.transactionId, projected.id),
+                eq(financeReviewCases.status, "open"),
+              ),
+            )
+            .for("update")
+            .limit(1);
+          if (!openReview) {
+            await tx.insert(financeReviewCases).values({
+              rationale:
+                "The provider changed a split transaction amount. Review the archived allocation evidence and set a new exact breakdown.",
+              reason: "amount_changed",
+              status: "open",
+              transactionId: projected.id,
+              userId: input.context.principal.userId,
+            });
+          }
+        }
         if (signChanged && existing) {
           const [review] = await tx
             .select()

@@ -1341,6 +1341,140 @@ describe.sequential("finance action service", () => {
     ).resolves.toMatchObject({ status: "applied" });
   });
 
+  it("makes an evidence-backed future merchant rule independently reviewable and rejects mixed history", async () => {
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: false, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const breakdown = (
+      await seedActionCases(database, userId, `Future rule ${crypto.randomUUID()}`)
+    ).find((item) => item.actionKind === "transaction_breakdown");
+    if (!breakdown) throw new Error("Future-rule breakdown fixture was not created.");
+    const [row] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, String(breakdown.input.id)));
+    const categoryId = (breakdown.input.allocations as Array<{ categoryId: string }>)[0]
+      ?.categoryId;
+    const [category] = await database.db
+      .select()
+      .from(financeCategories)
+      .where(eq(financeCategories.id, categoryId ?? ""));
+    if (!row?.merchantId || !category)
+      throw new Error("Future-rule evidence fixture was not created.");
+    await database.db.insert(financeClassificationDecisions).values(
+      [0, 1].map(() => ({
+        categoryId: category.id,
+        categoryName: category.name,
+        confidence: 10_000,
+        merchantId: row.merchantId,
+        outcome: "confirmed" as const,
+        source: "user" as const,
+        transactionId: row.id,
+        userId,
+      })),
+    );
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    const input = {
+      ...breakdown.input,
+      futureRule: { categoryId: category.id, rationale: "Apply this confirmed merchant pattern." },
+    };
+    const queued = await service.performDirect("transaction_breakdown", input, {
+      principal: agent(userId),
+      requestId: "future-rule-review",
+    });
+    if (queued.status !== "pending_review") throw new Error("Expected a future-rule review.");
+    expect(queued.review.changes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          entityType: "finance_category_rule",
+          summary: expect.stringContaining(category.name),
+        }),
+      ]),
+    );
+    expect(queued.review.sourceRefs).toContainEqual(
+      expect.objectContaining({ provider: "local", remoteId: row.merchantId }),
+    );
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "future-rule-review-approve",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    const [updatedTransaction] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, row.id));
+    if (!updatedTransaction) throw new Error("Approved future-rule transaction was not found.");
+    await database.db
+      .update(financeAutomationSettings)
+      .set({ reviewBypassEnabled: true, updatedAt: now })
+      .where(eq(financeAutomationSettings.userId, userId));
+    await expect(
+      service.performDirect(
+        "transaction_breakdown",
+        { ...input, expectedTransactionUpdatedAt: updatedTransaction.updatedAt.toISOString() },
+        { principal: agent(userId), requestId: "future-rule-bypass" },
+      ),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      database.db
+        .select({ category: financeCategoryRules.category })
+        .from(financeCategoryRules)
+        .where(eq(financeCategoryRules.userId, userId)),
+    ).resolves.toEqual(expect.arrayContaining([{ category: category.name }]));
+    await expect(
+      database.db
+        .select({ after: auditEvents.after, before: auditEvents.before })
+        .from(auditEvents)
+        .where(eq(auditEvents.action, "finance.transaction_breakdown_set"))
+        .orderBy(auditEvents.createdAt),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          after: expect.objectContaining({
+            futureRule: expect.objectContaining({ category: category.name }),
+          }),
+          before: expect.objectContaining({ futureRule: null }),
+        }),
+      ]),
+    );
+
+    const [otherCategory] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Future rule",
+        name: `Other ${crypto.randomUUID()}`,
+        slug: `other-future-rule-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!otherCategory) throw new Error("Mixed future-rule category was not created.");
+    await database.db.insert(financeClassificationDecisions).values({
+      categoryId: otherCategory.id,
+      categoryName: otherCategory.name,
+      confidence: 10_000,
+      merchantId: row.merchantId,
+      outcome: "confirmed",
+      source: "user",
+      transactionId: row.id,
+      userId,
+    });
+    await expect(
+      service.performDirect("transaction_breakdown", input, {
+        principal: agent(userId),
+        requestId: "future-rule-mixed",
+      }),
+    ).resolves.toMatchObject({ status: "needs_input" });
+  });
+
   it("keeps bypass out of categorization evidence while allowing prepared permanent rules", async () => {
     await database.db
       .update(financeAutomationSettings)

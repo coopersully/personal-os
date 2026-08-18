@@ -829,6 +829,9 @@ describe("ilo MCP server", () => {
     expect(tools.tools.find((tool) => tool.name === "delete_event")?.annotations).toMatchObject({
       destructiveHint: true,
     });
+    expect(
+      tools.tools.find((tool) => tool.name === "set_finance_transaction_breakdown")?.description,
+    ).toContain("consequential reusable merchant rule");
     const reminderTools = tools.tools.filter((tool) => tool.name.includes("reminder"));
     expect(reminderTools).toHaveLength(9);
     for (const tool of reminderTools) {

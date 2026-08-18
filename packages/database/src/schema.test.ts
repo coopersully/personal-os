@@ -36,6 +36,8 @@ describe("database schema contracts", () => {
         "treatment",
         "rationale",
         "revision",
+        "state",
+        "invalidated_at",
       ]),
     );
     expect(allocations.indexes.map((index) => index.config.name)).toEqual(
@@ -53,6 +55,14 @@ describe("database schema contracts", () => {
       "utf8",
     );
     expect(migrationSql).toContain('CREATE TABLE "finance_transaction_allocations"');
+    expect(migrationSql).toContain("\"state\" text DEFAULT 'active' NOT NULL");
+    expect(migrationSql).toContain('"invalidated_at" timestamptz');
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_transaction_allocations_transaction_order_idx" ON "finance_transaction_allocations" USING btree ("transaction_id", "allocation_order") WHERE "state" = \'active\';',
+    );
+    expect(migrationSql).toContain(
+      'ON CONFLICT ("transaction_id", "allocation_order") WHERE "state" = \'active\' DO NOTHING;',
+    );
     expect(migrationSql).toContain("ADD COLUMN \"behavior\" text DEFAULT 'unknown' NOT NULL");
     expect(migrationSql).toContain('INSERT INTO "finance_transaction_allocations"');
     expect(migrationSql).toContain('"pending" = false');

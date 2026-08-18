@@ -443,7 +443,7 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
     {
       annotations: writeAnnotations,
       description:
-        "Set exact, one-off category allocations for one posted transaction; Ilo returns its apply-or-review disposition.",
+        "Set exact category allocations for one posted transaction. Allocations are one-off unless the optional futureRule explicitly requests an evidence-backed, consequential reusable merchant rule; Ilo returns its apply-or-review disposition.",
       inputSchema: z.object({ id, ...setFinanceTransactionBreakdownInputSchema.shape }),
       title: "Set finance transaction breakdown",
     },

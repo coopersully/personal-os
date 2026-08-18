@@ -587,8 +587,10 @@ export const financeTransactionSchema = z.object({
           amount: moneySchema.positive(),
           categoryId: idSchema,
           id: idSchema,
+          invalidatedAt: isoDateTimeSchema.nullable(),
           rationale: z.string().max(1_000).nullable(),
           revision: z.number().int().positive(),
+          state: z.enum(["active", "invalidated"]),
           treatment: z.enum(["personal", "reimbursable"]),
         })
         .strict(),
@@ -699,6 +701,7 @@ export const financeReviewCaseSchema = z.object({
   rationale: z.string().nullable(),
   reason: z.enum([
     "ambiguous_merchant",
+    "amount_changed",
     "low_confidence",
     "one_time",
     "possible_duplicate",

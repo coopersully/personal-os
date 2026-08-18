@@ -27,3 +27,16 @@ DONE_WITH_CONCERNS
 - Confirmed the backfill is limited to already-posted, categorized transactions and is idempotent by the transaction/order unique index.
 - `apps/mcp/src/tool-catalog.ts` was added to the task scope because the new MCP tool cannot register without the repository's central safety/discovery entry.
 - `pnpm verify` was not run; focused integration tests, type checks, format checks, and diff validation were run instead.
+
+## Fix round 1 — Batch A
+
+- `transaction_breakdown` now separates the route/client/MCP transaction ID from the strict breakdown body before parsing. Preparation and terminal revalidation resolve the owned account first, lock the transaction snapshot, reject pending rows, verify the exact-cent allocation sum, revision, and category ownership, and emit provider-aware transaction evidence. Invalid actions produce recoverable `needs_input` before review queueing or bypass application.
+- Breakdown action coverage now exercises review-disabled queueing, enabled bypass/approval, pending transactions, stale revisions, invalid sums, and one-step allocation answer recovery without a repeated question.
+- Merchant evidence exposes a single documented `minimumMerchantOnlyConfirmations` threshold. The proposal keeps ineligible evidence explainable, but requires `merchantOnlyEligible` before an agent can apply it. Explicit learned merchant rules and deterministic classifications remain independent. Broad retailers, corrections, category diversity, and explicit mixed history stay non-actionable regardless of confirmation count.
+
+### Fix round 1 verification
+
+- RED: combined breakdown input was rejected as `needs_input`; threshold-driven evaluator cases failed until the eligibility constant and gate were implemented.
+- `pnpm exec vitest run apps/api/src/finance-merchant-evidence.test.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts packages/domain/src/domain.test.ts --reporter=verbose` — 119 tests passed.
+- Domain, database, API, API-client, and MCP type checks passed. (The attempted `@personal-os/client` filter matched no package; the repository package is `@personal-os/api-client`.)
+- Scoped Biome and `git diff --check` passed.

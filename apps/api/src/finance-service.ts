@@ -909,6 +909,7 @@ export function createFinanceService({
         (decision) =>
           decision.outcome === "confirmed" && decision.categoryName === evaluation.category,
       ).length,
+      merchantOnlyEligible: evaluation.merchantOnlyEligible,
     };
   }
   async function automaticCategorization(
@@ -948,7 +949,10 @@ export function createFinanceService({
       automatic.confidence === null ? (evidence?.confidence ?? 0) : automatic.confidence / 10_000;
     return {
       confidence,
-      meetsPolicyThreshold: suggestedCategory !== null && confidence >= threshold,
+      meetsPolicyThreshold:
+        suggestedCategory !== null &&
+        confidence >= threshold &&
+        (automatic.category !== null || evidence?.merchantOnlyEligible === true),
       policy: "preview",
       rationale: automatic.category
         ? learned
@@ -964,6 +968,9 @@ export function createFinanceService({
           await ownedTransaction(userId, item.id, executor),
           executor,
         )),
+      // Evidence remains visible for a review/deferred explanation even when
+      // it is not durable enough to automate. `meetsPolicyThreshold` is the
+      // gate that requires merchantOnlyEligible for an agent application.
       suggestionBasis: learned ? "merchant_rule" : evidence ? "transaction_evidence" : null,
       suggestedCategory,
       threshold,
@@ -1839,6 +1846,7 @@ export function createFinanceService({
       readExecutor,
     );
     let confidence = decision.confidence;
+    let agentProposal: FinanceCategorizationProposal | null = null;
     if (source === "agent" || source === "rule") {
       const proposal = await categorizationProposal(
         context.principal.userId,
@@ -1859,8 +1867,9 @@ export function createFinanceService({
       }
       confidence = proposal.confidence;
       threshold = proposal.threshold;
+      if (source === "agent") agentProposal = proposal;
     }
-    const canApply = source !== "agent" || confidence >= threshold;
+    const canApply = source !== "agent" || agentProposal?.meetsPolicyThreshold === true;
     if (!canApply) {
       const defer = async (tx: FinanceActionWriteExecutor) => {
         await assertMaintenanceClaim(tx, context);

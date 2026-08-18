@@ -20,7 +20,9 @@ export type MerchantEvidence = {
 };
 
 const broadRetailer = /\b(?:amazon|cvs|costco|target|walmart)\b/iu;
-const minimumConfirmations = 2;
+// Two independent, uncorrected confirmations are the smallest useful signal
+// for a narrow merchant. Broad and mixed merchants always stay transaction-led.
+export const minimumMerchantOnlyConfirmations = 2;
 
 /**
  * Merchant identity can narrow a suggestion, but it cannot turn a broad or
@@ -40,7 +42,7 @@ export function evaluateMerchantEvidence(input: MerchantEvidenceInput): Merchant
     input.behavior === "mixed" || broadPrior || categoryDiversity > 1
       ? "mixed"
       : input.behavior === "consistent" ||
-          (confirmations.length >= minimumConfirmations && category)
+          (confirmations.length >= minimumMerchantOnlyConfirmations && category)
         ? "consistent"
         : "unknown";
   const confidence = category
@@ -54,7 +56,7 @@ export function evaluateMerchantEvidence(input: MerchantEvidenceInput): Merchant
   const merchantOnlyEligible =
     behavior === "consistent" &&
     corrections.length === 0 &&
-    (strongest?.[1] ?? 0) >= minimumConfirmations;
+    (strongest?.[1] ?? 0) >= minimumMerchantOnlyConfirmations;
   const rationale =
     behavior === "mixed"
       ? broadPrior
@@ -63,7 +65,7 @@ export function evaluateMerchantEvidence(input: MerchantEvidenceInput): Merchant
       : corrections.length > 0
         ? "Prior corrections lower merchant-only confidence; use transaction-specific evidence."
         : merchantOnlyEligible
-          ? "Three uncorrected confirmations support this merchant-only category suggestion."
+          ? `${minimumMerchantOnlyConfirmations} uncorrected confirmations support this merchant-only category suggestion.`
           : "More uncorrected confirmations are required before merchant identity can support a category.";
   return { behavior, category, confidence, merchantOnlyEligible, rationale };
 }

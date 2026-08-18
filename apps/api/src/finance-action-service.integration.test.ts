@@ -238,6 +238,22 @@ async function seedActionCases(
       missingInput: {},
     },
     {
+      actionKind: "transaction_breakdown",
+      foreignInput: {
+        allocations: [{ amount: 12.34, categoryId: category.id, rationale: label }],
+        expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+        id: transaction.id,
+        rationale: label,
+      },
+      input: {
+        allocations: [{ amount: 12.34, categoryId: category.id, rationale: label }],
+        expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+        id: transaction.id,
+        rationale: label,
+      },
+      missingInput: {},
+    },
+    {
       actionKind: "income_stream",
       foreignInput: { id: income.id, status: "paused" },
       input: { id: income.id, status: "paused" },
@@ -1081,6 +1097,7 @@ describe.sequential("finance action service", () => {
       ["recurring_obligation", {}, "id"],
       ["alert", {}, "action"],
       ["transaction", {}, "id"],
+      ["transaction_breakdown", {}, "id"],
       ["income_stream", {}, "id"],
     ] as const;
 
@@ -1102,6 +1119,7 @@ describe.sequential("finance action service", () => {
         applyCategorizations: vi.fn(async () => []),
         resolveAlert: vi.fn(async () => ({})),
         setBudgetPlan: vi.fn(async () => ({})),
+        setTransactionBreakdown: vi.fn(async () => ({})),
         updateIncomeStream: vi.fn(async () => ({})),
         updateMerchant: vi.fn(async () => ({})),
         updateProfile: vi.fn(async () => ({})),
@@ -1184,6 +1202,143 @@ describe.sequential("finance action service", () => {
         status: "needs_input",
       });
     }
+  });
+
+  it("validates transaction breakdowns before bypass or queueing and recovers a corrected allocation once", async () => {
+    const setTransactionBreakdown = vi.fn(async () => ({}));
+    const service = createFinanceActionService({
+      db: database.db,
+      finances: { setTransactionBreakdown } as never,
+      now: () => now,
+    });
+    const updateBypass = async (enabled: boolean) => {
+      await database.db
+        .insert(financeAutomationSettings)
+        .values({ reviewBypassEnabled: enabled, userId })
+        .onConflictDoUpdate({
+          set: { reviewBypassEnabled: enabled, updatedAt: now },
+          target: financeAutomationSettings.userId,
+        });
+    };
+    const breakdown = (
+      await seedActionCases(database, userId, `Breakdown validation ${crypto.randomUUID()}`)
+    ).find((item) => item.actionKind === "transaction_breakdown");
+    if (!breakdown) throw new Error("Breakdown fixture was not created.");
+    const context = { principal: agent(userId), requestId: "breakdown-validation" };
+
+    await updateBypass(false);
+    const queued = await service.performDirect("transaction_breakdown", breakdown.input, context);
+    if (queued.status !== "pending_review") throw new Error("Expected a pending breakdown review.");
+    expect(queued.review.sourceRefs).toContainEqual(
+      expect.objectContaining({ provider: "local", sourceType: "finance_transaction" }),
+    );
+
+    await updateBypass(true);
+    await expect(
+      service.approve(queued.review.id, {
+        principal: user(userId),
+        requestId: "breakdown-validation-approve",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+
+    const invalidSum = {
+      ...breakdown.input,
+      allocations: [
+        {
+          amount: 1,
+          categoryId: (breakdown.input.allocations as Array<{ categoryId: string }>)[0]?.categoryId,
+          rationale: "wrong sum",
+        },
+      ],
+    };
+    await expect(
+      service.performDirect("transaction_breakdown", invalidSum, context),
+    ).resolves.toMatchObject({
+      status: "needs_input",
+      question: { expectedAnswer: [expect.objectContaining({ name: "allocations" })] },
+    });
+    await expect(
+      service.performDirect(
+        "transaction_breakdown",
+        { ...breakdown.input, expectedTransactionUpdatedAt: "2020-01-01T00:00:00.000Z" },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      status: "needs_input",
+      question: {
+        expectedAnswer: [expect.objectContaining({ name: "expectedTransactionUpdatedAt" })],
+      },
+    });
+    const [foreignOwner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Foreign breakdown category owner",
+        email: `foreign-breakdown-category-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!foreignOwner) throw new Error("Foreign breakdown category owner was not created.");
+    const [foreignCategory] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Test",
+        name: "Foreign breakdown category",
+        slug: `foreign-breakdown-${crypto.randomUUID()}`,
+        userId: foreignOwner.id,
+      })
+      .returning();
+    if (!foreignCategory) throw new Error("Foreign breakdown category was not created.");
+    await expect(
+      service.performDirect(
+        "transaction_breakdown",
+        {
+          ...breakdown.input,
+          allocations: [
+            { amount: 12.34, categoryId: foreignCategory.id, rationale: "Foreign category" },
+          ],
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      status: "needs_input",
+      question: { expectedAnswer: [expect.objectContaining({ name: "allocations" })] },
+    });
+
+    const transactionId = String(breakdown.input.id);
+    await database.db
+      .update(financeTransactions)
+      .set({ pending: true })
+      .where(eq(financeTransactions.id, transactionId));
+    await expect(
+      service.performDirect("transaction_breakdown", breakdown.input, context),
+    ).resolves.toMatchObject({
+      status: "needs_input",
+      question: { expectedAnswer: [expect.objectContaining({ name: "id" })] },
+    });
+    await database.db
+      .update(financeTransactions)
+      .set({ pending: false })
+      .where(eq(financeTransactions.id, transactionId));
+    const [current] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transactionId));
+    if (!current) throw new Error("Breakdown transaction was not found.");
+    const recoveryInput = {
+      ...invalidSum,
+      expectedTransactionUpdatedAt: current.updatedAt.toISOString(),
+    };
+    const asked = await service.performDirect("transaction_breakdown", recoveryInput, context);
+    if (asked.status !== "needs_input")
+      throw new Error("Expected a recoverable allocation question.");
+    await expect(
+      service.answerQuestion(
+        asked.question.id,
+        JSON.stringify({ allocations: breakdown.input.allocations }),
+        { principal: agent(userId), requestId: "breakdown-validation-recovery" },
+      ),
+    ).resolves.toMatchObject({ status: "applied" });
   });
 
   it("keeps bypass out of categorization evidence while allowing prepared permanent rules", async () => {
@@ -2708,6 +2863,7 @@ describe.sequential("finance action service", () => {
         createTransaction: vi.fn(async () => ({})),
         resolveAlert: vi.fn(async () => ({})),
         setBudgetPlan: vi.fn(async () => ({})),
+        setTransactionBreakdown: vi.fn(async () => ({})),
         updateIncomeStream: vi.fn(async () => ({})),
         updateMerchant: vi.fn(async () => ({})),
         updateProfile: vi.fn(async () => ({})),
@@ -2725,6 +2881,7 @@ describe.sequential("finance action service", () => {
     const ownedRecurring = ownedByKind.get("recurring_obligation");
     const ownedAlert = ownedByKind.get("alert");
     const ownedTransaction = ownedByKind.get("transaction");
+    const ownedBreakdown = ownedByKind.get("transaction_breakdown");
     const ownedIncome = ownedByKind.get("income_stream");
     const foreignProfile = foreign.find((item) => item.actionKind === "profile");
     if (
@@ -2735,6 +2892,7 @@ describe.sequential("finance action service", () => {
       !ownedRecurring ||
       !ownedAlert ||
       !ownedTransaction ||
+      !ownedBreakdown ||
       !ownedIncome ||
       !foreignProfile
     )
@@ -2759,13 +2917,18 @@ describe.sequential("finance action service", () => {
       ["recurring_obligation", { fields: ["id"], patch: { id: ownedRecurring.input.id } }],
       ["alert", { fields: ["id"], patch: { id: ownedAlert.input.id } }],
       ["transaction", { fields: ["id"], patch: { id: ownedTransaction.input.id } }],
+      ["transaction_breakdown", { fields: ["id"], patch: { id: ownedBreakdown.input.id } }],
       ["income_stream", { fields: ["id"], patch: { id: ownedIncome.input.id } }],
     ]);
 
     for (const foreignCase of foreign) {
       const expected = descriptor.get(foreignCase.actionKind);
       if (!expected) throw new Error("Question descriptor case was not configured.");
-      const asked = await service.performDirect(foreignCase.actionKind, foreignCase.foreignInput, {
+      const input =
+        foreignCase.actionKind === "transaction_breakdown"
+          ? { ...ownedBreakdown.input, id: foreignCase.foreignInput.id }
+          : foreignCase.foreignInput;
+      const asked = await service.performDirect(foreignCase.actionKind, input, {
         principal: agent(userId),
         requestId: `question-descriptor-${foreignCase.actionKind}`,
       });

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
+import {
+  evaluateMerchantEvidence,
+  minimumMerchantOnlyConfirmations,
+} from "./finance-merchant-evidence.js";
 
 describe("evaluateMerchantEvidence", () => {
   it("does not auto-apply a broad retailer from two CVS Health confirmations", () => {
@@ -37,29 +40,75 @@ describe("evaluateMerchantEvidence", () => {
       evaluateMerchantEvidence({
         behavior: "mixed",
         merchantName: "Small pharmacy",
-        observations: [
-          { category: "Health", outcome: "confirmed" },
-          { category: "Health", outcome: "confirmed" },
-          { category: "Health", outcome: "confirmed" },
-        ],
+        observations: Array.from({ length: minimumMerchantOnlyConfirmations + 3 }, () => ({
+          category: "Health",
+          outcome: "confirmed" as const,
+        })),
       }),
     ).toMatchObject({ behavior: "mixed", merchantOnlyEligible: false });
   });
 
-  it("allows uncorrected, consistent history to become eligible", () => {
+  it("requires the documented number of uncorrected confirmations before merchant-only evidence is eligible", () => {
+    const belowThreshold = evaluateMerchantEvidence({
+      merchantName: "Local pharmacy",
+      observations: Array.from({ length: minimumMerchantOnlyConfirmations - 1 }, () => ({
+        category: "Health",
+        outcome: "confirmed" as const,
+      })),
+    });
+    expect(belowThreshold).toMatchObject({ behavior: "unknown", merchantOnlyEligible: false });
+
     const evidence = evaluateMerchantEvidence({
       merchantName: "Local pharmacy",
-      observations: [
-        { category: "Health", outcome: "confirmed" },
-        { category: "Health", outcome: "confirmed" },
-        { category: "Health", outcome: "confirmed" },
-      ],
+      observations: Array.from({ length: minimumMerchantOnlyConfirmations }, () => ({
+        category: "Health",
+        outcome: "confirmed" as const,
+      })),
     });
 
     expect(evidence).toMatchObject({
       behavior: "consistent",
       category: "Health",
       merchantOnlyEligible: true,
+    });
+    expect(evidence.rationale).toContain(String(minimumMerchantOnlyConfirmations));
+  });
+
+  it("keeps a dominant category with diverse transaction history out of merchant-only automation", () => {
+    const evidence = evaluateMerchantEvidence({
+      merchantName: "Local market",
+      observations: [
+        ...Array.from({ length: minimumMerchantOnlyConfirmations + 4 }, () => ({
+          category: "Groceries",
+          outcome: "confirmed" as const,
+        })),
+        { category: "Dining", outcome: "confirmed" },
+      ],
+    });
+
+    expect(evidence).toMatchObject({
+      behavior: "mixed",
+      category: "Groceries",
+      merchantOnlyEligible: false,
+    });
+  });
+
+  it("keeps many corrected confirmations out of merchant-only automation", () => {
+    const evidence = evaluateMerchantEvidence({
+      merchantName: "Local pharmacy",
+      observations: [
+        ...Array.from({ length: minimumMerchantOnlyConfirmations + 4 }, () => ({
+          category: "Health",
+          outcome: "confirmed" as const,
+        })),
+        { category: "Health", outcome: "corrected" },
+      ],
+    });
+
+    expect(evidence).toMatchObject({
+      behavior: "consistent",
+      category: "Health",
+      merchantOnlyEligible: false,
     });
   });
 });

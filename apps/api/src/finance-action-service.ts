@@ -29,6 +29,7 @@ import {
   financeActionKindSchema,
   financeActionReviewSchema,
   financeQuestionSchema,
+  idSchema,
   type MaterialSourceReference,
   mergeFinanceMerchantsInputSchema,
   resolveFinanceAlertInputSchema,
@@ -1182,21 +1183,46 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       }
       case "transaction_breakdown": {
-        const input = parse<Record<string, unknown>>(setFinanceTransactionBreakdownInputSchema);
-        const id = typeof rawInput.id === "string" ? rawInput.id : "";
-        if (!id || !input)
+        const { id: rawId, ...body } = rawInput;
+        const id = idSchema.safeParse(rawId);
+        const input = setFinanceTransactionBreakdownInputSchema.safeParse(body);
+        if (!id.success || !input.success)
           return missing("Provide a transaction ID and exact transaction allocations.", [
             expectedAnswer("id", "string"),
             expectedAnswer("allocations", "object_array", { example: "[...]" }),
             expectedAnswer("expectedTransactionUpdatedAt", "string"),
             expectedAnswer("rationale", "string"),
           ]);
+        // Lock in the same account-before-transaction order as transaction
+        // updates and account deletion. This is the authoritative snapshot for
+        // both queueing and revalidation.
+        const transactionAccounts = await executor
+          .select({ accountId: financeTransactions.accountId })
+          .from(financeTransactions)
+          .where(and(eq(financeTransactions.id, id.data), eq(financeTransactions.userId, userId)))
+          .limit(1);
+        const accountId = transactionAccounts[0]?.accountId;
+        if (!accountId)
+          return missing("Choose one of your Finance transactions.", [
+            expectedAnswer("id", "string"),
+          ]);
+        const [account] = await lockAccounts([accountId]);
+        if (!account)
+          return missing("The transaction account is unavailable.", [
+            expectedAnswer("id", "string"),
+          ]);
         const item = await row(
           lockRead(
             executor
               .select()
               .from(financeTransactions)
-              .where(and(eq(financeTransactions.id, id), eq(financeTransactions.userId, userId)))
+              .where(
+                and(
+                  eq(financeTransactions.id, id.data),
+                  eq(financeTransactions.userId, userId),
+                  eq(financeTransactions.accountId, account.id),
+                ),
+              )
               .orderBy(financeTransactions.id)
               .limit(1),
           ),
@@ -1204,13 +1230,33 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           [expectedAnswer("id", "string")],
         );
         if ("question" in item) return item;
-        if (item.updatedAt.toISOString() !== String(input.expectedTransactionUpdatedAt)) {
+        if (item.pending)
+          return missing("Pending transactions cannot receive a final breakdown.", [
+            expectedAnswer("id", "string"),
+          ]);
+        if (item.updatedAt.toISOString() !== input.data.expectedTransactionUpdatedAt) {
           return missing(
             "The displayed transaction revision is stale. Refresh it before setting a breakdown.",
             [expectedAnswer("expectedTransactionUpdatedAt", "string")],
           );
         }
-        const allocationCategoryIds = (input.allocations as Array<{ categoryId: string }>).map(
+        const allocationCents = input.data.allocations.map((allocation) =>
+          Math.round(allocation.amount * 100),
+        );
+        if (
+          input.data.allocations.some(
+            (allocation, index) =>
+              Math.abs(allocation.amount * 100 - (allocationCents[index] ?? 0)) > 1e-8,
+          ) ||
+          allocationCents.reduce((sum, amount) => sum + amount, 0) !== item.amount
+        ) {
+          return missing(
+            "Transaction allocation amounts must sum exactly to the transaction amount.",
+            [expectedAnswer("allocations", "object_array", { example: "[...]" })],
+            [transactionSource(item, account)],
+          );
+        }
+        const allocationCategoryIds = input.data.allocations.map(
           (allocation) => allocation.categoryId,
         );
         const categories = await lockRead(
@@ -1231,16 +1277,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           ]);
         }
         return prepared(
-          { ...input, id },
+          { ...input.data, id: id.data },
           item.updatedAt.toISOString(),
           [
             {
               entityId: item.id,
               entityType: "finance_transaction",
-              summary: `Set ${item.merchant} transaction breakdown with ${(input.allocations as unknown[]).length} allocations.`,
+              summary: `Set ${item.merchant} transaction breakdown with ${input.data.allocations.length} allocations.`,
             },
           ],
-          [localSource(item.id, item.updatedAt.toISOString())],
+          [transactionSource(item, account)],
         );
       }
       case "income_stream": {

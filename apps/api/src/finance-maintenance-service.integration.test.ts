@@ -275,6 +275,57 @@ describe.sequential("Finance maintenance service", () => {
     expect(questionEffects).toBe(2);
   });
 
+  it("prepares one 47-item candidate without applying semantic categorization before challenge", async () => {
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const supported = Array.from({ length: 41 }, (_, index) =>
+      proposal(`10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, { confidence: 1 }),
+    );
+    const ambiguous = Array.from({ length: 6 }, (_, index) =>
+      proposal(`20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, { confidence: 0 }),
+    );
+    let applied = 0;
+    const prepared: Array<{ prepared: number; questions: number; fingerprints: string[] }> = [];
+    const service = createFinanceMaintenanceService({
+      finances: operations({
+        applyApprovedOneOffs: async () => {
+          applied += 1;
+          return [];
+        },
+        proposeOutstandingCategorizations: async () => ({
+          items: [...supported, ...ambiguous],
+          nextCursor: null,
+        }),
+        prepareMaintenanceCandidate: async ({ items }) => {
+          const fingerprints = items.map((item) => item.fingerprint);
+          prepared.push({
+            prepared: items.filter((item) => item.disposition === "prepared").length,
+            questions: items.filter((item) => item.disposition === "question").length,
+            fingerprints,
+          });
+          const candidate = prepared.at(-1);
+          if (!candidate) throw new Error("Candidate fixture was not prepared.");
+          return {
+            candidateId: "30000000-0000-4000-8000-000000000001",
+            revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            ...candidate,
+          };
+        },
+      }),
+      maintenance: workspace,
+      now: () => now,
+      status: { getFinanceStatus: async () => status() },
+    });
+    const run = await service.startOrResume(userId, { type: "all_outstanding" });
+    await service.dispatchRun(run.id);
+    expect(applied).toBe(0);
+    expect(prepared).toHaveLength(1);
+    expect(prepared[0]).toMatchObject({ prepared: 41, questions: 6 });
+    const retry = await service.startOrResume(userId, { type: "all_outstanding" });
+    await service.dispatchRun(retry.id);
+    expect(prepared).toHaveLength(2);
+    expect(prepared[1]?.fingerprints).toEqual(prepared[0]?.fingerprints);
+  });
+
   it("prefers the authoritative question-step creation count over reviews created during reconciliation", async () => {
     const ownerId = await createUser("Finance refreshed question count");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
@@ -531,18 +582,18 @@ describe.sequential("Finance maintenance service", () => {
     await service.dispatchRun(run.id);
     await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
       settledResult: {
-        applied: { categorizations: 2, transfers: 2 },
-        questions: { total: 2 },
+        applied: { categorizations: 0, transfers: 2 },
+        questions: { total: 4 },
         verification: { duplicateActions: 0 },
       },
       status: "completed_with_questions",
     });
     await expect(finances.summarizeMaintenanceEffectsForRun(ownerId, run.id)).resolves.toEqual({
-      categorizations: 2,
+      categorizations: 0,
       duplicateActions: 0,
       heuristicTransfersRepaired: 0,
-      questionStepCreations: 2,
-      questions: 2,
+      questionStepCreations: 0,
+      questions: 0,
       transfers: 2,
     });
     const appliedRows = await database.db
@@ -554,12 +605,10 @@ describe.sequential("Finance maintenance service", () => {
       .from(financeTransactions)
       .where(eq(financeTransactions.userId, ownerId));
     expect(appliedRows.find((row) => row.id === exactRuleCandidate.id)).toMatchObject({
-      category: "Groceries",
-      categorySource: "rule",
+      category: null,
     });
     expect(appliedRows.find((row) => row.id === oneOffCandidate.id)).toMatchObject({
-      category: "Groceries",
-      categorySource: "agent",
+      category: null,
     });
     expect(appliedRows.filter((row) => [transferOut.id, transferIn.id].includes(row.id))).toEqual([
       expect.objectContaining({ category: "Transfers" }),
@@ -569,10 +618,7 @@ describe.sequential("Finance maintenance service", () => {
       .select({ id: financeReviewCases.id, reason: financeReviewCases.reason })
       .from(financeReviewCases)
       .where(eq(financeReviewCases.userId, ownerId));
-    expect(questionsAfterFirst.map((question) => question.reason).sort()).toEqual([
-      "possible_duplicate",
-      "unknown_merchant",
-    ]);
+    expect(questionsAfterFirst).toEqual([]);
     const auditsAfterFirst = await database.db
       .select({
         action: auditEvents.action,
@@ -586,11 +632,7 @@ describe.sequential("Finance maintenance service", () => {
       audit.requestId.startsWith(`maintenance:${run.id}:`),
     );
     expect(maintenanceAudits.map((audit) => audit.action)).toEqual(
-      expect.arrayContaining([
-        "finance.review_queued",
-        "finance.transaction_categorized",
-        "finance.transfer_reconciled",
-      ]),
+      expect.arrayContaining(["finance.transfer_reconciled"]),
     );
     expect(maintenanceAudits).not.toHaveLength(0);
     for (const audit of maintenanceAudits) {
@@ -614,7 +656,7 @@ describe.sequential("Finance maintenance service", () => {
     await expect(service.getRun(ownerId, replay.id)).resolves.toMatchObject({
       settledResult: {
         applied: { categorizations: 0, transfers: 0 },
-        questions: { created: 0, total: 2 },
+        questions: { created: 0, total: 4 },
         verification: { duplicateActions: 0 },
       },
       status: "completed_with_questions",
@@ -1115,7 +1157,7 @@ describe.sequential("Finance maintenance service", () => {
     await recoveredRuntime.dispatchRun(run.id);
 
     await expect(recoveredRuntime.getRun(ownerId, run.id)).resolves.toMatchObject({
-      settledResult: { questions: { created: 1, total: 1 } },
+      settledResult: { questions: { created: 0, total: 2 } },
       status: "completed_with_questions",
     });
     await expect(
@@ -1128,7 +1170,7 @@ describe.sequential("Finance maintenance service", () => {
             eq(auditEvents.action, "finance.review_queued"),
           ),
         ),
-    ).resolves.toHaveLength(1);
+    ).resolves.toHaveLength(0);
   });
 
   it("recovers a committed categorization after process loss before its checkpoint", async () => {

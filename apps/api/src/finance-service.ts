@@ -16,6 +16,8 @@ import {
   financeCategoryRules,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
   financeMerchantAliases,
   financeMerchants,
   financeProfiles,
@@ -4696,6 +4698,113 @@ export function createFinanceService({
           nextCursor: transactions.nextCursor,
         };
       });
+    },
+    async prepareMaintenanceCandidate(input: {
+      items: Array<{
+        actionKind: string;
+        disposition: "prepared" | "question";
+        evidence: Record<string, unknown>;
+        expectedRevision: string | null;
+        fingerprint: string;
+        privatePayload: Record<string, unknown>;
+        safeChanges: Array<Record<string, unknown>>;
+        sourceRefs: Array<Record<string, unknown>>;
+      }>;
+      runId: string;
+      userId: string;
+    }) {
+      const [run] = await db
+        .select({ id: workspaceMaintenanceRuns.id })
+        .from(workspaceMaintenanceRuns)
+        .where(
+          and(
+            eq(workspaceMaintenanceRuns.id, input.runId),
+            eq(workspaceMaintenanceRuns.userId, input.userId),
+            eq(workspaceMaintenanceRuns.domain, "finances"),
+          ),
+        )
+        .limit(1);
+      if (!run) throw new AppError("not_found", "The Finance maintenance run is not available.");
+      const [existing] = await db
+        .select()
+        .from(financeMaintenanceCandidates)
+        .where(
+          and(
+            eq(financeMaintenanceCandidates.runId, input.runId),
+            sql`${financeMaintenanceCandidates.state} <> 'superseded'`,
+          ),
+        )
+        .limit(1);
+      if (existing) {
+        const items = await db
+          .select({ fingerprint: financeMaintenanceCandidateItems.fingerprint })
+          .from(financeMaintenanceCandidateItems)
+          .where(eq(financeMaintenanceCandidateItems.candidateId, existing.id))
+          .orderBy(financeMaintenanceCandidateItems.ordinal);
+        return {
+          candidateId: existing.id,
+          fingerprints: items.map((item) => item.fingerprint),
+          prepared: input.items.filter((item) => item.disposition === "prepared").length,
+          questions: input.items.filter((item) => item.disposition === "question").length,
+          revision: existing.revision,
+        };
+      }
+      const revision = `sha256:${createHash("sha256")
+        .update(
+          JSON.stringify(
+            input.items.map((item) => [
+              item.actionKind,
+              item.disposition,
+              item.expectedRevision,
+              item.fingerprint,
+            ]),
+          ),
+        )
+        .digest("hex")}`;
+      const expenses = await db
+        .select({ amount: financeTransactions.amount })
+        .from(financeTransactions)
+        .where(
+          and(
+            eq(financeTransactions.userId, input.userId),
+            eq(financeTransactions.direction, "expense"),
+            eq(financeTransactions.pending, false),
+          ),
+        );
+      const grossCashSpending = expenses.reduce((sum, row) => sum + row.amount / 100, 0);
+      const [candidate] = await db
+        .insert(financeMaintenanceCandidates)
+        .values({
+          projection: {
+            budgetVariance: null,
+            grossCashSpending,
+            personalSpending: grossCashSpending,
+            questions: input.items.filter((item) => item.disposition === "question").length,
+            reimbursementsOutstanding: 0,
+          },
+          revision,
+          runId: input.runId,
+          state: "ready_for_challenge",
+          userId: input.userId,
+        })
+        .returning();
+      if (!candidate) throw new Error("The Finance maintenance candidate could not be saved.");
+      if (input.items.length) {
+        await db.insert(financeMaintenanceCandidateItems).values(
+          input.items.map((item, ordinal) => ({
+            ...item,
+            candidateId: candidate.id,
+            ordinal,
+          })),
+        );
+      }
+      return {
+        candidateId: candidate.id,
+        fingerprints: input.items.map((item) => item.fingerprint),
+        prepared: input.items.filter((item) => item.disposition === "prepared").length,
+        questions: input.items.filter((item) => item.disposition === "question").length,
+        revision,
+      };
     },
     async proposeOutstandingCategorizations(
       userId: string,

@@ -190,6 +190,100 @@ export const workspaceMaintenanceSteps = pgTable(
   ],
 );
 
+/**
+ * The private candidate ledger for a single Finance maintenance run.  A
+ * superseded revision is retained for audit/recovery, while the partial index
+ * permits only one current candidate for that run.
+ */
+export const financeMaintenanceCandidates = pgTable(
+  "finance_maintenance_candidates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    state: text("state")
+      .$type<
+        | "preparing"
+        | "ready_for_challenge"
+        | "challenged"
+        | "awaiting_approval"
+        | "committing"
+        | "committed"
+        | "superseded"
+      >()
+      .notNull()
+      .default("preparing"),
+    revision: text("revision").notNull(),
+    projection: jsonb("projection").$type<Record<string, unknown>>().notNull().default({}),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "finance_maintenance_candidates_state_check",
+      sql`${table.state} IN ('preparing', 'ready_for_challenge', 'challenged', 'awaiting_approval', 'committing', 'committed', 'superseded')`,
+    ),
+    uniqueIndex("finance_maintenance_candidates_active_run_idx")
+      .on(table.runId)
+      .where(sql`${table.state} <> 'superseded'`),
+    index("finance_maintenance_candidates_user_state_idx").on(
+      table.userId,
+      table.state,
+      table.updatedAt,
+    ),
+  ],
+);
+
+/** Private prepared actions/questions; public views project only safeChanges. */
+export const financeMaintenanceCandidateItems = pgTable(
+  "finance_maintenance_candidate_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => financeMaintenanceCandidates.id, { onDelete: "cascade" }),
+    ordinal: integer("ordinal").notNull(),
+    actionKind: text("action_kind").notNull(),
+    privatePayload: jsonb("private_payload").$type<Record<string, unknown>>().notNull(),
+    safeChanges: jsonb("safe_changes")
+      .$type<Array<Record<string, unknown>>>()
+      .notNull()
+      .default([]),
+    sourceRefs: jsonb("source_refs").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    expectedRevision: text("expected_revision"),
+    evidence: jsonb("evidence").$type<Record<string, unknown>>().notNull().default({}),
+    fingerprint: text("fingerprint").notNull(),
+    disposition: text("disposition")
+      .$type<"prepared" | "question" | "removed" | "committed">()
+      .notNull()
+      .default("prepared"),
+    ...timestamps,
+  },
+  (table) => [
+    check("finance_maintenance_candidate_items_ordinal_check", sql`${table.ordinal} >= 0`),
+    check(
+      "finance_maintenance_candidate_items_disposition_check",
+      sql`${table.disposition} IN ('prepared', 'question', 'removed', 'committed')`,
+    ),
+    uniqueIndex("finance_maintenance_candidate_items_candidate_ordinal_idx").on(
+      table.candidateId,
+      table.ordinal,
+    ),
+    uniqueIndex("finance_maintenance_candidate_items_candidate_fingerprint_idx").on(
+      table.candidateId,
+      table.fingerprint,
+    ),
+    index("finance_maintenance_candidate_items_candidate_disposition_idx").on(
+      table.candidateId,
+      table.disposition,
+      table.ordinal,
+    ),
+  ],
+);
+
 export const accountActionTokens = pgTable(
   "account_action_tokens",
   {

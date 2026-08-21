@@ -9,6 +9,8 @@ import {
   financeAccounts,
   financeAgentActionReviews,
   financeAutomationSettings,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
   financeMerchants,
   financeProfiles,
   financeProviderItems,
@@ -24,6 +26,52 @@ import {
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps one active, owned Finance maintenance candidate with durable private items", async () => {
+    const candidates = getTableConfig(financeMaintenanceCandidates);
+    const items = getTableConfig(financeMaintenanceCandidateItems);
+    expect(candidates.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["user_id", "run_id", "state", "revision", "projection"]),
+    );
+    expect(items.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "candidate_id",
+        "ordinal",
+        "action_kind",
+        "private_payload",
+        "safe_changes",
+        "source_refs",
+        "expected_revision",
+        "fingerprint",
+        "disposition",
+      ]),
+    );
+    expect(candidates.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_maintenance_candidates_active_run_idx",
+        "finance_maintenance_candidates_user_state_idx",
+      ]),
+    );
+    expect(items.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_maintenance_candidate_items_candidate_ordinal_idx",
+        "finance_maintenance_candidate_items_candidate_fingerprint_idx",
+      ]),
+    );
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0063_finance_maintenance_candidates.sql",
+      ),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidates"');
+    expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidate_items"');
+    expect(migrationSql).toContain(
+      "finance_maintenance_candidates_run_id_workspace_maintenance_runs_id_fk",
+    );
+    expect(migrationSql).toContain("ON DELETE cascade");
+  });
+
   it("keeps transaction allocations owned, ordered, and aligned with migration 0061", async () => {
     const merchants = getTableConfig(financeMerchants);
     const allocations = getTableConfig(financeTransactionAllocations);
@@ -96,11 +144,12 @@ describe("database schema contracts", () => {
         "utf8",
       ),
     ) as { entries: Array<{ tag: string }> };
-    expect(journal.entries.slice(-4).map((entry) => entry.tag)).toEqual([
+    expect(journal.entries.slice(-5).map((entry) => entry.tag)).toEqual([
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
       "0061_finance_transaction_allocations",
       "0062_finance_reimbursements",
+      "0063_finance_maintenance_candidates",
     ]);
   });
 

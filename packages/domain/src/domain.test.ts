@@ -40,7 +40,10 @@ import {
   financeActionOutcomeSchema,
   financeAutomationSettingsSchema,
   financeBudgetPlanSchema,
+  financeCandidateLedgerProjectionSchema,
   financeGuidedPreferencesSchema,
+  financeMaintenanceCandidateItemSchema,
+  financeMaintenanceCandidateSchema,
   financeMaintenanceResultSchema,
   financeProviderItemHealthSchema,
   financeQuestionSchema,
@@ -352,6 +355,63 @@ describe("workspace maintenance", () => {
         retryAt: end,
       }).success,
     ).toBe(true);
+  });
+});
+
+describe("finance maintenance candidates", () => {
+  it("keeps prepared semantic work private while exposing a bounded candidate ledger", () => {
+    const candidate = financeMaintenanceCandidateSchema.parse({
+      id,
+      userId: id,
+      runId: accountId,
+      state: "ready_for_challenge",
+      revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      projection: {
+        budgetVariance: -12.5,
+        grossCashSpending: 42.5,
+        personalSpending: 30,
+        questions: 1,
+        reimbursementsOutstanding: 12.5,
+      },
+      createdAt: start,
+      updatedAt: end,
+    });
+    expect(candidate.state).toBe("ready_for_challenge");
+    expect(
+      financeMaintenanceCandidateItemSchema.parse({
+        id,
+        candidateId: accountId,
+        ordinal: 0,
+        actionKind: "categorization",
+        disposition: "prepared",
+        expectedRevision: start,
+        fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        privatePayload: { input: { decisions: [] } },
+        safeChanges: [
+          {
+            entityId: id,
+            entityType: "finance_transaction",
+            summary: "Categorize grocery purchase.",
+          },
+        ],
+        sourceRefs: [
+          {
+            accountId,
+            provider: "local",
+            remoteId: id,
+            revision: start,
+            sourceType: "finance_transaction",
+          },
+        ],
+        evidence: { confidence: 0.98 },
+        createdAt: start,
+        updatedAt: end,
+      }).privatePayload,
+    ).toEqual({ input: { decisions: [] } });
+    expect(financeCandidateLedgerProjectionSchema.parse(candidate.projection)).toMatchObject({
+      grossCashSpending: 42.5,
+      questions: 1,
+    });
   });
 });
 

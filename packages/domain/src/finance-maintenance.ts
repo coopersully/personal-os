@@ -1,6 +1,9 @@
 import { z } from "zod";
+import { idSchema, isoDateTimeSchema } from "./common.js";
+import { materialSourceReferenceSchema } from "./feature-contracts.js";
 import {
   financeAccountSchema,
+  financeActionKindSchema,
   financeFactEvidenceSchema,
   financeProviderItemHealthSchema,
   financeQuestionSchema,
@@ -172,6 +175,97 @@ export const financeStatusSchema = workspaceStatusSchema(financeStatusDetailsSch
   recommendedNextOperation: maintenanceOperationSchema.nullable(),
 });
 export type FinanceStatus = z.infer<typeof financeStatusSchema>;
+
+/**
+ * A durable, private Finance maintenance batch.  It is deliberately distinct
+ * from the public action-review record: challenge and settlement need the
+ * complete candidate ledger, while the UI receives only safe projections.
+ */
+export const financeMaintenanceCandidateStateSchema = z.enum([
+  "preparing",
+  "ready_for_challenge",
+  "challenged",
+  "awaiting_approval",
+  "committing",
+  "committed",
+  "superseded",
+]);
+export type FinanceMaintenanceCandidateState = z.infer<
+  typeof financeMaintenanceCandidateStateSchema
+>;
+
+export const financeMaintenanceCandidateDispositionSchema = z.enum([
+  "prepared",
+  "question",
+  "removed",
+  "committed",
+]);
+export type FinanceMaintenanceCandidateDisposition = z.infer<
+  typeof financeMaintenanceCandidateDispositionSchema
+>;
+
+const financeCandidateSafeChangeSchema = z
+  .object({
+    entityId: idSchema.nullable().default(null),
+    entityType: z.string().trim().min(1).max(100),
+    summary: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+export const financeCandidateLedgerProjectionSchema = z
+  .object({
+    budgetVariance: z.number().finite().nullable().default(null),
+    grossCashSpending: z.number().finite().nonnegative(),
+    personalSpending: z.number().finite().nonnegative(),
+    questions: z.int().nonnegative(),
+    reimbursementsOutstanding: z.number().finite().nonnegative(),
+  })
+  .strict();
+export type FinanceCandidateLedgerProjection = z.infer<
+  typeof financeCandidateLedgerProjectionSchema
+>;
+
+export const financeMaintenanceCandidateSchema = z
+  .object({
+    createdAt: isoDateTimeSchema,
+    id: idSchema,
+    projection: financeCandidateLedgerProjectionSchema,
+    revision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    runId: idSchema,
+    state: financeMaintenanceCandidateStateSchema,
+    updatedAt: isoDateTimeSchema,
+    userId: idSchema,
+  })
+  .strict();
+export type FinanceMaintenanceCandidate = z.infer<typeof financeMaintenanceCandidateSchema>;
+
+export const financeMaintenanceCandidateItemSchema = z
+  .object({
+    actionKind: financeActionKindSchema,
+    candidateId: idSchema,
+    createdAt: isoDateTimeSchema,
+    disposition: financeMaintenanceCandidateDispositionSchema,
+    evidence: z.record(z.string(), z.unknown()).default({}),
+    expectedRevision: z.string().trim().min(1).max(128).nullable().default(null),
+    fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    id: idSchema,
+    ordinal: z.int().nonnegative(),
+    privatePayload: z.record(z.string(), z.unknown()),
+    safeChanges: z.array(financeCandidateSafeChangeSchema).max(100).default([]),
+    sourceRefs: z.array(materialSourceReferenceSchema).max(100).default([]),
+    updatedAt: isoDateTimeSchema,
+  })
+  .strict();
+export type FinanceMaintenanceCandidateItem = z.infer<typeof financeMaintenanceCandidateItemSchema>;
+
+export const financeMaintenanceCandidatePageSchema = z
+  .object({
+    candidate: financeMaintenanceCandidateSchema,
+    items: z.array(financeMaintenanceCandidateItemSchema).max(100),
+    nextCursor: z.string().min(1).nullable(),
+  })
+  .strict();
+export type FinanceMaintenanceCandidatePage = z.infer<typeof financeMaintenanceCandidatePageSchema>;
 
 export const financeMaintenanceResultSchema = z.object({
   applied: z.object({

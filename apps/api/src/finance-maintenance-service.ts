@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ApplyFinanceCategorizationsInput,
   FinanceCategorizationApplyResult,
@@ -20,6 +21,22 @@ export const financeMaintenanceSteps = [
   "budget",
   "health",
   "verify",
+] as const;
+
+/** The candidate-first turn graph used by durable Finance maintenance. */
+export const financeCandidateMaintenanceSteps = [
+  "preflight",
+  "synchronize",
+  "reconcile",
+  "prepare",
+  "questions",
+  "budget_and_health_projection",
+  "challenge_prepare",
+  "challenge_resolve",
+  "commit_or_queue_review",
+  "health_refresh",
+  "verify",
+  "period_review",
 ] as const;
 
 type FinanceMaintenanceStep = (typeof financeMaintenanceSteps)[number];
@@ -56,6 +73,26 @@ export type FinanceMaintenanceOperations = {
     cursor?: string,
     onProgress?: () => Promise<void>,
   ) => Promise<FinanceCategorizationProposalPage>;
+  prepareMaintenanceCandidate?: (input: {
+    items: Array<{
+      actionKind: string;
+      disposition: "prepared" | "question";
+      evidence: Record<string, unknown>;
+      expectedRevision: string | null;
+      fingerprint: string;
+      privatePayload: Record<string, unknown>;
+      safeChanges: Array<Record<string, unknown>>;
+      sourceRefs: Array<Record<string, unknown>>;
+    }>;
+    runId: string;
+    userId: string;
+  }) => Promise<{
+    candidateId: string;
+    fingerprints: string[];
+    prepared: number;
+    questions: number;
+    revision: string;
+  }>;
   repairHeuristicTransfersForUser: (
     userId: string,
     scope: MaintenanceScope,
@@ -214,6 +251,66 @@ function isEligibleOneOff(
     proposal.transaction.reconciliationStatus !== "candidate" &&
     proposal.transaction.direction !== "transfer"
   );
+}
+
+function candidateFingerprint(value: unknown) {
+  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+}
+
+function preparedCandidateItems(page: FinanceCategorizationProposalPage) {
+  return page.items.map((proposal) => {
+    const sourceRefs = [proposal.source] as Array<Record<string, unknown>>;
+    if (!isEligibleOneOff(proposal)) {
+      return {
+        actionKind: "question",
+        disposition: "question" as const,
+        evidence: { confidence: proposal.confidence, rationale: proposal.rationale },
+        expectedRevision: proposal.transaction.updatedAt,
+        fingerprint: candidateFingerprint({
+          kind: "question",
+          revision: proposal.transaction.updatedAt,
+          transactionId: proposal.transaction.id,
+        }),
+        privatePayload: { proposal },
+        safeChanges: [
+          {
+            entityId: proposal.transaction.id,
+            entityType: "finance_transaction",
+            summary: `Answer the Finance question for ${proposal.transaction.merchant}.`,
+          },
+        ],
+        sourceRefs,
+      };
+    }
+    const input = {
+      decisions: [
+        {
+          categoryId: proposal.suggestedCategory.id,
+          confidence: proposal.confidence,
+          expectedTransactionUpdatedAt: proposal.transaction.updatedAt,
+          learnMerchant: "never",
+          rationale: proposal.rationale,
+          transactionId: proposal.transaction.id,
+        },
+      ],
+    };
+    return {
+      actionKind: "categorization",
+      disposition: "prepared" as const,
+      evidence: { confidence: proposal.confidence, rationale: proposal.rationale },
+      expectedRevision: proposal.transaction.updatedAt,
+      fingerprint: candidateFingerprint({ actionKind: "categorization", input }),
+      privatePayload: { input, rationale: proposal.rationale },
+      safeChanges: [
+        {
+          entityId: proposal.transaction.id,
+          entityType: "finance_transaction",
+          summary: `Categorize ${proposal.transaction.merchant} as ${proposal.suggestedCategory.name}.`,
+        },
+      ],
+      sourceRefs,
+    };
+  });
 }
 
 function errorCode(error: unknown): string {
@@ -456,6 +553,36 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
               await maintenance.renewClaim({ claimId, runId });
             },
           );
+          // Candidate-aware Finance maintenance never mutates semantic ledger
+          // rows before the connected-agent challenge.  Legacy fixtures that
+          // do not provide the candidate store retain their historical path.
+          if (finances.prepareMaintenanceCandidate) {
+            if (page.nextCursor) {
+              throw new AppError(
+                "conflict",
+                "Finance candidate preparation must finish one bounded page before challenge.",
+              );
+            }
+            await assertCurrentRulebook(run);
+            const candidate = await finances.prepareMaintenanceCandidate({
+              items: preparedCandidateItems(page),
+              runId,
+              userId: run.userId,
+            });
+            await maintenance.completeStep({
+              claimId,
+              idempotencyKey,
+              result: {
+                candidateId: candidate.candidateId,
+                prepared: candidate.prepared,
+                questions: candidate.questions,
+                revision: candidate.revision,
+              },
+              runId,
+              step,
+            });
+            continue;
+          }
           const eligible = page.items.filter(isEligibleOneOff).slice(0, 50);
           if (eligible.length > 0) {
             await assertCurrentRulebook(run);
@@ -521,6 +648,19 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           continue;
         }
         if (step === "questions") {
+          if (finances.prepareMaintenanceCandidate) {
+            const candidateStep = await maintenance.listStepRecords(runId);
+            const candidate = candidateStep.find((record) => record.step === "categorize")
+              ?.result as { questions?: number } | undefined;
+            await maintenance.completeStep({
+              claimId,
+              idempotencyKey,
+              result: { created: 0, total: candidate?.questions ?? 0 },
+              runId,
+              step,
+            });
+            continue;
+          }
           await assertCurrentRulebook(run);
           const refreshed = await finances.refreshMaintenanceQuestionsForUser(
             run.userId,
@@ -558,6 +698,21 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           continue;
         }
         if (step === "health") {
+          if (finances.prepareMaintenanceCandidate) {
+            const observed = await assertCurrentRulebook(run);
+            await maintenance.completeStep({
+              claimId,
+              idempotencyKey,
+              result: {
+                applicability: "not_run",
+                confidence: observed.details.health.confidence,
+                refreshed: false,
+              },
+              runId,
+              step,
+            });
+            continue;
+          }
           await assertCurrentRulebook(run);
           const refreshed = await finances.refreshCashflowForUser(
             run.userId,

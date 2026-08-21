@@ -449,6 +449,13 @@
       "when": 1786986000000,
       "tag": "0063_finance_maintenance_candidates",
       "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1786990000000,
+      "tag": "0064_finance_ledger_challenges",
+      "breakpoints": true
     }
   ]
 }

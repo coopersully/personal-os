@@ -12,6 +12,7 @@ import {
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
   setFinanceTransactionBreakdownInputSchema,
+  submitFinanceLedgerChallengeInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
@@ -105,6 +106,33 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
       title: "Maintain Finances",
     },
     async (input) => apiResult(() => api.maintainFinances(input.scope)),
+  );
+
+  server.registerTool(
+    "get_finance_ledger_challenge",
+    {
+      annotations: readAnnotations,
+      description:
+        "Read the next page of a prepared Finance maintenance candidate. Review every item and every rubric check before submitting; look for mixed merchants, weak rules, unusual amounts, reimbursements, transfers, duplicates, vague categories, stale facts, and misleading totals.",
+      inputSchema: z
+        .object({ challengeId: id, cursor: z.string().trim().min(1).optional() })
+        .strict(),
+      title: "Get Finance ledger challenge",
+    },
+    async (input) =>
+      apiResult(() => api.getFinanceLedgerChallenge(input.challengeId, input.cursor)),
+  );
+
+  server.registerTool(
+    "submit_finance_ledger_challenge",
+    {
+      annotations: writeAnnotations,
+      description:
+        "Submit complete structured coverage of a Finance maintenance candidate. Keep supported items, remove or replace corrections, and surface genuine questions or blockers. Ilo then resumes the same durable maintenance run and applies or queues the batch according to the app review setting.",
+      inputSchema: submitFinanceLedgerChallengeInputSchema,
+      title: "Submit Finance ledger challenge",
+    },
+    async (input) => apiResult(() => api.submitFinanceLedgerChallenge(input)),
   );
 
   server.registerTool(

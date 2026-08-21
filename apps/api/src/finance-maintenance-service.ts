@@ -177,6 +177,25 @@ type FinanceStatusReader = {
 };
 
 type Options = {
+  actions?: {
+    settleFinanceMaintenanceCandidate: (
+      candidateId: string,
+      expectedRevision: string,
+      context: { principal: Principal; requestId: string },
+    ) => Promise<unknown>;
+  };
+  challenge?: {
+    prepare: (userId: string, runId: string, candidateId: string) => Promise<{ id: string }>;
+    resolve: (
+      userId: string,
+      runId: string,
+    ) => Promise<{
+      candidateId: string;
+      candidateRevision: string | undefined;
+      questions: number;
+      submittingAgentId?: string | null;
+    }>;
+  };
   finances: FinanceMaintenanceOperations;
   maintenance: WorkspaceMaintenanceService;
   now: () => Date;
@@ -382,7 +401,14 @@ function safeErrorMessage(error: unknown): string {
   return "Finance maintenance could not finish this step.";
 }
 
-export function createFinanceMaintenanceService({ finances, maintenance, now, status }: Options) {
+export function createFinanceMaintenanceService({
+  actions,
+  challenge,
+  finances,
+  maintenance,
+  now,
+  status,
+}: Options) {
   async function currentStatus(userId: string, scope: MaintenanceScope) {
     return status.getFinanceStatus(userId, scope);
   }
@@ -768,18 +794,69 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           )?.result as NonNullable<typeof prepared> | undefined;
           if (!candidate)
             throw new AppError("conflict", "Finance candidate preparation is missing.");
+          const preparedChallenge = challenge
+            ? await challenge.prepare(run.userId, runId, candidate.candidateId)
+            : null;
           await maintenance.completeStep({
             claimId,
             idempotencyKey,
-            result: { candidateId: candidate.candidateId, revision: candidate.revision },
+            result: {
+              candidateId: candidate.candidateId,
+              challengeId: preparedChallenge?.id ?? null,
+              revision: candidate.revision,
+            },
             runId,
             step,
           });
           return releaseAtChallenge(candidate);
         }
-        // Challenge resolution and settlement are unavailable until Task 7
-        // establishes durable challenge authority. Never reach these steps
-        // while a candidate is waiting at its challenge boundary.
+        if (step === "challenge_resolve" && challenge && actions) {
+          const resolution = await challenge.resolve(run.userId, runId);
+          if (!resolution.candidateRevision)
+            throw new AppError("conflict", "The challenged Finance candidate is unavailable.");
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey,
+            result: resolution,
+            runId,
+            step,
+          });
+          if (resolution.questions > 0) {
+            return maintenance.settle({
+              claimId,
+              result: {
+                candidateId: resolution.candidateId,
+                questions: resolution.questions,
+              },
+              runId,
+              status: "completed_with_questions",
+            });
+          }
+          await maintenance.checkpointAndRelease({
+            checkpoint: {
+              candidateId: resolution.candidateId,
+              phase: "challenge",
+              revision: resolution.candidateRevision,
+            },
+            claimId,
+            runId,
+            status: "awaiting_agent_challenge",
+          });
+          await actions.settleFinanceMaintenanceCandidate(
+            resolution.candidateId,
+            resolution.candidateRevision,
+            {
+              principal: {
+                actorId: resolution.submittingAgentId ?? "finance-maintenance-agent",
+                actorType: "agent",
+                scopes: new Set(["finances:maintain", "finances:write"]),
+                userId: run.userId,
+              },
+              requestId: `finance-maintenance-settle:${runId}`,
+            },
+          );
+          return maintenance.getOwnedRun(run.userId, runId);
+        }
         return maintenance.getOwnedRun(run.userId, runId);
       }
       if (prepared) return releaseAtChallenge(prepared);

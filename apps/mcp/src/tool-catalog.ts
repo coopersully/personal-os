@@ -179,6 +179,13 @@ export const iloToolCatalog = {
     policy: "approved_rule",
     stage: "commit",
   }),
+  get_finance_ledger_challenge: read("finances", ["finances:maintain"]),
+  submit_finance_ledger_challenge: write("finances", ["finances:maintain"], {
+    idempotent: true,
+    openWorld: false,
+    policy: "approved_rule",
+    stage: "commit",
+  }),
   get_finance_wealth_summary: read("finances", ["finances:read"]),
   get_finance_cashflow: read("finances", ["finances:read"]),
   get_finance_ledger_health: read("finances", ["finances:read"]),

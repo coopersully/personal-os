@@ -24,6 +24,8 @@ import type {
   FinanceForecast,
   FinanceGuidedSetupContext,
   FinanceIncomeStream,
+  FinanceLedgerChallenge,
+  FinanceLedgerChallengePage,
   FinanceLedgerHealth,
   FinanceMerchant,
   FinanceOverview,
@@ -47,6 +49,7 @@ import type {
   ResolveFinanceAlertInput,
   SetFinanceBudgetPlanInput,
   SetFinanceTransactionBreakdownInput,
+  SubmitFinanceLedgerChallengeInput,
   UpdateFinanceAutomationSettingsInput,
   UpdateFinanceIncomeStreamInput,
   UpdateFinanceMerchantInput,
@@ -55,7 +58,12 @@ import type {
   UpdateFinanceTransactionInput,
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
-import { financeStatusSchema, maintenanceRunSchema } from "@personal-os/domain";
+import {
+  financeLedgerChallengePageSchema,
+  financeLedgerChallengeSchema,
+  financeStatusSchema,
+  maintenanceRunSchema,
+} from "@personal-os/domain";
 
 export type FinanceRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -228,6 +236,25 @@ export function createFinanceApi(request: FinanceRequest) {
         `/v1/finances/maintenance/${encodeURIComponent(id)}`,
       );
       return maintenanceRunSchema.parse(response.run);
+    },
+    async getFinanceLedgerChallenge(
+      id: string,
+      cursor?: string,
+    ): Promise<FinanceLedgerChallengePage> {
+      const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";
+      const response = await request<{ page: unknown }>(
+        `/v1/finances/maintenance/challenges/${encodeURIComponent(id)}${query}`,
+      );
+      return financeLedgerChallengePageSchema.parse(response.page);
+    },
+    async submitFinanceLedgerChallenge(
+      input: SubmitFinanceLedgerChallengeInput,
+    ): Promise<FinanceLedgerChallenge> {
+      const response = await request<{ challenge: unknown }>(
+        `/v1/finances/maintenance/challenges/${encodeURIComponent(input.challengeId)}/submit`,
+        { body: JSON.stringify(input), method: "POST" },
+      );
+      return financeLedgerChallengeSchema.parse(response.challenge);
     },
     async getFinanceOverviewForMonth(month: string): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>(

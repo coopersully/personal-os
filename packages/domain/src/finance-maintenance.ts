@@ -480,6 +480,96 @@ export const financeMaintenanceCandidatePageSchema = z
   .strict();
 export type FinanceMaintenanceCandidatePage = z.infer<typeof financeMaintenanceCandidatePageSchema>;
 
+export const financeLedgerChallengeCheckSchema = z.enum([
+  "mixed_merchants",
+  "conflicting_evidence",
+  "rule_breadth",
+  "prior_corrections",
+  "unusual_amounts",
+  "reimbursements",
+  "refunds_and_transfers",
+  "duplicates_and_reversals",
+  "allocation_integrity",
+  "vague_categories",
+  "stale_profile_and_budget_facts",
+  "misleading_unresolved_totals",
+]);
+export const financeLedgerChallengeChecks = financeLedgerChallengeCheckSchema.options;
+
+export const financeLedgerChallengeSchema = z
+  .object({
+    candidateId: idSchema,
+    candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    createdAt: isoDateTimeSchema,
+    cutoff: isoDateTimeSchema,
+    id: idSchema,
+    rubricVersion: z.literal("finance-ledger-challenge-v1"),
+    runId: idSchema,
+    state: z.enum(["prepared", "submitted", "resolved"]),
+    submittedAt: isoDateTimeSchema.nullable(),
+    submittingAgentId: z.string().trim().min(1).max(200).nullable(),
+    updatedAt: isoDateTimeSchema,
+    userId: idSchema,
+  })
+  .strict();
+export type FinanceLedgerChallenge = z.infer<typeof financeLedgerChallengeSchema>;
+
+export const financeLedgerChallengeResolutionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("keep") }).strict(),
+  z.object({ type: z.literal("remove") }).strict(),
+  z
+    .object({
+      actionKind: financeActionKindSchema.exclude(["question", "maintenance_turn"]),
+      input: z.record(z.string(), z.unknown()),
+      type: z.literal("replace"),
+    })
+    .strict(),
+  z
+    .object({
+      choices: z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+      prompt: z.string().trim().min(1).max(1_000),
+      type: z.literal("question"),
+      why: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+]);
+
+export const financeLedgerChallengeFindingInputSchema = z
+  .object({
+    candidateItemId: idSchema.nullable(),
+    evidence: z.string().trim().min(1).max(1_000),
+    kind: z.enum(["correction", "question", "blocker", "observation"]),
+    rationale: z.string().trim().min(1).max(1_000),
+    resolution: financeLedgerChallengeResolutionSchema,
+    severity: z.enum(["info", "warning", "blocker"]),
+    sourceRefs: z.array(materialSourceReferenceSchema).max(100).default([]),
+  })
+  .strict();
+
+export const submitFinanceLedgerChallengeInputSchema = z
+  .object({
+    candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    challengeId: idSchema,
+    checked: z.array(financeLedgerChallengeCheckSchema).min(financeLedgerChallengeChecks.length),
+    findings: z.array(financeLedgerChallengeFindingInputSchema).max(100),
+    reviewedItemIds: z.array(idSchema).max(10_000),
+    rubricVersion: z.literal("finance-ledger-challenge-v1"),
+  })
+  .strict();
+export type SubmitFinanceLedgerChallengeInput = z.infer<
+  typeof submitFinanceLedgerChallengeInputSchema
+>;
+
+export const financeLedgerChallengePageSchema = z
+  .object({
+    challenge: financeLedgerChallengeSchema,
+    checks: z.array(financeLedgerChallengeCheckSchema),
+    items: z.array(financeMaintenanceCandidateItemProjectionSchema).max(100),
+    nextCursor: z.string().min(1).nullable(),
+  })
+  .strict();
+export type FinanceLedgerChallengePage = z.infer<typeof financeLedgerChallengePageSchema>;
+
 export const financeMaintenanceResultSchema = z.object({
   applied: z.object({
     categorizations: z.int().nonnegative(),

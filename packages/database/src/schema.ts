@@ -311,6 +311,78 @@ export const financeMaintenanceCandidateItems = pgTable(
   ],
 );
 
+export const financeLedgerChallenges = pgTable(
+  "finance_ledger_challenges",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    candidateId: uuid("candidate_id")
+      .notNull()
+      .references(() => financeMaintenanceCandidates.id, { onDelete: "cascade" }),
+    candidateRevision: text("candidate_revision").notNull(),
+    rubricVersion: text("rubric_version").notNull(),
+    cutoff: timestamp("cutoff", { withTimezone: true }).notNull(),
+    state: text("state")
+      .$type<"prepared" | "submitted" | "resolved">()
+      .notNull()
+      .default("prepared"),
+    coverage: jsonb("coverage").$type<Record<string, unknown>>().notNull().default({}),
+    submittingAgentId: text("submitting_agent_id"),
+    submittedAt: timestamp("submitted_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "finance_ledger_challenges_state_check",
+      sql`${table.state} IN ('prepared', 'submitted', 'resolved')`,
+    ),
+    uniqueIndex("finance_ledger_challenges_run_idx").on(table.runId),
+    uniqueIndex("finance_ledger_challenges_candidate_idx").on(table.candidateId),
+    index("finance_ledger_challenges_user_state_idx").on(
+      table.userId,
+      table.state,
+      table.updatedAt,
+    ),
+  ],
+);
+
+export const financeLedgerChallengeFindings = pgTable(
+  "finance_ledger_challenge_findings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    challengeId: uuid("challenge_id")
+      .notNull()
+      .references(() => financeLedgerChallenges.id, { onDelete: "cascade" }),
+    candidateItemId: uuid("candidate_item_id").references(
+      () => financeMaintenanceCandidateItems.id,
+      { onDelete: "set null" },
+    ),
+    kind: text("kind").notNull(),
+    severity: text("severity").notNull(),
+    sourceRefs: jsonb("source_refs").$type<Array<Record<string, unknown>>>().notNull().default([]),
+    evidence: text("evidence").notNull(),
+    rationale: text("rationale").notNull(),
+    resolution: jsonb("resolution").$type<Record<string, unknown>>().notNull(),
+    ...timestamps,
+  },
+  (table) => [
+    check(
+      "finance_ledger_challenge_findings_kind_check",
+      sql`${table.kind} IN ('correction', 'question', 'blocker', 'observation')`,
+    ),
+    check(
+      "finance_ledger_challenge_findings_severity_check",
+      sql`${table.severity} IN ('info', 'warning', 'blocker')`,
+    ),
+    index("finance_ledger_challenge_findings_challenge_idx").on(table.challengeId, table.createdAt),
+  ],
+);
+
 export const accountActionTokens = pgTable(
   "account_action_tokens",
   {

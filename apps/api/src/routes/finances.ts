@@ -19,6 +19,7 @@ import {
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
   setFinanceTransactionBreakdownInputSchema,
+  submitFinanceLedgerChallengeInputSchema,
   updateFinanceAutomationSettingsInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
@@ -30,6 +31,7 @@ import {
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import { z } from "zod";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
+import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
 import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
@@ -51,6 +53,7 @@ type MutationContext = {
 type FinanceRouteOptions = {
   app: Hono<AppEnv>;
   actions?: ReturnType<typeof createFinanceActionService>;
+  financeChallenges?: FinanceChallengeService;
   financeMaintenance: FinanceMaintenanceService;
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
@@ -61,6 +64,7 @@ type FinanceRouteOptions = {
 export function registerFinanceRoutes({
   app,
   actions,
+  financeChallenges,
   financeMaintenance,
   financeStatus,
   finances,
@@ -91,7 +95,10 @@ export function registerFinanceRoutes({
     return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
   };
   const requireFinanceAccess: MiddlewareHandler<AppEnv> = async (context, next) => {
-    if (context.req.method === "POST" && context.req.path === "/v1/finances/maintenance") {
+    if (
+      (context.req.method === "POST" && context.req.path === "/v1/finances/maintenance") ||
+      context.req.path.includes("/v1/finances/maintenance/challenges/")
+    ) {
       await requireFinanceMaintenance(context, next);
       return;
     }
@@ -124,6 +131,26 @@ export function registerFinanceRoutes({
       ),
     }),
   );
+  app.get("/v1/finances/maintenance/challenges/:id", async (context) => {
+    if (!financeChallenges) throw new Error("Finance challenge service is unavailable.");
+    return context.json({
+      page: await financeChallenges.getPage(
+        context.get("principal").userId,
+        idSchema.parse(context.req.param("id")),
+        context.req.query("cursor"),
+      ),
+    });
+  });
+  app.post("/v1/finances/maintenance/challenges/:id/submit", async (context) => {
+    if (!financeChallenges) throw new Error("Finance challenge service is unavailable.");
+    const input = await parseBody(context, submitFinanceLedgerChallengeInputSchema);
+    const id = idSchema.parse(context.req.param("id"));
+    if (input.challengeId !== id)
+      throw new Error("The Finance challenge path and body do not match.");
+    return context.json({
+      challenge: await financeChallenges.submit(input, financeMutationContext(context)),
+    });
+  });
   app.get("/v1/finances/status", async (context) =>
     context.json({
       status: await financeStatus.getFinanceStatus(

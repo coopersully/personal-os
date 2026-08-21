@@ -43,6 +43,7 @@ import { createDailyBriefService } from "./daily-brief-service.js";
 import { createEmailDelivery } from "./email-delivery.js";
 import { AppError, errorResponse } from "./errors.js";
 import { createFinanceActionService } from "./finance-action-service.js";
+import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
@@ -485,7 +486,15 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     maintenance,
     now,
   });
+  const financeChallenges = createFinanceChallengeService({
+    actions: financeActions,
+    db: dependencies.db,
+    finances,
+    now,
+  });
   const financeMaintenance = createFinanceMaintenanceService({
+    actions: financeActions,
+    challenge: financeChallenges,
     finances,
     maintenance,
     now,
@@ -1125,6 +1134,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
   registerFinanceRoutes({
     actions: financeActions,
     app,
+    financeChallenges,
     financeMaintenance,
     financeStatus,
     finances,

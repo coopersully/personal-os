@@ -166,12 +166,13 @@ describe("database schema contracts", () => {
         "utf8",
       ),
     ) as { entries: Array<{ tag: string }> };
-    expect(journal.entries.slice(-5).map((entry) => entry.tag)).toEqual([
+    expect(journal.entries.slice(-6).map((entry) => entry.tag)).toEqual([
       "0059_finance_automation_settings",
       "0060_finance_agent_action_reviews",
       "0061_finance_transaction_allocations",
       "0062_finance_reimbursements",
       "0063_finance_maintenance_candidates",
+      "0064_finance_ledger_challenges",
     ]);
   });
 

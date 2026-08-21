@@ -150,6 +150,7 @@ describe.sequential("Finance maintenance service", () => {
     const migrations = resolve(process.cwd(), "packages/database/migrations");
     const oldMigrations = await migrationsWithout(migrations, "finance-maintenance-before-0063-", [
       "0063_finance_maintenance_candidates",
+      "0064_finance_ledger_challenges",
     ]);
     const upgradeContainer = await new PostgreSqlContainer("postgres:17.5-alpine")
       .withDatabase("personal_os")

@@ -2730,10 +2730,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       revision?: string;
     } | null;
     const settlingApproval = candidate.state === "awaiting_approval";
-    const expectedRunStatus =
-      settlingApproval
-        ? "awaiting_approval"
-        : "awaiting_agent_challenge";
+    const expectedRunStatus = settlingApproval ? "awaiting_approval" : "awaiting_agent_challenge";
     const expectedPhase = settlingApproval ? "approval" : "challenge";
     if (
       run.status !== expectedRunStatus ||
@@ -2953,8 +2950,17 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       actionKind: SupportedActionKind,
       input: Record<string, unknown>,
       userId: string,
+      executor?: FinanceExecutor,
+      actorType: Principal["actorType"] = "agent",
     ): Promise<FinanceMaintenanceCandidateItemDraft> {
-      const result = await prepare(actionKind, input, userId);
+      const result = await prepare(
+        actionKind,
+        input,
+        userId,
+        executor ?? db,
+        executor !== undefined,
+        actorType,
+      );
       if ("status" in result) {
         return financeMaintenanceCandidateItemDraftSchema.parse({
           actionKind: "question",

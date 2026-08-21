@@ -727,6 +727,20 @@ describe.sequential("finance action service", () => {
       .where(eq(financeAgentActionReviews.maintenanceRunId, fixture.run.id));
     expect(reviews).toHaveLength(1);
     expect(reviews[0]?.safeChanges).toHaveLength(100);
+    await expect(
+      database.db
+        .select({
+          checkpoint: workspaceMaintenanceRuns.checkpoint,
+          status: workspaceMaintenanceRuns.status,
+        })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.id, fixture.run.id)),
+    ).resolves.toEqual([
+      expect.objectContaining({
+        checkpoint: expect.objectContaining({ phase: "approval" }),
+        status: "awaiting_approval",
+      }),
+    ]);
     expect(
       await database.db
         .select({ categoryId: financeTransactions.categoryId })

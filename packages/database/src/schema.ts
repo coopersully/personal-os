@@ -116,7 +116,7 @@ export const workspaceMaintenanceRuns = pgTable(
   (table) => [
     check(
       "workspace_maintenance_runs_status_check",
-      sql`${table.status} IN ('queued', 'running', 'completed', 'completed_with_questions', 'awaiting_approval', 'blocked', 'failed_recoverable', 'failed_terminal')`,
+      sql`${table.status} IN ('queued', 'running', 'completed', 'completed_with_questions', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable', 'failed_terminal')`,
     ),
     check(
       "workspace_maintenance_runs_lease_check",
@@ -137,7 +137,7 @@ export const workspaceMaintenanceRuns = pgTable(
     uniqueIndex("workspace_maintenance_runs_open_user_domain_idx")
       .on(table.userId, table.domain)
       .where(
-        sql`${table.status} IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable')`,
+        sql`${table.status} IN ('queued', 'running', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable')`,
       ),
     uniqueIndex("workspace_maintenance_runs_id_user_id_unique").on(table.id, table.userId),
     index("workspace_maintenance_runs_claimable_idx")

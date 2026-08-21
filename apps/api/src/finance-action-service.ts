@@ -23,6 +23,7 @@ import {
   financeTransactions,
   goals,
   workspaceMaintenanceRuns,
+  workspaceMaintenanceSteps,
 } from "@personal-os/database";
 import {
   applyFinanceCategorizationsInputSchema,
@@ -117,7 +118,7 @@ type FinanceActionServiceOptions = {
   now: () => Date;
 };
 
-type FinanceExecutor = Pick<Database, "execute" | "insert" | "select" | "update">;
+type FinanceExecutor = Pick<Database, "delete" | "execute" | "insert" | "select" | "update">;
 type TransactionalWriter = (...args: unknown[]) => Promise<unknown>;
 
 function snapshotRevision(value: unknown): string {
@@ -2744,10 +2745,16 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         .update(workspaceMaintenanceRuns)
         .set({
           checkpoint: { candidateId: candidate.id, phase: "prepare", reason: "candidate_drift" },
+          leaseClaimId: null,
+          leaseExpiresAt: null,
+          retryAt: null,
           status: "queued",
           updatedAt: now(),
         })
         .where(eq(workspaceMaintenanceRuns.id, candidate.runId));
+      await executor
+        .delete(workspaceMaintenanceSteps)
+        .where(eq(workspaceMaintenanceSteps.runId, candidate.runId));
       if (input.reviewId)
         await executor
           .update(financeAgentActionReviews)
@@ -2811,6 +2818,17 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .update(financeMaintenanceCandidates)
           .set({ state: "awaiting_approval", updatedAt: now() })
           .where(eq(financeMaintenanceCandidates.id, candidate.id));
+      await executor
+        .update(workspaceMaintenanceRuns)
+        .set({
+          checkpoint: { candidateId, phase: "approval", revision: expectedRevision },
+          leaseClaimId: null,
+          leaseExpiresAt: null,
+          retryAt: null,
+          status: "awaiting_approval",
+          updatedAt: now(),
+        })
+        .where(eq(workspaceMaintenanceRuns.id, candidate.runId));
       return { review: reviewFromRow(review), status: "pending_review" as const };
     }
     const currentItems: Array<{ item: (typeof items)[number]; prepared: PreparedAction }> = [];
@@ -2865,6 +2883,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       .update(workspaceMaintenanceRuns)
       .set({
         checkpoint: { candidateId, phase: "health_refresh" },
+        leaseClaimId: null,
+        leaseExpiresAt: null,
+        retryAt: null,
         status: "queued",
         updatedAt: now(),
       })

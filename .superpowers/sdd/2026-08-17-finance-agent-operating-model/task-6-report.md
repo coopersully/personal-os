@@ -59,6 +59,13 @@
 - Candidate readers now serialize only the exact public domain contracts: candidate preparation internals and item private payloads cannot escape, timestamps are ISO strings, and every outgoing object is schema-parsed.
 - Corrected the unshipped migration-0063 projection default and the Drizzle default to a complete neutral projection. Migrated-Postgres settlement fixtures parse the default against the domain contract.
 
+## Batch G durable parked checkpoints
+
+- Added the nonclaimable `awaiting_agent_challenge` maintenance-run state to the domain contract, database schema, and fresh migration. Challenge preparation now atomically releases its lease into that parked state with the candidate ID and revision checkpoint; due scheduling leaves it untouched.
+- Bypass-off candidate settlement atomically parks both candidate and same run in `awaiting_approval`, with one reusable review and no remaining lease. Human approval or bypass commit returns the same run to queued `health_refresh` work.
+- Candidate dispatch is checkpoint-first after commit: it resumes `health_refresh → verify → period_review` and only settles once those post-commit steps complete, never re-entering an earlier challenge phase.
+- Drift supersession now clears the same run's stale step records before requeueing `prepare`, preventing old prepare/challenge receipts from blocking a rebuild.
+
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.
@@ -75,5 +82,6 @@
 - `pnpm exec vitest run packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 52 passed.
 - `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 73 passed.
 - `pnpm exec vitest run apps/api/src/finance-action-identity.test.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-maintenance-service.integration.test.ts packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 138 passed.
+- `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 137 passed.
 - API, Domain, and Database typechecks passed.
 - Scoped Biome and `git diff --check` passed.

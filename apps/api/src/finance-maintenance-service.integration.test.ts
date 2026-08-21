@@ -455,8 +455,9 @@ describe.sequential("Finance maintenance service", () => {
     await service.dispatchRun(run.id);
     await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
       checkpoint: { phase: "challenge" },
-      status: "queued",
+      status: "awaiting_agent_challenge",
     });
+    await expect(service.dispatchDue(5)).resolves.toMatchObject({ attempted: 0, claimed: 0 });
     const [candidate] = await database.db
       .select()
       .from(financeMaintenanceCandidates)
@@ -1456,7 +1457,7 @@ describe.sequential("Finance maintenance service", () => {
     expect(awaitingChallenge).toMatchObject({
       checkpoint: { phase: "challenge" },
       settledResult: null,
-      status: "queued",
+      status: "awaiting_agent_challenge",
     });
     const candidates = await database.db
       .select()
@@ -1566,15 +1567,10 @@ describe.sequential("Finance maintenance service", () => {
     const replay = await service.startOrResume(ownerId, { type: "all_outstanding" });
     await service.dispatchRun(replay.id);
     await expect(service.getRun(ownerId, replay.id)).resolves.toMatchObject({
-      settledResult: {
-        applied: { categorizations: 0, transfers: 0 },
-        questions: { created: 0, total: 4 },
-        verification: { duplicateActions: 0 },
-      },
-      status: "completed_with_questions",
+      checkpoint: { phase: "challenge" },
+      settledResult: null,
+      status: "awaiting_agent_challenge",
     });
-    await expect(service.dispatchDue(0)).resolves.toMatchObject({ attempted: 0 });
-    await expect(service.dispatchDue(100)).resolves.toMatchObject({ attempted: 0 });
     await expect(
       database.db
         .select({ id: financeReviewCases.id, reason: financeReviewCases.reason })

@@ -463,22 +463,75 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
       maintenance.checkpointAndRelease({
         checkpoint: {
           candidateId: candidate.candidateId,
-          candidateRevision: candidate.revision,
+          revision: candidate.revision,
           phase: "challenge",
         },
         claimId,
         runId,
+        status: "awaiting_agent_challenge",
       });
     try {
-      // Task 7 will replace this queued checkpoint with the dedicated
-      // awaiting_agent_challenge state. Until then it is deliberately an
-      // open, same-run checkpoint rather than a terminal settlement.
       if (checkpoint?.phase === "challenge" && prepared) return releaseAtChallenge(prepared);
       if (challengePrepared && prepared) return releaseAtChallenge(prepared);
 
       const completed = new Set(
         records.filter((record) => record.status === "completed").map((record) => record.step),
       );
+      if (checkpoint?.phase === "health_refresh") {
+        if (!completed.has("health_refresh")) {
+          await assertCurrentRulebook(run);
+          const refreshed = await finances.refreshCashflowForUser(
+            run.userId,
+            run.scope,
+            mutationContext(run, "health_refresh", claimId),
+            async () => maintenance.renewClaim({ claimId, runId }).then(() => undefined),
+          );
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey: `finances:${run.rulebookVersion}:health_refresh`,
+            result: refreshed,
+            runId,
+            step: "health_refresh",
+          });
+          completed.add("health_refresh");
+        }
+        const observed = await assertCurrentRulebook(run);
+        if (!completed.has("verify")) {
+          if (observed.freshness.blockers.length || observed.state === "blocked")
+            return maintenance.settle({
+              claimId,
+              result: await resultFor(run, observed),
+              runId,
+              status: "blocked",
+            });
+          if (observed.freshness.state !== "current")
+            throw new AppError("conflict", "Finance source freshness must recover before verify.");
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey: `finances:${run.rulebookVersion}:verify`,
+            result: { state: observed.state },
+            runId,
+            step: "verify",
+          });
+          completed.add("verify");
+        }
+        if (!completed.has("period_review")) {
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey: `finances:${run.rulebookVersion}:period_review`,
+            result: { applicability: "not_shipped" },
+            runId,
+            step: "period_review",
+          });
+        }
+        const result = await resultFor(run, observed);
+        return maintenance.settle({
+          claimId,
+          result,
+          runId,
+          status: result.questions.total > 0 ? "completed_with_questions" : "completed",
+        });
+      }
       for (const step of financeCandidateMaintenanceSteps) {
         if (completed.has(step)) continue;
         const idempotencyKey = `finances:${run.rulebookVersion}:${step}`;

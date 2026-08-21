@@ -358,7 +358,7 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE TABLE "workspace_maintenance_runs"');
     expect(migrationSql).toContain('CREATE TABLE "workspace_maintenance_steps"');
     expect(migrationSql).toContain(
-      "WHERE \"status\" IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable')",
+      "WHERE \"status\" IN ('queued', 'running', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable')",
     );
     expect(migrationSql).not.toMatch(/^\s*(?:UPDATE|DELETE\s+FROM)\b/mu);
     expect(migrationSql).not.toMatch(/https?:\/\//u);

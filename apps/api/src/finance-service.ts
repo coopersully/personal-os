@@ -860,6 +860,7 @@ export function createFinanceService({
     );
     let projectedAllocations = allocations.map((item) => ({ ...item }));
     let projectedReimbursements = reimbursementRows.map((item) => ({ ...item }));
+    let projectedBudgetLimits = new Map(budgets.map((item) => [item.category, item.limit]));
     const inScope = new Set(transactionIds);
     for (const item of items
       .filter((item) => item.disposition === "prepared")
@@ -937,7 +938,39 @@ export function createFinanceService({
               ? { ...reimbursement, status: "cancelled" as const }
               : reimbursement,
           );
+        } else if (input.operation === "match_credit") {
+          projectedReimbursements = projectedReimbursements.map((reimbursement) =>
+            reimbursement.id === input.reimbursementId
+              ? {
+                  ...reimbursement,
+                  receivedAmount: Math.min(
+                    reimbursement.expectedAmount,
+                    reimbursement.receivedAmount + toCents(input.amount as number),
+                  ),
+                  status:
+                    reimbursement.receivedAmount + toCents(input.amount as number) >=
+                    reimbursement.expectedAmount
+                      ? ("received" as const)
+                      : ("partially_received" as const),
+                }
+              : reimbursement,
+          );
         }
+      } else if (payload.actionKind === "budget_plan" && input.month === month) {
+        if (input.replace) projectedBudgetLimits = new Map();
+        for (const allocation of (input.allocations as Array<{
+          categoryId: string;
+          limit: number;
+        }>) ?? []) {
+          const category = categoryName.get(allocation.categoryId);
+          if (category) projectedBudgetLimits.set(category, toCents(allocation.limit));
+        }
+      } else if (payload.actionKind === "transaction") {
+        const transactionId = item.safeChanges.find(
+          (change) => change.entityType === "finance_transaction",
+        )?.entityId as string | undefined;
+        if (transactionId && inScope.has(transactionId) && input.category !== undefined)
+          categoryByTransaction.set(transactionId, input.category as string | null);
       }
     }
     const reimbursementExcluded = excludedReimbursementCentsByAllocation(projectedReimbursements);
@@ -980,7 +1013,10 @@ export function createFinanceService({
         }
         return sum + personal;
       }, 0);
-    const budgetTotal = budgets.reduce((sum, budget) => sum + budget.limit, 0);
+    const budgetTotal = [...projectedBudgetLimits.values()].reduce(
+      (sum, amount) => sum + amount,
+      0,
+    );
     const budgetActual = [...personalByCategory.values()].reduce((sum, amount) => sum + amount, 0);
     const outstanding = projectedReimbursements
       .filter((item) => !["cancelled", "received"].includes(item.status))

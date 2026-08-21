@@ -34,6 +34,7 @@
 
 - Candidate finalization now reads a repeatable-read scope snapshot and projects prepared categorization, transaction-breakdown, and reimbursement create/cancel actions in ordinal order without updating canonical Finance records.
 - The projection uses allocation/reimbursement helpers for gross cash, personal allocation shares, invalidated allocations, outstanding reimbursements, and scoped budget actual/total/variance. Candidate revisions include scope, source revisions, ordered fingerprints, and projection assumptions.
+- Prepared reimbursement credit matches now reduce outstanding reimbursement amounts in the overlay, while prepared budget plans replace or extend scoped budget limits without changing canonical budget rows. Prepared transaction category updates affect only projected budget classification.
 
 ## CONCERNS
 

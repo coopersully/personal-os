@@ -84,6 +84,21 @@ async function settleWithoutDeadlock(operations: Promise<unknown>[]) {
   return outcomes;
 }
 
+async function waitForAdvisoryLockWaiters(
+  pool: ReturnType<typeof createDatabaseClient>["pool"],
+  minimum = 1,
+) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(
+      "SELECT count(*)::text AS count FROM pg_stat_activity WHERE datname = current_database() AND wait_event = 'advisory'",
+    );
+    if (Number(result.rows[0]?.count ?? 0) >= minimum) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error(`Expected ${minimum} reimbursement topology lock waiter(s).`);
+}
+
 function createStatementTimedDatabase(connectionUri: string) {
   const url = new URL(connectionUri);
   // Every writer session gets a server-side ceiling as well as the test's
@@ -4595,7 +4610,7 @@ describe.sequential("finance action service", () => {
         },
         { principal: user(userId), requestId: "credit-race-direct" },
       );
-      await waitForLockWaiter(database.pool, "finance_reimbursements", 2);
+      await waitForLockWaiter(database.pool, "finance_reimbursements");
       await blocker.query("COMMIT");
       const outcomes = await settleWithoutDeadlock([typedAnswer, directReconciliation]);
       expect(outcomes.some((outcome) => outcome.status === "fulfilled")).toBe(true);
@@ -4757,7 +4772,7 @@ describe.sequential("finance action service", () => {
         },
         { principal: user(userId), requestId: "expense-race-direct" },
       );
-      await waitForLockWaiter(database.pool, "finance_transactions", 2);
+      await waitForLockWaiter(database.pool, "finance_transactions");
       await blocker.query("COMMIT");
       const outcomes = await settleWithoutDeadlock([typedAnswer, replacement]);
       const typedOutcome = outcomes[0];
@@ -4848,6 +4863,203 @@ describe.sequential("finance action service", () => {
           ),
         ),
     ).resolves.toEqual([{ action: "finance.question_answered" }]);
+  });
+
+  it("serializes direct reimbursement creation before replacing its allocation breakdown", async () => {
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Topology",
+        name: `create-breakdown-${crypto.randomUUID()}`,
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Topology",
+        name: `create-breakdown-${crypto.randomUUID()}`,
+        slug: `create-breakdown-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Topology create/breakdown fixture failed.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 10_000,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        merchant: "Topology",
+        transactionDate: "2026-08-17",
+        userId,
+      })
+      .returning();
+    if (!expense) throw new Error("Topology expense fixture failed.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 10_000,
+        categoryId: category.id,
+        transactionId: expense.id,
+        treatment: "reimbursable",
+        userId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Topology allocation fixture failed.");
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const blocker = await database.pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SET LOCAL statement_timeout = '5s'");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `finance-reimbursement-topology:${userId}`,
+      ]);
+      const created = finances.reconcileReimbursement(
+        {
+          allocationId: allocation.id,
+          dueDate: null,
+          evidence: { sourceRefs: [], summary: "Topology" },
+          expectedAmount: 100,
+          operation: "create",
+          payer: "Alex",
+          rationale: "Topology",
+        },
+        { principal: user(userId), requestId: "topology-create" },
+      );
+      const replaced = finances.setTransactionBreakdown(
+        expense.id,
+        {
+          allocations: [{ amount: 100, categoryId: category.id, rationale: "Replacement" }],
+          expectedTransactionUpdatedAt: expense.updatedAt.toISOString(),
+          rationale: "Replacement",
+        },
+        { principal: user(userId), requestId: "topology-breakdown" },
+      );
+      await waitForAdvisoryLockWaiters(database.pool, 2);
+      await blocker.query("COMMIT");
+      const outcomes = await settleWithoutDeadlock([created, replaced]);
+      expect(outcomes.some((outcome) => outcome.status === "fulfilled")).toBe(true);
+      expect(
+        outcomes.every(
+          (outcome) =>
+            outcome.status === "fulfilled" ||
+            (outcome.reason as { code?: string }).code === "conflict" ||
+            (outcome.reason as { code?: string }).code === "invalid_request",
+        ),
+      ).toBe(true);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+    }
+    const cases = await database.db
+      .select({ allocationId: financeReimbursements.allocationId })
+      .from(financeReimbursements)
+      .where(eq(financeReimbursements.allocationId, allocation.id));
+    expect(cases.length).toBeLessThanOrEqual(1);
+  });
+
+  it("serializes direct reimbursement creation before expense-account deletion", async () => {
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Topology",
+        name: `create-delete-${crypto.randomUUID()}`,
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Topology",
+        name: `create-delete-${crypto.randomUUID()}`,
+        slug: `create-delete-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Topology create/delete fixture failed.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 10_000,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        merchant: "Topology",
+        transactionDate: "2026-08-17",
+        userId,
+      })
+      .returning();
+    if (!expense) throw new Error("Topology delete expense fixture failed.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 10_000,
+        categoryId: category.id,
+        transactionId: expense.id,
+        treatment: "reimbursable",
+        userId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Topology delete allocation fixture failed.");
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const blocker = await database.pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SET LOCAL statement_timeout = '5s'");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `finance-reimbursement-topology:${userId}`,
+      ]);
+      const created = finances.reconcileReimbursement(
+        {
+          allocationId: allocation.id,
+          dueDate: null,
+          evidence: { sourceRefs: [], summary: "Topology" },
+          expectedAmount: 100,
+          operation: "create",
+          payer: "Alex",
+          rationale: "Topology",
+        },
+        { principal: user(userId), requestId: "topology-create-delete" },
+      );
+      const deletion = finances.deleteAccount(account.id, {
+        principal: user(userId),
+        requestId: "topology-delete",
+      });
+      await waitForAdvisoryLockWaiters(database.pool, 2);
+      await blocker.query("COMMIT");
+      const outcomes = await settleWithoutDeadlock([created, deletion]);
+      expect(outcomes.some((outcome) => outcome.status === "fulfilled")).toBe(true);
+      expect(
+        outcomes.every(
+          (outcome) =>
+            outcome.status === "fulfilled" ||
+            (outcome.reason as { code?: string }).code === "conflict" ||
+            (outcome.reason as { code?: string }).code === "invalid_request",
+        ),
+      ).toBe(true);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+    }
+    const accounts = await database.db
+      .select({ id: financeAccounts.id })
+      .from(financeAccounts)
+      .where(eq(financeAccounts.id, account.id));
+    const cases = await database.db
+      .select({ allocationId: financeReimbursements.allocationId })
+      .from(financeReimbursements)
+      .where(eq(financeReimbursements.allocationId, allocation.id));
+    expect(accounts.length === 1 || cases.length === 0).toBe(true);
   });
 
   it("accepts canonical provider-backed expense and credit evidence and rejects a stale provider revision", async () => {

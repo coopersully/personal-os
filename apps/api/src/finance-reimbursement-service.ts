@@ -16,7 +16,11 @@ import { and, eq, inArray } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
-import { lockReimbursementCases, lockReimbursementMatches } from "./finance-reimbursement-locks.js";
+import {
+  lockReimbursementCases,
+  lockReimbursementMatches,
+  lockReimbursementTopology,
+} from "./finance-reimbursement-locks.js";
 import type { Principal } from "./types.js";
 
 export function deriveReimbursementStatus({
@@ -44,7 +48,7 @@ export function deriveReimbursementStatus({
 }
 
 type Context = { principal: Principal; requestId: string };
-type ReimbursementWriter = Pick<Database, "insert" | "select" | "update">;
+type ReimbursementWriter = Pick<Database, "execute" | "insert" | "select" | "update">;
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -182,6 +186,7 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
     ) {
       const write = async (tx: ReimbursementWriter) => {
         const userId = context.principal.userId;
+        await lockReimbursementTopology(tx, userId);
         if (input.operation === "create") {
           const [allocation] = await tx
             .select()

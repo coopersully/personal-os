@@ -3,9 +3,24 @@ import {
   financeReimbursementMatches,
   financeReimbursements,
 } from "@personal-os/database";
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 
 type ReimbursementReadExecutor = Pick<Database, "select">;
+type ReimbursementTopologyExecutor = Pick<Database, "execute">;
+
+/**
+ * Serializes the reimbursement graph for one owner before any row locks.
+ * It covers absent rows (new cases/matches) and crossed case-credit writes,
+ * which row locking alone cannot order safely.
+ */
+export async function lockReimbursementTopology(
+  executor: ReimbursementTopologyExecutor,
+  userId: string,
+) {
+  await executor.execute(
+    sql`select pg_advisory_xact_lock(hashtextextended(${`finance-reimbursement-topology:${userId}`}, 0))`,
+  );
+}
 
 /**
  * Shared reimbursement lock contract. Callers first lock sorted case IDs,

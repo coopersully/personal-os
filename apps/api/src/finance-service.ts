@@ -108,6 +108,7 @@ import {
   type FinanceSyncBatchResult,
 } from "./finance-provider-item-sync-service.js";
 import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
+import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { createFinanceReimbursementService } from "./finance-reimbursement-service.js";
 import { auditAttentionItemMetadata, serializeAttentionItem } from "./serialization.js";
 import type { Principal, RequestLog } from "./types.js";
@@ -2217,6 +2218,7 @@ export function createFinanceService({
       return { applied: false, replayed, threshold, transaction: beforeValue };
     }
     const apply = async (tx: FinanceActionWriteExecutor) => {
+      await lockReimbursementTopology(tx, context.principal.userId);
       await assertMaintenanceClaim(tx, context);
       const [current] = await tx
         .select()
@@ -3109,7 +3111,7 @@ export function createFinanceService({
     async reconcileReimbursement(
       input: ReconcileFinanceReimbursementInput,
       context: MutationContext,
-      executor?: Pick<Database, "insert" | "select" | "update">,
+      executor?: Pick<Database, "execute" | "insert" | "select" | "update">,
     ) {
       if (context.principal.actorType === "agent" && context.financePreparedAction !== true) {
         throw new AppError(
@@ -5949,6 +5951,7 @@ export function createFinanceService({
     },
     async deleteAccount(id: string, context: MutationContext) {
       await db.transaction(async (tx) => {
+        await lockReimbursementTopology(tx, context.principal.userId);
         await tx.execute(
           sql`select pg_advisory_xact_lock(hashtextextended(${`finance-provider-topology:${context.principal.userId}`}, 0))`,
         );
@@ -6526,6 +6529,7 @@ export function createFinanceService({
         );
       }
       const write = async (tx: FinanceActionWriteExecutor) => {
+        await lockReimbursementTopology(tx, context.principal.userId);
         const [before] = await tx
           .select()
           .from(financeTransactions)
@@ -6963,6 +6967,7 @@ export function createFinanceService({
         );
       }
       const write = async (tx: FinanceActionWriteExecutor) => {
+        await lockReimbursementTopology(tx, context.principal.userId);
         const before = await ownedTransaction(context.principal.userId, id, tx);
         if (context.principal.actorType === "agent" && input.category !== undefined) {
           if (

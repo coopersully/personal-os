@@ -54,7 +54,11 @@ import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
 import { reliableMonthlyCapacity } from "./finance-planning.js";
-import { lockReimbursementCases, lockReimbursementMatches } from "./finance-reimbursement-locks.js";
+import {
+  lockReimbursementCases,
+  lockReimbursementMatches,
+  lockReimbursementTopology,
+} from "./finance-reimbursement-locks.js";
 import { deriveReimbursementStatus } from "./finance-reimbursement-service.js";
 import type { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
@@ -426,7 +430,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     actionKind: SupportedActionKind,
     rawInput: Record<string, unknown>,
     userId: string,
-    executor: Pick<Database, "select"> = db,
+    executor: Pick<Database, "execute" | "select"> = db,
     lockTargets = false,
     actorType: Principal["actorType"] = "agent",
   ): Promise<PreparedAction | { status: "needs_input"; question: FinanceQuestion }> {
@@ -1435,6 +1439,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       }
       case "reimbursement": {
+        if (lockTargets) await lockReimbursementTopology(executor, userId);
         // Maintenance reimbursement questions are deliberately not a loose
         // continuation of the generic action input.  The only caller-supplied
         // value is the bounded typed answer; candidate identity and source
@@ -2134,6 +2139,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     context: MutationContext,
     executor: FinanceExecutor,
   ) {
+    await lockReimbursementTopology(executor, context.principal.userId);
     const answer = financeReimbursementQuestionAnswerSchema.parse(input.answer);
     const plan = input.plan as Record<string, unknown>;
     const sourceRefs = input.sourceRefs as MaterialSourceReference[];

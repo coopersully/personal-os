@@ -37,6 +37,7 @@ import {
   connectorSyncAppError,
 } from "./connector-sync-health.js";
 import { AppError } from "./errors.js";
+import { lockReimbursementTopology } from "./finance-reimbursement-locks.js";
 import { decryptJson } from "./security.js";
 import type { Principal, RequestLog } from "./types.js";
 
@@ -61,7 +62,7 @@ export type FinanceSyncBatchResult = {
 };
 
 type FinanceSyncProgress = () => Promise<void>;
-type FinanceWriteExecutor = Pick<Database, "delete" | "insert" | "select" | "update">;
+type FinanceWriteExecutor = Pick<Database, "delete" | "execute" | "insert" | "select" | "update">;
 type PlaidCredentials = { accessToken: string };
 
 export type PreparedFinanceProviderTransaction = {
@@ -486,6 +487,7 @@ export function createFinanceProviderItemSyncService(options: Options) {
     prepared: PreparedFinanceProviderTransaction[];
   }): Promise<number> {
     return db.transaction(async (tx) => {
+      await lockReimbursementTopology(tx, input.context.principal.userId);
       await assertMaintenanceClaim(tx, input.context);
       const { accounts } = await lockClaimAggregate(
         tx,

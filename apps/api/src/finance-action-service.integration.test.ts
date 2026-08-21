@@ -54,6 +54,7 @@ function user(userId: string): Principal {
 async function waitForLockWaiter(
   pool: ReturnType<typeof createDatabaseClient>["pool"],
   tableName: string,
+  minimum = 1,
 ) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
@@ -65,10 +66,31 @@ async function waitForLockWaiter(
          AND query LIKE $1`,
       [`%${tableName}%`],
     );
-    if (Number(result.rows[0]?.count ?? 0) > 0) return;
+    if (Number(result.rows[0]?.count ?? 0) >= minimum) return;
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
-  throw new Error(`Expected a database lock waiter for ${tableName}.`);
+  throw new Error(`Expected ${minimum} database lock waiter(s) for ${tableName}.`);
+}
+
+async function settleWithoutDeadlock(operations: Promise<unknown>[]) {
+  const outcomes = await Promise.race([
+    Promise.allSettled(operations),
+    new Promise<"timed_out">((resolvePromise) =>
+      setTimeout(() => resolvePromise("timed_out"), 5_000),
+    ),
+  ]);
+  expect(outcomes).not.toBe("timed_out");
+  if (outcomes === "timed_out") throw new Error("Concurrent Finance operations did not finish.");
+  return outcomes;
+}
+
+function createStatementTimedDatabase(connectionUri: string) {
+  const url = new URL(connectionUri);
+  // Every writer session gets a server-side ceiling as well as the test's
+  // client-side completion assertion, so a reversed lock order cannot hang
+  // this suite indefinitely.
+  url.searchParams.set("options", "-c statement_timeout=5000");
+  return createDatabaseClient(url.toString());
 }
 
 type ActionCase = {
@@ -4450,6 +4472,382 @@ describe.sequential("finance action service", () => {
         .from(financeReimbursementMatches)
         .where(eq(financeReimbursementMatches.creditTransactionId, unrelated.id)),
     ).resolves.toEqual([]);
+  });
+
+  it("serializes a typed credit answer with a direct signed-in reconciliation on the same case and credit", async () => {
+    // If either writer stops locking the reimbursement case before its credit
+    // work, this real PostgreSQL barrier can deadlock or persist two matches.
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Credit race bank",
+        name: `Credit race ${crypto.randomUUID()}`,
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: `Credit race ${crypto.randomUUID()}`,
+        slug: `credit-race-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Credit-race account/category fixture failed.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 22_000,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        merchant: "Credit race dinner",
+        transactionDate: "2026-08-17",
+        userId,
+      })
+      .returning();
+    if (!expense) throw new Error("Credit-race expense fixture failed.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 22_000,
+        categoryId: category.id,
+        transactionId: expense.id,
+        treatment: "reimbursable",
+        userId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Credit-race allocation fixture failed.");
+    const [reimbursement] = await database.db
+      .insert(financeReimbursements)
+      .values({
+        allocationId: allocation.id,
+        evidence: { sourceRefs: [], summary: "Credit race receipt" },
+        expectedAmount: 22_000,
+        payer: "Alex",
+        rationale: "Credit race share",
+        userId,
+      })
+      .returning();
+    const [credit] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 22_000,
+        direction: "income",
+        merchant: "Venmo credit race",
+        transactionDate: "2026-08-18",
+        userId,
+      })
+      .returning();
+    if (!reimbursement || !credit) throw new Error("Credit-race reimbursement fixture failed.");
+    const question = await storeReimbursementQuestion(database, {
+      accountId: account.id,
+      candidate: { reimbursementIds: [reimbursement.id], transactionId: credit.id },
+      transaction: credit,
+      userId,
+    });
+    const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
+    const finances = createFinanceService({ db: contentionDatabase.db, now: () => now });
+    const actions = createFinanceActionService({
+      db: contentionDatabase.db,
+      finances,
+      now: () => now,
+    });
+    const blocker = await database.pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SET LOCAL statement_timeout = '5s'");
+      await blocker.query("SELECT id FROM finance_reimbursements WHERE id = $1 FOR UPDATE", [
+        reimbursement.id,
+      ]);
+      const typedAnswer = actions.answerQuestion(
+        question.id,
+        JSON.stringify({
+          answer: {
+            kind: "match",
+            matches: [{ amount: 220, reimbursementId: reimbursement.id }],
+          },
+        }),
+        { principal: agent(userId, "maintenance-answerer"), requestId: "credit-race-question" },
+      );
+      const directReconciliation = finances.reconcileReimbursement(
+        {
+          amount: 220,
+          creditTransactionId: credit.id,
+          evidence: { sourceRefs: [], summary: "Signed-in credit reconciliation" },
+          expectedRevision: reimbursement.revision,
+          operation: "match_credit",
+          rationale: "Signed-in reconciliation",
+          reimbursementId: reimbursement.id,
+        },
+        { principal: user(userId), requestId: "credit-race-direct" },
+      );
+      await waitForLockWaiter(database.pool, "finance_reimbursements", 2);
+      await blocker.query("COMMIT");
+      const outcomes = await settleWithoutDeadlock([typedAnswer, directReconciliation]);
+      expect(outcomes.some((outcome) => outcome.status === "fulfilled")).toBe(true);
+      expect(
+        outcomes.every(
+          (outcome) =>
+            outcome.status === "fulfilled" ||
+            (outcome.reason as { code?: string }).code === "conflict",
+        ),
+      ).toBe(true);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+      await contentionDatabase.close();
+    }
+    await expect(
+      database.db
+        .select({ amount: financeReimbursementMatches.amount })
+        .from(financeReimbursementMatches)
+        .where(
+          and(
+            eq(financeReimbursementMatches.reimbursementId, reimbursement.id),
+            eq(financeReimbursementMatches.creditTransactionId, credit.id),
+          ),
+        ),
+    ).resolves.toEqual([{ amount: 22_000 }]);
+    await expect(
+      database.db
+        .select({
+          receivedAmount: financeReimbursements.receivedAmount,
+          status: financeReimbursements.status,
+        })
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.id, reimbursement.id)),
+    ).resolves.toEqual([{ receivedAmount: 22_000, status: "received" }]);
+    await expect(
+      database.db
+        .select({ state: financeTransactionAllocations.state })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.id, allocation.id)),
+    ).resolves.toEqual([{ state: "active" }]);
+    const [questionReview] = await database.db
+      .select({ status: financeAgentActionReviews.status })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.id, question.id));
+    expect(questionReview).toEqual(
+      expect.objectContaining({ status: expect.stringMatching(/pending|superseded/) }),
+    );
+    const questionAudits = await database.db
+      .select({ action: auditEvents.action })
+      .from(auditEvents)
+      .where(
+        and(
+          eq(auditEvents.entityId, question.id),
+          eq(auditEvents.action, "finance.question_answered"),
+        ),
+      );
+    expect(questionAudits).toHaveLength(questionReview?.status === "superseded" ? 1 : 0);
+  });
+
+  it("serializes an expense reimbursement answer with a direct breakdown replacement", async () => {
+    // The barrier lets either writer acquire the expense lock first; the other
+    // must recover without deleting an allocation backing a reimbursement case.
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: true, userId })
+      .onConflictDoUpdate({
+        set: { reviewBypassEnabled: true, updatedAt: now },
+        target: financeAutomationSettings.userId,
+      });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Expense race bank",
+        name: `Expense race ${crypto.randomUUID()}`,
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: `Expense race ${crypto.randomUUID()}`,
+        slug: `expense-race-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Expense-race account/category fixture failed.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 31_000,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        merchant: "Expense race dinner",
+        transactionDate: "2026-08-17",
+        userId,
+      })
+      .returning();
+    if (!expense) throw new Error("Expense-race expense fixture failed.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 31_000,
+        categoryId: category.id,
+        transactionId: expense.id,
+        treatment: "personal",
+        userId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Expense-race allocation fixture failed.");
+    const question = await storeReimbursementQuestion(database, {
+      accountId: account.id,
+      candidate: { allocationIds: [allocation.id], transactionId: expense.id },
+      transaction: expense,
+      userId,
+    });
+    const contentionDatabase = createStatementTimedDatabase(container.getConnectionUri());
+    const finances = createFinanceService({ db: contentionDatabase.db, now: () => now });
+    const actions = createFinanceActionService({
+      db: contentionDatabase.db,
+      finances,
+      now: () => now,
+    });
+    const blocker = await database.pool.connect();
+    let typedAnswerApplied = false;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SET LOCAL statement_timeout = '5s'");
+      await blocker.query("SELECT id FROM finance_transactions WHERE id = $1 FOR UPDATE", [
+        expense.id,
+      ]);
+      const typedAnswer = actions.answerQuestion(
+        question.id,
+        JSON.stringify({
+          answer: {
+            amount: 220,
+            dueDate: null,
+            kind: "reimbursable",
+            payer: "Alex",
+            rationale: "Alex owes the shared portion.",
+          },
+        }),
+        { principal: agent(userId, "maintenance-answerer"), requestId: "expense-race-question" },
+      );
+      const replacement = finances.setTransactionBreakdown(
+        expense.id,
+        {
+          allocations: [
+            { amount: 310, categoryId: category.id, rationale: "Personal replacement" },
+          ],
+          expectedTransactionUpdatedAt: expense.updatedAt.toISOString(),
+          rationale: "Direct signed-in replacement",
+        },
+        { principal: user(userId), requestId: "expense-race-direct" },
+      );
+      await waitForLockWaiter(database.pool, "finance_transactions", 2);
+      await blocker.query("COMMIT");
+      const outcomes = await settleWithoutDeadlock([typedAnswer, replacement]);
+      const typedOutcome = outcomes[0];
+      const replacementOutcome = outcomes[1];
+      if (typedOutcome?.status !== "fulfilled")
+        throw new Error("The typed expense answer did not finish recoverably.");
+      typedAnswerApplied = (typedOutcome.value as { status: string }).status === "applied";
+      if (typedAnswerApplied) {
+        expect(replacementOutcome).toEqual(
+          expect.objectContaining({
+            reason: expect.objectContaining({ code: "conflict" }),
+            status: "rejected",
+          }),
+        );
+      } else {
+        expect(typedOutcome.value).toMatchObject({ status: "needs_input" });
+        expect(replacementOutcome).toEqual(expect.objectContaining({ status: "fulfilled" }));
+      }
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+      await contentionDatabase.close();
+    }
+    const allocations = await database.db
+      .select({
+        amount: financeTransactionAllocations.amount,
+        id: financeTransactionAllocations.id,
+        state: financeTransactionAllocations.state,
+        treatment: financeTransactionAllocations.treatment,
+      })
+      .from(financeTransactionAllocations)
+      .where(eq(financeTransactionAllocations.transactionId, expense.id));
+    const cases = await database.db
+      .select({
+        allocationId: financeReimbursements.allocationId,
+        expectedAmount: financeReimbursements.expectedAmount,
+        receivedAmount: financeReimbursements.receivedAmount,
+        status: financeReimbursements.status,
+      })
+      .from(financeReimbursements)
+      .where(
+        and(
+          eq(financeReimbursements.userId, userId),
+          inArray(
+            financeReimbursements.allocationId,
+            allocations.map((item) => item.id),
+          ),
+        ),
+      );
+    expect(
+      allocations
+        .filter((item) => item.state === "active")
+        .reduce((sum, item) => sum + item.amount, 0),
+    ).toBe(31_000);
+    if (typedAnswerApplied) {
+      expect(cases).toEqual([
+        expect.objectContaining({ expectedAmount: 22_000, receivedAmount: 0, status: "expected" }),
+      ]);
+      expect(allocations.find((item) => item.id === allocation.id)).toEqual(
+        expect.objectContaining({ state: "invalidated" }),
+      );
+      expect(allocations.filter((item) => item.state === "active")).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ amount: 9_000, treatment: "personal" }),
+          expect.objectContaining({ amount: 22_000, treatment: "reimbursable" }),
+        ]),
+      );
+    } else {
+      expect(cases).toEqual([]);
+      expect(allocations).toEqual([
+        expect.objectContaining({ amount: 31_000, state: "active", treatment: "personal" }),
+      ]);
+    }
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, question.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+    await expect(
+      database.db
+        .select({ action: auditEvents.action })
+        .from(auditEvents)
+        .where(
+          and(
+            eq(auditEvents.entityId, question.id),
+            eq(auditEvents.action, "finance.question_answered"),
+          ),
+        ),
+    ).resolves.toEqual([{ action: "finance.question_answered" }]);
   });
 
   it("accepts canonical provider-backed expense and credit evidence and rejects a stale provider revision", async () => {

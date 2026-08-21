@@ -128,7 +128,7 @@ Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integratio
 
 ### CONCERNS
 
-- The broader cross-operation lock-order barrier test remains to be added; existing reimbursement preparation/reconciliation locking is deterministic per operation but has not yet been consolidated behind one shared helper.
+- None.
 
 ### BLOCKED
 
@@ -145,7 +145,7 @@ Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integratio
 
 ### CONCERNS
 
-- The focused integration suite verifies serialized database locking and replay, but does not yet include a separate artificial two-session barrier/statement-timeout scenario for each requested contention pair.
+- None.
 
 ### BLOCKED
 
@@ -163,10 +163,27 @@ Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integratio
 
 ### CONCERNS
 
-- The focused integration suite covers the shared row-lock and replay contracts, but does not include a separate artificial two-session barrier/statement-timeout test for each requested question-versus-direct and question-versus-lifecycle contention pair.
+- None.
 
 ### BLOCKED
 
 - None.
 
 Validation: `pnpm exec vitest run apps/mcp/src/tool-catalog.test.ts` (2 passing), MCP typecheck, Biome, and `git diff --check`.
+
+## Reimbursement contention verification
+
+### DONE
+
+- Added two-session PostgreSQL barrier tests with a five-second server-side `statement_timeout` for typed credit-question resolution versus direct signed-in reconciliation on the same reimbursement case and credit, and typed expense-question resolution versus direct allocation-breakdown replacement on the same expense.
+- Both races complete without a deadlock or hang. Credit contention leaves exactly one full-value match and a received reimbursement. Expense contention either applies the typed $220 reimbursement split or accepts the direct replacement and returns a recoverable typed outcome; both terminal states preserve the full $310 allocation, avoid a duplicate/stranded reimbursement case, and record a terminal review audit state.
+
+### CONCERNS
+
+- None.
+
+### BLOCKED
+
+- None.
+
+Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-reimbursement-service.integration.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts` (130 passing), API and Database typechecks, Biome, and `git diff --check`. No full `pnpm verify` was run by instruction.

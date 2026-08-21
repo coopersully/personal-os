@@ -40,6 +40,7 @@
 
 - Added `settleFinanceMaintenanceCandidate(candidateId, expectedRevision, context)`. It locks the owned challenged candidate and ordered items, rejects unresolved questions, fences exact revisions, queues one bounded `maintenance_turn` review while bypass is off, and applies revalidated prepared actions transactionally when bypass is enabled.
 - Drift supersedes the candidate before semantic application; successful settlement marks items/candidate committed and requeues the same maintenance run at `health_refresh`.
+- Human approval now recognizes `maintenance_turn` reviews, locks the candidate/run/items, validates the private candidate fingerprint set, applies each prepared item in the review transaction, terminalizes the review, and requeues the same run. Agents remain denied by the existing interactive-user approval guard.
 
 ## CONCERNS
 

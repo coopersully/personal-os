@@ -5062,6 +5062,187 @@ describe.sequential("finance action service", () => {
     expect(accounts.length === 1 || cases.length === 0).toBe(true);
   });
 
+  it("serializes crossed reimbursement matches without overmatching either credit", async () => {
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Topology",
+        name: `crossed-${crypto.randomUUID()}`,
+        provider: "manual",
+        status: "manual",
+        userId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Topology",
+        name: `crossed-${crypto.randomUUID()}`,
+        slug: `crossed-${crypto.randomUUID()}`,
+        userId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Crossed topology account fixture failed.");
+    const cases = [] as Array<typeof financeReimbursements.$inferSelect>;
+    for (const payer of ["R1", "R2"]) {
+      const [expense] = await database.db
+        .insert(financeTransactions)
+        .values({
+          accountId: account.id,
+          amount: 10_000,
+          category: category.name,
+          categoryId: category.id,
+          direction: "expense",
+          merchant: payer,
+          transactionDate: "2026-08-17",
+          userId,
+        })
+        .returning();
+      if (!expense) throw new Error("Crossed topology expense fixture failed.");
+      const [allocation] = await database.db
+        .insert(financeTransactionAllocations)
+        .values({
+          allocationOrder: 0,
+          amount: 10_000,
+          categoryId: category.id,
+          transactionId: expense.id,
+          treatment: "reimbursable",
+          userId,
+        })
+        .returning();
+      if (!allocation) throw new Error("Crossed topology allocation fixture failed.");
+      const [reimbursement] = await database.db
+        .insert(financeReimbursements)
+        .values({
+          allocationId: allocation.id,
+          evidence: { sourceRefs: [], summary: "Crossed" },
+          expectedAmount: 10_000,
+          payer,
+          rationale: "Crossed",
+          receivedAmount: 3_000,
+          revision: 1,
+          status: "partially_received",
+          userId,
+        })
+        .returning();
+      if (!reimbursement) throw new Error("Crossed topology reimbursement fixture failed.");
+      cases.push(reimbursement);
+    }
+    const credits = [] as Array<typeof financeTransactions.$inferSelect>;
+    for (const merchant of ["C1", "C2"]) {
+      const [credit] = await database.db
+        .insert(financeTransactions)
+        .values({
+          accountId: account.id,
+          amount: 10_000,
+          direction: "income",
+          merchant,
+          transactionDate: "2026-08-18",
+          userId,
+        })
+        .returning();
+      if (!credit) throw new Error("Crossed topology credit fixture failed.");
+      credits.push(credit);
+    }
+    await database.db.insert(financeReimbursementMatches).values([
+      {
+        amount: 3_000,
+        creditTransactionId: credits[1]?.id ?? "",
+        evidence: { sourceRefs: [], summary: "Crossed" },
+        rationale: "Crossed",
+        reimbursementId: cases[0]?.id ?? "",
+        userId,
+      },
+      {
+        amount: 3_000,
+        creditTransactionId: credits[0]?.id ?? "",
+        evidence: { sourceRefs: [], summary: "Crossed" },
+        rationale: "Crossed",
+        reimbursementId: cases[1]?.id ?? "",
+        userId,
+      },
+    ]);
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const blocker = await database.pool.connect();
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query("SET LOCAL statement_timeout = '5s'");
+      await blocker.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `finance-reimbursement-topology:${userId}`,
+      ]);
+      const r1c1 = finances.reconcileReimbursement(
+        {
+          amount: 70,
+          creditTransactionId: credits[0]?.id ?? "",
+          evidence: { sourceRefs: [], summary: "Crossed" },
+          expectedRevision: 1,
+          operation: "match_credit",
+          rationale: "Crossed",
+          reimbursementId: cases[0]?.id ?? "",
+        },
+        { principal: user(userId), requestId: "crossed-r1-c1" },
+      );
+      const r2c2 = finances.reconcileReimbursement(
+        {
+          amount: 70,
+          creditTransactionId: credits[1]?.id ?? "",
+          evidence: { sourceRefs: [], summary: "Crossed" },
+          expectedRevision: 1,
+          operation: "match_credit",
+          rationale: "Crossed",
+          reimbursementId: cases[1]?.id ?? "",
+        },
+        { principal: user(userId), requestId: "crossed-r2-c2" },
+      );
+      await waitForAdvisoryLockWaiters(database.pool, 2);
+      await blocker.query("COMMIT");
+      await expect(settleWithoutDeadlock([r1c1, r2c2])).resolves.toEqual([
+        expect.objectContaining({ status: "fulfilled" }),
+        expect.objectContaining({ status: "fulfilled" }),
+      ]);
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => undefined);
+      blocker.release();
+    }
+    await expect(
+      database.db
+        .select({
+          receivedAmount: financeReimbursements.receivedAmount,
+          status: financeReimbursements.status,
+        })
+        .from(financeReimbursements)
+        .where(
+          inArray(
+            financeReimbursements.id,
+            cases.map((item) => item.id),
+          ),
+        )
+        .orderBy(financeReimbursements.payer),
+    ).resolves.toEqual([
+      { receivedAmount: 10_000, status: "received" },
+      { receivedAmount: 10_000, status: "received" },
+    ]);
+    const matched = await database.db
+      .select({
+        creditTransactionId: financeReimbursementMatches.creditTransactionId,
+        amount: financeReimbursementMatches.amount,
+      })
+      .from(financeReimbursementMatches)
+      .where(
+        inArray(
+          financeReimbursementMatches.creditTransactionId,
+          credits.map((item) => item.id),
+        ),
+      );
+    expect(
+      credits.map((credit) =>
+        matched
+          .filter((match) => match.creditTransactionId === credit.id)
+          .reduce((sum, match) => sum + match.amount, 0),
+      ),
+    ).toEqual([10_000, 10_000]);
+  });
+
   it("accepts canonical provider-backed expense and credit evidence and rejects a stale provider revision", async () => {
     await database.db
       .update(financeAutomationSettings)

@@ -187,3 +187,19 @@ Validation: `pnpm exec vitest run apps/mcp/src/tool-catalog.test.ts` (2 passing)
 - None.
 
 Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-reimbursement-service.integration.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-status-service.integration.test.ts` (130 passing), API and Database typechecks, Biome, and `git diff --check`. No full `pnpm verify` was run by instruction.
+
+## Reimbursement topology serialization
+
+**Status: DONE**
+
+Commit `9bca992` introduced a transaction-scoped, user-keyed reimbursement-topology advisory lock before reimbursement graph mutations, allocation replacement/categorization, account deletion guards, typed reimbursement revalidation/application, and provider allocation projection. This closes absent-row guard TOCTOU windows and prevents crossed case-credit lock cycles while preserving deterministic row locks.
+
+Commit `test(finances): cover crossed reimbursement matches` adds a two-session, five-second statement-timeout barrier with preseeded crossed matches R1→C2 and R2→C1, then concurrently completes R1→C1 and R2→C2. Both credits and cases finish exactly at capacity with no deadlock or overmatch. The focused create-vs-breakdown and create-vs-account-deletion barrier scenarios likewise serialize to a valid applied or recoverable-conflict outcome without raw foreign-key errors.
+
+### CONCERNS
+
+- None.
+
+### BLOCKED
+
+- None.

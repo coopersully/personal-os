@@ -2541,6 +2541,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     executor: FinanceExecutor,
     actorType: Principal["actorType"] = "agent",
   ) {
+    if (prepared.actionKind === "reimbursement") await lockReimbursementTopology(executor, userId);
     // There is no row lock for an absent target. The target-key advisory lock
     // covers that case and gives queueing, approval, and bypass commits the
     // same deterministic serialization point.
@@ -2579,6 +2580,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     context: MutationContext,
     executor: FinanceExecutor,
   ) {
+    if (prepared.actionKind === "reimbursement")
+      await lockReimbursementTopology(executor, context.principal.userId);
     for (const key of [...prepared.semanticTargetKeys].sort()) {
       await executor.execute(sql`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`);
     }
@@ -2732,6 +2735,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       // request-body bypass authority.
       if (context.principal.actorType === "agent") {
         return db.transaction(async (tx) => {
+          // Reimbursement terminal paths hold topology before every semantic
+          // lock, including the bypass-setting row. A new proposal must take
+          // the same order while it revalidates or queues beside them.
+          if (prepared.actionKind === "reimbursement")
+            await lockReimbursementTopology(tx, context.principal.userId);
           if (!(await readBypass(tx, context.principal.userId, true))) {
             const current = await revalidate(prepared, context.principal.userId, tx, "agent");
             if ("status" in current) return current;
@@ -2787,6 +2795,19 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         );
       }
       return db.transaction(async (tx) => {
+        const [preview] = await tx
+          .select()
+          .from(financeAgentActionReviews)
+          .where(
+            and(
+              eq(financeAgentActionReviews.id, id),
+              eq(financeAgentActionReviews.userId, context.principal.userId),
+            ),
+          )
+          .limit(1);
+        if (!preview) throw new AppError("not_found", "The Finance action review was not found.");
+        if (preview.actionKind === "reimbursement")
+          await lockReimbursementTopology(tx, context.principal.userId);
         const [review] = await tx
           .select()
           .from(financeAgentActionReviews)
@@ -2799,6 +2820,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .for("update")
           .limit(1);
         if (!review) throw new AppError("not_found", "The Finance action review was not found.");
+        if (
+          review.fingerprint !== preview.fingerprint ||
+          review.updatedAt.getTime() !== preview.updatedAt.getTime()
+        )
+          throw new AppError("conflict", "The Finance action review changed before approval.");
         const payload = review.privatePayload as StoredPayload;
         if (review.status === "applied") {
           return { result: payload.result as T, status: "applied" };
@@ -2905,6 +2931,21 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       }
       const canonicalAnswer = suppliedAnswer ? stableJson(suppliedAnswer) : answerValue;
       return db.transaction(async (tx) => {
+        const [preview] = await tx
+          .select()
+          .from(financeAgentActionReviews)
+          .where(
+            and(
+              eq(financeAgentActionReviews.id, id),
+              eq(financeAgentActionReviews.userId, context.principal.userId),
+              eq(financeAgentActionReviews.actionKind, "question"),
+            ),
+          )
+          .limit(1);
+        if (!preview) throw new AppError("not_found", "The Finance question was not found.");
+        const previewPayload = preview.privatePayload as { original?: { actionKind?: unknown } };
+        if (previewPayload.original?.actionKind === "reimbursement")
+          await lockReimbursementTopology(tx, context.principal.userId);
         const [review] = await tx
           .select()
           .from(financeAgentActionReviews)
@@ -2918,6 +2959,11 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .for("update")
           .limit(1);
         if (!review) throw new AppError("not_found", "The Finance question was not found.");
+        if (
+          review.fingerprint !== preview.fingerprint ||
+          review.updatedAt.getTime() !== preview.updatedAt.getTime()
+        )
+          throw new AppError("conflict", "The Finance question changed before it was answered.");
         const payload = review.privatePayload as {
           answer?: string;
           candidate?: Record<string, unknown>;

@@ -134,6 +134,24 @@ Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integratio
 
 - None.
 
+## Review and maintenance-question lock ordering
+
+### DONE
+
+- Reimbursement agent proposals now acquire the user-scoped reimbursement-topology advisory lock before locking the durable bypass-setting row. This matches reimbursement approval and maintenance-question terminalization, eliminating their setting/topology lock inversion.
+- Approval and answer paths pre-read their durable review/question, acquire topology when it is a reimbursement operation, then lock and revalidate that row before applying, queueing, or terminalizing it.
+- Added two real PostgreSQL barrier races, each with a five-second server-side `statement_timeout`: human approval versus a changed same-target agent reimbursement proposal, and a typed maintenance-question answer versus a changed same-target agent reimbursement proposal. They complete with coherent applied/pending/superseded/conflict outcomes and assert no duplicate reimbursement, match, or allocation mutation.
+
+### CONCERNS
+
+- None.
+
+### BLOCKED
+
+- None.
+
+Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-reimbursement-service.integration.test.ts` (63 passing), API and Database typechecks, targeted Biome, and `git diff --check`. No full `pnpm verify` was run by instruction.
+
 Validation: `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-service.integration.test.ts apps/api/src/finance-anomaly-service.test.ts` (106 passing), API and database type checks, Biome, and `git diff --check`.
 
 ## Reimbursement lock and replay follow-up

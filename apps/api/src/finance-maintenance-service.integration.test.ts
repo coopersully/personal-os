@@ -286,6 +286,7 @@ describe.sequential("Finance maintenance service", () => {
       proposal(`20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, { confidence: 0 }),
     );
     let applied = 0;
+    let proposalCalls = 0;
     const prepared: Array<{ prepared: number; questions: number; fingerprints: string[] }> = [];
     const service = createFinanceMaintenanceService({
       finances: operations({
@@ -293,10 +294,13 @@ describe.sequential("Finance maintenance service", () => {
           applied += 1;
           return [];
         },
-        proposeOutstandingCategorizations: async () => ({
-          items: [...supported, ...ambiguous],
-          nextCursor: null,
-        }),
+        proposeOutstandingCategorizations: async (_userId, _scope, cursor) => {
+          proposalCalls += 1;
+          const all = [...supported, ...ambiguous];
+          return cursor
+            ? { items: all.slice(25), nextCursor: null }
+            : { items: all.slice(0, 25), nextCursor: "candidate-page-2" };
+        },
         prepareMaintenanceCandidate: async ({ items }) => {
           const fingerprints = items.map((item) => item.fingerprint);
           prepared.push({
@@ -320,6 +324,7 @@ describe.sequential("Finance maintenance service", () => {
     const run = await service.startOrResume(userId, { type: "all_outstanding" });
     await service.dispatchRun(run.id);
     expect(applied).toBe(0);
+    expect(proposalCalls).toBe(2);
     expect(prepared).toHaveLength(1);
     expect(prepared[0]).toMatchObject({ prepared: 41, questions: 6 });
     await expect(service.getRun(userId, run.id)).resolves.toMatchObject({
@@ -600,6 +605,22 @@ describe.sequential("Finance maintenance service", () => {
     expect(candidates[0]).toMatchObject({ state: "ready_for_challenge", userId: ownerId });
     const candidate = candidates[0];
     if (!candidate) throw new Error("Candidate fixture was not saved.");
+    await expect(finances.getMaintenanceCandidate(ownerId, candidate.id)).resolves.toMatchObject({
+      id: candidate.id,
+      userId: ownerId,
+    });
+    const candidatePage = await finances.listMaintenanceCandidateItems(
+      ownerId,
+      candidate.id,
+      undefined,
+      2,
+    );
+    expect(candidatePage.items).toHaveLength(2);
+    expect(candidatePage.nextCursor).toEqual(expect.any(String));
+    expect(candidatePage.items[0]).not.toHaveProperty("privatePayload");
+    await expect(
+      finances.getMaintenanceCandidate("00000000-0000-4000-8000-000000000001", candidate.id),
+    ).rejects.toMatchObject({ code: "not_found" });
     await expect(
       database.db
         .select({ fingerprint: financeMaintenanceCandidateItems.fingerprint })

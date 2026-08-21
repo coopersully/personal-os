@@ -15,10 +15,18 @@
 - Candidate maintenance calls an exact-pair-only transfer reconciler. The existing public reconciler retains legacy review/rent behavior, while candidate preparation leaves uncertain transfer and categorization work as private candidate items/questions.
 - Migration 0063 now has a composite `(run_id, user_id)` ownership foreign key to the maintenance run and a matching unique run-owner key.
 
+## Batch B typed preparation and pages
+
+- Candidate item drafts are parsed before persistence. Prepared payloads are a closed, action-specific union for every supported Finance action family; question drafts carry a bounded typed answer contract, underlying action, evidence, and as-of revision. Mismatched action/payload kinds and arbitrary payload records are rejected.
+- Finance action preparation exposes `prepareMaintenanceCandidateDraft`, which reuses the Task 3 read/prepare path for all supported action families without applying a semantic write.
+- Candidate-aware categorization discovery follows opaque proposal cursors (rather than rejecting a second page) and persists a single typed candidate batch. The public owner-scoped candidate reader pages stable ordinals and omits every private payload field.
+- The 47-item candidate scenario now traverses two proposal pages and still prepares 41 categorization items plus six typed questions with no pre-challenge application.
+
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.
 - The initial projection is conservative: prepared categorization changes do not change cash or personal-spending totals. Reimbursement-aware overlay refinement belongs with the challenge/settlement work.
+- Proposal pages are renewed and accumulated under one claim before the atomic candidate insertion. A crash between pages replays the source pages rather than retaining a per-page candidate checkpoint; durable per-page append/resume remains follow-up hardening.
 
 ## BLOCKED
 
@@ -26,6 +34,8 @@
 
 ## Verification
 
-- `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 126 passed.
+- `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts` — 18 passed.
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts` — 57 passed.
+- `pnpm exec vitest run packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 52 passed.
 - API, Domain, and Database typechecks passed.
 - Scoped Biome and `git diff --check` passed.

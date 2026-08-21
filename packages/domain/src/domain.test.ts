@@ -42,6 +42,7 @@ import {
   financeBudgetPlanSchema,
   financeCandidateLedgerProjectionSchema,
   financeGuidedPreferencesSchema,
+  financeMaintenanceCandidateItemDraftSchema,
   financeMaintenanceCandidateItemSchema,
   financeMaintenanceCandidateSchema,
   financeMaintenanceResultSchema,
@@ -359,6 +360,47 @@ describe("workspace maintenance", () => {
 });
 
 describe("finance maintenance candidates", () => {
+  it("rejects arbitrary or mismatched private maintenance drafts before persistence", () => {
+    const valid = {
+      actionKind: "categorization" as const,
+      assumptions: [],
+      disposition: "prepared" as const,
+      evidence: { confidence: 0.9, rationale: "The merchant has a clear grocery pattern." },
+      expectedRevision: start,
+      fingerprint: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      privatePayload: {
+        actionKind: "categorization" as const,
+        input: {
+          decisions: [
+            {
+              categoryId: accountId,
+              confidence: 0.9,
+              expectedTransactionUpdatedAt: start,
+              learnMerchant: "never" as const,
+              rationale: "The merchant has a clear grocery pattern.",
+              transactionId: id,
+            },
+          ],
+        },
+      },
+      safeChanges: [],
+      sourceRefs: [],
+    };
+    expect(financeMaintenanceCandidateItemDraftSchema.safeParse(valid).success).toBe(true);
+    expect(
+      financeMaintenanceCandidateItemDraftSchema.safeParse({
+        ...valid,
+        privatePayload: { actionKind: "merchant", input: { displayName: "Market" } },
+      }).success,
+    ).toBe(false);
+    expect(
+      financeMaintenanceCandidateItemDraftSchema.safeParse({
+        ...valid,
+        privatePayload: { arbitrary: "untyped" },
+      }).success,
+    ).toBe(false);
+  });
+
   it("keeps prepared semantic work private while exposing a bounded candidate ledger", () => {
     const candidate = financeMaintenanceCandidateSchema.parse({
       id,

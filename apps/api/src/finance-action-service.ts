@@ -28,11 +28,13 @@ import {
   type FinanceActionKind,
   type FinanceActionOutcome,
   type FinanceActionReview,
+  type FinanceMaintenanceCandidateItemDraft,
   type FinancePendingActionReview,
   type FinanceQuestion,
   type FinanceSafeChange,
   financeActionKindSchema,
   financeActionReviewSchema,
+  financeMaintenanceCandidateItemDraftSchema,
   financeQuestionSchema,
   financeReimbursementQuestionAnswerSchema,
   idSchema,
@@ -2667,6 +2669,45 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
 
   return {
     prepare,
+    async prepareMaintenanceCandidateDraft(
+      actionKind: SupportedActionKind,
+      input: Record<string, unknown>,
+      userId: string,
+    ): Promise<FinanceMaintenanceCandidateItemDraft> {
+      const result = await prepare(actionKind, input, userId);
+      if ("status" in result) {
+        return financeMaintenanceCandidateItemDraftSchema.parse({
+          actionKind: "question",
+          assumptions: [],
+          disposition: "question",
+          evidence: { confidence: 0, rationale: result.question.why },
+          expectedRevision: null,
+          fingerprint: `sha256:${actionFingerprint("question", { actionKind, input })}`,
+          privatePayload: {
+            asOf: now().toISOString(),
+            choices: result.question.choices,
+            expectedAnswer: result.question.expectedAnswer,
+            prompt: result.question.prompt,
+            transactionId: null,
+            underlyingAction: actionKind,
+            why: result.question.why,
+          },
+          safeChanges: [],
+          sourceRefs: result.question.sourceRefs,
+        });
+      }
+      return financeMaintenanceCandidateItemDraftSchema.parse({
+        actionKind: result.actionKind,
+        assumptions: result.assumptions,
+        disposition: "prepared",
+        evidence: { confidence: 1, rationale: result.rationale },
+        expectedRevision: result.expectedRevision,
+        fingerprint: `sha256:${result.fingerprint}`,
+        privatePayload: { actionKind: result.actionKind, input: result.input },
+        safeChanges: result.safeChanges,
+        sourceRefs: result.sourceRefs,
+      });
+    },
     async performDirect<T>(
       actionKind: SupportedActionKind,
       input: Record<string, unknown>,

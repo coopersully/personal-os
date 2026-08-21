@@ -3,6 +3,7 @@ import type {
   ApplyFinanceCategorizationsInput,
   FinanceCategorizationApplyResult,
   FinanceCategorizationProposalPage,
+  FinanceMaintenanceCandidateItemDraft,
   FinanceMaintenanceRun,
   FinanceStatus,
   MaintenanceScope,
@@ -77,16 +78,7 @@ export type FinanceMaintenanceOperations = {
     onProgress?: () => Promise<void>,
   ) => Promise<FinanceCategorizationProposalPage>;
   prepareMaintenanceCandidate?: (input: {
-    items: Array<{
-      actionKind: string;
-      disposition: "prepared" | "question";
-      evidence: Record<string, unknown>;
-      expectedRevision: string | null;
-      fingerprint: string;
-      privatePayload: Record<string, unknown>;
-      safeChanges: Array<Record<string, unknown>>;
-      sourceRefs: Array<Record<string, unknown>>;
-    }>;
+    items: FinanceMaintenanceCandidateItemDraft[];
     runId: string;
     userId: string;
   }) => Promise<{
@@ -268,10 +260,10 @@ function candidateFingerprint(value: unknown) {
 
 function preparedCandidateItems(page: FinanceCategorizationProposalPage) {
   return page.items.map((proposal) => {
-    const sourceRefs = [proposal.source] as Array<Record<string, unknown>>;
+    const sourceRefs = [proposal.source];
     if (!isEligibleOneOff(proposal)) {
       return {
-        actionKind: "question",
+        actionKind: "question" as const,
         disposition: "question" as const,
         evidence: { confidence: proposal.confidence, rationale: proposal.rationale },
         expectedRevision: proposal.transaction.updatedAt,
@@ -280,7 +272,18 @@ function preparedCandidateItems(page: FinanceCategorizationProposalPage) {
           revision: proposal.transaction.updatedAt,
           transactionId: proposal.transaction.id,
         }),
-        privatePayload: { proposal },
+        assumptions: [],
+        privatePayload: {
+          asOf: proposal.transaction.updatedAt,
+          choices: [],
+          expectedAnswer: [
+            { name: "answer", nullable: false, required: true, type: "string" as const },
+          ],
+          prompt: `How should ${proposal.transaction.merchant} be recorded?`,
+          transactionId: proposal.transaction.id,
+          underlyingAction: "categorization" as const,
+          why: proposal.rationale,
+        },
         safeChanges: [
           {
             entityId: proposal.transaction.id,
@@ -297,19 +300,20 @@ function preparedCandidateItems(page: FinanceCategorizationProposalPage) {
           categoryId: proposal.suggestedCategory.id,
           confidence: proposal.confidence,
           expectedTransactionUpdatedAt: proposal.transaction.updatedAt,
-          learnMerchant: "never",
+          learnMerchant: "never" as const,
           rationale: proposal.rationale,
           transactionId: proposal.transaction.id,
         },
       ],
     };
     return {
-      actionKind: "categorization",
+      actionKind: "categorization" as const,
       disposition: "prepared" as const,
       evidence: { confidence: proposal.confidence, rationale: proposal.rationale },
       expectedRevision: proposal.transaction.updatedAt,
       fingerprint: candidateFingerprint({ actionKind: "categorization", input }),
-      privatePayload: { input, rationale: proposal.rationale },
+      assumptions: [],
+      privatePayload: { actionKind: "categorization" as const, input },
       safeChanges: [
         {
           entityId: proposal.transaction.id,
@@ -502,20 +506,28 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           continue;
         }
         if (step === "prepare") {
-          const page = await finances.proposeOutstandingCategorizations(
-            run.userId,
-            run.scope,
-            undefined,
-            async () => maintenance.renewClaim({ claimId, runId }).then(() => undefined),
-          );
-          if (page.nextCursor) {
-            throw new AppError(
-              "conflict",
-              "Finance candidate preparation must fit its bounded page.",
+          let cursor: string | undefined;
+          let pageCount = 0;
+          const candidateItems: FinanceMaintenanceCandidateItemDraft[] = [];
+          do {
+            const page = await finances.proposeOutstandingCategorizations(
+              run.userId,
+              run.scope,
+              cursor,
+              async () => maintenance.renewClaim({ claimId, runId }).then(() => undefined),
             );
-          }
+            candidateItems.push(...preparedCandidateItems(page));
+            cursor = page.nextCursor ?? undefined;
+            pageCount += 1;
+            if (pageCount > 100) {
+              throw new AppError(
+                "conflict",
+                "Finance candidate preparation exceeded its safe page bound.",
+              );
+            }
+          } while (cursor);
           const candidate = await finances.prepareMaintenanceCandidate?.({
-            items: preparedCandidateItems(page),
+            items: candidateItems,
             runId,
             userId: run.userId,
           });

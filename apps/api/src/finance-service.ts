@@ -57,6 +57,7 @@ import type {
   FinanceGuidedSetupContext,
   FinanceIncomeStream,
   FinanceLedgerHealth,
+  FinanceMaintenanceCandidateItemDraft,
   FinanceMerchant,
   FinanceOverview,
   FinanceProfile,
@@ -82,7 +83,13 @@ import type {
   UpdateFinanceTransactionInput,
   UpsertFinanceAttentionItemInput,
 } from "@personal-os/domain";
-import { financeDomainProfileSchema, idSchema, localDateAt, toCents } from "@personal-os/domain";
+import {
+  financeDomainProfileSchema,
+  financeMaintenanceCandidateItemDraftSchema,
+  idSchema,
+  localDateAt,
+  toCents,
+} from "@personal-os/domain";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
@@ -336,6 +343,23 @@ function encodeTransactionCursor(
   return Buffer.from(
     JSON.stringify({ direction, id: row.id, sortBy, value } satisfies TransactionCursor),
   ).toString("base64url");
+}
+
+function decodeCandidateItemCursor(cursor: string): number {
+  try {
+    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as {
+      ordinal?: unknown;
+    };
+    if (typeof value.ordinal !== "number" || !Number.isInteger(value.ordinal) || value.ordinal < 0)
+      throw new Error("cursor");
+    return value.ordinal as number;
+  } catch {
+    throw new AppError("invalid_request", "The maintenance candidate cursor is invalid.");
+  }
+}
+
+function encodeCandidateItemCursor(ordinal: number) {
+  return Buffer.from(JSON.stringify({ ordinal })).toString("base64url");
 }
 function categorization(merchant: string, learnedCategory?: string) {
   if (isRentMerchant(merchant)) {
@@ -4711,23 +4735,17 @@ export function createFinanceService({
       });
     },
     async prepareMaintenanceCandidate(input: {
-      items: Array<{
-        actionKind: string;
-        disposition: "prepared" | "question";
-        evidence: Record<string, unknown>;
-        expectedRevision: string | null;
-        fingerprint: string;
-        privatePayload: Record<string, unknown>;
-        safeChanges: Array<Record<string, unknown>>;
-        sourceRefs: Array<Record<string, unknown>>;
-      }>;
+      items: FinanceMaintenanceCandidateItemDraft[];
       runId: string;
       userId: string;
     }) {
+      const items = input.items.map((item) =>
+        financeMaintenanceCandidateItemDraftSchema.parse(item),
+      );
       const revision = `sha256:${createHash("sha256")
         .update(
           JSON.stringify(
-            input.items.map((item) => [
+            items.map((item) => [
               item.actionKind,
               item.disposition,
               item.expectedRevision,
@@ -4774,10 +4792,8 @@ export function createFinanceService({
             .for("update");
           const fingerprints = stored.map((item) => item.fingerprint);
           if (
-            fingerprints.length === input.items.length &&
-            fingerprints.every(
-              (fingerprint, index) => fingerprint === input.items[index]?.fingerprint,
-            )
+            fingerprints.length === items.length &&
+            fingerprints.every((fingerprint, index) => fingerprint === items[index]?.fingerprint)
           ) {
             return {
               candidateId: existing.id,
@@ -4810,7 +4826,7 @@ export function createFinanceService({
               budgetVariance: null,
               grossCashSpending,
               personalSpending: grossCashSpending,
-              questions: input.items.filter((item) => item.disposition === "question").length,
+              questions: items.filter((item) => item.disposition === "question").length,
               reimbursementsOutstanding: 0,
             },
             revision,
@@ -4820,12 +4836,15 @@ export function createFinanceService({
           })
           .returning();
         if (!candidate) throw new Error("The Finance maintenance candidate could not be saved.");
-        if (input.items.length) {
-          await tx
-            .insert(financeMaintenanceCandidateItems)
-            .values(
-              input.items.map((item, ordinal) => ({ ...item, candidateId: candidate.id, ordinal })),
-            );
+        if (items.length) {
+          await tx.insert(financeMaintenanceCandidateItems).values(
+            items.map(({ assumptions, ...item }, ordinal) => ({
+              ...item,
+              candidateId: candidate.id,
+              ordinal,
+              privatePayload: { ...item.privatePayload, assumptions },
+            })),
+          );
         }
         const [ready] = await tx
           .update(financeMaintenanceCandidates)
@@ -4835,12 +4854,79 @@ export function createFinanceService({
         if (!ready) throw new Error("The Finance maintenance candidate could not be finalized.");
         return {
           candidateId: ready.id,
-          fingerprints: input.items.map((item) => item.fingerprint),
-          prepared: input.items.filter((item) => item.disposition === "prepared").length,
-          questions: input.items.filter((item) => item.disposition === "question").length,
+          fingerprints: items.map((item) => item.fingerprint),
+          prepared: items.filter((item) => item.disposition === "prepared").length,
+          questions: items.filter((item) => item.disposition === "question").length,
           revision: ready.revision,
         };
       });
+    },
+    async getMaintenanceCandidate(userId: string, candidateId: string) {
+      const [candidate] = await db
+        .select()
+        .from(financeMaintenanceCandidates)
+        .where(
+          and(
+            eq(financeMaintenanceCandidates.id, candidateId),
+            eq(financeMaintenanceCandidates.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!candidate)
+        throw new AppError("not_found", "The Finance maintenance candidate is not available.");
+      return candidate;
+    },
+    async listMaintenanceCandidateItems(
+      userId: string,
+      candidateId: string,
+      cursor?: string,
+      limit = 50,
+    ) {
+      const [candidate] = await db
+        .select({ id: financeMaintenanceCandidates.id })
+        .from(financeMaintenanceCandidates)
+        .where(
+          and(
+            eq(financeMaintenanceCandidates.id, candidateId),
+            eq(financeMaintenanceCandidates.userId, userId),
+          ),
+        )
+        .limit(1);
+      if (!candidate)
+        throw new AppError("not_found", "The Finance maintenance candidate is not available.");
+      const afterOrdinal = cursor ? decodeCandidateItemCursor(cursor) : -1;
+      const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)));
+      const rows = await db
+        .select({
+          actionKind: financeMaintenanceCandidateItems.actionKind,
+          candidateId: financeMaintenanceCandidateItems.candidateId,
+          createdAt: financeMaintenanceCandidateItems.createdAt,
+          disposition: financeMaintenanceCandidateItems.disposition,
+          evidence: financeMaintenanceCandidateItems.evidence,
+          expectedRevision: financeMaintenanceCandidateItems.expectedRevision,
+          fingerprint: financeMaintenanceCandidateItems.fingerprint,
+          id: financeMaintenanceCandidateItems.id,
+          ordinal: financeMaintenanceCandidateItems.ordinal,
+          safeChanges: financeMaintenanceCandidateItems.safeChanges,
+          sourceRefs: financeMaintenanceCandidateItems.sourceRefs,
+          updatedAt: financeMaintenanceCandidateItems.updatedAt,
+        })
+        .from(financeMaintenanceCandidateItems)
+        .where(
+          and(
+            eq(financeMaintenanceCandidateItems.candidateId, candidateId),
+            gt(financeMaintenanceCandidateItems.ordinal, afterOrdinal),
+          ),
+        )
+        .orderBy(asc(financeMaintenanceCandidateItems.ordinal))
+        .limit(boundedLimit + 1);
+      const hasMore = rows.length > boundedLimit;
+      const items = rows.slice(0, boundedLimit);
+      const finalItem = items.at(-1);
+      return {
+        items,
+        nextCursor: hasMore && finalItem ? encodeCandidateItemCursor(finalItem.ordinal) : null,
+      };
     },
     async proposeOutstandingCategorizations(
       userId: string,

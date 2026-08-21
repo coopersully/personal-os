@@ -30,6 +30,11 @@
 - Finalization requires a terminal cursor, verifies contiguous persisted ordinals, computes the complete revision/projection, then transitions the candidate to `ready_for_challenge`. Public candidate/item readers reject incomplete candidates by default.
 - Added a real database integration case covering 101 prepared items across three pages, post-page-one recovery, exact replay, drift supersession/restart, and stable final fingerprints.
 
+## Batch C scoped candidate overlay
+
+- Candidate finalization now reads a repeatable-read scope snapshot and projects prepared categorization, transaction-breakdown, and reimbursement create/cancel actions in ordinal order without updating canonical Finance records.
+- The projection uses allocation/reimbursement helpers for gross cash, personal allocation shares, invalidated allocations, outstanding reimbursements, and scoped budget actual/total/variance. Candidate revisions include scope, source revisions, ordered fingerprints, and projection assumptions.
+
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.

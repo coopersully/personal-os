@@ -304,6 +304,8 @@ export type FinanceMaintenanceCandidateItemDraft = z.infer<
 export const financeCandidateLedgerProjectionSchema = z
   .object({
     budgetVariance: z.number().finite().nullable().default(null),
+    budgetActual: z.number().finite().nonnegative().nullable().default(null),
+    budgetTotal: z.number().finite().nonnegative().nullable().default(null),
     grossCashSpending: z.number().finite().nonnegative(),
     personalSpending: z.number().finite().nonnegative(),
     questions: z.int().nonnegative(),

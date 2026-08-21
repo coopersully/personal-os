@@ -784,6 +784,232 @@ export function createFinanceService({
     };
   }
 
+  async function candidateLedgerProjection(
+    userId: string,
+    scope: MaintenanceScope,
+    items: Array<{
+      actionKind: string;
+      disposition: string;
+      fingerprint: string;
+      ordinal: number;
+      privatePayload: Record<string, unknown>;
+      safeChanges: Array<Record<string, unknown>>;
+    }>,
+    executor: FinanceReadExecutor = db,
+  ) {
+    const conditions = [eq(financeTransactions.userId, userId)];
+    if (scope.type === "window") {
+      conditions.push(gte(financeTransactions.transactionDate, scope.start));
+      conditions.push(lte(financeTransactions.transactionDate, scope.end));
+    } else if (scope.type === "target") {
+      if (scope.entityType === "finance_transaction")
+        conditions.push(eq(financeTransactions.id, scope.id));
+      else if (scope.entityType === "finance_account")
+        conditions.push(eq(financeTransactions.accountId, scope.id));
+      else conditions.push(sql`false`);
+    }
+    const transactions = await executor
+      .select()
+      .from(financeTransactions)
+      .where(and(...conditions))
+      .orderBy(financeTransactions.id);
+    const transactionIds = transactions.map((item) => item.id);
+    const allocations = transactionIds.length
+      ? await executor
+          .select()
+          .from(financeTransactionAllocations)
+          .where(
+            and(
+              eq(financeTransactionAllocations.userId, userId),
+              inArray(financeTransactionAllocations.transactionId, transactionIds),
+            ),
+          )
+      : [];
+    const reimbursementRows = allocations.length
+      ? await executor
+          .select()
+          .from(financeReimbursements)
+          .where(
+            and(
+              eq(financeReimbursements.userId, userId),
+              inArray(
+                financeReimbursements.allocationId,
+                allocations.map((item) => item.id),
+              ),
+            ),
+          )
+      : [];
+    const categories = await executor
+      .select()
+      .from(financeCategories)
+      .where(eq(financeCategories.userId, userId));
+    const month =
+      scope.type === "window"
+        ? scope.start.slice(0, 7)
+        : (transactions[0]?.transactionDate.slice(0, 7) ?? now().toISOString().slice(0, 7));
+    const budgets = await executor
+      .select()
+      .from(financeBudgets)
+      .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, month)));
+    const categoryName = new Map(categories.map((item) => [item.id, item.name]));
+    const categoryByTransaction = new Map(
+      transactions.map((item) => [
+        item.id,
+        item.categoryId ? (categoryName.get(item.categoryId) ?? item.category) : item.category,
+      ]),
+    );
+    let projectedAllocations = allocations.map((item) => ({ ...item }));
+    let projectedReimbursements = reimbursementRows.map((item) => ({ ...item }));
+    const inScope = new Set(transactionIds);
+    for (const item of items
+      .filter((item) => item.disposition === "prepared")
+      .toSorted((a, b) => a.ordinal - b.ordinal)) {
+      const payload = item.privatePayload as {
+        actionKind?: string;
+        input?: Record<string, unknown>;
+      };
+      const input = payload.input;
+      if (!input) continue;
+      if (payload.actionKind === "categorization") {
+        const decisions = input.decisions as
+          | Array<{ categoryId: string; transactionId: string }>
+          | undefined;
+        for (const decision of decisions ?? []) {
+          if (inScope.has(decision.transactionId))
+            categoryByTransaction.set(
+              decision.transactionId,
+              categoryName.get(decision.categoryId) ?? null,
+            );
+        }
+      } else if (payload.actionKind === "transaction_breakdown") {
+        const transactionId = item.safeChanges.find(
+          (change) => change.entityType === "finance_transaction",
+        )?.entityId as string | undefined;
+        const split = input.allocations as
+          | Array<{ amount: number; categoryId: string; treatment: "personal" | "reimbursable" }>
+          | undefined;
+        if (transactionId && inScope.has(transactionId) && split) {
+          projectedAllocations = projectedAllocations.filter(
+            (allocation) => allocation.transactionId !== transactionId,
+          );
+          projectedAllocations.push(
+            ...split.map((allocation, index) => ({
+              amount: toCents(allocation.amount),
+              allocationOrder: index,
+              categoryId: allocation.categoryId,
+              id: `candidate:${item.ordinal}:${index}`,
+              invalidatedAt: null,
+              rationale: "Candidate overlay",
+              revision: 1,
+              state: "active" as const,
+              transactionId,
+              treatment: allocation.treatment,
+              userId,
+              createdAt: now(),
+              updatedAt: now(),
+            })),
+          );
+        }
+      } else if (payload.actionKind === "reimbursement") {
+        if (input.operation === "create") {
+          const allocationId = input.allocationId as string;
+          projectedReimbursements.push({
+            allocationId,
+            cancelledAt: null,
+            cancelledEvidence: null,
+            cancelledRationale: null,
+            createdAt: now(),
+            dueDate: (input.dueDate as string | null) ?? null,
+            evidence: input.evidence ?? {},
+            expectedAmount: toCents(input.expectedAmount as number),
+            id: `candidate:${item.ordinal}`,
+            payer: (input.payer as string | null) ?? null,
+            rationale: String(input.rationale ?? "Candidate overlay"),
+            receivedAmount: 0,
+            revision: 1,
+            status: "expected" as const,
+            updatedAt: now(),
+            userId,
+          });
+        } else if (input.operation === "cancel") {
+          projectedReimbursements = projectedReimbursements.map((reimbursement) =>
+            reimbursement.id === input.reimbursementId
+              ? { ...reimbursement, status: "cancelled" as const }
+              : reimbursement,
+          );
+        }
+      }
+    }
+    const reimbursementExcluded = excludedReimbursementCentsByAllocation(projectedReimbursements);
+    const active = activeAllocationsByTransaction(projectedAllocations);
+    const activeDetailed = new Map<string, typeof projectedAllocations>();
+    for (const allocation of projectedAllocations) {
+      if (allocation.state !== "active") continue;
+      const current = activeDetailed.get(allocation.transactionId) ?? [];
+      current.push(allocation);
+      activeDetailed.set(allocation.transactionId, current);
+    }
+    const grossCashSpending = transactions
+      .filter((item) => item.direction === "expense" && !item.pending)
+      .reduce((sum, item) => sum + item.amount, 0);
+    const personalByCategory = new Map<string, number>();
+    const personalSpending = transactions
+      .filter((item) => item.direction === "expense" && !item.pending)
+      .reduce((sum, item) => {
+        const personal = personalAllocationCents(
+          item.id,
+          item.amount,
+          active,
+          reimbursementExcluded,
+        );
+        const splits = activeDetailed.get(item.id);
+        if (splits?.length) {
+          for (const split of splits) {
+            const amount =
+              split.treatment === "personal"
+                ? split.amount
+                : Math.max(0, split.amount - (reimbursementExcluded.get(split.id) ?? 0));
+            const category = categoryName.get(split.categoryId);
+            if (category)
+              personalByCategory.set(category, (personalByCategory.get(category) ?? 0) + amount);
+          }
+        } else {
+          const category = categoryByTransaction.get(item.id);
+          if (category)
+            personalByCategory.set(category, (personalByCategory.get(category) ?? 0) + personal);
+        }
+        return sum + personal;
+      }, 0);
+    const budgetTotal = budgets.reduce((sum, budget) => sum + budget.limit, 0);
+    const budgetActual = [...personalByCategory.values()].reduce((sum, amount) => sum + amount, 0);
+    const outstanding = projectedReimbursements
+      .filter((item) => !["cancelled", "received"].includes(item.status))
+      .reduce((sum, item) => sum + Math.max(0, item.expectedAmount - item.receivedAmount), 0);
+    const sourceRevision = financeCandidateRevision(
+      transactions.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.categoryId,
+        fingerprint: `${item.amount}:${item.transactionDate}:${item.reconciliationStatus}`,
+      })),
+    );
+    return {
+      assumptions: [
+        "Prepared candidate items are projected in ordinal order without canonical writes.",
+      ],
+      projection: {
+        budgetActual: budgetActual / 100,
+        budgetTotal: budgetTotal / 100,
+        budgetVariance: budgetTotal ? (budgetActual - budgetTotal) / 100 : null,
+        grossCashSpending: grossCashSpending / 100,
+        personalSpending: personalSpending / 100,
+        questions: items.filter((item) => item.disposition === "question").length,
+        reimbursementsOutstanding: outstanding / 100,
+      },
+      sourceRevision,
+    };
+  }
+
   async function seedCategories(
     userId: string,
     executor: Pick<Database, "insert" | "select"> = db,
@@ -4794,8 +5020,9 @@ export function createFinanceService({
     },
     async beginMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
       return db.transaction(async (tx) => {
+        await tx.execute(sql`set transaction isolation level repeatable read`);
         const [run] = await tx
-          .select({ id: workspaceMaintenanceRuns.id })
+          .select({ id: workspaceMaintenanceRuns.id, scope: workspaceMaintenanceRuns.scope })
           .from(workspaceMaintenanceRuns)
           .where(
             and(
@@ -4960,8 +5187,9 @@ export function createFinanceService({
     },
     async finalizeMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
       return db.transaction(async (tx) => {
+        await tx.execute(sql`set transaction isolation level repeatable read`);
         const [run] = await tx
-          .select({ id: workspaceMaintenanceRuns.id })
+          .select({ id: workspaceMaintenanceRuns.id, scope: workspaceMaintenanceRuns.scope })
           .from(workspaceMaintenanceRuns)
           .where(
             and(
@@ -4998,6 +5226,9 @@ export function createFinanceService({
             disposition: financeMaintenanceCandidateItems.disposition,
             expectedRevision: financeMaintenanceCandidateItems.expectedRevision,
             fingerprint: financeMaintenanceCandidateItems.fingerprint,
+            ordinal: financeMaintenanceCandidateItems.ordinal,
+            privatePayload: financeMaintenanceCandidateItems.privatePayload,
+            safeChanges: financeMaintenanceCandidateItems.safeChanges,
           })
           .from(financeMaintenanceCandidateItems)
           .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
@@ -5005,29 +5236,27 @@ export function createFinanceService({
           .for("update");
         if (items.length !== candidate.nextOrdinal)
           throw new AppError("conflict", "The Finance maintenance candidate page ordinal changed.");
-        const expenses = await tx
-          .select({ amount: financeTransactions.amount })
-          .from(financeTransactions)
-          .where(
-            and(
-              eq(financeTransactions.userId, input.userId),
-              eq(financeTransactions.direction, "expense"),
-              eq(financeTransactions.pending, false),
-            ),
-          );
-        const grossCashSpending = expenses.reduce((sum, row) => sum + row.amount / 100, 0);
-        const revision = financeCandidateRevision(items);
+        const overlay = await candidateLedgerProjection(input.userId, run.scope, items, tx);
+        const revision = financeCandidateRevision([
+          ...items,
+          {
+            actionKind: "candidate_scope",
+            disposition: JSON.stringify(run.scope),
+            expectedRevision: overlay.sourceRevision,
+            fingerprint: candidate.discoveryRevision ?? "sha256:empty",
+          },
+          {
+            actionKind: "projection_assumptions",
+            disposition: overlay.assumptions.join("\n"),
+            expectedRevision: null,
+            fingerprint: overlay.sourceRevision,
+          },
+        ]);
         const [ready] = await tx
           .update(financeMaintenanceCandidates)
           .set({
             preparationCheckpoint: { finalized: true, nextOrdinal: candidate.nextOrdinal },
-            projection: {
-              budgetVariance: null,
-              grossCashSpending,
-              personalSpending: grossCashSpending,
-              questions: items.filter((item) => item.disposition === "question").length,
-              reimbursementsOutstanding: 0,
-            },
+            projection: overlay.projection,
             revision,
             state: "ready_for_challenge",
             updatedAt: now(),

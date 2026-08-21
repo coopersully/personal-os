@@ -20,7 +20,8 @@
 - Candidate item drafts are parsed before persistence. Prepared payloads are a closed, action-specific union for every supported Finance action family; question drafts carry a bounded typed answer contract, underlying action, evidence, and as-of revision. Mismatched action/payload kinds and arbitrary payload records are rejected.
 - Finance action preparation exposes `prepareMaintenanceCandidateDraft`, which reuses the Task 3 read/prepare path for all supported action families without applying a semantic write.
 - Candidate-aware categorization discovery follows opaque proposal cursors (rather than rejecting a second page) and persists a single typed candidate batch. The public owner-scoped candidate reader pages stable ordinals and omits every private payload field.
-- The 47-item candidate scenario now traverses two proposal pages and still prepares 41 categorization items plus six typed questions with no pre-challenge application.
+- Candidate preparation follows opaque proposal pages before it persists the challenge batch; the real 47-item fixture verifies the persisted ordinal order through public candidate-item pages.
+- Replaced the former mocked 47-item candidate scenario with a migrated-Postgres production fixture: 41 rule-backed categorization proposals, four genuinely ambiguous merchant questions, one reimbursement-context question, and one possible-transfer question. It asserts ordinal/fingerprint stability, typed underlying actions and source references, same-run retry, and no canonical writes to transactions, allocations, reimbursements, category rules, review cases, alerts, profile, or budget plans.
 
 ## Batch B paging durability
 

@@ -3,10 +3,15 @@ import {
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  financeAlerts,
+  financeBudgetPlans,
   financeCategoryRules,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
+  financeProfiles,
+  financeReimbursements,
   financeReviewCases,
+  financeTransactionAllocations,
   financeTransactions,
   migrateDatabase,
   users,
@@ -278,62 +283,241 @@ describe.sequential("Finance maintenance service", () => {
   });
 
   it("prepares one 47-item candidate without applying semantic categorization before challenge", async () => {
+    const ownerId = await createUser("Real 47 Finance candidate");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
-    const supported = Array.from({ length: 41 }, (_, index) =>
-      proposal(`10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, { confidence: 1 }),
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const context = {
+      principal: {
+        actorId: ownerId,
+        actorType: "user" as const,
+        scopes: new Set(["finances:read" as const, "finances:write" as const]),
+        userId: ownerId,
+      },
+      requestId: "real-47-finance-maintenance-fixture",
+    };
+    const account = await finances.createAccount(
+      { balance: 10_000, institution: "Bank", kind: "cash", name: "Checking", provider: "manual" },
+      context,
     );
-    const ambiguous = Array.from({ length: 6 }, (_, index) =>
-      proposal(`20000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`, { confidence: 0 }),
+    await finances.listCategories(ownerId);
+    const preparedTransactions = await Promise.all(
+      Array.from({ length: 41 }, (_, index) =>
+        finances.createTransaction(
+          {
+            accountId: account.id,
+            amount: 100 + index,
+            category: null,
+            categoryConfidence: null,
+            date: "2026-08-14",
+            direction: "expense",
+            merchant: `Whole Foods ${index + 1}`,
+            notes: null,
+          },
+          context,
+        ),
+      ),
     );
-    let applied = 0;
-    let proposalCalls = 0;
-    const prepared: Array<{ prepared: number; questions: number; fingerprints: string[] }> = [];
-    const service = createFinanceMaintenanceService({
-      finances: operations({
-        applyApprovedOneOffs: async () => {
-          applied += 1;
-          return [];
-        },
-        proposeOutstandingCategorizations: async (_userId, _scope, cursor) => {
-          proposalCalls += 1;
-          const all = [...supported, ...ambiguous];
-          return cursor
-            ? { items: all.slice(25), nextCursor: null }
-            : { items: all.slice(0, 25), nextCursor: "candidate-page-2" };
-        },
-        prepareMaintenanceCandidate: async ({ items }) => {
-          const fingerprints = items.map((item) => item.fingerprint);
-          prepared.push({
-            prepared: items.filter((item) => item.disposition === "prepared").length,
-            questions: items.filter((item) => item.disposition === "question").length,
-            fingerprints,
-          });
-          const candidate = prepared.at(-1);
-          if (!candidate) throw new Error("Candidate fixture was not prepared.");
-          return {
-            candidateId: "30000000-0000-4000-8000-000000000001",
-            revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            ...candidate,
-          };
-        },
-      }),
+    const ambiguousTransactions = await Promise.all(
+      ["CVS", "Amazon Marketplace", "Broad Everyday Store", "Mixed Diversity Merchant"].map(
+        (merchant, index) =>
+          finances.createTransaction(
+            {
+              accountId: account.id,
+              amount: 200 + index,
+              category: null,
+              categoryConfidence: null,
+              date: "2026-08-14",
+              direction: "expense",
+              merchant,
+              notes: null,
+            },
+            context,
+          ),
+      ),
+    );
+    const reimbursement = await finances.createTransaction(
+      {
+        accountId: account.id,
+        amount: 300,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-08-14",
+        direction: "expense",
+        merchant: "Shared Trip Expense",
+        notes: null,
+      },
+      context,
+    );
+    const possibleTransfer = await finances.createTransaction(
+      {
+        accountId: account.id,
+        amount: 400,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-08-14",
+        direction: "expense",
+        merchant: "Account Movement",
+        notes: null,
+      },
+      context,
+    );
+    const allTransactionIds = [
+      ...preparedTransactions.map((item) => item.id),
+      ...ambiguousTransactions.map((item) => item.id),
+      reimbursement.id,
+      possibleTransfer.id,
+    ];
+    await database.db
+      .update(financeTransactions)
+      .set({
+        category: null,
+        categoryConfidence: null,
+        categoryDecidedAt: null,
+        categoryId: null,
+        categorySource: null,
+        needsReview: true,
+        pending: false,
+      })
+      .where(inArray(financeTransactions.id, allTransactionIds));
+    await database.db
+      .update(financeTransactions)
+      .set({ reconciliationStatus: "candidate" })
+      .where(eq(financeTransactions.id, possibleTransfer.id));
+    await database.db.insert(financeCategoryRules).values(
+      Array.from({ length: 41 }, (_, index) => ({
+        category: "Groceries",
+        merchantNormalized: `whole foods ${index + 1}`,
+        userId: ownerId,
+      })),
+    );
+    await database.db.insert(financeReviewCases).values([
+      {
+        rationale: "This expense may be reimbursed by a travel companion.",
+        reason: "possible_reimbursement",
+        transactionId: reimbursement.id,
+        userId: ownerId,
+      },
+      {
+        rationale: "This movement may be an internal transfer.",
+        reason: "possible_transfer",
+        transactionId: possibleTransfer.id,
+        userId: ownerId,
+      },
+    ]);
+    const productionProposals = await finances.proposeOutstandingCategorizations(ownerId, {
+      type: "all_outstanding",
+    });
+    expect(productionProposals.items.filter((item) => item.meetsPolicyThreshold)).toHaveLength(41);
+    const snapshot = async () =>
+      Promise.all([
+        database.db
+          .select()
+          .from(financeTransactions)
+          .where(eq(financeTransactions.userId, ownerId)),
+        database.db
+          .select()
+          .from(financeTransactionAllocations)
+          .where(eq(financeTransactionAllocations.userId, ownerId)),
+        database.db
+          .select()
+          .from(financeReimbursements)
+          .where(eq(financeReimbursements.userId, ownerId)),
+        database.db
+          .select()
+          .from(financeCategoryRules)
+          .where(eq(financeCategoryRules.userId, ownerId)),
+        database.db.select().from(financeReviewCases).where(eq(financeReviewCases.userId, ownerId)),
+        database.db.select().from(financeAlerts).where(eq(financeAlerts.userId, ownerId)),
+        database.db.select().from(financeProfiles).where(eq(financeProfiles.userId, ownerId)),
+        database.db.select().from(financeBudgetPlans).where(eq(financeBudgetPlans.userId, ownerId)),
+      ]);
+    const before = await snapshot();
+    const financeStatus = createFinanceStatusService({
+      assistant: {} as never,
+      db: database.db,
+      finances,
+      goals: {} as never,
       maintenance: workspace,
       now: () => now,
-      status: { getFinanceStatus: async () => status() },
     });
-    const run = await service.startOrResume(userId, { type: "all_outstanding" });
+    const service = createFinanceMaintenanceService({
+      finances,
+      maintenance: workspace,
+      now: () => now,
+      status: financeStatus,
+    });
+    const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
     await service.dispatchRun(run.id);
-    expect(applied).toBe(0);
-    expect(proposalCalls).toBe(2);
-    expect(prepared).toHaveLength(1);
-    expect(prepared[0]).toMatchObject({ prepared: 41, questions: 6 });
-    await expect(service.getRun(userId, run.id)).resolves.toMatchObject({
-      checkpoint: { candidateId: "30000000-0000-4000-8000-000000000001", phase: "challenge" },
+    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+      checkpoint: { phase: "challenge" },
       status: "queued",
     });
-    const retry = await service.startOrResume(userId, { type: "all_outstanding" });
+    const [candidate] = await database.db
+      .select()
+      .from(financeMaintenanceCandidates)
+      .where(eq(financeMaintenanceCandidates.runId, run.id));
+    if (!candidate) throw new Error("The real 47-item candidate was not saved.");
+    const candidateItems = await database.db
+      .select()
+      .from(financeMaintenanceCandidateItems)
+      .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
+      .orderBy(financeMaintenanceCandidateItems.ordinal);
+    expect(candidateItems).toHaveLength(47);
+    expect(candidateItems.map((item) => item.ordinal)).toEqual(
+      Array.from({ length: 47 }, (_, index) => index),
+    );
+    const firstCandidatePage = await finances.listMaintenanceCandidateItems(
+      ownerId,
+      candidate.id,
+      undefined,
+      25,
+    );
+    expect(firstCandidatePage.items.map((item) => item.ordinal)).toEqual(
+      Array.from({ length: 25 }, (_, index) => index),
+    );
+    expect(firstCandidatePage.items[0]).not.toHaveProperty("privatePayload");
+    const secondCandidatePage = await finances.listMaintenanceCandidateItems(
+      ownerId,
+      candidate.id,
+      firstCandidatePage.nextCursor ?? undefined,
+      25,
+    );
+    expect(secondCandidatePage.items.map((item) => item.ordinal)).toEqual(
+      Array.from({ length: 22 }, (_, index) => index + 25),
+    );
+    expect(secondCandidatePage.nextCursor).toBeNull();
+    expect(candidateItems.filter((item) => item.disposition === "prepared")).toHaveLength(41);
+    expect(candidateItems.filter((item) => item.disposition === "question")).toHaveLength(6);
+    const questionPayloads = candidateItems
+      .filter((item) => item.disposition === "question")
+      .map((item) => item.privatePayload as { underlyingAction: string; why: string });
+    expect(questionPayloads.map((item) => item.underlyingAction).sort()).toEqual([
+      "categorization",
+      "categorization",
+      "categorization",
+      "categorization",
+      "reimbursement",
+      "transaction",
+    ]);
+    expect(questionPayloads.map((item) => item.why)).toEqual(
+      expect.arrayContaining([
+        "This expense may be reimbursed by a travel companion.",
+        "This movement may be an internal transfer.",
+      ]),
+    );
+    expect(candidateItems.every((item) => item.sourceRefs.length === 1)).toBe(true);
+    expect(await snapshot()).toEqual(before);
+    const fingerprints = candidateItems.map((item) => item.fingerprint);
+    const retry = await service.startOrResume(ownerId, { type: "all_outstanding" });
     expect(retry.id).toBe(run.id);
-    expect(prepared).toHaveLength(1);
+    await service.dispatchRun(retry.id);
+    await expect(
+      database.db
+        .select({ fingerprint: financeMaintenanceCandidateItems.fingerprint })
+        .from(financeMaintenanceCandidateItems)
+        .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
+        .orderBy(financeMaintenanceCandidateItems.ordinal),
+    ).resolves.toEqual(fingerprints.map((fingerprint) => ({ fingerprint })));
   });
 
   it("durably appends three candidate pages and replays or supersedes a crashed page safely", async () => {

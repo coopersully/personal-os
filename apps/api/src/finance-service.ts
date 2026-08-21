@@ -4756,6 +4756,42 @@ export function createFinanceService({
         };
       });
     },
+    async getMaintenanceCandidateQuestionContexts(userId: string, transactionIds: string[]) {
+      if (!transactionIds.length) return {};
+      const rows = await db
+        .select({
+          rationale: financeReviewCases.rationale,
+          reason: financeReviewCases.reason,
+          transactionId: financeReviewCases.transactionId,
+        })
+        .from(financeReviewCases)
+        .where(
+          and(
+            eq(financeReviewCases.userId, userId),
+            inArray(financeReviewCases.transactionId, transactionIds),
+            inArray(financeReviewCases.status, ["deferred", "open"]),
+            inArray(financeReviewCases.reason, ["possible_reimbursement", "possible_transfer"]),
+          ),
+        )
+        .orderBy(desc(financeReviewCases.updatedAt));
+      const contexts: Record<
+        string,
+        { underlyingAction: "reimbursement" | "transaction"; why: string }
+      > = {};
+      for (const row of rows) {
+        if (contexts[row.transactionId]) continue;
+        contexts[row.transactionId] = {
+          underlyingAction:
+            row.reason === "possible_reimbursement" ? "reimbursement" : "transaction",
+          why:
+            row.rationale ??
+            (row.reason === "possible_reimbursement"
+              ? "This transaction may be reimbursable and needs a bounded reimbursement decision."
+              : "This transaction may be a transfer and needs a bounded transfer decision."),
+        };
+      }
+      return contexts;
+    },
     async beginMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
       return db.transaction(async (tx) => {
         const [run] = await tx

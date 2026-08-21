@@ -113,6 +113,10 @@ export type FinanceMaintenanceOperations = {
     questions: number;
     revision: string;
   }>;
+  getMaintenanceCandidateQuestionContexts?: (
+    userId: string,
+    transactionIds: string[],
+  ) => Promise<Record<string, { underlyingAction: "reimbursement" | "transaction"; why: string }>>;
   repairHeuristicTransfersForUser: (
     userId: string,
     scope: MaintenanceScope,
@@ -283,10 +287,17 @@ function candidateFingerprint(value: unknown) {
   return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
 }
 
-function preparedCandidateItems(page: FinanceCategorizationProposalPage) {
+function preparedCandidateItems(
+  page: FinanceCategorizationProposalPage,
+  questionContexts: Record<
+    string,
+    { underlyingAction: "reimbursement" | "transaction"; why: string }
+  > = {},
+) {
   return page.items.map((proposal) => {
     const sourceRefs = [proposal.source];
     if (!isEligibleOneOff(proposal)) {
+      const context = questionContexts[proposal.transaction.id];
       return {
         actionKind: "question" as const,
         disposition: "question" as const,
@@ -302,12 +313,23 @@ function preparedCandidateItems(page: FinanceCategorizationProposalPage) {
           asOf: proposal.transaction.updatedAt,
           choices: [],
           expectedAnswer: [
-            { name: "answer", nullable: false, required: true, type: "string" as const },
+            {
+              name: "answer",
+              nullable: false,
+              required: true,
+              type:
+                context?.underlyingAction === "reimbursement"
+                  ? ("object" as const)
+                  : ("string" as const),
+            },
           ],
-          prompt: `How should ${proposal.transaction.merchant} be recorded?`,
+          prompt:
+            context?.underlyingAction === "reimbursement"
+              ? `Is ${proposal.transaction.merchant} personal or reimbursable?`
+              : `How should ${proposal.transaction.merchant} be recorded?`,
           transactionId: proposal.transaction.id,
-          underlyingAction: "categorization" as const,
-          why: proposal.rationale,
+          underlyingAction: context?.underlyingAction ?? ("categorization" as const),
+          why: context?.why ?? proposal.rationale,
         },
         safeChanges: [
           {
@@ -565,7 +587,13 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
               preparation.cursor ?? undefined,
               async () => maintenance.renewClaim({ claimId, runId }).then(() => undefined),
             );
-            const items = preparedCandidateItems(page);
+            const questionContexts = finances.getMaintenanceCandidateQuestionContexts
+              ? await finances.getMaintenanceCandidateQuestionContexts(
+                  run.userId,
+                  page.items.map((item) => item.transaction.id),
+                )
+              : {};
+            const items = preparedCandidateItems(page, questionContexts);
             const appended = await finances.appendMaintenanceCandidatePage({
               cursor: preparation.cursor,
               discoveryRevision: candidateFingerprint(

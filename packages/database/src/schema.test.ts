@@ -66,9 +66,8 @@ describe("database schema contracts", () => {
     );
     expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidates"');
     expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidate_items"');
-    expect(migrationSql).toContain(
-      "finance_maintenance_candidates_run_id_workspace_maintenance_runs_id_fk",
-    );
+    expect(migrationSql).toContain("finance_maintenance_candidates_run_user_fk");
+    expect(migrationSql).toContain("workspace_maintenance_runs_id_user_id_unique");
     expect(migrationSql).toContain("ON DELETE cascade");
   });
 

@@ -16,18 +16,6 @@ export const financeMaintenanceSteps = [
   "preflight",
   "synchronize",
   "reconcile",
-  "categorize",
-  "questions",
-  "budget",
-  "health",
-  "verify",
-] as const;
-
-/** The candidate-first turn graph used by durable Finance maintenance. */
-export const financeCandidateMaintenanceSteps = [
-  "preflight",
-  "synchronize",
-  "reconcile",
   "prepare",
   "questions",
   "budget_and_health_projection",
@@ -39,7 +27,22 @@ export const financeCandidateMaintenanceSteps = [
   "period_review",
 ] as const;
 
-type FinanceMaintenanceStep = (typeof financeMaintenanceSteps)[number];
+/** The candidate-first turn graph used by durable Finance maintenance. */
+export const financeCandidateMaintenanceSteps = financeMaintenanceSteps;
+
+const legacyFinanceMaintenanceSteps = [
+  "preflight",
+  "synchronize",
+  "reconcile",
+  "categorize",
+  "questions",
+  "budget",
+  "health",
+  "verify",
+] as const;
+
+type FinanceMaintenanceStep = (typeof legacyFinanceMaintenanceSteps)[number];
+type FinanceCandidateMaintenanceStep = (typeof financeCandidateMaintenanceSteps)[number];
 type MutationContext = {
   maintenance: {
     idempotencyKey: string;
@@ -106,6 +109,12 @@ export type FinanceMaintenanceOperations = {
     repaired: number;
   }>;
   reconcileTransfersForUser: (
+    userId: string,
+    scope: MaintenanceScope,
+    context?: MutationContext,
+    onProgress?: () => Promise<void>,
+  ) => Promise<{ paired: number; transfers: number }>;
+  reconcileExactTransfersForUser?: (
     userId: string,
     scope: MaintenanceScope,
     context?: MutationContext,
@@ -209,14 +218,14 @@ function completedStep(value: unknown): FinanceMaintenanceStep | null {
   if (value === null || typeof value !== "object") return null;
   const step = (value as Record<string, unknown>).completedStep;
   return typeof step === "string" &&
-    financeMaintenanceSteps.includes(step as FinanceMaintenanceStep)
+    legacyFinanceMaintenanceSteps.includes(step as FinanceMaintenanceStep)
     ? (step as FinanceMaintenanceStep)
     : null;
 }
 
 function mutationContext(
   run: Pick<FinanceMaintenanceRun, "id" | "rulebookVersion" | "userId">,
-  step: FinanceMaintenanceStep,
+  step: FinanceMaintenanceStep | FinanceCandidateMaintenanceStep,
   claimId: string,
 ): MutationContext {
   return {
@@ -389,7 +398,206 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
     };
   }
 
-  async function dispatchRun(runId: string): Promise<FinanceMaintenanceRun | null> {
+  async function dispatchCandidateRun(runId: string): Promise<FinanceMaintenanceRun | null> {
+    const claim = await maintenance.claim(runId);
+    if (!claim) return null;
+    const { claimId, run } = claim;
+    const records = await maintenance.listStepRecords(runId);
+    const prepared = records.find((record) => record.step === "prepare")?.result as
+      | { candidateId: string; questions: number; revision: string }
+      | undefined;
+    const challengePrepared = records.find((record) => record.step === "challenge_prepare");
+    const checkpoint = run.checkpoint as Record<string, unknown> | null;
+    const releaseAtChallenge = async (candidate: NonNullable<typeof prepared>) =>
+      maintenance.checkpointAndRelease({
+        checkpoint: {
+          candidateId: candidate.candidateId,
+          candidateRevision: candidate.revision,
+          phase: "challenge",
+        },
+        claimId,
+        runId,
+      });
+    try {
+      // Task 7 will replace this queued checkpoint with the dedicated
+      // awaiting_agent_challenge state. Until then it is deliberately an
+      // open, same-run checkpoint rather than a terminal settlement.
+      if (checkpoint?.phase === "challenge" && prepared) return releaseAtChallenge(prepared);
+      if (challengePrepared && prepared) return releaseAtChallenge(prepared);
+
+      const completed = new Set(
+        records.filter((record) => record.status === "completed").map((record) => record.step),
+      );
+      for (const step of financeCandidateMaintenanceSteps) {
+        if (completed.has(step)) continue;
+        const idempotencyKey = `finances:${run.rulebookVersion}:${step}`;
+        if (step === "preflight") {
+          const allocationBackfill = finances.backfillTransactionAllocations
+            ? await finances.backfillTransactionAllocations(100)
+            : null;
+          const observed = await assertCurrentRulebook(run);
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey,
+            result: {
+              allocationBackfill,
+              asOf: observed.asOf,
+              freshness: observed.freshness.state,
+            },
+            runId,
+            step,
+          });
+          continue;
+        }
+        if (step === "synchronize") {
+          await assertCurrentRulebook(run);
+          const synchronized = await finances.syncDueAccountsForUser(
+            run.userId,
+            run.scope,
+            mutationContext(run, step, claimId),
+            async () => maintenance.renewClaim({ claimId, runId }).then(() => undefined),
+          );
+          const observed = await currentStatus(run.userId, run.scope);
+          if (observed.freshness.blockers.length || observed.state === "blocked") {
+            return maintenance.settle({
+              claimId,
+              result: await resultFor(run, observed),
+              runId,
+              status: "blocked",
+            });
+          }
+          if (
+            synchronized.failed ||
+            synchronized.skipped ||
+            observed.freshness.state !== "current"
+          ) {
+            throw new AppError(
+              "conflict",
+              "Finance synchronization is incomplete and will be retried.",
+            );
+          }
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey,
+            result: synchronized,
+            runId,
+            step,
+          });
+          continue;
+        }
+        if (step === "reconcile") {
+          await assertCurrentRulebook(run);
+          const reconciled = await (
+            finances.reconcileExactTransfersForUser ?? finances.reconcileTransfersForUser
+          )(run.userId, run.scope, mutationContext(run, step, claimId), async () =>
+            maintenance.renewClaim({ claimId, runId }).then(() => undefined),
+          );
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey,
+            result: reconciled,
+            runId,
+            step,
+          });
+          continue;
+        }
+        if (step === "prepare") {
+          const page = await finances.proposeOutstandingCategorizations(
+            run.userId,
+            run.scope,
+            undefined,
+            async () => maintenance.renewClaim({ claimId, runId }).then(() => undefined),
+          );
+          if (page.nextCursor) {
+            throw new AppError(
+              "conflict",
+              "Finance candidate preparation must fit its bounded page.",
+            );
+          }
+          const candidate = await finances.prepareMaintenanceCandidate?.({
+            items: preparedCandidateItems(page),
+            runId,
+            userId: run.userId,
+          });
+          if (!candidate)
+            throw new AppError("conflict", "Finance candidate storage is unavailable.");
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey,
+            result: {
+              candidateId: candidate.candidateId,
+              prepared: candidate.prepared,
+              questions: candidate.questions,
+              revision: candidate.revision,
+            },
+            runId,
+            step,
+          });
+          continue;
+        }
+        if (step === "questions") {
+          const candidate = (await maintenance.listStepRecords(runId)).find(
+            (record) => record.step === "prepare",
+          )?.result as { questions?: number } | undefined;
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey,
+            result: { created: 0, total: candidate?.questions ?? 0 },
+            runId,
+            step,
+          });
+          continue;
+        }
+        if (step === "budget_and_health_projection") {
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey,
+            result: { prepared: true, refreshed: false },
+            runId,
+            step,
+          });
+          continue;
+        }
+        if (step === "challenge_prepare") {
+          const candidate = (await maintenance.listStepRecords(runId)).find(
+            (record) => record.step === "prepare",
+          )?.result as NonNullable<typeof prepared> | undefined;
+          if (!candidate)
+            throw new AppError("conflict", "Finance candidate preparation is missing.");
+          await maintenance.completeStep({
+            claimId,
+            idempotencyKey,
+            result: { candidateId: candidate.candidateId, revision: candidate.revision },
+            runId,
+            step,
+          });
+          return releaseAtChallenge(candidate);
+        }
+        // Challenge resolution and settlement are unavailable until Task 7
+        // establishes durable challenge authority. Never reach these steps
+        // while a candidate is waiting at its challenge boundary.
+        return maintenance.getOwnedRun(run.userId, runId);
+      }
+      if (prepared) return releaseAtChallenge(prepared);
+      return maintenance.getOwnedRun(run.userId, runId);
+    } catch (error) {
+      const step = "prepare";
+      await maintenance.failStep({
+        claimId,
+        code: errorCode(error),
+        recoverable: !(
+          error instanceof AppError &&
+          ["forbidden", "invalid_request", "not_found"].includes(error.code)
+        ),
+        runId,
+        safeMessage: safeErrorMessage(error),
+        step,
+      });
+      return maintenance.getOwnedRun(run.userId, runId);
+    }
+  }
+
+  async function dispatchLegacyRun(runId: string): Promise<FinanceMaintenanceRun | null> {
     const claim = await maintenance.claim(runId);
     if (!claim) return null;
     const { claimId } = claim;
@@ -398,11 +606,11 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
     const reconciliationContinuation = reconcileCheckpoint(run.checkpoint);
     const lastCompleted = completedStep(run.checkpoint);
     let startIndex = categorizationContinuation
-      ? financeMaintenanceSteps.indexOf("categorize")
+      ? legacyFinanceMaintenanceSteps.indexOf("categorize")
       : reconciliationContinuation
-        ? financeMaintenanceSteps.indexOf("reconcile")
+        ? legacyFinanceMaintenanceSteps.indexOf("reconcile")
         : lastCompleted
-          ? financeMaintenanceSteps.indexOf(lastCompleted) + 1
+          ? legacyFinanceMaintenanceSteps.indexOf(lastCompleted) + 1
           : 0;
     let categorizationApplied = categorizationContinuation?.applied ?? 0;
     let heuristicTransfersRepaired = reconciliationContinuation?.repaired ?? 0;
@@ -438,8 +646,8 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
                 : "completed",
         });
       }
-      for (; startIndex < financeMaintenanceSteps.length; startIndex += 1) {
-        const step = financeMaintenanceSteps[startIndex];
+      for (; startIndex < legacyFinanceMaintenanceSteps.length; startIndex += 1) {
+        const step = legacyFinanceMaintenanceSteps[startIndex];
         if (!step) break;
         const idempotencyKey = `finances:${run.rulebookVersion}:${step}`;
         if (step === "preflight") {
@@ -778,8 +986,9 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
         });
       }
       const step =
-        financeMaintenanceSteps[Math.min(startIndex, financeMaintenanceSteps.length - 1)] ??
-        "preflight";
+        legacyFinanceMaintenanceSteps[
+          Math.min(startIndex, legacyFinanceMaintenanceSteps.length - 1)
+        ] ?? "preflight";
       const terminal =
         error instanceof AppError &&
         ["forbidden", "invalid_request", "not_found"].includes(error.code);
@@ -793,6 +1002,12 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
       });
       return maintenance.getOwnedRun(run.userId, runId);
     }
+  }
+
+  async function dispatchRun(runId: string): Promise<FinanceMaintenanceRun | null> {
+    return finances.prepareMaintenanceCandidate
+      ? dispatchCandidateRun(runId)
+      : dispatchLegacyRun(runId);
   }
 
   return {

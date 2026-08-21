@@ -1075,6 +1075,7 @@ export function createFinanceService({
     scope: MaintenanceScope = { type: "all_outstanding" },
     context?: MutationContext,
     onProgress?: FinanceSyncProgress,
+    exactOnly = false,
   ) {
     await onProgress?.();
     await assertMaintenanceScopeOwned(userId, scope);
@@ -1146,7 +1147,9 @@ export function createFinanceService({
       const candidateIds = candidateRows
         .filter(inScope)
         .filter((item) => !hasExplicitDecision(item))
-        .filter((item) => isMovementCandidate(item) || isRentMerchant(item.merchant))
+        .filter(
+          (item) => isMovementCandidate(item) || (!exactOnly && isRentMerchant(item.merchant)),
+        )
         .map((item) => item.id);
       const transactions: Array<typeof financeTransactions.$inferSelect> = [];
       for (let offset = 0; offset < candidateIds.length; offset += 1_000) {
@@ -1163,22 +1166,24 @@ export function createFinanceService({
           .for("update");
         transactions.push(...locked);
       }
-      const rentTransactions = transactions
-        .filter((item) => isRentMerchant(item.merchant))
-        .filter((item) => !hasExplicitDecision(item))
-        .filter(
-          (item) =>
-            item.categoryId !== rent.id ||
-            item.category !== rentCategory ||
-            item.categoryConfidence !== 10_000 ||
-            item.categorySource !== "rule" ||
-            item.direction !== "expense" ||
-            item.needsReview,
-        );
+      const rentTransactions = exactOnly
+        ? []
+        : transactions
+            .filter((item) => isRentMerchant(item.merchant))
+            .filter((item) => !hasExplicitDecision(item))
+            .filter(
+              (item) =>
+                item.categoryId !== rent.id ||
+                item.category !== rentCategory ||
+                item.categoryConfidence !== 10_000 ||
+                item.categorySource !== "rule" ||
+                item.direction !== "expense" ||
+                item.needsReview,
+            );
       const movementCandidates = transactions.filter(
         (item) =>
           !item.pending &&
-          !isRentMerchant(item.merchant) &&
+          (exactOnly || !isRentMerchant(item.merchant)) &&
           !hasExplicitDecision(item) &&
           isMovementCandidate(item),
       );
@@ -1274,90 +1279,88 @@ export function createFinanceService({
             ),
           );
       }
-      const transferCandidates = movementCandidates.filter((item) => !pairedIds.has(item.id));
-      for (const item of transferCandidates) {
-        const source = sourceFor(item);
-        if (!item.needsReview || item.reconciliationStatus !== "candidate") {
-          const [updated] = await tx
+      if (!exactOnly) {
+        const transferCandidates = movementCandidates.filter((item) => !pairedIds.has(item.id));
+        for (const item of transferCandidates) {
+          const source = sourceFor(item);
+          if (!item.needsReview || item.reconciliationStatus !== "candidate") {
+            const [updated] = await tx
+              .update(financeTransactions)
+              .set({ needsReview: true, reconciliationStatus: "candidate", updatedAt: now() })
+              .where(
+                and(eq(financeTransactions.id, item.id), eq(financeTransactions.userId, userId)),
+              )
+              .returning();
+            if (updated && context?.maintenance) {
+              await tx.insert(auditEvents).values(
+                auditValues({
+                  action: "finance.transfer_candidate_queued",
+                  after: {
+                    ...transactionAuditSnapshot(transaction(updated)),
+                    ...maintenanceAuditAttribution(context, source),
+                  },
+                  before: transactionAuditSnapshot(transaction(item)),
+                  entityId: item.id,
+                  entityType: "finance_transaction",
+                  ...context,
+                }),
+              );
+            }
+          }
+          await putInReview(
+            item.id,
+            userId,
+            "possible_transfer",
+            null,
+            "Provider marked this movement as a transfer, but no internal counterpart is confirmed.",
+            tx,
+            context,
+            source,
+          );
+        }
+        if (rentTransactions.length) {
+          const updatedRent = await tx
             .update(financeTransactions)
             .set({
-              needsReview: true,
-              reconciliationStatus: "candidate",
+              category: rentCategory,
+              categoryConfidence: 10_000,
+              categoryId: rent.id,
+              categoryRationale: "User rule: Lee Tachman/Tackman is rent.",
+              categorySource: "rule",
+              direction: "expense",
+              needsReview: false,
               updatedAt: now(),
             })
-            .where(and(eq(financeTransactions.id, item.id), eq(financeTransactions.userId, userId)))
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                inArray(
+                  financeTransactions.id,
+                  rentTransactions.map((item) => item.id),
+                ),
+              ),
+            )
             .returning();
-          if (updated && context?.maintenance) {
+          if (context?.maintenance) {
+            const beforeById = new Map(rentTransactions.map((item) => [item.id, item]));
             await tx.insert(auditEvents).values(
-              auditValues({
-                action: "finance.transfer_candidate_queued",
-                after: {
-                  ...transactionAuditSnapshot(transaction(updated)),
-                  ...maintenanceAuditAttribution(context, source),
-                },
-                before: transactionAuditSnapshot(transaction(item)),
-                entityId: item.id,
-                entityType: "finance_transaction",
-                ...context,
+              updatedRent.map((updated) => {
+                const before = beforeById.get(updated.id);
+                if (!before) throw new AppError("conflict", "The rent classification set changed.");
+                return auditValues({
+                  action: "finance.rent_rule_applied",
+                  after: {
+                    ...transactionAuditSnapshot(transaction(updated)),
+                    ...maintenanceAuditAttribution(context, sourceFor(before)),
+                  },
+                  before: transactionAuditSnapshot(transaction(before)),
+                  entityId: updated.id,
+                  entityType: "finance_transaction",
+                  ...context,
+                });
               }),
             );
           }
-        }
-        await putInReview(
-          item.id,
-          userId,
-          "possible_transfer",
-          null,
-          "Provider marked this movement as a transfer, but no internal counterpart is confirmed.",
-          tx,
-          context,
-          source,
-        );
-      }
-      if (rentTransactions.length > 0) {
-        const updatedRent = await tx
-          .update(financeTransactions)
-          .set({
-            category: rentCategory,
-            categoryConfidence: 10_000,
-            categoryId: rent.id,
-            categoryRationale: "User rule: Lee Tachman/Tackman is rent.",
-            categorySource: "rule",
-            direction: "expense",
-            needsReview: false,
-            updatedAt: now(),
-          })
-          .where(
-            and(
-              eq(financeTransactions.userId, userId),
-              inArray(
-                financeTransactions.id,
-                rentTransactions.map((item) => item.id),
-              ),
-            ),
-          )
-          .returning();
-        if (context?.maintenance) {
-          const beforeById = new Map(rentTransactions.map((item) => [item.id, item]));
-          await tx.insert(auditEvents).values(
-            updatedRent.map((updated) => {
-              const before = beforeById.get(updated.id);
-              if (!before) {
-                throw new AppError("conflict", "The rent classification set changed.");
-              }
-              return auditValues({
-                action: "finance.rent_rule_applied",
-                after: {
-                  ...transactionAuditSnapshot(transaction(updated)),
-                  ...maintenanceAuditAttribution(context, sourceFor(before)),
-                },
-                before: transactionAuditSnapshot(transaction(before)),
-                entityId: updated.id,
-                entityType: "finance_transaction",
-                ...context,
-              });
-            }),
-          );
         }
       }
       return { paired: pairedIds.size / 2, transfers: pairedIds.size };
@@ -4035,6 +4038,14 @@ export function createFinanceService({
     ) {
       return reconcileBudgetTransfers(userId, scope, context, onProgress);
     },
+    async reconcileExactTransfersForUser(
+      userId: string,
+      scope: MaintenanceScope,
+      context?: MutationContext,
+      onProgress?: FinanceSyncProgress,
+    ) {
+      return reconcileBudgetTransfers(userId, scope, context, onProgress, true);
+    },
     async repairHeuristicTransfersForUser(
       userId: string,
       scope: MaintenanceScope,
@@ -4713,42 +4724,6 @@ export function createFinanceService({
       runId: string;
       userId: string;
     }) {
-      const [run] = await db
-        .select({ id: workspaceMaintenanceRuns.id })
-        .from(workspaceMaintenanceRuns)
-        .where(
-          and(
-            eq(workspaceMaintenanceRuns.id, input.runId),
-            eq(workspaceMaintenanceRuns.userId, input.userId),
-            eq(workspaceMaintenanceRuns.domain, "finances"),
-          ),
-        )
-        .limit(1);
-      if (!run) throw new AppError("not_found", "The Finance maintenance run is not available.");
-      const [existing] = await db
-        .select()
-        .from(financeMaintenanceCandidates)
-        .where(
-          and(
-            eq(financeMaintenanceCandidates.runId, input.runId),
-            sql`${financeMaintenanceCandidates.state} <> 'superseded'`,
-          ),
-        )
-        .limit(1);
-      if (existing) {
-        const items = await db
-          .select({ fingerprint: financeMaintenanceCandidateItems.fingerprint })
-          .from(financeMaintenanceCandidateItems)
-          .where(eq(financeMaintenanceCandidateItems.candidateId, existing.id))
-          .orderBy(financeMaintenanceCandidateItems.ordinal);
-        return {
-          candidateId: existing.id,
-          fingerprints: items.map((item) => item.fingerprint),
-          prepared: input.items.filter((item) => item.disposition === "prepared").length,
-          questions: input.items.filter((item) => item.disposition === "question").length,
-          revision: existing.revision,
-        };
-      }
       const revision = `sha256:${createHash("sha256")
         .update(
           JSON.stringify(
@@ -4761,50 +4736,111 @@ export function createFinanceService({
           ),
         )
         .digest("hex")}`;
-      const expenses = await db
-        .select({ amount: financeTransactions.amount })
-        .from(financeTransactions)
-        .where(
-          and(
-            eq(financeTransactions.userId, input.userId),
-            eq(financeTransactions.direction, "expense"),
-            eq(financeTransactions.pending, false),
-          ),
-        );
-      const grossCashSpending = expenses.reduce((sum, row) => sum + row.amount / 100, 0);
-      const [candidate] = await db
-        .insert(financeMaintenanceCandidates)
-        .values({
-          projection: {
-            budgetVariance: null,
-            grossCashSpending,
-            personalSpending: grossCashSpending,
-            questions: input.items.filter((item) => item.disposition === "question").length,
-            reimbursementsOutstanding: 0,
-          },
-          revision,
-          runId: input.runId,
-          state: "ready_for_challenge",
-          userId: input.userId,
-        })
-        .returning();
-      if (!candidate) throw new Error("The Finance maintenance candidate could not be saved.");
-      if (input.items.length) {
-        await db.insert(financeMaintenanceCandidateItems).values(
-          input.items.map((item, ordinal) => ({
-            ...item,
-            candidateId: candidate.id,
-            ordinal,
-          })),
-        );
-      }
-      return {
-        candidateId: candidate.id,
-        fingerprints: input.items.map((item) => item.fingerprint),
-        prepared: input.items.filter((item) => item.disposition === "prepared").length,
-        questions: input.items.filter((item) => item.disposition === "question").length,
-        revision,
-      };
+      return db.transaction(async (tx) => {
+        const [run] = await tx
+          .select({ id: workspaceMaintenanceRuns.id })
+          .from(workspaceMaintenanceRuns)
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.id, input.runId),
+              eq(workspaceMaintenanceRuns.userId, input.userId),
+              eq(workspaceMaintenanceRuns.domain, "finances"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!run) throw new AppError("not_found", "The Finance maintenance run is not available.");
+        const [existing] = await tx
+          .select()
+          .from(financeMaintenanceCandidates)
+          .where(
+            and(
+              eq(financeMaintenanceCandidates.runId, input.runId),
+              eq(financeMaintenanceCandidates.userId, input.userId),
+              sql`${financeMaintenanceCandidates.state} <> 'superseded'`,
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (existing) {
+          const stored = await tx
+            .select({
+              disposition: financeMaintenanceCandidateItems.disposition,
+              fingerprint: financeMaintenanceCandidateItems.fingerprint,
+            })
+            .from(financeMaintenanceCandidateItems)
+            .where(eq(financeMaintenanceCandidateItems.candidateId, existing.id))
+            .orderBy(financeMaintenanceCandidateItems.ordinal)
+            .for("update");
+          const fingerprints = stored.map((item) => item.fingerprint);
+          if (
+            fingerprints.length === input.items.length &&
+            fingerprints.every(
+              (fingerprint, index) => fingerprint === input.items[index]?.fingerprint,
+            )
+          ) {
+            return {
+              candidateId: existing.id,
+              fingerprints,
+              prepared: stored.filter((item) => item.disposition === "prepared").length,
+              questions: stored.filter((item) => item.disposition === "question").length,
+              revision: existing.revision,
+            };
+          }
+          await tx
+            .update(financeMaintenanceCandidates)
+            .set({ state: "superseded", updatedAt: now() })
+            .where(eq(financeMaintenanceCandidates.id, existing.id));
+        }
+        const expenses = await tx
+          .select({ amount: financeTransactions.amount })
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.userId, input.userId),
+              eq(financeTransactions.direction, "expense"),
+              eq(financeTransactions.pending, false),
+            ),
+          );
+        const grossCashSpending = expenses.reduce((sum, row) => sum + row.amount / 100, 0);
+        const [candidate] = await tx
+          .insert(financeMaintenanceCandidates)
+          .values({
+            projection: {
+              budgetVariance: null,
+              grossCashSpending,
+              personalSpending: grossCashSpending,
+              questions: input.items.filter((item) => item.disposition === "question").length,
+              reimbursementsOutstanding: 0,
+            },
+            revision,
+            runId: input.runId,
+            state: "preparing",
+            userId: input.userId,
+          })
+          .returning();
+        if (!candidate) throw new Error("The Finance maintenance candidate could not be saved.");
+        if (input.items.length) {
+          await tx
+            .insert(financeMaintenanceCandidateItems)
+            .values(
+              input.items.map((item, ordinal) => ({ ...item, candidateId: candidate.id, ordinal })),
+            );
+        }
+        const [ready] = await tx
+          .update(financeMaintenanceCandidates)
+          .set({ state: "ready_for_challenge", updatedAt: now() })
+          .where(eq(financeMaintenanceCandidates.id, candidate.id))
+          .returning();
+        if (!ready) throw new Error("The Finance maintenance candidate could not be finalized.");
+        return {
+          candidateId: ready.id,
+          fingerprints: input.items.map((item) => item.fingerprint),
+          prepared: input.items.filter((item) => item.disposition === "prepared").length,
+          questions: input.items.filter((item) => item.disposition === "question").length,
+          revision: ready.revision,
+        };
+      });
     },
     async proposeOutstandingCategorizations(
       userId: string,

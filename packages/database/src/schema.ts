@@ -139,6 +139,7 @@ export const workspaceMaintenanceRuns = pgTable(
       .where(
         sql`${table.status} IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable')`,
       ),
+    uniqueIndex("workspace_maintenance_runs_id_user_id_unique").on(table.id, table.userId),
     index("workspace_maintenance_runs_claimable_idx")
       .on(table.status, table.retryAt, table.leaseExpiresAt, table.updatedAt)
       .where(sql`${table.status} IN ('queued', 'running', 'failed_recoverable')`),
@@ -202,9 +203,7 @@ export const financeMaintenanceCandidates = pgTable(
     userId: uuid("user_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
-    runId: uuid("run_id")
-      .notNull()
-      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    runId: uuid("run_id").notNull(),
     state: text("state")
       .$type<
         | "preparing"
@@ -234,6 +233,11 @@ export const financeMaintenanceCandidates = pgTable(
       table.state,
       table.updatedAt,
     ),
+    foreignKey({
+      columns: [table.runId, table.userId],
+      foreignColumns: [workspaceMaintenanceRuns.id, workspaceMaintenanceRuns.userId],
+      name: "finance_maintenance_candidates_run_user_fk",
+    }).onDelete("cascade"),
   ],
 );
 

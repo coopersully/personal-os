@@ -12,7 +12,9 @@ CREATE TABLE "finance_maintenance_candidates" (
 --> statement-breakpoint
 ALTER TABLE "finance_maintenance_candidates" ADD CONSTRAINT "finance_maintenance_candidates_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-ALTER TABLE "finance_maintenance_candidates" ADD CONSTRAINT "finance_maintenance_candidates_run_id_workspace_maintenance_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."workspace_maintenance_runs"("id") ON DELETE cascade ON UPDATE no action;
+CREATE UNIQUE INDEX "workspace_maintenance_runs_id_user_id_unique" ON "workspace_maintenance_runs" USING btree ("id", "user_id");
+--> statement-breakpoint
+ALTER TABLE "finance_maintenance_candidates" ADD CONSTRAINT "finance_maintenance_candidates_run_user_fk" FOREIGN KEY ("run_id", "user_id") REFERENCES "public"."workspace_maintenance_runs"("id", "user_id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
 CREATE UNIQUE INDEX "finance_maintenance_candidates_active_run_idx" ON "finance_maintenance_candidates" USING btree ("run_id") WHERE "state" <> 'superseded';
 --> statement-breakpoint

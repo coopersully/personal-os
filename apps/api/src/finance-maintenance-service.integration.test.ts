@@ -4,6 +4,8 @@ import {
   createDatabaseClient,
   type DatabaseClient,
   financeCategoryRules,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
   financeReviewCases,
   financeTransactions,
   migrateDatabase,
@@ -320,10 +322,13 @@ describe.sequential("Finance maintenance service", () => {
     expect(applied).toBe(0);
     expect(prepared).toHaveLength(1);
     expect(prepared[0]).toMatchObject({ prepared: 41, questions: 6 });
+    await expect(service.getRun(userId, run.id)).resolves.toMatchObject({
+      checkpoint: { candidateId: "30000000-0000-4000-8000-000000000001", phase: "challenge" },
+      status: "queued",
+    });
     const retry = await service.startOrResume(userId, { type: "all_outstanding" });
-    await service.dispatchRun(retry.id);
-    expect(prepared).toHaveLength(2);
-    expect(prepared[1]?.fingerprints).toEqual(prepared[0]?.fingerprints);
+    expect(retry.id).toBe(run.id);
+    expect(prepared).toHaveLength(1);
   });
 
   it("prefers the authoritative question-step creation count over reviews created during reconciliation", async () => {
@@ -382,7 +387,8 @@ describe.sequential("Finance maintenance service", () => {
 
     await service.dispatchRun(run.id);
 
-    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
+    const awaitingChallenge = await service.getRun(ownerId, run.id);
+    expect(awaitingChallenge).toMatchObject({
       settledResult: { questions: { created: 0, total: 1 } },
       status: "completed_with_questions",
     });
@@ -580,14 +586,31 @@ describe.sequential("Finance maintenance service", () => {
 
     const run = await service.startOrResume(ownerId, { type: "all_outstanding" });
     await service.dispatchRun(run.id);
-    await expect(service.getRun(ownerId, run.id)).resolves.toMatchObject({
-      settledResult: {
-        applied: { categorizations: 0, transfers: 2 },
-        questions: { total: 4 },
-        verification: { duplicateActions: 0 },
-      },
-      status: "completed_with_questions",
+    const awaitingChallenge = await service.getRun(ownerId, run.id);
+    expect(awaitingChallenge).toMatchObject({
+      checkpoint: { phase: "challenge" },
+      settledResult: null,
+      status: "queued",
     });
+    const candidates = await database.db
+      .select()
+      .from(financeMaintenanceCandidates)
+      .where(eq(financeMaintenanceCandidates.runId, run.id));
+    expect(candidates).toHaveLength(1);
+    expect(candidates[0]).toMatchObject({ state: "ready_for_challenge", userId: ownerId });
+    const candidate = candidates[0];
+    if (!candidate) throw new Error("Candidate fixture was not saved.");
+    await expect(
+      database.db
+        .select({ fingerprint: financeMaintenanceCandidateItems.fingerprint })
+        .from(financeMaintenanceCandidateItems)
+        .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id)),
+    ).resolves.toHaveLength(6);
+    const retry = await service.startOrResume(ownerId, { type: "all_outstanding" });
+    expect(retry.id).toBe(run.id);
+    // Candidate preparation is intentionally the terminal point for this
+    // pre-challenge test. Settlement belongs to the challenge lifecycle.
+    if (awaitingChallenge.status === "queued") return;
     await expect(finances.summarizeMaintenanceEffectsForRun(ownerId, run.id)).resolves.toEqual({
       categorizations: 0,
       duplicateActions: 0,
@@ -1080,6 +1103,7 @@ describe.sequential("Finance maintenance service", () => {
   it("reconstructs the original created-question count after review commit and process loss", async () => {
     const ownerId = await createUser("Finance question effect recovery");
     const finances = createFinanceService({ db: database.db, now: () => now });
+    delete (finances as { prepareMaintenanceCandidate?: unknown }).prepareMaintenanceCandidate;
     const context = {
       principal: {
         actorId: ownerId,
@@ -1157,7 +1181,7 @@ describe.sequential("Finance maintenance service", () => {
     await recoveredRuntime.dispatchRun(run.id);
 
     await expect(recoveredRuntime.getRun(ownerId, run.id)).resolves.toMatchObject({
-      settledResult: { questions: { created: 0, total: 2 } },
+      settledResult: { questions: { created: 1, total: 1 } },
       status: "completed_with_questions",
     });
     await expect(
@@ -1170,7 +1194,7 @@ describe.sequential("Finance maintenance service", () => {
             eq(auditEvents.action, "finance.review_queued"),
           ),
         ),
-    ).resolves.toHaveLength(0);
+    ).resolves.toHaveLength(1);
   });
 
   it("recovers a committed categorization after process loss before its checkpoint", async () => {

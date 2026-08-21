@@ -380,6 +380,9 @@ describe.sequential("finance service", () => {
       // 0062 has a deliberate FK dependency on the allocation table and is
       // applied with the current chain during this legacy-upgrade test.
       "0062_finance_reimbursements",
+      // Candidate storage depends on the maintenance-run migration omitted
+      // by this legacy schema fixture.
+      "0063_finance_maintenance_candidates",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

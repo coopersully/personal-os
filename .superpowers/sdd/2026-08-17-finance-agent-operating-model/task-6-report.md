@@ -66,6 +66,11 @@
 - Candidate dispatch is checkpoint-first after commit: it resumes `health_refresh → verify → period_review` and only settles once those post-commit steps complete, never re-entering an earlier challenge phase.
 - Drift supersession now clears the same run's stale step records before requeueing `prepare`, preventing old prepare/challenge receipts from blocking a rebuild.
 
+## Batch H projection source completeness
+
+- Candidate source revisions now include scoped transaction allocations (including invalidations), reimbursements, reimbursement matches, categories, budget rows and plan parents, effective profiles, income/recurring records, accounts, and provider synchronization cutoffs. The stable revision records only IDs, revisions, statuses, dates, and financial values—not rationale text.
+- Profile selection is bounded by the projection as-of date, and window projections enumerate every included month. Budget projection keys now include month plus category, so multi-month totals do not silently overwrite same-named categories.
+
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.

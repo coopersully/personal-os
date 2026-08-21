@@ -858,22 +858,67 @@ export function createFinanceService({
             ),
           )
       : [];
+    const reimbursementMatches = reimbursementRows.length
+      ? await executor
+          .select()
+          .from(financeReimbursementMatches)
+          .where(
+            and(
+              eq(financeReimbursementMatches.userId, userId),
+              inArray(
+                financeReimbursementMatches.reimbursementId,
+                reimbursementRows.map((item) => item.id),
+              ),
+            ),
+          )
+      : [];
     const categories = await executor
       .select()
       .from(financeCategories)
       .where(eq(financeCategories.userId, userId));
-    const month =
+    const asOf =
       scope.type === "window"
-        ? scope.start.slice(0, 7)
-        : (transactions[0]?.transactionDate.slice(0, 7) ?? now().toISOString().slice(0, 7));
+        ? scope.end
+        : (transactions.at(-1)?.transactionDate ?? now().toISOString().slice(0, 10));
+    const months =
+      scope.type === "window"
+        ? Array.from(
+            {
+              length:
+                (Number(scope.end.slice(0, 4)) - Number(scope.start.slice(0, 4))) * 12 +
+                Number(scope.end.slice(5, 7)) -
+                Number(scope.start.slice(5, 7)) +
+                1,
+            },
+            (_, index) => {
+              const date = new Date(`${scope.start.slice(0, 7)}-01T00:00:00.000Z`);
+              date.setUTCMonth(date.getUTCMonth() + index);
+              return date.toISOString().slice(0, 7);
+            },
+          )
+        : [...new Set(transactions.map((item) => item.transactionDate.slice(0, 7)))];
     const budgets = await executor
       .select()
       .from(financeBudgets)
-      .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, month)));
+      .where(
+        and(
+          eq(financeBudgets.userId, userId),
+          months.length ? inArray(financeBudgets.month, months) : sql`false`,
+        ),
+      );
+    const budgetPlans = await executor
+      .select()
+      .from(financeBudgetPlans)
+      .where(
+        and(
+          eq(financeBudgetPlans.userId, userId),
+          months.length ? inArray(financeBudgetPlans.month, months) : sql`false`,
+        ),
+      );
     const [profile] = await executor
       .select()
       .from(financeProfiles)
-      .where(eq(financeProfiles.userId, userId))
+      .where(and(eq(financeProfiles.userId, userId), lte(financeProfiles.effectiveDate, asOf)))
       .orderBy(desc(financeProfiles.effectiveDate), desc(financeProfiles.updatedAt))
       .limit(1);
     const incomeStreams = await executor
@@ -884,6 +929,33 @@ export function createFinanceService({
       .select()
       .from(financeRecurringObligations)
       .where(eq(financeRecurringObligations.userId, userId));
+    const accounts = transactionIds.length
+      ? await executor
+          .select()
+          .from(financeAccounts)
+          .where(
+            and(
+              eq(financeAccounts.userId, userId),
+              inArray(financeAccounts.id, [...new Set(transactions.map((item) => item.accountId))]),
+            ),
+          )
+      : [];
+    const providerItems = accounts.length
+      ? await executor
+          .select()
+          .from(financeProviderItems)
+          .where(
+            and(
+              eq(financeProviderItems.userId, userId),
+              inArray(
+                financeProviderItems.id,
+                accounts.flatMap((item) =>
+                  item.providerItemRecordId ? [item.providerItemRecordId] : [],
+                ),
+              ),
+            ),
+          )
+      : [];
     const categoryName = new Map(categories.map((item) => [item.id, item.name]));
     const categoryByTransaction = new Map(
       transactions.map((item) => [
@@ -893,7 +965,9 @@ export function createFinanceService({
     );
     let projectedAllocations = allocations.map((item) => ({ ...item }));
     let projectedReimbursements = reimbursementRows.map((item) => ({ ...item }));
-    let projectedBudgetLimits = new Map(budgets.map((item) => [item.category, item.limit]));
+    let projectedBudgetLimits = new Map(
+      budgets.map((item) => [`${item.month}:${item.category}`, item.limit]),
+    );
     let projectedProfile = profile ? { ...profile } : null;
     const projectedIncomeStreams = incomeStreams.map((item) => ({ ...item }));
     const projectedRecurringObligations = recurringObligations.map((item) => ({ ...item }));
@@ -1027,15 +1101,19 @@ export function createFinanceService({
         }
         case "budget_plan": {
           const input = payload.input;
-          if (input.month === month) {
+          if (months.includes(input.month)) {
             if ("allocations" in input) {
               if (input.replace) projectedBudgetLimits = new Map();
               for (const allocation of input.allocations) {
                 const category = categoryName.get(allocation.categoryId);
-                if (category) projectedBudgetLimits.set(category, toCents(allocation.limit));
+                if (category)
+                  projectedBudgetLimits.set(
+                    `${input.month}:${category}`,
+                    toCents(allocation.limit),
+                  );
               }
             } else {
-              projectedBudgetLimits.set(input.category, toCents(input.limit));
+              projectedBudgetLimits.set(`${input.month}:${input.category}`, toCents(input.limit));
             }
           }
           break;
@@ -1207,6 +1285,42 @@ export function createFinanceService({
         expectedRevision: item.categoryId,
         fingerprint: `${item.amount}:${item.transactionDate}:${item.reconciliationStatus}`,
       })),
+      ...allocations.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.state,
+        fingerprint: `${item.transactionId}:${item.categoryId}:${item.amount}:${item.treatment}:${item.revision}`,
+      })),
+      ...reimbursementRows.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.status,
+        fingerprint: `${item.allocationId}:${item.expectedAmount}:${item.receivedAmount}:${item.revision}`,
+      })),
+      ...reimbursementMatches.map((item) => ({
+        actionKind: item.id,
+        disposition: item.createdAt.toISOString(),
+        expectedRevision: item.reimbursementId,
+        fingerprint: `${item.creditTransactionId}:${item.amount}`,
+      })),
+      ...categories.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.slug,
+        fingerprint: `${item.name}:${item.group}`,
+      })),
+      ...budgets.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.month,
+        fingerprint: `${item.category}:${item.limit}`,
+      })),
+      ...budgetPlans.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.month,
+        fingerprint: `${item.version}:${item.replace}:${item.scenarioFingerprint ?? ""}`,
+      })),
       ...incomeStreams.map((item) => ({
         actionKind: item.id,
         disposition: item.updatedAt.toISOString(),
@@ -1229,6 +1343,18 @@ export function createFinanceService({
             },
           ]
         : []),
+      ...accounts.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.syncState,
+        fingerprint: `${item.providerItemRecordId ?? ""}:${item.lastSyncedAt?.toISOString() ?? ""}`,
+      })),
+      ...providerItems.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.syncState,
+        fingerprint: `${item.lastSyncedAt?.toISOString() ?? ""}:${item.syncCursor ?? ""}`,
+      })),
     ]);
     return {
       assumptions: [

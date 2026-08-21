@@ -22,11 +22,17 @@
 - Candidate-aware categorization discovery follows opaque proposal cursors (rather than rejecting a second page) and persists a single typed candidate batch. The public owner-scoped candidate reader pages stable ordinals and omits every private payload field.
 - The 47-item candidate scenario now traverses two proposal pages and still prepares 41 categorization items plus six typed questions with no pre-challenge application.
 
+## Batch B paging durability
+
+- Migration 0063 and the Drizzle schema now retain the private preparation cursor, next ordinal, cumulative discovery revision, and last-page checkpoint metadata.
+- Candidate preparation creates an unpublished `preparing` candidate, then appends each source page in a short owned-run transaction. The page fingerprint, cursor, and ordinal fence make an exact replay a no-op; a mismatched replay supersedes the incomplete candidate and rebuilds it on the same run.
+- Finalization requires a terminal cursor, verifies contiguous persisted ordinals, computes the complete revision/projection, then transitions the candidate to `ready_for_challenge`. Public candidate/item readers reject incomplete candidates by default.
+- Added a real database integration case covering 101 prepared items across three pages, post-page-one recovery, exact replay, drift supersession/restart, and stable final fingerprints.
+
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.
 - The initial projection is conservative: prepared categorization changes do not change cash or personal-spending totals. Reimbursement-aware overlay refinement belongs with the challenge/settlement work.
-- Proposal pages are renewed and accumulated under one claim before the atomic candidate insertion. A crash between pages replays the source pages rather than retaining a per-page candidate checkpoint; durable per-page append/resume remains follow-up hardening.
 
 ## BLOCKED
 

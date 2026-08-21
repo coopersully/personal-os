@@ -336,6 +336,158 @@ describe.sequential("Finance maintenance service", () => {
     expect(prepared).toHaveLength(1);
   });
 
+  it("durably appends three candidate pages and replays or supersedes a crashed page safely", async () => {
+    const ownerId = await createUser("Paged Finance candidate");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const run = await workspace.createOrResume(
+      ownerId,
+      "finances",
+      { type: "all_outstanding" },
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    const draft = (index: number) => ({
+      actionKind: "categorization" as const,
+      assumptions: [],
+      disposition: "prepared" as const,
+      evidence: { confidence: 1, rationale: "Bounded fixture evidence." },
+      expectedRevision: now.toISOString(),
+      fingerprint: `sha256:${index.toString(16).padStart(64, "0")}`,
+      privatePayload: {
+        actionKind: "categorization" as const,
+        input: {
+          decisions: [
+            {
+              categoryId: categoryId,
+              confidence: 1,
+              expectedTransactionUpdatedAt: now.toISOString(),
+              learnMerchant: "never" as const,
+              rationale: "Bounded fixture evidence.",
+              transactionId: `10000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+            },
+          ],
+        },
+      },
+      safeChanges: [],
+      sourceRefs: [
+        {
+          accountId: "33333333-3333-4333-8333-333333333333",
+          provider: "local" as const,
+          remoteId: `page-${index}`,
+          revision: now.toISOString(),
+          sourceType: "finance_transaction" as const,
+        },
+      ],
+    });
+    const [firstPage, secondPage, thirdPage] = [
+      Array.from({ length: 40 }, (_, index) => draft(index + 1)),
+      Array.from({ length: 40 }, (_, index) => draft(index + 41)),
+      Array.from({ length: 21 }, (_, index) => draft(index + 81)),
+    ];
+    const first = await finances.beginMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    const pageOne = await finances.appendMaintenanceCandidatePage({
+      cursor: first.cursor,
+      discoveryRevision: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      items: firstPage,
+      nextCursor: "page-2",
+      runId: run.id,
+      userId: ownerId,
+    });
+    expect(pageOne).toMatchObject({ nextOrdinal: 40, status: "appended" });
+    await expect(
+      finances.getMaintenanceCandidate(ownerId, first.candidateId),
+    ).rejects.toMatchObject({
+      code: "not_found",
+    });
+    const recovered = await finances.beginMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    expect(recovered).toMatchObject({
+      candidateId: first.candidateId,
+      cursor: "page-2",
+      nextOrdinal: 40,
+    });
+    await expect(
+      finances.appendMaintenanceCandidatePage({
+        cursor: first.cursor,
+        discoveryRevision:
+          "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        items: firstPage,
+        nextCursor: "page-2",
+        runId: run.id,
+        userId: ownerId,
+      }),
+    ).resolves.toMatchObject({ status: "replayed", nextOrdinal: 40 });
+    await finances.appendMaintenanceCandidatePage({
+      cursor: "page-2",
+      discoveryRevision: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      items: secondPage,
+      nextCursor: "page-3",
+      runId: run.id,
+      userId: ownerId,
+    });
+    await finances.appendMaintenanceCandidatePage({
+      cursor: "page-3",
+      discoveryRevision: "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      items: thirdPage,
+      nextCursor: null,
+      runId: run.id,
+      userId: ownerId,
+    });
+    const finalized = await finances.finalizeMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    expect(finalized).toMatchObject({
+      candidateId: first.candidateId,
+      prepared: 101,
+      questions: 0,
+    });
+    expect(finalized.fingerprints).toHaveLength(101);
+
+    const driftOwnerId = await createUser("Drift Finance candidate");
+    const driftRun = await workspace.createOrResume(
+      driftOwnerId,
+      "finances",
+      {
+        id: "10000000-0000-4000-8000-000000000001",
+        type: "target",
+        entityType: "finance_transaction",
+      },
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    const drift = await finances.beginMaintenanceCandidatePreparation({
+      runId: driftRun.id,
+      userId: driftOwnerId,
+    });
+    await finances.appendMaintenanceCandidatePage({
+      cursor: null,
+      discoveryRevision: "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      items: firstPage,
+      nextCursor: "page-2",
+      runId: driftRun.id,
+      userId: driftOwnerId,
+    });
+    await expect(
+      finances.appendMaintenanceCandidatePage({
+        cursor: null,
+        discoveryRevision:
+          "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+        items: firstPage,
+        nextCursor: "page-2",
+        runId: driftRun.id,
+        userId: driftOwnerId,
+      }),
+    ).resolves.toMatchObject({ candidateId: drift.candidateId, status: "superseded" });
+    await expect(
+      finances.beginMaintenanceCandidatePreparation({ runId: driftRun.id, userId: driftOwnerId }),
+    ).resolves.toMatchObject({ cursor: null, nextOrdinal: 0 });
+  });
+
   it("prefers the authoritative question-step creation count over reviews created during reconciliation", async () => {
     const ownerId = await createUser("Finance refreshed question count");
     const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });

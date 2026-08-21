@@ -30,7 +30,17 @@ describe("database schema contracts", () => {
     const candidates = getTableConfig(financeMaintenanceCandidates);
     const items = getTableConfig(financeMaintenanceCandidateItems);
     expect(candidates.columns.map((column) => column.name)).toEqual(
-      expect.arrayContaining(["user_id", "run_id", "state", "revision", "projection"]),
+      expect.arrayContaining([
+        "user_id",
+        "run_id",
+        "state",
+        "revision",
+        "projection",
+        "preparation_cursor",
+        "next_ordinal",
+        "discovery_revision",
+        "preparation_checkpoint",
+      ]),
     );
     expect(items.columns.map((column) => column.name)).toEqual(
       expect.arrayContaining([
@@ -68,6 +78,10 @@ describe("database schema contracts", () => {
     expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidate_items"');
     expect(migrationSql).toContain("finance_maintenance_candidates_run_user_fk");
     expect(migrationSql).toContain("workspace_maintenance_runs_id_user_id_unique");
+    expect(migrationSql).toContain('"preparation_cursor" text');
+    expect(migrationSql).toContain('"next_ordinal" integer DEFAULT 0 NOT NULL');
+    expect(migrationSql).toContain('"discovery_revision" text');
+    expect(migrationSql).toContain('"preparation_checkpoint" jsonb');
     expect(migrationSql).toContain("ON DELETE cascade");
   });
 

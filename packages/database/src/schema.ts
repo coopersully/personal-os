@@ -218,6 +218,14 @@ export const financeMaintenanceCandidates = pgTable(
       .default("preparing"),
     revision: text("revision").notNull(),
     projection: jsonb("projection").$type<Record<string, unknown>>().notNull().default({}),
+    /** The next stable proposal cursor, visible only to the preparer. */
+    preparationCursor: text("preparation_cursor"),
+    nextOrdinal: integer("next_ordinal").notNull().default(0),
+    discoveryRevision: text("discovery_revision"),
+    preparationCheckpoint: jsonb("preparation_checkpoint")
+      .$type<Record<string, unknown>>()
+      .notNull()
+      .default({}),
     ...timestamps,
   },
   (table) => [
@@ -225,6 +233,7 @@ export const financeMaintenanceCandidates = pgTable(
       "finance_maintenance_candidates_state_check",
       sql`${table.state} IN ('preparing', 'ready_for_challenge', 'challenged', 'awaiting_approval', 'committing', 'committed', 'superseded')`,
     ),
+    check("finance_maintenance_candidates_next_ordinal_check", sql`${table.nextOrdinal} >= 0`),
     uniqueIndex("finance_maintenance_candidates_active_run_idx")
       .on(table.runId)
       .where(sql`${table.state} <> 'superseded'`),

@@ -88,6 +88,31 @@ export type FinanceMaintenanceOperations = {
     questions: number;
     revision: string;
   }>;
+  beginMaintenanceCandidatePreparation?: (input: { runId: string; userId: string }) => Promise<{
+    candidateId: string;
+    complete: boolean;
+    cursor: string | null;
+    nextOrdinal: number;
+  }>;
+  appendMaintenanceCandidatePage?: (input: {
+    cursor: string | null;
+    discoveryRevision: string;
+    items: FinanceMaintenanceCandidateItemDraft[];
+    nextCursor: string | null;
+    runId: string;
+    userId: string;
+  }) => Promise<{
+    candidateId: string;
+    nextOrdinal: number;
+    status: "appended" | "replayed" | "superseded";
+  }>;
+  finalizeMaintenanceCandidatePreparation?: (input: { runId: string; userId: string }) => Promise<{
+    candidateId: string;
+    fingerprints: string[];
+    prepared: number;
+    questions: number;
+    revision: string;
+  }>;
   repairHeuristicTransfersForUser: (
     userId: string,
     scope: MaintenanceScope,
@@ -506,6 +531,92 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
           continue;
         }
         if (step === "prepare") {
+          if (
+            finances.beginMaintenanceCandidatePreparation &&
+            finances.appendMaintenanceCandidatePage &&
+            finances.finalizeMaintenanceCandidatePreparation
+          ) {
+            const preparation = await finances.beginMaintenanceCandidatePreparation({
+              runId,
+              userId: run.userId,
+            });
+            if (preparation.complete) {
+              const candidate = await finances.finalizeMaintenanceCandidatePreparation({
+                runId,
+                userId: run.userId,
+              });
+              await maintenance.completeStep({
+                claimId,
+                idempotencyKey,
+                result: {
+                  candidateId: candidate.candidateId,
+                  prepared: candidate.prepared,
+                  questions: candidate.questions,
+                  revision: candidate.revision,
+                },
+                runId,
+                step,
+              });
+              continue;
+            }
+            const page = await finances.proposeOutstandingCategorizations(
+              run.userId,
+              run.scope,
+              preparation.cursor ?? undefined,
+              async () => maintenance.renewClaim({ claimId, runId }).then(() => undefined),
+            );
+            const items = preparedCandidateItems(page);
+            const appended = await finances.appendMaintenanceCandidatePage({
+              cursor: preparation.cursor,
+              discoveryRevision: candidateFingerprint(
+                page.items.map((item) => [
+                  item.source,
+                  item.transaction.id,
+                  item.transaction.updatedAt,
+                ]),
+              ),
+              items,
+              nextCursor: page.nextCursor,
+              runId,
+              userId: run.userId,
+            });
+            if (appended.status === "superseded") {
+              return maintenance.checkpointAndRelease({
+                checkpoint: { phase: "prepare", restarted: true },
+                claimId,
+                runId,
+              });
+            }
+            if (page.nextCursor) {
+              return maintenance.checkpointAndRelease({
+                checkpoint: {
+                  candidateId: appended.candidateId,
+                  cursor: page.nextCursor,
+                  nextOrdinal: appended.nextOrdinal,
+                  phase: "prepare",
+                },
+                claimId,
+                runId,
+              });
+            }
+            const candidate = await finances.finalizeMaintenanceCandidatePreparation({
+              runId,
+              userId: run.userId,
+            });
+            await maintenance.completeStep({
+              claimId,
+              idempotencyKey,
+              result: {
+                candidateId: candidate.candidateId,
+                prepared: candidate.prepared,
+                questions: candidate.questions,
+                revision: candidate.revision,
+              },
+              runId,
+              step,
+            });
+            continue;
+          }
           let cursor: string | undefined;
           let pageCount = 0;
           const candidateItems: FinanceMaintenanceCandidateItemDraft[] = [];

@@ -361,6 +361,28 @@ function decodeCandidateItemCursor(cursor: string): number {
 function encodeCandidateItemCursor(ordinal: number) {
   return Buffer.from(JSON.stringify({ ordinal })).toString("base64url");
 }
+
+function financeCandidateRevision(
+  items: Array<{
+    actionKind: string;
+    disposition: string;
+    expectedRevision: string | null;
+    fingerprint: string;
+  }>,
+) {
+  return `sha256:${createHash("sha256")
+    .update(
+      JSON.stringify(
+        items.map((item) => [
+          item.actionKind,
+          item.disposition,
+          item.expectedRevision,
+          item.fingerprint,
+        ]),
+      ),
+    )
+    .digest("hex")}`;
+}
 function categorization(merchant: string, learnedCategory?: string) {
   if (isRentMerchant(merchant)) {
     return { category: rentCategory, confidence: 10_000, needsReview: false };
@@ -4734,6 +4756,258 @@ export function createFinanceService({
         };
       });
     },
+    async beginMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
+      return db.transaction(async (tx) => {
+        const [run] = await tx
+          .select({ id: workspaceMaintenanceRuns.id })
+          .from(workspaceMaintenanceRuns)
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.id, input.runId),
+              eq(workspaceMaintenanceRuns.userId, input.userId),
+              eq(workspaceMaintenanceRuns.domain, "finances"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!run) throw new AppError("not_found", "The Finance maintenance run is not available.");
+        const [existing] = await tx
+          .select()
+          .from(financeMaintenanceCandidates)
+          .where(
+            and(
+              eq(financeMaintenanceCandidates.runId, input.runId),
+              eq(financeMaintenanceCandidates.userId, input.userId),
+              sql`${financeMaintenanceCandidates.state} <> 'superseded'`,
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (existing) {
+          if (existing.state !== "preparing") {
+            throw new AppError(
+              "conflict",
+              "The Finance maintenance candidate is no longer preparing.",
+            );
+          }
+          return {
+            candidateId: existing.id,
+            complete:
+              Object.hasOwn(existing.preparationCheckpoint as object, "lastCursor") &&
+              (existing.preparationCheckpoint as { nextCursor?: unknown }).nextCursor === null,
+            cursor: existing.preparationCursor,
+            nextOrdinal: existing.nextOrdinal,
+          };
+        }
+        const [created] = await tx
+          .insert(financeMaintenanceCandidates)
+          .values({
+            discoveryRevision: null,
+            nextOrdinal: 0,
+            preparationCheckpoint: {},
+            preparationCursor: null,
+            projection: {
+              budgetVariance: null,
+              grossCashSpending: 0,
+              personalSpending: 0,
+              questions: 0,
+              reimbursementsOutstanding: 0,
+            },
+            revision: financeCandidateRevision([]),
+            runId: input.runId,
+            state: "preparing",
+            userId: input.userId,
+          })
+          .returning();
+        if (!created) throw new Error("The Finance maintenance candidate could not be created.");
+        return { candidateId: created.id, complete: false, cursor: null, nextOrdinal: 0 };
+      });
+    },
+    async appendMaintenanceCandidatePage(input: {
+      cursor: string | null;
+      discoveryRevision: string;
+      items: FinanceMaintenanceCandidateItemDraft[];
+      nextCursor: string | null;
+      runId: string;
+      userId: string;
+    }) {
+      const items = input.items.map((item) =>
+        financeMaintenanceCandidateItemDraftSchema.parse(item),
+      );
+      return db.transaction(async (tx) => {
+        const [run] = await tx
+          .select({ id: workspaceMaintenanceRuns.id })
+          .from(workspaceMaintenanceRuns)
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.id, input.runId),
+              eq(workspaceMaintenanceRuns.userId, input.userId),
+              eq(workspaceMaintenanceRuns.domain, "finances"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!run) throw new AppError("not_found", "The Finance maintenance run is not available.");
+        const [candidate] = await tx
+          .select()
+          .from(financeMaintenanceCandidates)
+          .where(
+            and(
+              eq(financeMaintenanceCandidates.runId, input.runId),
+              eq(financeMaintenanceCandidates.userId, input.userId),
+              eq(financeMaintenanceCandidates.state, "preparing"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!candidate)
+          throw new AppError("conflict", "The Finance maintenance candidate is not preparing.");
+        const checkpoint = candidate.preparationCheckpoint as {
+          lastCursor?: string | null;
+          nextCursor?: string | null;
+          pageRevision?: string;
+          startOrdinal?: number;
+        };
+        if (candidate.preparationCursor !== input.cursor) {
+          if (
+            checkpoint.lastCursor === input.cursor &&
+            checkpoint.nextCursor === input.nextCursor &&
+            checkpoint.pageRevision === input.discoveryRevision
+          ) {
+            return {
+              candidateId: candidate.id,
+              nextOrdinal: candidate.nextOrdinal,
+              status: "replayed" as const,
+            };
+          }
+          await tx
+            .update(financeMaintenanceCandidates)
+            .set({ state: "superseded", updatedAt: now() })
+            .where(eq(financeMaintenanceCandidates.id, candidate.id));
+          return {
+            candidateId: candidate.id,
+            nextOrdinal: candidate.nextOrdinal,
+            status: "superseded" as const,
+          };
+        }
+        const startOrdinal = candidate.nextOrdinal;
+        if (items.length) {
+          await tx.insert(financeMaintenanceCandidateItems).values(
+            items.map(({ assumptions, ...item }, offset) => ({
+              ...item,
+              candidateId: candidate.id,
+              ordinal: startOrdinal + offset,
+              privatePayload: { ...item.privatePayload, assumptions },
+            })),
+          );
+        }
+        const nextOrdinal = startOrdinal + items.length;
+        await tx
+          .update(financeMaintenanceCandidates)
+          .set({
+            discoveryRevision: `sha256:${createHash("sha256")
+              .update(`${candidate.discoveryRevision ?? ""}:${input.discoveryRevision}`)
+              .digest("hex")}`,
+            nextOrdinal,
+            preparationCheckpoint: {
+              lastCursor: input.cursor,
+              nextCursor: input.nextCursor,
+              pageRevision: input.discoveryRevision,
+              startOrdinal,
+            },
+            preparationCursor: input.nextCursor,
+            updatedAt: now(),
+          })
+          .where(eq(financeMaintenanceCandidates.id, candidate.id));
+        return { candidateId: candidate.id, nextOrdinal, status: "appended" as const };
+      });
+    },
+    async finalizeMaintenanceCandidatePreparation(input: { runId: string; userId: string }) {
+      return db.transaction(async (tx) => {
+        const [run] = await tx
+          .select({ id: workspaceMaintenanceRuns.id })
+          .from(workspaceMaintenanceRuns)
+          .where(
+            and(
+              eq(workspaceMaintenanceRuns.id, input.runId),
+              eq(workspaceMaintenanceRuns.userId, input.userId),
+              eq(workspaceMaintenanceRuns.domain, "finances"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!run) throw new AppError("not_found", "The Finance maintenance run is not available.");
+        const [candidate] = await tx
+          .select()
+          .from(financeMaintenanceCandidates)
+          .where(
+            and(
+              eq(financeMaintenanceCandidates.runId, input.runId),
+              eq(financeMaintenanceCandidates.userId, input.userId),
+              eq(financeMaintenanceCandidates.state, "preparing"),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!candidate)
+          throw new AppError("conflict", "The Finance maintenance candidate is not preparing.");
+        if (candidate.preparationCursor !== null)
+          throw new AppError(
+            "conflict",
+            "The Finance maintenance candidate still has another page.",
+          );
+        const items = await tx
+          .select({
+            actionKind: financeMaintenanceCandidateItems.actionKind,
+            disposition: financeMaintenanceCandidateItems.disposition,
+            expectedRevision: financeMaintenanceCandidateItems.expectedRevision,
+            fingerprint: financeMaintenanceCandidateItems.fingerprint,
+          })
+          .from(financeMaintenanceCandidateItems)
+          .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
+          .orderBy(asc(financeMaintenanceCandidateItems.ordinal))
+          .for("update");
+        if (items.length !== candidate.nextOrdinal)
+          throw new AppError("conflict", "The Finance maintenance candidate page ordinal changed.");
+        const expenses = await tx
+          .select({ amount: financeTransactions.amount })
+          .from(financeTransactions)
+          .where(
+            and(
+              eq(financeTransactions.userId, input.userId),
+              eq(financeTransactions.direction, "expense"),
+              eq(financeTransactions.pending, false),
+            ),
+          );
+        const grossCashSpending = expenses.reduce((sum, row) => sum + row.amount / 100, 0);
+        const revision = financeCandidateRevision(items);
+        const [ready] = await tx
+          .update(financeMaintenanceCandidates)
+          .set({
+            preparationCheckpoint: { finalized: true, nextOrdinal: candidate.nextOrdinal },
+            projection: {
+              budgetVariance: null,
+              grossCashSpending,
+              personalSpending: grossCashSpending,
+              questions: items.filter((item) => item.disposition === "question").length,
+              reimbursementsOutstanding: 0,
+            },
+            revision,
+            state: "ready_for_challenge",
+            updatedAt: now(),
+          })
+          .where(eq(financeMaintenanceCandidates.id, candidate.id))
+          .returning();
+        if (!ready) throw new Error("The Finance maintenance candidate could not be finalized.");
+        return {
+          candidateId: ready.id,
+          fingerprints: items.map((item) => item.fingerprint),
+          prepared: items.filter((item) => item.disposition === "prepared").length,
+          questions: items.filter((item) => item.disposition === "question").length,
+          revision: ready.revision,
+        };
+      });
+    },
     async prepareMaintenanceCandidate(input: {
       items: FinanceMaintenanceCandidateItemDraft[];
       runId: string;
@@ -4861,7 +5135,7 @@ export function createFinanceService({
         };
       });
     },
-    async getMaintenanceCandidate(userId: string, candidateId: string) {
+    async getMaintenanceCandidate(userId: string, candidateId: string, includePreparing = false) {
       const [candidate] = await db
         .select()
         .from(financeMaintenanceCandidates)
@@ -4869,6 +5143,9 @@ export function createFinanceService({
           and(
             eq(financeMaintenanceCandidates.id, candidateId),
             eq(financeMaintenanceCandidates.userId, userId),
+            includePreparing
+              ? undefined
+              : sql`${financeMaintenanceCandidates.state} <> 'preparing'`,
           ),
         )
         .limit(1);
@@ -4881,6 +5158,7 @@ export function createFinanceService({
       candidateId: string,
       cursor?: string,
       limit = 50,
+      includePreparing = false,
     ) {
       const [candidate] = await db
         .select({ id: financeMaintenanceCandidates.id })
@@ -4889,6 +5167,9 @@ export function createFinanceService({
           and(
             eq(financeMaintenanceCandidates.id, candidateId),
             eq(financeMaintenanceCandidates.userId, userId),
+            includePreparing
+              ? undefined
+              : sql`${financeMaintenanceCandidates.state} <> 'preparing'`,
           ),
         )
         .limit(1);

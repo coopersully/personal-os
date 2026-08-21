@@ -5,9 +5,14 @@ CREATE TABLE "finance_maintenance_candidates" (
 	"state" text DEFAULT 'preparing' NOT NULL,
 	"revision" text NOT NULL,
 	"projection" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"preparation_cursor" text,
+	"next_ordinal" integer DEFAULT 0 NOT NULL,
+	"discovery_revision" text,
+	"preparation_checkpoint" jsonb DEFAULT '{}'::jsonb NOT NULL,
 	"created_at" timestamptz DEFAULT now() NOT NULL,
 	"updated_at" timestamptz DEFAULT now() NOT NULL,
-	CONSTRAINT "finance_maintenance_candidates_state_check" CHECK ("state" IN ('preparing', 'ready_for_challenge', 'challenged', 'awaiting_approval', 'committing', 'committed', 'superseded'))
+	CONSTRAINT "finance_maintenance_candidates_state_check" CHECK ("state" IN ('preparing', 'ready_for_challenge', 'challenged', 'awaiting_approval', 'committing', 'committed', 'superseded')),
+	CONSTRAINT "finance_maintenance_candidates_next_ordinal_check" CHECK ("next_ordinal" >= 0)
 );
 --> statement-breakpoint
 ALTER TABLE "finance_maintenance_candidates" ADD CONSTRAINT "finance_maintenance_candidates_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;

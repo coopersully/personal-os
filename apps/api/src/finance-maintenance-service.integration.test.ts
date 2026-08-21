@@ -3,12 +3,16 @@ import {
   auditEvents,
   createDatabaseClient,
   type DatabaseClient,
+  financeAccounts,
   financeAlerts,
   financeBudgetPlans,
+  financeCategories,
   financeCategoryRules,
+  financeIncomeStreams,
   financeMaintenanceCandidateItems,
   financeMaintenanceCandidates,
   financeProfiles,
+  financeRecurringObligations,
   financeReimbursements,
   financeReviewCases,
   financeTransactionAllocations,
@@ -20,6 +24,7 @@ import {
 } from "@personal-os/database";
 import type {
   FinanceCategorizationProposal,
+  FinanceMaintenanceCandidateItemDraft,
   FinanceStatus,
   MaintenanceScope,
 } from "@personal-os/domain";
@@ -670,6 +675,526 @@ describe.sequential("Finance maintenance service", () => {
     await expect(
       finances.beginMaintenanceCandidatePreparation({ runId: driftRun.id, userId: driftOwnerId }),
     ).resolves.toMatchObject({ cursor: null, nextOrdinal: 0 });
+  });
+
+  it("projects prepared candidate financial overlays without mutating canonical Finance records", async () => {
+    const ownerId = await createUser("Projected Finance candidate");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        balance: 0,
+        institution: "Projection Bank",
+        kind: "cash",
+        name: "Projection checking",
+        provider: "manual",
+        status: "manual",
+        userId: ownerId,
+      })
+      .returning();
+    const [groceries, travel] = await database.db
+      .insert(financeCategories)
+      .values([
+        {
+          group: "Spending",
+          isSystem: false,
+          name: "Groceries",
+          slug: `groceries-${ownerId}`,
+          userId: ownerId,
+        },
+        {
+          group: "Spending",
+          isSystem: false,
+          name: "Travel",
+          slug: `travel-${ownerId}`,
+          userId: ownerId,
+        },
+      ])
+      .returning();
+    if (!account || !groceries || !travel) throw new Error("Projection fixtures were not created.");
+    const [expense, outsideWindow] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 31_000,
+          category: "Groceries",
+          categoryId: groceries.id,
+          direction: "expense",
+          merchant: "Shared dinner",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-08-14",
+          userId: ownerId,
+        },
+        {
+          accountId: account.id,
+          amount: 9_999,
+          category: "Groceries",
+          categoryId: groceries.id,
+          direction: "expense",
+          merchant: "Outside window",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-09-01",
+          userId: ownerId,
+        },
+      ])
+      .returning();
+    if (!expense || !outsideWindow) throw new Error("Projection transactions were not created.");
+    const [personalAllocation, reimbursableAllocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values([
+        {
+          allocationOrder: 0,
+          amount: 9_000,
+          categoryId: groceries.id,
+          rationale: "Personal share.",
+          transactionId: expense.id,
+          treatment: "personal",
+          userId: ownerId,
+        },
+        {
+          allocationOrder: 1,
+          amount: 22_000,
+          categoryId: travel.id,
+          rationale: "Companion share.",
+          transactionId: expense.id,
+          treatment: "reimbursable",
+          userId: ownerId,
+        },
+      ])
+      .returning();
+    if (!personalAllocation || !reimbursableAllocation)
+      throw new Error("Projection allocations were not created.");
+    const [incomeStream] = await database.db
+      .insert(financeIncomeStreams)
+      .values({
+        accountId: account.id,
+        amountTolerance: 0,
+        cadence: "monthly",
+        confidence: 10_000,
+        displayName: "Contract income",
+        expectedAmount: 120_000,
+        payer: "Client",
+        source: "user",
+        status: "paused",
+        userId: ownerId,
+      })
+      .returning();
+    const [recurring] = await database.db
+      .insert(financeRecurringObligations)
+      .values({
+        accountId: account.id,
+        amountTolerance: 0,
+        cadence: "monthly",
+        confidence: 10_000,
+        displayName: "Rent",
+        expectedAmount: 100_000,
+        kind: "bill",
+        merchant: "Landlord",
+        source: "user",
+        status: "paused",
+        userId: ownerId,
+      })
+      .returning();
+    if (!incomeStream || !recurring)
+      throw new Error("Projection cashflow fixtures were not created.");
+    const [profile] = await database.db
+      .insert(financeProfiles)
+      .values({
+        effectiveDate: "2026-08-01",
+        expectedNetPay: 400_000,
+        payFrequency: "monthly",
+        userId: ownerId,
+      })
+      .returning();
+    if (!profile) throw new Error("Projection profile was not created.");
+    const run = await workspace.createOrResume(
+      ownerId,
+      "finances",
+      { type: "window", start: "2026-08-01", end: "2026-08-31" },
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    const fingerprint = (ordinal: number) => `sha256:${ordinal.toString(16).padStart(64, "0")}`;
+    const draft = (
+      ordinal: number,
+      actionKind: FinanceMaintenanceCandidateItemDraft["actionKind"],
+      input: Record<string, unknown>,
+      safeChanges: Array<{ entityId: string | null; entityType: string; summary: string }> = [],
+    ) =>
+      ({
+        actionKind,
+        assumptions: [],
+        disposition: "prepared",
+        evidence: { confidence: 1, rationale: "Projection fixture evidence." },
+        expectedRevision: now.toISOString(),
+        fingerprint: fingerprint(ordinal),
+        privatePayload: { actionKind, input },
+        safeChanges,
+        sourceRefs: [],
+      }) as unknown as FinanceMaintenanceCandidateItemDraft;
+    const items = [
+      draft(
+        1,
+        "transaction_breakdown",
+        {
+          allocations: [
+            {
+              amount: 90,
+              categoryId: groceries.id,
+              rationale: "Personal share.",
+              treatment: "personal",
+            },
+            {
+              amount: 220,
+              categoryId: travel.id,
+              rationale: "Companion share.",
+              treatment: "reimbursable",
+            },
+          ],
+          expectedTransactionUpdatedAt: expense.updatedAt.toISOString(),
+          futureRule: null,
+          id: expense.id,
+          rationale: "Split the shared dinner.",
+        },
+        [
+          {
+            entityId: expense.id,
+            entityType: "finance_transaction",
+            summary: "Split shared dinner.",
+          },
+        ],
+      ),
+      draft(2, "reimbursement", {
+        allocationId: reimbursableAllocation.id,
+        dueDate: null,
+        evidence: {
+          sourceRefs: [
+            {
+              accountId: account.id,
+              provider: "local",
+              remoteId: expense.id,
+              revision: expense.updatedAt.toISOString(),
+              sourceType: "finance_transaction",
+            },
+          ],
+          summary: "Companion confirmed the share.",
+        },
+        expectedAmount: 220,
+        operation: "create",
+        payer: "Companion",
+        rationale: "Track the companion reimbursement.",
+      }),
+      draft(3, "budget_plan", {
+        acknowledgeOverAllocation: false,
+        allocations: [{ categoryId: groceries.id, limit: 150 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-08",
+        rationale: "August grocery budget.",
+        replace: true,
+        scenarioFingerprint: null,
+      }),
+      draft(4, "transaction", {
+        accountId: account.id,
+        amount: 77,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-08-20",
+        direction: "income",
+        merchant: "Manual credit",
+        notes: null,
+      }),
+      draft(
+        5,
+        "transaction",
+        {
+          category: "Travel",
+          id: expense.id,
+          rationale: "Correct the transaction category.",
+        },
+        [{ entityId: expense.id, entityType: "finance_transaction", summary: "Correct category." }],
+      ),
+      draft(6, "profile", {
+        effectiveDate: "2026-08-01",
+        expectedNetPay: 5000,
+        payFrequency: "monthly",
+      }),
+      draft(7, "income_stream", { id: incomeStream.id, status: "active" }, [
+        {
+          entityId: incomeStream.id,
+          entityType: "finance_income_stream",
+          summary: "Resume income.",
+        },
+      ]),
+      draft(8, "recurring_obligation", { id: recurring.id, status: "active" }, [
+        {
+          entityId: recurring.id,
+          entityType: "finance_recurring_obligation",
+          summary: "Resume rent.",
+        },
+      ]),
+      draft(9, "merchant", { displayName: "Shared dinner", id: crypto.randomUUID() }),
+      draft(10, "alert", { action: "resolve", id: crypto.randomUUID(), rationale: null }),
+    ];
+    const before = await database.db
+      .select({ amount: financeTransactions.amount, category: financeTransactions.category })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, expense.id));
+    const prepared = await finances.beginMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    await expect(
+      finances.appendMaintenanceCandidatePage({
+        cursor: prepared.cursor,
+        discoveryRevision:
+          "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        items,
+        nextCursor: null,
+        runId: run.id,
+        userId: ownerId,
+      }),
+    ).resolves.toMatchObject({ status: "appended" });
+    const finalized = await finances.finalizeMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    const candidate = await finances.getMaintenanceCandidate(ownerId, finalized.candidateId);
+    expect(candidate.projection).toMatchObject({
+      budgetActual: 90,
+      budgetTotal: 150,
+      budgetVariance: -60,
+      grossCashSpending: 310,
+      monthlyCapacity: 4000,
+      plannedIncome: 1200,
+      profileExpectedNetIncome: 5000,
+      personalSpending: 90,
+      recurringCommittedOutflow: 1000,
+      reimbursementsOutstanding: 220,
+      workItems: 2,
+    });
+    await expect(
+      database.db
+        .select({ amount: financeTransactions.amount, category: financeTransactions.category })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, expense.id)),
+    ).resolves.toEqual(before);
+    await expect(
+      database.db
+        .select({ status: financeIncomeStreams.status })
+        .from(financeIncomeStreams)
+        .where(eq(financeIncomeStreams.id, incomeStream.id)),
+    ).resolves.toEqual([{ status: "paused" }]);
+    await expect(
+      database.db
+        .select({ status: financeRecurringObligations.status })
+        .from(financeRecurringObligations)
+        .where(eq(financeRecurringObligations.id, recurring.id)),
+    ).resolves.toEqual([{ status: "paused" }]);
+    await database.db
+      .update(financeProfiles)
+      .set({ expectedNetPay: 410_000, updatedAt: new Date(now.getTime() + 1) })
+      .where(eq(financeProfiles.id, profile.id));
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ state: "superseded" })
+      .where(eq(financeMaintenanceCandidates.id, finalized.candidateId));
+    const retry = await finances.beginMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    await finances.appendMaintenanceCandidatePage({
+      cursor: retry.cursor,
+      discoveryRevision: "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      items,
+      nextCursor: null,
+      runId: run.id,
+      userId: ownerId,
+    });
+    const afterSourceDrift = await finances.finalizeMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    expect(afterSourceDrift.revision).not.toBe(finalized.revision);
+  });
+
+  it("projects a partial reimbursement match and preserves invalidated allocations as pending input", async () => {
+    const ownerId = await createUser("Partial projection candidate");
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        balance: 0,
+        institution: "Projection Bank",
+        kind: "cash",
+        name: "Projection checking",
+        provider: "manual",
+        status: "manual",
+        userId: ownerId,
+      })
+      .returning();
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        isSystem: false,
+        name: "Travel",
+        slug: `partial-travel-${ownerId}`,
+        userId: ownerId,
+      })
+      .returning();
+    if (!account || !category) throw new Error("Partial projection fixtures were not created.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 31_000,
+        category: "Travel",
+        categoryId: category.id,
+        direction: "expense",
+        merchant: "Shared stay",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-14",
+        userId: ownerId,
+      })
+      .returning();
+    if (!expense) throw new Error("Partial projection transaction was not created.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 31_000,
+        categoryId: category.id,
+        rationale: "Awaiting receipt.",
+        state: "invalidated",
+        invalidatedAt: now,
+        transactionId: expense.id,
+        treatment: "reimbursable",
+        userId: ownerId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Partial projection allocation was not created.");
+    const [reimbursement] = await database.db
+      .insert(financeReimbursements)
+      .values({
+        allocationId: allocation.id,
+        evidence: {},
+        expectedAmount: 22000,
+        payer: "Companion",
+        rationale: "Original reimbursement.",
+        status: "expected",
+        userId: ownerId,
+      })
+      .returning();
+    if (!reimbursement) throw new Error("Partial projection reimbursement was not created.");
+    const [credit] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: account.id,
+        amount: 5_000,
+        category: null,
+        direction: "income",
+        merchant: "Companion",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-15",
+        userId: ownerId,
+      })
+      .returning();
+    if (!credit) throw new Error("Partial projection credit was not created.");
+    const run = await workspace.createOrResume(
+      ownerId,
+      "finances",
+      { type: "window", start: "2026-08-01", end: "2026-08-31" },
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    const item = {
+      actionKind: "reimbursement" as const,
+      assumptions: [],
+      disposition: "prepared" as const,
+      evidence: { confidence: 1, rationale: "Credit amount is exact." },
+      expectedRevision: now.toISOString(),
+      fingerprint: "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      privatePayload: {
+        actionKind: "reimbursement" as const,
+        input: {
+          amount: 50,
+          creditTransactionId: credit.id,
+          evidence: {
+            sourceRefs: [
+              {
+                accountId: account.id,
+                provider: "local" as const,
+                remoteId: credit.id,
+                revision: credit.updatedAt.toISOString(),
+                sourceType: "finance_transaction" as const,
+              },
+            ],
+            summary: "Companion payment.",
+          },
+          expectedRevision: reimbursement.revision,
+          operation: "match_credit" as const,
+          rationale: "Apply the partial reimbursement.",
+          reimbursementId: reimbursement.id,
+        },
+      },
+      safeChanges: [],
+      sourceRefs: [],
+    } satisfies FinanceMaintenanceCandidateItemDraft;
+    const question = {
+      actionKind: "question" as const,
+      assumptions: [],
+      disposition: "question" as const,
+      evidence: { confidence: 1, rationale: "The invalidated allocation requires confirmation." },
+      expectedRevision: now.toISOString(),
+      fingerprint: "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      privatePayload: {
+        asOf: now.toISOString(),
+        choices: [],
+        expectedAnswer: [],
+        prompt: "Confirm how the invalidated travel allocation should be handled.",
+        transactionId: expense.id,
+        underlyingAction: "reimbursement" as const,
+        why: "The provider amount changed after the allocation was prepared.",
+      },
+      safeChanges: [],
+      sourceRefs: [],
+    } satisfies FinanceMaintenanceCandidateItemDraft;
+    const prepared = await finances.beginMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    await finances.appendMaintenanceCandidatePage({
+      cursor: prepared.cursor,
+      discoveryRevision: "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      items: [item, question],
+      nextCursor: null,
+      runId: run.id,
+      userId: ownerId,
+    });
+    const finalized = await finances.finalizeMaintenanceCandidatePreparation({
+      runId: run.id,
+      userId: ownerId,
+    });
+    const candidate = await finances.getMaintenanceCandidate(ownerId, finalized.candidateId);
+    expect(candidate.projection).toMatchObject({
+      grossCashSpending: 310,
+      matchedReimbursementIncome: 50,
+      personalSpending: 0,
+      questions: 1,
+      reimbursementsOutstanding: 170,
+    });
+    await expect(
+      database.db
+        .select({ receivedAmount: financeReimbursements.receivedAmount })
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.id, reimbursement.id)),
+    ).resolves.toEqual([{ receivedAmount: 0 }]);
   });
 
   it("prefers the authoritative question-step creation count over reviews created during reconciliation", async () => {

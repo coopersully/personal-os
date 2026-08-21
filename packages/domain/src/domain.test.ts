@@ -452,7 +452,13 @@ describe("finance maintenance candidates", () => {
     ).toEqual({ input: { decisions: [] } });
     expect(financeCandidateLedgerProjectionSchema.parse(candidate.projection)).toMatchObject({
       grossCashSpending: 42.5,
+      matchedReimbursementIncome: 0,
+      monthlyCapacity: null,
+      plannedIncome: 0,
+      profileExpectedNetIncome: null,
       questions: 1,
+      recurringCommittedOutflow: 0,
+      workItems: 0,
     });
   });
 });

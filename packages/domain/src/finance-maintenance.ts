@@ -3,6 +3,7 @@ import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
 import {
   applyFinanceCategorizationsInputSchema,
+  createFinanceTransactionInputSchema,
   financeAccountSchema,
   financeActionKindSchema,
   financeFactEvidenceSchema,
@@ -229,6 +230,24 @@ const financeCandidateEvidenceSchema = z
   })
   .strict();
 
+// Candidate payloads retain the entity identifier used by the action executor.
+// Public mutation schemas omit it because a route supplies it separately.
+const candidateTransactionBreakdownInputSchema = setFinanceTransactionBreakdownInputSchema.extend({
+  id: idSchema,
+});
+const candidateMerchantInputSchema = updateFinanceMerchantInputSchema.extend({ id: idSchema });
+const candidateAlertInputSchema = resolveFinanceAlertInputSchema.extend({ id: idSchema });
+const candidateIncomeStreamInputSchema = updateFinanceIncomeStreamInputSchema.extend({
+  id: idSchema,
+});
+const candidateRecurringObligationInputSchema = updateFinanceRecurringObligationInputSchema.extend({
+  id: idSchema,
+});
+const candidateTransactionInputSchema = z.union([
+  createFinanceTransactionInputSchema,
+  updateFinanceTransactionInputSchema.extend({ id: idSchema }),
+]);
+
 const financeCandidatePreparedPayloadSchema = z.discriminatedUnion("actionKind", [
   z.object({
     actionKind: z.literal("categorization"),
@@ -236,7 +255,7 @@ const financeCandidatePreparedPayloadSchema = z.discriminatedUnion("actionKind",
   }),
   z.object({
     actionKind: z.literal("transaction_breakdown"),
-    input: setFinanceTransactionBreakdownInputSchema,
+    input: candidateTransactionBreakdownInputSchema,
   }),
   z.object({
     actionKind: z.literal("reimbursement"),
@@ -244,14 +263,14 @@ const financeCandidatePreparedPayloadSchema = z.discriminatedUnion("actionKind",
   }),
   z.object({
     actionKind: z.literal("recurring_obligation"),
-    input: updateFinanceRecurringObligationInputSchema,
+    input: candidateRecurringObligationInputSchema,
   }),
-  z.object({ actionKind: z.literal("merchant"), input: updateFinanceMerchantInputSchema }),
-  z.object({ actionKind: z.literal("alert"), input: resolveFinanceAlertInputSchema }),
+  z.object({ actionKind: z.literal("merchant"), input: candidateMerchantInputSchema }),
+  z.object({ actionKind: z.literal("alert"), input: candidateAlertInputSchema }),
   z.object({ actionKind: z.literal("profile"), input: updateFinanceProfileInputSchema }),
   z.object({ actionKind: z.literal("budget_plan"), input: setFinanceBudgetPlanInputSchema }),
-  z.object({ actionKind: z.literal("transaction"), input: updateFinanceTransactionInputSchema }),
-  z.object({ actionKind: z.literal("income_stream"), input: updateFinanceIncomeStreamInputSchema }),
+  z.object({ actionKind: z.literal("transaction"), input: candidateTransactionInputSchema }),
+  z.object({ actionKind: z.literal("income_stream"), input: candidateIncomeStreamInputSchema }),
 ]);
 
 const financeCandidateDraftBaseSchema = z.object({
@@ -307,9 +326,15 @@ export const financeCandidateLedgerProjectionSchema = z
     budgetActual: z.number().finite().nonnegative().nullable().default(null),
     budgetTotal: z.number().finite().nonnegative().nullable().default(null),
     grossCashSpending: z.number().finite().nonnegative(),
+    matchedReimbursementIncome: z.number().finite().nonnegative().default(0),
+    monthlyCapacity: z.number().finite().nullable().default(null),
+    plannedIncome: z.number().finite().nonnegative().default(0),
+    profileExpectedNetIncome: z.number().finite().nullable().default(null),
+    recurringCommittedOutflow: z.number().finite().nonnegative().default(0),
     personalSpending: z.number().finite().nonnegative(),
     questions: z.int().nonnegative(),
     reimbursementsOutstanding: z.number().finite().nonnegative(),
+    workItems: z.int().nonnegative().default(0),
   })
   .strict();
 export type FinanceCandidateLedgerProjection = z.infer<

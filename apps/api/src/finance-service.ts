@@ -110,7 +110,7 @@ import {
 } from "./finance-cashflow.js";
 import { parseFinanceCsv } from "./finance-csv.js";
 import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
-import { reliableMonthlyCapacity } from "./finance-planning.js";
+import { monthlyAmount, reliableMonthlyCapacity } from "./finance-planning.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import {
   createFinanceProviderItemSyncService,
@@ -145,6 +145,10 @@ type Options = {
   plaid?: PlaidConnector;
   providerItems?: ReturnType<typeof createFinanceProviderItemService>;
 };
+type CandidatePreparedPayload = Extract<
+  FinanceMaintenanceCandidateItemDraft,
+  { disposition: "prepared" }
+>["privatePayload"];
 type FinanceProfileSourceExecutor = Pick<Database, "select">;
 type FinanceReadExecutor = Pick<Database, "select">;
 type FinanceReviewExecutor = Pick<Database, "insert" | "select" | "update">;
@@ -851,6 +855,20 @@ export function createFinanceService({
       .select()
       .from(financeBudgets)
       .where(and(eq(financeBudgets.userId, userId), eq(financeBudgets.month, month)));
+    const [profile] = await executor
+      .select()
+      .from(financeProfiles)
+      .where(eq(financeProfiles.userId, userId))
+      .orderBy(desc(financeProfiles.effectiveDate), desc(financeProfiles.updatedAt))
+      .limit(1);
+    const incomeStreams = await executor
+      .select()
+      .from(financeIncomeStreams)
+      .where(eq(financeIncomeStreams.userId, userId));
+    const recurringObligations = await executor
+      .select()
+      .from(financeRecurringObligations)
+      .where(eq(financeRecurringObligations.userId, userId));
     const categoryName = new Map(categories.map((item) => [item.id, item.name]));
     const categoryByTransaction = new Map(
       transactions.map((item) => [
@@ -861,116 +879,232 @@ export function createFinanceService({
     let projectedAllocations = allocations.map((item) => ({ ...item }));
     let projectedReimbursements = reimbursementRows.map((item) => ({ ...item }));
     let projectedBudgetLimits = new Map(budgets.map((item) => [item.category, item.limit]));
+    let projectedProfile = profile ? { ...profile } : null;
+    const projectedIncomeStreams = incomeStreams.map((item) => ({ ...item }));
+    const projectedRecurringObligations = recurringObligations.map((item) => ({ ...item }));
+    let matchedReimbursementIncome = 0;
+    let workItems = 0;
+    const projectedTransactions = transactions.map((item) => ({
+      amount: item.amount,
+      category: item.category,
+      categoryId: item.categoryId,
+      direction: item.direction,
+      id: item.id,
+      pending: item.pending,
+      transactionDate: item.transactionDate,
+    }));
     const inScope = new Set(transactionIds);
+    const inScopeDate = (date: string) =>
+      scope.type !== "window" || (date >= scope.start && date <= scope.end);
     for (const item of items
       .filter((item) => item.disposition === "prepared")
       .toSorted((a, b) => a.ordinal - b.ordinal)) {
-      const payload = item.privatePayload as {
-        actionKind?: string;
-        input?: Record<string, unknown>;
-      };
-      const input = payload.input;
-      if (!input) continue;
-      if (payload.actionKind === "categorization") {
-        const decisions = input.decisions as
-          | Array<{ categoryId: string; transactionId: string }>
-          | undefined;
-        for (const decision of decisions ?? []) {
-          if (inScope.has(decision.transactionId))
-            categoryByTransaction.set(
-              decision.transactionId,
-              categoryName.get(decision.categoryId) ?? null,
+      const payload = item.privatePayload as CandidatePreparedPayload;
+      // The action discriminator is exhaustive below. Inputs have already
+      // passed the strict candidate draft union before persistence.
+      switch (payload.actionKind) {
+        case "categorization": {
+          const input = payload.input;
+          const decisions = input.decisions as
+            | Array<{ categoryId: string; transactionId: string }>
+            | undefined;
+          for (const decision of decisions ?? []) {
+            if (inScope.has(decision.transactionId))
+              categoryByTransaction.set(
+                decision.transactionId,
+                categoryName.get(decision.categoryId) ?? null,
+              );
+          }
+          break;
+        }
+        case "transaction_breakdown": {
+          const input = payload.input;
+          const transactionId = item.safeChanges.find(
+            (change) => change.entityType === "finance_transaction",
+          )?.entityId as string | undefined;
+          const split = input.allocations as
+            | Array<{ amount: number; categoryId: string; treatment: "personal" | "reimbursable" }>
+            | undefined;
+          if (transactionId && inScope.has(transactionId) && split) {
+            const previous = projectedAllocations.filter(
+              (allocation) => allocation.transactionId === transactionId,
             );
+            projectedAllocations = projectedAllocations.filter(
+              (allocation) => allocation.transactionId !== transactionId,
+            );
+            projectedAllocations.push(
+              ...split.map((allocation, index) => {
+                const amount = toCents(allocation.amount);
+                const retained = previous.find(
+                  (current) =>
+                    current.amount === amount &&
+                    current.treatment === allocation.treatment &&
+                    current.state === "active",
+                );
+                return {
+                  amount,
+                  allocationOrder: index,
+                  categoryId: allocation.categoryId,
+                  id: retained?.id ?? `candidate:${item.ordinal}:${index}`,
+                  invalidatedAt: null,
+                  rationale: "Candidate overlay",
+                  revision: 1,
+                  state: "active" as const,
+                  transactionId,
+                  treatment: allocation.treatment,
+                  userId,
+                  createdAt: now(),
+                  updatedAt: now(),
+                };
+              }),
+            );
+          }
+          break;
         }
-      } else if (payload.actionKind === "transaction_breakdown") {
-        const transactionId = item.safeChanges.find(
-          (change) => change.entityType === "finance_transaction",
-        )?.entityId as string | undefined;
-        const split = input.allocations as
-          | Array<{ amount: number; categoryId: string; treatment: "personal" | "reimbursable" }>
-          | undefined;
-        if (transactionId && inScope.has(transactionId) && split) {
-          projectedAllocations = projectedAllocations.filter(
-            (allocation) => allocation.transactionId !== transactionId,
-          );
-          projectedAllocations.push(
-            ...split.map((allocation, index) => ({
-              amount: toCents(allocation.amount),
-              allocationOrder: index,
-              categoryId: allocation.categoryId,
-              id: `candidate:${item.ordinal}:${index}`,
-              invalidatedAt: null,
-              rationale: "Candidate overlay",
-              revision: 1,
-              state: "active" as const,
-              transactionId,
-              treatment: allocation.treatment,
-              userId,
+        case "reimbursement": {
+          const input = payload.input;
+          if (input.operation === "create") {
+            const allocationId = input.allocationId as string;
+            projectedReimbursements.push({
+              allocationId,
+              cancelledAt: null,
+              cancelledEvidence: null,
+              cancelledRationale: null,
               createdAt: now(),
+              dueDate: (input.dueDate as string | null) ?? null,
+              evidence: input.evidence ?? {},
+              expectedAmount: toCents(input.expectedAmount as number),
+              id: `candidate:${item.ordinal}`,
+              payer: (input.payer as string | null) ?? null,
+              rationale: String(input.rationale ?? "Candidate overlay"),
+              receivedAmount: 0,
+              revision: 1,
+              status: "expected" as const,
               updatedAt: now(),
-            })),
-          );
+              userId,
+            });
+          } else if (input.operation === "cancel") {
+            projectedReimbursements = projectedReimbursements.map((reimbursement) =>
+              reimbursement.id === input.reimbursementId
+                ? { ...reimbursement, status: "cancelled" as const }
+                : reimbursement,
+            );
+          } else if (input.operation === "match_credit") {
+            matchedReimbursementIncome += toCents(input.amount as number);
+            projectedReimbursements = projectedReimbursements.map((reimbursement) =>
+              reimbursement.id === input.reimbursementId
+                ? {
+                    ...reimbursement,
+                    receivedAmount: Math.min(
+                      reimbursement.expectedAmount,
+                      reimbursement.receivedAmount + toCents(input.amount as number),
+                    ),
+                    status:
+                      reimbursement.receivedAmount + toCents(input.amount as number) >=
+                      reimbursement.expectedAmount
+                        ? ("received" as const)
+                        : ("partially_received" as const),
+                  }
+                : reimbursement,
+            );
+          }
+          break;
         }
-      } else if (payload.actionKind === "reimbursement") {
-        if (input.operation === "create") {
-          const allocationId = input.allocationId as string;
-          projectedReimbursements.push({
-            allocationId,
-            cancelledAt: null,
-            cancelledEvidence: null,
-            cancelledRationale: null,
-            createdAt: now(),
-            dueDate: (input.dueDate as string | null) ?? null,
-            evidence: input.evidence ?? {},
-            expectedAmount: toCents(input.expectedAmount as number),
-            id: `candidate:${item.ordinal}`,
-            payer: (input.payer as string | null) ?? null,
-            rationale: String(input.rationale ?? "Candidate overlay"),
-            receivedAmount: 0,
-            revision: 1,
-            status: "expected" as const,
-            updatedAt: now(),
-            userId,
-          });
-        } else if (input.operation === "cancel") {
-          projectedReimbursements = projectedReimbursements.map((reimbursement) =>
-            reimbursement.id === input.reimbursementId
-              ? { ...reimbursement, status: "cancelled" as const }
-              : reimbursement,
-          );
-        } else if (input.operation === "match_credit") {
-          projectedReimbursements = projectedReimbursements.map((reimbursement) =>
-            reimbursement.id === input.reimbursementId
-              ? {
-                  ...reimbursement,
-                  receivedAmount: Math.min(
-                    reimbursement.expectedAmount,
-                    reimbursement.receivedAmount + toCents(input.amount as number),
-                  ),
-                  status:
-                    reimbursement.receivedAmount + toCents(input.amount as number) >=
-                    reimbursement.expectedAmount
-                      ? ("received" as const)
-                      : ("partially_received" as const),
-                }
-              : reimbursement,
-          );
+        case "budget_plan": {
+          const input = payload.input;
+          if (input.month === month) {
+            if (input.replace) projectedBudgetLimits = new Map();
+            for (const allocation of input.allocations ?? []) {
+              const category = categoryName.get(allocation.categoryId);
+              if (category) projectedBudgetLimits.set(category, toCents(allocation.limit));
+            }
+          }
+          break;
         }
-      } else if (payload.actionKind === "budget_plan" && input.month === month) {
-        if (input.replace) projectedBudgetLimits = new Map();
-        for (const allocation of (input.allocations as Array<{
-          categoryId: string;
-          limit: number;
-        }>) ?? []) {
-          const category = categoryName.get(allocation.categoryId);
-          if (category) projectedBudgetLimits.set(category, toCents(allocation.limit));
+        case "transaction": {
+          const input = payload.input;
+          const transactionId = item.safeChanges.find(
+            (change) => change.entityType === "finance_transaction",
+          )?.entityId as string | undefined;
+          if ("accountId" in input) {
+            if (inScopeDate(input.date)) {
+              const id = `candidate:${item.ordinal}`;
+              inScope.add(id);
+              projectedTransactions.push({
+                amount: toCents(input.amount),
+                category: input.category ?? null,
+                categoryId: null,
+                direction: input.direction,
+                id,
+                pending: false,
+                transactionDate: input.date,
+              });
+              categoryByTransaction.set(id, input.category ?? null);
+            }
+          } else if (transactionId && inScope.has(transactionId)) {
+            const transaction = projectedTransactions.find(
+              (current) => current.id === transactionId,
+            );
+            if (transaction) {
+              if (input.category !== undefined) {
+                transaction.category = input.category;
+                transaction.categoryId = null;
+                categoryByTransaction.set(transactionId, input.category);
+              }
+            }
+          }
+          break;
         }
-      } else if (payload.actionKind === "transaction") {
-        const transactionId = item.safeChanges.find(
-          (change) => change.entityType === "finance_transaction",
-        )?.entityId as string | undefined;
-        if (transactionId && inScope.has(transactionId) && input.category !== undefined)
-          categoryByTransaction.set(transactionId, input.category as string | null);
+        case "income_stream": {
+          const input = payload.input;
+          const incomeStreamId = item.safeChanges.find(
+            (change) => change.entityType === "finance_income_stream",
+          )?.entityId;
+          const current = projectedIncomeStreams.find((stream) => stream.id === incomeStreamId);
+          if (current) Object.assign(current, input);
+          break;
+        }
+        case "profile": {
+          const input = payload.input;
+          projectedProfile = {
+            ...(projectedProfile ?? {
+              effectiveDate: input.effectiveDate,
+              expectedNetPay: null,
+              grossAnnualIncome: null,
+              payFrequency: null,
+            }),
+            ...input,
+            expectedNetPay: input.expectedNetPay === null ? null : toCents(input.expectedNetPay),
+            grossAnnualIncome:
+              input.grossAnnualIncome === null ? null : toCents(input.grossAnnualIncome),
+            monthlyHousingCost:
+              input.monthlyHousingCost === undefined
+                ? projectedProfile?.monthlyHousingCost
+                : input.monthlyHousingCost === null
+                  ? null
+                  : toCents(input.monthlyHousingCost),
+          } as typeof projectedProfile;
+          break;
+        }
+        case "recurring_obligation": {
+          const input = payload.input;
+          const recurringObligationId = item.safeChanges.find(
+            (change) => change.entityType === "finance_recurring_obligation",
+          )?.entityId;
+          const current = projectedRecurringObligations.find(
+            (obligation) => obligation.id === recurringObligationId,
+          );
+          if (current) Object.assign(current, input);
+          break;
+        }
+        case "merchant":
+        case "alert":
+          workItems += 1;
+          break;
+        default: {
+          const exhaustive: never = payload;
+          throw new Error(`Unsupported candidate projection action: ${String(exhaustive)}`);
+        }
       }
     }
     const reimbursementExcluded = excludedReimbursementCentsByAllocation(projectedReimbursements);
@@ -982,11 +1116,11 @@ export function createFinanceService({
       current.push(allocation);
       activeDetailed.set(allocation.transactionId, current);
     }
-    const grossCashSpending = transactions
+    const grossCashSpending = projectedTransactions
       .filter((item) => item.direction === "expense" && !item.pending)
       .reduce((sum, item) => sum + item.amount, 0);
     const personalByCategory = new Map<string, number>();
-    const personalSpending = transactions
+    const personalSpending = projectedTransactions
       .filter((item) => item.direction === "expense" && !item.pending)
       .reduce((sum, item) => {
         const personal = personalAllocationCents(
@@ -1021,14 +1155,62 @@ export function createFinanceService({
     const outstanding = projectedReimbursements
       .filter((item) => !["cancelled", "received"].includes(item.status))
       .reduce((sum, item) => sum + Math.max(0, item.expectedAmount - item.receivedAmount), 0);
-    const sourceRevision = financeCandidateRevision(
-      transactions.map((item) => ({
+    const plannedIncome = projectedIncomeStreams
+      .filter((stream) => stream.status === "active")
+      .reduce(
+        (sum, stream) => sum + (monthlyAmount(stream.expectedAmount, stream.cadence) ?? 0),
+        0,
+      );
+    const profileExpectedNetIncome = projectedProfile
+      ? reliableMonthlyCapacity({
+          expectedNetPay: projectedProfile.expectedNetPay,
+          expectedNetPayFrequency: projectedProfile.payFrequency,
+          grossAnnualIncome: projectedProfile.grossAnnualIncome,
+          observedMonthlyIncome: null,
+          recurring: [],
+        })
+      : null;
+    const recurringCommittedOutflow = projectedRecurringObligations
+      .filter((obligation) => obligation.status === "active")
+      .reduce(
+        (sum, obligation) =>
+          sum + (monthlyAmount(obligation.expectedAmount, obligation.cadence) ?? 0),
+        0,
+      );
+    const monthlyCapacity =
+      (profileExpectedNetIncome ?? (plannedIncome > 0 ? plannedIncome : null)) === null
+        ? null
+        : (profileExpectedNetIncome ?? plannedIncome) - recurringCommittedOutflow;
+    const sourceRevision = financeCandidateRevision([
+      ...transactions.map((item) => ({
         actionKind: item.id,
         disposition: item.updatedAt.toISOString(),
         expectedRevision: item.categoryId,
         fingerprint: `${item.amount}:${item.transactionDate}:${item.reconciliationStatus}`,
       })),
-    );
+      ...incomeStreams.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.status,
+        fingerprint: `${item.expectedAmount}:${item.cadence}`,
+      })),
+      ...recurringObligations.map((item) => ({
+        actionKind: item.id,
+        disposition: item.updatedAt.toISOString(),
+        expectedRevision: item.status,
+        fingerprint: `${item.expectedAmount}:${item.cadence}`,
+      })),
+      ...(profile
+        ? [
+            {
+              actionKind: profile.id,
+              disposition: profile.updatedAt.toISOString(),
+              expectedRevision: profile.effectiveDate,
+              fingerprint: `${profile.expectedNetPay}:${profile.payFrequency}:${profile.grossAnnualIncome}`,
+            },
+          ]
+        : []),
+    ]);
     return {
       assumptions: [
         "Prepared candidate items are projected in ordinal order without canonical writes.",
@@ -1038,9 +1220,16 @@ export function createFinanceService({
         budgetTotal: budgetTotal / 100,
         budgetVariance: budgetTotal ? (budgetActual - budgetTotal) / 100 : null,
         grossCashSpending: grossCashSpending / 100,
+        matchedReimbursementIncome: matchedReimbursementIncome / 100,
+        monthlyCapacity: monthlyCapacity === null ? null : monthlyCapacity / 100,
+        plannedIncome: plannedIncome / 100,
+        profileExpectedNetIncome:
+          profileExpectedNetIncome === null ? null : profileExpectedNetIncome / 100,
         personalSpending: personalSpending / 100,
         questions: items.filter((item) => item.disposition === "question").length,
+        recurringCommittedOutflow: recurringCommittedOutflow / 100,
         reimbursementsOutstanding: outstanding / 100,
+        workItems,
       },
       sourceRevision,
     };

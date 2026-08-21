@@ -35,6 +35,10 @@
 - Candidate finalization now reads a repeatable-read scope snapshot and projects prepared categorization, transaction-breakdown, and reimbursement create/cancel actions in ordinal order without updating canonical Finance records.
 - The projection uses allocation/reimbursement helpers for gross cash, personal allocation shares, invalidated allocations, outstanding reimbursements, and scoped budget actual/total/variance. Candidate revisions include scope, source revisions, ordered fingerprints, and projection assumptions.
 - Prepared reimbursement credit matches now reduce outstanding reimbursement amounts in the overlay, while prepared budget plans replace or extend scoped budget limits without changing canonical budget rows. Prepared transaction category updates affect only projected budget classification.
+- The candidate payload union is now exhaustive for every supported action kind and retains internal entity IDs where normal route inputs carry the ID outside the body. This permits safe projection of transaction creates/updates and ID-addressed income, recurring, merchant, and alert work.
+- Projection now separates financially truthful overlays: gross bank expense, personal allocation expense, reimbursement receivable/matched income, budget plan totals, expected income, recurring committed outflow, and monthly capacity. Merchant and alert work contributes only to projected work count.
+- The existing migration-0063 JSONB projection column remains storage-compatible: new projection fields have neutral domain defaults, so no destructive schema rewrite or backfill is needed for already-prepared candidates.
+- Added migrated-Postgres projection coverage for a scoped $310 split ($90 personal/$220 reimbursement), partial credit matching, budget variance, profile/income/recurring capacity, month exclusion, invalidated allocations, retry-safe candidate preparation, source-revision drift, and canonical-record immutability.
 
 ## Batch D settlement foundation
 
@@ -51,7 +55,7 @@
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.
-- The initial projection is conservative: prepared categorization changes do not change cash or personal-spending totals. Reimbursement-aware overlay refinement belongs with the challenge/settlement work.
+- Prepared categorization remains intentionally cash-neutral; it affects only projected budget classification.
 
 ## BLOCKED
 
@@ -62,5 +66,6 @@
 - `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts` — 19 passed.
 - `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts` — 63 passed.
 - `pnpm exec vitest run packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 52 passed.
+- `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 73 passed.
 - API, Domain, and Database typechecks passed.
 - Scoped Biome and `git diff --check` passed.

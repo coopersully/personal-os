@@ -39,6 +39,17 @@ also records currently established Finance invariants. Code, tests, migrations, 
 and the implementation log—not this target statement alone—determine which stewardship
 capabilities are shipped.
 
+The shipped maintenance path prepares a durable candidate before it changes the
+canonical ledger. A connected agent must page through every candidate item and
+submit all checks in the versioned Finance challenge rubric. Findings can keep,
+remove, replace, or turn an item into a bounded question. Candidate revision,
+source revisions, run fences, and challenge coverage are revalidated before
+settlement. Bypass off queues one `maintenance_turn` approval for the challenged
+candidate; bypass on commits the same challenged candidate. Both paths resume
+the same durable run, verify the resulting ledger, and publish one immutable
+period review. A retry resumes the recorded checkpoint rather than reconstructing
+an agent-authored workflow.
+
 ## Decision
 
 The Finance vertical slice owns its data model, API route module, typed client,
@@ -215,6 +226,13 @@ have classified a record as spending. They exclude confirmed internal transfers
 and matched debt payments, while unresolved candidates remain visible for
 review. Planned, spent, and remaining values therefore use the same ledger
 selection rules across overview, budget, export, and MCP surfaces.
+
+Transaction allocations are the canonical personal-spending projection for
+mixed purchases. Their exact cents must sum to the transaction, may separate
+personal and reimbursable treatment, and retain invalidated history as evidence.
+Reimbursement cases are internal ledger records only: expected, partial,
+received, overdue, needs-input, or cancelled. Matching a posted credit changes
+the accounting projection; it never initiates or claims an external payment.
 
 The budget-pace endpoint returns every cell in the selected calendar period and
 an `asOf` day. A `blank` cell deliberately represents future, missing,

@@ -219,6 +219,13 @@ maintenance durably starts, resumes, or verifies one Ilo-owned turn for all outs
 bounded window, or an exact target. No-argument maintenance means all outstanding work. MCP does
 not poll, schedule, or sequence this work: the API owns its durable lifecycle, questions,
 approvals, recovery, and terminal result.
+When status reports `awaiting_agent_challenge`, the agent calls
+`get_finance_ledger_challenge` until its opaque cursor is exhausted, checks all
+twelve versioned rubric areas, and calls `submit_finance_ledger_challenge` with
+complete item coverage and structured findings. The API resumes that same run;
+the agent does not call individual mutation tools to reproduce the candidate.
+After verification, `latestReview` links to the immutable artifact readable with
+`get_finance_period_review`.
 `get_finance_status` requires `finances:read`; `maintain_finances` requires the separately
 consented `finances:maintain` scope. Existing `finances:write` grants remain limited to Finance
 guidance drafts and do not gain maintenance authority. Grant `finances:maintain` through an
@@ -238,6 +245,11 @@ without merchant, amount, title, or summary content. Categorization proposals ca
 derived transaction source reference from a consistent snapshot. Provider-backed CSV accounts
 retain PayPal, Venmo, or Zelle attribution rather than being mislabeled as local.
 Generic attention cannot claim Finance transaction provenance.
+
+Mixed purchases use `set_finance_transaction_breakdown`; allocations must equal
+the transaction's exact cents and explicitly distinguish personal and
+reimbursable treatment. Reimbursement tools track expected money and posted
+credits inside the ledger. They do not request, send, or move money.
 
 Categorization is intentionally proposal-first:
 `propose_finance_categorizations` uses the Finance read scope on both `GET` and

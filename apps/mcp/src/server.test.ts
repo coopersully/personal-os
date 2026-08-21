@@ -344,6 +344,40 @@ function mockApi() {
       scope: { type: "all_outstanding" as const },
       status: "queued" as const,
     })),
+    getFinanceLedgerChallenge: vi.fn(async () => ({
+      challenge: {
+        candidateId: id,
+        candidateRevision: `sha256:${"a".repeat(64)}`,
+        createdAt: now,
+        cutoff: now,
+        id,
+        rubricVersion: "finance-ledger-challenge-v1" as const,
+        runId: id,
+        state: "prepared" as const,
+        submittedAt: null,
+        submittingAgentId: null,
+        updatedAt: now,
+        userId: id,
+      },
+      checks: [],
+      items: [],
+      nextCursor: null,
+    })),
+    submitFinanceLedgerChallenge: vi.fn(async () => ({
+      candidateId: id,
+      candidateRevision: `sha256:${"a".repeat(64)}`,
+      createdAt: now,
+      cutoff: now,
+      id,
+      rubricVersion: "finance-ledger-challenge-v1" as const,
+      runId: id,
+      state: "submitted" as const,
+      submittedAt: now,
+      submittingAgentId: "agent-test",
+      updatedAt: now,
+      userId: id,
+    })),
+    getFinancePeriodReview: vi.fn(async () => ({ id, status: "completed" as const })),
     getFinanceMaintenanceRun: vi.fn(async () => ({
       id,
       scope: { type: "all_outstanding" as const },
@@ -1867,6 +1901,20 @@ describe("ilo MCP server", () => {
       },
       inputSchema: { additionalProperties: false, properties: { scope: expect.any(Object) } },
     });
+    expect(tools.tools.find((tool) => tool.name === "get_finance_ledger_challenge")).toMatchObject({
+      _meta: { "ilo/domain": "finances", "ilo/policy": "read_only", "ilo/stage": "inspect" },
+      annotations: { readOnlyHint: true },
+    });
+    expect(
+      tools.tools.find((tool) => tool.name === "submit_finance_ledger_challenge"),
+    ).toMatchObject({
+      _meta: { "ilo/domain": "finances", "ilo/policy": "approved_rule", "ilo/stage": "commit" },
+      annotations: { readOnlyHint: false },
+    });
+    expect(tools.tools.find((tool) => tool.name === "get_finance_period_review")).toMatchObject({
+      _meta: { "ilo/domain": "finances", "ilo/policy": "read_only", "ilo/stage": "inspect" },
+      annotations: { readOnlyHint: true },
+    });
 
     const maintenance = await client.callTool({ arguments: {}, name: "maintain_finances" });
     expect(api.maintainFinances).toHaveBeenCalledWith({ type: "all_outstanding" });
@@ -1901,6 +1949,11 @@ describe("ilo MCP server", () => {
       id,
       type: "target",
     });
+
+    await client.callTool({ arguments: { challengeId: id }, name: "get_finance_ledger_challenge" });
+    expect(api.getFinanceLedgerChallenge).toHaveBeenCalledWith(id, undefined);
+    await client.callTool({ arguments: { reviewId: id }, name: "get_finance_period_review" });
+    expect(api.getFinancePeriodReview).toHaveBeenCalledWith(id);
 
     const unsupported = await client.callTool({
       arguments: { batch: 5, scope: { type: "all_outstanding" } },

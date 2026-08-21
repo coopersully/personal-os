@@ -2931,12 +2931,14 @@ describe("ilo web app", () => {
     expect(transactionTable).not.toHaveTextContent("TRANSFER_OUT");
     expect(screen.getAllByRole("img", { name: "Merchant entity found" })).toHaveLength(2);
     expect(screen.getByRole("img", { name: "Merchant entity needs review" })).toBeInTheDocument();
-    const transactionRows = within(transactionTable).getAllByRole("row");
-    const firstTransactionRow = transactionRows.at(1);
-    expect(firstTransactionRow).toBeDefined();
-    if (!firstTransactionRow) throw new Error("Expected a transaction row");
-    await browser.click(within(firstTransactionRow).getByRole("button", { name: "Details" }));
+    const cafeRow = screen.getByText("Cafe").closest("tr");
+    expect(cafeRow).not.toBeNull();
+    if (!cafeRow) throw new Error("Expected the categorized Cafe transaction row");
+    await browser.click(within(cafeRow).getByRole("button", { name: "Details" }));
     expect(await screen.findByText("Raw description")).toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Split purchase" }));
+    expect(await screen.findByRole("dialog", { name: "Split Cafe" })).toBeVisible();
+    await browser.click(screen.getByRole("button", { name: "Cancel" }));
     await browser.click(screen.getByRole("button", { name: "Sort by amount" }));
     await waitFor(() =>
       expect(mocks.listFinanceTransactions).toHaveBeenLastCalledWith(

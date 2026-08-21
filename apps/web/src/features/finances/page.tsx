@@ -565,6 +565,7 @@ export function FinancesPage() {
                   isCategorizing={categorize.isPending}
                   isLoading={transactionList.isPending}
                   nextCursor={transactionList.data?.nextCursor ?? null}
+                  onBreakdown={setBreakdownTransaction}
                   onCategorize={openCategorize}
                   onNextPage={nextTransactionPage}
                   onPreviousPage={previousTransactionPage}
@@ -2269,6 +2270,7 @@ function FinanceTransactionsTable({
   isCategorizing,
   isLoading,
   nextCursor,
+  onBreakdown,
   onCategorize,
   onNextPage,
   onPreviousPage,
@@ -2280,6 +2282,7 @@ function FinanceTransactionsTable({
   isCategorizing: boolean;
   isLoading: boolean;
   nextCursor: string | null;
+  onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
   onNextPage: () => void;
   onPreviousPage: () => void;
@@ -2460,6 +2463,7 @@ function FinanceTransactionsTable({
                     >
                       <TransactionDetails
                         isCategorizing={isCategorizing}
+                        onBreakdown={onBreakdown}
                         onCategorize={onCategorize}
                         transaction={row.original}
                       />
@@ -2542,10 +2546,12 @@ function transactionTableColumnClass(columnId: string) {
 
 function TransactionDetails({
   isCategorizing,
+  onBreakdown,
   onCategorize,
   transaction,
 }: {
   isCategorizing: boolean;
+  onBreakdown: (transaction: FinanceTransaction) => void;
   onCategorize: (transaction: FinanceTransaction) => void;
   transaction: FinanceTransaction;
 }) {
@@ -2562,8 +2568,11 @@ function TransactionDetails({
         value={transaction.rawMerchant ?? transaction.merchant}
       />
       {transaction.notes ? <TransactionDetail label="Notes" value={transaction.notes} /> : null}
-      {transaction.needsReview ? (
-        <div className="flex items-end">
+      <div className="flex items-end gap-2">
+        <ShadcnButton onClick={() => onBreakdown(transaction)} size="sm" variant="outline">
+          Split purchase
+        </ShadcnButton>
+        {transaction.needsReview ? (
           <ShadcnButton
             disabled={isCategorizing}
             onClick={() => onCategorize(transaction)}
@@ -2571,8 +2580,8 @@ function TransactionDetails({
           >
             Categorize
           </ShadcnButton>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
     </dl>
   );
 }

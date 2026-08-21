@@ -5,6 +5,7 @@ import {
   domainProfileApprovals,
   domainProfiles,
   financeAccounts,
+  financeAgentActionReviews,
   financeAutomationSettings,
   financeBudgetPlans,
   financeBudgets,
@@ -197,7 +198,7 @@ describe.sequential("Finance status service", () => {
     expect(status.details.month.spending).toBe(400);
     expect(status.details.cashFlow.net).toBe(600);
     expect(status.details.health.confidence).toBe("reliable");
-    expect(status.state).toBe("needs_work");
+    expect(status.state).toBe("clean");
   });
 
   it("restores only a cancelled reimbursement remainder to personal spending without changing gross cash", async () => {
@@ -529,6 +530,28 @@ describe.sequential("Finance status service", () => {
       expect.objectContaining({ goal: expect.objectContaining({ id: firstGoal.id }), priority: 2 }),
     ]);
     expect(prioritized.details.missingFacts).not.toContain("goal_priority");
+    expect(prioritized.details.missingFacts).toEqual([]);
+  });
+
+  it("omits malformed durable questions instead of failing status", async () => {
+    const userId = await makeUser("Malformed Finance question");
+    const [question] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        actionKind: "question",
+        fingerprint: `malformed-${crypto.randomUUID()}`,
+        privatePayload: { question: { prompt: 42 } },
+        requestingAgentId: "finance-maintenance",
+        userId,
+      })
+      .returning({ id: financeAgentActionReviews.id });
+    if (!question) throw new Error("Malformed question fixture was not created.");
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.questions).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: question.id })]),
+    );
   });
 
   it("projects one authoritative Provider Item across sibling accounts without trusting account shadows", async () => {

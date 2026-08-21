@@ -12,7 +12,7 @@ import {
   type ReconcileFinanceReimbursementInput,
   toCents,
 } from "@personal-os/domain";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, gte, inArray } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { selectPlausibleReimbursementCredits } from "./finance-reimbursement-candidates.js";
@@ -48,7 +48,7 @@ export function deriveReimbursementStatus({
 }
 
 type Context = { principal: Principal; requestId: string };
-type ReimbursementWriter = Pick<Database, "execute" | "insert" | "select" | "update">;
+type ReimbursementWriter = Parameters<Parameters<Database["transaction"]>[0]>[0];
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -141,6 +141,33 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
         items.push(match);
         matchesByReimbursement.set(match.reimbursementId, items);
       }
+      const openAllocationIds = rows
+        .filter((row) => row.status !== "cancelled" && row.status !== "received")
+        .map((row) => row.allocationId);
+      const openAllocations = openAllocationIds.length
+        ? await db
+            .select({ transactionId: financeTransactionAllocations.transactionId })
+            .from(financeTransactionAllocations)
+            .where(
+              and(
+                eq(financeTransactionAllocations.userId, userId),
+                inArray(financeTransactionAllocations.id, openAllocationIds),
+              ),
+            )
+        : [];
+      const openTransactionIds = openAllocations.map((row) => row.transactionId);
+      const openExpenseDates = openTransactionIds.length
+        ? await db
+            .select({ date: financeTransactions.transactionDate })
+            .from(financeTransactions)
+            .where(
+              and(
+                eq(financeTransactions.userId, userId),
+                inArray(financeTransactions.id, openTransactionIds),
+              ),
+            )
+        : [];
+      const oldestOpenAnchor = openExpenseDates.map((row) => row.date).toSorted()[0];
       const credits = await db
         .select({
           category: financeTransactions.category,
@@ -152,8 +179,16 @@ export function createFinanceReimbursementService({ db, now }: { db: Database; n
         })
         .from(financeTransactions)
         .where(
-          and(eq(financeTransactions.userId, userId), eq(financeTransactions.direction, "income")),
-        );
+          and(
+            eq(financeTransactions.userId, userId),
+            eq(financeTransactions.direction, "income"),
+            oldestOpenAnchor
+              ? gte(financeTransactions.transactionDate, oldestOpenAnchor)
+              : undefined,
+          ),
+        )
+        .orderBy(desc(financeTransactions.transactionDate), desc(financeTransactions.id))
+        .limit(500);
       const candidates = selectPlausibleReimbursementCredits({
         credits,
         matches,

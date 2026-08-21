@@ -550,9 +550,15 @@ export const submitFinanceLedgerChallengeInputSchema = z
   .object({
     candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
     challengeId: idSchema,
-    checked: z.array(financeLedgerChallengeCheckSchema).min(financeLedgerChallengeChecks.length),
+    checked: z
+      .array(financeLedgerChallengeCheckSchema)
+      .length(financeLedgerChallengeChecks.length)
+      .refine((items) => new Set(items).size === items.length, "Challenge checks must be unique."),
     findings: z.array(financeLedgerChallengeFindingInputSchema).max(100),
-    reviewedItemIds: z.array(idSchema).max(10_000),
+    reviewedItemIds: z
+      .array(idSchema)
+      .max(10_000)
+      .refine((items) => new Set(items).size === items.length, "Reviewed item IDs must be unique."),
     rubricVersion: z.literal("finance-ledger-challenge-v1"),
   })
   .strict();

@@ -141,12 +141,19 @@ describe.sequential("Finance period review service", () => {
       },
       freshness: { blockers: [], state: "current" },
     } as unknown as FinanceStatus;
+    let snapshotExecutor: unknown;
     const service = createFinancePeriodReviewService({
       db: database.db,
       now: () => now,
-      status: { getFinanceStatus: async () => observed },
+      status: {
+        getFinanceStatus: async (_userId, _scope, executor) => {
+          snapshotExecutor = executor;
+          return observed;
+        },
+      },
     });
     const first = await service.createForRun(owner.id, run.id);
+    expect(snapshotExecutor).toBeDefined();
     const replay = await service.createForRun(owner.id, run.id);
     expect(replay).toEqual(first);
     expect(first).toMatchObject({
@@ -275,7 +282,17 @@ describe.sequential("Finance period review service", () => {
       status: {
         getFinanceStatus: async () => ({
           ...observed,
-          freshness: { blockers: ["provider_sync"], state: "stale" },
+          freshness: {
+            blockers: [
+              {
+                code: "provider_sync",
+                message: "Provider synchronization is stale.",
+                recovery: null,
+              },
+            ],
+            observedAt: now.toISOString(),
+            state: "stale",
+          },
         }),
       },
     });

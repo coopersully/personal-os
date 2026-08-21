@@ -179,6 +179,15 @@ describe.sequential("Finance ledger challenge", () => {
         .from(workspaceMaintenanceRuns)
         .where(eq(workspaceMaintenanceRuns.id, setup.run.id)),
     ).resolves.toEqual([{ status: "queued" }]);
+    await expect(setup.challenge.resolve(setup.owner.id, setup.run.id)).resolves.toMatchObject({
+      candidateId: setup.ready.id,
+      candidateRevision: setup.ready.revision,
+      questions: 0,
+      submittingAgentId: "connected-finance-agent",
+    });
+    await expect(setup.challenge.resolve(setup.owner.id, setup.run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
   });
 
   it("rejects incomplete item and rubric coverage", async () => {
@@ -247,19 +256,21 @@ describe.sequential("Finance ledger challenge", () => {
       duplicate.run.id,
       duplicate.ready.id,
     );
+    const duplicateCheck = financeLedgerChallengeChecks[0];
+    if (!duplicateCheck) throw new Error("Expected at least one ledger challenge check.");
     await expect(
       duplicate.challenge.submit(
         {
           candidateRevision: duplicate.ready.revision,
           challengeId: duplicateChallenge.id,
-          checked: [...financeLedgerChallengeChecks, financeLedgerChallengeChecks[0]],
+          checked: [...financeLedgerChallengeChecks.slice(1), duplicateCheck, duplicateCheck],
           findings: [],
           reviewedItemIds: [duplicate.item.id, duplicate.item.id],
           rubricVersion: "finance-ledger-challenge-v1",
         },
         duplicate.context,
       ),
-    ).rejects.toMatchObject({ code: "invalid_request" });
+    ).rejects.toThrow("Challenge checks must be unique");
 
     const stale = await fixture();
     const staleChallenge = await stale.challenge.prepare(

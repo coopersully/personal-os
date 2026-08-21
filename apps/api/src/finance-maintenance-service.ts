@@ -487,7 +487,6 @@ export function createFinanceMaintenanceService({
     const prepared = records.find((record) => record.step === "prepare")?.result as
       | { candidateId: string; questions: number; revision: string }
       | undefined;
-    const challengePrepared = records.find((record) => record.step === "challenge_prepare");
     const checkpoint = run.checkpoint as Record<string, unknown> | null;
     const releaseAtChallenge = async (candidate: NonNullable<typeof prepared>) =>
       maintenance.checkpointAndRelease({
@@ -500,15 +499,16 @@ export function createFinanceMaintenanceService({
         runId,
         status: "awaiting_agent_challenge",
       });
+    let currentStep: (typeof financeCandidateMaintenanceSteps)[number] = "prepare";
     try {
       if (checkpoint?.phase === "challenge" && prepared) return releaseAtChallenge(prepared);
-      if (challengePrepared && prepared) return releaseAtChallenge(prepared);
 
       const completed = new Set(
         records.filter((record) => record.status === "completed").map((record) => record.step),
       );
       if (checkpoint?.phase === "health_refresh") {
         if (!completed.has("health_refresh")) {
+          currentStep = "health_refresh";
           await assertCurrentRulebook(run);
           const refreshed = await finances.refreshCashflowForUser(
             run.userId,
@@ -527,6 +527,7 @@ export function createFinanceMaintenanceService({
         }
         const observed = await assertCurrentRulebook(run);
         if (!completed.has("verify")) {
+          currentStep = "verify";
           if (observed.freshness.blockers.length || observed.state === "blocked")
             return maintenance.settle({
               claimId,
@@ -546,6 +547,7 @@ export function createFinanceMaintenanceService({
           completed.add("verify");
         }
         if (!completed.has("period_review")) {
+          currentStep = "period_review";
           const periodReview = periodReviews
             ? await periodReviews.createForRun(run.userId, runId)
             : null;
@@ -569,6 +571,7 @@ export function createFinanceMaintenanceService({
       }
       for (const step of financeCandidateMaintenanceSteps) {
         if (completed.has(step)) continue;
+        currentStep = step;
         const idempotencyKey = `finances:${run.rulebookVersion}:${step}`;
         if (step === "preflight") {
           const allocationBackfill = finances.backfillTransactionAllocations
@@ -871,18 +874,21 @@ export function createFinanceMaintenanceService({
       if (prepared) return releaseAtChallenge(prepared);
       return maintenance.getOwnedRun(run.userId, runId);
     } catch (error) {
-      const step = "prepare";
-      await maintenance.failStep({
-        claimId,
-        code: errorCode(error),
-        recoverable: !(
-          error instanceof AppError &&
-          ["forbidden", "invalid_request", "not_found"].includes(error.code)
-        ),
-        runId,
-        safeMessage: safeErrorMessage(error),
-        step,
-      });
+      try {
+        await maintenance.failStep({
+          claimId,
+          code: errorCode(error),
+          recoverable: !(
+            error instanceof AppError &&
+            ["forbidden", "invalid_request", "not_found"].includes(error.code)
+          ),
+          runId,
+          safeMessage: safeErrorMessage(error),
+          step: currentStep,
+        });
+      } catch {
+        // A failed error-recording write must not abort the remaining maintenance batch.
+      }
       return maintenance.getOwnedRun(run.userId, runId);
     }
   }

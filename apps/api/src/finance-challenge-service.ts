@@ -392,40 +392,55 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
     },
 
     async resolve(userId: string, runId: string) {
-      const [challenge] = await db
-        .select()
-        .from(financeLedgerChallenges)
-        .where(
-          and(
-            eq(financeLedgerChallenges.runId, runId),
-            eq(financeLedgerChallenges.userId, userId),
-            eq(financeLedgerChallenges.state, "submitted"),
-          ),
-        )
-        .orderBy(desc(financeLedgerChallenges.createdAt), desc(financeLedgerChallenges.id))
-        .limit(1);
-      if (!challenge)
-        throw new AppError("conflict", "The Finance challenge has not been submitted.");
-      const items = await db
-        .select({ disposition: financeMaintenanceCandidateItems.disposition })
-        .from(financeMaintenanceCandidateItems)
-        .where(eq(financeMaintenanceCandidateItems.candidateId, challenge.candidateId));
-      await db
-        .update(financeLedgerChallenges)
-        .set({ state: "resolved", updatedAt: now() })
-        .where(eq(financeLedgerChallenges.id, challenge.id));
-      return {
-        candidateId: challenge.candidateId,
-        candidateRevision: (
-          await db
-            .select({ revision: financeMaintenanceCandidates.revision })
-            .from(financeMaintenanceCandidates)
-            .where(eq(financeMaintenanceCandidates.id, challenge.candidateId))
-            .limit(1)
-        )[0]?.revision,
-        questions: items.filter((item) => item.disposition === "question").length,
-        submittingAgentId: challenge.submittingAgentId,
-      };
+      return db.transaction(async (tx) => {
+        const [challenge] = await tx
+          .select()
+          .from(financeLedgerChallenges)
+          .where(
+            and(
+              eq(financeLedgerChallenges.runId, runId),
+              eq(financeLedgerChallenges.userId, userId),
+              eq(financeLedgerChallenges.state, "submitted"),
+            ),
+          )
+          .orderBy(desc(financeLedgerChallenges.createdAt), desc(financeLedgerChallenges.id))
+          .for("update")
+          .limit(1);
+        if (!challenge)
+          throw new AppError("conflict", "The Finance challenge has not been submitted.");
+        const [candidate] = await tx
+          .select({ revision: financeMaintenanceCandidates.revision })
+          .from(financeMaintenanceCandidates)
+          .where(
+            and(
+              eq(financeMaintenanceCandidates.id, challenge.candidateId),
+              eq(financeMaintenanceCandidates.userId, userId),
+            ),
+          )
+          .limit(1);
+        const items = await tx
+          .select({ disposition: financeMaintenanceCandidateItems.disposition })
+          .from(financeMaintenanceCandidateItems)
+          .where(eq(financeMaintenanceCandidateItems.candidateId, challenge.candidateId));
+        const [resolved] = await tx
+          .update(financeLedgerChallenges)
+          .set({ state: "resolved", updatedAt: now() })
+          .where(
+            and(
+              eq(financeLedgerChallenges.id, challenge.id),
+              eq(financeLedgerChallenges.state, "submitted"),
+            ),
+          )
+          .returning({ id: financeLedgerChallenges.id });
+        if (!resolved)
+          throw new AppError("conflict", "The Finance challenge changed before resolution.");
+        return {
+          candidateId: challenge.candidateId,
+          candidateRevision: candidate?.revision,
+          questions: items.filter((item) => item.disposition === "question").length,
+          submittingAgentId: challenge.submittingAgentId,
+        };
+      });
     },
   };
 }

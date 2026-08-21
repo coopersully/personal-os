@@ -690,6 +690,16 @@ const reimbursementExpectedInputSchema = z
   })
   .strict();
 
+export const cancelFinanceReimbursementInputSchema = z
+  .object({
+    expectedRevision: z.number().int().positive(),
+    evidence: financeReimbursementEvidenceSchema,
+    operation: z.literal("cancel"),
+    rationale: z.string().trim().min(1).max(1_000),
+    reimbursementId: idSchema,
+  })
+  .strict();
+
 export const reconcileFinanceReimbursementInputSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("create"), ...reimbursementExpectedInputSchema.shape }).strict(),
   z
@@ -703,15 +713,7 @@ export const reconcileFinanceReimbursementInputSchema = z.discriminatedUnion("op
       reimbursementId: idSchema,
     })
     .strict(),
-  z
-    .object({
-      expectedRevision: z.number().int().positive(),
-      evidence: financeReimbursementEvidenceSchema,
-      operation: z.literal("cancel"),
-      rationale: z.string().trim().min(1).max(1_000),
-      reimbursementId: idSchema,
-    })
-    .strict(),
+  cancelFinanceReimbursementInputSchema,
 ]);
 export type ReconcileFinanceReimbursementInput = z.infer<
   typeof reconcileFinanceReimbursementInputSchema

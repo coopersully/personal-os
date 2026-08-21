@@ -3814,7 +3814,7 @@ export function createFinanceService({
     async reconcileReimbursement(
       input: ReconcileFinanceReimbursementInput,
       context: MutationContext,
-      executor?: Pick<Database, "execute" | "insert" | "select" | "update">,
+      executor?: Parameters<Parameters<Database["transaction"]>[0]>[0],
     ) {
       if (context.principal.actorType === "agent" && context.financePreparedAction !== true) {
         throw new AppError(

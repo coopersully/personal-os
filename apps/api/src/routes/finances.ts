@@ -1,5 +1,6 @@
 import {
   applyFinanceCategorizationsInputSchema,
+  cancelFinanceReimbursementInputSchema,
   createFinanceAccountInputSchema,
   createFinanceBudgetInputSchema,
   createFinanceTransactionInputSchema,
@@ -502,7 +503,7 @@ export function registerFinanceRoutes({
   app.post("/v1/finances/reimbursements/:id/cancel", async (context) => {
     const body = await parseBody(
       context,
-      reconcileFinanceReimbursementInputSchema.options[2].omit({
+      cancelFinanceReimbursementInputSchema.omit({
         reimbursementId: true,
         operation: true,
       }),

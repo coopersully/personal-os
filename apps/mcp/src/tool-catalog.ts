@@ -205,7 +205,11 @@ export const iloToolCatalog = {
     destructive: true,
     policy: "approve_each",
   }),
-  resolve_finance_review: write("finances", ["finances:write"], { policy: "approved_rule" }),
+  // Deprecated compatibility alias for answer_finance_question.
+  resolve_finance_review: write("finances", ["finances:write"], {
+    destructive: true,
+    policy: "approve_each",
+  }),
   update_finance_recurring_obligation: write("finances", ["finances:write"], {
     policy: "approved_rule",
   }),

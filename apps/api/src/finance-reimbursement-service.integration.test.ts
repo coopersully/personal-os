@@ -123,7 +123,7 @@ describe.sequential("reimbursement lifecycle", () => {
       scopes: new Set(["finances:read", "finances:write"]),
       userId: user.id,
     };
-    return { allocation, credit, principal };
+    return { account, allocation, credit, expense, principal };
   }
 
   it("records multi-payer, combined-credit, and idempotent lifecycle transitions", async () => {
@@ -335,6 +335,56 @@ describe.sequential("reimbursement lifecycle", () => {
         { principal, requestId: crypto.randomUUID() },
       ),
     ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("bounds plausible credits to the oldest open expense and 500 rows", async () => {
+    const { account, allocation, expense, principal } = await fixture();
+    const service = createFinanceReimbursementService({ db: database.db, now: () => now });
+    await service.reconcile(
+      {
+        allocationId: allocation.id,
+        dueDate: null,
+        evidence: evidence(),
+        expectedAmount: 220,
+        operation: "create",
+        payer: "Casey",
+        rationale: "Casey agreed to repay this share",
+      },
+      { principal, requestId: crypto.randomUUID() },
+    );
+    const [olderCredit, currentCredit] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 22_000,
+          direction: "income",
+          merchant: "Old repayment",
+          transactionDate: "2026-08-16",
+          userId: principal.userId,
+        },
+        {
+          accountId: account.id,
+          amount: 22_000,
+          direction: "income",
+          merchant: "Zelle Casey repayment",
+          transactionDate: "2026-08-18",
+          userId: principal.userId,
+        },
+      ])
+      .returning();
+    if (!olderCredit || !currentCredit) throw new Error("Credit fixtures failed.");
+
+    const listed = await service.list(principal.userId);
+
+    expect(expense.transactionDate).toBe("2026-08-17");
+    expect(listed.unmatchedCredits).toEqual(
+      expect.arrayContaining([expect.objectContaining({ transactionId: currentCredit.id })]),
+    );
+    expect(listed.unmatchedCredits).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ transactionId: olderCredit.id })]),
+    );
+    expect(listed.unmatchedCredits.length).toBeLessThanOrEqual(500);
   });
 
   it("marks overdue expected money without treating it as received", () => {

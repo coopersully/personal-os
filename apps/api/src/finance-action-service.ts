@@ -2667,7 +2667,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     expectedItemFingerprints?: string[];
     expectedRevision: string;
     expectedRunId?: string;
-    expectedState: "awaiting_approval" | "challenged" | "awaiting_approval_or_challenged";
+    expectedState: "awaiting_approval" | "challenged";
     executor: FinanceExecutor;
     mode: "apply" | "queue";
     reviewId?: string;
@@ -2688,9 +2688,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       throw new AppError("not_found", "The Finance maintenance candidate is not available.");
     if (candidate.state === "committed") return { candidateId, status: "committed" as const };
     const acceptsState =
-      input.expectedState === "awaiting_approval_or_challenged"
-        ? candidate.state === "awaiting_approval" || candidate.state === "challenged"
-        : candidate.state === input.expectedState;
+      candidate.state === input.expectedState ||
+      (input.mode === "queue" && candidate.state === "awaiting_approval");
     if (
       !acceptsState ||
       candidate.revision !== expectedRevision ||
@@ -2709,7 +2708,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       );
     }
     const [run] = await executor
-      .select({ id: workspaceMaintenanceRuns.id })
+      .select({
+        checkpoint: workspaceMaintenanceRuns.checkpoint,
+        id: workspaceMaintenanceRuns.id,
+        scope: workspaceMaintenanceRuns.scope,
+        status: workspaceMaintenanceRuns.status,
+      })
       .from(workspaceMaintenanceRuns)
       .where(
         and(
@@ -2720,6 +2724,32 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       .for("update")
       .limit(1);
     if (!run) throw new AppError("conflict", "The Finance maintenance run is no longer available.");
+    const checkpoint = run.checkpoint as {
+      candidateId?: string;
+      phase?: string;
+      revision?: string;
+    } | null;
+    const settlingApproval = candidate.state === "awaiting_approval";
+    const expectedRunStatus =
+      settlingApproval
+        ? "awaiting_approval"
+        : "awaiting_agent_challenge";
+    const expectedPhase = settlingApproval ? "approval" : "challenge";
+    if (
+      run.status !== expectedRunStatus ||
+      checkpoint?.candidateId !== candidate.id ||
+      checkpoint.phase !== expectedPhase ||
+      checkpoint.revision !== expectedRevision
+    ) {
+      if (input.reviewId) {
+        await executor
+          .update(financeAgentActionReviews)
+          .set({ status: "superseded", updatedAt: now() })
+          .where(eq(financeAgentActionReviews.id, input.reviewId));
+        return { candidateId, status: "superseded" as const };
+      }
+      throw new AppError("conflict", "The Finance maintenance run changed before settlement.");
+    }
     const items = await executor
       .select()
       .from(financeMaintenanceCandidateItems)
@@ -2864,10 +2894,24 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       if ("status" in current) return supersedeAndRebuild();
       currentItems.push({ item, prepared: current });
     }
+    const currentSnapshot = await finances.maintenanceCandidateSnapshot(
+      context.principal.userId,
+      run.scope,
+      items,
+      candidate.discoveryRevision,
+      executor,
+    );
+    if (currentSnapshot.revision !== candidate.revision) return supersedeAndRebuild();
     await executor
       .update(financeMaintenanceCandidates)
       .set({ state: "committing", updatedAt: now() })
-      .where(eq(financeMaintenanceCandidates.id, candidate.id));
+      .where(
+        and(
+          eq(financeMaintenanceCandidates.id, candidate.id),
+          eq(financeMaintenanceCandidates.state, input.expectedState),
+          eq(financeMaintenanceCandidates.revision, expectedRevision),
+        ),
+      );
     for (const { item, prepared } of currentItems) {
       await applyPrepared(prepared, context, executor);
       await executor
@@ -2878,7 +2922,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
     await executor
       .update(financeMaintenanceCandidates)
       .set({ state: "committed", updatedAt: now() })
-      .where(eq(financeMaintenanceCandidates.id, candidate.id));
+      .where(
+        and(
+          eq(financeMaintenanceCandidates.id, candidate.id),
+          eq(financeMaintenanceCandidates.state, "committing"),
+        ),
+      );
     await executor
       .update(workspaceMaintenanceRuns)
       .set({
@@ -2889,7 +2938,12 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         status: "queued",
         updatedAt: now(),
       })
-      .where(eq(workspaceMaintenanceRuns.id, candidate.runId));
+      .where(
+        and(
+          eq(workspaceMaintenanceRuns.id, candidate.runId),
+          eq(workspaceMaintenanceRuns.status, expectedRunStatus),
+        ),
+      );
     return { candidateId, status: "committed" as const };
   }
 
@@ -2945,7 +2999,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           candidateId,
           context,
           expectedRevision,
-          expectedState: bypass ? "challenged" : "awaiting_approval_or_challenged",
+          expectedState: "challenged",
           executor: tx,
           mode: bypass ? "apply" : "queue",
         });

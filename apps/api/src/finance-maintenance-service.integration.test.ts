@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   auditEvents,
@@ -37,6 +38,7 @@ import {
 } from "./finance-maintenance-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
+import { migrationsWithout } from "./test-migrations.js";
 import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
 
 const now = new Date("2026-08-15T12:00:00.000Z");
@@ -143,6 +145,80 @@ describe.sequential("Finance maintenance service", () => {
     if (!user) throw new Error("Fixture user was not created.");
     return user.id;
   }
+
+  it("upgrades the historical maintenance chain before parking active candidate runs", async () => {
+    const migrations = resolve(process.cwd(), "packages/database/migrations");
+    const oldMigrations = await migrationsWithout(migrations, "finance-maintenance-before-0063-", [
+      "0063_finance_maintenance_candidates",
+    ]);
+    const upgradeContainer = await new PostgreSqlContainer("postgres:17.5-alpine")
+      .withDatabase("personal_os")
+      .withUsername("personal_os")
+      .withPassword("personal_os")
+      .start();
+    const upgradeDatabase = createDatabaseClient(upgradeContainer.getConnectionUri());
+    try {
+      await migrateDatabase(upgradeDatabase.db, oldMigrations);
+      const [upgradeUser] = await upgradeDatabase.db
+        .insert(users)
+        .values({
+          displayName: "Maintenance upgrade",
+          email: `maintenance-upgrade-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        })
+        .returning();
+      if (!upgradeUser) throw new Error("Upgrade migration user was not created.");
+
+      await migrateDatabase(upgradeDatabase.db, migrations);
+      const values = {
+        domain: "finances" as const,
+        rulebookVersion: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        scope: { type: "all_outstanding" as const },
+        userId: upgradeUser.id,
+      };
+      await expect(
+        upgradeDatabase.db.insert(workspaceMaintenanceRuns).values({
+          ...values,
+          checkpoint: { candidateId: crypto.randomUUID(), phase: "challenge" },
+          status: "awaiting_agent_challenge",
+        }),
+      ).resolves.toBeDefined();
+      await expect(
+        upgradeDatabase.db.insert(workspaceMaintenanceRuns).values({
+          ...values,
+          checkpoint: { candidateId: crypto.randomUUID(), phase: "approval" },
+          status: "awaiting_approval",
+        }),
+      ).rejects.toThrow();
+    } finally {
+      await upgradeDatabase.close();
+      await upgradeContainer.stop();
+      await rm(oldMigrations, { force: true, recursive: true });
+    }
+  }, 120_000);
+
+  it("fresh migration accepts parked runs while retaining one active run invariant", async () => {
+    const freshUserId = await createUser("Fresh parked maintenance");
+    const values = {
+      domain: "finances" as const,
+      rulebookVersion: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      scope: { type: "all_outstanding" as const },
+      userId: freshUserId,
+    };
+    await database.db.insert(workspaceMaintenanceRuns).values({
+      ...values,
+      checkpoint: { candidateId: crypto.randomUUID(), phase: "challenge" },
+      status: "awaiting_agent_challenge",
+    });
+    await expect(
+      database.db.insert(workspaceMaintenanceRuns).values({
+        ...values,
+        checkpoint: { candidateId: crypto.randomUUID(), phase: "approval" },
+        status: "awaiting_approval",
+      }),
+    ).rejects.toThrow();
+  });
 
   function status(
     rulebookVersion = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

@@ -73,7 +73,7 @@
 
 ## CONCERNS
 
-- The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.
+- Task 7 still owns the connected-agent challenge decisions that transition a prepared candidate to `challenged`; Task 6 now provides the durable parked run state and fenced settlement boundary it will call.
 - Prepared categorization remains intentionally cash-neutral; it affects only projected budget classification.
 
 ## BLOCKED
@@ -90,3 +90,11 @@
 - `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts apps/api/src/finance-action-service.integration.test.ts packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 137 passed.
 - API, Domain, and Database typechecks passed.
 - Scoped Biome and `git diff --check` passed.
+
+## Final hardening
+
+- Restored immutable migration 0056 and moved the `awaiting_agent_challenge` constraint/index upgrade into append-only migration 0063, with both upgrade-chain and fresh-database coverage.
+- Settlement now requires the exact parked run status/checkpoint, recomputes the complete scoped source snapshot inside the write transaction, and supersedes/rebuilds on non-item ledger drift before any semantic writer runs.
+- Projection scope is deterministic: budget replacement is month-local, as-of dates no longer depend on UUID ordering, empty targeted accounts retain account/provider evidence, and all revision contributors are canonically sorted.
+- Completed the strict private reimbursement-question and budget recovery payload variants and made the public candidate page schema accept only the public item projection.
+- Final focused verification: 140 tests passed across Finance action settlement, maintenance, domain, and database schema suites; API, Domain, and Database typechecks passed; scoped Biome and `git diff --check` passed.

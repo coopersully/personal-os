@@ -86,6 +86,7 @@ import type {
 import {
   financeDomainProfileSchema,
   financeMaintenanceCandidateItemDraftSchema,
+  financeMaintenanceCandidateItemPageSchema,
   financeMaintenanceCandidateItemProjectionSchema,
   financeMaintenanceCandidateSchema,
   idSchema,
@@ -96,7 +97,10 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
-import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
+import {
+  financeCandidateActionFingerprint,
+  stableFinanceActionInput,
+} from "./finance-action-identity.js";
 import {
   type AllocationProjection,
   activeAllocationsByTransaction,
@@ -879,7 +883,13 @@ export function createFinanceService({
     const asOf =
       scope.type === "window"
         ? scope.end
-        : (transactions.at(-1)?.transactionDate ?? now().toISOString().slice(0, 10));
+        : (transactions.reduce<string | null>(
+            (latest, transaction) =>
+              latest === null || transaction.transactionDate > latest
+                ? transaction.transactionDate
+                : latest,
+            null,
+          ) ?? now().toISOString().slice(0, 10));
     const months =
       scope.type === "window"
         ? Array.from(
@@ -929,15 +939,18 @@ export function createFinanceService({
       .select()
       .from(financeRecurringObligations)
       .where(eq(financeRecurringObligations.userId, userId));
-    const accounts = transactionIds.length
+    const scopedAccountIds = [
+      ...new Set([
+        ...transactions.map((item) => item.accountId),
+        ...(scope.type === "target" && scope.entityType === "finance_account" ? [scope.id] : []),
+      ]),
+    ];
+    const accounts = scopedAccountIds.length
       ? await executor
           .select()
           .from(financeAccounts)
           .where(
-            and(
-              eq(financeAccounts.userId, userId),
-              inArray(financeAccounts.id, [...new Set(transactions.map((item) => item.accountId))]),
-            ),
+            and(eq(financeAccounts.userId, userId), inArray(financeAccounts.id, scopedAccountIds)),
           )
       : [];
     const providerItems = accounts.length
@@ -1103,7 +1116,11 @@ export function createFinanceService({
           const input = payload.input;
           if (months.includes(input.month)) {
             if ("allocations" in input) {
-              if (input.replace) projectedBudgetLimits = new Map();
+              if (input.replace) {
+                projectedBudgetLimits = new Map(
+                  [...projectedBudgetLimits].filter(([key]) => !key.startsWith(`${input.month}:`)),
+                );
+              }
               for (const allocation of input.allocations) {
                 const category = categoryName.get(allocation.categoryId);
                 if (category)
@@ -1278,7 +1295,7 @@ export function createFinanceService({
       (profileExpectedNetIncome ?? (plannedIncome > 0 ? plannedIncome : null)) === null
         ? null
         : (profileExpectedNetIncome ?? plannedIncome) - recurringCommittedOutflow;
-    const sourceRevision = financeCandidateRevision([
+    const revisionContributors = [
       ...transactions.map((item) => ({
         actionKind: item.id,
         disposition: item.updatedAt.toISOString(),
@@ -1355,7 +1372,10 @@ export function createFinanceService({
         expectedRevision: item.syncState,
         fingerprint: `${item.lastSyncedAt?.toISOString() ?? ""}:${item.syncCursor ?? ""}`,
       })),
-    ]);
+    ].toSorted((left, right) =>
+      stableFinanceActionInput(left).localeCompare(stableFinanceActionInput(right)),
+    );
+    const sourceRevision = financeCandidateRevision(revisionContributors);
     return {
       assumptions: [
         "Prepared candidate items are projected in ordinal order without canonical writes.",
@@ -1377,6 +1397,42 @@ export function createFinanceService({
         workItems,
       },
       sourceRevision,
+    };
+  }
+
+  async function maintenanceCandidateSnapshot(
+    userId: string,
+    scope: MaintenanceScope,
+    items: Array<{
+      actionKind: string;
+      disposition: string;
+      expectedRevision: string | null;
+      fingerprint: string;
+      ordinal: number;
+      privatePayload: Record<string, unknown>;
+      safeChanges: Array<Record<string, unknown>>;
+    }>,
+    discoveryRevision: string | null,
+    executor: FinanceReadExecutor = db,
+  ) {
+    const overlay = await candidateLedgerProjection(userId, scope, items, executor);
+    return {
+      ...overlay,
+      revision: financeCandidateRevision([
+        ...items,
+        {
+          actionKind: "candidate_scope",
+          disposition: JSON.stringify(scope),
+          expectedRevision: overlay.sourceRevision,
+          fingerprint: discoveryRevision ?? "sha256:empty",
+        },
+        {
+          actionKind: "projection_assumptions",
+          disposition: overlay.assumptions.join("\n"),
+          expectedRevision: null,
+          fingerprint: overlay.sourceRevision,
+        },
+      ]),
     };
   }
 
@@ -5604,28 +5660,19 @@ export function createFinanceService({
           .for("update");
         if (items.length !== candidate.nextOrdinal)
           throw new AppError("conflict", "The Finance maintenance candidate page ordinal changed.");
-        const overlay = await candidateLedgerProjection(input.userId, run.scope, items, tx);
-        const revision = financeCandidateRevision([
-          ...items,
-          {
-            actionKind: "candidate_scope",
-            disposition: JSON.stringify(run.scope),
-            expectedRevision: overlay.sourceRevision,
-            fingerprint: candidate.discoveryRevision ?? "sha256:empty",
-          },
-          {
-            actionKind: "projection_assumptions",
-            disposition: overlay.assumptions.join("\n"),
-            expectedRevision: null,
-            fingerprint: overlay.sourceRevision,
-          },
-        ]);
+        const overlay = await maintenanceCandidateSnapshot(
+          input.userId,
+          run.scope,
+          items,
+          candidate.discoveryRevision,
+          tx,
+        );
         const [ready] = await tx
           .update(financeMaintenanceCandidates)
           .set({
             preparationCheckpoint: { finalized: true, nextOrdinal: candidate.nextOrdinal },
             projection: overlay.projection,
-            revision,
+            revision: overlay.revision,
             state: "ready_for_challenge",
             updatedAt: now(),
           })
@@ -5641,6 +5688,7 @@ export function createFinanceService({
         };
       });
     },
+    maintenanceCandidateSnapshot,
     async prepareMaintenanceCandidate(input: {
       items: FinanceMaintenanceCandidateItemDraft[];
       runId: string;
@@ -5850,10 +5898,10 @@ export function createFinanceService({
         }),
       );
       const finalItem = items.at(-1);
-      return {
+      return financeMaintenanceCandidateItemPageSchema.parse({
         items,
         nextCursor: hasMore && finalItem ? encodeCandidateItemCursor(finalItem.ordinal) : null,
-      };
+      });
     },
     async proposeOutstandingCategorizations(
       userId: string,

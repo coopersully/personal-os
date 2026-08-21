@@ -14,7 +14,7 @@ CREATE TABLE "workspace_maintenance_runs" (
 	"settled_result" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "workspace_maintenance_runs_status_check" CHECK ("status" IN ('queued', 'running', 'completed', 'completed_with_questions', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable', 'failed_terminal')),
+	CONSTRAINT "workspace_maintenance_runs_status_check" CHECK ("status" IN ('queued', 'running', 'completed', 'completed_with_questions', 'awaiting_approval', 'blocked', 'failed_recoverable', 'failed_terminal')),
 	CONSTRAINT "workspace_maintenance_runs_lease_check" CHECK (
 		("status" = 'running' AND "lease_claim_id" IS NOT NULL AND "lease_expires_at" IS NOT NULL)
 		OR
@@ -52,7 +52,7 @@ ALTER TABLE "workspace_maintenance_runs" ADD CONSTRAINT "workspace_maintenance_r
 --> statement-breakpoint
 ALTER TABLE "workspace_maintenance_steps" ADD CONSTRAINT "workspace_maintenance_steps_run_id_workspace_maintenance_runs_id_fk" FOREIGN KEY ("run_id") REFERENCES "public"."workspace_maintenance_runs"("id") ON DELETE cascade ON UPDATE no action;
 --> statement-breakpoint
-CREATE UNIQUE INDEX "workspace_maintenance_runs_open_user_domain_idx" ON "workspace_maintenance_runs" USING btree ("user_id", "domain") WHERE "status" IN ('queued', 'running', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable');
+CREATE UNIQUE INDEX "workspace_maintenance_runs_open_user_domain_idx" ON "workspace_maintenance_runs" USING btree ("user_id", "domain") WHERE "status" IN ('queued', 'running', 'awaiting_approval', 'blocked', 'failed_recoverable');
 --> statement-breakpoint
 CREATE INDEX "workspace_maintenance_runs_claimable_idx" ON "workspace_maintenance_runs" USING btree ("status", "retry_at", "lease_expires_at", "updated_at") WHERE "status" IN ('queued', 'running', 'failed_recoverable');
 --> statement-breakpoint

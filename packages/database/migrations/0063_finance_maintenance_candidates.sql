@@ -50,3 +50,11 @@ CREATE UNIQUE INDEX "finance_maintenance_candidate_items_candidate_ordinal_idx" 
 CREATE UNIQUE INDEX "finance_maintenance_candidate_items_candidate_fingerprint_idx" ON "finance_maintenance_candidate_items" USING btree ("candidate_id", "fingerprint");
 --> statement-breakpoint
 CREATE INDEX "finance_maintenance_candidate_items_candidate_disposition_idx" ON "finance_maintenance_candidate_items" USING btree ("candidate_id", "disposition", "ordinal");
+--> statement-breakpoint
+ALTER TABLE "workspace_maintenance_runs" DROP CONSTRAINT "workspace_maintenance_runs_status_check";
+--> statement-breakpoint
+ALTER TABLE "workspace_maintenance_runs" ADD CONSTRAINT "workspace_maintenance_runs_status_check" CHECK ("status" IN ('queued', 'running', 'completed', 'completed_with_questions', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable', 'failed_terminal'));
+--> statement-breakpoint
+DROP INDEX "workspace_maintenance_runs_open_user_domain_idx";
+--> statement-breakpoint
+CREATE UNIQUE INDEX "workspace_maintenance_runs_open_user_domain_idx" ON "workspace_maintenance_runs" USING btree ("user_id", "domain") WHERE "status" IN ('queued', 'running', 'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable');

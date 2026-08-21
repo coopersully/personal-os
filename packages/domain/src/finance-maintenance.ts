@@ -10,6 +10,7 @@ import {
   financeFactEvidenceSchema,
   financeProviderItemHealthSchema,
   financeQuestionSchema,
+  financeReimbursementQuestionAnswerSchema,
   mergeFinanceMerchantsInputSchema,
   reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
@@ -256,8 +257,75 @@ const candidateTransactionInputSchema = z.union([
   updateFinanceTransactionInputSchema.extend({ id: idSchema }),
 ]);
 const candidateBudgetPlanInputSchema = z.union([
-  setFinanceBudgetPlanInputSchema,
+  setFinanceBudgetPlanInputSchema.extend({ payAccountId: idSchema.optional() }),
   createFinanceBudgetInputSchema,
+]);
+
+const candidateReimbursementQuestionInputSchema = z.union([
+  z
+    .object({
+      answer: financeReimbursementQuestionAnswerSchema,
+      candidate: z
+        .object({ allocationIds: z.array(idSchema).min(1).max(100), transactionId: idSchema })
+        .strict(),
+      operation: z.literal("answer_question"),
+      plan: z
+        .object({
+          allocationIds: z.array(idSchema).min(1).max(100),
+          allocations: z
+            .array(
+              z
+                .object({
+                  allocationOrder: z.int().nonnegative(),
+                  categoryId: idSchema,
+                  rationale: z.string().trim().min(1).max(1_000).nullable(),
+                  treatment: z.enum(["personal", "reimbursable"]),
+                })
+                .strict(),
+            )
+            .min(1)
+            .max(100),
+          amount: z.number().finite().nonnegative(),
+          categoryId: idSchema,
+          kind: z.enum(["entirely_personal", "reimbursable"]),
+          transactionId: idSchema,
+        })
+        .strict(),
+      sourceRefs: z.array(materialSourceReferenceSchema).min(1).max(100),
+    })
+    .strict(),
+  z
+    .object({
+      answer: financeReimbursementQuestionAnswerSchema,
+      candidate: z
+        .object({
+          reimbursementIds: z.array(idSchema).min(1).max(100),
+          transactionId: idSchema,
+          unmatchedAmount: z.number().finite().nonnegative().optional(),
+        })
+        .strict(),
+      operation: z.literal("answer_question"),
+      plan: z
+        .object({
+          creditTransactionId: idSchema,
+          kind: z.enum(["not_reimbursement", "match"]),
+          matches: z
+            .array(
+              z
+                .object({ amount: z.number().finite().positive(), reimbursementId: idSchema })
+                .strict(),
+            )
+            .max(100),
+          reimbursementIds: z.array(idSchema).min(1).max(100),
+        })
+        .strict(),
+      sourceRefs: z.array(materialSourceReferenceSchema).min(1).max(100),
+    })
+    .strict(),
+]);
+const candidateReimbursementInputSchema = z.union([
+  reconcileFinanceReimbursementInputSchema,
+  candidateReimbursementQuestionInputSchema,
 ]);
 
 const financeCandidatePreparedPayloadSchema = z.discriminatedUnion("actionKind", [
@@ -271,7 +339,7 @@ const financeCandidatePreparedPayloadSchema = z.discriminatedUnion("actionKind",
   }),
   z.object({
     actionKind: z.literal("reimbursement"),
-    input: reconcileFinanceReimbursementInputSchema,
+    input: candidateReimbursementInputSchema,
   }),
   z.object({
     actionKind: z.literal("recurring_obligation"),
@@ -406,7 +474,7 @@ export type FinanceMaintenanceCandidateItemPage = z.infer<
 export const financeMaintenanceCandidatePageSchema = z
   .object({
     candidate: financeMaintenanceCandidateSchema,
-    items: z.array(financeMaintenanceCandidateItemSchema).max(100),
+    items: z.array(financeMaintenanceCandidateItemProjectionSchema).max(100),
     nextCursor: z.string().min(1).nullable(),
   })
   .strict();

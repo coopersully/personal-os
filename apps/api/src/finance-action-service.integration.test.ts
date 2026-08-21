@@ -32,6 +32,7 @@ import {
 } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
+import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
 import type { SupportedActionKind } from "./finance-action-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceService } from "./finance-service.js";
@@ -604,14 +605,36 @@ describe.sequential("finance action service", () => {
         ordinal,
       })),
     );
+    const storedItems = await database.db
+      .select()
+      .from(financeMaintenanceCandidateItems)
+      .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id));
+    const snapshot = await finances.maintenanceCandidateSnapshot(
+      ownerId,
+      run.scope,
+      storedItems,
+      candidate.discoveryRevision,
+    );
     // Task 7 owns the challenge. Settlement tests deliberately begin after
     // that boundary with a manually challenged, otherwise-real candidate.
     const [challenged] = await database.db
       .update(financeMaintenanceCandidates)
-      .set({ state: "challenged", updatedAt: now })
+      .set({ revision: snapshot.revision, state: "challenged", updatedAt: now })
       .where(eq(financeMaintenanceCandidates.id, candidate.id))
       .returning();
     if (!challenged) throw new Error("Settlement candidate was not challenged.");
+    await database.db
+      .update(workspaceMaintenanceRuns)
+      .set({
+        checkpoint: {
+          candidateId: challenged.id,
+          phase: "challenge",
+          revision: challenged.revision,
+        },
+        status: "awaiting_agent_challenge",
+        updatedAt: now,
+      })
+      .where(eq(workspaceMaintenanceRuns.id, run.id));
     return { actions, candidate: challenged, category, ownerId, run, transactions };
   }
 
@@ -690,6 +713,72 @@ describe.sequential("finance action service", () => {
         ownerId,
       ),
     ).resolves.toMatchObject({ actionKind: "merchant", disposition: "prepared" });
+    const categorization = cases.find((item) => item.actionKind === "categorization");
+    const categorizationInput = categorization?.input as
+      | { decisions?: Array<{ categoryId?: string; transactionId?: string }> }
+      | undefined;
+    const decision = categorizationInput?.decisions?.[0];
+    const transactionId = String(decision?.transactionId);
+    const categoryId = String(decision?.categoryId);
+    const [transaction] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transactionId));
+    if (!transaction) throw new Error("Candidate reimbursement transaction was not found.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: transaction.amount,
+        categoryId,
+        rationale: "Candidate reimbursement evidence.",
+        transactionId: transaction.id,
+        treatment: "reimbursable",
+        userId: ownerId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Candidate reimbursement allocation was not created.");
+    const reimbursementInput = {
+      answer: {
+        amount: 12.34,
+        dueDate: null,
+        kind: "reimbursable" as const,
+        payer: "Alex",
+        rationale: "Alex agreed to reimburse this expense.",
+      },
+      candidate: { allocationIds: [allocation.id], transactionId: transaction.id },
+      operation: "answer_question" as const,
+      sourceRefs: [
+        {
+          accountId: transaction.accountId,
+          provider: "local" as const,
+          remoteId: transaction.id,
+          revision: transaction.updatedAt.toISOString(),
+          sourceType: "finance_transaction" as const,
+        },
+      ],
+    };
+    const reimbursementDraft = await actions.prepareMaintenanceCandidateDraft(
+      "reimbursement",
+      reimbursementInput,
+      ownerId,
+    );
+    expect(reimbursementDraft).toMatchObject({
+      actionKind: "reimbursement",
+      disposition: "prepared",
+    });
+    if (reimbursementDraft.disposition !== "prepared")
+      throw new Error("Expected reimbursement question to prepare.");
+    expect(reimbursementDraft.privatePayload.input).toMatchObject({
+      candidate: reimbursementInput.candidate,
+      operation: "answer_question",
+    });
+    expect(reimbursementDraft.fingerprint).toBe(
+      financeCandidateActionFingerprint(
+        reimbursementDraft.actionKind,
+        reimbursementDraft.privatePayload.input,
+      ),
+    );
   });
 
   it("queues one bounded maintenance review without semantic writes and retains all private fingerprints", async () => {

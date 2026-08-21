@@ -44,6 +44,7 @@ import {
   financeGuidedPreferencesSchema,
   financeMaintenanceCandidateItemDraftSchema,
   financeMaintenanceCandidateItemSchema,
+  financeMaintenanceCandidatePageSchema,
   financeMaintenanceCandidateSchema,
   financeMaintenanceResultSchema,
   financeProviderItemHealthSchema,
@@ -460,6 +461,79 @@ describe("finance maintenance candidates", () => {
       recurringCommittedOutflow: 0,
       workItems: 0,
     });
+  });
+
+  it("keeps private candidate operations complete while public pages exclude them", () => {
+    const preparedBudget = financeMaintenanceCandidateItemDraftSchema.parse({
+      actionKind: "budget_plan",
+      assumptions: [],
+      disposition: "prepared",
+      evidence: { confidence: 1, rationale: "The selected account is owned." },
+      expectedRevision: start,
+      fingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      privatePayload: {
+        actionKind: "budget_plan",
+        input: {
+          acknowledgeOverAllocation: false,
+          allocations: [{ categoryId: id, limit: 50 }],
+          assumptions: [],
+          goalIds: [],
+          month: "2026-08",
+          payAccountId: accountId,
+          rationale: "Use the selected account for budget recovery.",
+          replace: true,
+          scenarioFingerprint: null,
+        },
+      },
+      safeChanges: [],
+      sourceRefs: [],
+    });
+    if (preparedBudget.disposition !== "prepared")
+      throw new Error("Expected prepared budget draft.");
+    expect(preparedBudget.privatePayload.input).toHaveProperty("payAccountId", accountId);
+    expect(
+      financeMaintenanceCandidatePageSchema.safeParse({
+        candidate: financeMaintenanceCandidateSchema.parse({
+          id,
+          userId: id,
+          runId: accountId,
+          state: "ready_for_challenge",
+          revision: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          projection: {
+            grossCashSpending: 0,
+            personalSpending: 0,
+            questions: 0,
+            reimbursementsOutstanding: 0,
+          },
+          createdAt: start,
+          updatedAt: end,
+        }),
+        items: [
+          {
+            id,
+            candidateId: accountId,
+            ordinal: 0,
+            actionKind: "budget_plan",
+            disposition: "prepared",
+            expectedRevision: start,
+            fingerprint: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            safeChanges: [],
+            sourceRefs: [],
+            evidence: {},
+            createdAt: start,
+            updatedAt: end,
+          },
+        ],
+        nextCursor: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      financeMaintenanceCandidatePageSchema.safeParse({
+        candidate: { id },
+        items: [{ privatePayload: {} }],
+        nextCursor: null,
+      }).success,
+    ).toBe(false);
   });
 });
 

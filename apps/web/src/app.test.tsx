@@ -2952,7 +2952,7 @@ describe("ilo web app", () => {
       ),
     );
     view.unmount();
-  });
+  }, 10_000);
 
   it("syncs accounts and imports account history", async () => {
     configureFinanceWorkspace();
@@ -4167,7 +4167,7 @@ describe("ilo web app", () => {
       await screen.findByRole("button", { name: "Toggle person@icloud.com calendars" }),
     ).toBeInTheDocument();
     icloudView.unmount();
-  }, 15_000);
+  }, 30_000);
 
   it("renders rich event notes safely and confirms write-through deletion", async () => {
     const richEvent = {

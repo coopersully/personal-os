@@ -127,6 +127,9 @@ describe.sequential("Finance ledger challenge", () => {
   it("pages the complete rubric and resumes the same run after an exact submission", async () => {
     const setup = await fixture();
     const prepared = await setup.challenge.prepare(setup.owner.id, setup.run.id, setup.ready.id);
+    await expect(
+      setup.challenge.prepare(setup.owner.id, setup.run.id, setup.ready.id),
+    ).resolves.toEqual(prepared);
     const page = await setup.challenge.getPage(setup.owner.id, prepared.id);
     expect(page.checks).toEqual(financeLedgerChallengeChecks);
     expect(page.items.map((item) => item.id)).toEqual([setup.item.id]);
@@ -194,5 +197,154 @@ describe.sequential("Finance ledger challenge", () => {
         setup.context,
       ),
     ).rejects.toBeDefined();
+  });
+
+  it("rejects foreign, stale, duplicate, and non-agent challenge submissions", async () => {
+    const missing = await fixture();
+    await expect(
+      missing.challenge.getPage(missing.owner.id, crypto.randomUUID()),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      missing.challenge.submit(
+        {
+          candidateRevision: missing.ready.revision,
+          challengeId: crypto.randomUUID(),
+          checked: [...financeLedgerChallengeChecks],
+          findings: [],
+          reviewedItemIds: [missing.item.id],
+          rubricVersion: "finance-ledger-challenge-v1",
+        },
+        {
+          principal: {
+            actorId: missing.owner.id,
+            actorType: "user",
+            scopes: new Set(),
+            userId: missing.owner.id,
+          },
+          requestId: "challenge-user-submit",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "forbidden" });
+
+    const notFound = await fixture();
+    await expect(
+      notFound.challenge.submit(
+        {
+          candidateRevision: notFound.ready.revision,
+          challengeId: crypto.randomUUID(),
+          checked: [...financeLedgerChallengeChecks],
+          findings: [],
+          reviewedItemIds: [notFound.item.id],
+          rubricVersion: "finance-ledger-challenge-v1",
+        },
+        notFound.context,
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    const duplicate = await fixture();
+    const duplicateChallenge = await duplicate.challenge.prepare(
+      duplicate.owner.id,
+      duplicate.run.id,
+      duplicate.ready.id,
+    );
+    await expect(
+      duplicate.challenge.submit(
+        {
+          candidateRevision: duplicate.ready.revision,
+          challengeId: duplicateChallenge.id,
+          checked: [...financeLedgerChallengeChecks, financeLedgerChallengeChecks[0]],
+          findings: [],
+          reviewedItemIds: [duplicate.item.id, duplicate.item.id],
+          rubricVersion: "finance-ledger-challenge-v1",
+        },
+        duplicate.context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+
+    const stale = await fixture();
+    const staleChallenge = await stale.challenge.prepare(
+      stale.owner.id,
+      stale.run.id,
+      stale.ready.id,
+    );
+    await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ state: "superseded" })
+      .where(eq(financeMaintenanceCandidates.id, stale.ready.id));
+    await expect(
+      stale.challenge.submit(
+        {
+          candidateRevision: stale.ready.revision,
+          challengeId: staleChallenge.id,
+          checked: [...financeLedgerChallengeChecks],
+          findings: [],
+          reviewedItemIds: [stale.item.id],
+          rubricVersion: "finance-ledger-challenge-v1",
+        },
+        stale.context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("applies bounded remove, replacement, and question findings to the challenged packet", async () => {
+    const cases = [
+      {
+        disposition: "removed",
+        kind: "correction" as const,
+        resolution: { type: "remove" as const },
+      },
+      {
+        disposition: "prepared",
+        kind: "correction" as const,
+        resolution: {
+          actionKind: "alert" as const,
+          input: { operation: "refresh" },
+          type: "replace" as const,
+        },
+      },
+      {
+        disposition: "question",
+        kind: "question" as const,
+        resolution: {
+          choices: ["Keep", "Remove"],
+          prompt: "Should this alert refresh remain in the maintenance packet?",
+          type: "question" as const,
+          why: "The evidence is intentionally ambiguous for this challenge fixture.",
+        },
+      },
+    ];
+    for (const itemCase of cases) {
+      const setup = await fixture();
+      const prepared = await setup.challenge.prepare(setup.owner.id, setup.run.id, setup.ready.id);
+      await expect(
+        setup.challenge.submit(
+          {
+            candidateRevision: setup.ready.revision,
+            challengeId: prepared.id,
+            checked: [...financeLedgerChallengeChecks],
+            findings: [
+              {
+                candidateItemId: setup.item.id,
+                evidence: "The packet evidence supports this bounded challenge disposition.",
+                kind: itemCase.kind,
+                rationale: "Exercise the durable semantic challenge resolution.",
+                resolution: itemCase.resolution,
+                severity: itemCase.kind === "question" ? "warning" : "info",
+                sourceRefs: [],
+              },
+            ],
+            reviewedItemIds: [setup.item.id],
+            rubricVersion: "finance-ledger-challenge-v1",
+          },
+          setup.context,
+        ),
+      ).resolves.toMatchObject({ state: "submitted" });
+      await expect(
+        database.db
+          .select({ disposition: financeMaintenanceCandidateItems.disposition })
+          .from(financeMaintenanceCandidateItems)
+          .where(eq(financeMaintenanceCandidateItems.id, setup.item.id)),
+      ).resolves.toEqual([{ disposition: itemCase.disposition }]);
+    }
   });
 });

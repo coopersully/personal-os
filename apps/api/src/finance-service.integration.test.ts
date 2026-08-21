@@ -5870,6 +5870,43 @@ describe.sequential("finance service", () => {
         sortDirection: "desc",
       }),
     ).rejects.toThrow("does not match this sort");
+    for (const sortBy of ["date", "merchant"] as const) {
+      for (const sortDirection of ["asc", "desc"] as const) {
+        const page = await service.listTransactions(plaidOnlyUser.id, {
+          accountId: plaidAccount.id,
+          from: "2026-01-01",
+          limit: 1,
+          pending: false,
+          review: "resolved",
+          sortBy,
+          sortDirection,
+          to: "2026-12-31",
+        });
+        expect(page.items).toHaveLength(1);
+        if (page.nextCursor) {
+          await expect(
+            service.listTransactions(plaidOnlyUser.id, {
+              accountId: plaidAccount.id,
+              cursor: page.nextCursor,
+              from: "2026-01-01",
+              limit: 1,
+              pending: false,
+              review: "resolved",
+              sortBy,
+              sortDirection,
+              to: "2026-12-31",
+            }),
+          ).resolves.toEqual(expect.objectContaining({ items: expect.any(Array) }));
+        }
+      }
+    }
+    await expect(
+      service.listTransactions(plaidOnlyUser.id, {
+        limit: 200,
+        pending: true,
+        review: "needs_review",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ items: expect.any(Array) }));
     const manual = await service.createAccount(
       { balance: null, institution: "Cash", name: "Emergency", provider: "manual" },
       context,

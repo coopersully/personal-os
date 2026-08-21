@@ -166,4 +166,121 @@ describe.sequential("Finance period review service", () => {
         .where(eq(financePeriodReviews.runId, run.id)),
     ).resolves.toHaveLength(1);
   });
+
+  it("keeps missing, stale, and incomplete close packets unpublished", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Incomplete period owner",
+        email: `incomplete-period-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Incomplete period owner was not created.");
+    const rulebookVersion = `sha256:${"d".repeat(64)}`;
+    const observed = {
+      asOf: now.toISOString(),
+      details: {
+        activeGoals: [],
+        cashFlow: { net: null, projectedLowestBalance: null },
+        closeReadiness: {
+          missingProvenance: 1,
+          possibleDuplicates: 0,
+          ready: false,
+          reconciledThrough: null,
+          unansweredExceptions: 1,
+          uncategorized: 1,
+          unmatchedTransfers: 0,
+        },
+        evidence: { cutoff: null, current: true },
+        income: { monthly: null },
+        questions: [],
+        reimbursements: {
+          anomalies: 0,
+          expected: 0,
+          needsInput: 0,
+          open: 0,
+          overdue: 0,
+          outstanding: 0,
+          received: 0,
+          unresolved: 0,
+          unmatchedCredits: 0,
+        },
+        rulebookVersion,
+        wealth: { cash: null, debt: null, netWorth: null },
+      },
+      freshness: { blockers: [], state: "current" },
+    } as unknown as FinanceStatus;
+    const service = createFinancePeriodReviewService({
+      db: database.db,
+      now: () => now,
+      status: { getFinanceStatus: async () => observed },
+    });
+    await expect(service.getLatest(owner.id)).resolves.toBeNull();
+    await expect(service.getOwned(owner.id, crypto.randomUUID())).rejects.toMatchObject({
+      code: "not_found",
+    });
+    await expect(service.createForRun(owner.id, crypto.randomUUID())).rejects.toMatchObject({
+      code: "not_found",
+    });
+
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        domain: "finances",
+        rulebookVersion,
+        scope: { entityType: "finance_account", id: crypto.randomUUID(), type: "target" },
+        status: "queued",
+        userId: owner.id,
+      })
+      .returning();
+    if (!run) throw new Error("Incomplete period run was not created.");
+    await expect(service.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({
+        projection: {
+          budgetActual: 0,
+          budgetTotal: 0,
+          budgetVariance: 0,
+          grossCashSpending: 0,
+          matchedReimbursementIncome: 0,
+          monthlyCapacity: null,
+          personalSpending: 0,
+          plannedIncome: 0,
+          profileExpectedNetIncome: null,
+          questions: 0,
+          recurringCommittedOutflow: 0,
+          reimbursementsOutstanding: 0,
+          workItems: 0,
+        },
+        revision: `sha256:${"e".repeat(64)}`,
+        runId: run.id,
+        state: "committed",
+        userId: owner.id,
+      })
+      .returning();
+    if (!candidate) throw new Error("Incomplete period candidate was not created.");
+    await expect(service.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+
+    const staleService = createFinancePeriodReviewService({
+      db: database.db,
+      now: () => now,
+      status: {
+        getFinanceStatus: async () => ({
+          ...observed,
+          freshness: { blockers: ["provider_sync"], state: "stale" },
+        }),
+      },
+    });
+    await expect(staleService.createForRun(owner.id, run.id)).rejects.toMatchObject({
+      code: "conflict",
+    });
+  });
 });

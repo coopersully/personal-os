@@ -199,6 +199,9 @@ type Options = {
   finances: FinanceMaintenanceOperations;
   maintenance: WorkspaceMaintenanceService;
   now: () => Date;
+  periodReviews?: {
+    createForRun: (userId: string, runId: string) => Promise<{ id: string; status: string }>;
+  };
   status: FinanceStatusReader;
 };
 
@@ -407,6 +410,7 @@ export function createFinanceMaintenanceService({
   finances,
   maintenance,
   now,
+  periodReviews,
   status,
 }: Options) {
   async function currentStatus(userId: string, scope: MaintenanceScope) {
@@ -542,10 +546,15 @@ export function createFinanceMaintenanceService({
           completed.add("verify");
         }
         if (!completed.has("period_review")) {
+          const periodReview = periodReviews
+            ? await periodReviews.createForRun(run.userId, runId)
+            : null;
           await maintenance.completeStep({
             claimId,
             idempotencyKey: `finances:${run.rulebookVersion}:period_review`,
-            result: { applicability: "not_shipped" },
+            result: periodReview
+              ? { id: periodReview.id, status: periodReview.status }
+              : { applicability: "not_shipped" },
             runId,
             step: "period_review",
           });

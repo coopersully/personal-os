@@ -33,6 +33,7 @@ import { z } from "zod";
 import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
 import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
+import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
 import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
@@ -55,6 +56,7 @@ type FinanceRouteOptions = {
   actions?: ReturnType<typeof createFinanceActionService>;
   financeChallenges?: FinanceChallengeService;
   financeMaintenance: FinanceMaintenanceService;
+  financePeriodReviews?: FinancePeriodReviewService;
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
@@ -66,6 +68,7 @@ export function registerFinanceRoutes({
   actions,
   financeChallenges,
   financeMaintenance,
+  financePeriodReviews,
   financeStatus,
   finances,
   mutationContext,
@@ -159,6 +162,15 @@ export function registerFinanceRoutes({
       ),
     }),
   );
+  app.get("/v1/finances/period-reviews/:id", async (context) => {
+    if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
+    return context.json({
+      review: await financePeriodReviews.getOwned(
+        context.get("principal").userId,
+        idSchema.parse(context.req.param("id")),
+      ),
+    });
+  });
   app.post("/v1/finances/scenarios/compare", async (context) =>
     context.json({
       scenario: compareFinanceScenarios(await parseBody(context, financeScenarioInputSchema)),

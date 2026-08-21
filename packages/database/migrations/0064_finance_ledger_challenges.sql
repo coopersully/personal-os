@@ -41,9 +41,7 @@ ALTER TABLE "finance_ledger_challenge_findings" ADD CONSTRAINT "finance_ledger_c
 --> statement-breakpoint
 ALTER TABLE "finance_ledger_challenge_findings" ADD CONSTRAINT "finance_ledger_challenge_findings_candidate_item_id_finance_maintenance_candidate_items_id_fk" FOREIGN KEY ("candidate_item_id") REFERENCES "public"."finance_maintenance_candidate_items"("id") ON DELETE set null ON UPDATE no action;
 --> statement-breakpoint
-CREATE UNIQUE INDEX "finance_ledger_challenges_run_idx" ON "finance_ledger_challenges" USING btree ("run_id");
---> statement-breakpoint
-CREATE UNIQUE INDEX "finance_ledger_challenges_candidate_idx" ON "finance_ledger_challenges" USING btree ("candidate_id");
+CREATE UNIQUE INDEX "finance_ledger_challenges_run_candidate_idx" ON "finance_ledger_challenges" USING btree ("run_id", "candidate_id");
 --> statement-breakpoint
 CREATE INDEX "finance_ledger_challenges_user_state_idx" ON "finance_ledger_challenges" USING btree ("user_id", "state", "updated_at");
 --> statement-breakpoint

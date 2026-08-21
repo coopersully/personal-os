@@ -44,6 +44,7 @@ import {
   type AnyPgColumn,
   boolean,
   check,
+  date,
   foreignKey,
   index,
   integer,
@@ -341,8 +342,7 @@ export const financeLedgerChallenges = pgTable(
       "finance_ledger_challenges_state_check",
       sql`${table.state} IN ('prepared', 'submitted', 'resolved')`,
     ),
-    uniqueIndex("finance_ledger_challenges_run_idx").on(table.runId),
-    uniqueIndex("finance_ledger_challenges_candidate_idx").on(table.candidateId),
+    uniqueIndex("finance_ledger_challenges_run_candidate_idx").on(table.runId, table.candidateId),
     index("finance_ledger_challenges_user_state_idx").on(
       table.userId,
       table.state,
@@ -380,6 +380,35 @@ export const financeLedgerChallengeFindings = pgTable(
       sql`${table.severity} IN ('info', 'warning', 'blocker')`,
     ),
     index("finance_ledger_challenge_findings_challenge_idx").on(table.challengeId, table.createdAt),
+  ],
+);
+
+export const financePeriodReviews = pgTable(
+  "finance_period_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    runId: uuid("run_id")
+      .notNull()
+      .references(() => workspaceMaintenanceRuns.id, { onDelete: "cascade" }),
+    periodStart: date("period_start").notNull(),
+    periodEnd: date("period_end").notNull(),
+    cutoff: timestamp("cutoff", { withTimezone: true }).notNull(),
+    status: text("status").notNull(),
+    report: jsonb("report").$type<Record<string, unknown>>().notNull(),
+    sourceIds: jsonb("source_ids").$type<string[]>().notNull().default([]),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    check("finance_period_reviews_period_check", sql`${table.periodStart} <= ${table.periodEnd}`),
+    check(
+      "finance_period_reviews_status_check",
+      sql`${table.status} IN ('completed', 'completed_with_questions')`,
+    ),
+    uniqueIndex("finance_period_reviews_run_idx").on(table.runId),
+    index("finance_period_reviews_user_created_idx").on(table.userId, table.createdAt),
   ],
 );
 

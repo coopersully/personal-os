@@ -136,6 +136,18 @@ export function registerFinanceTools(server: McpServer, api: PersonalOsApiClient
   );
 
   server.registerTool(
+    "get_finance_period_review",
+    {
+      annotations: readAnnotations,
+      description:
+        "Read one immutable Finance period review, including positions, income, gross and personal spending, reimbursements, budget variance, challenge coverage, exceptions, recommendations, and ongoing monitoring responsibility.",
+      inputSchema: z.object({ reviewId: id }).strict(),
+      title: "Get Finance period review",
+    },
+    async (input) => apiResult(() => api.getFinancePeriodReview(input.reviewId)),
+  );
+
+  server.registerTool(
     "get_finance_guided_setup",
     {
       annotations: readAnnotations,

@@ -570,6 +570,80 @@ export const financeLedgerChallengePageSchema = z
   .strict();
 export type FinanceLedgerChallengePage = z.infer<typeof financeLedgerChallengePageSchema>;
 
+const financePeriodReviewMoneySchema = z.number().finite().nullable();
+export const financePeriodReviewSchema = z
+  .object({
+    challenge: z
+      .object({
+        checked: z.array(financeLedgerChallengeCheckSchema),
+        findings: z.int().nonnegative(),
+        observations: z.int().nonnegative(),
+      })
+      .strict(),
+    closeReadiness: financeStatusDetailsSchema.shape.closeReadiness,
+    createdAt: isoDateTimeSchema,
+    cutoff: isoDateTimeSchema,
+    id: idSchema,
+    income: financePeriodReviewMoneySchema,
+    goalsAndDebt: z
+      .object({
+        activeGoals: z.int().nonnegative(),
+        debt: financePeriodReviewMoneySchema,
+        netWorth: financePeriodReviewMoneySchema,
+      })
+      .strict(),
+    monitoring: z
+      .object({
+        href: z.string().startsWith("/").max(2_000),
+        responsibility: z.string().trim().min(1).max(500),
+      })
+      .strict(),
+    period: z.object({ end: z.iso.date(), start: z.iso.date() }).strict(),
+    position: z
+      .object({
+        cashLowPoint: financePeriodReviewMoneySchema,
+        closing: financePeriodReviewMoneySchema,
+        opening: financePeriodReviewMoneySchema,
+      })
+      .strict(),
+    recommendations: z
+      .array(
+        z
+          .object({
+            assumptions: z.array(z.string().trim().min(1).max(500)).max(20),
+            disposition: z.enum(["monitor", "needs_input", "ready"]),
+            evidence: z.array(z.string().trim().min(1).max(500)).max(20),
+            recommendation: z.string().trim().min(1).max(1_000),
+            tradeoffs: z.array(z.string().trim().min(1).max(500)).max(20),
+          })
+          .strict(),
+      )
+      .max(25),
+    reimbursements: financeStatusDetailsSchema.shape.reimbursements,
+    runId: idSchema,
+    sourceIds: z.array(idSchema).max(10_000),
+    spending: z
+      .object({
+        budgetVariance: financePeriodReviewMoneySchema,
+        gross: z.number().finite().nonnegative(),
+        personal: z.number().finite().nonnegative(),
+        savings: financePeriodReviewMoneySchema,
+      })
+      .strict(),
+    status: z.enum(["completed", "completed_with_questions"]),
+    userId: idSchema,
+    work: z
+      .object({
+        approvals: z.int().nonnegative(),
+        exceptions: z.int().nonnegative(),
+        questions: z.int().nonnegative(),
+        rulesAndActions: z.int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+export type FinancePeriodReview = z.infer<typeof financePeriodReviewSchema>;
+
 export const financeMaintenanceResultSchema = z.object({
   applied: z.object({
     categorizations: z.int().nonnegative(),

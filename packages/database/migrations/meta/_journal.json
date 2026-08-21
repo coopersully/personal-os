@@ -456,6 +456,13 @@
       "when": 1786990000000,
       "tag": "0064_finance_ledger_challenges",
       "breakpoints": true
+    },
+    {
+      "idx": 65,
+      "version": "7",
+      "when": 1786993600000,
+      "tag": "0065_finance_period_reviews",
+      "breakpoints": true
     }
   ]
 }

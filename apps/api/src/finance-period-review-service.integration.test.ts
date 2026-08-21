@@ -1,0 +1,169 @@
+import { resolve } from "node:path";
+import {
+  createDatabaseClient,
+  financeLedgerChallenges,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
+  financePeriodReviews,
+  migrateDatabase,
+  users,
+  workspaceMaintenanceRuns,
+} from "@personal-os/database";
+import { type FinanceStatus, financeLedgerChallengeChecks } from "@personal-os/domain";
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { eq } from "drizzle-orm";
+import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
+
+const now = new Date("2026-08-21T12:00:00.000Z");
+
+describe.sequential("Finance period review service", () => {
+  let container: StartedPostgreSqlContainer;
+  let database: ReturnType<typeof createDatabaseClient>;
+
+  beforeAll(async () => {
+    container = await new PostgreSqlContainer("postgres:17.5-alpine")
+      .withDatabase("personal_os")
+      .withUsername("personal_os")
+      .withPassword("personal_os")
+      .start();
+    database = createDatabaseClient(container.getConnectionUri());
+    await migrateDatabase(database.db, resolve(process.cwd(), "packages/database/migrations"));
+  }, 120_000);
+
+  afterAll(async () => {
+    await database.close();
+    await container.stop();
+  });
+
+  it("publishes one reproducible review from a committed challenged candidate", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Period review owner",
+        email: `period-review-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Period review owner was not created.");
+    const rulebookVersion = `sha256:${"a".repeat(64)}`;
+    const [run] = await database.db
+      .insert(workspaceMaintenanceRuns)
+      .values({
+        domain: "finances",
+        rulebookVersion,
+        scope: { end: "2026-08-31", start: "2026-08-01", type: "window" },
+        status: "queued",
+        userId: owner.id,
+      })
+      .returning();
+    if (!run) throw new Error("Period review run was not created.");
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({
+        projection: {
+          budgetActual: 200,
+          budgetTotal: 250,
+          budgetVariance: -50,
+          grossCashSpending: 310,
+          matchedReimbursementIncome: 220,
+          monthlyCapacity: 1_000,
+          personalSpending: 90,
+          plannedIncome: 2_000,
+          profileExpectedNetIncome: 2_000,
+          questions: 0,
+          recurringCommittedOutflow: 1_000,
+          reimbursementsOutstanding: 0,
+          workItems: 1,
+        },
+        revision: `sha256:${"b".repeat(64)}`,
+        runId: run.id,
+        state: "committed",
+        userId: owner.id,
+      })
+      .returning();
+    if (!candidate) throw new Error("Period review candidate was not created.");
+    const [item] = await database.db
+      .insert(financeMaintenanceCandidateItems)
+      .values({
+        actionKind: "alert",
+        candidateId: candidate.id,
+        disposition: "committed",
+        evidence: {},
+        fingerprint: `sha256:${"c".repeat(64)}`,
+        ordinal: 0,
+        privatePayload: { actionKind: "alert", input: { operation: "refresh" } },
+      })
+      .returning();
+    if (!item) throw new Error("Period review item was not created.");
+    await database.db.insert(financeLedgerChallenges).values({
+      candidateId: candidate.id,
+      candidateRevision: candidate.revision,
+      coverage: { checked: financeLedgerChallengeChecks, reviewedItemIds: [item.id] },
+      cutoff: now,
+      rubricVersion: "finance-ledger-challenge-v1",
+      runId: run.id,
+      state: "resolved",
+      submittedAt: now,
+      submittingAgentId: "connected-agent",
+      userId: owner.id,
+    });
+    const observed = {
+      asOf: now.toISOString(),
+      details: {
+        activeGoals: [],
+        cashFlow: { net: 500, projectedLowestBalance: 1_250 },
+        closeReadiness: {
+          missingProvenance: 0,
+          possibleDuplicates: 0,
+          ready: true,
+          reconciledThrough: "2026-08-21",
+          unansweredExceptions: 0,
+          uncategorized: 0,
+          unmatchedTransfers: 0,
+        },
+        evidence: { cutoff: now.toISOString(), current: true },
+        income: { monthly: 2_000 },
+        reimbursements: {
+          anomalies: 0,
+          expected: 0,
+          needsInput: 0,
+          open: 0,
+          overdue: 0,
+          outstanding: 0,
+          received: 1,
+          unresolved: 0,
+          unmatchedCredits: 0,
+        },
+        questions: [],
+        rulebookVersion,
+        wealth: { cash: 3_000, debt: 0, netWorth: 3_000 },
+      },
+      freshness: { blockers: [], state: "current" },
+    } as unknown as FinanceStatus;
+    const service = createFinancePeriodReviewService({
+      db: database.db,
+      now: () => now,
+      status: { getFinanceStatus: async () => observed },
+    });
+    const first = await service.createForRun(owner.id, run.id);
+    const replay = await service.createForRun(owner.id, run.id);
+    expect(replay).toEqual(first);
+    expect(first).toMatchObject({
+      challenge: { checked: financeLedgerChallengeChecks, findings: 0 },
+      period: { end: "2026-08-31", start: "2026-08-01" },
+      position: { closing: 3_000, opening: 2_500 },
+      spending: { budgetVariance: -50, gross: 310, personal: 90, savings: 1_910 },
+      status: "completed",
+      work: { questions: 0, rulesAndActions: 1 },
+    });
+    await expect(service.getOwned(owner.id, first.id)).resolves.toEqual(first);
+    await expect(service.getLatest(owner.id)).resolves.toEqual(first);
+    await expect(
+      database.db
+        .select({ id: financePeriodReviews.id })
+        .from(financePeriodReviews)
+        .where(eq(financePeriodReviews.runId, run.id)),
+    ).resolves.toHaveLength(1);
+  });
+});

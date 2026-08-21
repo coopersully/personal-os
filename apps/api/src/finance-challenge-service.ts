@@ -16,7 +16,7 @@ import {
   type SubmitFinanceLedgerChallengeInput,
   submitFinanceLedgerChallengeInputSchema,
 } from "@personal-os/domain";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { AppError } from "./errors.js";
 import { stableFinanceActionInput } from "./finance-action-identity.js";
 import type { createFinanceActionService, SupportedActionKind } from "./finance-action-service.js";
@@ -344,6 +344,7 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
         const [updatedChallenge] = await tx
           .update(financeLedgerChallenges)
           .set({
+            candidateRevision: snapshot.revision,
             coverage: {
               checked: [...new Set(input.checked)].toSorted(),
               reviewedItemIds: [...new Set(input.reviewedItemIds)].toSorted(),
@@ -395,10 +396,15 @@ export function createFinanceChallengeService({ actions, db, finances, now }: Op
         .select()
         .from(financeLedgerChallenges)
         .where(
-          and(eq(financeLedgerChallenges.runId, runId), eq(financeLedgerChallenges.userId, userId)),
+          and(
+            eq(financeLedgerChallenges.runId, runId),
+            eq(financeLedgerChallenges.userId, userId),
+            eq(financeLedgerChallenges.state, "submitted"),
+          ),
         )
+        .orderBy(desc(financeLedgerChallenges.createdAt), desc(financeLedgerChallenges.id))
         .limit(1);
-      if (challenge?.state !== "submitted")
+      if (!challenge)
         throw new AppError("conflict", "The Finance challenge has not been submitted.");
       const items = await db
         .select({ disposition: financeMaintenanceCandidateItems.disposition })

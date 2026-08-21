@@ -9,6 +9,7 @@ import {
   financeBudgets,
   financeCategoryRules,
   financeIncomeStreams,
+  financePeriodReviews,
   financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
@@ -261,6 +262,16 @@ export function createFinanceStatusService({ db, now }: Options) {
             .from(financeProviderItems)
             .where(eq(financeProviderItems.userId, userId))
             .orderBy(financeProviderItems.id);
+          const [latestPeriodReview] = await tx
+            .select({
+              completedAt: financePeriodReviews.createdAt,
+              id: financePeriodReviews.id,
+              status: financePeriodReviews.status,
+            })
+            .from(financePeriodReviews)
+            .where(eq(financePeriodReviews.userId, userId))
+            .orderBy(desc(financePeriodReviews.createdAt), desc(financePeriodReviews.id))
+            .limit(1);
           const budgets = await tx
             .select()
             .from(financeBudgets)
@@ -1066,8 +1077,13 @@ export function createFinanceStatusService({ db, now }: Options) {
                 forecast: evidenceCurrent ? forecast : null,
                 spending: evidenceCurrent ? spending : null,
               },
-              // Period reviews are durable Task 8 records, not maintenance-run projections.
-              latestReview: null,
+              latestReview: latestPeriodReview
+                ? {
+                    completedAt: latestPeriodReview.completedAt.toISOString(),
+                    id: latestPeriodReview.id,
+                    status: latestPeriodReview.status,
+                  }
+                : null,
               missingFacts,
               plan: {
                 budgetVariance:

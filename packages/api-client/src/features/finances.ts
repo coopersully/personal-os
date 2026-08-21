@@ -29,6 +29,7 @@ import type {
   FinanceLedgerHealth,
   FinanceMerchant,
   FinanceOverview,
+  FinancePeriodReview,
   FinanceProfile,
   FinanceQuestion,
   FinanceRecurringObligation,
@@ -61,6 +62,7 @@ import type {
 import {
   financeLedgerChallengePageSchema,
   financeLedgerChallengeSchema,
+  financePeriodReviewSchema,
   financeStatusSchema,
   maintenanceRunSchema,
 } from "@personal-os/domain";
@@ -255,6 +257,12 @@ export function createFinanceApi(request: FinanceRequest) {
         { body: JSON.stringify(input), method: "POST" },
       );
       return financeLedgerChallengeSchema.parse(response.challenge);
+    },
+    async getFinancePeriodReview(id: string): Promise<FinancePeriodReview> {
+      const response = await request<{ review: unknown }>(
+        `/v1/finances/period-reviews/${encodeURIComponent(id)}`,
+      );
+      return financePeriodReviewSchema.parse(response.review);
     },
     async getFinanceOverviewForMonth(month: string): Promise<FinanceOverview> {
       const response = await request<{ overview: FinanceOverview }>(

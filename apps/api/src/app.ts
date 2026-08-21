@@ -45,6 +45,7 @@ import { AppError, errorResponse } from "./errors.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceChallengeService } from "./finance-challenge-service.js";
 import { createFinanceMaintenanceService } from "./finance-maintenance-service.js";
+import { createFinancePeriodReviewService } from "./finance-period-review-service.js";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService } from "./finance-service.js";
 import { createFinanceStatusService } from "./finance-status-service.js";
@@ -492,12 +493,18 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     finances,
     now,
   });
+  const financePeriodReviews = createFinancePeriodReviewService({
+    db: dependencies.db,
+    now,
+    status: financeStatus,
+  });
   const financeMaintenance = createFinanceMaintenanceService({
     actions: financeActions,
     challenge: financeChallenges,
     finances,
     maintenance,
     now,
+    periodReviews: financePeriodReviews,
     status: financeStatus,
   });
   const pinterest = createPinterestService({ db: dependencies.db, now });
@@ -1136,6 +1143,7 @@ export function createApp(dependencies: AppDependencies): PersonalOsApp {
     app,
     financeChallenges,
     financeMaintenance,
+    financePeriodReviews,
     financeStatus,
     finances,
     mutationContext,

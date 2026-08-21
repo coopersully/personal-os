@@ -186,6 +186,7 @@ export const iloToolCatalog = {
     policy: "approved_rule",
     stage: "commit",
   }),
+  get_finance_period_review: read("finances", ["finances:read"], "inspect", { ui: true }),
   get_finance_wealth_summary: read("finances", ["finances:read"]),
   get_finance_cashflow: read("finances", ["finances:read"]),
   get_finance_ledger_health: read("finances", ["finances:read"]),

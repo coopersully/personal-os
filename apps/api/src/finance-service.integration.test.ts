@@ -383,6 +383,8 @@ describe.sequential("finance service", () => {
       // Candidate storage depends on the maintenance-run migration omitted
       // by this legacy schema fixture.
       "0063_finance_maintenance_candidates",
+      "0064_finance_ledger_challenges",
+      "0065_finance_period_reviews",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(

@@ -277,12 +277,13 @@ compatibility alias only translates legacy categorization answers. Provider
 administration, account connection and import, ambiguous transfer confirmation,
 and action-review approval/dismissal remain human-only and unavailable to MCP.
 
-The signed-in categorization batch API predates this guided-setup work and
+The categorization batch API predates this guided-setup work and
 commits each decision independently. Its bounded workers and per-item results
 do not provide a durable batch or resume record if the process ends between
 decisions. A follow-up must add an idempotency key, persisted per-item state,
-query or resume support, and abort-aware scheduling. MCP does not expose this
-human-only apply endpoint.
+query or resume support, and abort-aware scheduling. MCP exposes it as
+`apply_finance_categorizations` with the same evidence and review boundary as
+other Finance actions.
 
 The shared `save_domain_profile` tool may save a Finance guidance draft with
 `finances:write`. It cannot activate that draft: activation is a signed-in

@@ -149,13 +149,13 @@ omits transaction amounts, merchants, notes, and rationales so an `audit:read`
 grant does not imply `finances:read`. Transfer confirmation uses the same
 transactional path.
 
-The pre-existing synchronous batch endpoint still has no durable batch entity:
+The synchronous categorization batch endpoint still has no durable batch entity:
 process loss or request abandonment can occur between individually committed
-decisions. This PR does not widen that risk—the route is now human-only,
-workers are bounded, and each returned decision is atomic—but durable
+decisions. Agent calls receive the same apply-or-review disposition as other
+semantic writes, workers are bounded, and each returned decision is atomic, but durable
 lost-response recovery remains a bounded follow-up. Only exact per-decision
 replays are idempotent today; the synchronous batch itself is not advertised as
-idempotent or exposed through MCP. Durable batch work should add a client
+idempotent. Durable batch work should add a client
 idempotency key, a `finance_categorization_batches` record, per-decision terminal
 state, an endpoint to query or resume unfinished work, and abort-aware scheduling
 with a process-loss integration test.

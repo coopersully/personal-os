@@ -326,7 +326,7 @@ describe.sequential("Finance Provider Item service", () => {
     await database.db
       .update(financeProviderItems)
       .set({
-        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimExpiresAt: new Date("2099-08-17T12:00:00.000Z"),
         syncClaimGeneration: 3,
         syncClaimId: claimId,
         syncClaimOwner: "destination-runtime",
@@ -397,7 +397,7 @@ describe.sequential("Finance Provider Item service", () => {
     await database.db
       .update(financeProviderItems)
       .set({
-        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimExpiresAt: new Date("2099-08-17T12:00:00.000Z"),
         syncClaimGeneration: 5,
         syncClaimId: foreignClaimId,
         syncClaimOwner: "foreign-runtime",
@@ -677,7 +677,7 @@ describe.sequential("Finance Provider Item service", () => {
     const [legacyAccount] = await insertLegacyGroup("legacy-active-claim", ["legacy-cursor"]);
     if (!legacyAccount) throw new Error("The actively claimed legacy account was not created.");
     const legacyClaimId = "12121212-1212-4212-8212-121212121212";
-    const legacyClaimExpiry = new Date("2026-08-17T12:00:00.000Z");
+    const legacyClaimExpiry = new Date("2099-08-17T12:00:00.000Z");
     await database.db
       .update(financeAccounts)
       .set({ syncClaimExpiresAt: legacyClaimExpiry, syncClaimId: legacyClaimId })
@@ -739,7 +739,7 @@ describe.sequential("Finance Provider Item service", () => {
       .update(financeProviderItems)
       .set({
         nextSyncAt: new Date("2026-08-17T12:00:00.000Z"),
-        syncClaimExpiresAt: new Date("2026-08-17T12:00:00.000Z"),
+        syncClaimExpiresAt: new Date("2099-08-17T12:00:00.000Z"),
         syncClaimGeneration: claimGeneration,
         syncClaimId: claimId,
         syncClaimOwner: "runtime-before-replay",

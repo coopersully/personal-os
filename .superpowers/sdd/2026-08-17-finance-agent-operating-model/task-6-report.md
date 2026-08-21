@@ -42,6 +42,12 @@
 - Drift supersedes the candidate before semantic application; successful settlement marks items/candidate committed and requeues the same maintenance run at `health_refresh`.
 - Human approval now recognizes `maintenance_turn` reviews, locks the candidate/run/items, validates the private candidate fingerprint set, applies each prepared item in the review transaction, terminalizes the review, and requeues the same run. Agents remain denied by the existing interactive-user approval guard.
 
+## Batch E settlement verification
+
+- Direct bypass settlement and `maintenance_turn` approval now use one executor-aware settlement helper. It locks candidate, run, and ordered items; validates every prepared item before any writer runs; then commits the batch and requeues the same run at `health_refresh`.
+- Bypass-off settlement reuses one bounded review (100 safe public changes) while retaining all private item fingerprints. A stale prepared item supersedes the candidate, supersedes its review, and requeues the same run at `prepare` without partial canonical writes.
+- Added migrated-Postgres coverage for 101-item public bounds, human-only approval/idempotency, bypass-on direct commit, unresolved questions, revision drift, and rollback/retry after an injected later audit failure using real categorization, profile, budget, and Task 3 writers.
+
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.
@@ -53,8 +59,8 @@
 
 ## Verification
 
-- `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts` — 18 passed.
-- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts` — 57 passed.
+- `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts` — 19 passed.
+- `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts` — 63 passed.
 - `pnpm exec vitest run packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 52 passed.
 - API, Domain, and Database typechecks passed.
 - Scoped Biome and `git diff --check` passed.

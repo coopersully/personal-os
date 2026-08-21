@@ -12,6 +12,8 @@ import {
   financeCategoryRules,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
   financeMerchants,
   financeProfiles,
   financeRecurringObligations,
@@ -22,6 +24,7 @@ import {
   goals,
   migrateDatabase,
   users,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import type { MaterialSourceReference } from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
@@ -30,6 +33,7 @@ import type { SupportedActionKind } from "./finance-action-service.js";
 import { createFinanceActionService } from "./finance-action-service.js";
 import { createFinanceService } from "./finance-service.js";
 import type { Principal } from "./types.js";
+import { createWorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
 
 const now = new Date("2026-08-17T12:00:00.000Z");
 
@@ -386,6 +390,519 @@ describe.sequential("finance action service", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+  });
+
+  async function createSettlementFixture(options: {
+    bypass: boolean;
+    includeQuestion?: boolean;
+    itemCount?: number;
+    label: string;
+  }) {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: options.label,
+        email: `settlement-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Settlement fixture user was not created.");
+    const ownerId = owner.id;
+    await database.db.insert(financeAutomationSettings).values({
+      reviewBypassEnabled: options.bypass,
+      userId: ownerId,
+    });
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const workspace = createWorkspaceMaintenanceService({ db: database.db, now: () => now });
+    const run = await workspace.createOrResume(
+      ownerId,
+      "finances",
+      { type: "all_outstanding" },
+      "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    );
+    const ownerContext = {
+      principal: user(ownerId),
+      requestId: `settlement-seed-${options.label}`,
+    };
+    const account = await finances.createAccount(
+      {
+        balance: 1_000,
+        institution: "Settlement Bank",
+        kind: "cash",
+        name: "Settlement checking",
+        provider: "manual",
+      },
+      ownerContext,
+    );
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: `Settlement groceries ${crypto.randomUUID()}`,
+        slug: `settlement-groceries-${crypto.randomUUID()}`,
+        userId: ownerId,
+      })
+      .returning();
+    if (!category) throw new Error("Settlement fixture category was not created.");
+    const count = options.itemCount ?? 3;
+    const createdTransactions = await Promise.all(
+      Array.from({ length: count }, (_, index) =>
+        finances.createTransaction(
+          {
+            accountId: account.id,
+            amount: 10 + index,
+            category: null,
+            categoryConfidence: null,
+            date: "2026-08-17",
+            direction: "expense",
+            merchant: `Settlement merchant ${index + 1}`,
+            notes: null,
+          },
+          ownerContext,
+        ),
+      ),
+    );
+    const [merchant] = await database.db
+      .insert(financeMerchants)
+      .values({
+        displayName: "Settlement merchant",
+        normalizedName: `settlement-merchant-${crypto.randomUUID()}`,
+        userId: ownerId,
+      })
+      .returning();
+    if (!merchant) throw new Error("Settlement fixture merchant was not created.");
+    await database.db
+      .update(financeTransactions)
+      .set({ merchantId: merchant.id, updatedAt: now })
+      .where(
+        inArray(
+          financeTransactions.id,
+          createdTransactions.map((item) => item.id),
+        ),
+      );
+    const transactions = await Promise.all(
+      createdTransactions.map(async (transaction) => {
+        const [current] = await database.db
+          .select()
+          .from(financeTransactions)
+          .where(eq(financeTransactions.id, transaction.id));
+        if (!current) throw new Error("Settlement fixture transaction was not refreshed.");
+        return current;
+      }),
+    );
+    const [firstTransaction] = transactions;
+    if (!firstTransaction) throw new Error("Settlement fixture has no transaction.");
+    await database.db.insert(financeClassificationDecisions).values(
+      Array.from({ length: 2 }, () => ({
+        categoryId: category.id,
+        categoryName: category.name,
+        confidence: 10_000,
+        merchantId: merchant.id,
+        outcome: "confirmed" as const,
+        rationale: "Two prior user confirmations support this merchant category.",
+        source: "user" as const,
+        transactionId: firstTransaction.id,
+        userId: ownerId,
+      })),
+    );
+    const categorizationInput = (transaction: (typeof transactions)[number]) => ({
+      decisions: [
+        {
+          categoryId: category.id,
+          confidence: 0.965,
+          expectedTransactionUpdatedAt: transaction.updatedAt.toISOString(),
+          learnMerchant: "never" as const,
+          rationale: "Deterministic settlement fixture evidence.",
+          transactionId: transaction.id,
+        },
+      ],
+    });
+    const drafts =
+      options.itemCount && options.itemCount > 3
+        ? await Promise.all(
+            transactions.map((transaction) =>
+              actions.prepareMaintenanceCandidateDraft(
+                "categorization",
+                categorizationInput(transaction),
+                ownerId,
+              ),
+            ),
+          )
+        : [
+            await actions.prepareMaintenanceCandidateDraft(
+              "categorization",
+              categorizationInput(firstTransaction),
+              ownerId,
+            ),
+            await actions.prepareMaintenanceCandidateDraft(
+              "profile",
+              {
+                effectiveDate: "2026-08-17",
+                employer: "Settlement employer",
+                payAccountId: account.id,
+              },
+              ownerId,
+            ),
+            await actions.prepareMaintenanceCandidateDraft(
+              "budget_plan",
+              {
+                allocations: [{ categoryId: category.id, limit: 75 }],
+                assumptions: [],
+                goalIds: [],
+                month: "2026-08",
+                rationale: "Settlement budget evidence.",
+                replace: true,
+                scenarioFingerprint: null,
+              },
+              ownerId,
+            ),
+          ];
+    if (options.includeQuestion) {
+      drafts.push(
+        await actions.prepareMaintenanceCandidateDraft(
+          "categorization",
+          { decisions: [] },
+          ownerId,
+        ),
+      );
+    }
+    const revision = `sha256:${"a".repeat(64)}`;
+    const [candidate] = await database.db
+      .insert(financeMaintenanceCandidates)
+      .values({
+        projection: {},
+        revision,
+        runId: run.id,
+        state: "ready_for_challenge",
+        userId: ownerId,
+      })
+      .returning();
+    if (!candidate) throw new Error("Settlement candidate was not created.");
+    await database.db.insert(financeMaintenanceCandidateItems).values(
+      drafts.map((draft, ordinal) => ({
+        ...draft,
+        candidateId: candidate.id,
+        ordinal,
+      })),
+    );
+    // Task 7 owns the challenge. Settlement tests deliberately begin after
+    // that boundary with a manually challenged, otherwise-real candidate.
+    const [challenged] = await database.db
+      .update(financeMaintenanceCandidates)
+      .set({ state: "challenged", updatedAt: now })
+      .where(eq(financeMaintenanceCandidates.id, candidate.id))
+      .returning();
+    if (!challenged) throw new Error("Settlement candidate was not challenged.");
+    return { actions, candidate: challenged, category, ownerId, run, transactions };
+  }
+
+  it("queues one bounded maintenance review without semantic writes and retains all private fingerprints", async () => {
+    // Removing the 100-row public projection cap or applying before human
+    // approval makes this persistence-level regression fail.
+    const fixture = await createSettlementFixture({
+      bypass: false,
+      itemCount: 101,
+      label: "Bounded settlement review",
+    });
+    const context = { principal: agent(fixture.ownerId), requestId: "settlement-review-queue" };
+    const first = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      context,
+    );
+    const second = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      context,
+    );
+    if (first.status !== "pending_review" || second.status !== "pending_review")
+      throw new Error("Expected the candidate to reuse its one pending review.");
+    expect(first).toMatchObject({ review: { actionKind: "maintenance_turn" } });
+    expect(second).toMatchObject({ review: { id: first.review.id } });
+    const items = await database.db
+      .select()
+      .from(financeMaintenanceCandidateItems)
+      .where(eq(financeMaintenanceCandidateItems.candidateId, fixture.candidate.id));
+    expect(items).toHaveLength(101);
+    expect(new Set(items.map((item) => item.fingerprint))).toHaveLength(101);
+    const reviews = await database.db
+      .select()
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.maintenanceRunId, fixture.run.id));
+    expect(reviews).toHaveLength(1);
+    expect(reviews[0]?.safeChanges).toHaveLength(100);
+    expect(
+      await database.db
+        .select({ categoryId: financeTransactions.categoryId })
+        .from(financeTransactions)
+        .where(
+          inArray(
+            financeTransactions.id,
+            fixture.transactions.map((item) => item.id),
+          ),
+        ),
+    ).toEqual(Array.from({ length: 101 }, () => ({ categoryId: null })));
+  });
+
+  it("commits a human-approved maintenance turn once and requeues the same run", async () => {
+    // A duplicate item loop, review terminalization omission, or wrong-run
+    // requeue makes one of these durable state assertions fail.
+    const fixture = await createSettlementFixture({ bypass: false, label: "Human settlement" });
+    const queued = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      { principal: agent(fixture.ownerId), requestId: "settlement-human-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a maintenance review.");
+    await expect(
+      fixture.actions.approve(queued.review.id, {
+        principal: agent(fixture.ownerId),
+        requestId: "settlement-agent-denied",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      fixture.actions.dismiss(queued.review.id, {
+        principal: agent(fixture.ownerId),
+        requestId: "settlement-agent-dismiss-denied",
+      }),
+    ).rejects.toMatchObject({ code: "forbidden" });
+    await expect(
+      fixture.actions.approve(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "settlement-human-approve",
+      }),
+    ).resolves.toMatchObject({
+      result: { candidateId: fixture.candidate.id, status: "committed" },
+    });
+    await expect(
+      fixture.actions.approve(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "settlement-human-repeat",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    await expect(
+      fixture.actions.settleFinanceMaintenanceCandidate(
+        fixture.candidate.id,
+        fixture.candidate.revision,
+        { principal: agent(fixture.ownerId), requestId: "settlement-repeat" },
+      ),
+    ).resolves.toMatchObject({ status: "committed" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "committed" }]);
+    await expect(
+      database.db
+        .select({ disposition: financeMaintenanceCandidateItems.disposition })
+        .from(financeMaintenanceCandidateItems)
+        .where(eq(financeMaintenanceCandidateItems.candidateId, fixture.candidate.id)),
+    ).resolves.toEqual([
+      { disposition: "committed" },
+      { disposition: "committed" },
+      { disposition: "committed" },
+    ]);
+    await expect(
+      database.db
+        .select({
+          checkpoint: workspaceMaintenanceRuns.checkpoint,
+          status: workspaceMaintenanceRuns.status,
+        })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.id, fixture.run.id)),
+    ).resolves.toEqual([
+      {
+        checkpoint: { candidateId: fixture.candidate.id, phase: "health_refresh" },
+        status: "queued",
+      },
+    ]);
+  });
+
+  it("commits the same real candidate directly when review bypass is enabled", async () => {
+    const fixture = await createSettlementFixture({ bypass: true, label: "Direct settlement" });
+    const [transaction] = fixture.transactions;
+    if (!transaction) throw new Error("Settlement fixture has no transaction.");
+    await expect(
+      fixture.actions.settleFinanceMaintenanceCandidate(
+        fixture.candidate.id,
+        fixture.candidate.revision,
+        {
+          principal: agent(fixture.ownerId),
+          requestId: "settlement-direct",
+        },
+      ),
+    ).resolves.toMatchObject({ status: "committed" });
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactions.categoryId })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ categoryId: fixture.category.id }]);
+    await expect(
+      database.db
+        .select({ id: financeAgentActionReviews.id })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.maintenanceRunId, fixture.run.id)),
+    ).resolves.toEqual([]);
+  });
+
+  it("blocks unresolved candidate questions without changing canonical Finance records", async () => {
+    const fixture = await createSettlementFixture({
+      bypass: true,
+      includeQuestion: true,
+      label: "Settlement question",
+    });
+    const [transaction] = fixture.transactions;
+    if (!transaction) throw new Error("Settlement fixture has no transaction.");
+    await expect(
+      fixture.actions.settleFinanceMaintenanceCandidate(
+        fixture.candidate.id,
+        fixture.candidate.revision,
+        {
+          principal: agent(fixture.ownerId),
+          requestId: "settlement-question",
+        },
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "challenged" }]);
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactions.categoryId })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ categoryId: null }]);
+  });
+
+  it("supersedes a drifted candidate and requeues its same run before any approval write", async () => {
+    // Revalidating and applying one item at a time would leave preceding
+    // writes behind when a later source revision drifts.
+    const fixture = await createSettlementFixture({ bypass: false, label: "Settlement drift" });
+    const [transaction] = fixture.transactions;
+    if (!transaction) throw new Error("Settlement fixture has no transaction.");
+    const queued = await fixture.actions.settleFinanceMaintenanceCandidate(
+      fixture.candidate.id,
+      fixture.candidate.revision,
+      { principal: agent(fixture.ownerId), requestId: "settlement-drift-queue" },
+    );
+    if (queued.status !== "pending_review") throw new Error("Expected a maintenance review.");
+    await database.db
+      .update(financeTransactions)
+      .set({ notes: "Changed after challenge", updatedAt: new Date("2026-08-17T12:01:00.000Z") })
+      .where(eq(financeTransactions.id, transaction.id));
+    await expect(
+      fixture.actions.approve(queued.review.id, {
+        principal: user(fixture.ownerId),
+        requestId: "settlement-drift-approval",
+      }),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "superseded" }]);
+    await expect(
+      database.db
+        .select({
+          checkpoint: workspaceMaintenanceRuns.checkpoint,
+          status: workspaceMaintenanceRuns.status,
+        })
+        .from(workspaceMaintenanceRuns)
+        .where(eq(workspaceMaintenanceRuns.id, fixture.run.id)),
+    ).resolves.toEqual([
+      {
+        checkpoint: {
+          candidateId: fixture.candidate.id,
+          phase: "prepare",
+          reason: "candidate_drift",
+        },
+        status: "queued",
+      },
+    ]);
+    await expect(
+      database.db
+        .select({ status: financeAgentActionReviews.status })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.id, queued.review.id)),
+    ).resolves.toEqual([{ status: "superseded" }]);
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactions.categoryId })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ categoryId: null }]);
+    await expect(
+      database.db
+        .select({ id: financeProfiles.id })
+        .from(financeProfiles)
+        .where(eq(financeProfiles.userId, fixture.ownerId)),
+    ).resolves.toEqual([]);
+  });
+
+  it("rolls back every candidate item when a later audit write fails and retries safely", async () => {
+    const fixture = await createSettlementFixture({ bypass: true, label: "Settlement rollback" });
+    const [transaction] = fixture.transactions;
+    if (!transaction) throw new Error("Settlement fixture has no transaction.");
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_second_settlement_audit() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.request_id = 'settlement-rollback' AND EXISTS (
+          SELECT 1 FROM audit_events WHERE request_id = NEW.request_id
+        ) THEN
+          RAISE EXCEPTION 'forced later settlement audit failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_second_settlement_audit
+      BEFORE INSERT ON audit_events
+      FOR EACH ROW EXECUTE FUNCTION fail_second_settlement_audit();
+    `);
+    try {
+      await expect(
+        fixture.actions.settleFinanceMaintenanceCandidate(
+          fixture.candidate.id,
+          fixture.candidate.revision,
+          {
+            principal: agent(fixture.ownerId),
+            requestId: "settlement-rollback",
+          },
+        ),
+      ).rejects.toThrow(/Failed query: insert into "audit_events"/);
+    } finally {
+      await database.pool.query("DROP TRIGGER fail_second_settlement_audit ON audit_events");
+      await database.pool.query("DROP FUNCTION fail_second_settlement_audit()");
+    }
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactions.categoryId })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, transaction.id)),
+    ).resolves.toEqual([{ categoryId: null }]);
+    await expect(
+      database.db
+        .select({ state: financeMaintenanceCandidates.state })
+        .from(financeMaintenanceCandidates)
+        .where(eq(financeMaintenanceCandidates.id, fixture.candidate.id)),
+    ).resolves.toEqual([{ state: "challenged" }]);
+    await expect(
+      fixture.actions.settleFinanceMaintenanceCandidate(
+        fixture.candidate.id,
+        fixture.candidate.revision,
+        {
+          principal: agent(fixture.ownerId),
+          requestId: "settlement-retry",
+        },
+      ),
+    ).resolves.toMatchObject({ status: "committed" });
   });
 
   it("queues prepared agent work when durable bypass is disabled, then applies the same action after it is enabled", async () => {

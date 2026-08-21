@@ -12,6 +12,8 @@ import {
   financeCategoryRules,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
   financeMerchants,
   financeProfiles,
   financeRecurringObligations,
@@ -20,6 +22,7 @@ import {
   financeTransactionAllocations,
   financeTransactions,
   goals,
+  workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import {
   applyFinanceCategorizationsInputSchema,
@@ -51,7 +54,7 @@ import {
   updateFinanceRecurringObligationInputSchema,
   updateFinanceTransactionInputSchema,
 } from "@personal-os/domain";
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
 import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
@@ -2706,6 +2709,162 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         privatePayload: { actionKind: result.actionKind, input: result.input },
         safeChanges: result.safeChanges,
         sourceRefs: result.sourceRefs,
+      });
+    },
+    async settleFinanceMaintenanceCandidate(
+      candidateId: string,
+      expectedRevision: string,
+      context: MutationContext,
+    ) {
+      return db.transaction(async (tx) => {
+        const [candidate] = await tx
+          .select()
+          .from(financeMaintenanceCandidates)
+          .where(
+            and(
+              eq(financeMaintenanceCandidates.id, candidateId),
+              eq(financeMaintenanceCandidates.userId, context.principal.userId),
+            ),
+          )
+          .for("update")
+          .limit(1);
+        if (!candidate)
+          throw new AppError("not_found", "The Finance maintenance candidate is not available.");
+        if (candidate.state === "committed") return { candidateId, status: "committed" as const };
+        if (candidate.state !== "challenged" || candidate.revision !== expectedRevision)
+          throw new AppError(
+            "conflict",
+            "The Finance maintenance candidate changed before settlement.",
+          );
+        const items = await tx
+          .select()
+          .from(financeMaintenanceCandidateItems)
+          .where(eq(financeMaintenanceCandidateItems.candidateId, candidate.id))
+          .orderBy(asc(financeMaintenanceCandidateItems.ordinal))
+          .for("update");
+        if (items.some((item) => item.disposition === "question"))
+          throw new AppError(
+            "conflict",
+            "Finance maintenance questions must be answered before settlement.",
+          );
+        const preparedItems = items.filter((item) => item.disposition === "prepared");
+        const safeChanges = preparedItems
+          .flatMap((item) => item.safeChanges as FinanceSafeChange[])
+          .slice(0, 100);
+        if (!(await readBypass(tx, context.principal.userId, true))) {
+          const fingerprint = `sha256:${createHash("sha256")
+            .update(
+              JSON.stringify({
+                candidateId,
+                expectedRevision,
+                items: preparedItems.map((item) => item.fingerprint),
+              }),
+            )
+            .digest("hex")}`;
+          const [created] = await tx
+            .insert(financeAgentActionReviews)
+            .values({
+              actionKind: "maintenance_turn",
+              expectedRevision,
+              fingerprint,
+              maintenanceRunId: candidate.runId,
+              privatePayload: {
+                candidateId,
+                expectedRevision,
+                itemFingerprints: preparedItems.map((item) => item.fingerprint),
+                runId: candidate.runId,
+              },
+              requestingAgentId: context.principal.actorId,
+              safeChanges,
+              semanticTargetKeys: [`finance-maintenance-candidate:${candidateId}`],
+              sourceRefs: preparedItems.flatMap((item) => item.sourceRefs).slice(0, 100),
+              userId: context.principal.userId,
+            })
+            .onConflictDoNothing()
+            .returning();
+          const review =
+            created ??
+            (
+              await tx
+                .select()
+                .from(financeAgentActionReviews)
+                .where(
+                  and(
+                    eq(financeAgentActionReviews.userId, context.principal.userId),
+                    eq(financeAgentActionReviews.fingerprint, fingerprint),
+                    eq(financeAgentActionReviews.status, "pending"),
+                  ),
+                )
+                .limit(1)
+            )[0];
+          if (!review) throw new Error("The Finance maintenance review could not be saved.");
+          await tx
+            .update(financeMaintenanceCandidates)
+            .set({ state: "awaiting_approval", updatedAt: now() })
+            .where(eq(financeMaintenanceCandidates.id, candidate.id));
+          return { review: reviewFromRow(review), status: "pending_review" as const };
+        }
+        await tx
+          .update(financeMaintenanceCandidates)
+          .set({ state: "committing", updatedAt: now() })
+          .where(eq(financeMaintenanceCandidates.id, candidate.id));
+        for (const item of preparedItems) {
+          const payload = item.privatePayload as {
+            actionKind?: string;
+            input?: Record<string, unknown>;
+          };
+          if (!payload.actionKind || !payload.input)
+            throw new AppError(
+              "conflict",
+              "A Finance maintenance item is missing its prepared action.",
+            );
+          const prepared = await prepare(
+            supportedActionKind(payload.actionKind),
+            payload.input,
+            context.principal.userId,
+            tx,
+            true,
+            context.principal.actorType,
+          );
+          if ("status" in prepared || `sha256:${prepared.fingerprint}` !== item.fingerprint) {
+            await tx
+              .update(financeMaintenanceCandidates)
+              .set({ state: "superseded", updatedAt: now() })
+              .where(eq(financeMaintenanceCandidates.id, candidate.id));
+            return { candidateId, status: "superseded" as const };
+          }
+          const current = await revalidate(
+            prepared,
+            context.principal.userId,
+            tx,
+            context.principal.actorType,
+          );
+          if ("status" in current) {
+            await tx
+              .update(financeMaintenanceCandidates)
+              .set({ state: "superseded", updatedAt: now() })
+              .where(eq(financeMaintenanceCandidates.id, candidate.id));
+            return { candidateId, status: "superseded" as const };
+          }
+          await applyPrepared(current, context, tx);
+          await tx
+            .update(financeMaintenanceCandidateItems)
+            .set({ disposition: "committed", updatedAt: now() })
+            .where(eq(financeMaintenanceCandidateItems.id, item.id));
+        }
+        await tx
+          .update(financeMaintenanceCandidates)
+          .set({ state: "committed", updatedAt: now() })
+          .where(eq(financeMaintenanceCandidates.id, candidate.id));
+        await tx
+          .update(workspaceMaintenanceRuns)
+          .set({
+            checkpoint: { candidateId, phase: "health_refresh" },
+            status: "queued",
+            updatedAt: now(),
+          })
+          .where(eq(workspaceMaintenanceRuns.id, candidate.runId));
+        return { candidateId, status: "committed" as const };
       });
     },
     async performDirect<T>(

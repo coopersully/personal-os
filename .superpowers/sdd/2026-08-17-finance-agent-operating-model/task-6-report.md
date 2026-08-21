@@ -36,6 +36,11 @@
 - The projection uses allocation/reimbursement helpers for gross cash, personal allocation shares, invalidated allocations, outstanding reimbursements, and scoped budget actual/total/variance. Candidate revisions include scope, source revisions, ordered fingerprints, and projection assumptions.
 - Prepared reimbursement credit matches now reduce outstanding reimbursement amounts in the overlay, while prepared budget plans replace or extend scoped budget limits without changing canonical budget rows. Prepared transaction category updates affect only projected budget classification.
 
+## Batch D settlement foundation
+
+- Added `settleFinanceMaintenanceCandidate(candidateId, expectedRevision, context)`. It locks the owned challenged candidate and ordered items, rejects unresolved questions, fences exact revisions, queues one bounded `maintenance_turn` review while bypass is off, and applies revalidated prepared actions transactionally when bypass is enabled.
+- Drift supersedes the candidate before semantic application; successful settlement marks items/candidate committed and requeues the same maintenance run at `health_refresh`.
+
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.

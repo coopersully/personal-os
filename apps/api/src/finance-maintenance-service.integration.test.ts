@@ -1466,10 +1466,15 @@ describe.sequential("Finance maintenance service", () => {
     expect(candidates[0]).toMatchObject({ state: "ready_for_challenge", userId: ownerId });
     const candidate = candidates[0];
     if (!candidate) throw new Error("Candidate fixture was not saved.");
-    await expect(finances.getMaintenanceCandidate(ownerId, candidate.id)).resolves.toMatchObject({
+    const publicCandidate = await finances.getMaintenanceCandidate(ownerId, candidate.id);
+    expect(publicCandidate).toMatchObject({
       id: candidate.id,
       userId: ownerId,
     });
+    expect(publicCandidate).not.toHaveProperty("preparationCursor");
+    expect(publicCandidate).not.toHaveProperty("preparationCheckpoint");
+    expect(typeof publicCandidate.createdAt).toBe("string");
+    expect(typeof publicCandidate.updatedAt).toBe("string");
     const candidatePage = await finances.listMaintenanceCandidateItems(
       ownerId,
       candidate.id,
@@ -1479,6 +1484,8 @@ describe.sequential("Finance maintenance service", () => {
     expect(candidatePage.items).toHaveLength(2);
     expect(candidatePage.nextCursor).toEqual(expect.any(String));
     expect(candidatePage.items[0]).not.toHaveProperty("privatePayload");
+    expect(typeof candidatePage.items[0]?.createdAt).toBe("string");
+    expect(typeof candidatePage.items[0]?.updatedAt).toBe("string");
     await expect(
       finances.getMaintenanceCandidate("00000000-0000-4000-8000-000000000001", candidate.id),
     ).rejects.toMatchObject({ code: "not_found" });

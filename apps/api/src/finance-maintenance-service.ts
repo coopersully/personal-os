@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
   ApplyFinanceCategorizationsInput,
   FinanceCategorizationApplyResult,
@@ -9,6 +8,7 @@ import type {
   MaintenanceScope,
 } from "@personal-os/domain";
 import { AppError } from "./errors.js";
+import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
 import type { FinanceSyncBatchResult } from "./finance-service.js";
 import type { Principal } from "./types.js";
 import type { WorkspaceMaintenanceService } from "./workspace-maintenance-service.js";
@@ -283,8 +283,8 @@ function isEligibleOneOff(
   );
 }
 
-function candidateFingerprint(value: unknown) {
-  return `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
+function candidateFingerprint(actionKind: string, input: Record<string, unknown>) {
+  return financeCandidateActionFingerprint(actionKind, input);
 }
 
 function preparedCandidateItems(
@@ -303,7 +303,7 @@ function preparedCandidateItems(
         disposition: "question" as const,
         evidence: { confidence: proposal.confidence, rationale: proposal.rationale },
         expectedRevision: proposal.transaction.updatedAt,
-        fingerprint: candidateFingerprint({
+        fingerprint: candidateFingerprint("question", {
           kind: "question",
           revision: proposal.transaction.updatedAt,
           transactionId: proposal.transaction.id,
@@ -358,7 +358,7 @@ function preparedCandidateItems(
       disposition: "prepared" as const,
       evidence: { confidence: proposal.confidence, rationale: proposal.rationale },
       expectedRevision: proposal.transaction.updatedAt,
-      fingerprint: candidateFingerprint({ actionKind: "categorization", input }),
+      fingerprint: candidateFingerprint("categorization", input),
       assumptions: [],
       privatePayload: { actionKind: "categorization" as const, input },
       safeChanges: [
@@ -596,13 +596,13 @@ export function createFinanceMaintenanceService({ finances, maintenance, now, st
             const items = preparedCandidateItems(page, questionContexts);
             const appended = await finances.appendMaintenanceCandidatePage({
               cursor: preparation.cursor,
-              discoveryRevision: candidateFingerprint(
-                page.items.map((item) => [
+              discoveryRevision: candidateFingerprint("candidate_page", {
+                items: page.items.map((item) => [
                   item.source,
                   item.transaction.id,
                   item.transaction.updatedAt,
                 ]),
-              ),
+              }),
               items,
               nextCursor: page.nextCursor,
               runId,

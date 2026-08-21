@@ -3,12 +3,14 @@ import { idSchema, isoDateTimeSchema } from "./common.js";
 import { materialSourceReferenceSchema } from "./feature-contracts.js";
 import {
   applyFinanceCategorizationsInputSchema,
+  createFinanceBudgetInputSchema,
   createFinanceTransactionInputSchema,
   financeAccountSchema,
   financeActionKindSchema,
   financeFactEvidenceSchema,
   financeProviderItemHealthSchema,
   financeQuestionSchema,
+  mergeFinanceMerchantsInputSchema,
   reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
   setFinanceBudgetPlanInputSchema,
@@ -235,8 +237,14 @@ const financeCandidateEvidenceSchema = z
 const candidateTransactionBreakdownInputSchema = setFinanceTransactionBreakdownInputSchema.extend({
   id: idSchema,
 });
-const candidateMerchantInputSchema = updateFinanceMerchantInputSchema.extend({ id: idSchema });
-const candidateAlertInputSchema = resolveFinanceAlertInputSchema.extend({ id: idSchema });
+const candidateMerchantInputSchema = z.union([
+  updateFinanceMerchantInputSchema.extend({ id: idSchema }),
+  mergeFinanceMerchantsInputSchema,
+]);
+const candidateAlertInputSchema = z.union([
+  resolveFinanceAlertInputSchema.extend({ id: idSchema }),
+  z.object({ operation: z.literal("refresh") }).strict(),
+]);
 const candidateIncomeStreamInputSchema = updateFinanceIncomeStreamInputSchema.extend({
   id: idSchema,
 });
@@ -246,6 +254,10 @@ const candidateRecurringObligationInputSchema = updateFinanceRecurringObligation
 const candidateTransactionInputSchema = z.union([
   createFinanceTransactionInputSchema,
   updateFinanceTransactionInputSchema.extend({ id: idSchema }),
+]);
+const candidateBudgetPlanInputSchema = z.union([
+  setFinanceBudgetPlanInputSchema,
+  createFinanceBudgetInputSchema,
 ]);
 
 const financeCandidatePreparedPayloadSchema = z.discriminatedUnion("actionKind", [
@@ -268,7 +280,7 @@ const financeCandidatePreparedPayloadSchema = z.discriminatedUnion("actionKind",
   z.object({ actionKind: z.literal("merchant"), input: candidateMerchantInputSchema }),
   z.object({ actionKind: z.literal("alert"), input: candidateAlertInputSchema }),
   z.object({ actionKind: z.literal("profile"), input: updateFinanceProfileInputSchema }),
-  z.object({ actionKind: z.literal("budget_plan"), input: setFinanceBudgetPlanInputSchema }),
+  z.object({ actionKind: z.literal("budget_plan"), input: candidateBudgetPlanInputSchema }),
   z.object({ actionKind: z.literal("transaction"), input: candidateTransactionInputSchema }),
   z.object({ actionKind: z.literal("income_stream"), input: candidateIncomeStreamInputSchema }),
 ]);

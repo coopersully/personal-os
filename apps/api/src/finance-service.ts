@@ -86,6 +86,8 @@ import type {
 import {
   financeDomainProfileSchema,
   financeMaintenanceCandidateItemDraftSchema,
+  financeMaintenanceCandidateItemProjectionSchema,
+  financeMaintenanceCandidateSchema,
   idSchema,
   localDateAt,
   toCents,
@@ -94,6 +96,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, like, lt, lte, or, sql } 
 import { auditValues } from "./audit.js";
 import { requireDatabaseRecord } from "./database.js";
 import { AppError } from "./errors.js";
+import { financeCandidateActionFingerprint } from "./finance-action-identity.js";
 import {
   type AllocationProjection,
   activeAllocationsByTransaction,
@@ -386,6 +389,18 @@ function financeCandidateRevision(
       ),
     )
     .digest("hex")}`;
+}
+
+function normalizeCandidateDraft(item: FinanceMaintenanceCandidateItemDraft) {
+  const parsed = financeMaintenanceCandidateItemDraftSchema.parse(item);
+  if (parsed.disposition !== "prepared") return parsed;
+  return {
+    ...parsed,
+    fingerprint: financeCandidateActionFingerprint(
+      parsed.actionKind,
+      parsed.privatePayload.input as Record<string, unknown>,
+    ),
+  };
 }
 function categorization(merchant: string, learnedCategory?: string) {
   if (isRentMerchant(merchant)) {
@@ -1013,10 +1028,14 @@ export function createFinanceService({
         case "budget_plan": {
           const input = payload.input;
           if (input.month === month) {
-            if (input.replace) projectedBudgetLimits = new Map();
-            for (const allocation of input.allocations ?? []) {
-              const category = categoryName.get(allocation.categoryId);
-              if (category) projectedBudgetLimits.set(category, toCents(allocation.limit));
+            if ("allocations" in input) {
+              if (input.replace) projectedBudgetLimits = new Map();
+              for (const allocation of input.allocations) {
+                const category = categoryName.get(allocation.categoryId);
+                if (category) projectedBudgetLimits.set(category, toCents(allocation.limit));
+              }
+            } else {
+              projectedBudgetLimits.set(input.category, toCents(input.limit));
             }
           }
           break;
@@ -5319,9 +5338,7 @@ export function createFinanceService({
       runId: string;
       userId: string;
     }) {
-      const items = input.items.map((item) =>
-        financeMaintenanceCandidateItemDraftSchema.parse(item),
-      );
+      const items = input.items.map(normalizeCandidateDraft);
       return db.transaction(async (tx) => {
         const [run] = await tx
           .select({ id: workspaceMaintenanceRuns.id })
@@ -5503,9 +5520,7 @@ export function createFinanceService({
       runId: string;
       userId: string;
     }) {
-      const items = input.items.map((item) =>
-        financeMaintenanceCandidateItemDraftSchema.parse(item),
-      );
+      const items = input.items.map(normalizeCandidateDraft);
       const revision = `sha256:${createHash("sha256")
         .update(
           JSON.stringify(
@@ -5641,7 +5656,16 @@ export function createFinanceService({
         .limit(1);
       if (!candidate)
         throw new AppError("not_found", "The Finance maintenance candidate is not available.");
-      return candidate;
+      return financeMaintenanceCandidateSchema.parse({
+        createdAt: candidate.createdAt.toISOString(),
+        id: candidate.id,
+        projection: candidate.projection,
+        revision: candidate.revision,
+        runId: candidate.runId,
+        state: candidate.state,
+        updatedAt: candidate.updatedAt.toISOString(),
+        userId: candidate.userId,
+      });
     },
     async listMaintenanceCandidateItems(
       userId: string,
@@ -5692,7 +5716,13 @@ export function createFinanceService({
         .orderBy(asc(financeMaintenanceCandidateItems.ordinal))
         .limit(boundedLimit + 1);
       const hasMore = rows.length > boundedLimit;
-      const items = rows.slice(0, boundedLimit);
+      const items = rows.slice(0, boundedLimit).map((item) =>
+        financeMaintenanceCandidateItemProjectionSchema.parse({
+          ...item,
+          createdAt: item.createdAt.toISOString(),
+          updatedAt: item.updatedAt.toISOString(),
+        }),
+      );
       const finalItem = items.at(-1);
       return {
         items,

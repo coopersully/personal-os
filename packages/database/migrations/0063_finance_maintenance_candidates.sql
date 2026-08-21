@@ -4,7 +4,7 @@ CREATE TABLE "finance_maintenance_candidates" (
 	"run_id" uuid NOT NULL,
 	"state" text DEFAULT 'preparing' NOT NULL,
 	"revision" text NOT NULL,
-	"projection" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"projection" jsonb DEFAULT '{"budgetActual":null,"budgetTotal":null,"budgetVariance":null,"grossCashSpending":0,"matchedReimbursementIncome":0,"monthlyCapacity":null,"personalSpending":0,"plannedIncome":0,"profileExpectedNetIncome":null,"questions":0,"recurringCommittedOutflow":0,"reimbursementsOutstanding":0,"workItems":0}'::jsonb NOT NULL,
 	"preparation_cursor" text,
 	"next_ordinal" integer DEFAULT 0 NOT NULL,
 	"discovery_revision" text,

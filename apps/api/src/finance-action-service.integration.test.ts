@@ -26,7 +26,10 @@ import {
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
-import type { MaterialSourceReference } from "@personal-os/domain";
+import {
+  financeCandidateLedgerProjectionSchema,
+  type MaterialSourceReference,
+} from "@personal-os/domain";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { and, eq, inArray } from "drizzle-orm";
 import type { SupportedActionKind } from "./finance-action-service.js";
@@ -572,7 +575,6 @@ describe.sequential("finance action service", () => {
     const [candidate] = await database.db
       .insert(financeMaintenanceCandidates)
       .values({
-        projection: {},
         revision,
         runId: run.id,
         state: "ready_for_challenge",
@@ -580,6 +582,21 @@ describe.sequential("finance action service", () => {
       })
       .returning();
     if (!candidate) throw new Error("Settlement candidate was not created.");
+    expect(financeCandidateLedgerProjectionSchema.parse(candidate.projection)).toEqual({
+      budgetActual: null,
+      budgetTotal: null,
+      budgetVariance: null,
+      grossCashSpending: 0,
+      matchedReimbursementIncome: 0,
+      monthlyCapacity: null,
+      personalSpending: 0,
+      plannedIncome: 0,
+      profileExpectedNetIncome: null,
+      questions: 0,
+      recurringCommittedOutflow: 0,
+      reimbursementsOutstanding: 0,
+      workItems: 0,
+    });
     await database.db.insert(financeMaintenanceCandidateItems).values(
       drafts.map((draft, ordinal) => ({
         ...draft,
@@ -597,6 +614,83 @@ describe.sequential("finance action service", () => {
     if (!challenged) throw new Error("Settlement candidate was not challenged.");
     return { actions, candidate: challenged, category, ownerId, run, transactions };
   }
+
+  it("serializes every prepared action variant as a strict maintenance candidate draft", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Candidate draft variants",
+        email: `candidate-drafts-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Candidate draft owner was not created.");
+    const ownerId = owner.id;
+    const finances = createFinanceService({ db: database.db, now: () => now });
+    const actions = createFinanceActionService({ db: database.db, finances, now: () => now });
+    const cases = await seedActionCases(database, ownerId, `Candidate ${crypto.randomUUID()}`);
+    const drafts = await Promise.all(
+      cases.map((item) =>
+        actions.prepareMaintenanceCandidateDraft(item.actionKind, item.input, ownerId),
+      ),
+    );
+    expect(drafts).toHaveLength(cases.length);
+    expect(drafts.every((draft) => ["prepared", "question"].includes(draft.disposition))).toBe(
+      true,
+    );
+    const accountId = String(
+      cases.find((item) => item.actionKind === "profile")?.input.payAccountId,
+    );
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "transaction",
+        {
+          accountId,
+          amount: 12.34,
+          category: null,
+          categoryConfidence: null,
+          date: "2026-08-17",
+          direction: "income",
+          merchant: "Candidate draft income",
+          notes: null,
+        },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "transaction", disposition: "prepared" });
+    await expect(
+      actions.prepareMaintenanceCandidateDraft("alert", { operation: "refresh" }, ownerId),
+    ).resolves.toMatchObject({ actionKind: "alert", disposition: "prepared" });
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "budget_plan",
+        { category: "Candidate simple", limit: 12, month: "2026-08" },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "budget_plan", disposition: "prepared" });
+    const rename = cases.find((item) => item.actionKind === "merchant");
+    const sourceMerchantId = String(rename?.input.id);
+    const [target] = await database.db
+      .insert(financeMerchants)
+      .values({
+        displayName: "Candidate merge target",
+        normalizedName: `candidate-merge-${crypto.randomUUID()}`,
+        userId: ownerId,
+      })
+      .returning();
+    if (!target) throw new Error("Candidate merge target was not created.");
+    await expect(
+      actions.prepareMaintenanceCandidateDraft(
+        "merchant",
+        {
+          rationale: "Combine duplicate merchant records.",
+          sourceMerchantId,
+          targetMerchantId: target.id,
+        },
+        ownerId,
+      ),
+    ).resolves.toMatchObject({ actionKind: "merchant", disposition: "prepared" });
+  });
 
   it("queues one bounded maintenance review without semantic writes and retains all private fingerprints", async () => {
     // Removing the 100-row public projection cap or applying before human

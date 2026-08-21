@@ -75,6 +75,8 @@ describe("database schema contracts", () => {
       "utf8",
     );
     expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidates"');
+    expect(migrationSql).toContain('"grossCashSpending":0');
+    expect(migrationSql).toContain('"recurringCommittedOutflow":0');
     expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidate_items"');
     expect(migrationSql).toContain("finance_maintenance_candidates_run_user_fk");
     expect(migrationSql).toContain("workspace_maintenance_runs_id_user_id_unique");

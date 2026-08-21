@@ -52,6 +52,13 @@
 - Bypass-off settlement reuses one bounded review (100 safe public changes) while retaining all private item fingerprints. A stale prepared item supersedes the candidate, supersedes its review, and requeues the same run at `prepare` without partial canonical writes.
 - Added migrated-Postgres coverage for 101-item public bounds, human-only approval/idempotency, bypass-on direct commit, unresolved questions, revision drift, and rollback/retry after an injected later audit failure using real categorization, profile, budget, and Task 3 writers.
 
+## Batch F identity and public-contract hardening
+
+- Extracted one canonical Finance action identity helper. Direct action reviews use its unprefixed digest and maintenance candidates use the same digest with the durable `sha256:` prefix; preparation, candidate discovery/persistence, and settlement now agree on the exact normalized action identity.
+- Completed strict private candidate payload variants for alert refresh/resolve, merchant rename/merge, full and simple budget actions, transaction create/update, and existing ID-addressed actions. A migrated-Postgres table-driven preparation test verifies representative action-service output stays candidate-parseable.
+- Candidate readers now serialize only the exact public domain contracts: candidate preparation internals and item private payloads cannot escape, timestamps are ISO strings, and every outgoing object is schema-parsed.
+- Corrected the unshipped migration-0063 projection default and the Drizzle default to a complete neutral projection. Migrated-Postgres settlement fixtures parse the default against the domain contract.
+
 ## CONCERNS
 
 - The connected-agent challenge lifecycle and post-challenge commit-or-one-review batch are deliberately left for Task 7, which adds the required `awaiting_agent_challenge` run status and durable challenge authority. Task 6 does not prematurely settle semantic candidate items.
@@ -67,5 +74,6 @@
 - `pnpm exec vitest run apps/api/src/finance-action-service.integration.test.ts` — 63 passed.
 - `pnpm exec vitest run packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 52 passed.
 - `pnpm exec vitest run apps/api/src/finance-maintenance-service.integration.test.ts packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 73 passed.
+- `pnpm exec vitest run apps/api/src/finance-action-identity.test.ts apps/api/src/finance-action-service.integration.test.ts apps/api/src/finance-maintenance-service.integration.test.ts packages/domain/src/domain.test.ts packages/database/src/schema.test.ts` — 138 passed.
 - API, Domain, and Database typechecks passed.
 - Scoped Biome and `git diff --check` passed.

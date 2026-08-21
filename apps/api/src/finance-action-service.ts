@@ -57,6 +57,11 @@ import {
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditValues } from "./audit.js";
 import { AppError } from "./errors.js";
+import {
+  financeActionFingerprint,
+  financeCandidateActionFingerprint,
+  stableFinanceActionInput,
+} from "./finance-action-identity.js";
 import { evaluateMerchantEvidence } from "./finance-merchant-evidence.js";
 import { reliableMonthlyCapacity } from "./finance-planning.js";
 import {
@@ -115,25 +120,8 @@ type FinanceActionServiceOptions = {
 type FinanceExecutor = Pick<Database, "execute" | "insert" | "select" | "update">;
 type TransactionalWriter = (...args: unknown[]) => Promise<unknown>;
 
-function stableJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => `${JSON.stringify(key)}:${stableJson(child)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function actionFingerprint(actionKind: FinanceActionKind, input: Record<string, unknown>): string {
-  return createHash("sha256")
-    .update(`${actionKind}:${stableJson(input)}`)
-    .digest("hex");
-}
-
 function snapshotRevision(value: unknown): string {
-  return createHash("sha256").update(stableJson(value)).digest("hex");
+  return createHash("sha256").update(stableFinanceActionInput(value)).digest("hex");
 }
 
 function localSource(id: string, revision: string | null): MaterialSourceReference {
@@ -485,7 +473,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       actionKind,
       assumptions,
       expectedRevision,
-      fingerprint: actionFingerprint(actionKind, input),
+      fingerprint: financeActionFingerprint(actionKind, input),
       input,
       rationale:
         typeof input.rationale === "string" && input.rationale.trim()
@@ -1971,7 +1959,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               match.creditTransactionId === matchInput.creditTransactionId &&
               match.amount === toCents(matchInput.amount) &&
               match.rationale === matchInput.rationale &&
-              stableJson(match.evidence) === stableJson(canonicalEvidence),
+              stableFinanceActionInput(match.evidence) ===
+                stableFinanceActionInput(canonicalEvidence),
           );
         const idempotentCancel =
           input.data.operation === "cancel" && current?.status === "cancelled";
@@ -1994,7 +1983,8 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               item.payer === createInput.payer &&
               item.dueDate === createInput.dueDate &&
               item.rationale === createInput.rationale &&
-              stableJson(item.evidence) === stableJson(canonicalEvidence),
+              stableFinanceActionInput(item.evidence) ===
+                stableFinanceActionInput(canonicalEvidence),
           );
           if (
             !replayedCreate &&
@@ -2842,7 +2832,10 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         true,
         context.principal.actorType,
       );
-      if ("status" in prepared || `sha256:${prepared.fingerprint}` !== item.fingerprint)
+      if (
+        "status" in prepared ||
+        financeCandidateActionFingerprint(prepared.actionKind, prepared.input) !== item.fingerprint
+      )
         return supersedeAndRebuild();
       const current = await revalidate(
         prepared,
@@ -2894,7 +2887,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           disposition: "question",
           evidence: { confidence: 0, rationale: result.question.why },
           expectedRevision: null,
-          fingerprint: `sha256:${actionFingerprint("question", { actionKind, input })}`,
+          fingerprint: `sha256:${financeActionFingerprint("question", { actionKind, input })}`,
           privatePayload: {
             asOf: now().toISOString(),
             choices: result.question.choices,
@@ -2962,7 +2955,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
           .values({
             actionKind: "question",
             expectedRevision: null,
-            fingerprint: actionFingerprint("question", {
+            fingerprint: financeActionFingerprint("question", {
               actionKind,
               input,
               requestingAgentId: context.principal.actorId,
@@ -2992,7 +2985,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
               eq(financeAgentActionReviews.userId, context.principal.userId),
               eq(
                 financeAgentActionReviews.fingerprint,
-                actionFingerprint("question", {
+                financeActionFingerprint("question", {
                   actionKind,
                   input,
                   requestingAgentId: context.principal.actorId,
@@ -3248,7 +3241,9 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
       } catch {
         // Keep malformed answers recoverable for an outstanding question.
       }
-      const canonicalAnswer = suppliedAnswer ? stableJson(suppliedAnswer) : answerValue;
+      const canonicalAnswer = suppliedAnswer
+        ? stableFinanceActionInput(suppliedAnswer)
+        : answerValue;
       return db.transaction(async (tx) => {
         const [preview] = await tx
           .select()
@@ -3307,7 +3302,7 @@ export function createFinanceActionService({ db, finances, now }: FinanceActionS
         if (review.status !== "pending") {
           if (payload.answer && payload.outcome) {
             try {
-              if (stableJson(JSON.parse(payload.answer)) === canonicalAnswer)
+              if (stableFinanceActionInput(JSON.parse(payload.answer)) === canonicalAnswer)
                 return payload.outcome;
             } catch {
               if (payload.answer === canonicalAnswer) return payload.outcome;

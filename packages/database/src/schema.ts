@@ -217,7 +217,21 @@ export const financeMaintenanceCandidates = pgTable(
       .notNull()
       .default("preparing"),
     revision: text("revision").notNull(),
-    projection: jsonb("projection").$type<Record<string, unknown>>().notNull().default({}),
+    projection: jsonb("projection").$type<Record<string, unknown>>().notNull().default({
+      budgetActual: null,
+      budgetTotal: null,
+      budgetVariance: null,
+      grossCashSpending: 0,
+      matchedReimbursementIncome: 0,
+      monthlyCapacity: null,
+      personalSpending: 0,
+      plannedIncome: 0,
+      profileExpectedNetIncome: null,
+      questions: 0,
+      recurringCommittedOutflow: 0,
+      reimbursementsOutstanding: 0,
+      workItems: 0,
+    }),
     /** The next stable proposal cursor, visible only to the preparer. */
     preparationCursor: text("preparation_cursor"),
     nextOrdinal: integer("next_ordinal").notNull().default(0),

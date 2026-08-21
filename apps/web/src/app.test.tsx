@@ -312,9 +312,11 @@ const mocks = vi.hoisted(() => ({
   listPinterestPins: vi.fn(),
   getFinanceOverview: vi.fn(),
   getFinanceOverviewForMonth: vi.fn(),
+  getFinanceAutomationSettings: vi.fn(),
   getFinanceBudgetPace: vi.fn(),
   getFinanceLedgerHealth: vi.fn(),
   getFinanceGuidedSetup: vi.fn(),
+  getFinanceStatus: vi.fn(),
   getFinanceProfile: vi.fn(),
   listFinanceIncomeStreams: vi.fn(),
   listFinanceRecurringObligations: vi.fn(),
@@ -324,12 +326,20 @@ const mocks = vi.hoisted(() => ({
   exportFinanceData: vi.fn(),
   getFinanceCategories: vi.fn(),
   getFinanceReviewQueue: vi.fn(),
+  listFinanceActionReviews: vi.fn(),
+  listFinanceQuestions: vi.fn(),
+  listFinanceReimbursements: vi.fn(),
   listFinanceTransactions: vi.fn(),
   importFinanceCsv: vi.fn(),
   getPlaidLinkToken: vi.fn(),
   getPlaidStatus: vi.fn(),
   invoke: vi.fn(),
   updateFinanceTransaction: vi.fn(),
+  updateFinanceAutomationSettings: vi.fn(),
+  setFinanceTransactionBreakdown: vi.fn(),
+  answerFinanceQuestion: vi.fn(),
+  approveFinanceActionReview: vi.fn(),
+  dismissFinanceActionReview: vi.fn(),
   updateGoal: vi.fn(),
   updateMotive: vi.fn(),
   updatePinterestWallpaperSettings: vi.fn(),
@@ -513,6 +523,20 @@ function defaults() {
     reviewCount: 0,
     spendingThisMonth: 0,
     transactions: [],
+  });
+  mocks.getFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
+  mocks.updateFinanceAutomationSettings.mockResolvedValue({ reviewBypassEnabled: false });
+  mocks.listFinanceActionReviews.mockResolvedValue([]);
+  mocks.listFinanceQuestions.mockResolvedValue([]);
+  mocks.listFinanceReimbursements.mockResolvedValue({ reimbursements: [], unmatchedCredits: [] });
+  mocks.getFinanceStatus.mockResolvedValue({
+    details: {
+      cashFlow: { projectedLowestBalance: 0, projectedLowestBalanceDate: null },
+      evidence: { current: true },
+      latestReview: null,
+      month: { spending: 0 },
+      reimbursements: { open: 0, outstanding: 0 },
+    },
   });
   mocks.getFinanceWealthSummary.mockResolvedValue({
     annualIncome: 0,
@@ -2798,6 +2822,87 @@ describe("ilo web app", () => {
     await browser.click(screen.getByText("Month"));
     await waitFor(() => expect(mocks.getFinanceBudgetPace).toHaveBeenLastCalledWith("month"));
     expect(await screen.findByText("Budget pace")).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("prioritizes the current financial position and review work on Overview", async () => {
+    configureFinanceWorkspace();
+    mocks.getFinanceWealthSummary.mockResolvedValueOnce({
+      annualIncome: 120_000,
+      cash: 250,
+      debt: 50,
+      incomeBasis: "observed",
+      investments: 100,
+      monthlyIncome: 10_000,
+      monthlyPlanRemaining: 9_900,
+      netWorth: 300,
+      observedAnnualIncome: 120_000,
+      otherAssets: 0,
+      plannedThisMonth: 100,
+      statedAnnualIncome: null,
+    });
+    mocks.getFinanceLedgerHealth.mockResolvedValueOnce({
+      asOf: now,
+      balanceOnlyAccounts: 0,
+      candidateTransfers: 2,
+      missingProvenance: 0,
+      pendingTransactions: 1,
+      possibleDuplicates: 0,
+      staleAccounts: 0,
+      unresolvedReviews: 3,
+    });
+    const view = setup("/finances");
+    const browser = userEvent.setup();
+
+    const position = await screen.findByRole("region", { name: "Current financial position" });
+    expect(within(position).getByText("$250.00")).toBeInTheDocument();
+    expect(within(position).getByText("$42.50")).toBeInTheDocument();
+    expect(within(position).getByText("$300.00")).toBeInTheDocument();
+    expect(within(position).getByRole("link", { name: "Review 1 decision" })).toHaveAttribute(
+      "href",
+      "/finances/review",
+    );
+    expect(screen.queryByRole("region", { name: "Finance workspaces" })).not.toBeInTheDocument();
+
+    const sidebar = screen.getByRole("complementary", { name: "Finances Sidebar" });
+    expect(within(sidebar).getByRole("link", { name: /Review/ })).toHaveAttribute(
+      "href",
+      "/finances/review",
+    );
+    expect(within(sidebar).getByRole("link", { name: "Accounts" })).toHaveAttribute(
+      "href",
+      "/finances/accounts",
+    );
+
+    expect(screen.queryByRole("list", { name: "Ledger integrity checks" })).not.toBeInTheDocument();
+    await browser.click(screen.getByRole("button", { name: "Review 3 ledger checks" }));
+    expect(screen.getByRole("list", { name: "Ledger integrity checks" })).toBeInTheDocument();
+    view.unmount();
+  });
+
+  it("replaces an unconfigured budget graph with one setup action", async () => {
+    mocks.getFinanceBudgetPace.mockResolvedValueOnce({
+      asOf: "2026-07-13",
+      cells: [
+        {
+          date: "2026-07-13",
+          planned: 0,
+          spent: 0,
+          status: "blank",
+        },
+      ],
+      period: "week",
+    });
+    const view = setup("/finances");
+
+    expect(await screen.findByText("No budget yet")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Set a budget" })).toHaveAttribute(
+      "href",
+      "/finances/budgets",
+    );
+    expect(
+      screen.queryByRole("radiogroup", { name: "Budget pace period" }),
+    ).not.toBeInTheDocument();
     view.unmount();
   });
 

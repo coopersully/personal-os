@@ -1,7 +1,29 @@
 import { z } from "zod";
-import { financeAccountSchema, financeProviderItemHealthSchema } from "./finance.js";
+import { idSchema, isoDateTimeSchema } from "./common.js";
+import { materialSourceReferenceSchema } from "./feature-contracts.js";
+import {
+  applyFinanceCategorizationsInputSchema,
+  createFinanceBudgetInputSchema,
+  createFinanceTransactionInputSchema,
+  financeAccountSchema,
+  financeActionKindSchema,
+  financeFactEvidenceSchema,
+  financeProviderItemHealthSchema,
+  financeQuestionSchema,
+  financeReimbursementQuestionAnswerSchema,
+  mergeFinanceMerchantsInputSchema,
+  reconcileFinanceReimbursementInputSchema,
+  resolveFinanceAlertInputSchema,
+  setFinanceBudgetPlanInputSchema,
+  setFinanceTransactionBreakdownInputSchema,
+  updateFinanceIncomeStreamInputSchema,
+  updateFinanceMerchantInputSchema,
+  updateFinanceProfileInputSchema,
+  updateFinanceRecurringObligationInputSchema,
+  updateFinanceTransactionInputSchema,
+} from "./finance.js";
 import { goalSchema, motiveSchema } from "./goals.js";
-import { workspaceStatusSchema } from "./maintenance.js";
+import { maintenanceOperationSchema, workspaceStatusSchema } from "./maintenance.js";
 
 export const financeDataConfidenceSchema = z.enum(["insufficient", "provisional", "reliable"]);
 export type FinanceDataConfidence = z.infer<typeof financeDataConfidenceSchema>;
@@ -56,10 +78,6 @@ export const financeHealthSchema = z.object({
 export type FinanceHealth = z.infer<typeof financeHealthSchema>;
 
 const nullableMoneySchema = z.number().finite().nullable();
-const financeQuestionSchema = z.object({
-  code: z.string().trim().min(1).max(100),
-  prompt: z.string().trim().min(1).max(1_000),
-});
 const financeProposalSummarySchema = z.object({
   id: z.string().uuid(),
   kind: z.string().trim().min(1).max(100),
@@ -87,9 +105,32 @@ export const financeStatusDetailsSchema = z.object({
     month: z.string().regex(/^\d{4}-\d{2}$/u),
     total: nullableMoneySchema,
   }),
-  cashFlow: z.object({ net: nullableMoneySchema }),
+  cashFlow: z.object({
+    net: nullableMoneySchema,
+    projectedLowestBalance: nullableMoneySchema,
+    projectedLowestBalanceDate: z.iso.date().nullable(),
+    reserveRunwayMonths: nullableMoneySchema,
+  }),
+  closeReadiness: z.object({
+    missingProvenance: z.int().nonnegative(),
+    possibleDuplicates: z.int().nonnegative(),
+    ready: z.boolean(),
+    reconciledThrough: z.iso.date().nullable(),
+    unansweredExceptions: z.int().nonnegative(),
+    uncategorized: z.int().nonnegative(),
+    unmatchedTransfers: z.int().nonnegative(),
+  }),
+  evidence: z.object({
+    cutoff: z.iso.datetime().nullable(),
+    current: z.boolean(),
+  }),
   health: financeHealthSchema,
-  income: z.object({ monthly: nullableMoneySchema }),
+  income: z.object({
+    monthly: nullableMoneySchema,
+    observed: financeFactEvidenceSchema(z.number().finite()),
+    stated: financeFactEvidenceSchema(z.number().finite()),
+  }),
+  interview: z.array(financeQuestionSchema),
   ledger: z.object({
     candidateTransfers: z.int().nonnegative(),
     missingProvenance: z.int().nonnegative(),
@@ -97,8 +138,39 @@ export const financeStatusDetailsSchema = z.object({
     possibleDuplicates: z.int().nonnegative(),
   }),
   month: z.object({ forecast: nullableMoneySchema, spending: nullableMoneySchema }),
+  latestReview: z
+    .object({
+      completedAt: z.iso.datetime(),
+      id: z.uuid(),
+      status: z.string().trim().min(1).max(100),
+    })
+    .nullable(),
+  missingFacts: z.array(z.string().trim().min(1).max(160)),
+  plan: z.object({
+    budgetVariance: nullableMoneySchema,
+    capacity: nullableMoneySchema,
+    overAllocated: z.boolean(),
+  }),
+  prioritizedGoals: z.array(
+    z.object({
+      goal: goalSchema,
+      priority: z.int().positive(),
+    }),
+  ),
   proposals: z.array(financeProposalSummarySchema),
   questions: z.array(financeQuestionSchema),
+  reimbursements: z.object({
+    anomalies: z.int().nonnegative(),
+    expected: z.int().nonnegative(),
+    needsInput: z.int().nonnegative(),
+    open: z.int().nonnegative(),
+    overdue: z.int().nonnegative(),
+    outstanding: z.number().finite().nonnegative(),
+    received: z.int().nonnegative(),
+    unresolved: z.int().nonnegative(),
+    unmatchedCredits: z.int().nonnegative(),
+  }),
+  reviewMode: z.object({ reviewBypassEnabled: z.boolean() }),
   review: z.object({
     byReason: z.record(z.string(), z.int().nonnegative()),
     total: z.int().nonnegative(),
@@ -114,8 +186,469 @@ export const financeStatusDetailsSchema = z.object({
 
 export const financeStatusSchema = workspaceStatusSchema(financeStatusDetailsSchema).extend({
   domain: z.literal("finances"),
+  recommendedNextOperation: maintenanceOperationSchema.nullable(),
 });
 export type FinanceStatus = z.infer<typeof financeStatusSchema>;
+
+/**
+ * A durable, private Finance maintenance batch.  It is deliberately distinct
+ * from the public action-review record: challenge and settlement need the
+ * complete candidate ledger, while the UI receives only safe projections.
+ */
+export const financeMaintenanceCandidateStateSchema = z.enum([
+  "preparing",
+  "ready_for_challenge",
+  "challenged",
+  "awaiting_approval",
+  "committing",
+  "committed",
+  "superseded",
+]);
+export type FinanceMaintenanceCandidateState = z.infer<
+  typeof financeMaintenanceCandidateStateSchema
+>;
+
+export const financeMaintenanceCandidateDispositionSchema = z.enum([
+  "prepared",
+  "question",
+  "removed",
+  "committed",
+]);
+export type FinanceMaintenanceCandidateDisposition = z.infer<
+  typeof financeMaintenanceCandidateDispositionSchema
+>;
+
+const financeCandidateSafeChangeSchema = z
+  .object({
+    entityId: idSchema.nullable().default(null),
+    entityType: z.string().trim().min(1).max(100),
+    summary: z.string().trim().min(1).max(500),
+  })
+  .strict();
+
+const financeCandidateEvidenceSchema = z
+  .object({
+    confidence: z.number().finite().min(0).max(1),
+    rationale: z.string().trim().min(1).max(4_000),
+  })
+  .strict();
+
+// Candidate payloads retain the entity identifier used by the action executor.
+// Public mutation schemas omit it because a route supplies it separately.
+const candidateTransactionBreakdownInputSchema = setFinanceTransactionBreakdownInputSchema.extend({
+  id: idSchema,
+});
+const candidateMerchantInputSchema = z.union([
+  updateFinanceMerchantInputSchema.extend({ id: idSchema }),
+  mergeFinanceMerchantsInputSchema,
+]);
+const candidateAlertInputSchema = z.union([
+  resolveFinanceAlertInputSchema.extend({ id: idSchema }),
+  z.object({ operation: z.literal("refresh") }).strict(),
+]);
+const candidateIncomeStreamInputSchema = updateFinanceIncomeStreamInputSchema.extend({
+  id: idSchema,
+});
+const candidateRecurringObligationInputSchema = updateFinanceRecurringObligationInputSchema.extend({
+  id: idSchema,
+});
+const candidateTransactionInputSchema = z.union([
+  createFinanceTransactionInputSchema,
+  updateFinanceTransactionInputSchema.extend({ id: idSchema }),
+]);
+const candidateBudgetPlanInputSchema = z.union([
+  setFinanceBudgetPlanInputSchema.extend({ payAccountId: idSchema.optional() }),
+  createFinanceBudgetInputSchema,
+]);
+
+const candidateReimbursementQuestionInputSchema = z.union([
+  z
+    .object({
+      answer: financeReimbursementQuestionAnswerSchema,
+      candidate: z
+        .object({ allocationIds: z.array(idSchema).min(1).max(100), transactionId: idSchema })
+        .strict(),
+      operation: z.literal("answer_question"),
+      plan: z
+        .object({
+          allocationIds: z.array(idSchema).min(1).max(100),
+          allocations: z
+            .array(
+              z
+                .object({
+                  allocationOrder: z.int().nonnegative(),
+                  categoryId: idSchema,
+                  rationale: z.string().trim().min(1).max(1_000).nullable(),
+                  treatment: z.enum(["personal", "reimbursable"]),
+                })
+                .strict(),
+            )
+            .min(1)
+            .max(100),
+          amount: z.number().finite().nonnegative(),
+          categoryId: idSchema,
+          kind: z.enum(["entirely_personal", "reimbursable"]),
+          transactionId: idSchema,
+        })
+        .strict(),
+      sourceRefs: z.array(materialSourceReferenceSchema).min(1).max(100),
+    })
+    .strict(),
+  z
+    .object({
+      answer: financeReimbursementQuestionAnswerSchema,
+      candidate: z
+        .object({
+          reimbursementIds: z.array(idSchema).min(1).max(100),
+          transactionId: idSchema,
+          unmatchedAmount: z.number().finite().nonnegative().optional(),
+        })
+        .strict(),
+      operation: z.literal("answer_question"),
+      plan: z
+        .object({
+          creditTransactionId: idSchema,
+          kind: z.enum(["not_reimbursement", "match"]),
+          matches: z
+            .array(
+              z
+                .object({ amount: z.number().finite().positive(), reimbursementId: idSchema })
+                .strict(),
+            )
+            .max(100),
+          reimbursementIds: z.array(idSchema).min(1).max(100),
+        })
+        .strict(),
+      sourceRefs: z.array(materialSourceReferenceSchema).min(1).max(100),
+    })
+    .strict(),
+]);
+const candidateReimbursementInputSchema = z.union([
+  reconcileFinanceReimbursementInputSchema,
+  candidateReimbursementQuestionInputSchema,
+]);
+
+const financeCandidatePreparedPayloadSchema = z.discriminatedUnion("actionKind", [
+  z.object({
+    actionKind: z.literal("categorization"),
+    input: applyFinanceCategorizationsInputSchema,
+  }),
+  z.object({
+    actionKind: z.literal("transaction_breakdown"),
+    input: candidateTransactionBreakdownInputSchema,
+  }),
+  z.object({
+    actionKind: z.literal("reimbursement"),
+    input: candidateReimbursementInputSchema,
+  }),
+  z.object({
+    actionKind: z.literal("recurring_obligation"),
+    input: candidateRecurringObligationInputSchema,
+  }),
+  z.object({ actionKind: z.literal("merchant"), input: candidateMerchantInputSchema }),
+  z.object({ actionKind: z.literal("alert"), input: candidateAlertInputSchema }),
+  z.object({ actionKind: z.literal("profile"), input: updateFinanceProfileInputSchema }),
+  z.object({ actionKind: z.literal("budget_plan"), input: candidateBudgetPlanInputSchema }),
+  z.object({ actionKind: z.literal("transaction"), input: candidateTransactionInputSchema }),
+  z.object({ actionKind: z.literal("income_stream"), input: candidateIncomeStreamInputSchema }),
+]);
+
+const financeCandidateDraftBaseSchema = z.object({
+  assumptions: z.array(z.string().trim().min(1).max(500)).max(25).default([]),
+  evidence: financeCandidateEvidenceSchema,
+  expectedRevision: z.string().trim().min(1).max(128).nullable().default(null),
+  fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+  safeChanges: z.array(financeCandidateSafeChangeSchema).max(100).default([]),
+  sourceRefs: z.array(materialSourceReferenceSchema).max(100).default([]),
+});
+
+const financeCandidatePreparedDraftSchema = financeCandidateDraftBaseSchema.extend({
+  actionKind: financeActionKindSchema.exclude(["question", "maintenance_turn"]),
+  disposition: z.literal("prepared"),
+  privatePayload: financeCandidatePreparedPayloadSchema,
+});
+
+const financeCandidateQuestionDraftSchema = financeCandidateDraftBaseSchema.extend({
+  actionKind: z.literal("question"),
+  disposition: z.literal("question"),
+  privatePayload: z
+    .object({
+      asOf: isoDateTimeSchema,
+      choices: financeQuestionSchema.shape.choices,
+      expectedAnswer: financeQuestionSchema.shape.expectedAnswer,
+      prompt: z.string().trim().min(1).max(1_000),
+      underlyingAction: financeActionKindSchema.exclude(["question", "maintenance_turn"]),
+      transactionId: idSchema.nullable().default(null),
+      why: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+});
+
+/** Strict internal input accepted before a candidate item can be persisted. */
+export const financeMaintenanceCandidateItemDraftSchema = z
+  .union([financeCandidatePreparedDraftSchema, financeCandidateQuestionDraftSchema])
+  .superRefine((value, context) => {
+    if (value.disposition === "prepared" && value.actionKind !== value.privatePayload.actionKind) {
+      context.addIssue({
+        code: "custom",
+        message: "Prepared candidate payload actionKind must match the candidate actionKind.",
+        path: ["privatePayload", "actionKind"],
+      });
+    }
+  });
+export type FinanceMaintenanceCandidateItemDraft = z.infer<
+  typeof financeMaintenanceCandidateItemDraftSchema
+>;
+
+export const financeCandidateLedgerProjectionSchema = z
+  .object({
+    budgetVariance: z.number().finite().nullable().default(null),
+    budgetActual: z.number().finite().nonnegative().nullable().default(null),
+    budgetTotal: z.number().finite().nonnegative().nullable().default(null),
+    grossCashSpending: z.number().finite().nonnegative(),
+    matchedReimbursementIncome: z.number().finite().nonnegative().default(0),
+    monthlyCapacity: z.number().finite().nullable().default(null),
+    plannedIncome: z.number().finite().nonnegative().default(0),
+    profileExpectedNetIncome: z.number().finite().nullable().default(null),
+    recurringCommittedOutflow: z.number().finite().nonnegative().default(0),
+    personalSpending: z.number().finite().nonnegative(),
+    questions: z.int().nonnegative(),
+    reimbursementsOutstanding: z.number().finite().nonnegative(),
+    workItems: z.int().nonnegative().default(0),
+  })
+  .strict();
+export type FinanceCandidateLedgerProjection = z.infer<
+  typeof financeCandidateLedgerProjectionSchema
+>;
+
+export const financeMaintenanceCandidateSchema = z
+  .object({
+    createdAt: isoDateTimeSchema,
+    id: idSchema,
+    projection: financeCandidateLedgerProjectionSchema,
+    revision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    runId: idSchema,
+    state: financeMaintenanceCandidateStateSchema,
+    updatedAt: isoDateTimeSchema,
+    userId: idSchema,
+  })
+  .strict();
+export type FinanceMaintenanceCandidate = z.infer<typeof financeMaintenanceCandidateSchema>;
+
+export const financeMaintenanceCandidateItemSchema = z
+  .object({
+    actionKind: financeActionKindSchema,
+    candidateId: idSchema,
+    createdAt: isoDateTimeSchema,
+    disposition: financeMaintenanceCandidateDispositionSchema,
+    evidence: z.record(z.string(), z.unknown()).default({}),
+    expectedRevision: z.string().trim().min(1).max(128).nullable().default(null),
+    fingerprint: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    id: idSchema,
+    ordinal: z.int().nonnegative(),
+    privatePayload: z.record(z.string(), z.unknown()),
+    safeChanges: z.array(financeCandidateSafeChangeSchema).max(100).default([]),
+    sourceRefs: z.array(materialSourceReferenceSchema).max(100).default([]),
+    updatedAt: isoDateTimeSchema,
+  })
+  .strict();
+export type FinanceMaintenanceCandidateItem = z.infer<typeof financeMaintenanceCandidateItemSchema>;
+
+/** Safe, owner-scoped candidate item view. Private prepared payloads never leave storage. */
+export const financeMaintenanceCandidateItemProjectionSchema =
+  financeMaintenanceCandidateItemSchema.omit({ privatePayload: true });
+export type FinanceMaintenanceCandidateItemProjection = z.infer<
+  typeof financeMaintenanceCandidateItemProjectionSchema
+>;
+
+export const financeMaintenanceCandidateItemPageSchema = z
+  .object({
+    items: z.array(financeMaintenanceCandidateItemProjectionSchema).max(100),
+    nextCursor: z.string().min(1).nullable(),
+  })
+  .strict();
+export type FinanceMaintenanceCandidateItemPage = z.infer<
+  typeof financeMaintenanceCandidateItemPageSchema
+>;
+
+export const financeMaintenanceCandidatePageSchema = z
+  .object({
+    candidate: financeMaintenanceCandidateSchema,
+    items: z.array(financeMaintenanceCandidateItemProjectionSchema).max(100),
+    nextCursor: z.string().min(1).nullable(),
+  })
+  .strict();
+export type FinanceMaintenanceCandidatePage = z.infer<typeof financeMaintenanceCandidatePageSchema>;
+
+export const financeLedgerChallengeCheckSchema = z.enum([
+  "mixed_merchants",
+  "conflicting_evidence",
+  "rule_breadth",
+  "prior_corrections",
+  "unusual_amounts",
+  "reimbursements",
+  "refunds_and_transfers",
+  "duplicates_and_reversals",
+  "allocation_integrity",
+  "vague_categories",
+  "stale_profile_and_budget_facts",
+  "misleading_unresolved_totals",
+]);
+export const financeLedgerChallengeChecks = financeLedgerChallengeCheckSchema.options;
+
+export const financeLedgerChallengeSchema = z
+  .object({
+    candidateId: idSchema,
+    candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    createdAt: isoDateTimeSchema,
+    cutoff: isoDateTimeSchema,
+    id: idSchema,
+    rubricVersion: z.literal("finance-ledger-challenge-v1"),
+    runId: idSchema,
+    state: z.enum(["prepared", "submitted", "resolved"]),
+    submittedAt: isoDateTimeSchema.nullable(),
+    submittingAgentId: z.string().trim().min(1).max(200).nullable(),
+    updatedAt: isoDateTimeSchema,
+    userId: idSchema,
+  })
+  .strict();
+export type FinanceLedgerChallenge = z.infer<typeof financeLedgerChallengeSchema>;
+
+export const financeLedgerChallengeResolutionSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("keep") }).strict(),
+  z.object({ type: z.literal("remove") }).strict(),
+  z
+    .object({
+      actionKind: financeActionKindSchema.exclude(["question", "maintenance_turn"]),
+      input: z.record(z.string(), z.unknown()),
+      type: z.literal("replace"),
+    })
+    .strict(),
+  z
+    .object({
+      choices: z.array(z.string().trim().min(1).max(200)).max(20).default([]),
+      prompt: z.string().trim().min(1).max(1_000),
+      type: z.literal("question"),
+      why: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+]);
+
+export const financeLedgerChallengeFindingInputSchema = z
+  .object({
+    candidateItemId: idSchema.nullable(),
+    evidence: z.string().trim().min(1).max(1_000),
+    kind: z.enum(["correction", "question", "blocker", "observation"]),
+    rationale: z.string().trim().min(1).max(1_000),
+    resolution: financeLedgerChallengeResolutionSchema,
+    severity: z.enum(["info", "warning", "blocker"]),
+    sourceRefs: z.array(materialSourceReferenceSchema).max(100).default([]),
+  })
+  .strict();
+
+export const submitFinanceLedgerChallengeInputSchema = z
+  .object({
+    candidateRevision: z.string().regex(/^sha256:[a-f0-9]{64}$/u),
+    challengeId: idSchema,
+    checked: z
+      .array(financeLedgerChallengeCheckSchema)
+      .length(financeLedgerChallengeChecks.length)
+      .refine((items) => new Set(items).size === items.length, "Challenge checks must be unique."),
+    findings: z.array(financeLedgerChallengeFindingInputSchema).max(100),
+    reviewedItemIds: z
+      .array(idSchema)
+      .max(10_000)
+      .refine((items) => new Set(items).size === items.length, "Reviewed item IDs must be unique."),
+    rubricVersion: z.literal("finance-ledger-challenge-v1"),
+  })
+  .strict();
+export type SubmitFinanceLedgerChallengeInput = z.infer<
+  typeof submitFinanceLedgerChallengeInputSchema
+>;
+
+export const financeLedgerChallengePageSchema = z
+  .object({
+    challenge: financeLedgerChallengeSchema,
+    checks: z.array(financeLedgerChallengeCheckSchema),
+    items: z.array(financeMaintenanceCandidateItemProjectionSchema).max(100),
+    nextCursor: z.string().min(1).nullable(),
+  })
+  .strict();
+export type FinanceLedgerChallengePage = z.infer<typeof financeLedgerChallengePageSchema>;
+
+const financePeriodReviewMoneySchema = z.number().finite().nullable();
+export const financePeriodReviewSchema = z
+  .object({
+    challenge: z
+      .object({
+        checked: z.array(financeLedgerChallengeCheckSchema),
+        findings: z.int().nonnegative(),
+        observations: z.int().nonnegative(),
+      })
+      .strict(),
+    closeReadiness: financeStatusDetailsSchema.shape.closeReadiness,
+    createdAt: isoDateTimeSchema,
+    cutoff: isoDateTimeSchema,
+    id: idSchema,
+    income: financePeriodReviewMoneySchema,
+    goalsAndDebt: z
+      .object({
+        activeGoals: z.int().nonnegative(),
+        debt: financePeriodReviewMoneySchema,
+        netWorth: financePeriodReviewMoneySchema,
+      })
+      .strict(),
+    monitoring: z
+      .object({
+        href: z.string().startsWith("/").max(2_000),
+        responsibility: z.string().trim().min(1).max(500),
+      })
+      .strict(),
+    period: z.object({ end: z.iso.date(), start: z.iso.date() }).strict(),
+    position: z
+      .object({
+        cashLowPoint: financePeriodReviewMoneySchema,
+        closing: financePeriodReviewMoneySchema,
+        opening: financePeriodReviewMoneySchema,
+      })
+      .strict(),
+    recommendations: z
+      .array(
+        z
+          .object({
+            assumptions: z.array(z.string().trim().min(1).max(500)).max(20),
+            disposition: z.enum(["monitor", "needs_input", "ready"]),
+            evidence: z.array(z.string().trim().min(1).max(500)).max(20),
+            recommendation: z.string().trim().min(1).max(1_000),
+            tradeoffs: z.array(z.string().trim().min(1).max(500)).max(20),
+          })
+          .strict(),
+      )
+      .max(25),
+    reimbursements: financeStatusDetailsSchema.shape.reimbursements,
+    runId: idSchema,
+    sourceIds: z.array(idSchema).max(10_000),
+    spending: z
+      .object({
+        budgetVariance: financePeriodReviewMoneySchema,
+        gross: z.number().finite().nonnegative(),
+        personal: z.number().finite().nonnegative(),
+        savings: financePeriodReviewMoneySchema,
+      })
+      .strict(),
+    status: z.enum(["completed", "completed_with_questions"]),
+    userId: idSchema,
+    work: z
+      .object({
+        approvals: z.int().nonnegative(),
+        exceptions: z.int().nonnegative(),
+        questions: z.int().nonnegative(),
+        rulesAndActions: z.int().nonnegative(),
+      })
+      .strict(),
+  })
+  .strict();
+export type FinancePeriodReview = z.infer<typeof financePeriodReviewSchema>;
 
 export const financeMaintenanceResultSchema = z.object({
   applied: z.object({

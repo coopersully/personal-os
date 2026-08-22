@@ -5,10 +5,20 @@ import {
   domainProfileApprovals,
   domainProfiles,
   financeAccounts,
+  financeAgentActionReviews,
+  financeAutomationSettings,
+  financeBudgetPlans,
   financeBudgets,
+  financeCategories,
+  financeIncomeStreams,
+  financeProfiles,
   financeProviderItems,
+  financeRecurringObligations,
+  financeReimbursements,
   financeReviewCases,
+  financeTransactionAllocations,
   financeTransactions,
+  goals,
   migrateDatabase,
   users,
   workspaceMaintenanceRuns,
@@ -116,19 +126,49 @@ describe.sequential("Finance status service", () => {
     await database.db
       .insert(financeBudgets)
       .values({ category: "Food", limit: 100_000, month: "2026-08", userId });
-    await database.db.insert(financeTransactions).values({
-      accountId: source.id,
-      amount: 40_000,
-      category: "Food",
-      categoryConfidence: 10000,
-      categorySource: "user",
-      direction: "expense",
-      merchant: "Market",
-      needsReview: false,
-      pending: false,
-      transactionDate: "2026-08-10",
-      userId,
-    });
+    const [food, reimbursement] = await database.db
+      .insert(financeCategories)
+      .values([
+        { group: "Spending", name: "Food", slug: `food-${userId}`, userId },
+        { group: "Spending", name: "Reimbursement", slug: `reimbursement-${userId}`, userId },
+      ])
+      .returning();
+    if (!food || !reimbursement) throw new Error("Status allocation categories were not created.");
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: source.id,
+        amount: 40_000,
+        category: "Food",
+        categoryConfidence: 10000,
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Market",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-10",
+        userId,
+      })
+      .returning();
+    if (!expense) throw new Error("Status allocation expense was not created.");
+    await database.db.insert(financeTransactionAllocations).values([
+      {
+        allocationOrder: 0,
+        amount: 15_000,
+        categoryId: food.id,
+        transactionId: expense.id,
+        treatment: "personal",
+        userId,
+      },
+      {
+        allocationOrder: 1,
+        amount: 25_000,
+        categoryId: reimbursement.id,
+        transactionId: expense.id,
+        treatment: "reimbursable",
+        userId,
+      },
+    ]);
     await database.db.insert(financeTransactions).values({
       accountId: source.id,
       amount: 100_000,
@@ -153,9 +193,199 @@ describe.sequential("Finance status service", () => {
       state: "unavailable",
     });
     expect(status.details.accounts.items[0]?.synchronization.nextRetryAt).toBeNull();
+    // A reimbursable allocation becomes non-personal only once there is an
+    // active reimbursement expectation; a bare allocation still belongs to us.
     expect(status.details.month.spending).toBe(400);
+    expect(status.details.cashFlow.net).toBe(600);
     expect(status.details.health.confidence).toBe("reliable");
     expect(status.state).toBe("clean");
+  });
+
+  it("restores only a cancelled reimbursement remainder to personal spending without changing gross cash", async () => {
+    const userId = await makeUser("Cancelled reimbursement");
+    const source = await account(userId, "current");
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({ group: "Spending", name: "Dining", slug: `dining-${userId}`, userId })
+      .returning();
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: source.id,
+        amount: 31_000,
+        direction: "expense",
+        merchant: "Dinner",
+        transactionDate: "2026-08-15",
+        userId,
+      })
+      .returning();
+    if (!category || !expense) throw new Error("Cancelled reimbursement fixture failed.");
+    const [personal, reimbursable] = await database.db
+      .insert(financeTransactionAllocations)
+      .values([
+        {
+          allocationOrder: 0,
+          amount: 9_000,
+          categoryId: category.id,
+          transactionId: expense.id,
+          treatment: "personal",
+          userId,
+        },
+        {
+          allocationOrder: 1,
+          amount: 22_000,
+          categoryId: category.id,
+          transactionId: expense.id,
+          treatment: "reimbursable",
+          userId,
+        },
+      ])
+      .returning();
+    if (!personal || !reimbursable) throw new Error("Cancelled reimbursement allocations failed.");
+    await database.db.insert(financeReimbursements).values({
+      allocationId: reimbursable.id,
+      cancelledAt: now,
+      expectedAmount: 22_000,
+      receivedAmount: 10_000,
+      rationale: "Payer cannot repay",
+      status: "cancelled",
+      userId,
+    });
+    await database.db.insert(financeReviewCases).values({
+      rationale: "Dinner amount is materially above its robust merchant baseline.",
+      reason: "possible_reimbursement",
+      transactionId: expense.id,
+      userId,
+    });
+    await expect(
+      service().getFinanceStatus(userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      details: {
+        month: { spending: 210 },
+        reimbursements: { anomalies: 1, open: 0, overdue: 0 },
+      },
+    });
+  });
+
+  it("returns planning evidence before asking for a first budget", async () => {
+    const userId = await makeUser("Planning evidence Finance");
+    const source = await account(userId, "current");
+    await database.db
+      .insert(financeAutomationSettings)
+      .values({ reviewBypassEnabled: false, userId });
+    await database.db.insert(financeProfiles).values({
+      effectiveDate: "2026-08-01",
+      grossAnnualIncome: 72_000_00,
+      householdSize: 2,
+      monthlyHousingCost: 1_800_00,
+      reserveTargetMonths: 3,
+      userId,
+    });
+    await database.db.insert(financeIncomeStreams).values({
+      accountId: source.id,
+      amountTolerance: 0,
+      cadence: "monthly",
+      confidence: 10_000,
+      displayName: "Salary",
+      expectedAmount: 6_000_00,
+      payer: "Employer",
+      source: "user",
+      status: "active",
+      userId,
+    });
+    await database.db.insert(financeRecurringObligations).values({
+      accountId: source.id,
+      amountTolerance: 0,
+      cadence: "monthly",
+      confidence: 10_000,
+      displayName: "Rent",
+      expectedAmount: 1_800_00,
+      kind: "bill",
+      merchant: "Landlord",
+      source: "user",
+      status: "active",
+      userId,
+    });
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.reviewMode).toEqual({ reviewBypassEnabled: false });
+    expect(status.details.income.stated).toMatchObject({
+      basis: "user_stated",
+      confidence: "high",
+      value: 6_000,
+    });
+    expect(status.details.closeReadiness).toMatchObject({ ready: true, uncategorized: 0 });
+    expect(status.details.cashFlow).toMatchObject({ projectedLowestBalance: 5_000 });
+    expect(status.details.cashFlow.reserveRunwayMonths).toBeCloseTo(2.78, 2);
+    expect(status.details.missingFacts).toContain("goal_priority");
+    expect(status.details.interview).toEqual([
+      expect.objectContaining({
+        prompt: expect.stringContaining("goal"),
+        why: expect.stringContaining("budget"),
+      }),
+    ]);
+    expect(status.recommendedNextOperation).toMatchObject({ operation: "answer_finance_question" });
+    expect(status.details.reimbursements).toEqual({
+      anomalies: 0,
+      expected: 0,
+      needsInput: 0,
+      open: 0,
+      overdue: 0,
+      outstanding: 0,
+      received: 0,
+      unmatchedCredits: 0,
+      unresolved: 0,
+    });
+    expect(status.details.latestReview).toBeNull();
+  });
+
+  it("keeps partial month-to-date income visible but missing as a reliable monthly baseline", async () => {
+    const userId = await makeUser("Partial income Finance");
+    const source = await account(userId, "current");
+    await database.db.insert(financeTransactions).values({
+      accountId: source.id,
+      amount: 500_00,
+      category: "Income",
+      categorySource: "user",
+      direction: "income",
+      merchant: "Partial payroll",
+      needsReview: false,
+      pending: false,
+      transactionDate: "2026-08-01",
+      userId,
+    });
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.income.observed).toMatchObject({ basis: "ledger_observed", value: 500 });
+    expect(status.details.income.monthly).toBeNull();
+    expect(status.details.missingFacts).toContain("reliable_monthly_income");
+    expect(status.details.questions).toContainEqual(
+      expect.objectContaining({
+        prompt: expect.stringContaining("reliable monthly take-home income"),
+      }),
+    );
+  });
+
+  it("reports biweekly expected take-home as the same normalized monthly income used for capacity", async () => {
+    const userId = await makeUser("Biweekly income Finance");
+    await account(userId, "current");
+    await database.db.insert(financeProfiles).values({
+      effectiveDate: "2026-08-01",
+      expectedNetPay: 2_000_00,
+      payFrequency: "biweekly",
+      userId,
+    });
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.income.monthly).toBeCloseTo(4_333.33, 2);
+    expect(status.details.plan.capacity).toBeCloseTo(
+      status.details.income.monthly ?? Number.NaN,
+      8,
+    );
+    expect(status.details.missingFacts).not.toContain("reliable_monthly_income");
   });
 
   it("uses persisted manual-account current state without requiring a Plaid timestamp", async () => {
@@ -179,6 +409,149 @@ describe.sequential("Finance status service", () => {
 
     expect(status.freshness.state).toBe("current");
     expect(status.details.health.confidence).toBe("reliable");
+    expect(status.details.evidence.cutoff).toBe(source.updatedAt.toISOString());
+  });
+
+  it("uses the oldest current source cutoff and never invents provider transaction references", async () => {
+    const userId = await makeUser("Conservative evidence Finance");
+    const manual = await account(userId, "current");
+    const plaid = await account(userId, "current", "plaid");
+    const [item] = await database.db
+      .insert(financeProviderItems)
+      .values({
+        encryptedCredentials: { ciphertext: "fixture", iv: "fixture", tag: "fixture", version: 1 },
+        lastSyncedAt: new Date("2026-08-15T10:00:00.000Z"),
+        provider: "plaid",
+        providerItemId: `item-${crypto.randomUUID()}`,
+        syncState: "current",
+        userId,
+      })
+      .returning();
+    if (!item) throw new Error("Provider item was not created.");
+    await database.db
+      .update(financeAccounts)
+      .set({ providerItemRecordId: item.id })
+      .where(eq(financeAccounts.id, plaid.id));
+    await database.db.insert(financeTransactions).values([
+      {
+        accountId: manual.id,
+        amount: 100,
+        category: "Food",
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Resolved before exception",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-01",
+        userId,
+      },
+      {
+        accountId: manual.id,
+        amount: 200,
+        category: "Food",
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Pending exception",
+        needsReview: false,
+        pending: true,
+        transactionDate: "2026-08-05",
+        userId,
+      },
+      {
+        accountId: manual.id,
+        amount: 300,
+        category: "Food",
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Resolved after exception",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-10",
+        userId,
+      },
+      {
+        accountId: plaid.id,
+        amount: 2_000,
+        category: "Income",
+        categorySource: "provider",
+        direction: "income",
+        merchant: "Provider income without remote id",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-02",
+        userId,
+      },
+    ]);
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.evidence).toEqual({
+      current: true,
+      cutoff: "2026-08-15T10:00:00.000Z",
+    });
+    expect(status.details.income.observed.sourceRefs).toEqual([]);
+    expect(status.details.closeReadiness).toMatchObject({
+      ready: false,
+      reconciledThrough: "2026-08-02",
+    });
+  });
+
+  it("uses durable budget-plan goal order and asks when no stated priority exists", async () => {
+    const userId = await makeUser("Durable goal priority Finance");
+    const [firstGoal, secondGoal] = await database.db
+      .insert(goals)
+      .values([
+        { targetDate: "2026-12-01", title: "First by date", userId },
+        { targetDate: "2026-09-01", title: "Second by date", userId },
+      ])
+      .returning();
+    if (!firstGoal || !secondGoal) throw new Error("Finance goals were not created.");
+
+    const unprioritized = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+    expect(unprioritized.details.prioritizedGoals).toEqual([]);
+    expect(unprioritized.details.missingFacts).toContain("goal_priority");
+    expect(unprioritized.details.questions).toContainEqual(
+      expect.objectContaining({ prompt: expect.stringContaining("goal") }),
+    );
+
+    await database.db.insert(financeBudgetPlans).values({
+      goalIds: [secondGoal.id, firstGoal.id],
+      month: "2026-08",
+      rationale: "Use the stated goal order.",
+      userId,
+    });
+    const prioritized = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(prioritized.details.prioritizedGoals).toEqual([
+      expect.objectContaining({
+        goal: expect.objectContaining({ id: secondGoal.id }),
+        priority: 1,
+      }),
+      expect.objectContaining({ goal: expect.objectContaining({ id: firstGoal.id }), priority: 2 }),
+    ]);
+    expect(prioritized.details.missingFacts).not.toContain("goal_priority");
+    expect(prioritized.details.missingFacts).toEqual([]);
+  });
+
+  it("omits malformed durable questions instead of failing status", async () => {
+    const userId = await makeUser("Malformed Finance question");
+    const [question] = await database.db
+      .insert(financeAgentActionReviews)
+      .values({
+        actionKind: "question",
+        fingerprint: `malformed-${crypto.randomUUID()}`,
+        privatePayload: { question: { prompt: 42 } },
+        requestingAgentId: "finance-maintenance",
+        userId,
+      })
+      .returning({ id: financeAgentActionReviews.id });
+    if (!question) throw new Error("Malformed question fixture was not created.");
+
+    const status = await service().getFinanceStatus(userId, { type: "all_outstanding" });
+
+    expect(status.details.questions).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: question.id })]),
+    );
   });
 
   it("projects one authoritative Provider Item across sibling accounts without trusting account shadows", async () => {

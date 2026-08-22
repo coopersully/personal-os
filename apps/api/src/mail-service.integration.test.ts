@@ -145,6 +145,13 @@ describe.sequential("mail service", () => {
       "0056_workspace_maintenance_runs",
       "0057_finance_currency_evidence",
       "0058_finance_provider_items",
+      "0059_finance_automation_settings",
+      "0060_finance_agent_action_reviews",
+      "0061_finance_transaction_allocations",
+      "0062_finance_reimbursements",
+      "0063_finance_maintenance_candidates",
+      "0064_finance_ledger_challenges",
+      "0065_finance_period_reviews",
     ]);
     await migrateDatabase(database.db, temporaryMigrationsFolder);
     const [user] = await database.db
@@ -188,6 +195,13 @@ describe.sequential("mail service", () => {
       "0056_workspace_maintenance_runs",
       "0057_finance_currency_evidence",
       "0058_finance_provider_items",
+      "0059_finance_automation_settings",
+      "0060_finance_agent_action_reviews",
+      "0061_finance_transaction_allocations",
+      "0062_finance_reimbursements",
+      "0063_finance_maintenance_candidates",
+      "0064_finance_ledger_challenges",
+      "0065_finance_period_reviews",
     ]);
     await migrateDatabase(database.db, setupMigrationsFolder);
     const legacyDisabledApproved = await database.pool.query<{ id: string }>(

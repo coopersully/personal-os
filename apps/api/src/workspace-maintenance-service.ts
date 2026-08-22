@@ -18,6 +18,7 @@ import { AppError, isUniqueViolation } from "./errors.js";
 const openStatuses = [
   "queued",
   "running",
+  "awaiting_agent_challenge",
   "awaiting_approval",
   "blocked",
   "failed_recoverable",
@@ -61,6 +62,7 @@ type CheckpointAndReleaseInput = {
   checkpoint: unknown;
   claimId: string;
   runId: string;
+  status?: "awaiting_agent_challenge" | "awaiting_approval" | "queued";
 };
 
 type RenewClaimInput = {
@@ -285,7 +287,7 @@ export function createWorkspaceMaintenanceService({
           checkpoint: input.checkpoint,
           leaseClaimId: null,
           leaseExpiresAt: null,
-          status: "queued",
+          status: input.status ?? "queued",
           updatedAt: sql`NOW()`,
         })
         .where(

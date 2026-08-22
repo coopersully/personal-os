@@ -44,7 +44,22 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
     activeGoals: [],
     activeMotives: [],
     budget: { approved: false, month: "2026-07", total: null },
-    cashFlow: { net: null },
+    cashFlow: {
+      net: null,
+      projectedLowestBalance: null,
+      projectedLowestBalanceDate: null,
+      reserveRunwayMonths: null,
+    },
+    closeReadiness: {
+      missingProvenance: 0,
+      possibleDuplicates: 0,
+      ready: true,
+      reconciledThrough: null,
+      uncategorized: 0,
+      unansweredExceptions: 0,
+      unmatchedTransfers: 0,
+    },
+    evidence: { cutoff: null, current: false },
     health: {
       confidence: "insufficient",
       confidenceEvidence: [],
@@ -68,7 +83,12 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
         rating: "unknown",
       },
     },
-    income: { monthly: null },
+    income: {
+      monthly: null,
+      observed: { asOf: null, basis: "missing", confidence: null, sourceRefs: [], value: null },
+      stated: { asOf: null, basis: "missing", confidence: null, sourceRefs: [], value: null },
+    },
+    interview: [],
     ledger: {
       candidateTransfers: 0,
       missingProvenance: 0,
@@ -76,14 +96,31 @@ const financeStatus: FinanceStatus = financeStatusSchema.parse({
       possibleDuplicates: 0,
     },
     month: { forecast: null, spending: null },
+    latestReview: null,
+    missingFacts: [],
+    plan: { budgetVariance: null, capacity: null, overAllocated: false },
+    prioritizedGoals: [],
     proposals: [],
     questions: [],
+    reimbursements: {
+      anomalies: 0,
+      expected: 0,
+      needsInput: 0,
+      open: 0,
+      outstanding: 0,
+      overdue: 0,
+      received: 0,
+      unresolved: 0,
+      unmatchedCredits: 0,
+    },
+    reviewMode: { reviewBypassEnabled: false },
     review: { byReason: {}, total: 0 },
     rulebookVersion: `sha256:${"a".repeat(64)}`,
     wealth: { cash: null, debt: null, investments: null, netWorth: null },
   },
   domain: "finances",
   freshness: { blockers: [], observedAt: now, state: "current" },
+  recommendedNextOperation: null,
   state: "clean",
   validNextOperations: [],
   work: {
@@ -383,6 +420,7 @@ const financeBudget: FinanceBudget = {
 };
 const financeMerchant: FinanceMerchant = {
   aliases: ["CORNER STORE #102"],
+  behavior: "unknown",
   displayName: "Corner Store",
   id,
   isUserConfirmed: false,
@@ -705,6 +743,10 @@ function apiFetch() {
         ],
       });
     if (url.pathname === "/v1/finances/plaid/status") return json({ available: true });
+    if (url.pathname === "/v1/finances/automation-settings")
+      return json({
+        settings: { reviewBypassEnabled: method === "PATCH" },
+      });
     if (url.pathname === "/v1/finances/guided-setup")
       return json({
         setup: {
@@ -1192,6 +1234,259 @@ describe("ilo API client", () => {
     ]);
   });
 
+  it("serializes Finance scenario comparisons and budget plans", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const scenarioInput = {
+      alternatives: [],
+      asOf: "2026-08-01",
+      baseline: {
+        assumptions: [],
+        budgetAllocations: [],
+        label: "Baseline",
+        monthlyDebtPayment: 0,
+        monthlyHousingCost: 0,
+        monthlyIncome: 3000,
+        monthlyReserveContribution: 250,
+        startingCash: 1000,
+      },
+      horizonMonths: 3,
+    };
+    const scenario = {
+      alternatives: [],
+      asOf: "2026-08-01",
+      assumptions: [],
+      baseline: {
+        debtPayoffMonths: null,
+        goalDateEffects: [],
+        label: "Baseline",
+        monthlyCashFlow: 2750,
+        projectedLowestBalance: 1000,
+        reserveRunwayMonths: 4,
+      },
+      fingerprint: "scenario-fingerprint",
+      goalConflicts: [],
+      missingInputs: [],
+      sensitivityWarnings: [],
+    };
+    const budgetPlan = {
+      acknowledgeOverAllocation: false,
+      allocations: [{ categoryId: id, limit: 250 }],
+      assumptions: ["Income remains stable."],
+      goalIds: [],
+      month: "2026-08",
+      rationale: "Allocate within reliable monthly capacity.",
+      replace: true,
+      scenarioFingerprint: "scenario-fingerprint",
+    };
+    const breakdown = {
+      allocations: [{ amount: 12, categoryId: id, rationale: "Receipt." }],
+      expectedTransactionUpdatedAt: now,
+      rationale: "One-off receipt breakdown.",
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        if (url.pathname === "/v1/finances/scenarios/compare") return json({ scenario });
+        if (url.pathname === "/v1/finances/budget-plan") return json({ plan: budgetPlan });
+        if (url.pathname === `/v1/finances/transactions/${id}/breakdown`)
+          return json({ transaction: { allocations: [], id } });
+        return json({ error: { code: "not_found", message: "Not found" } }, 404);
+      },
+    });
+
+    await expect(api.compareFinanceScenarios(scenarioInput)).resolves.toEqual(scenario);
+    await expect(api.setFinanceBudgetPlan(budgetPlan)).resolves.toEqual(budgetPlan);
+    await expect(api.setFinanceTransactionBreakdown(id, breakdown)).resolves.toEqual({
+      allocations: [],
+      id,
+    });
+
+    expect(requests).toEqual([
+      {
+        body: JSON.stringify(scenarioInput),
+        method: "POST",
+        path: "/v1/finances/scenarios/compare",
+      },
+      {
+        body: JSON.stringify(budgetPlan),
+        method: "PUT",
+        path: "/v1/finances/budget-plan",
+      },
+      {
+        body: JSON.stringify(breakdown),
+        method: "PUT",
+        path: `/v1/finances/transactions/${id}/breakdown`,
+      },
+    ]);
+  });
+
+  it("forwards an agent Finance disposition instead of reading a human-only result field", async () => {
+    // Returning response.plan here would turn a valid pending review into undefined.
+    const pending = { status: "pending_review", review: { id, status: "pending" } };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(pending),
+    });
+
+    await expect(
+      api.setFinanceBudgetPlan({
+        acknowledgeOverAllocation: false,
+        allocations: [{ categoryId: id, limit: 250 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-08",
+        rationale: "Allocate within reliable monthly capacity.",
+        replace: true,
+        scenarioFingerprint: null,
+      }),
+    ).resolves.toEqual(pending);
+  });
+
+  it("preserves root Finance dispositions for budget, profile, and recurring mutations", async () => {
+    const applied = { result: { month: "2026-08" }, status: "applied" };
+    const pending = { review: { id, status: "pending" }, status: "pending_review" };
+    const needsInput = { question: { id, prompt: "Choose status." }, status: "needs_input" };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const path = new URL(String(input)).pathname;
+        return json(
+          path === "/v1/finances/budget-plan"
+            ? applied
+            : path === "/v1/finances/profile"
+              ? pending
+              : needsInput,
+        );
+      },
+    });
+    await expect(
+      api.setFinanceBudgetPlan({
+        acknowledgeOverAllocation: false,
+        allocations: [{ categoryId: id, limit: 1 }],
+        assumptions: [],
+        goalIds: [],
+        month: "2026-08",
+        rationale: "Test",
+        replace: true,
+        scenarioFingerprint: null,
+      }),
+    ).resolves.toEqual(applied);
+    await expect(
+      api.updateFinanceProfile({
+        effectiveDate: "2026-08-01",
+        employer: null,
+        employmentType: null,
+        expectedNetPay: null,
+        grossAnnualIncome: null,
+        nextPayday: null,
+        payAccountId: null,
+        payFrequency: null,
+        role: null,
+      }),
+    ).resolves.toEqual(pending);
+    await expect(api.updateFinanceRecurringObligation(id, { status: "active" })).resolves.toEqual(
+      needsInput,
+    );
+  });
+
+  it("uses exact action-review transport paths and result envelopes", async () => {
+    const requests: Array<{ body: string | null; method: string; path: string }> = [];
+    const review = { id, status: "dismissed" };
+    const outcome = { result: { id }, status: "applied" };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input, init) => {
+        const url = new URL(String(input));
+        requests.push({
+          body: init?.body ? String(init.body) : null,
+          method: init?.method ?? "GET",
+          path: `${url.pathname}${url.search}`,
+        });
+        return json(
+          url.pathname.endsWith("/approve")
+            ? { outcome }
+            : url.pathname.endsWith("/dismiss")
+              ? { review }
+              : { reviews: [review] },
+        );
+      },
+    });
+    await expect(api.listFinanceActionReviews(7)).resolves.toEqual([review]);
+    await expect(api.approveFinanceActionReview(id)).resolves.toEqual(outcome);
+    await expect(api.dismissFinanceActionReview(id)).resolves.toEqual(review);
+    expect(requests).toEqual([
+      { body: null, method: "GET", path: "/v1/finances/action-reviews?limit=7" },
+      { body: null, method: "POST", path: `/v1/finances/action-reviews/${id}/approve` },
+      { body: null, method: "POST", path: `/v1/finances/action-reviews/${id}/dismiss` },
+    ]);
+  });
+
+  it.each([
+    { result: { refreshed: true }, status: "applied" },
+    { review: { id, status: "pending" }, status: "pending_review" },
+    { question: { id, prompt: "Need evidence." }, status: "needs_input" },
+  ])("preserves refresh Finance action disposition $status", async (outcome) => {
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async () => json(outcome),
+    });
+    await expect(api.refreshFinanceInsights()).resolves.toEqual(outcome);
+  });
+
+  it("lists public Finance questions through the dedicated recovery endpoint", async () => {
+    const question = {
+      id,
+      prompt: "Choose a replacement account.",
+      why: "The account is unavailable.",
+    };
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (input) => {
+        const url = new URL(String(input));
+        expect(`${url.pathname}${url.search}`).toBe("/v1/finances/questions?limit=3");
+        return json({ questions: [question] });
+      },
+    });
+    await expect(api.listFinanceQuestions(3)).resolves.toEqual([question]);
+  });
+
+  it("forwards typed reimbursement answers through the bounded question envelope", async () => {
+    let body: string | null = null;
+    const api = createApiClient({
+      baseUrl: "https://api.example.com",
+      fetch: async (_input, init) => {
+        body = String(init?.body ?? null);
+        return json({ outcome: { result: { reimbursementId: id }, status: "applied" } });
+      },
+    });
+    await expect(
+      api.answerFinanceQuestion(id, {
+        amount: 220,
+        dueDate: null,
+        kind: "reimbursable",
+        payer: "Alex",
+        rationale: "Alex owes their share.",
+      }),
+    ).resolves.toMatchObject({ status: "applied" });
+    expect(JSON.parse(body ?? "{}")).toEqual({
+      answer: JSON.stringify({
+        answer: {
+          amount: 220,
+          dueDate: null,
+          kind: "reimbursable",
+          payer: "Alex",
+          rationale: "Alex owes their share.",
+        },
+      }),
+    });
+  });
+
   it("preserves Finance maintenance API errors with their request IDs", async () => {
     const api = createApiClient({
       baseUrl: "https://api.example.com",
@@ -1411,6 +1706,12 @@ describe("ilo API client", () => {
     });
     await expect(api.getFinanceBudgetPace("week")).resolves.toMatchObject({ period: "week" });
     await expect(api.getFinanceWealthSummary()).resolves.toMatchObject({ netWorth: 1000 });
+    await expect(api.getFinanceAutomationSettings()).resolves.toEqual({
+      reviewBypassEnabled: false,
+    });
+    await expect(
+      api.updateFinanceAutomationSettings({ reviewBypassEnabled: true }),
+    ).resolves.toEqual({ reviewBypassEnabled: true });
     await expect(api.getFinanceGuidedSetup()).resolves.toMatchObject({
       accountSources: [financeAccount],
       humanOnlyActions: expect.arrayContaining(["create_merchant_rule"]),

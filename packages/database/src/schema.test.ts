@@ -7,7 +7,16 @@ import {
   connectorSyncTriggers,
   domainProfileApprovals,
   financeAccounts,
+  financeAgentActionReviews,
+  financeAutomationSettings,
+  financeMaintenanceCandidateItems,
+  financeMaintenanceCandidates,
+  financeMerchants,
+  financeProfiles,
   financeProviderItems,
+  financeReimbursementMatches,
+  financeReimbursements,
+  financeTransactionAllocations,
   financeTransactions,
   mailCalendarCommitmentIntakes,
   mailRuleWorkItems,
@@ -17,6 +26,304 @@ import {
 } from "./schema.js";
 
 describe("database schema contracts", () => {
+  it("keeps one active, owned Finance maintenance candidate with durable private items", async () => {
+    const candidates = getTableConfig(financeMaintenanceCandidates);
+    const items = getTableConfig(financeMaintenanceCandidateItems);
+    expect(candidates.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "user_id",
+        "run_id",
+        "state",
+        "revision",
+        "projection",
+        "preparation_cursor",
+        "next_ordinal",
+        "discovery_revision",
+        "preparation_checkpoint",
+      ]),
+    );
+    expect(items.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "candidate_id",
+        "ordinal",
+        "action_kind",
+        "private_payload",
+        "safe_changes",
+        "source_refs",
+        "expected_revision",
+        "fingerprint",
+        "disposition",
+      ]),
+    );
+    expect(candidates.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_maintenance_candidates_active_run_idx",
+        "finance_maintenance_candidates_user_state_idx",
+      ]),
+    );
+    expect(items.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_maintenance_candidate_items_candidate_ordinal_idx",
+        "finance_maintenance_candidate_items_candidate_fingerprint_idx",
+      ]),
+    );
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0063_finance_maintenance_candidates.sql",
+      ),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidates"');
+    expect(migrationSql).toContain('"grossCashSpending":0');
+    expect(migrationSql).toContain('"recurringCommittedOutflow":0');
+    expect(migrationSql).toContain('CREATE TABLE "finance_maintenance_candidate_items"');
+    expect(migrationSql).toContain("finance_maintenance_candidates_run_user_fk");
+    expect(migrationSql).toContain("workspace_maintenance_runs_id_user_id_unique");
+    expect(migrationSql).toContain('"preparation_cursor" text');
+    expect(migrationSql).toContain('"next_ordinal" integer DEFAULT 0 NOT NULL');
+    expect(migrationSql).toContain('"discovery_revision" text');
+    expect(migrationSql).toContain('"preparation_checkpoint" jsonb');
+    expect(migrationSql).toContain("ON DELETE cascade");
+    expect(migrationSql).toContain(
+      'ALTER TABLE "workspace_maintenance_runs" DROP CONSTRAINT "workspace_maintenance_runs_status_check"',
+    );
+    expect(migrationSql).toContain(
+      "'awaiting_agent_challenge', 'awaiting_approval', 'blocked', 'failed_recoverable'",
+    );
+    expect(migrationSql).toContain('DROP INDEX "workspace_maintenance_runs_open_user_domain_idx"');
+  });
+
+  it("keeps transaction allocations owned, ordered, and aligned with migration 0061", async () => {
+    const merchants = getTableConfig(financeMerchants);
+    const allocations = getTableConfig(financeTransactionAllocations);
+    expect(merchants.columns.map((column) => column.name)).toContain("behavior");
+    expect(allocations.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "user_id",
+        "transaction_id",
+        "category_id",
+        "amount_cents",
+        "allocation_order",
+        "treatment",
+        "rationale",
+        "revision",
+        "state",
+        "invalidated_at",
+      ]),
+    );
+    expect(allocations.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_transaction_allocations_user_category_idx",
+        "finance_transaction_allocations_transaction_order_idx",
+      ]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(
+        process.cwd(),
+        "packages/database/migrations/0061_finance_transaction_allocations.sql",
+      ),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_transaction_allocations"');
+    expect(migrationSql).toContain("\"state\" text DEFAULT 'active' NOT NULL");
+    expect(migrationSql).toContain('"invalidated_at" timestamptz');
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_transaction_allocations_transaction_order_idx" ON "finance_transaction_allocations" USING btree ("transaction_id", "allocation_order") WHERE "state" = \'active\';',
+    );
+    expect(migrationSql).not.toContain('INSERT INTO "finance_transaction_allocations"');
+    expect(migrationSql).toContain("finance_merchants_behavior_check");
+    expect(migrationSql).toContain("finance_transaction_allocations_transaction_user_fk");
+    expect(migrationSql).toContain("finance_transaction_allocations_category_user_fk");
+    expect(migrationSql).toContain("ADD COLUMN \"behavior\" text DEFAULT 'unknown' NOT NULL");
+    expect(
+      allocations.foreignKeys.map((foreignKey) => ({
+        columns: foreignKey.reference().columns.map((column) => column.name),
+        foreignColumns: foreignKey.reference().foreignColumns.map((column) => column.name),
+        name: foreignKey.getName(),
+        onDelete: foreignKey.onDelete,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          columns: ["transaction_id", "user_id"],
+          foreignColumns: ["id", "user_id"],
+          name: "finance_transaction_allocations_transaction_user_fk",
+          onDelete: "cascade",
+        },
+        {
+          columns: ["category_id", "user_id"],
+          foreignColumns: ["id", "user_id"],
+          name: "finance_transaction_allocations_category_user_fk",
+          onDelete: "restrict",
+        },
+      ]),
+    );
+    const journal = JSON.parse(
+      await readFile(
+        resolve(process.cwd(), "packages/database/migrations/meta/_journal.json"),
+        "utf8",
+      ),
+    ) as { entries: Array<{ tag: string }> };
+    expect(journal.entries.slice(-7).map((entry) => entry.tag)).toEqual([
+      "0059_finance_automation_settings",
+      "0060_finance_agent_action_reviews",
+      "0061_finance_transaction_allocations",
+      "0062_finance_reimbursements",
+      "0063_finance_maintenance_candidates",
+      "0064_finance_ledger_challenges",
+      "0065_finance_period_reviews",
+    ]);
+  });
+
+  it("keeps reimbursement ownership, many-to-many credit matching, and migration 0062 aligned", async () => {
+    const reimbursements = getTableConfig(financeReimbursements);
+    const matches = getTableConfig(financeReimbursementMatches);
+    expect(reimbursements.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "user_id",
+        "allocation_id",
+        "expected_amount_cents",
+        "received_amount_cents",
+        "payer",
+        "due_date",
+        "evidence",
+        "status",
+        "revision",
+      ]),
+    );
+    expect(matches.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        "finance_reimbursement_matches_reimbursement_credit_idx",
+        "finance_reimbursement_matches_user_credit_idx",
+      ]),
+    );
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0062_finance_reimbursements.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_reimbursements"');
+    expect(migrationSql).toContain('CREATE TABLE "finance_reimbursement_matches"');
+    expect(migrationSql).toContain("finance_reimbursements_allocation_user_fk");
+    expect(migrationSql).toContain("finance_reimbursement_matches_credit_user_fk");
+  });
+
+  it("stores bounded Finance action reviews without exposing their private payload", async () => {
+    const reviews = getTableConfig(financeAgentActionReviews);
+    const profiles = getTableConfig(financeProfiles);
+
+    expect(reviews.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "user_id",
+        "requesting_agent_id",
+        "source_refs",
+        "action_kind",
+        "private_payload",
+        "safe_changes",
+        "semantic_target_keys",
+        "maintenance_run_id",
+        "expected_revision",
+        "fingerprint",
+        "status",
+      ]),
+    );
+    expect(reviews.indexes.map((index) => index.config.name)).toEqual([
+      "finance_agent_action_reviews_user_status_idx",
+      "finance_agent_action_reviews_pending_fingerprint_idx",
+      "finance_agent_action_reviews_target_keys_idx",
+    ]);
+    const userStatusIndex = reviews.indexes.find(
+      (index) => index.config.name === "finance_agent_action_reviews_user_status_idx",
+    );
+    const pendingFingerprintIndex = reviews.indexes.find(
+      (index) => index.config.name === "finance_agent_action_reviews_pending_fingerprint_idx",
+    );
+    expect(userStatusIndex).toMatchObject({ config: { unique: false } });
+    expect(
+      userStatusIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "status", "created_at"]);
+    expect(pendingFingerprintIndex).toMatchObject({ config: { unique: true } });
+    expect(
+      pendingFingerprintIndex?.config.columns.map((column) => (column as { name?: string }).name),
+    ).toEqual(["user_id", "fingerprint"]);
+    const pendingFingerprintPredicate = pendingFingerprintIndex?.config.where;
+    if (!pendingFingerprintPredicate)
+      throw new Error("Finance pending fingerprint index must be partial.");
+    expect(new PgDialect().sqlToQuery(pendingFingerprintPredicate).sql).toBe(
+      '"finance_agent_action_reviews"."status" = \'pending\'',
+    );
+    expect(
+      reviews.foreignKeys.map((foreignKey) => ({
+        columns: foreignKey.reference().columns.map((column) => column.name),
+        foreignColumns: foreignKey.reference().foreignColumns.map((column) => column.name),
+        name: foreignKey.getName(),
+        onDelete: foreignKey.onDelete,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        {
+          columns: ["user_id"],
+          foreignColumns: ["id"],
+          name: "finance_agent_action_reviews_user_id_users_id_fk",
+          onDelete: "cascade",
+        },
+        {
+          columns: ["maintenance_run_id"],
+          foreignColumns: ["id"],
+          name: "finance_agent_action_reviews_maintenance_run_id_workspace_maintenance_runs_id_fk",
+          onDelete: "set null",
+        },
+      ]),
+    );
+    expect(profiles.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining([
+        "household_size",
+        "dependents",
+        "housing_status",
+        "monthly_housing_cost_cents",
+        "reserve_target_months",
+        "investment_risk_willingness",
+        "investment_risk_capacity",
+      ]),
+    );
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0060_finance_agent_action_reviews.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_agent_action_reviews"');
+    expect(migrationSql).toContain('"private_payload" jsonb NOT NULL');
+    expect(migrationSql).toContain("\"safe_changes\" jsonb DEFAULT '[]'::jsonb NOT NULL");
+    expect(migrationSql).toContain("\"semantic_target_keys\" jsonb DEFAULT '[]'::jsonb NOT NULL");
+    expect(migrationSql).toContain(
+      'CREATE UNIQUE INDEX "finance_agent_action_reviews_pending_fingerprint_idx" ON "finance_agent_action_reviews" USING btree ("user_id", "fingerprint") WHERE "status" = \'pending\'',
+    );
+    expect(migrationSql).toContain('CREATE INDEX "finance_agent_action_reviews_user_status_idx"');
+    expect(migrationSql).toContain('CREATE INDEX "finance_agent_action_reviews_target_keys_idx"');
+    expect(migrationSql).toContain('ADD COLUMN "household_size" integer');
+    expect(migrationSql).not.toMatch(/^\s*(?:INSERT|UPDATE|DELETE)\b/mu);
+    expect(migrationSql).not.toMatch(/https?:\/\//u);
+  });
+
+  it("persists one default-off Finance review bypass setting per user", async () => {
+    const settings = getTableConfig(financeAutomationSettings);
+
+    expect(settings.columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(["user_id", "review_bypass_enabled", "created_at", "updated_at"]),
+    );
+    expect(settings.columns.find((column) => column.name === "user_id")?.primary).toBe(true);
+
+    const migrationSql = await readFile(
+      resolve(process.cwd(), "packages/database/migrations/0059_finance_automation_settings.sql"),
+      "utf8",
+    );
+    expect(migrationSql).toContain('CREATE TABLE "finance_automation_settings"');
+    expect(migrationSql).toContain('"review_bypass_enabled" boolean DEFAULT false NOT NULL');
+    expect(migrationSql).not.toMatch(/^\s*(?:UPDATE|DELETE\s+FROM)\b/mu);
+  });
+
   it("keeps workspace maintenance runs durable, exclusive, and claimable", async () => {
     const runs = getTableConfig(workspaceMaintenanceRuns);
     const steps = getTableConfig(workspaceMaintenanceSteps);

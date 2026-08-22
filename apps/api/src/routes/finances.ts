@@ -1,5 +1,6 @@
 import {
   applyFinanceCategorizationsInputSchema,
+  cancelFinanceReimbursementInputSchema,
   createFinanceAccountInputSchema,
   createFinanceBudgetInputSchema,
   createFinanceTransactionInputSchema,
@@ -9,12 +10,18 @@ import {
   financeCsvImportInputSchema,
   financeMerchantQuerySchema,
   financeReviewDecisionInputSchema,
+  financeScenarioInputSchema,
   financeTransactionQuerySchema,
   idSchema,
   maintenanceRequestSchema,
   maintenanceScopeQuerySchema,
   mergeFinanceMerchantsInputSchema,
+  reconcileFinanceReimbursementInputSchema,
   resolveFinanceAlertInputSchema,
+  setFinanceBudgetPlanInputSchema,
+  setFinanceTransactionBreakdownInputSchema,
+  submitFinanceLedgerChallengeInputSchema,
+  updateFinanceAutomationSettingsInputSchema,
   updateFinanceIncomeStreamInputSchema,
   updateFinanceMerchantInputSchema,
   updateFinanceProfileInputSchema,
@@ -23,7 +30,12 @@ import {
   upsertFinanceAttentionItemInputSchema,
 } from "@personal-os/domain";
 import type { Context, Hono, MiddlewareHandler } from "hono";
+import { z } from "zod";
+import type { createFinanceActionService, SupportedActionKind } from "../finance-action-service.js";
+import type { FinanceChallengeService } from "../finance-challenge-service.js";
 import type { FinanceMaintenanceService } from "../finance-maintenance-service.js";
+import type { FinancePeriodReviewService } from "../finance-period-review-service.js";
+import { compareFinanceScenarios } from "../finance-scenario-service.js";
 import type { createFinanceService } from "../finance-service.js";
 import type { FinanceStatusService } from "../finance-status-service.js";
 import type { AppEnv, Principal } from "../types.js";
@@ -35,11 +47,17 @@ import {
   requireScope,
 } from "./support.js";
 
-type MutationContext = { principal: Principal; requestId: string };
+type MutationContext = {
+  principal: Principal;
+  requestId: string;
+};
 
 type FinanceRouteOptions = {
   app: Hono<AppEnv>;
+  actions?: ReturnType<typeof createFinanceActionService>;
+  financeChallenges?: FinanceChallengeService;
   financeMaintenance: FinanceMaintenanceService;
+  financePeriodReviews?: FinancePeriodReviewService;
   financeStatus: FinanceStatusService;
   finances: ReturnType<typeof createFinanceService>;
   mutationContext: (context: Context<AppEnv>) => MutationContext;
@@ -48,7 +66,10 @@ type FinanceRouteOptions = {
 /** Register the Finance-owned HTTP surface without constructing shared services. */
 export function registerFinanceRoutes({
   app,
+  actions,
+  financeChallenges,
   financeMaintenance,
+  financePeriodReviews,
   financeStatus,
   finances,
   mutationContext,
@@ -56,14 +77,40 @@ export function registerFinanceRoutes({
   const requireFinanceScope = requireFeatureAccess("finances");
   const requireFinanceRead = requireScope("finances:read");
   const requireFinanceMaintenance = requireScope("finances:maintain");
+  const requireActions = () => {
+    if (!actions) throw new Error("Finance action service is required for Finance mutations.");
+    return actions;
+  };
+  const financeMutationContext = (context: Context<AppEnv>): MutationContext =>
+    mutationContext(context);
+  const routeId = (context: Context<AppEnv>) => idSchema.parse(context.req.param("id"));
+  const act = async (
+    context: Context<AppEnv>,
+    actionKind: SupportedActionKind,
+    input: Record<string, unknown>,
+    direct: () => Promise<Response>,
+  ) => {
+    if (context.get("principal").actorType !== "agent") return direct();
+    const outcome = await requireActions().performDirect(
+      actionKind,
+      input,
+      financeMutationContext(context),
+    );
+    return context.json(outcome, outcome.status === "pending_review" ? 202 : 200);
+  };
   const requireFinanceAccess: MiddlewareHandler<AppEnv> = async (context, next) => {
-    if (context.req.method === "POST" && context.req.path === "/v1/finances/maintenance") {
+    if (
+      (context.req.method === "POST" && context.req.path === "/v1/finances/maintenance") ||
+      context.req.path.includes("/v1/finances/maintenance/challenges/")
+    ) {
       await requireFinanceMaintenance(context, next);
       return;
     }
     if (
       context.req.method === "POST" &&
-      context.req.path === "/v1/finances/categorizations/propose"
+      ["/v1/finances/categorizations/propose", "/v1/finances/scenarios/compare"].includes(
+        context.req.path,
+      )
     ) {
       await requireFinanceRead(context, next);
       return;
@@ -88,6 +135,26 @@ export function registerFinanceRoutes({
       ),
     }),
   );
+  app.get("/v1/finances/maintenance/challenges/:id", async (context) => {
+    if (!financeChallenges) throw new Error("Finance challenge service is unavailable.");
+    return context.json({
+      page: await financeChallenges.getPage(
+        context.get("principal").userId,
+        idSchema.parse(context.req.param("id")),
+        context.req.query("cursor"),
+      ),
+    });
+  });
+  app.post("/v1/finances/maintenance/challenges/:id/submit", async (context) => {
+    if (!financeChallenges) throw new Error("Finance challenge service is unavailable.");
+    const input = await parseBody(context, submitFinanceLedgerChallengeInputSchema);
+    const id = idSchema.parse(context.req.param("id"));
+    if (input.challengeId !== id)
+      throw new Error("The Finance challenge path and body do not match.");
+    return context.json({
+      challenge: await financeChallenges.submit(input, financeMutationContext(context)),
+    });
+  });
   app.get("/v1/finances/status", async (context) =>
     context.json({
       status: await financeStatus.getFinanceStatus(
@@ -96,6 +163,26 @@ export function registerFinanceRoutes({
       ),
     }),
   );
+  app.get("/v1/finances/period-reviews/:id", async (context) => {
+    if (!financePeriodReviews) throw new Error("Finance period reviews are unavailable.");
+    return context.json({
+      review: await financePeriodReviews.getOwned(
+        context.get("principal").userId,
+        idSchema.parse(context.req.param("id")),
+      ),
+    });
+  });
+  app.post("/v1/finances/scenarios/compare", async (context) =>
+    context.json({
+      scenario: compareFinanceScenarios(await parseBody(context, financeScenarioInputSchema)),
+    }),
+  );
+  app.put("/v1/finances/budget-plan", async (context) => {
+    const input = await parseBody(context, setFinanceBudgetPlanInputSchema);
+    return act(context, "budget_plan", input, async () =>
+      context.json({ plan: await finances.setBudgetPlan(input, financeMutationContext(context)) }),
+    );
+  });
   app.get("/v1/finances", async (context) => {
     const query = financeBudgetStatusQuerySchema.parse(context.req.query());
     const accountIds = context.req.query("accountIds")?.split(",").filter(Boolean);
@@ -110,6 +197,19 @@ export function registerFinanceRoutes({
   app.get("/v1/finances/wealth", async (context) =>
     context.json({ wealth: await finances.getWealthSummary(context.get("principal").userId) }),
   );
+  app.get("/v1/finances/automation-settings", async (context) =>
+    context.json({
+      settings: await finances.getAutomationSettings(context.get("principal").userId),
+    }),
+  );
+  app.patch("/v1/finances/automation-settings", requireHuman, async (context) =>
+    context.json({
+      settings: await finances.updateAutomationSettings(
+        await parseBody(context, updateFinanceAutomationSettingsInputSchema),
+        financeMutationContext(context),
+      ),
+    }),
+  );
   app.get("/v1/finances/guided-setup", async (context) =>
     context.json({
       setup: await finances.getGuidedSetupContext(context.get("principal").userId),
@@ -118,61 +218,80 @@ export function registerFinanceRoutes({
   app.get("/v1/finances/profile", async (context) =>
     context.json({ profile: await finances.getProfile(context.get("principal").userId) }),
   );
-  app.put("/v1/finances/profile", requireHuman, async (context) =>
-    context.json({
-      profile: await finances.updateProfile(
-        await parseBody(context, updateFinanceProfileInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
+  app.put("/v1/finances/profile", async (context) => {
+    const input = await parseBody(context, updateFinanceProfileInputSchema);
+    return act(context, "profile", input, async () =>
+      context.json({
+        profile: await finances.updateProfile(input, financeMutationContext(context)),
+      }),
+    );
+  });
   app.get("/v1/finances/income-streams", async (context) =>
     context.json({
       incomeStreams: await finances.listIncomeStreams(context.get("principal").userId),
     }),
   );
-  app.patch("/v1/finances/income-streams/:id", requireHuman, async (context) =>
-    context.json({
-      incomeStream: await finances.updateIncomeStream(
-        context.req.param("id"),
-        await parseBody(context, updateFinanceIncomeStreamInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
+  app.patch("/v1/finances/income-streams/:id", async (context) => {
+    const input = {
+      id: routeId(context),
+      ...(await parseBody(context, updateFinanceIncomeStreamInputSchema)),
+    };
+    return act(context, "income_stream", input, async () =>
+      context.json({
+        incomeStream: await finances.updateIncomeStream(
+          input.id,
+          input,
+          financeMutationContext(context),
+        ),
+      }),
+    );
+  });
   app.get("/v1/finances/recurring", async (context) =>
     context.json({
       recurring: await finances.listRecurringObligations(context.get("principal").userId),
     }),
   );
-  app.patch("/v1/finances/recurring/:id", requireHuman, async (context) =>
-    context.json({
-      recurring: await finances.updateRecurringObligation(
-        context.req.param("id"),
-        await parseBody(context, updateFinanceRecurringObligationInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
+  app.patch("/v1/finances/recurring/:id", async (context) => {
+    const input = {
+      id: routeId(context),
+      ...(await parseBody(context, updateFinanceRecurringObligationInputSchema)),
+    };
+    return act(context, "recurring_obligation", input, async () =>
+      context.json({
+        recurring: await finances.updateRecurringObligation(
+          input.id,
+          input,
+          financeMutationContext(context),
+        ),
+      }),
+    );
+  });
   app.get("/v1/finances/forecast", async (context) =>
     context.json({ forecast: await finances.getForecast(context.get("principal").userId) }),
   );
   app.get("/v1/finances/alerts", async (context) =>
     context.json({ alerts: await finances.listAlerts(context.get("principal").userId) }),
   );
-  app.post("/v1/finances/alerts/:id", requireHuman, async (context) =>
-    context.json({
-      alert: await finances.resolveAlert(
-        context.req.param("id"),
-        await parseBody(context, resolveFinanceAlertInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
-  app.post("/v1/finances/insights/refresh", requireHuman, async (context) =>
-    context.json({
-      result: await finances.refreshCashflowInsights(context.get("principal").userId),
-    }),
+  app.post("/v1/finances/alerts/:id", async (context) => {
+    const input = {
+      id: routeId(context),
+      ...(await parseBody(context, resolveFinanceAlertInputSchema)),
+    };
+    return act(context, "alert", input, async () =>
+      context.json({
+        alert: await finances.resolveAlert(input.id, input, financeMutationContext(context)),
+      }),
+    );
+  });
+  app.post("/v1/finances/insights/refresh", async (context) =>
+    act(context, "alert", { operation: "refresh" }, async () =>
+      context.json({
+        result: await finances.refreshCashflowInsights(
+          context.get("principal").userId,
+          financeMutationContext(context),
+        ),
+      }),
+    ),
   );
   app.get("/v1/finances/health", async (context) =>
     context.json({ health: await finances.getLedgerHealth(context.get("principal").userId) }),
@@ -207,23 +326,23 @@ export function registerFinanceRoutes({
       ),
     }),
   );
-  app.patch("/v1/finances/merchants/:id", requireHuman, async (context) =>
-    context.json({
-      merchant: await finances.updateMerchant(
-        context.req.param("id"),
-        await parseBody(context, updateFinanceMerchantInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
-  app.post("/v1/finances/merchants/merge", requireHuman, async (context) =>
-    context.json({
-      merchant: await finances.mergeMerchants(
-        await parseBody(context, mergeFinanceMerchantsInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
+  app.patch("/v1/finances/merchants/:id", async (context) => {
+    const body = await parseBody(context, updateFinanceMerchantInputSchema);
+    const input = { id: routeId(context), ...body };
+    return act(context, "merchant", input, async () =>
+      context.json({
+        merchant: await finances.updateMerchant(input.id, body, financeMutationContext(context)),
+      }),
+    );
+  });
+  app.post("/v1/finances/merchants/merge", async (context) => {
+    const input = await parseBody(context, mergeFinanceMerchantsInputSchema);
+    return act(context, "merchant", input, async () =>
+      context.json({
+        merchant: await finances.mergeMerchants(input, financeMutationContext(context)),
+      }),
+    );
+  });
   app.get("/v1/finances/transactions", async (context) =>
     context.json(
       await finances.listTransactions(
@@ -250,23 +369,62 @@ export function registerFinanceRoutes({
   };
   app.post("/v1/finances/categorizations/propose", proposeCategorizations);
   app.get("/v1/finances/categorizations/propose", proposeCategorizations);
-  app.post("/v1/finances/categorizations/apply", requireHuman, async (context) =>
-    context.json({
-      results: await finances.applyCategorizations(
-        await parseBody(context, applyFinanceCategorizationsInputSchema),
-        mutationContext(context),
-      ),
-    }),
-  );
+  app.post("/v1/finances/categorizations/apply", async (context) => {
+    const input = await parseBody(context, applyFinanceCategorizationsInputSchema);
+    return act(context, "categorization", input, async () =>
+      context.json({
+        results: await finances.applyCategorizations(input, financeMutationContext(context)),
+      }),
+    );
+  });
   app.post("/v1/finances/review/:id", requireHuman, async (context) =>
     context.json({
       result: await finances.resolveReview(
-        context.req.param("id"),
+        routeId(context),
         await parseBody(context, financeReviewDecisionInputSchema),
-        mutationContext(context),
+        financeMutationContext(context),
       ),
     }),
   );
+  app.get("/v1/finances/action-reviews", requireHuman, async (context) =>
+    context.json({
+      reviews: await requireActions().listReviews(
+        context.get("principal").userId,
+        financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+      ),
+    }),
+  );
+  app.get("/v1/finances/questions", async (context) =>
+    context.json({
+      questions: await requireActions().listQuestions(
+        context.get("principal").userId,
+        financeTransactionQuerySchema.shape.limit.parse(context.req.query("limit") ?? 50),
+      ),
+    }),
+  );
+  app.post("/v1/finances/action-reviews/:id/approve", requireHuman, async (context) =>
+    context.json({
+      outcome: await requireActions().approve(routeId(context), financeMutationContext(context)),
+    }),
+  );
+  app.post("/v1/finances/action-reviews/:id/dismiss", requireHuman, async (context) =>
+    context.json({
+      review: await requireActions().dismiss(routeId(context), financeMutationContext(context)),
+    }),
+  );
+  app.post("/v1/finances/questions/:id/answer", async (context) => {
+    const { answer } = await parseBody(
+      context,
+      z.object({ answer: z.string().trim().min(1).max(4_000) }).strict(),
+    );
+    return context.json({
+      outcome: await requireActions().answerQuestion(
+        routeId(context),
+        answer,
+        financeMutationContext(context),
+      ),
+    });
+  });
   app.post("/v1/finances/accounts", requireHuman, async (context) =>
     context.json(
       {
@@ -279,49 +437,96 @@ export function registerFinanceRoutes({
     ),
   );
   app.delete("/v1/finances/accounts/:id", requireHuman, async (context) => {
-    await finances.deleteAccount(context.req.param("id"), mutationContext(context));
+    await finances.deleteAccount(routeId(context), mutationContext(context));
     return context.body(null, 204);
   });
-  app.post("/v1/finances/transactions", requireHuman, async (context) =>
-    context.json(
-      {
-        transaction: await finances.createTransaction(
-          await parseBody(context, createFinanceTransactionInputSchema),
-          mutationContext(context),
-        ),
-      },
-      201,
-    ),
-  );
+  app.post("/v1/finances/transactions", async (context) => {
+    const input = await parseBody(context, createFinanceTransactionInputSchema);
+    return act(context, "transaction", input, async () =>
+      context.json(
+        { transaction: await finances.createTransaction(input, financeMutationContext(context)) },
+        201,
+      ),
+    );
+  });
   app.put("/v1/finances/transactions/:id/attention", async (context) =>
     context.json({
       item: await finances.upsertAttentionItem(
-        context.req.param("id"),
+        routeId(context),
         await parseBody(context, upsertFinanceAttentionItemInputSchema),
         mutationContext(context),
       ),
     }),
   );
-  app.patch("/v1/finances/transactions/:id", requireHuman, async (context) =>
+  app.patch("/v1/finances/transactions/:id", async (context) => {
+    const body = await parseBody(context, updateFinanceTransactionInputSchema);
+    const input = { id: routeId(context), ...body };
+    return act(context, "transaction", input, async () =>
+      context.json({
+        transaction: await finances.updateTransaction(
+          input.id,
+          body,
+          financeMutationContext(context),
+        ),
+      }),
+    );
+  });
+  app.put("/v1/finances/transactions/:id/breakdown", async (context) => {
+    const body = await parseBody(context, setFinanceTransactionBreakdownInputSchema);
+    const input = { id: routeId(context), ...body };
+    return act(context, "transaction_breakdown", input, async () =>
+      context.json({
+        transaction: await finances.setTransactionBreakdown(
+          input.id,
+          body,
+          financeMutationContext(context),
+        ),
+      }),
+    );
+  });
+  app.get("/v1/finances/reimbursements", async (context) =>
     context.json({
-      transaction: await finances.updateTransaction(
-        context.req.param("id"),
-        await parseBody(context, updateFinanceTransactionInputSchema),
-        mutationContext(context),
-      ),
+      reimbursements: await finances.listReimbursements(context.get("principal").userId),
     }),
   );
-  app.post("/v1/finances/budgets", requireHuman, async (context) =>
-    context.json(
-      {
-        budget: await finances.createBudget(
-          await parseBody(context, createFinanceBudgetInputSchema),
-          mutationContext(context),
+  app.post("/v1/finances/reimbursements/reconcile", async (context) => {
+    const input = await parseBody(context, reconcileFinanceReimbursementInputSchema);
+    return act(context, "reimbursement", input, async () =>
+      context.json({
+        reimbursement: await finances.reconcileReimbursement(
+          input,
+          financeMutationContext(context),
         ),
-      },
-      201,
-    ),
-  );
+      }),
+    );
+  });
+  app.post("/v1/finances/reimbursements/:id/cancel", async (context) => {
+    const body = await parseBody(
+      context,
+      cancelFinanceReimbursementInputSchema.omit({
+        reimbursementId: true,
+        operation: true,
+      }),
+    );
+    const input = { ...body, operation: "cancel" as const, reimbursementId: routeId(context) };
+    return act(context, "reimbursement", input, async () =>
+      context.json({
+        reimbursement: await finances.reconcileReimbursement(
+          input,
+          financeMutationContext(context),
+        ),
+      }),
+    );
+  });
+  app.post("/v1/finances/budgets", async (context) => {
+    const input = await parseBody(context, createFinanceBudgetInputSchema);
+    return act(context, "budget_plan", input, async () =>
+      context.json(
+        { budget: await finances.createBudget(input, financeMutationContext(context)) },
+        201,
+      ),
+    );
+  });
   app.get("/v1/finances/plaid/status", async (context) =>
     context.json({ available: finances.plaidAvailable() }),
   );
@@ -343,7 +548,7 @@ export function registerFinanceRoutes({
   );
   app.post("/v1/finances/accounts/:id/sync", requireHuman, async (context) =>
     context.json({
-      result: await finances.syncPlaidAccount(context.req.param("id"), mutationContext(context)),
+      result: await finances.syncPlaidAccount(routeId(context), mutationContext(context)),
     }),
   );
   app.post("/v1/finances/accounts/:id/import", requireHuman, async (context) =>
@@ -352,7 +557,7 @@ export function registerFinanceRoutes({
         result: await finances.importCsv(
           {
             ...(await parseBody(context, financeCsvImportInputSchema)),
-            accountId: context.req.param("id"),
+            accountId: routeId(context),
           },
           mutationContext(context),
         ),

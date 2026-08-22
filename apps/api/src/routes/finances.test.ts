@@ -47,13 +47,69 @@ describe("finance routes", () => {
     });
   });
 
-  it("keeps setup and owned attention agent-accessible while consequential Finance mutations stay human-only", async () => {
+  it("compares scenarios on the read scope and forwards a complete budget plan", async () => {
+    const app = new Hono<AppEnv>();
+    const setBudgetPlan = vi.fn(async (input) => input);
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "finance-plan");
+      await next();
+    });
+    registerFinanceRoutes({
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: { setBudgetPlan } as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+    const scenario = await app.request("/v1/finances/scenarios/compare", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        alternatives: [],
+        asOf: "2026-08-01",
+        baseline: { label: "Base", monthlyIncome: 1, startingCash: 0 },
+        horizonMonths: 1,
+      }),
+    });
+    expect(scenario.status).toBe(200);
+    await expect(scenario.json()).resolves.toMatchObject({
+      scenario: { baseline: { label: "Base" } },
+    });
+    const input = {
+      allocations: [{ categoryId: id, limit: 1 }],
+      month: "2026-08",
+      rationale: "Plan.",
+    };
+    const plan = await app.request("/v1/finances/budget-plan", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    expect(plan.status).toBe(200);
+    await expect(plan.json()).resolves.toMatchObject({ plan: input });
+    expect(setBudgetPlan).toHaveBeenCalledWith(
+      expect.objectContaining(input),
+      expect.objectContaining({ requestId: "finance-plan" }),
+    );
+  });
+
+  it("keeps setup and owned attention agent-accessible while provider, account, and approval actions stay human-only", async () => {
     const app = new Hono<AppEnv>();
     const finances = {
       createAccount: vi.fn(),
       createBudget: vi.fn(),
       createTransaction: vi.fn(),
       deleteAccount: vi.fn(),
+      getAutomationSettings: vi.fn(async () => ({ reviewBypassEnabled: false })),
       getGuidedSetupContext: vi.fn(async () => ({ ready: true })),
       mergeMerchants: vi.fn(),
       proposeCategorizations: vi.fn(async () => ({ items: [], nextCursor: null })),
@@ -64,6 +120,23 @@ describe("finance routes", () => {
       updateRecurringObligation: vi.fn(),
       upsertAttentionItem: vi.fn(async () => ({ id })),
     };
+    const performDirect = vi.fn(async () => ({
+      review: {
+        actionKind: "budget_plan",
+        assumptions: [],
+        changes: [{ entityId: null, entityType: "finance_budget_plan", summary: "Apply budget." }],
+        expectedRevision: null,
+        fingerprint: "pending-budget",
+        id,
+        rationale: "Requested budget.",
+        requestedAt: "2026-08-17T00:00:00.000Z",
+        requestingAgentId: id,
+        runId: null,
+        sourceRefs: [],
+        status: "pending" as const,
+      },
+      status: "pending_review" as const,
+    }));
     app.use("*", async (context, next) => {
       context.set("principal", {
         actorId: id,
@@ -78,6 +151,7 @@ describe("finance routes", () => {
       context.json({ error: error instanceof Error ? error.message : "unknown" }, 403),
     );
     registerFinanceRoutes({
+      actions: { performDirect } as never,
       app,
       financeMaintenance: {} as FinanceMaintenanceService,
       financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
@@ -110,23 +184,27 @@ describe("finance routes", () => {
     const humanOnlyResponses = await Promise.all([
       app.request("/v1/finances/accounts", json),
       app.request(`/v1/finances/accounts/${id}`, { method: "DELETE" }),
-      app.request("/v1/finances/budgets", json),
       app.request(`/v1/finances/accounts/${id}/sync`, json),
-      app.request(`/v1/finances/recurring/${id}`, { ...json, method: "PATCH" }),
-      app.request(`/v1/finances/alerts/${id}`, json),
-      app.request(`/v1/finances/merchants/${id}`, { ...json, method: "PATCH" }),
-      app.request("/v1/finances/merchants/merge", json),
-      app.request("/v1/finances/categorizations/apply", json),
       app.request(`/v1/finances/review/${id}`, json),
-      app.request("/v1/finances/transactions", json),
-      app.request(`/v1/finances/transactions/${id}`, { ...json, method: "PATCH" }),
     ]);
     for (const response of humanOnlyResponses) {
       expect(response.status).toBe(403);
       await expect(response.json()).resolves.toMatchObject({
-        error: expect.stringContaining("interactive user session"),
+        error: expect.stringMatching(/interactive user session|waiting for review/),
       });
     }
+    const queued = await app.request("/v1/finances/budgets", {
+      body: JSON.stringify({ category: "Housing", limit: 2_000, month: "2026-08" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(queued.status).toBe(202);
+    await expect(queued.json()).resolves.toMatchObject({ status: "pending_review" });
+    expect(performDirect).toHaveBeenCalledWith(
+      "budget_plan",
+      expect.objectContaining({ category: "Housing" }),
+      expect.objectContaining({ requestId: "request-1" }),
+    );
     expect(finances.getGuidedSetupContext).toHaveBeenCalledWith(id);
     expect(finances.proposeCategorizations).toHaveBeenCalledWith(
       id,
@@ -147,6 +225,60 @@ describe("finance routes", () => {
     expect(finances.mergeMerchants).not.toHaveBeenCalled();
     expect(finances.resolveReview).not.toHaveBeenCalled();
     expect(finances.createTransaction).not.toHaveBeenCalled();
+  });
+
+  it("returns the action service disposition and never accepts a bypass token or tool input", async () => {
+    const app = new Hono<AppEnv>();
+    const budget = { category: "Housing", id, limit: 2_000, month: "2026-08" };
+    const finances = {
+      createBudget: vi.fn(async () => budget),
+      getAutomationSettings: vi.fn(async () => ({ reviewBypassEnabled: true })),
+      updateAutomationSettings: vi.fn(),
+    };
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "agent",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "request-agent-budget");
+      await next();
+    });
+    app.onError((error, context) =>
+      context.json({ error: error instanceof Error ? error.message : "unknown" }, 403),
+    );
+    registerFinanceRoutes({
+      actions: {
+        performDirect: vi.fn(async () => ({ result: budget, status: "applied" as const })),
+      } as never,
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: finances as unknown as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const created = await app.request("/v1/finances/budgets", {
+      body: JSON.stringify({ category: "Housing", limit: 2_000, month: "2026-08" }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(created.status).toBe(200);
+    await expect(created.json()).resolves.toEqual({ result: budget, status: "applied" });
+    expect(finances.getAutomationSettings).not.toHaveBeenCalled();
+    expect(finances.createBudget).not.toHaveBeenCalled();
+
+    const selfEnable = await app.request("/v1/finances/automation-settings", {
+      body: JSON.stringify({ reviewBypassEnabled: true }),
+      headers: { "content-type": "application/json" },
+      method: "PATCH",
+    });
+    expect(selfEnable.status).toBe(403);
+    expect(finances.updateAutomationSettings).not.toHaveBeenCalled();
   });
 
   it("keeps POST proposal compatibility on the Finance read scope", async () => {
@@ -250,5 +382,74 @@ describe("finance routes", () => {
     expect(read.status).toBe(200);
     await expect(read.json()).resolves.toEqual({ run: { ...run, status: "completed" } });
     expect(financeMaintenance.getRun).toHaveBeenCalledWith(id, id);
+  });
+
+  it("lists only public pending Finance questions and rejects malformed action IDs", async () => {
+    const app = new Hono<AppEnv>();
+    const questions = [
+      {
+        actionKind: "profile",
+        choices: [],
+        expectedAnswer: [{ name: "payAccountId", required: true, type: "string" }],
+        id,
+        prompt: "Choose a replacement account.",
+        sourceRefs: [],
+        why: "The selected account is unavailable.",
+      },
+    ];
+    const listQuestions = vi.fn(async () => questions);
+    const approve = vi.fn();
+    const answerQuestion = vi.fn(async () => ({
+      result: { reimbursementId: id },
+      status: "applied",
+    }));
+    app.use("*", async (context, next) => {
+      context.set("principal", {
+        actorId: id,
+        actorType: "user",
+        scopes: new Set(["finances:read", "finances:write"]),
+        userId: id,
+      });
+      context.set("requestId", "question-list");
+      await next();
+    });
+    app.onError((error, context) =>
+      context.json({ error: error instanceof Error ? error.message : "unknown" }, 400),
+    );
+    registerFinanceRoutes({
+      actions: { answerQuestion, approve, listQuestions } as never,
+      app,
+      financeMaintenance: {} as FinanceMaintenanceService,
+      financeStatus: { getFinanceStatus: vi.fn() } as unknown as FinanceStatusService,
+      finances: {} as ReturnType<typeof createFinanceService>,
+      mutationContext: (context) => ({
+        principal: context.get("principal"),
+        requestId: context.get("requestId"),
+      }),
+    });
+
+    const listed = await app.request("/v1/finances/questions?limit=2");
+    expect(listed.status).toBe(200);
+    await expect(listed.json()).resolves.toEqual({ questions });
+    expect(listQuestions).toHaveBeenLastCalledWith(id, 2);
+    const answered = await app.request(`/v1/finances/questions/${id}/answer`, {
+      body: JSON.stringify({ answer: JSON.stringify({ answer: { kind: "not_reimbursement" } }) }),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    });
+    expect(answered.status).toBe(200);
+    await expect(answered.json()).resolves.toEqual({
+      outcome: { result: { reimbursementId: id }, status: "applied" },
+    });
+    expect(answerQuestion).toHaveBeenCalledWith(
+      id,
+      JSON.stringify({ answer: { kind: "not_reimbursement" } }),
+      expect.objectContaining({ requestId: "question-list" }),
+    );
+    expect(
+      (await app.request("/v1/finances/action-reviews/not-an-id/approve", { method: "POST" }))
+        .status,
+    ).toBe(400);
+    expect(approve).not.toHaveBeenCalled();
   });
 });

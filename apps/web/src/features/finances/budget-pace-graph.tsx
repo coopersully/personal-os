@@ -1,6 +1,8 @@
 import type { FinanceBudgetPace, FinanceBudgetPacePeriod } from "@personal-os/domain";
 import { formatDateOnly } from "@personal-os/domain";
+import { Link } from "react-router-dom";
 import { Badge as ShadcnBadge } from "@/components/ui/badge";
+import { Button as ShadcnButton } from "@/components/ui/button";
 import {
   Card as ShadcnCard,
   CardAction as ShadcnCardAction,
@@ -9,6 +11,13 @@ import {
   CardHeader as ShadcnCardHeader,
   CardTitle as ShadcnCardTitle,
 } from "@/components/ui/card";
+import {
+  Empty as ShadcnEmpty,
+  EmptyContent as ShadcnEmptyContent,
+  EmptyDescription as ShadcnEmptyDescription,
+  EmptyHeader as ShadcnEmptyHeader,
+  EmptyTitle as ShadcnEmptyTitle,
+} from "@/components/ui/empty";
 import {
   ToggleGroup as ShadcnToggleGroup,
   ToggleGroupItem as ShadcnToggleGroupItem,
@@ -117,6 +126,24 @@ export function BudgetPaceGraph({
   const latest = data?.cells.find((cell) => cell.date === data.asOf);
   const hasBudget = data?.cells.some((cell) => cell.planned > 0) ?? false;
   const isYear = period === "year";
+
+  if (data && !hasBudget) {
+    return (
+      <ShadcnEmpty className="min-h-48 border">
+        <ShadcnEmptyHeader>
+          <ShadcnEmptyTitle>No budget yet</ShadcnEmptyTitle>
+          <ShadcnEmptyDescription>
+            Set monthly category limits to see whether your spending is on pace.
+          </ShadcnEmptyDescription>
+        </ShadcnEmptyHeader>
+        <ShadcnEmptyContent>
+          <ShadcnButton asChild size="sm">
+            <Link to="/finances/budgets">Set a budget</Link>
+          </ShadcnButton>
+        </ShadcnEmptyContent>
+      </ShadcnEmpty>
+    );
+  }
 
   return (
     <ShadcnCard>

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { createPlaidConnector } from "@personal-os/connectors";
@@ -9,23 +10,34 @@ import {
   domainProfileApprovals,
   domainProfiles,
   financeAccounts,
+  financeAgentActionReviews,
   financeAlerts,
+  financeAutomationSettings,
+  financeBudgetPlans,
+  financeBudgets,
   financeCategories,
   financeClassificationDecisions,
   financeIncomeStreams,
+  financeMerchants,
+  financeProfiles,
   financeProviderItems,
   financeRecurringObligations,
+  financeReimbursementMatches,
+  financeReimbursements,
   financeReviewCases,
   financeSetupBackfillState,
+  financeTransactionAllocations,
   financeTransactions,
+  goals,
   migrateDatabase,
   users,
   workspaceMaintenanceRuns,
 } from "@personal-os/database";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { createFinanceProviderItemService } from "./finance-provider-item-service.js";
 import { createFinanceService, financeCsvImportErrorMessage } from "./finance-service.js";
+import { createFinanceStatusService } from "./finance-status-service.js";
 import { migrationsWithout } from "./test-migrations.js";
 import type { Principal } from "./types.js";
 
@@ -69,6 +81,20 @@ async function waitForLockWaiters(pool: DatabaseClient["pool"], expected: number
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
   throw new Error(`Expected at least ${expected} database lock waiter(s).`);
+}
+
+async function waitForPostgresSleep(pool: DatabaseClient["pool"]) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const result = await pool.query<{ count: string }>(`
+      SELECT count(*)::text AS count
+      FROM pg_stat_activity
+      WHERE datname = current_database() AND wait_event = 'PgSleep'
+    `);
+    if (Number(result.rows[0]?.count ?? 0) > 0) return;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+  throw new Error("Expected the first Finance budget plan write to reach its test barrier.");
 }
 
 function plaidFetch(): typeof globalThis.fetch {
@@ -348,6 +374,17 @@ describe.sequential("finance service", () => {
       "0056_workspace_maintenance_runs",
       "0057_finance_currency_evidence",
       "0058_finance_provider_items",
+      "0059_finance_automation_settings",
+      "0060_finance_agent_action_reviews",
+      "0061_finance_transaction_allocations",
+      // 0062 has a deliberate FK dependency on the allocation table and is
+      // applied with the current chain during this legacy-upgrade test.
+      "0062_finance_reimbursements",
+      // Candidate storage depends on the maintenance-run migration omitted
+      // by this legacy schema fixture.
+      "0063_finance_maintenance_candidates",
+      "0064_finance_ledger_challenges",
+      "0065_finance_period_reviews",
     ]);
     await migrateDatabase(database.db, legacyMigrations);
     await expect(
@@ -830,6 +867,392 @@ describe.sequential("finance service", () => {
   afterAll(async () => {
     await database.close();
     await container.stop();
+  });
+
+  it("keeps review bypass off until a signed-in user explicitly enables it", async () => {
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(userId), requestId: "finance-review-bypass" };
+
+    await expect(service.getAutomationSettings(userId)).resolves.toEqual({
+      reviewBypassEnabled: false,
+    });
+    await expect(
+      service.updateAutomationSettings({ reviewBypassEnabled: true }, context),
+    ).resolves.toEqual({ reviewBypassEnabled: true });
+    await expect(service.getAutomationSettings(userId)).resolves.toEqual({
+      reviewBypassEnabled: true,
+    });
+    await expect(service.getGuidedSetupContext(userId)).resolves.toMatchObject({
+      humanOnlyActions: [
+        "connect_or_disconnect_source",
+        "import_transactions",
+        "manage_accounts",
+        "refresh_provider_data",
+      ],
+    });
+    await expect(
+      database.db
+        .select({ reviewBypassEnabled: financeAutomationSettings.reviewBypassEnabled })
+        .from(financeAutomationSettings)
+        .where(eq(financeAutomationSettings.userId, userId)),
+    ).resolves.toEqual([{ reviewBypassEnabled: true }]);
+    await expect(
+      database.db
+        .select({ action: auditEvents.action, actorType: auditEvents.actorType })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, context.requestId)),
+    ).resolves.toEqual([{ action: "finance.review_bypass_updated", actorType: "user" }]);
+  });
+
+  it("atomically replaces an owned budget plan and records only a redacted audit summary", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Budget plan owner",
+        email: "budget-plan-owner@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Budget plan owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const categories = await service.listCategories(owner.id);
+    const category = categories[0];
+    if (!category) throw new Error("Default Finance categories were not seeded.");
+    await database.db.insert(financeProfiles).values({
+      effectiveDate: "2026-07-01",
+      grossAnnualIncome: 5_000_00,
+      userId: owner.id,
+    });
+    const context = { principal: financePrincipal(owner.id), requestId: "budget-plan" };
+    const input = {
+      allocations: [{ categoryId: category.id, limit: 400 }],
+      acknowledgeOverAllocation: false,
+      assumptions: ["Income stays stable."],
+      goalIds: [],
+      month: "2026-07",
+      rationale: "Fund essentials first.",
+      replace: true,
+      scenarioFingerprint: `sha256:${"a".repeat(64)}`,
+    };
+
+    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(eq(financeBudgets.userId, owner.id)),
+    ).resolves.toEqual([{ category: category.name, limit: 40_000 }]);
+    await expect(
+      database.db
+        .select({ after: auditEvents.after })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, context.requestId)),
+    ).resolves.toEqual([
+      {
+        after: expect.objectContaining({
+          assumptionsCount: 1,
+          rationaleProvided: true,
+          scenarioFingerprint: input.scenarioFingerprint,
+        }),
+      },
+    ]);
+    await expect(
+      service.setBudgetPlan(
+        { ...input, allocations: [{ categoryId: category.id, limit: 6_000 }] },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
+  it("keeps budget-plan ownership, durable metadata, and audits atomic and private", async () => {
+    const [owner, otherUser] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "Budget plan metadata owner",
+          email: "budget-plan-metadata-owner@example.com",
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Budget plan metadata other user",
+          email: "budget-plan-metadata-other@example.com",
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+      ])
+      .returning();
+    if (!owner || !otherUser) throw new Error("Fixture users were not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const [category, secondCategory] = await service.listCategories(owner.id);
+    const [foreignCategory] = await service.listCategories(otherUser.id);
+    if (!category || !secondCategory || !foreignCategory)
+      throw new Error("Default Finance categories were not seeded.");
+    const [goal, foreignGoal] = await database.db
+      .insert(goals)
+      .values([
+        { title: "Owner goal", userId: owner.id },
+        { title: "Foreign goal", userId: otherUser.id },
+      ])
+      .returning();
+    if (!goal || !foreignGoal) throw new Error("Finance goals were not created.");
+    const input = {
+      acknowledgeOverAllocation: false,
+      allocations: [{ categoryId: category.id, limit: 400 }],
+      assumptions: ["Income stays stable.", "Housing cost is unchanged."],
+      goalIds: [goal.id],
+      month: "2026-07",
+      rationale: "Fund essentials first.",
+      replace: true,
+      scenarioFingerprint: `sha256:${"b".repeat(64)}`,
+    };
+    const context = { principal: financePrincipal(owner.id), requestId: "budget-plan-metadata" };
+
+    await expect(service.setBudgetPlan(input, context)).resolves.toEqual(input);
+    await expect(
+      database.db
+        .select({
+          assumptions: financeBudgetPlans.assumptions,
+          goalIds: financeBudgetPlans.goalIds,
+          rationale: financeBudgetPlans.rationale,
+          replace: financeBudgetPlans.replace,
+          scenarioFingerprint: financeBudgetPlans.scenarioFingerprint,
+          version: financeBudgetPlans.version,
+        })
+        .from(financeBudgetPlans)
+        .where(
+          and(eq(financeBudgetPlans.userId, owner.id), eq(financeBudgetPlans.month, input.month)),
+        ),
+    ).resolves.toEqual([
+      {
+        assumptions: input.assumptions,
+        goalIds: input.goalIds,
+        rationale: input.rationale,
+        replace: input.replace,
+        scenarioFingerprint: input.scenarioFingerprint,
+        version: 1,
+      },
+    ]);
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, input.month))),
+    ).resolves.toEqual([{ category: category.name, limit: 40_000 }]);
+    await expect(
+      database.db
+        .select({ after: auditEvents.after, before: auditEvents.before })
+        .from(auditEvents)
+        .where(eq(auditEvents.requestId, context.requestId)),
+    ).resolves.toEqual([
+      {
+        after: {
+          allocationCount: 1,
+          assumptionsCount: 2,
+          goalCount: 1,
+          month: input.month,
+          planVersion: 1,
+          rationaleProvided: true,
+          scenarioFingerprint: input.scenarioFingerprint,
+        },
+        before: { allocationCount: 0, month: input.month, priorAllocationCount: 0 },
+      },
+    ]);
+
+    const persistedPlan = await database.db
+      .select({ rationale: financeBudgetPlans.rationale, version: financeBudgetPlans.version })
+      .from(financeBudgetPlans)
+      .where(
+        and(eq(financeBudgetPlans.userId, owner.id), eq(financeBudgetPlans.month, input.month)),
+      );
+    const persistedBudgets = await database.db
+      .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+      .from(financeBudgets)
+      .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, input.month)));
+    const auditCount = await database.db.$count(auditEvents, eq(auditEvents.userId, owner.id));
+
+    await expect(
+      service.setBudgetPlan(
+        { ...input, allocations: [{ categoryId: foreignCategory.id, limit: 100 }] },
+        { ...context, requestId: "budget-plan-foreign-category" },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.setBudgetPlan(
+        { ...input, goalIds: [foreignGoal.id] },
+        { ...context, requestId: "budget-plan-foreign-goal" },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+
+    await expect(
+      database.db
+        .select({ rationale: financeBudgetPlans.rationale, version: financeBudgetPlans.version })
+        .from(financeBudgetPlans)
+        .where(
+          and(eq(financeBudgetPlans.userId, owner.id), eq(financeBudgetPlans.month, input.month)),
+        ),
+    ).resolves.toEqual(persistedPlan);
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, input.month))),
+    ).resolves.toEqual(persistedBudgets);
+    await expect(database.db.$count(auditEvents, eq(auditEvents.userId, owner.id))).resolves.toBe(
+      auditCount,
+    );
+
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION fail_finance_budget_plan_allocation_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.month = '2026-07' AND (
+          SELECT count(*) FROM finance_budgets WHERE user_id = NEW.user_id AND month = NEW.month
+        ) >= 1 THEN
+          RAISE EXCEPTION 'forced Finance budget plan allocation failure';
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER fail_finance_budget_plan_allocation_for_test
+      BEFORE INSERT ON finance_budgets
+      FOR EACH ROW EXECUTE FUNCTION fail_finance_budget_plan_allocation_for_test();
+    `);
+    try {
+      let allocationFailure: unknown;
+      try {
+        await service.setBudgetPlan(
+          {
+            ...input,
+            allocations: [
+              { categoryId: category.id, limit: 350 },
+              { categoryId: secondCategory.id, limit: 50 },
+            ],
+            rationale: "Attempt a replacement that will fail midway.",
+          },
+          { ...context, requestId: "budget-plan-allocation-rollback" },
+        );
+      } catch (error) {
+        allocationFailure = error;
+      }
+      expect(allocationFailure).toBeInstanceOf(Error);
+      expect((allocationFailure as Error & { cause?: Error }).cause?.message).toContain(
+        "forced Finance budget plan allocation failure",
+      );
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS fail_finance_budget_plan_allocation_for_test ON finance_budgets;
+        DROP FUNCTION IF EXISTS fail_finance_budget_plan_allocation_for_test();
+      `);
+    }
+
+    await expect(
+      database.db
+        .select({ rationale: financeBudgetPlans.rationale, version: financeBudgetPlans.version })
+        .from(financeBudgetPlans)
+        .where(
+          and(eq(financeBudgetPlans.userId, owner.id), eq(financeBudgetPlans.month, input.month)),
+        ),
+    ).resolves.toEqual(persistedPlan);
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, input.month))),
+    ).resolves.toEqual(persistedBudgets);
+    await expect(database.db.$count(auditEvents, eq(auditEvents.userId, owner.id))).resolves.toBe(
+      auditCount,
+    );
+  });
+
+  it("serializes concurrent complete budget-plan replacements across disjoint categories", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Concurrent budget plan owner",
+        email: "concurrent-budget-plan-owner@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Fixture user was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const [firstCategory, secondCategory] = await service.listCategories(owner.id);
+    if (!firstCategory || !secondCategory)
+      throw new Error("Default Finance categories were not seeded.");
+    const firstPlan = {
+      acknowledgeOverAllocation: false,
+      allocations: [{ categoryId: firstCategory.id, limit: 250 }],
+      assumptions: [],
+      goalIds: [],
+      month: "2026-10",
+      rationale: "First complete plan.",
+      replace: true,
+      scenarioFingerprint: "finance-race-first",
+    };
+    const secondPlan = {
+      ...firstPlan,
+      allocations: [{ categoryId: secondCategory.id, limit: 500 }],
+      rationale: "Second complete plan.",
+      scenarioFingerprint: "finance-race-second",
+    };
+
+    await database.pool.query(`
+      CREATE OR REPLACE FUNCTION pause_first_finance_budget_plan_for_test() RETURNS trigger AS $$
+      BEGIN
+        IF NEW.month = '2026-10' AND NEW.scenario_fingerprint = 'finance-race-first' THEN
+          PERFORM pg_sleep(0.25);
+        END IF;
+        RETURN NEW;
+      END;
+      $$ LANGUAGE plpgsql;
+      CREATE TRIGGER pause_first_finance_budget_plan_for_test
+      AFTER INSERT OR UPDATE ON finance_budget_plans
+      FOR EACH ROW EXECUTE FUNCTION pause_first_finance_budget_plan_for_test();
+    `);
+    let first: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
+    let second: ReturnType<ReturnType<typeof createFinanceService>["setBudgetPlan"]> | undefined;
+    try {
+      first = service.setBudgetPlan(firstPlan, {
+        principal: financePrincipal(owner.id),
+        requestId: "concurrent-budget-plan-first",
+      });
+      void first.catch(() => undefined);
+      await waitForPostgresSleep(database.pool);
+      second = service.setBudgetPlan(secondPlan, {
+        principal: financePrincipal(owner.id),
+        requestId: "concurrent-budget-plan-second",
+      });
+      void second.catch(() => undefined);
+      await expect(Promise.all([first, second])).resolves.toEqual([firstPlan, secondPlan]);
+    } finally {
+      await database.pool.query(`
+        DROP TRIGGER IF EXISTS pause_first_finance_budget_plan_for_test ON finance_budget_plans;
+        DROP FUNCTION IF EXISTS pause_first_finance_budget_plan_for_test();
+      `);
+      await Promise.allSettled([first, second].filter((value) => value !== undefined));
+    }
+
+    await expect(
+      database.db
+        .select({ category: financeBudgets.category, limit: financeBudgets.limit })
+        .from(financeBudgets)
+        .where(and(eq(financeBudgets.userId, owner.id), eq(financeBudgets.month, firstPlan.month))),
+    ).resolves.toEqual([{ category: secondCategory.name, limit: 50_000 }]);
+    await expect(
+      database.db
+        .select({
+          scenarioFingerprint: financeBudgetPlans.scenarioFingerprint,
+          version: financeBudgetPlans.version,
+        })
+        .from(financeBudgetPlans)
+        .where(
+          and(
+            eq(financeBudgetPlans.userId, owner.id),
+            eq(financeBudgetPlans.month, firstPlan.month),
+          ),
+        ),
+    ).resolves.toEqual([{ scenarioFingerprint: secondPlan.scenarioFingerprint, version: 2 }]);
   });
 
   it("derives Finance attention provenance, deduplicates open items, and audits atomically", async () => {
@@ -2211,8 +2634,9 @@ describe.sequential("finance service", () => {
       await service.getGuidedSetupContext(userId)
     ).suggestedWorkflows.find((workflow) => workflow.key === "categorization_review");
     expect(categorizationWorkflow).toMatchObject({
-      available: false,
-      unavailableReason: expect.stringContaining("ambiguous transfers"),
+      available: true,
+      policy: "approved_rule",
+      unavailableReason: null,
     });
     const guidedSetupSnapshot = await service.getGuidedSetupContext(userId);
     expect(guidedSetupSnapshot.ledgerHealth.unresolvedReviews).toBe(
@@ -2819,7 +3243,7 @@ describe.sequential("finance service", () => {
     expect(sourceDecisions[0]?.merchantId).toBe(target.id);
   });
 
-  it("keeps tied merchant evidence non-actionable until one category has more confirmations", async () => {
+  it("keeps mixed merchant evidence non-actionable even when one category has more confirmations", async () => {
     const service = createFinanceService({ db: database.db, now: () => now });
     const context = { principal: financePrincipal(userId), requestId: "merchant-evidence-tie" };
     const account = await service.createAccount(
@@ -2864,9 +3288,9 @@ describe.sequential("finance service", () => {
       })
     ).items.find((proposal) => proposal.transaction.id === tiedCandidate.id);
     expect(tiedProposal).toMatchObject({
-      confidence: 0,
+      confidence: 0.95,
       meetsPolicyThreshold: false,
-      suggestedCategory: null,
+      suggestedCategory: expect.objectContaining({ name: "Shopping" }),
     });
 
     await confirm("Shopping");
@@ -2890,8 +3314,1205 @@ describe.sequential("finance service", () => {
       })
     ).items.find((proposal) => proposal.transaction.id === winningCandidate.id);
     expect(winningProposal).toMatchObject({
-      meetsPolicyThreshold: true,
+      meetsPolicyThreshold: false,
       suggestedCategory: expect.objectContaining({ name: "Shopping" }),
+    });
+  });
+
+  it("atomically stores an exact-cent CVS split and derives budgets and exports from allocations", async () => {
+    const [owner, other] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "Breakdown owner",
+          email: "breakdown-owner@example.com",
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Breakdown other",
+          email: "breakdown-other@example.com",
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+      ])
+      .returning();
+    if (!owner || !other) throw new Error("Breakdown users were not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "transaction-breakdown" };
+    const categories = await service.listCategories(owner.id);
+    const byName = new Map(categories.map((category) => [category.name, category]));
+    const health = byName.get("Health");
+    const groceries = byName.get("Groceries");
+    const personalCare = byName.get("Personal Care");
+    if (!health || !groceries || !personalCare)
+      throw new Error("Breakdown categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 100, institution: "Breakdown Bank", name: "Breakdown wallet", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 62.14,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "CVS Health",
+        notes: null,
+      },
+      context,
+    );
+    const input = {
+      allocations: [
+        { amount: 20, categoryId: health.id, rationale: "Prescription" },
+        { amount: 30, categoryId: groceries.id, rationale: "Groceries" },
+        {
+          amount: 12.14,
+          categoryId: personalCare.id,
+          rationale: "Toiletries",
+          treatment: "reimbursable" as const,
+        },
+      ],
+      expectedTransactionUpdatedAt: transaction.updatedAt,
+      rationale: "Receipt itemization.",
+    };
+    const breakdown = await service.setTransactionBreakdown(transaction.id, input, context);
+    expect(breakdown.allocations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: 20, categoryId: health.id, treatment: "personal" }),
+        expect.objectContaining({ amount: 30, categoryId: groceries.id, treatment: "personal" }),
+        expect.objectContaining({
+          amount: 12.14,
+          categoryId: personalCare.id,
+          treatment: "reimbursable",
+        }),
+      ]),
+    );
+    expect(
+      (breakdown.allocations ?? []).reduce((sum, allocation) => sum + allocation.amount, 0),
+    ).toBe(62.14);
+    await expect(
+      service.setTransactionBreakdown(
+        transaction.id,
+        { ...input, expectedTransactionUpdatedAt: transaction.updatedAt },
+        { principal: financePrincipal(other.id), requestId: "transaction-breakdown-other" },
+      ),
+    ).rejects.toMatchObject({ code: "not_found" });
+    await expect(
+      service.setTransactionBreakdown(
+        transaction.id,
+        { ...input, expectedTransactionUpdatedAt: transaction.updatedAt },
+        context,
+      ),
+    ).rejects.toMatchObject({ code: "conflict" });
+    await service.createBudget({ category: "Health", limit: 100, month: "2026-07" }, context);
+    await service.createBudget(
+      { category: "Personal Care", limit: 100, month: "2026-07" },
+      context,
+    );
+    await expect(service.getBudgetStatus(owner.id, "2026-07")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          budget: expect.objectContaining({ category: "Health" }),
+          spent: 20,
+        }),
+        expect.objectContaining({
+          budget: expect.objectContaining({ category: "Personal Care" }),
+          spent: 12.14,
+        }),
+      ]),
+    );
+    await expect(service.listOverview(owner.id, "2026-07")).resolves.toMatchObject({
+      spendingThisMonth: 62.14,
+      transactions: expect.arrayContaining([
+        expect.objectContaining({ amount: 62.14, id: transaction.id }),
+      ]),
+    });
+    await expect(service.getBudgetPace(owner.id, "month")).resolves.toMatchObject({
+      cells: expect.arrayContaining([
+        expect.objectContaining({ date: "2026-07-19", spent: 62.14 }),
+      ]),
+    });
+    await expect(service.exportData(owner.id)).resolves.toMatchObject({
+      transactions: [
+        expect.objectContaining({ id: transaction.id, allocations: expect.any(Array) }),
+      ],
+    });
+    await expect(
+      database.db
+        .select({ amount: financeTransactionAllocations.amount })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, transaction.id)),
+    ).resolves.toEqual([{ amount: 2_000 }, { amount: 3_000 }, { amount: 1_214 }]);
+  });
+
+  it("enforces allocation ownership in PostgreSQL and backfills category-name legacy rows", async () => {
+    const [owner, other] = await database.db
+      .insert(users)
+      .values([
+        {
+          displayName: "Allocation FK owner",
+          email: `allocation-fk-owner-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+        {
+          displayName: "Allocation FK other",
+          email: `allocation-fk-other-${crypto.randomUUID()}@example.com`,
+          passwordHash: "unused",
+          planningTimezone: "UTC",
+        },
+      ])
+      .returning();
+    if (!owner || !other) throw new Error("Allocation ownership users were not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const ownerContext = {
+      principal: financePrincipal(owner.id),
+      requestId: "allocation-fk-owner",
+    };
+    const ownerAccount = await service.createAccount(
+      { balance: 100, institution: "Owner", name: "Owner account", provider: "manual" },
+      ownerContext,
+    );
+    const ownerCategory = (await service.listCategories(owner.id))[0];
+    const otherCategory = (await service.listCategories(other.id))[0];
+    if (!ownerCategory || !otherCategory)
+      throw new Error("Allocation ownership categories were not seeded.");
+    const ownerTransaction = await service.createTransaction(
+      {
+        accountId: ownerAccount.id,
+        amount: 10,
+        category: ownerCategory.name,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Ownership fixture",
+        notes: null,
+      },
+      ownerContext,
+    );
+    await expect(
+      database.db.insert(financeTransactionAllocations).values({
+        allocationOrder: 99,
+        amount: 1000,
+        categoryId: otherCategory.id,
+        transactionId: ownerTransaction.id,
+        userId: other.id,
+      }),
+    ).rejects.toThrow();
+    const cascadeTransaction = await service.createTransaction(
+      {
+        accountId: ownerAccount.id,
+        amount: 10,
+        category: ownerCategory.name,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Cascade fixture",
+        notes: null,
+      },
+      ownerContext,
+    );
+    await expect(
+      database.db.delete(financeCategories).where(eq(financeCategories.id, ownerCategory.id)),
+    ).rejects.toThrow();
+    await database.db
+      .delete(financeTransactions)
+      .where(eq(financeTransactions.id, cascadeTransaction.id));
+    await expect(
+      database.db
+        .select({ id: financeTransactionAllocations.id })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, cascadeTransaction.id)),
+    ).resolves.toEqual([]);
+    await database.db
+      .delete(financeTransactionAllocations)
+      .where(eq(financeTransactionAllocations.transactionId, ownerTransaction.id));
+    await database.db
+      .update(financeTransactions)
+      .set({ category: "Legacy Only", categoryId: null })
+      .where(eq(financeTransactions.id, ownerTransaction.id));
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, "finance_transaction_allocation_backfill_v1"));
+    await expect(service.backfillTransactionAllocations(100)).resolves.toMatchObject({
+      inserted: expect.any(Number),
+    });
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactionAllocations.amount,
+          treatment: financeTransactionAllocations.treatment,
+        })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, ownerTransaction.id)),
+    ).resolves.toEqual([{ amount: 1000, treatment: "personal" }]);
+    await expect(
+      database.db
+        .select({ name: financeCategories.name, userId: financeCategories.userId })
+        .from(financeCategories)
+        .where(eq(financeCategories.name, "Legacy Only")),
+    ).resolves.toEqual([{ name: "Legacy Only", userId: owner.id }]);
+  });
+
+  it("resumes bounded allocation backfill without duplicating concurrent worker allocations", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation cursor owner",
+        email: `allocation-cursor-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation cursor owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-cursor" };
+    const account = await service.createAccount(
+      { balance: 50, institution: "Cursor", name: "Cursor account", provider: "manual" },
+      context,
+    );
+    const category = (await service.listCategories(owner.id))[0];
+    if (!category) throw new Error("Allocation cursor category was not seeded.");
+    const stateKey = "finance_transaction_allocation_backfill_v1";
+    const cursor = "ffffffff-ffff-4fff-8fff-ffffffffff00";
+    const firstId = "ffffffff-ffff-4fff-8fff-ffffffffff01";
+    const secondId = "ffffffff-ffff-4fff-8fff-ffffffffff02";
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, stateKey));
+    await database.db.insert(financeSetupBackfillState).values({
+      allocationCursor: cursor,
+      key: stateKey,
+    });
+    await database.db.insert(financeTransactions).values([
+      {
+        accountId: account.id,
+        amount: 111,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        id: firstId,
+        merchant: "Cursor first",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      },
+      {
+        accountId: account.id,
+        amount: 222,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense",
+        id: secondId,
+        merchant: "Cursor second",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      },
+    ]);
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      complete: false,
+      inserted: 1,
+      processed: 1,
+    });
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      complete: false,
+      inserted: 1,
+      processed: 1,
+    });
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      complete: true,
+      inserted: 0,
+      processed: 0,
+    });
+    const thirdId = "ffffffff-ffff-4fff-8fff-ffffffffff03";
+    await database.db.insert(financeTransactions).values({
+      accountId: account.id,
+      amount: 333,
+      category: category.name,
+      categoryId: category.id,
+      direction: "expense",
+      id: thirdId,
+      merchant: "Cursor concurrent",
+      needsReview: false,
+      pending: false,
+      transactionDate: "2026-07-19",
+      userId: owner.id,
+    });
+    await database.db
+      .update(financeSetupBackfillState)
+      .set({ allocationCursor: secondId, allocationsComplete: false })
+      .where(eq(financeSetupBackfillState.key, stateKey));
+    const concurrent = await Promise.all([
+      service.backfillTransactionAllocations(1),
+      service.backfillTransactionAllocations(1),
+    ]);
+    expect(concurrent.filter((result) => result.claimed)).toHaveLength(2);
+    expect(concurrent.reduce((sum, result) => sum + result.inserted, 0)).toBe(1);
+    await expect(
+      database.db
+        .select({ transactionId: financeTransactionAllocations.transactionId })
+        .from(financeTransactionAllocations)
+        .where(inArray(financeTransactionAllocations.transactionId, [firstId, secondId, thirdId])),
+    ).resolves.toHaveLength(3);
+  });
+
+  it("waits for an earlier provider writer instead of advancing the allocation cursor past it", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation lock convergence",
+        email: `allocation-lock-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation lock owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-lock" };
+    const account = await service.createAccount(
+      { balance: 20, institution: "Lock", name: "Lock account", provider: "manual" },
+      context,
+    );
+    const category = (await service.listCategories(owner.id))[0];
+    if (!category) throw new Error("Allocation lock category was not seeded.");
+    const cursor = "ffffffff-ffff-4fff-8fff-ffffffffff10";
+    const firstId = "ffffffff-ffff-4fff-8fff-ffffffffff11";
+    const secondId = "ffffffff-ffff-4fff-8fff-ffffffffff12";
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, "finance_transaction_allocation_backfill_v1"));
+    await database.db.insert(financeSetupBackfillState).values({
+      allocationCursor: cursor,
+      key: "finance_transaction_allocation_backfill_v1",
+    });
+    await database.db.insert(financeTransactions).values(
+      [firstId, secondId].map((id, index) => ({
+        accountId: account.id,
+        amount: 100 + index,
+        category: category.name,
+        categoryId: category.id,
+        direction: "expense" as const,
+        id,
+        merchant: `Lock fixture ${index}`,
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      })),
+    );
+    let releaseWriter: (() => void) | undefined;
+    let writerLocked: (() => void) | undefined;
+    const writerReleased = new Promise<void>((resolvePromise) => {
+      releaseWriter = resolvePromise;
+    });
+    const writerReady = new Promise<void>((resolvePromise) => {
+      writerLocked = resolvePromise;
+    });
+    const writer = database.db.transaction(async (tx) => {
+      await tx
+        .select({ id: financeTransactions.id })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, firstId))
+        .for("update");
+      writerLocked?.();
+      await writerReleased;
+    });
+    await writerReady;
+    const backfill = service.backfillTransactionAllocations(2);
+    let beforeRelease = "advanced";
+    try {
+      beforeRelease = await Promise.race([
+        backfill.then(() => "advanced"),
+        new Promise<string>((resolvePromise) => setTimeout(() => resolvePromise("waiting"), 100)),
+      ]);
+    } finally {
+      releaseWriter?.();
+      await writer;
+    }
+    expect(beforeRelease).toBe("waiting");
+    await expect(backfill).resolves.toMatchObject({ inserted: 2, processed: 2 });
+    await expect(
+      database.db
+        .select({ transactionId: financeTransactionAllocations.transactionId })
+        .from(financeTransactionAllocations)
+        .where(inArray(financeTransactionAllocations.transactionId, [firstId, secondId])),
+    ).resolves.toHaveLength(2);
+  });
+
+  it("advances zero-dollar legacy rows and materializes colliding legacy category names", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation zero and slug",
+        email: `allocation-zero-slug-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation zero/slug owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-zero-slug" };
+    const account = await service.createAccount(
+      { balance: 20, institution: "Slug", name: "Slug account", provider: "manual" },
+      context,
+    );
+    const cursor = "ffffffff-ffff-4fff-8fff-ffffffffff20";
+    const zeroId = "ffffffff-ffff-4fff-8fff-ffffffffff21";
+    const collisionId = "ffffffff-ffff-4fff-8fff-ffffffffff22";
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, "finance_transaction_allocation_backfill_v1"));
+    await database.db.insert(financeSetupBackfillState).values({
+      allocationCursor: cursor,
+      key: "finance_transaction_allocation_backfill_v1",
+    });
+    await database.db.insert(financeCategories).values({
+      group: "Spending",
+      name: "Foo Bar",
+      slug: "foo-bar",
+      userId: owner.id,
+    });
+    await database.db.insert(financeTransactions).values([
+      {
+        accountId: account.id,
+        amount: 0,
+        category: "Zero legacy",
+        direction: "expense",
+        id: zeroId,
+        merchant: "Zero fixture",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      },
+      {
+        accountId: account.id,
+        amount: 123,
+        category: "Foo/Bar",
+        direction: "expense",
+        id: collisionId,
+        merchant: "Slug fixture",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      },
+    ]);
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      inserted: 0,
+      processed: 1,
+    });
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      inserted: 1,
+      processed: 1,
+    });
+    await expect(service.backfillTransactionAllocations(1)).resolves.toMatchObject({
+      complete: true,
+      inserted: 0,
+      processed: 0,
+    });
+    await expect(
+      database.db
+        .select({ id: financeTransactionAllocations.id })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, zeroId)),
+    ).resolves.toEqual([]);
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactionAllocations.amount,
+          treatment: financeTransactionAllocations.treatment,
+        })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, collisionId)),
+    ).resolves.toEqual([{ amount: 123, treatment: "personal" }]);
+    await expect(
+      database.db
+        .select({ name: financeCategories.name, slug: financeCategories.slug })
+        .from(financeCategories)
+        .where(and(eq(financeCategories.userId, owner.id), eq(financeCategories.name, "Foo/Bar"))),
+    ).resolves.toEqual([expect.objectContaining({ slug: expect.not.stringMatching(/^foo-bar$/) })]);
+  });
+
+  it("materializes the intended legacy category after an occupied canonical slug under concurrent batches", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation canonical collision",
+        email: `allocation-canonical-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation canonical collision owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-canonical" };
+    const account = await service.createAccount(
+      { balance: 20, institution: "Canonical", name: "Canonical account", provider: "manual" },
+      context,
+    );
+    const name = "Canonical / Category";
+    const canonicalSlug = `canonical-category-${createHash("sha256")
+      .update(`finance-legacy-category:${owner.id}:${name.toLocaleLowerCase()}`)
+      .digest("hex")
+      .slice(0, 12)}`;
+    const cursor = "ffffffff-ffff-4fff-8fff-ffffffffff30";
+    const firstId = "ffffffff-ffff-4fff-8fff-ffffffffff31";
+    const secondId = "ffffffff-ffff-4fff-8fff-ffffffffff32";
+    await database.db
+      .delete(financeSetupBackfillState)
+      .where(eq(financeSetupBackfillState.key, "finance_transaction_allocation_backfill_v1"));
+    await database.db.insert(financeSetupBackfillState).values({
+      allocationCursor: cursor,
+      key: "finance_transaction_allocation_backfill_v1",
+    });
+    const [occupied] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: "Different canonical occupant",
+        slug: canonicalSlug,
+        userId: owner.id,
+      })
+      .returning();
+    if (!occupied) throw new Error("Canonical slug occupant was not created.");
+    await database.db.insert(financeTransactions).values(
+      [firstId, secondId].map((id, index) => ({
+        accountId: account.id,
+        amount: 123 + index,
+        category: name,
+        direction: "expense" as const,
+        id,
+        merchant: `Canonical fixture ${index}`,
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-07-19",
+        userId: owner.id,
+      })),
+    );
+    const results = await Promise.all([
+      service.backfillTransactionAllocations(1),
+      service.backfillTransactionAllocations(1),
+    ]);
+    expect(results.reduce((sum, result) => sum + result.inserted, 0)).toBe(2);
+    const [intended] = await database.db
+      .select({ id: financeCategories.id, slug: financeCategories.slug })
+      .from(financeCategories)
+      .where(and(eq(financeCategories.userId, owner.id), eq(financeCategories.name, name)));
+    if (!intended) throw new Error("Intended canonical category was not materialized.");
+    expect(intended.slug).not.toBe(canonicalSlug);
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactionAllocations.categoryId })
+        .from(financeTransactionAllocations)
+        .where(inArray(financeTransactionAllocations.transactionId, [firstId, secondId])),
+    ).resolves.toEqual([{ categoryId: intended.id }, { categoryId: intended.id }]);
+  });
+
+  it("audits breakdown replacement counts and rolls every write back when audit persistence fails", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Breakdown audit",
+        email: `breakdown-audit-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Breakdown audit owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "breakdown-audit" };
+    const [first, second] = await service.listCategories(owner.id);
+    if (!first || !second) throw new Error("Breakdown audit categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 100, institution: "Audit", name: "Audit", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 10,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Audit merchant",
+        notes: null,
+      },
+      context,
+    );
+    const initial = {
+      allocations: [
+        { amount: 4, categoryId: first.id, rationale: "Personal" },
+        {
+          amount: 6,
+          categoryId: second.id,
+          rationale: "Reimbursable",
+          treatment: "reimbursable" as const,
+        },
+      ],
+      expectedTransactionUpdatedAt: transaction.updatedAt,
+      rationale: "Initial split.",
+    };
+    const saved = await service.setTransactionBreakdown(transaction.id, initial, context);
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [{ amount: 10, categoryId: first.id, rationale: "Replacement" }],
+        expectedTransactionUpdatedAt: saved.updatedAt,
+        rationale: "Replacement split.",
+      },
+      context,
+    );
+    const [audit] = await database.db
+      .select({ after: auditEvents.after, before: auditEvents.before })
+      .from(auditEvents)
+      .where(eq(auditEvents.requestId, context.requestId))
+      .orderBy(desc(auditEvents.createdAt))
+      .limit(1);
+    expect(audit).toMatchObject({
+      before: { allocationCount: 2, reimbursableAllocationCount: 1, futureRule: null },
+      after: { allocationCount: 1, reimbursableAllocationCount: 0, futureRule: null },
+    });
+    expect(JSON.stringify(audit)).not.toContain("Replacement split.");
+    const [latest] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transaction.id));
+    if (!latest) throw new Error("Breakdown audit transaction was not found.");
+    await expect(
+      database.db.transaction(async (tx) =>
+        service.setTransactionBreakdown(
+          transaction.id,
+          {
+            allocations: [{ amount: 10, categoryId: second.id, rationale: "Will fail" }],
+            expectedTransactionUpdatedAt: latest.updatedAt.toISOString(),
+            rationale: "Must roll back.",
+          },
+          context,
+          new Proxy(tx, {
+            get(target, property) {
+              if (property !== "insert") return Reflect.get(target, property);
+              return (table: unknown) => {
+                if (table === auditEvents) throw new Error("audit failure");
+                return target.insert(table as never);
+              };
+            },
+          }) as never,
+        ),
+      ),
+    ).rejects.toThrow("audit failure");
+    await expect(
+      database.db
+        .select({ categoryId: financeTransactionAllocations.categoryId })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, transaction.id)),
+    ).resolves.toEqual([{ categoryId: first.id }]);
+  });
+
+  it("blocks allocation and account lifecycle changes while reimbursement evidence exists", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Reimbursement lifecycle",
+        email: `reimbursement-lifecycle-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Reimbursement lifecycle owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "reimbursement-lifecycle" };
+    const [first, second] = await service.listCategories(owner.id);
+    if (!first || !second) throw new Error("Reimbursement lifecycle categories were not seeded.");
+    const expenseAccount = await service.createAccount(
+      { balance: 500, institution: "Local", name: "Expense", provider: "manual" },
+      context,
+    );
+    const expense = await service.createTransaction(
+      {
+        accountId: expenseAccount.id,
+        amount: 100,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Shared dinner",
+        notes: null,
+      },
+      context,
+    );
+    const brokenDown = await service.setTransactionBreakdown(
+      expense.id,
+      {
+        allocations: [
+          {
+            amount: 100,
+            categoryId: second.id,
+            rationale: "Alex share",
+            treatment: "reimbursable",
+          },
+        ],
+        expectedTransactionUpdatedAt: expense.updatedAt,
+        rationale: "Shared dinner.",
+      },
+      context,
+    );
+    const [allocation] = await database.db
+      .select()
+      .from(financeTransactionAllocations)
+      .where(
+        and(
+          eq(financeTransactionAllocations.transactionId, expense.id),
+          eq(financeTransactionAllocations.state, "active"),
+        ),
+      );
+    if (!allocation) throw new Error("Reimbursement allocation was not created.");
+    const [reimbursement] = await database.db
+      .insert(financeReimbursements)
+      .values({
+        allocationId: allocation.id,
+        evidence: { sourceRefs: [], summary: "Receipt" },
+        expectedAmount: 10_000,
+        payer: "Alex",
+        rationale: "Shared dinner.",
+        userId: owner.id,
+      })
+      .returning();
+    if (!reimbursement) throw new Error("Reimbursement case was not created.");
+    await expect(
+      service.setTransactionBreakdown(
+        expense.id,
+        {
+          allocations: [{ amount: 100, categoryId: first.id, rationale: "Replace" }],
+          expectedTransactionUpdatedAt: brokenDown.updatedAt,
+          rationale: "Replace.",
+        },
+        context,
+      ),
+    ).rejects.toThrow("Cancel or adjust the reimbursement");
+    await expect(
+      service.updateTransaction(expense.id, { category: first.name }, context),
+    ).rejects.toThrow("Cancel or adjust the reimbursement");
+    await expect(service.deleteAccount(expenseAccount.id, context)).rejects.toThrow(
+      "reimbursement cases or matched credits",
+    );
+
+    const creditAccount = await service.createAccount(
+      { balance: 500, institution: "Local", name: "Credit", provider: "manual" },
+      context,
+    );
+    const credit = await service.createTransaction(
+      {
+        accountId: creditAccount.id,
+        amount: 100,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-20",
+        direction: "income",
+        merchant: "Alex",
+        notes: null,
+      },
+      context,
+    );
+    await database.db.insert(financeReimbursementMatches).values({
+      amount: 10_000,
+      creditTransactionId: credit.id,
+      evidence: { sourceRefs: [], summary: "Payment" },
+      rationale: "Matched.",
+      reimbursementId: reimbursement.id,
+      userId: owner.id,
+    });
+    await expect(service.deleteAccount(creditAccount.id, context)).rejects.toThrow(
+      "reimbursement cases or matched credits",
+    );
+    const unrelated = await service.createAccount(
+      { balance: 0, institution: "Local", name: "Disposable", provider: "manual" },
+      context,
+    );
+    await expect(service.deleteAccount(unrelated.id, context)).resolves.toBeUndefined();
+  });
+
+  it("keeps allocation-based merchant evidence mixed without downgrading explicit mixed behavior", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Mixed allocation merchant",
+        email: `mixed-allocation-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Mixed allocation owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "mixed-allocation" };
+    const [firstCategory, secondCategory] = await service.listCategories(owner.id);
+    if (!firstCategory || !secondCategory)
+      throw new Error("Allocation categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 500, institution: "Local", name: "Local checking", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 310,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Neighborhood Dining",
+        notes: null,
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [
+          { amount: 90, categoryId: firstCategory.id, rationale: "Personal meal" },
+          {
+            amount: 220,
+            categoryId: secondCategory.id,
+            rationale: "Client meal",
+            treatment: "reimbursable",
+          },
+        ],
+        expectedTransactionUpdatedAt: transaction.updatedAt,
+        rationale: "Dining receipt split.",
+      },
+      context,
+    );
+    const [merchant] = await database.db
+      .select()
+      .from(financeMerchants)
+      .where(eq(financeMerchants.displayName, "Neighborhood Dining"));
+    expect(merchant?.behavior).toBe("mixed");
+    await database.db
+      .update(financeMerchants)
+      .set({ behavior: "mixed" })
+      .where(eq(financeMerchants.id, merchant?.id ?? ""));
+    const [updatedTransaction] = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transaction.id));
+    if (!updatedTransaction) throw new Error("Mixed transaction was not updated.");
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [{ amount: 310, categoryId: firstCategory.id, rationale: "Final receipt" }],
+        expectedTransactionUpdatedAt: updatedTransaction.updatedAt.toISOString(),
+        rationale: "Corrected receipt.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({ behavior: financeMerchants.behavior })
+        .from(financeMerchants)
+        .where(eq(financeMerchants.id, merchant?.id ?? "")),
+    ).resolves.toEqual([{ behavior: "mixed" }]);
+  });
+
+  it("records active-category replacements as corrections without treating treatment-only changes as diversity", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Allocation replacement evidence",
+        email: `allocation-replacement-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Allocation replacement owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "allocation-replacement" };
+    const [firstCategory, secondCategory, thirdCategory] = await service.listCategories(owner.id);
+    if (!firstCategory || !secondCategory || !thirdCategory)
+      throw new Error("Replacement categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 200, institution: "Local", name: "Replacement checking", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 100,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Replacement merchant",
+        notes: null,
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [
+          { amount: 40, categoryId: firstCategory.id, rationale: "First share" },
+          { amount: 60, categoryId: secondCategory.id, rationale: "Second share" },
+        ],
+        expectedTransactionUpdatedAt: transaction.updatedAt,
+        rationale: "Initial mixed receipt.",
+      },
+      context,
+    );
+    const [replacedRevision] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, transaction.id));
+    if (!replacedRevision) throw new Error("Replacement transaction was not found.");
+    await service.setTransactionBreakdown(
+      transaction.id,
+      {
+        allocations: [
+          { amount: 50, categoryId: secondCategory.id, rationale: "Retained share" },
+          { amount: 50, categoryId: thirdCategory.id, rationale: "New share" },
+        ],
+        expectedTransactionUpdatedAt: replacedRevision.updatedAt.toISOString(),
+        rationale: "Corrected mixed receipt.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({
+          categoryId: financeClassificationDecisions.categoryId,
+          outcome: financeClassificationDecisions.outcome,
+        })
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.transactionId, transaction.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        { categoryId: firstCategory.id, outcome: "corrected" },
+        { categoryId: thirdCategory.id, outcome: "confirmed" },
+      ]),
+    );
+
+    const treatmentOnly = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 100,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Treatment-only merchant",
+        notes: null,
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      treatmentOnly.id,
+      {
+        allocations: [{ amount: 100, categoryId: firstCategory.id, rationale: "Initial share" }],
+        expectedTransactionUpdatedAt: treatmentOnly.updatedAt,
+        rationale: "Initial receipt.",
+      },
+      context,
+    );
+    const [treatmentRevision] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, treatmentOnly.id));
+    if (!treatmentRevision) throw new Error("Treatment-only transaction was not found.");
+    await service.setTransactionBreakdown(
+      treatmentOnly.id,
+      {
+        allocations: [
+          { amount: 50, categoryId: firstCategory.id, rationale: "Personal share" },
+          {
+            amount: 50,
+            categoryId: firstCategory.id,
+            rationale: "Reimbursable share",
+            treatment: "reimbursable",
+          },
+        ],
+        expectedTransactionUpdatedAt: treatmentRevision.updatedAt.toISOString(),
+        rationale: "Treatment-only correction.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({ outcome: financeClassificationDecisions.outcome })
+        .from(financeClassificationDecisions)
+        .where(
+          and(
+            eq(financeClassificationDecisions.transactionId, treatmentOnly.id),
+            eq(financeClassificationDecisions.outcome, "corrected"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+  });
+
+  it("uses a legacy category as replacement evidence only when no allocation history exists", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Legacy replacement evidence",
+        email: `legacy-replacement-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Legacy replacement owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "legacy-replacement" };
+    const [oldCategory, newCategory] = await service.listCategories(owner.id);
+    if (!oldCategory || !newCategory)
+      throw new Error("Legacy replacement categories were not seeded.");
+    const account = await service.createAccount(
+      { balance: 20, institution: "Legacy", name: "Legacy checking", provider: "manual" },
+      context,
+    );
+    const legacy = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 10,
+        category: oldCategory.name,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Legacy replacement merchant",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .delete(financeTransactionAllocations)
+      .where(eq(financeTransactionAllocations.transactionId, legacy.id));
+    await service.setTransactionBreakdown(
+      legacy.id,
+      {
+        allocations: [{ amount: 10, categoryId: newCategory.id, rationale: "Reclassified legacy" }],
+        expectedTransactionUpdatedAt: legacy.updatedAt,
+        rationale: "Replace unbackfilled legacy category.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({
+          categoryId: financeClassificationDecisions.categoryId,
+          outcome: financeClassificationDecisions.outcome,
+        })
+        .from(financeClassificationDecisions)
+        .where(eq(financeClassificationDecisions.transactionId, legacy.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([{ categoryId: oldCategory.id, outcome: "corrected" }]),
+    );
+
+    const invalidated = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 10,
+        category: oldCategory.name,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Invalidated replacement merchant",
+        notes: null,
+      },
+      context,
+    );
+    await database.db
+      .update(financeTransactionAllocations)
+      .set({ invalidatedAt: now, state: "invalidated" })
+      .where(eq(financeTransactionAllocations.transactionId, invalidated.id));
+    await service.setTransactionBreakdown(
+      invalidated.id,
+      {
+        allocations: [
+          { amount: 10, categoryId: newCategory.id, rationale: "Reviewed replacement" },
+        ],
+        expectedTransactionUpdatedAt: invalidated.updatedAt,
+        rationale: "Do not reuse invalidated history as legacy evidence.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({ outcome: financeClassificationDecisions.outcome })
+        .from(financeClassificationDecisions)
+        .where(
+          and(
+            eq(financeClassificationDecisions.transactionId, invalidated.id),
+            eq(financeClassificationDecisions.categoryId, oldCategory.id),
+            eq(financeClassificationDecisions.outcome, "corrected"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+  });
+
+  it("allows a Dining receipt to split personal and reimbursable shares in the same category", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Same category allocation",
+        email: `same-category-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Same-category allocation owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = {
+      principal: financePrincipal(owner.id),
+      requestId: "same-category-allocation",
+    };
+    const dining = (await service.listCategories(owner.id)).find(
+      (category) => category.name === "Dining",
+    );
+    if (!dining) throw new Error("Dining category was not seeded.");
+    const account = await service.createAccount(
+      { balance: 310, institution: "Local", name: "Dining card", provider: "manual" },
+      context,
+    );
+    const transaction = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 310,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Dining receipt",
+        notes: null,
+      },
+      context,
+    );
+    await expect(
+      service.setTransactionBreakdown(
+        transaction.id,
+        {
+          allocations: [
+            { amount: 90, categoryId: dining.id, rationale: "Personal share" },
+            {
+              amount: 220,
+              categoryId: dining.id,
+              rationale: "Client share",
+              treatment: "reimbursable",
+            },
+          ],
+          expectedTransactionUpdatedAt: transaction.updatedAt,
+          rationale: "Dining reimbursement split.",
+        },
+        context,
+      ),
+    ).resolves.toMatchObject({
+      allocations: expect.arrayContaining([
+        expect.objectContaining({ amount: 90, categoryId: dining.id, treatment: "personal" }),
+        expect.objectContaining({ amount: 220, categoryId: dining.id, treatment: "reimbursable" }),
+      ]),
     });
   });
 
@@ -4249,6 +5870,43 @@ describe.sequential("finance service", () => {
         sortDirection: "desc",
       }),
     ).rejects.toThrow("does not match this sort");
+    for (const sortBy of ["date", "merchant"] as const) {
+      for (const sortDirection of ["asc", "desc"] as const) {
+        const page = await service.listTransactions(plaidOnlyUser.id, {
+          accountId: plaidAccount.id,
+          from: "2026-01-01",
+          limit: 1,
+          pending: false,
+          review: "resolved",
+          sortBy,
+          sortDirection,
+          to: "2026-12-31",
+        });
+        expect(page.items).toHaveLength(1);
+        if (page.nextCursor) {
+          await expect(
+            service.listTransactions(plaidOnlyUser.id, {
+              accountId: plaidAccount.id,
+              cursor: page.nextCursor,
+              from: "2026-01-01",
+              limit: 1,
+              pending: false,
+              review: "resolved",
+              sortBy,
+              sortDirection,
+              to: "2026-12-31",
+            }),
+          ).resolves.toEqual(expect.objectContaining({ items: expect.any(Array) }));
+        }
+      }
+    }
+    await expect(
+      service.listTransactions(plaidOnlyUser.id, {
+        limit: 200,
+        pending: true,
+        review: "needs_review",
+      }),
+    ).resolves.toEqual(expect.objectContaining({ items: expect.any(Array) }));
     const manual = await service.createAccount(
       { balance: null, institution: "Cash", name: "Emergency", provider: "manual" },
       context,
@@ -4293,6 +5951,304 @@ describe.sequential("finance service", () => {
       if (reconnectExchange) pendingOperations.push(reconnectExchange);
       await Promise.allSettled(pendingOperations);
     }
+  });
+
+  it("keeps provider amount drift from leaving active allocations out of balance", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Provider amount drift",
+        email: `provider-amount-drift-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Provider amount-drift owner was not created.");
+    let syncCall = 0;
+    const fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const requestUrl =
+        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      const path = new URL(requestUrl).pathname;
+      if (path === "/item/public_token/exchange")
+        return Response.json({ access_token: "amount-drift-token", item_id: "amount-drift-item" });
+      if (path === "/accounts/get") {
+        return Response.json({
+          accounts: [
+            {
+              account_id: "amount-drift-account",
+              balances: { current: 100 },
+              name: "Amount drift checking",
+              official_name: null,
+            },
+          ],
+        });
+      }
+      if (path === "/transactions/sync") {
+        syncCall += 1;
+        return Response.json(
+          syncCall === 1
+            ? {
+                added: [
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 10,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Single amount drift",
+                    personal_finance_category: null,
+                    transaction_id: "single-amount-drift",
+                  },
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 30,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Mixed amount drift",
+                    personal_finance_category: null,
+                    transaction_id: "mixed-amount-drift",
+                  },
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 7,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Pending to posted",
+                    pending: true,
+                    personal_finance_category: null,
+                    transaction_id: "pending-amount-drift",
+                  },
+                ],
+                has_more: false,
+                modified: [],
+                next_cursor: "amount-drift-1",
+                removed: [],
+              }
+            : {
+                added: [
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 7,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Pending to posted",
+                    pending: false,
+                    pending_transaction_id: "pending-amount-drift",
+                    personal_finance_category: null,
+                    transaction_id: "posted-amount-drift",
+                  },
+                ],
+                has_more: false,
+                modified: [
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 12,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Single amount drift",
+                    personal_finance_category: null,
+                    transaction_id: "single-amount-drift",
+                  },
+                  {
+                    account_id: "amount-drift-account",
+                    amount: 31,
+                    date: "2026-07-19",
+                    merchant_name: null,
+                    name: "Mixed amount drift",
+                    personal_finance_category: null,
+                    transaction_id: "mixed-amount-drift",
+                  },
+                ],
+                next_cursor: "amount-drift-2",
+                removed: [],
+              },
+        );
+      }
+      return Response.json({ error_message: "Unexpected Plaid path" }, { status: 400 });
+    });
+    const context = { principal: financePrincipal(owner.id), requestId: "provider-amount-drift" };
+    const service = createFinanceService({
+      db: database.db,
+      encryptionKey: key,
+      now: () => now,
+      plaid: createPlaidConnector({
+        clientId: "client",
+        environment: "sandbox",
+        fetch,
+        secret: "secret",
+      }),
+    });
+    const [account] = await service.exchangePlaidToken(
+      { institution: "Amount Drift Bank", publicToken: "amount-drift-public" },
+      context,
+    );
+    if (!account) throw new Error("Amount-drift account was not created.");
+    await service.syncPlaidAccount(account.id, context);
+    const categories = await service.listCategories(owner.id);
+    const [firstCategory, secondCategory] = categories;
+    if (!firstCategory || !secondCategory)
+      throw new Error("Amount-drift categories were not seeded.");
+    const rows = await database.db
+      .select()
+      .from(financeTransactions)
+      .where(eq(financeTransactions.userId, owner.id));
+    const single = rows.find((row) => row.providerTransactionId === "single-amount-drift");
+    const mixed = rows.find((row) => row.providerTransactionId === "mixed-amount-drift");
+    if (!single || !mixed) throw new Error("Amount-drift transactions were not projected.");
+    await service.setTransactionBreakdown(
+      single.id,
+      {
+        allocations: [{ amount: 10, categoryId: firstCategory.id, rationale: "One category" }],
+        expectedTransactionUpdatedAt: single.updatedAt.toISOString(),
+        rationale: "One-category provider drift fixture.",
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      mixed.id,
+      {
+        allocations: [
+          { amount: 12, categoryId: firstCategory.id, rationale: "First part" },
+          { amount: 18, categoryId: secondCategory.id, rationale: "Second part" },
+        ],
+        expectedTransactionUpdatedAt: mixed.updatedAt.toISOString(),
+        rationale: "Mixed provider drift fixture.",
+      },
+      context,
+    );
+    await service.createBudget(
+      { category: firstCategory.name, limit: 100, month: "2026-07" },
+      context,
+    );
+
+    await service.syncPlaidAccount(account.id, context);
+
+    const allocations = await database.db
+      .select({
+        amount: financeTransactionAllocations.amount,
+        invalidatedAt: financeTransactionAllocations.invalidatedAt,
+        state: financeTransactionAllocations.state,
+        transactionId: financeTransactionAllocations.transactionId,
+      })
+      .from(financeTransactionAllocations)
+      .where(inArray(financeTransactionAllocations.transactionId, [single.id, mixed.id]))
+      .orderBy(
+        financeTransactionAllocations.transactionId,
+        financeTransactionAllocations.allocationOrder,
+      );
+    expect(allocations.filter((allocation) => allocation.transactionId === single.id)).toEqual([
+      expect.objectContaining({ amount: 1200, invalidatedAt: null, state: "active" }),
+    ]);
+    expect(allocations.filter((allocation) => allocation.transactionId === mixed.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ amount: 1200, state: "invalidated" }),
+        expect.objectContaining({ amount: 1800, state: "invalidated" }),
+      ]),
+    );
+    expect(
+      allocations
+        .filter((allocation) => allocation.transactionId === mixed.id)
+        .every((item) => item.invalidatedAt !== null),
+    ).toBe(true);
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactions.amount,
+          needsReview: financeTransactions.needsReview,
+        })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.id, mixed.id)),
+    ).resolves.toEqual([{ amount: 3100, needsReview: true }]);
+    await expect(service.listReviewQueue(owner.id)).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          reason: "amount_changed",
+          transaction: expect.objectContaining({ id: mixed.id }),
+        }),
+      ]),
+    );
+    await expect(service.getBudgetStatus(owner.id, "2026-07")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          budget: expect.objectContaining({ category: firstCategory.name }),
+          spent: 12,
+        }),
+      ]),
+    );
+    await expect(service.listOverview(owner.id, "2026-07")).resolves.toMatchObject({
+      spendingThisMonth: 19,
+    });
+    await expect(service.getBudgetPace(owner.id, "month")).resolves.toMatchObject({
+      cells: expect.arrayContaining([expect.objectContaining({ date: "2026-07-19", spent: 19 })]),
+    });
+    await expect(
+      createFinanceStatusService({
+        assistant: {} as never,
+        db: database.db,
+        finances: service,
+        goals: {} as never,
+        maintenance: {} as never,
+        now: () => now,
+      }).getFinanceStatus(owner.id, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      details: {
+        cashFlow: { net: -50 },
+        closeReadiness: { unansweredExceptions: 1 },
+        month: { spending: 19 },
+      },
+    });
+    await expect(service.exportData(owner.id)).resolves.toMatchObject({
+      transactions: expect.arrayContaining([
+        expect.objectContaining({
+          id: mixed.id,
+          allocations: expect.arrayContaining([expect.objectContaining({ state: "invalidated" })]),
+        }),
+      ]),
+    });
+    const [mixedAfterDrift] = await database.db
+      .select({ updatedAt: financeTransactions.updatedAt })
+      .from(financeTransactions)
+      .where(eq(financeTransactions.id, mixed.id));
+    if (!mixedAfterDrift) throw new Error("Amount-drift transaction was not updated.");
+    await service.setTransactionBreakdown(
+      mixed.id,
+      {
+        allocations: [{ amount: 31, categoryId: firstCategory.id, rationale: "Re-reviewed" }],
+        expectedTransactionUpdatedAt: mixedAfterDrift.updatedAt.toISOString(),
+        rationale: "Replace the invalidated split after reviewing the provider amount.",
+      },
+      context,
+    );
+    await expect(
+      database.db
+        .select({
+          amount: financeTransactionAllocations.amount,
+          state: financeTransactionAllocations.state,
+        })
+        .from(financeTransactionAllocations)
+        .where(eq(financeTransactionAllocations.transactionId, mixed.id))
+        .orderBy(
+          financeTransactionAllocations.state,
+          financeTransactionAllocations.allocationOrder,
+        ),
+    ).resolves.toEqual([
+      { amount: 3100, state: "active" },
+      { amount: 1200, state: "invalidated" },
+      { amount: 1800, state: "invalidated" },
+    ]);
+    await expect(service.getBudgetStatus(owner.id, "2026-07")).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          budget: expect.objectContaining({ category: firstCategory.name }),
+          spent: 43,
+        }),
+      ]),
+    );
+    await expect(
+      database.db
+        .select({ amount: financeTransactions.amount, pending: financeTransactions.pending })
+        .from(financeTransactions)
+        .where(eq(financeTransactions.providerTransactionId, "posted-amount-drift")),
+    ).resolves.toEqual([{ amount: 700, pending: false }]);
   });
 
   it("fences Plaid claims and durably settles classified failures and recovery", async () => {
@@ -7023,5 +8979,364 @@ describe.sequential("finance service", () => {
       questions: attributedQuestionCount,
       transfers: 2,
     });
+  });
+
+  it("queues only evidence-backed reimbursement anomalies and ambiguous credit questions", async () => {
+    const [anomalyUser] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Anomaly questions",
+        email: "anomaly-questions@example.com",
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!anomalyUser) throw new Error("Anomaly user was not created.");
+    const [account] = await database.db
+      .insert(financeAccounts)
+      .values({
+        institution: "Test",
+        name: "Checking",
+        provider: "manual",
+        status: "manual",
+        userId: anomalyUser.id,
+      })
+      .returning();
+    if (!account) throw new Error("Anomaly account was not created.");
+    const dinnerRows = [42, 44, 45, 45, 46].map((amount, index) => ({
+      accountId: account.id,
+      amount: amount * 100,
+      category: "Dining",
+      direction: "expense" as const,
+      merchant: "Dinner House",
+      needsReview: false,
+      pending: false,
+      transactionDate: `2026-0${index + 1}-10`,
+      userId: anomalyUser.id,
+    }));
+    await database.db.insert(financeTransactions).values(dinnerRows);
+    const [largeDinner, normalDinner, salary, venmo] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 31_000,
+          category: "Dining",
+          direction: "expense",
+          merchant: "Dinner House",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-07-18",
+          userId: anomalyUser.id,
+        },
+        {
+          accountId: account.id,
+          amount: 4_500,
+          category: "Dining",
+          direction: "expense",
+          merchant: "Dinner House",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-07-19",
+          userId: anomalyUser.id,
+        },
+        {
+          accountId: account.id,
+          amount: 250_000,
+          category: "INCOME",
+          direction: "income",
+          merchant: "Payroll ACME",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-07-19",
+          userId: anomalyUser.id,
+        },
+        {
+          accountId: account.id,
+          amount: 22_000,
+          category: "OTHER",
+          direction: "income",
+          merchant: "Venmo repayment",
+          needsReview: false,
+          pending: false,
+          transactionDate: "2026-07-19",
+          userId: anomalyUser.id,
+        },
+      ])
+      .returning();
+    if (!largeDinner || !normalDinner || !salary || !venmo)
+      throw new Error("Anomaly transactions failed.");
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({
+        group: "Spending",
+        name: "Dining",
+        slug: `dining-${anomalyUser.id}`,
+        userId: anomalyUser.id,
+      })
+      .returning();
+    if (!category) throw new Error("Anomaly category was not created.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 22_000,
+        categoryId: category.id,
+        transactionId: largeDinner.id,
+        treatment: "reimbursable",
+        userId: anomalyUser.id,
+      })
+      .returning();
+    if (!allocation) throw new Error("Anomaly allocation was not created.");
+    await database.db.insert(financeReimbursements).values({
+      allocationId: allocation.id,
+      evidence: {
+        sourceRefs: [
+          {
+            accountId: account.id,
+            provider: "local",
+            remoteId: largeDinner.id,
+            revision: largeDinner.updatedAt.toISOString(),
+            sourceType: "finance_transaction",
+          },
+        ],
+        summary: "Dinner receipt",
+      },
+      expectedAmount: 22_000,
+      payer: "Alex",
+      rationale: "Alex owes their share",
+      userId: anomalyUser.id,
+    });
+    const service = createFinanceService({ db: database.db, now: () => now });
+    await expect(
+      service.refreshMaintenanceQuestionsForUser(anomalyUser.id, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({ created: 0 });
+    await expect(
+      database.db
+        .select({
+          actionKind: financeAgentActionReviews.actionKind,
+          privatePayload: financeAgentActionReviews.privatePayload,
+        })
+        .from(financeAgentActionReviews)
+        .where(eq(financeAgentActionReviews.userId, anomalyUser.id)),
+    ).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          actionKind: "question",
+          privatePayload: expect.objectContaining({ candidate: expect.any(Object) }),
+        }),
+      ]),
+    );
+    const maintenanceQuestions = await database.db
+      .select({ privatePayload: financeAgentActionReviews.privatePayload })
+      .from(financeAgentActionReviews)
+      .where(eq(financeAgentActionReviews.userId, anomalyUser.id));
+    expect(
+      maintenanceQuestions.some((row) => {
+        const payload = row.privatePayload as { candidate?: { transactionId?: unknown } };
+        return payload.candidate?.transactionId === largeDinner.id;
+      }),
+    ).toBe(false);
+    await expect(
+      database.db
+        .select({ id: financeReimbursements.id })
+        .from(financeReimbursements)
+        .where(eq(financeReimbursements.allocationId, allocation.id)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      database.db
+        .select({ id: financeReviewCases.id })
+        .from(financeReviewCases)
+        .where(
+          and(eq(financeReviewCases.userId, anomalyUser.id), eq(financeReviewCases.status, "open")),
+        ),
+    ).resolves.toEqual([]);
+  });
+
+  it("replays an earlier exact credit match after a later match advances the case revision", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Replay reimbursement",
+        email: `replay-reimbursement-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Replay owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "reimbursement-replay" };
+    const [category] = await service.listCategories(owner.id);
+    if (!category) throw new Error("Replay category was not created.");
+    const account = await service.createAccount(
+      { balance: 500, institution: "Local", name: "Replay", provider: "manual" },
+      context,
+    );
+    const expense = await service.createTransaction(
+      {
+        accountId: account.id,
+        amount: 220,
+        category: null,
+        categoryConfidence: null,
+        date: "2026-07-19",
+        direction: "expense",
+        merchant: "Shared expense",
+        notes: null,
+      },
+      context,
+    );
+    await service.setTransactionBreakdown(
+      expense.id,
+      {
+        allocations: [
+          { amount: 220, categoryId: category.id, rationale: "Shared", treatment: "reimbursable" },
+        ],
+        expectedTransactionUpdatedAt: expense.updatedAt,
+        rationale: "Shared expense.",
+      },
+      context,
+    );
+    const [allocation] = await database.db
+      .select()
+      .from(financeTransactionAllocations)
+      .where(
+        and(
+          eq(financeTransactionAllocations.transactionId, expense.id),
+          eq(financeTransactionAllocations.state, "active"),
+        ),
+      );
+    if (!allocation) throw new Error("Replay allocation was not created.");
+    const reimbursement = await service.reconcileReimbursement(
+      {
+        allocationId: allocation.id,
+        dueDate: null,
+        evidence: { sourceRefs: [], summary: "Receipt" },
+        expectedAmount: 220,
+        operation: "create",
+        payer: "Alex",
+        rationale: "Shared expense.",
+      },
+      context,
+    );
+    const [firstCredit, secondCredit] = await database.db
+      .insert(financeTransactions)
+      .values([
+        {
+          accountId: account.id,
+          amount: 10_000,
+          direction: "income",
+          merchant: "Alex first",
+          transactionDate: "2026-07-20",
+          userId: owner.id,
+        },
+        {
+          accountId: account.id,
+          amount: 12_000,
+          direction: "income",
+          merchant: "Alex second",
+          transactionDate: "2026-07-21",
+          userId: owner.id,
+        },
+      ])
+      .returning();
+    if (!firstCredit || !secondCredit) throw new Error("Replay credits were not created.");
+    const first = {
+      amount: 100,
+      creditTransactionId: firstCredit.id,
+      evidence: { sourceRefs: [], summary: "First transfer" },
+      expectedRevision: reimbursement.revision,
+      operation: "match_credit" as const,
+      rationale: "First transfer.",
+      reimbursementId: reimbursement.id,
+    };
+    await service.reconcileReimbursement(first, context);
+    const [afterFirst] = await database.db
+      .select()
+      .from(financeReimbursements)
+      .where(eq(financeReimbursements.id, reimbursement.id));
+    if (!afterFirst) throw new Error("First match was not persisted.");
+    await service.reconcileReimbursement(
+      {
+        ...first,
+        amount: 120,
+        creditTransactionId: secondCredit.id,
+        evidence: { sourceRefs: [], summary: "Second transfer" },
+        expectedRevision: afterFirst.revision,
+        rationale: "Second transfer.",
+      },
+      context,
+    );
+    await expect(service.reconcileReimbursement(first, context)).resolves.toMatchObject({
+      receivedAmount: 220,
+      status: "received",
+    });
+  });
+
+  it("returns bounded not-found outcomes for missing owned Finance resources", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Missing Finance resources",
+        email: `missing-finance-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing-resource owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "missing-finance" };
+    const missingId = crypto.randomUUID();
+    const failures = [
+      service.updateMerchant(missingId, { displayName: "Missing" }, context),
+      service.mergeMerchants(
+        {
+          rationale: "Missing merchants.",
+          sourceMerchantId: missingId,
+          targetMerchantId: missingId,
+        },
+        context,
+      ),
+      service.updateIncomeStream(missingId, { status: "paused" }, context),
+      service.updateRecurringObligation(missingId, { status: "paused" }, context),
+      service.resolveAlert(missingId, { action: "resolve", rationale: null }, context),
+      service.resolveReview(
+        missingId,
+        {
+          action: "defer",
+          expectedTransactionUpdatedAt: now.toISOString(),
+          learnMerchant: "never",
+          rationale: null,
+        },
+        context,
+      ),
+      service.getMaintenanceCandidate(owner.id, missingId),
+      service.listMaintenanceCandidateItems(owner.id, missingId),
+      service.beginMaintenanceCandidatePreparation({ runId: missingId, userId: owner.id }),
+      service.finalizeMaintenanceCandidatePreparation({ runId: missingId, userId: owner.id }),
+      service.deleteAccount(missingId, context),
+      service.syncPlaidAccount(missingId, context),
+      service.setTransactionBreakdown(
+        missingId,
+        {
+          allocations: [
+            {
+              amount: 1,
+              categoryId: missingId,
+              rationale: "Missing transaction.",
+              treatment: "personal",
+            },
+          ],
+          expectedTransactionUpdatedAt: now.toISOString(),
+          rationale: "Missing transaction.",
+        },
+        context,
+      ),
+      service.updateTransaction(missingId, { notes: "Missing" }, context),
+    ];
+
+    const outcomes = await Promise.allSettled(failures);
+
+    expect(outcomes).toHaveLength(failures.length);
+    expect(outcomes.every((outcome) => outcome.status === "rejected")).toBe(true);
   });
 });

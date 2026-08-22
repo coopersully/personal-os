@@ -142,18 +142,39 @@ describe.sequential("Finance period review service", () => {
       freshness: { blockers: [], state: "current" },
     } as unknown as FinanceStatus;
     let snapshotExecutor: unknown;
+    let statusReads = 0;
+    let markBothSnapshotsRead!: () => void;
+    let releaseSnapshots!: () => void;
+    const bothSnapshotsRead = new Promise<void>((resolve) => {
+      markBothSnapshotsRead = resolve;
+    });
+    const snapshotsReleased = new Promise<void>((resolve) => {
+      releaseSnapshots = resolve;
+    });
     const service = createFinancePeriodReviewService({
       db: database.db,
       now: () => now,
       status: {
         getFinanceStatus: async (_userId, _scope, executor) => {
           snapshotExecutor = executor;
+          statusReads += 1;
+          if (statusReads <= 2) {
+            if (statusReads === 2) markBothSnapshotsRead();
+            await snapshotsReleased;
+          }
           return observed;
         },
       },
     });
-    const first = await service.createForRun(owner.id, run.id);
+    const concurrent = Promise.all([
+      service.createForRun(owner.id, run.id),
+      service.createForRun(owner.id, run.id),
+    ]);
+    await bothSnapshotsRead;
+    releaseSnapshots();
+    const [first, concurrentReplay] = await concurrent;
     expect(snapshotExecutor).toBeDefined();
+    expect(concurrentReplay).toEqual(first);
     const replay = await service.createForRun(owner.id, run.id);
     expect(replay).toEqual(first);
     expect(first).toMatchObject({

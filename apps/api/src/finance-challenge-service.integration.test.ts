@@ -263,9 +263,9 @@ describe.sequential("Finance ledger challenge", () => {
         {
           candidateRevision: duplicate.ready.revision,
           challengeId: duplicateChallenge.id,
-          checked: [...financeLedgerChallengeChecks.slice(1), duplicateCheck, duplicateCheck],
+          checked: [duplicateCheck, duplicateCheck, ...financeLedgerChallengeChecks.slice(2)],
           findings: [],
-          reviewedItemIds: [duplicate.item.id, duplicate.item.id],
+          reviewedItemIds: [duplicate.item.id],
           rubricVersion: "finance-ledger-challenge-v1",
         },
         duplicate.context,

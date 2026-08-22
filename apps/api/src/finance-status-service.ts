@@ -378,29 +378,61 @@ export function createFinanceStatusService({ db, now }: Options) {
               )
           : [];
         const activeAllocations = activeAllocationsByTransaction(allocationRows);
-        const [reimbursementRows, reimbursementMatches, incomeCredits] = await Promise.all([
+        const [reimbursementRows, reimbursementMatches] = await Promise.all([
           tx.select().from(financeReimbursements).where(eq(financeReimbursements.userId, userId)),
           tx
             .select()
             .from(financeReimbursementMatches)
             .where(eq(financeReimbursementMatches.userId, userId)),
-          tx
-            .select({
-              amount: financeTransactions.amount,
-              category: financeTransactions.category,
-              date: financeTransactions.transactionDate,
-              id: financeTransactions.id,
-              merchant: financeTransactions.merchant,
-              pending: financeTransactions.pending,
-            })
-            .from(financeTransactions)
-            .where(
-              and(
-                eq(financeTransactions.userId, userId),
-                eq(financeTransactions.direction, "income"),
-              ),
-            ),
         ]);
+        const openAllocationIds = reimbursementRows
+          .filter((row) => row.status !== "cancelled" && row.status !== "received")
+          .map((row) => row.allocationId);
+        const openAllocations = openAllocationIds.length
+          ? await tx
+              .select({ transactionId: financeTransactionAllocations.transactionId })
+              .from(financeTransactionAllocations)
+              .where(
+                and(
+                  eq(financeTransactionAllocations.userId, userId),
+                  inArray(financeTransactionAllocations.id, openAllocationIds),
+                ),
+              )
+          : [];
+        const openTransactionIds = openAllocations.map((row) => row.transactionId);
+        const openExpenseDates = openTransactionIds.length
+          ? await tx
+              .select({ date: financeTransactions.transactionDate })
+              .from(financeTransactions)
+              .where(
+                and(
+                  eq(financeTransactions.userId, userId),
+                  inArray(financeTransactions.id, openTransactionIds),
+                ),
+              )
+          : [];
+        const oldestOpenReimbursementAnchor = openExpenseDates.map((row) => row.date).toSorted()[0];
+        const incomeCredits = oldestOpenReimbursementAnchor
+          ? await tx
+              .select({
+                amount: financeTransactions.amount,
+                category: financeTransactions.category,
+                date: financeTransactions.transactionDate,
+                id: financeTransactions.id,
+                merchant: financeTransactions.merchant,
+                pending: financeTransactions.pending,
+              })
+              .from(financeTransactions)
+              .where(
+                and(
+                  eq(financeTransactions.userId, userId),
+                  eq(financeTransactions.direction, "income"),
+                  gte(financeTransactions.transactionDate, oldestOpenReimbursementAnchor),
+                ),
+              )
+              .orderBy(desc(financeTransactions.transactionDate), desc(financeTransactions.id))
+              .limit(500)
+          : [];
         const reimbursementStatus = reimbursementRows.map((row) =>
           deriveReimbursementStatus({
             cancelledAt: row.cancelledAt,

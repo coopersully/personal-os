@@ -201,6 +201,80 @@ describe.sequential("Finance status service", () => {
     expect(status.state).toBe("clean");
   });
 
+  it("only scans reimbursement credits from the oldest open expense", async () => {
+    const userId = await makeUser("Bounded reimbursement credits");
+    const source = await account(userId, "current");
+    const [category] = await database.db
+      .insert(financeCategories)
+      .values({ group: "Spending", name: "Meals", slug: `meals-${userId}`, userId })
+      .returning();
+    const [expense] = await database.db
+      .insert(financeTransactions)
+      .values({
+        accountId: source.id,
+        amount: 10_000,
+        category: "Meals",
+        categoryConfidence: 10000,
+        categorySource: "user",
+        direction: "expense",
+        merchant: "Restaurant",
+        needsReview: false,
+        pending: false,
+        transactionDate: "2026-08-10",
+        userId,
+      })
+      .returning();
+    if (!category || !expense) throw new Error("Reimbursement scan fixture was not created.");
+    const [allocation] = await database.db
+      .insert(financeTransactionAllocations)
+      .values({
+        allocationOrder: 0,
+        amount: 10_000,
+        categoryId: category.id,
+        transactionId: expense.id,
+        treatment: "reimbursable",
+        userId,
+      })
+      .returning();
+    if (!allocation) throw new Error("Reimbursement scan allocation was not created.");
+    await database.db.insert(financeReimbursements).values({
+      allocationId: allocation.id,
+      expectedAmount: 10_000,
+      receivedAmount: 0,
+      rationale: "A shared dinner is expected to be repaid.",
+      status: "expected",
+      userId,
+    });
+    await database.db.insert(financeTransactions).values([
+      {
+        accountId: source.id,
+        amount: 10_000,
+        category: null,
+        direction: "income",
+        merchant: "Venmo shared dinner",
+        pending: false,
+        transactionDate: "2026-08-09",
+        userId,
+      },
+      {
+        accountId: source.id,
+        amount: 10_000,
+        category: null,
+        direction: "income",
+        merchant: "Venmo shared dinner",
+        pending: false,
+        transactionDate: "2026-08-11",
+        userId,
+      },
+    ]);
+
+    await expect(
+      service().getFinanceStatus(userId, { type: "all_outstanding" }),
+    ).resolves.toMatchObject({
+      details: { reimbursements: { unmatchedCredits: 1 } },
+    });
+  });
+
   it("restores only a cancelled reimbursement remainder to personal spending without changing gross cash", async () => {
     const userId = await makeUser("Cancelled reimbursement");
     const source = await account(userId, "current");

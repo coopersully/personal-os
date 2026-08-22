@@ -30,6 +30,30 @@ type StatusReader = {
 };
 type Options = { db: Database; now: () => Date; status: StatusReader };
 
+function isSerializationFailure(error: unknown): boolean {
+  let current = error;
+  while (typeof current === "object" && current !== null) {
+    if ("code" in current && (current as { code?: unknown }).code === "40001") return true;
+    current = "cause" in current ? (current as { cause?: unknown }).cause : undefined;
+  }
+  return false;
+}
+
+async function retrySerializationFailure<Result>(
+  db: Database,
+  operation: (executor: Parameters<Parameters<Database["transaction"]>[0]>[0]) => Promise<Result>,
+  maxAttempts: number,
+): Promise<Result> {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    try {
+      return await db.transaction(operation, { isolationLevel: "repeatable read" });
+    } catch (error) {
+      if (!isSerializationFailure(error) || attempt === maxAttempts - 1) throw error;
+    }
+  }
+  throw new Error("Unreachable serialization retry state.");
+}
+
 function periodFor(scope: MaintenanceScope, now: Date) {
   if (scope.type === "window") return { end: scope.end, start: scope.start };
   const month = now.toISOString().slice(0, 7);
@@ -58,7 +82,8 @@ function serialize(row: typeof financePeriodReviews.$inferSelect): FinancePeriod
 export function createFinancePeriodReviewService({ db, now, status }: Options) {
   return {
     async createForRun(userId: string, runId: string): Promise<FinancePeriodReview> {
-      return db.transaction(
+      return retrySerializationFailure(
+        db,
         async (tx) => {
           const [existing] = await tx
             .select()
@@ -248,7 +273,7 @@ export function createFinancePeriodReviewService({ db, now, status }: Options) {
           if (!replayed) throw new Error("The Finance period review could not be published.");
           return serialize(replayed);
         },
-        { isolationLevel: "repeatable read" },
+        3,
       );
     },
 

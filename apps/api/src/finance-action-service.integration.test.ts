@@ -4297,6 +4297,122 @@ describe.sequential("finance action service", () => {
     expect(independent.question.id).not.toBe(first.question.id);
   });
 
+  it("turns missing owned targets into bounded candidate questions across action families", async () => {
+    const missingId = crypto.randomUUID();
+    const actions = createFinanceActionService({
+      db: database.db,
+      finances: createFinanceService({ db: database.db, now: () => now }),
+      now: () => now,
+    });
+    const sourceRefs = [
+      {
+        accountId: null,
+        provider: "local" as const,
+        remoteId: "missing-evidence",
+        revision: null,
+        sourceType: "local" as const,
+      },
+    ];
+    const cases: Array<{ actionKind: SupportedActionKind; input: Record<string, unknown> }> = [
+      { actionKind: "profile", input: { effectiveDate: "2026-12-10", payAccountId: missingId } },
+      {
+        actionKind: "budget_plan",
+        input: {
+          allocations: [{ categoryId: missingId, limit: 10 }],
+          month: "2026-12",
+          rationale: "Missing category.",
+        },
+      },
+      {
+        actionKind: "categorization",
+        input: {
+          decisions: [
+            {
+              categoryId: missingId,
+              confidence: 1,
+              expectedTransactionUpdatedAt: now.toISOString(),
+              learnMerchant: "suggest",
+              rationale: "Missing transaction.",
+              transactionId: missingId,
+            },
+          ],
+        },
+      },
+      { actionKind: "merchant", input: { displayName: "Missing", id: missingId } },
+      {
+        actionKind: "merchant",
+        input: {
+          rationale: "Missing merchants.",
+          sourceMerchantId: missingId,
+          targetMerchantId: crypto.randomUUID(),
+        },
+      },
+      { actionKind: "recurring_obligation", input: { id: missingId, status: "paused" } },
+      { actionKind: "alert", input: { action: "resolve", id: missingId } },
+      { actionKind: "transaction", input: { id: missingId, notes: "Missing" } },
+      {
+        actionKind: "transaction",
+        input: {
+          accountId: missingId,
+          amount: 10,
+          date: "2026-12-10",
+          direction: "expense",
+          merchant: "Missing account",
+        },
+      },
+      {
+        actionKind: "transaction_breakdown",
+        input: {
+          allocations: [{ amount: 10, categoryId: missingId, rationale: "Missing." }],
+          expectedTransactionUpdatedAt: now.toISOString(),
+          id: missingId,
+          rationale: "Missing transaction.",
+        },
+      },
+      { actionKind: "income_stream", input: { id: missingId, status: "paused" } },
+      {
+        actionKind: "reimbursement",
+        input: {
+          allocationId: missingId,
+          dueDate: null,
+          evidence: { sourceRefs, summary: "Missing allocation." },
+          expectedAmount: 10,
+          operation: "create",
+          payer: null,
+          rationale: "Missing allocation.",
+        },
+      },
+      {
+        actionKind: "reimbursement",
+        input: {
+          expectedRevision: 1,
+          evidence: { sourceRefs, summary: "Missing reimbursement." },
+          operation: "cancel",
+          rationale: "Missing reimbursement.",
+          reimbursementId: missingId,
+        },
+      },
+      {
+        actionKind: "reimbursement",
+        input: {
+          amount: 10,
+          creditTransactionId: crypto.randomUUID(),
+          evidence: { sourceRefs, summary: "Missing match." },
+          expectedRevision: 1,
+          operation: "match_credit",
+          rationale: "Missing reimbursement.",
+          reimbursementId: missingId,
+        },
+      },
+    ];
+
+    for (const item of cases) {
+      await expect(
+        actions.prepareMaintenanceCandidateDraft(item.actionKind, item.input, userId),
+      ).resolves.toMatchObject({ actionKind: "question", disposition: "question" });
+    }
+  });
+
   it("requires agent transaction categories to satisfy categorization evidence before applying", async () => {
     await database.db
       .insert(financeAutomationSettings)

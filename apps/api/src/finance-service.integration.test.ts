@@ -9271,4 +9271,72 @@ describe.sequential("finance service", () => {
       status: "received",
     });
   });
+
+  it("returns bounded not-found outcomes for missing owned Finance resources", async () => {
+    const [owner] = await database.db
+      .insert(users)
+      .values({
+        displayName: "Missing Finance resources",
+        email: `missing-finance-${crypto.randomUUID()}@example.com`,
+        passwordHash: "unused",
+        planningTimezone: "UTC",
+      })
+      .returning();
+    if (!owner) throw new Error("Missing-resource owner was not created.");
+    const service = createFinanceService({ db: database.db, now: () => now });
+    const context = { principal: financePrincipal(owner.id), requestId: "missing-finance" };
+    const missingId = crypto.randomUUID();
+    const failures = [
+      service.updateMerchant(missingId, { displayName: "Missing" }, context),
+      service.mergeMerchants(
+        {
+          rationale: "Missing merchants.",
+          sourceMerchantId: missingId,
+          targetMerchantId: missingId,
+        },
+        context,
+      ),
+      service.updateIncomeStream(missingId, { status: "paused" }, context),
+      service.updateRecurringObligation(missingId, { status: "paused" }, context),
+      service.resolveAlert(missingId, { action: "resolve", rationale: null }, context),
+      service.resolveReview(
+        missingId,
+        {
+          action: "defer",
+          expectedTransactionUpdatedAt: now.toISOString(),
+          learnMerchant: "never",
+          rationale: null,
+        },
+        context,
+      ),
+      service.getMaintenanceCandidate(owner.id, missingId),
+      service.listMaintenanceCandidateItems(owner.id, missingId),
+      service.beginMaintenanceCandidatePreparation({ runId: missingId, userId: owner.id }),
+      service.finalizeMaintenanceCandidatePreparation({ runId: missingId, userId: owner.id }),
+      service.deleteAccount(missingId, context),
+      service.syncPlaidAccount(missingId, context),
+      service.setTransactionBreakdown(
+        missingId,
+        {
+          allocations: [
+            {
+              amount: 1,
+              categoryId: missingId,
+              rationale: "Missing transaction.",
+              treatment: "personal",
+            },
+          ],
+          expectedTransactionUpdatedAt: now.toISOString(),
+          rationale: "Missing transaction.",
+        },
+        context,
+      ),
+      service.updateTransaction(missingId, { notes: "Missing" }, context),
+    ];
+
+    const outcomes = await Promise.allSettled(failures);
+
+    expect(outcomes).toHaveLength(failures.length);
+    expect(outcomes.every((outcome) => outcome.status === "rejected")).toBe(true);
+  });
 });

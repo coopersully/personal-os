@@ -1,5 +1,66 @@
 import { expect, it } from "vitest";
-import { reliableMonthlyCapacity } from "./finance-planning.js";
+import {
+  monthlyAmount,
+  reliableMonthlyCapacity,
+  reliableMonthlyIncome,
+} from "./finance-planning.js";
+
+it.each([
+  ["weekly", 520],
+  ["biweekly", 260],
+  ["semimonthly", 240],
+  ["monthly", 120],
+  ["quarterly", 40],
+  ["yearly", 10],
+  ["irregular", 120],
+  ["unsupported", null],
+] as const)("normalizes %s monthly amounts", (cadence, expected) => {
+  expect(monthlyAmount(120, cadence)).toBe(expected);
+});
+
+it.each([
+  ["weekly", 5_200],
+  ["semimonthly", 2_400],
+  ["annual", 100],
+  ["yearly", 100],
+  ["irregular", 5_000],
+  [undefined, 1_200],
+] as const)("normalizes %s expected net income", (frequency, expected) => {
+  expect(
+    reliableMonthlyIncome({
+      expectedNetPay: 1_200,
+      ...(frequency === undefined ? {} : { expectedNetPayFrequency: frequency }),
+      grossAnnualIncome: 60_000,
+      observedMonthlyIncome: null,
+    }),
+  ).toBe(expected);
+});
+
+it("uses complete observed income, then gross income, and preserves unavailable capacity", () => {
+  expect(
+    reliableMonthlyIncome({
+      expectedNetPay: null,
+      grossAnnualIncome: 60_000,
+      observedMonthlyIncome: 4_500,
+      observedIncomeWindow: { complete: true, days: 31 },
+    }),
+  ).toBe(4_500);
+  expect(
+    reliableMonthlyIncome({
+      expectedNetPay: null,
+      grossAnnualIncome: 60_000,
+      observedMonthlyIncome: null,
+    }),
+  ).toBe(5_000);
+  expect(
+    reliableMonthlyCapacity({
+      expectedNetPay: null,
+      grossAnnualIncome: null,
+      observedMonthlyIncome: null,
+      recurring: [{ amount: 100, cadence: "unsupported" }],
+    }),
+  ).toBeNull();
+});
 
 it("uses the same cadence-aware net capacity for planning callers", () => {
   const input = {
